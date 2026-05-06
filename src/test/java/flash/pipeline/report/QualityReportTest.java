@@ -1,0 +1,121 @@
+package flash.pipeline.report;
+
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
+
+import java.io.File;
+import java.io.IOException;
+import java.util.LinkedHashMap;
+import java.util.Map;
+
+import static org.junit.Assert.*;
+
+/**
+ * Lifecycle tests for QualityReport — proves that fresh instances
+ * do not inherit state from previous runs.
+ */
+public class QualityReportTest {
+
+    @Rule
+    public TemporaryFolder tmp = new TemporaryFolder();
+
+    @Test
+    public void freshInstance_hasNoSectionsOrImageQcData() {
+        QualityReport report = new QualityReport();
+        assertTrue(report.getSections().isEmpty());
+        assertTrue(report.getImageQcData().isEmpty());
+        assertTrue(report.getSpectralPreviewData().isEmpty());
+    }
+
+    @Test
+    public void freshInstance_hasCurrentStartTime() {
+        long before = System.currentTimeMillis();
+        QualityReport report = new QualityReport();
+        long after = System.currentTimeMillis();
+        assertTrue(report.getStartTime() >= before);
+        assertTrue(report.getStartTime() <= after);
+    }
+
+    @Test
+    public void secondInstance_doesNotInheritSectionsFromFirst() {
+        QualityReport a = new QualityReport();
+        a.setEnabled(true);
+        a.setDirectory("/tmp/a");
+        Map<String, String> params = new LinkedHashMap<String, String>();
+        params.put("key", "value");
+        a.addSection("Split and Merge", params);
+
+        assertEquals(1, a.getSections().size());
+
+        QualityReport b = new QualityReport();
+        b.setEnabled(true);
+        b.setDirectory("/tmp/b");
+
+        assertTrue("Second report must not inherit sections from first",
+                b.getSections().isEmpty());
+    }
+
+    @Test
+    public void secondInstance_hasIndependentStartTime() throws Exception {
+        QualityReport a = new QualityReport();
+        Thread.sleep(20);
+        QualityReport b = new QualityReport();
+        assertTrue("Second report must have a later start time",
+                b.getStartTime() > a.getStartTime());
+    }
+
+    @Test
+    public void secondInstance_doesNotInheritProjectDir() {
+        QualityReport a = new QualityReport();
+        a.setDirectory("/dir/alpha");
+
+        QualityReport b = new QualityReport();
+        b.setDirectory("/dir/beta");
+
+        assertEquals("/dir/beta", b.getProjectDir());
+        assertNotEquals(a.getProjectDir(), b.getProjectDir());
+    }
+
+    @Test
+    public void addSection_noOpWhenDisabled() {
+        QualityReport report = new QualityReport();
+        report.setEnabled(false);
+        Map<String, String> params = new LinkedHashMap<String, String>();
+        params.put("k", "v");
+        report.addSection("Test", params);
+        assertTrue(report.getSections().isEmpty());
+    }
+
+    @Test
+    public void multipleAnalyses_accumulateInOneReport() {
+        QualityReport report = new QualityReport();
+        report.setEnabled(true);
+        report.setDirectory("/tmp/x");
+
+        Map<String, String> p1 = new LinkedHashMap<String, String>();
+        p1.put("a", "1");
+        report.addSection("Analysis A", p1);
+
+        Map<String, String> p2 = new LinkedHashMap<String, String>();
+        p2.put("b", "2");
+        report.addSection("Analysis B", p2);
+
+        assertEquals(2, report.getSections().size());
+        assertEquals("Analysis A", report.getSections().get(0).name);
+        assertEquals("Analysis B", report.getSections().get(1).name);
+    }
+
+    @Test
+    public void writeReport_usesFlashQualityReportFolder() {
+        QualityReport report = new QualityReport();
+        report.setEnabled(true);
+        report.setDirectory(tmp.getRoot().getAbsolutePath());
+
+        report.addGenericAnalysis("Test Analysis", 1200);
+
+        assertTrue(new File(tmp.getRoot(),
+                "FLASH/Reports/Quality Report/QC_Report.html").isFile());
+        assertFalse(new File(tmp.getRoot(), "Quality_Report/QC_Report.html").exists());
+    }
+}

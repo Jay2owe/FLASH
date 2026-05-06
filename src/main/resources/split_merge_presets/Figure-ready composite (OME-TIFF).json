@@ -1,0 +1,12 @@
+{
+  "name": "Figure-ready composite (OME-TIFF)",
+  "description": "Use saved display ranges, build composites, and save OME-TIFF outputs.",
+  "processMethods": ["Custom Min-Max Display Ranges"],
+  "saturations": [0.35],
+  "createMerge": true,
+  "saveOmeTiff": true,
+  "additionalMergeSpec": "",
+  "subtractBackground": false,
+  "backgroundIndex": -1,
+  "subtractFromChannels": [true]
+}

@@ -1,0 +1,10 @@
+{
+  "name": "Threshold puncta only",
+  "description": "Threshold punctate and plaque-like channels, keep cellular channels as whole-ROI mean.",
+  "libraryVersion": "1",
+  "strategy": "threshold_puncta",
+  "defaultMode": "Whole ROI mean (all pixels, including background)",
+  "channelModes": {},
+  "thresholds": {},
+  "roiSetNameHints": []
+}

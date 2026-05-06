@@ -1,0 +1,10 @@
+{
+  "name": "Area fraction (% positive)",
+  "description": "Threshold all measured channels; output CSV always carries IntDen, %Area, and RawIntDen.",
+  "libraryVersion": "1",
+  "strategy": "area_fraction",
+  "defaultMode": "Only bright pixels above threshold (puncta / cells)",
+  "channelModes": {},
+  "thresholds": {},
+  "roiSetNameHints": []
+}

@@ -1,0 +1,10 @@
+{
+  "name": "Hemisphere-LH-only ROI measurement",
+  "description": "Whole-ROI mean intensity restricted to ROI sets whose name contains LH.",
+  "libraryVersion": "1",
+  "strategy": "lh_only",
+  "defaultMode": "Whole ROI mean (all pixels, including background)",
+  "channelModes": {},
+  "thresholds": {},
+  "roiSetNameHints": ["LH", "left"]
+}

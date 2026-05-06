@@ -1,0 +1,19 @@
+{
+  "name": "Bleed-through removal (standard)",
+  "description": "Standard bleed-through cleanup with saturation and size guards.",
+  "libraryVersion": "1",
+  "contaminationType": "bleedthrough",
+  "calibration": "manual",
+  "strength": "standard",
+  "goal": "create_cleaned_image",
+  "targetChannelIndex": 0,
+  "bleedThroughChannelIndexes": [],
+  "autofluorescenceChannelIndexes": [],
+  "excludedChannelIndexes": [],
+  "controlConditionNames": [],
+  "experimentalConditionNames": [],
+  "correctionPresetId": "bleed_through",
+  "expertMode": false,
+  "correctionFeatureIds": ["saturation_exclusion", "linear_unmixing", "threshold_corrected_target", "size_filter"],
+  "featureSettings": {"size_filter": {"min_size_voxels": "50", "max_size_voxels": "0"}}
+}

@@ -1,0 +1,7 @@
+{
+  "name": "Per-animal per-hemisphere",
+  "description": "One row per (animal, hemisphere) pair. Keeps raw totals and per-mm^3 for paired-hemisphere tests.",
+  "libraryVersion": "1",
+  "granularity": "hemisphere",
+  "output": "both"
+}

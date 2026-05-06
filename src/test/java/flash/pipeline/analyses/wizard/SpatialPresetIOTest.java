@@ -1,0 +1,92 @@
+package flash.pipeline.analyses.wizard;
+
+import flash.pipeline.ui.wizard.JsonIO;
+
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
+
+import java.io.File;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.util.List;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+
+public class SpatialPresetIOTest {
+
+    @Rule
+    public TemporaryFolder temp = new TemporaryFolder();
+
+    @Test
+    public void roundTripSaveAndLoad() throws Exception {
+        File root = temp.newFolder("spatial-preset");
+        SpatialPresetIO io = new SpatialPresetIO(root);
+
+        SpatialPreset preset = new SpatialPreset("My Spatial Preset", "test", "1",
+                true, false, true, true, false, true, false,
+                false, true, true, false, false,
+                4.5, "Cyan", 3, 30.0);
+
+        io.save(preset);
+
+        assertTrue(new File(root, "FLASH/Presets/Spatial Analysis/my_spatial_preset.json").isFile());
+        SpatialPreset loaded = io.load("my_spatial_preset");
+
+        assertEquals("My Spatial Preset", loaded.getName());
+        assertTrue(loaded.isDoDistances());
+        assertTrue(loaded.isDoVolColoc());
+        assertTrue(loaded.isDo3DMorphology());
+        assertEquals("Cyan", loaded.getHeatmapLut());
+        assertEquals(3, loaded.getClusterK());
+    }
+
+    @Test
+    public void stockPresetsBootstrapWhenDirectoryIsEmpty() throws Exception {
+        File root = temp.newFolder("stock");
+        SpatialPresetIO io = new SpatialPresetIO(root);
+
+        List<SpatialPreset> presets = io.listAll();
+
+        assertEquals(6, presets.size());
+        assertTrue(new File(io.presetDirectory(), "microglia_plaque_contact.json").isFile());
+        assertTrue(new File(io.presetDirectory(), "exploratory_all.json").isFile());
+    }
+
+    @Test
+    public void stockPresetsRefreshExistingBundledFiles() throws Exception {
+        File root = temp.newFolder("stock-refresh");
+        SpatialPresetIO io = new SpatialPresetIO(root);
+        assertTrue(io.presetDirectory().mkdirs());
+        File stale = new File(io.presetDirectory(), "density_hotspots.json");
+        Files.write(stale.toPath(), ("{"
+                + "\"name\":\"Density hotspots + clusters\","
+                + "\"doHeatmaps\":false,"
+                + "\"doPhenotyping\":false"
+                + "}").getBytes(StandardCharsets.UTF_8));
+
+        SpatialPreset loaded = io.load("Density hotspots + clusters");
+
+        assertTrue(loaded.isDoHeatmaps());
+        assertTrue(loaded.isDoPhenotyping());
+    }
+
+    @Test
+    public void loadFindsLegacyProjectRootPresetFolder() throws Exception {
+        File root = temp.newFolder("legacy-spatial");
+        File legacyDir = new File(root, "Spatial Morphometry Presets");
+        assertTrue(legacyDir.mkdirs());
+        SpatialPreset preset = new SpatialPreset("Legacy Spatial", "test", "1",
+                true, false, true, true, false, true, false,
+                false, true, true, false, false,
+                4.5, "Cyan", 3, 30.0);
+        Files.write(new File(legacyDir, "legacy_spatial.json").toPath(),
+                JsonIO.write(preset.toJsonObject()).getBytes(StandardCharsets.UTF_8));
+
+        SpatialPreset loaded = new SpatialPresetIO(root).load("Legacy Spatial");
+
+        assertTrue(loaded.isDoDistances());
+        assertEquals("Legacy Spatial", loaded.getName());
+    }
+}

@@ -1,0 +1,1694 @@
+package flash.pipeline;
+
+import flash.pipeline.analyses.Analysis;
+import flash.pipeline.analyses.CreateBinFileAnalysis;
+import flash.pipeline.analyses.DeconvolutionAnalysis;
+import flash.pipeline.analyses.DrawAndSaveROIsAnalysis;
+import flash.pipeline.analyses.ImageOrientationSetupAnalysis;
+import flash.pipeline.analyses.IntensityAnalysisV2;
+import flash.pipeline.analyses.LineDistanceAnalysis;
+import flash.pipeline.analyses.MasterAggregationAnalysis;
+import flash.pipeline.analyses.SpatialAnalysis;
+import flash.pipeline.analyses.SplitAndMergeImageChannelsAnalysis;
+import flash.pipeline.analyses.StatisticalAnalysis;
+import flash.pipeline.analyses.ThreeDObjectAnalysis;
+import flash.pipeline.audit.RunSettingsSnapshot;
+import flash.pipeline.bin.BinSetupDispatcher;
+import flash.pipeline.cli.CLIArgumentParser;
+import flash.pipeline.cli.CLIConfig;
+import flash.pipeline.decontamination.SpectralDecontaminationAnalysis;
+import flash.pipeline.help.AnalysisHelpCatalog;
+import flash.pipeline.help.AnalysisHelpDialog;
+import flash.pipeline.help.AnalysisHelpTopic;
+import flash.pipeline.help.HelpDialog;
+import flash.pipeline.ui.HelpButton;
+import flash.pipeline.image.GpuConcurrency;
+import flash.pipeline.ui.PipelineDialog;
+import flash.pipeline.ui.ToggleSwitch;
+
+import flash.pipeline.io.ImageCache;
+import flash.pipeline.io.ConditionManifestIO;
+import flash.pipeline.io.FlashProjectLayout;
+import flash.pipeline.io.ImageSourceDispatcher;
+import flash.pipeline.intelligence.DiagnosticsDialog;
+import flash.pipeline.intelligence.AnalysisStatus;
+import flash.pipeline.intelligence.AnalysisStatusScanner;
+import flash.pipeline.intelligence.PostRunSummary;
+import flash.pipeline.intelligence.PreFlightChecks;
+import flash.pipeline.recipes.PipelineRecipe;
+import flash.pipeline.recipes.PipelineRecipeIO;
+import flash.pipeline.report.QualityReport;
+import flash.pipeline.runtime.BioFormatsRuntime;
+import flash.pipeline.runtime.DependencyFixPlan;
+import flash.pipeline.runtime.DependencyFixResult;
+import flash.pipeline.runtime.DependencyId;
+import flash.pipeline.runtime.DependencyRegistry;
+import flash.pipeline.runtime.DependencyService;
+import flash.pipeline.runtime.DependencySpec;
+import flash.pipeline.runtime.DependencyStatus;
+import flash.pipeline.runtime.FeatureDependencyGate;
+import flash.pipeline.runtime.PluginInstallGuard;
+
+import ij.IJ;
+import ij.Macro;
+import ij.io.DirectoryChooser;
+import ij.plugin.PlugIn;
+
+import javax.swing.BorderFactory;
+import javax.swing.Box;
+import javax.swing.BoxLayout;
+import javax.swing.JButton;
+import javax.swing.Icon;
+import javax.swing.ImageIcon;
+import javax.swing.JLabel;
+import javax.swing.JOptionPane;
+import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.JSeparator;
+import javax.swing.JTextField;
+import javax.swing.JTextArea;
+import javax.swing.SwingConstants;
+import javax.swing.SwingUtilities;
+import java.awt.Color;
+import java.awt.Component;
+import java.awt.FlowLayout;
+import java.awt.Font;
+import java.awt.GraphicsEnvironment;
+import java.io.File;
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+
+public class FLASH_Pipeline implements PlugIn {
+
+    private String directory = null;
+    private boolean cliInvocation = false;
+    private boolean headlessMode = true;
+    private boolean aggressiveMemory = false;
+    private boolean verboseLogging = false;
+    private boolean autoAggregate = true;
+    private boolean parallelProcessing = true;
+    private int parallelThreadCount = Math.max(1, Runtime.getRuntime().availableProcessors() / 2);
+    private int loaderThreadCount = 1;
+    private int loaderPercent = 50;
+    private boolean useTifCache = false;
+    private String overwriteBehavior = "Auto-Overwrite";
+    private boolean generateQcReport = true;
+    /** GPU inference permit override; 0 = auto-detect (see {@link GpuConcurrency}). */
+    private int gpuPermits = 0;
+    private static final Color SAVE_RECIPE_BG = new Color(232, 245, 253);
+    private static final Color SAVE_RECIPE_FG = new Color(15, 87, 140);
+    private static final Color SAVE_RECIPE_BORDER = new Color(71, 145, 196);
+
+    private ImageCache imageCache = null;
+    private final DependencyService dependencyService = new DependencyService();
+    private CLIConfig cliConfig = null;
+
+    private final String[] analyses = {
+            "Set Up Configuration",
+            "Draw and Save ROIs",
+            "3D Deconvolution",
+            "Split and Merge Image Channels",
+            "3D Object Analysis",
+            "Spatial Analysis",
+            "Line Distance Analysis",
+            "Fluorescence Intensity Analysis",
+            "Nuclear Counter",
+            // UI clarity pass intentionally flips the old Aggregation label to plain English.
+            "Combine results per condition / animal",
+            "Statistical Analysis",
+            "Excel Summary Export",
+            "Spectral Decontamination (Experimental)",
+            "Image Orientation Setup"
+    };
+
+    private static final String[] DESCRIPTIONS = {
+            "Set up channel names, thresholds, and size filters for this experiment.",
+            "Manually draw regions of interest on each image.",
+            "Sharpen Z-stacks using a theoretical PSF before segmentation.",
+            "Make presentation-ready per-channel and composite images.",
+            "Count cells in 3D, measure size/shape, and check colocalisation.",
+            "Re-run spatial / nearest-neighbour analysis from existing object CSVs.",
+            "Distance from each object to a drawn anatomical landmark.",
+            "Per-region fluorescence intensity (mean, area-fraction, thresholded).",
+            "Deprecated legacy path; use 3D Object Analysis on the nuclear channel.",
+            "Aggregates all per-image CSVs into master summary tables (Master Data Aggregation).",
+            "Group comparisons - t-tests, ANOVA, Tukey / Dunn's post-hoc.",
+            "Make a publication-ready .xlsx workbook from the master CSVs.",
+            "Remove channel bleed-through / autofluorescence (placeholder).",
+            "Set hemisphere labels, rotate/flip images, and save orientation rules for later analyses."
+    };
+
+    /** Analysis indices. Keep in sync with {@link #analyses}. */
+    public static final int IDX_CREATE_BIN = 0;
+    public static final int IDX_DRAW_ROIS = 1;
+    public static final int IDX_DECONVOLUTION = 2;
+    public static final int IDX_SPLIT_MERGE = 3;
+    public static final int IDX_3D_OBJECT = 4;
+    public static final int IDX_SPATIAL = 5;
+    public static final int IDX_LINE_DISTANCE = 6;
+    public static final int IDX_INTENSITY = 7;
+    public static final int IDX_NUCLEAR = 8;
+    public static final int IDX_AGGREGATION = 9;
+    public static final int IDX_STATISTICS = 10;
+    public static final int IDX_EXCEL_EXPORT = 11;
+    public static final int IDX_SPECTRAL_DECONTAMINATION = 12;
+    public static final int IDX_ORIENTATION_SETUP = 13;
+
+    private static final int[] VISIBLE_ANALYSIS_ORDER = {
+            IDX_CREATE_BIN,
+            IDX_DRAW_ROIS,
+            IDX_ORIENTATION_SETUP,
+            IDX_DECONVOLUTION,
+            IDX_SPECTRAL_DECONTAMINATION,
+            IDX_SPLIT_MERGE,
+            IDX_INTENSITY,
+            IDX_3D_OBJECT,
+            IDX_SPATIAL,
+            IDX_AGGREGATION,
+            IDX_STATISTICS,
+            IDX_EXCEL_EXPORT
+    };
+
+    /** Test hook for the visible main-dialog analysis rows. */
+    public static int[] visibleAnalysisOrderForTests() {
+        return Arrays.copyOf(VISIBLE_ANALYSIS_ORDER, VISIBLE_ANALYSIS_ORDER.length);
+    }
+
+    private static final String EXCEL_EXPORT_ANALYSIS_CLASS =
+            "flash.pipeline.export.ExcelSummaryExportAnalysis";
+
+    private final Map<Integer, Analysis> analysisMap = new HashMap<>();
+
+    @Override
+    public void run(String arg) {
+        cliInvocation = false;
+        cliConfig = null;
+        configureFeatureDependencyGate();
+
+        // Kick off the GPU probe as early as possible so its ~200 ms cost
+        // overlaps with the directory picker / dependency check, not the
+        // first DL inference.
+        GpuConcurrency.initAsync();
+
+        // ── CLI / Batch mode detection ──
+        String macroOptions = Macro.getOptions();
+        if (CLIArgumentParser.hasCliOptions(macroOptions)) {
+            runCli(macroOptions);
+            return;
+        }
+
+        if (directory == null) {
+            DirectoryChooser dc = new DirectoryChooser("Choose a Directory");
+            directory = dc.getDirectory();
+            if (directory == null) {
+                IJ.showMessage("Error", "No directory chosen, plugin cancelled.");
+                return;
+            }
+        }
+
+        // L-10: if this folder already contains a prior run's output dirs,
+        // confirm that a re-run is intended before doing anything else.
+        if (!PreFlightChecks.confirmProceedOnOutputFolder(directory)) {
+            return;
+        }
+        if (!confirmInputSourceAndWarn(true)) {
+            return;
+        }
+
+        initAnalyses();
+
+        boolean continuePipeline = true;
+        while (continuePipeline) {
+            boolean[] selections = showAnalysisDialog();
+            if (selections == null) break;
+
+            // Silent pre-flight guards. Fire once per batch invocation.
+            if (!runPreFlightGuards(directory)) continue;
+
+            // Fresh QC report for this run — prevents state leaking across runs
+            QualityReport qualityReport = createQualityReportForRun(
+                    directory, generateQcReport, headlessMode, parallelProcessing,
+                    parallelThreadCount, aggressiveMemory, verboseLogging, overwriteBehavior);
+
+            // Count selected analyses to suppress intermediate dialogs
+            int selectedCount = 0;
+            for (boolean sel : selections) if (sel) selectedCount++;
+            boolean suppressDialogs = selectedCount > 1;
+
+            GpuConcurrency.logEffectivePermits();
+
+            for (int i = 0; i < selections.length; i++) {
+                if (!selections[i]) continue;
+
+                if (isDeprecatedAnalysis(i)) {
+                    IJ.log("Skipping " + analyses[i] + " — this module has been deprecated. Use 3D Object Analysis for nuclear counts.");
+                    continue;
+                }
+
+                Analysis analysis = analysisMap.get(i);
+                if (analysis != null) {
+                    configureAnalysis(analysis, i, suppressDialogs, qualityReport);
+                    BinSetupDispatcher.clearLastFieldSources();
+                    analysis.execute(directory);
+                    resetBioFormatsWindowless();
+                    writeRunAudit(analysis, i);
+                } else {
+                    IJ.showMessage("Analysis not implemented");
+                }
+            }
+
+            // Auto-trigger aggregation after 3D Object or Intensity analyses
+            boolean ran3D = selections[IDX_3D_OBJECT];
+            boolean ranSpatial = selections[IDX_SPATIAL];
+            boolean ranIntensity = selections[IDX_INTENSITY];
+            boolean manuallyRanAgg = selections[IDX_AGGREGATION];
+            if (autoAggregate && (ran3D || ranSpatial || ranIntensity) && !manuallyRanAgg) {
+                IJ.log("Auto-running Master Data Aggregation...");
+                Analysis aggAnalysis = analysisMap.get(IDX_AGGREGATION);
+                configureAnalysis(aggAnalysis, IDX_AGGREGATION, true, qualityReport);
+                BinSetupDispatcher.clearLastFieldSources();
+                aggAnalysis.execute(directory);
+                writeRunAudit(aggAnalysis, IDX_AGGREGATION);
+            }
+
+            // Post-run summary (R-01, R-08, R-09) — informational only
+            PostRunSummary.writeIfPossible(directory);
+            saveProjectRecipe(selections);
+
+            PipelineDialog repeat = new PipelineDialog("Repeat Pipeline?");
+            repeat.addMessage("Would you like to perform another analysis?");
+            repeat.addToggle("Run another analysis", true);
+            if (!repeat.showDialog()) break;
+            continuePipeline = repeat.getNextBoolean();
+        }
+
+        releaseImageCache();
+        IJ.log("Pipeline finished.");
+    }
+
+    /**
+     * CLI / headless batch execution path.
+     * Skips all dialogs and runs analyses based on parsed macro options.
+     */
+    private void runCli(String macroOptions) {
+        cliInvocation = true;
+        configureFeatureDependencyGate();
+        CLIConfig cfg = CLIArgumentParser.parse(macroOptions);
+        if (cfg == null) {
+            IJ.log("[CLI] " + CLIArgumentParser.usage());
+            return;
+        }
+        cliConfig = cfg;
+
+        directory = cfg.getDirectory();
+        headlessMode = cfg.isHeadless();
+        parallelProcessing = cfg.isParallel();
+        parallelThreadCount = cfg.getThreads();
+        aggressiveMemory = cfg.isAggressiveMemory();
+        verboseLogging = cfg.isVerbose();
+        overwriteBehavior = cfg.getOverwriteBehavior();
+        autoAggregate = cfg.isAutoAggregate();
+        generateQcReport = cfg.isQcReport();
+        useTifCache = cfg.isTifCache();
+        loaderThreadCount = cfg.getLoaderThreads();
+        loaderPercent = cfg.getLoaderPercent();
+        gpuPermits = cfg.getGpuPermits();
+        GpuConcurrency.setUserOverride(gpuPermits);
+
+        File runDir = new File(directory);
+        if (!runDir.isDirectory()) {
+            IJ.log("[CLI FATAL] Directory does not exist or is not a directory: " + directory);
+            return;
+        }
+
+        boolean[] selections = cfg.getSelectedAnalyses();
+
+        // Check if any analyses were selected
+        boolean anySelected = false;
+        for (boolean s : selections) {
+            if (s) { anySelected = true; break; }
+        }
+        if (!anySelected) {
+            IJ.log("[CLI] No analyses selected. Use run_deconv, run_3d, run_intensity, etc. or analyses=2,4,7");
+            IJ.log("[CLI] " + CLIArgumentParser.usage());
+            return;
+        }
+        if (!confirmInputSourceAndWarn(false)) {
+            return;
+        }
+
+        IJ.log("===== FLASH - The Pipeline for Fluorescence Automated Spatial Histology (CLI Mode) =====");
+        IJ.log("Directory: " + directory);
+        StringBuilder sb = new StringBuilder("Analyses: ");
+        for (int i = 0; i < selections.length; i++) {
+            if (selections[i]) sb.append(analyses[i]).append(", ");
+        }
+        IJ.log(sb.toString().replaceAll(", $", ""));
+        IJ.log("Headless: " + headlessMode + "  |  Parallel: " + parallelProcessing
+                + " (" + parallelThreadCount + " threads)");
+        IJ.log("Overwrite: " + overwriteBehavior + "  |  QC Report: " + generateQcReport);
+        IJ.log("============================================");
+
+        initAnalyses();
+
+        // Fresh QC report for this CLI invocation
+        QualityReport qualityReport = createQualityReportForRun(
+                directory, generateQcReport, headlessMode, parallelProcessing,
+                parallelThreadCount, aggressiveMemory, verboseLogging, overwriteBehavior);
+
+        GpuConcurrency.logEffectivePermits();
+
+        List<String> failedAnalyses = new ArrayList<>();
+
+        // Execute selected analyses — CLI always suppresses dialogs
+        for (int i = 0; i < selections.length; i++) {
+            if (!selections[i]) continue;
+
+            if (isDeprecatedAnalysis(i)) {
+                IJ.log("[CLI] Skipping " + analyses[i]
+                        + " — this module has been deprecated. Use 3D Object Analysis for nuclear counts.");
+                continue;
+            }
+
+            Analysis analysis = analysisMap.get(i);
+            if (analysis != null) {
+                IJ.log("[CLI] Running: " + analyses[i]);
+                configureAnalysis(analysis, i, true, qualityReport);
+                BinSetupDispatcher.clearLastFieldSources();
+                try {
+                    analysis.execute(directory);
+                } catch (Throwable t) {
+                    IJ.handleException(t);
+                    IJ.log("[CLI] " + analyses[i] + " FAILED: " + t.getMessage());
+                    failedAnalyses.add(analyses[i]);
+                }
+                resetBioFormatsWindowless();
+                writeRunAudit(analysis, i);
+            } else {
+                IJ.log("[CLI] Warning: Analysis not implemented for index " + i);
+            }
+        }
+
+        // Auto-trigger aggregation — configured through the same path
+        boolean ran3D = selections[IDX_3D_OBJECT];
+        boolean ranSpatial = selections[IDX_SPATIAL];
+        boolean ranIntensity = selections[IDX_INTENSITY];
+        boolean manuallyRanAgg = selections[IDX_AGGREGATION];
+        if (autoAggregate && (ran3D || ranSpatial || ranIntensity) && !manuallyRanAgg) {
+            IJ.log("[CLI] Auto-running Master Data Aggregation...");
+            Analysis aggAnalysis = analysisMap.get(IDX_AGGREGATION);
+            configureAnalysis(aggAnalysis, IDX_AGGREGATION, true, qualityReport);
+            BinSetupDispatcher.clearLastFieldSources();
+            try {
+                aggAnalysis.execute(directory);
+            } catch (Throwable t) {
+                IJ.handleException(t);
+                IJ.log("[CLI] " + analyses[IDX_AGGREGATION] + " (auto) FAILED: " + t.getMessage());
+                failedAnalyses.add(analyses[IDX_AGGREGATION] + " (auto)");
+            }
+            writeRunAudit(aggAnalysis, IDX_AGGREGATION);
+        }
+
+        // Post-run summary (R-01, R-08, R-09) — informational only
+        PostRunSummary.writeIfPossible(directory);
+
+        writeCliStatus(runDir, failedAnalyses.isEmpty(), failedAnalyses, null);
+        releaseImageCache();
+        IJ.log("[CLI] Pipeline finished.");
+    }
+
+    static void writeCliStatus(File directory, boolean ok,
+                               List<String> failed, String reason) {
+        File status = FlashProjectLayout.forDirectory(directory.getAbsolutePath())
+                .statusWriteFile("cli_status.txt");
+        File parent = status.getParentFile();
+        if (parent != null && !parent.isDirectory() && !parent.mkdirs() && !parent.isDirectory()) {
+            IJ.log("[CLI] could not create status folder: " + parent.getAbsolutePath());
+            return;
+        }
+        try (PrintWriter w = new PrintWriter(
+                Files.newBufferedWriter(status.toPath(), StandardCharsets.UTF_8))) {
+            w.println("ok=" + ok);
+            if (reason != null) w.println("reason=" + reason);
+            if (failed != null) {
+                for (String f : failed) w.println("failed=" + f);
+            }
+        } catch (IOException ioe) {
+            IJ.log("[CLI] could not write CLI status: " + ioe.getMessage());
+        }
+    }
+
+    private boolean confirmInputSourceAndWarn(boolean interactive) {
+        try {
+            ImageSourceDispatcher.detectMode(directory);
+            ImageSourceDispatcher.maybeWarnUncalibrated(directory);
+            return true;
+        } catch (IllegalArgumentException e) {
+            String message = "No compatible input source was found:\n\n"
+                    + e.getMessage();
+            if (interactive) {
+                IJ.showMessage("FLASH", message);
+            } else {
+                IJ.log("[CLI] " + message.replace('\n', ' '));
+            }
+            return false;
+        }
+    }
+
+    private boolean[] showAnalysisDialog() {
+        if (cliInvocation || GraphicsEnvironment.isHeadless()) {
+            return null;
+        }
+        while (true) {
+            PipelineDialog pd = new PipelineDialog("FLASH - The Pipeline for Fluorescence Automated Spatial Histology");
+            pd.setPrimaryButtonText("Run");
+            final int[] statusRowsByAnalysis = new int[analyses.length];
+            Arrays.fill(statusRowsByAnalysis, -1);
+            final int[] nextStatusRow = new int[]{0};
+            final boolean[] statusRowsReady = new boolean[]{false};
+            final Map<Integer, AnalysisStatus>[] pendingStatuses = new Map[1];
+            final AnalysisStatusScanner[] pendingScanner = new AnalysisStatusScanner[1];
+            final Icon pendingIcon = loadStatusIcon("status_pending.png");
+            startAnalysisStatusScan(directory, pd, statusRowsByAnalysis, statusRowsReady,
+                    pendingStatuses, pendingScanner);
+
+            pd.addHeader("Current Directory");
+            final JLabel dirLabel = pd.addMessage(directory);
+            JButton changeBtn = pd.addButton("Change Directory");
+            changeBtn.addActionListener(e -> {
+                DirectoryChooser dc = new DirectoryChooser("Choose a new Directory");
+                String newDir = dc.getDirectory();
+                if (newDir != null) {
+                    directory = newDir;
+                    dirLabel.setText("<html><body width='280'>" + directory + "</body></html>");
+                    startAnalysisStatusScan(directory, pd, statusRowsByAnalysis, statusRowsReady,
+                            pendingStatuses, pendingScanner);
+                }
+            });
+
+            addRecipeWarningPanel(pd);
+
+            final ToggleSwitch[] togglesByAnalysis = new ToggleSwitch[analyses.length];
+            pd.setNorthSlot(buildQuickStartPanel(pd, togglesByAnalysis));
+
+            addAnalysisSection(pd, "Setup", new int[]{
+                    IDX_CREATE_BIN,
+                    IDX_DRAW_ROIS
+            }, pendingIcon, statusRowsByAnalysis, nextStatusRow, togglesByAnalysis);
+
+            addAnalysisSection(pd, "Image Preparation", new int[]{
+                    IDX_ORIENTATION_SETUP,
+                    IDX_DECONVOLUTION,
+                    IDX_SPECTRAL_DECONTAMINATION
+            }, pendingIcon, statusRowsByAnalysis, nextStatusRow, togglesByAnalysis);
+
+            addAnalysisSection(pd, "Display", new int[]{
+                    IDX_SPLIT_MERGE
+            }, pendingIcon, statusRowsByAnalysis, nextStatusRow, togglesByAnalysis);
+
+            addAnalysisSection(pd, "Image Analysis", new int[]{
+                    IDX_INTENSITY,
+                    IDX_3D_OBJECT,
+                    IDX_SPATIAL
+            }, pendingIcon, statusRowsByAnalysis, nextStatusRow, togglesByAnalysis);
+
+            addAnalysisSection(pd, "Results and Validation", new int[]{
+                    IDX_AGGREGATION,
+                    IDX_STATISTICS,
+                    IDX_EXCEL_EXPORT
+            }, pendingIcon, statusRowsByAnalysis, nextStatusRow, togglesByAnalysis);
+            statusRowsReady[0] = true;
+            if (pendingStatuses[0] != null && pendingScanner[0] != null) {
+                applyAnalysisStatuses(pd, statusRowsByAnalysis, pendingStatuses[0], pendingScanner[0]);
+                pendingStatuses[0] = null;
+                pendingScanner[0] = null;
+            }
+
+            JButton checkBtn = pd.addFooterButton("Check my data");
+            checkBtn.addActionListener(e -> {
+                if (directory == null) {
+                    IJ.showMessage("Check my data", "Pick a directory first.");
+                    return;
+                }
+                pd.closeWithAction("check_my_data");
+            });
+
+            JButton optionsBtn = pd.addFooterButton("Options");
+            optionsBtn.addActionListener(e -> pd.runChildWorkflow(new Runnable() {
+                @Override public void run() {
+                    showOptionsDialog();
+                }
+            }));
+
+            JButton depsBtn = pd.addFooterButton("Dependencies");
+            depsBtn.addActionListener(e -> pd.runChildWorkflow(new Runnable() {
+                @Override public void run() {
+                    showDependenciesDialog();
+                }
+            }));
+
+            if (!pd.showDialog()) {
+                if ("check_my_data".equals(pd.getActionCommand())) {
+                    new DiagnosticsDialog(directory).openBlocking();
+                    continue;
+                }
+                return null;
+            }
+
+            boolean[] results = new boolean[analyses.length];
+            for (int i = 0; i < VISIBLE_ANALYSIS_ORDER.length; i++) {
+                results[VISIBLE_ANALYSIS_ORDER[i]] = pd.getNextBoolean();
+            }
+            return results;
+        }
+    }
+
+    private JPanel buildQuickStartPanel(final PipelineDialog pd, final ToggleSwitch[] togglesByAnalysis) {
+        JPanel panel = new JPanel();
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setBackground(new Color(245, 245, 245));
+        panel.setBorder(BorderFactory.createEmptyBorder(6, 20, 6, 20));
+        panel.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        JPanel headerRow = new JPanel();
+        headerRow.setLayout(new BoxLayout(headerRow, BoxLayout.X_AXIS));
+        headerRow.setOpaque(false);
+        headerRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        JLabel header = new JLabel("Quick start");
+        header.setFont(header.getFont().deriveFont(Font.BOLD, 13f));
+        header.setForeground(new Color(55, 71, 79));
+        headerRow.add(header);
+        headerRow.add(Box.createHorizontalStrut(6));
+
+        final JButton helpBtn = HelpButton.question("Open FLASH help and workflow advice.");
+        helpBtn.addActionListener(e -> {
+            helpBtn.setEnabled(false);
+            try {
+                new HelpDialog(directory, analyses, DESCRIPTIONS, togglesByAnalysis)
+                        .open(pd.getWindow());
+            } finally {
+                helpBtn.setEnabled(true);
+            }
+        });
+        headerRow.add(helpBtn);
+        headerRow.add(Box.createHorizontalGlue());
+        panel.add(headerRow);
+        panel.add(Box.createVerticalStrut(4));
+
+        JSeparator separator = new JSeparator(SwingConstants.HORIZONTAL);
+        separator.setMaximumSize(new java.awt.Dimension(Integer.MAX_VALUE, 1));
+        separator.setAlignmentX(Component.LEFT_ALIGNMENT);
+        panel.add(separator);
+        panel.add(Box.createVerticalStrut(5));
+
+        final JLabel recipeCaption = new JLabel(
+                "<html><body width='300'>Pick a recipe or tick analyses individually.</body></html>");
+        recipeCaption.setFont(recipeCaption.getFont().deriveFont(Font.PLAIN, 11f));
+        recipeCaption.setForeground(new Color(33, 33, 33));
+        recipeCaption.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        JButton standardRecipeBtn = new JButton("Standard 3D + Intensity");
+        JButton quickCountRecipeBtn = new JButton("Quick cell count");
+        JButton fullRecipeBtn = new JButton("Full pipeline");
+        JButton customRecipeBtn = new JButton("Clear Recipe");
+        JButton saveRecipeBtn = new JButton("Save selection as recipe...");
+        setRecipeTooltip(standardRecipeBtn, "standard-3d-intensity");
+        setRecipeTooltip(quickCountRecipeBtn, "quick-cell-count");
+        setRecipeTooltip(fullRecipeBtn, "full-pipeline");
+        customRecipeBtn.setToolTipText("Clear all recipe selections.");
+        styleSaveRecipeButton(saveRecipeBtn);
+        saveRecipeBtn.setToolTipText("Save the currently ticked analyses as a reusable recipe.");
+
+        JPanel buttonRows = new JPanel();
+        buttonRows.setLayout(new BoxLayout(buttonRows, BoxLayout.Y_AXIS));
+        buttonRows.setOpaque(false);
+        buttonRows.setAlignmentX(Component.LEFT_ALIGNMENT);
+        buttonRows.add(recipeButtonRow(standardRecipeBtn, quickCountRecipeBtn));
+        buttonRows.add(Box.createVerticalStrut(2));
+        buttonRows.add(recipeButtonRow(fullRecipeBtn, customRecipeBtn, saveRecipeBtn));
+
+        standardRecipeBtn.addActionListener(e -> applyRecipe(togglesByAnalysis, recipeCaption, "standard-3d-intensity"));
+        quickCountRecipeBtn.addActionListener(e -> applyRecipe(togglesByAnalysis, recipeCaption, "quick-cell-count"));
+        fullRecipeBtn.addActionListener(e -> applyRecipe(togglesByAnalysis, recipeCaption, "full-pipeline"));
+        customRecipeBtn.addActionListener(e -> {
+            for (int i = 0; i < togglesByAnalysis.length; i++) {
+                if (togglesByAnalysis[i] != null) {
+                    togglesByAnalysis[i].setSelected(false);
+                }
+            }
+            recipeCaption.setText("<html><body width='300'>Recipe cleared.</body></html>");
+        });
+        saveRecipeBtn.addActionListener(e -> saveCurrentSelectionAsRecipe(pd, togglesByAnalysis));
+
+        panel.add(buttonRows);
+        panel.add(Box.createVerticalStrut(3));
+
+        panel.add(recipeCaption);
+        return panel;
+    }
+
+    private JPanel recipeButtonRow(JButton first, JButton second) {
+        return recipeButtonRow(first, second, null);
+    }
+
+    private JPanel recipeButtonRow(JButton first, JButton second, JButton third) {
+        JPanel row = leftAlignedButtonRow();
+        row.add(first);
+        row.add(Box.createHorizontalStrut(6));
+        row.add(second);
+        if (third != null) {
+            row.add(Box.createHorizontalStrut(6));
+            row.add(third);
+        }
+        row.add(Box.createHorizontalGlue());
+        return row;
+    }
+
+    private JPanel leftAlignedButtonRow() {
+        JPanel row = new JPanel();
+        row.setLayout(new BoxLayout(row, BoxLayout.X_AXIS));
+        row.setOpaque(false);
+        row.setAlignmentX(Component.LEFT_ALIGNMENT);
+        return row;
+    }
+
+    private void styleSaveRecipeButton(JButton button) {
+        styleSecondaryButton(button, 3, 10);
+    }
+
+    private void styleCompactSecondaryButton(JButton button) {
+        styleSecondaryButton(button, 2, 8);
+    }
+
+    private void styleSecondaryButton(JButton button, int verticalPadding, int horizontalPadding) {
+        button.setBackground(SAVE_RECIPE_BG);
+        button.setForeground(SAVE_RECIPE_FG);
+        button.setOpaque(true);
+        button.setContentAreaFilled(true);
+        button.setFocusPainted(false);
+        button.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(SAVE_RECIPE_BORDER),
+                BorderFactory.createEmptyBorder(verticalPadding, horizontalPadding,
+                        verticalPadding, horizontalPadding)));
+    }
+
+    private void addAnalysisSection(PipelineDialog pd, String heading, int[] analysisIndices,
+                                    Icon pendingIcon, int[] statusRowsByAnalysis, int[] nextStatusRow,
+                                    ToggleSwitch[] togglesByAnalysis) {
+        final ToggleSwitch sectionToggle = pd.addHeaderToggle(heading, false);
+        final List<ToggleSwitch> childToggles = new java.util.ArrayList<ToggleSwitch>();
+        final boolean[] updating = new boolean[]{false};
+        for (int i = 0; i < analysisIndices.length; i++) {
+            final ToggleSwitch child = addAnalysisToggle(pd, analysisIndices[i],
+                    pendingIcon, statusRowsByAnalysis, nextStatusRow);
+            if (togglesByAnalysis != null && analysisIndices[i] >= 0
+                    && analysisIndices[i] < togglesByAnalysis.length) {
+                togglesByAnalysis[analysisIndices[i]] = child;
+            }
+            childToggles.add(child);
+            child.addChangeListener(new Runnable() {
+                @Override public void run() {
+                    if (updating[0]) return;
+                    boolean allSelected = true;
+                    for (ToggleSwitch toggle : childToggles) {
+                        if (!toggle.isSelected()) {
+                            allSelected = false;
+                            break;
+                        }
+                    }
+                    updating[0] = true;
+                    sectionToggle.setSelected(allSelected);
+                    updating[0] = false;
+                }
+            });
+        }
+        sectionToggle.addChangeListener(new Runnable() {
+            @Override public void run() {
+                if (updating[0]) return;
+                updating[0] = true;
+                boolean selected = sectionToggle.isSelected();
+                for (ToggleSwitch toggle : childToggles) {
+                    toggle.setSelected(selected);
+                }
+                updating[0] = false;
+            }
+        });
+    }
+
+    private ToggleSwitch addAnalysisToggle(PipelineDialog pd, int analysisIndex,
+                                           Icon pendingIcon, int[] statusRowsByAnalysis,
+                                           int[] nextStatusRow) {
+        JLabel statusIcon = new JLabel(pendingIcon);
+        statusIcon.setToolTipText("Scanning...");
+        int rowIndex = nextStatusRow[0]++;
+        statusRowsByAnalysis[analysisIndex] = rowIndex;
+        final JButton help = HelpButton.question("About " + analyses[analysisIndex]);
+        help.addActionListener(e -> openAnalysisHelp(pd, analysisIndex));
+        ToggleSwitch toggle = pd.addToggleWithStatus(analyses[analysisIndex], false, statusIcon, help);
+        pd.addHelpText(DESCRIPTIONS[analysisIndex]);
+        return toggle;
+    }
+
+    private void openAnalysisHelp(PipelineDialog parent, int analysisIndex) {
+        AnalysisHelpTopic topic = resolveAnalysisHelpTopic(analysisIndex);
+        if (topic == null) {
+            JOptionPane.showMessageDialog(parent == null ? null : parent.getWindow(),
+                    "Focused help is not available for this analysis yet.",
+                    "Analysis Help",
+                    JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+
+        AnalysisHelpDialog.show(parent == null ? null : parent.getWindow(), topic);
+    }
+
+    private static AnalysisHelpTopic resolveAnalysisHelpTopic(int analysisIndex) {
+        return AnalysisHelpCatalog.forAnalysis(analysisIndex);
+    }
+
+    /** Test hook for the topic that a visible row help button will open. */
+    public static AnalysisHelpTopic analysisHelpTopicForTests(int analysisIndex) {
+        return resolveAnalysisHelpTopic(analysisIndex);
+    }
+
+    /** Test hook for matching catalog topic titles to main-dialog labels. */
+    public String analysisLabelForTests(int analysisIndex) {
+        return analyses[analysisIndex];
+    }
+
+    private void applyRecipe(ToggleSwitch[] togglesByAnalysis, JLabel caption, String recipeId) {
+        try {
+            PipelineRecipe recipe = PipelineRecipeIO.loadFromResources(recipeId);
+            for (int i = 0; i < togglesByAnalysis.length; i++) {
+                if (togglesByAnalysis[i] != null) {
+                    togglesByAnalysis[i].setSelected(false);
+                }
+            }
+
+            int tickedCount = 0;
+            for (String key : recipe.getAnalyses()) {
+            Integer idx = PipelineRecipe.KEY_TO_IDX.get(key);
+            if (idx == null || idx.intValue() < 0 || idx.intValue() >= togglesByAnalysis.length) {
+                continue;
+            }
+            if (!isVisibleAnalysisIndex(idx.intValue())) {
+                continue;
+            }
+            ToggleSwitch toggle = togglesByAnalysis[idx.intValue()];
+            if (toggle == null) {
+                continue;
+                }
+                toggle.setSelected(true);
+                tickedCount++;
+            }
+            if (tickedCount == 0) {
+                caption.setText("<html><body width='280'>Recipe did not match any visible analyses.</body></html>");
+                return;
+            }
+            List<String> unknown = recipe.unknownAnalysisKeys();
+            StringBuilder message = new StringBuilder("Applied recipe: ");
+            message.append(recipe.getName()).append(".");
+            if (!unknown.isEmpty()) {
+                message.append(" Unknown recipe keys ignored: ").append(unknown).append(".");
+            }
+            caption.setText("<html><body width='280'>" + htmlText(message.toString()) + "</body></html>");
+        } catch (IOException e) {
+            caption.setText("<html><body width='280'>Could not load recipe: "
+                    + htmlText(e.getMessage()) + "</body></html>");
+            IJ.log("[FLASH] Could not load pipeline recipe '" + recipeId + "': " + e.getMessage());
+        }
+    }
+
+    private void setRecipeTooltip(JButton button, String recipeId) {
+        try {
+            PipelineRecipe recipe = PipelineRecipeIO.loadFromResources(recipeId);
+            button.setToolTipText("<html><body width='280'>"
+                    + htmlText(buildRecipeSelectionSummary(recipe, analyses)) + "</body></html>");
+        } catch (IOException e) {
+            button.setToolTipText("Could not load recipe preview: " + e.getMessage());
+        }
+    }
+
+    static String buildRecipeSelectionSummary(PipelineRecipe recipe, String[] analysisLabels) {
+        if (recipe == null) {
+            return "Recipe did not match any visible analyses.";
+        }
+        StringBuilder ticked = new StringBuilder("This will tick: ");
+        int tickedCount = 0;
+        for (String key : recipe.getAnalyses()) {
+            Integer idx = PipelineRecipe.KEY_TO_IDX.get(key);
+            if (idx == null || idx.intValue() < 0 || idx.intValue() >= analysisLabels.length) {
+                continue;
+            }
+            if (!isVisibleAnalysisIndex(idx.intValue())) {
+                continue;
+            }
+            if (tickedCount > 0) {
+                ticked.append(", ");
+            }
+            ticked.append(analysisLabels[idx.intValue()]);
+            tickedCount++;
+        }
+        if (tickedCount == 0) {
+            return "Recipe did not match any visible analyses.";
+        }
+        List<String> unknown = recipe.unknownAnalysisKeys();
+        if (!unknown.isEmpty()) {
+            ticked.append(". Unknown recipe keys ignored: ").append(unknown);
+        } else {
+            ticked.append(".");
+        }
+        return ticked.toString();
+    }
+
+    private static boolean isVisibleAnalysisIndex(int analysisIndex) {
+        for (int visible : VISIBLE_ANALYSIS_ORDER) {
+            if (visible == analysisIndex) return true;
+        }
+        return false;
+    }
+
+    private void saveCurrentSelectionAsRecipe(PipelineDialog pd, ToggleSwitch[] togglesByAnalysis) {
+        if (GraphicsEnvironment.isHeadless()) {
+            return;
+        }
+        String name = JOptionPane.showInputDialog(null, "Recipe name:");
+        if (name == null || name.trim().isEmpty()) {
+            return;
+        }
+        try {
+            PipelineRecipe recipe = PipelineRecipe.fromSelections(name.trim(), "User saved recipe",
+                    selectionsFromToggles(togglesByAnalysis));
+            File saved = PipelineRecipeIO.saveToUserDir(recipe);
+            pd.setTransientStatus("Saved recipe: " + saved.getAbsolutePath());
+        } catch (IOException e) {
+            pd.setTransientStatus("Could not save recipe: " + e.getMessage());
+            IJ.log("[FLASH] Could not save pipeline recipe: " + e.getMessage());
+        }
+    }
+
+    private void addRecipeWarningPanel(PipelineDialog pd) {
+        List<String> unknown = collectRecipeWarnings();
+        if (unknown.isEmpty()) {
+            return;
+        }
+        JPanel warn = new JPanel();
+        warn.setLayout(new BoxLayout(warn, BoxLayout.X_AXIS));
+        warn.setBackground(new Color(255, 243, 205));
+        warn.setBorder(BorderFactory.createEmptyBorder(6, 8, 6, 8));
+        warn.add(new JLabel("<html><body width='300'>Recipe references unknown analyses: "
+                + htmlText(unknown.toString()) + ". Known analyses were substituted automatically.</body></html>"));
+        pd.addComponent(warn);
+    }
+
+    private List<String> collectRecipeWarnings() {
+        List<String> unknown = new java.util.ArrayList<String>();
+        collectRecipeWarnings("standard-3d-intensity", unknown);
+        collectRecipeWarnings("quick-cell-count", unknown);
+        collectRecipeWarnings("full-pipeline", unknown);
+        return unknown;
+    }
+
+    private void collectRecipeWarnings(String recipeId, List<String> unknown) {
+        try {
+            PipelineRecipe recipe = PipelineRecipeIO.loadFromResources(recipeId);
+            for (String key : recipe.unknownAnalysisKeys()) {
+                String entry = recipeId + ": " + key;
+                if (!unknown.contains(entry)) {
+                    unknown.add(entry);
+                }
+            }
+        } catch (IOException e) {
+            String entry = recipeId + ": " + e.getMessage();
+            if (!unknown.contains(entry)) {
+                unknown.add(entry);
+            }
+        }
+    }
+
+    private void saveProjectRecipe(boolean[] selections) {
+        try {
+            File projectRecipeDir = FlashProjectLayout.forDirectory(directory).statusRoot();
+            PipelineRecipe recipe = PipelineRecipe.fromSelections("last-run", "Last successful run", selections);
+            PipelineRecipeIO.saveToFile(recipe, new File(projectRecipeDir, "recipe.json"));
+        } catch (IOException e) {
+            IJ.log("[FLASH] Warning: could not save project pipeline recipe: " + e.getMessage());
+        }
+    }
+
+    private boolean[] selectionsFromToggles(ToggleSwitch[] togglesByAnalysis) {
+        boolean[] selections = new boolean[analyses.length];
+        if (togglesByAnalysis == null) {
+            return selections;
+        }
+        for (int i = 0; i < togglesByAnalysis.length && i < selections.length; i++) {
+            selections[i] = togglesByAnalysis[i] != null && togglesByAnalysis[i].isSelected();
+        }
+        return selections;
+    }
+
+    private void startAnalysisStatusScan(final String scanDirectory,
+                                         final PipelineDialog pd,
+                                         final int[] statusRowsByAnalysis,
+                                         final boolean[] statusRowsReady,
+                                         final Map<Integer, AnalysisStatus>[] pendingStatuses,
+                                         final AnalysisStatusScanner[] pendingScanner) {
+        final AnalysisStatusScanner scanner = new AnalysisStatusScanner();
+        Thread thread = new Thread(new Runnable() {
+            @Override public void run() {
+                final Map<Integer, AnalysisStatus> statuses = scanner.scan(new File(scanDirectory));
+                SwingUtilities.invokeLater(new Runnable() {
+                    @Override public void run() {
+                        if (scanDirectory == null || !scanDirectory.equals(directory)) {
+                            return;
+                        }
+                        if (!statusRowsReady[0]) {
+                            pendingStatuses[0] = statuses;
+                            pendingScanner[0] = scanner;
+                            return;
+                        }
+                        applyAnalysisStatuses(pd, statusRowsByAnalysis, statuses, scanner);
+                    }
+                });
+            }
+        }, "FLASH status scanner");
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    private void applyAnalysisStatuses(PipelineDialog pd,
+                                       int[] statusRowsByAnalysis,
+                                       Map<Integer, AnalysisStatus> statuses,
+                                       AnalysisStatusScanner scanner) {
+        if (pd == null || statuses == null || scanner == null) return;
+        for (int i = 0; i < analyses.length; i++) {
+            int row = statusRowsByAnalysis[i];
+            if (row < 0) continue;
+            AnalysisStatus status = statuses.get(Integer.valueOf(i));
+            if (status == null) status = AnalysisStatus.NOT_STARTED;
+            pd.updateRowIcon(row, statusIconFor(status), scanner.tooltipFor(i));
+        }
+    }
+
+    private Icon statusIconFor(AnalysisStatus status) {
+        if (status == AnalysisStatus.DONE) return loadStatusIcon("status_done.png");
+        if (status == AnalysisStatus.STALE) return loadStatusIcon("status_stale.png");
+        return loadStatusIcon("status_pending.png");
+    }
+
+    private Icon loadStatusIcon(String resourceName) {
+        if (cliInvocation || GraphicsEnvironment.isHeadless()) return null;
+        URL url = getClass().getResource("/icons/" + resourceName);
+        return url == null ? null : new ImageIcon(url);
+    }
+
+    /**
+     * Resets Bio-Formats windowless mode to false so that drag-and-drop
+     * imports show the normal Bio-Formats dialog after the pipeline finishes.
+     */
+    private static void resetBioFormatsWindowless() {
+        BioFormatsRuntime.resetWindowlessModeIfTouched();
+    }
+
+    private void configureFeatureDependencyGate() {
+        FeatureDependencyGate.configure(dependencyService, new FeatureDependencyGate.DependenciesDialogOpener() {
+            @Override
+            public void openDependenciesDialog() {
+                showDependenciesDialog();
+            }
+        });
+    }
+
+    private void showOptionsDialog() {
+        PipelineDialog opts = new PipelineDialog("Pipeline Options");
+
+        opts.addHeader("Display Settings");
+        opts.addToggle("Hide Image Windows", headlessMode);
+        opts.addHelpText("When enabled, image windows are not displayed during batch "
+                + "processing. Improves performance and reduces visual clutter.");
+        opts.addHelpText("Note: Headless Mode is not fully supported for 3D Object Analysis "
+                + "due to external dependencies. Image windows may briefly appear during 3D processing.");
+        opts.addToggle("Always show advanced options", ij.Prefs.get("flash.advanced.global", false));
+        opts.addHelpText("When enabled, every module's advanced options panel opens by default. "
+                + "Otherwise each module remembers its own setting.");
+
+        opts.addHeader("Performance");
+        final ToggleSwitch parallelToggle = opts.addToggle("Parallel Processing", parallelProcessing);
+        opts.addHelpText("Process multiple images simultaneously using " + Runtime.getRuntime().availableProcessors()
+                + " available CPU cores. Dramatically reduces batch processing time for large datasets.");
+        final JTextField threadCountField = opts.addNumericField("Thread Count", parallelThreadCount, 0);
+        threadCountField.setEnabled(parallelProcessing);
+        parallelToggle.addChangeListener(() -> threadCountField.setEnabled(parallelToggle.isSelected()));
+        opts.addHelpText("Number of images to process in parallel (recommended: "
+                + Math.max(1, Runtime.getRuntime().availableProcessors() / 2) + " for this machine, max: "
+                + Runtime.getRuntime().availableProcessors() + ").");
+        final JTextField gpuPermitsField = opts.addNumericField(
+                "GPU Inference Permits (0 = auto-detect)", gpuPermits, 0);
+        int autoNow = GpuConcurrency.getAutoDetectedPermits();
+        String autoText = autoNow > 0 ? String.valueOf(autoNow) : "probing…";
+        gpuPermitsField.setToolTipText("Auto-detected: " + autoText
+                + ". Caps simultaneous StarDist + Cellpose GPU inferences. 0 uses the auto value.");
+        opts.addHelpText("Concurrent GPU inference workers (StarDist + Cellpose share one GPU). "
+                + "Auto-detected from VRAM, heap, and system RAM. Override here only if you have "
+                + "a reason. Auto value: " + autoText + ".");
+        opts.addToggle("Cache Images as TIFs", useTifCache);
+        opts.addHelpText("Save raw images as individual TIF files on first load. "
+                + "Subsequent analyses load from TIFs instead of re-parsing the .lif file (much faster).");
+        opts.addToggle("Aggressive Memory Clearing", aggressiveMemory);
+        opts.addHelpText("Explicitly frees memory after each image. Useful for large datasets "
+                + "that cause out-of-memory errors.");
+
+        opts.addHeader("Logging");
+        opts.addToggle("Verbose Logging / Debug Mode", verboseLogging);
+        opts.addHelpText("Prints detailed step-by-step information during processing, "
+                + "including ROI indices, threshold values, and sub-step timing.");
+
+        opts.addHeader("File Handling");
+        opts.addChoice("File Overwrite Behavior",
+                new String[]{"Auto-Overwrite", "Skip Existing"}, overwriteBehavior);
+        opts.addHelpText("Auto-Overwrite: always regenerate output files. "
+                + "Skip Existing: skip images whose output files already exist.");
+
+        opts.addHeader("Export");
+        opts.addToggle("Auto-Save Aggregated Summaries", autoAggregate);
+        opts.addHelpText("When enabled, master summary CSVs are automatically generated "
+                + "in the ImageJ Exports/ folder after running 3D Object or Intensity analyses. "
+                + "Disable to skip automatic aggregation.");
+
+        opts.addHeader("Reporting");
+        opts.addToggle("Generate QC Report", generateQcReport);
+        opts.addHelpText("Generate an HTML quality control report documenting analysis parameters "
+                + "and segmentation overlays for reproducibility verification.");
+
+        if (opts.showDialog()) {
+            headlessMode = opts.getNextBoolean();
+            boolean newAdvancedGlobal = opts.getNextBoolean();
+            ij.Prefs.set("flash.advanced.global", newAdvancedGlobal);
+            ij.Prefs.savePreferences();
+            parallelProcessing = opts.getNextBoolean();
+            int maxThreads = Runtime.getRuntime().availableProcessors();
+            parallelThreadCount = Math.max(1, Math.min((int) opts.getNextNumber(), maxThreads));
+            gpuPermits = Math.max(0, (int) opts.getNextNumber());
+            GpuConcurrency.setUserOverride(gpuPermits);
+            useTifCache = opts.getNextBoolean();
+            aggressiveMemory = opts.getNextBoolean();
+            verboseLogging = opts.getNextBoolean();
+            overwriteBehavior = opts.getNextChoice();
+            autoAggregate = opts.getNextBoolean();
+            generateQcReport = opts.getNextBoolean();
+        }
+    }
+
+    private void showDependenciesDialog() {
+        while (true) {
+            dependencyService.refreshStatuses();
+            List<DependencyService.DialogRow> rows = dependencyService.getDialogRows();
+            DependencyFixPlan fixPlan = dependencyService.planFixAll();
+
+            PipelineDialog pd = new PipelineDialog("Pipeline Dependencies");
+            pd.setDefaultButtonsVisible(false);
+            pd.addMessage("Each row comes from the runtime registry. Missing items only block the features listed on that row.");
+            pd.addSpacer(4);
+
+            String lastSection = "";
+            for (DependencyService.DialogRow row : rows) {
+                String sectionLabel = row.getSectionLabel();
+                if (sectionLabel != null && !sectionLabel.isEmpty() && !sectionLabel.equals(lastSection)) {
+                    pd.addHeader(sectionLabel);
+                    lastSection = sectionLabel;
+                } else if (sectionLabel == null || sectionLabel.isEmpty()) {
+                    lastSection = "";
+                }
+                pd.addComponent(createDependencyRowPanel(pd, row));
+            }
+
+            JButton autoFixAllBtn = pd.addFooterButton(buildAutoFixAllLabel(fixPlan));
+            autoFixAllBtn.addActionListener(e -> pd.closeWithAction("auto_fix_all"));
+            JButton refreshBtn = pd.addFooterButton("Refresh");
+            refreshBtn.addActionListener(e -> pd.closeWithAction("refresh"));
+            JButton closeBtn = pd.addFooterButton("Close");
+            closeBtn.addActionListener(e -> pd.closeWithAction("close"));
+
+            pd.showDialog();
+
+            String action = pd.getActionCommand();
+            if ("refresh".equals(action)) {
+                dependencyService.invalidateStatusCache();
+                continue;
+            }
+            if ("auto_fix_all".equals(action)) {
+                runAutoFixAll(fixPlan);
+                continue;
+            }
+            if (action != null && action.startsWith("row:")) {
+                handleDependencyRowAction(action);
+                continue;
+            }
+            return;
+        }
+    }
+
+    private JPanel createDependencyRowPanel(final PipelineDialog pd, final DependencyService.DialogRow row) {
+        JPanel card = new JPanel();
+        card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
+        card.setAlignmentX(Component.LEFT_ALIGNMENT);
+        card.setOpaque(true);
+        card.setBackground(Color.WHITE);
+        card.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(new Color(220, 220, 220)),
+                BorderFactory.createEmptyBorder(10, 12, 10, 12)));
+
+        JLabel title = new JLabel(row.getSpec().getDisplayName());
+        title.setAlignmentX(Component.LEFT_ALIGNMENT);
+        title.setFont(title.getFont().deriveFont(Font.BOLD, 12f));
+        card.add(title);
+        card.add(Box.createVerticalStrut(4));
+
+        JLabel statusLabel = createDependencyTextLabel("Status: " + row.getStatusLabel(), 11f, Font.BOLD);
+        statusLabel.setForeground(dependencyStatusColor(row.getStatus()));
+        card.add(statusLabel);
+
+        if (!row.getStatusDetail().isEmpty()) {
+            card.add(Box.createVerticalStrut(2));
+            card.add(createDependencyTextLabel("Details: " + row.getStatusDetail(), 11f, Font.PLAIN));
+        }
+
+        card.add(Box.createVerticalStrut(4));
+        card.add(createDependencyTextLabel(row.getBlockedLabel(), 11f, Font.PLAIN));
+        card.add(Box.createVerticalStrut(2));
+        card.add(createDependencyTextLabel(row.getExplanation(), 11f, Font.PLAIN));
+        card.add(Box.createVerticalStrut(2));
+        card.add(createDependencyTextLabel(row.getRestartLabel(), 11f, Font.PLAIN));
+
+        if (!row.getActionNote().isEmpty()) {
+            card.add(Box.createVerticalStrut(4));
+            JLabel note = createDependencyTextLabel(row.getActionNote(), 11f, Font.PLAIN);
+            note.setForeground(new Color(141, 60, 0));
+            card.add(note);
+        }
+
+        if (!row.getActions().isEmpty()) {
+            JPanel buttonRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+            buttonRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+            buttonRow.setOpaque(false);
+            for (DependencyService.DialogAction action : row.getActions()) {
+                JButton button = new JButton(action.getLabel());
+                button.addActionListener(e -> pd.closeWithAction(
+                        buildDependencyRowActionCommand(row.getSpec().getId(), action.getActionId())));
+                buttonRow.add(button);
+            }
+            card.add(Box.createVerticalStrut(6));
+            card.add(buttonRow);
+        }
+
+        return card;
+    }
+
+    private void handleDependencyRowAction(String actionCommand) {
+        String[] parts = actionCommand.split(":", 3);
+        if (parts.length != 3) {
+            IJ.showMessage("Pipeline Dependencies", "Could not parse dependency action: " + actionCommand);
+            return;
+        }
+
+        DependencyId dependencyId;
+        try {
+            dependencyId = DependencyId.valueOf(parts[1]);
+        } catch (IllegalArgumentException e) {
+            IJ.showMessage("Pipeline Dependencies", "Unknown dependency: " + parts[1]);
+            return;
+        }
+
+        String actionId = parts[2];
+        DependencyFixResult result = dependencyService.runDialogAction(dependencyId, actionId);
+        dependencyService.invalidateStatusCache();
+
+        if (!DependencyService.DialogAction.VERIFY.equals(actionId) || !result.isSuccess()) {
+            DependencySpec spec = DependencyRegistry.get(dependencyId);
+            String dependencyName = spec == null ? dependencyId.name() : spec.getDisplayName();
+            StringBuilder sb = new StringBuilder();
+            sb.append("Dependency: ").append(dependencyName).append("\n");
+            sb.append("Result: ").append(result.isSuccess() ? "Success" : "Incomplete").append("\n");
+            sb.append("Restart Fiji after repair: ")
+                    .append(result.isRestartRequired() ? "required" : "not required");
+            if (result.getMessage() != null && !result.getMessage().trim().isEmpty()) {
+                sb.append("\n\n").append(result.getMessage().trim());
+            }
+            showScrollableMessage(
+                    "Pipeline Dependencies - " + dependencyName,
+                    sb.toString(),
+                    result.isSuccess() ? JOptionPane.INFORMATION_MESSAGE : JOptionPane.WARNING_MESSAGE);
+        }
+    }
+
+    private void runAutoFixAll(DependencyFixPlan plan) {
+        if (!confirmAutoFixAll(plan)) {
+            return;
+        }
+        if (plan.getDependenciesToFix().isEmpty()) {
+            return;
+        }
+
+        List<DependencyFixResult> results = new java.util.ArrayList<DependencyFixResult>();
+        boolean restartRequired = false;
+        boolean allSucceeded = true;
+        for (DependencySpec spec : plan.getDependenciesToFix()) {
+            DependencyFixResult result = dependencyService.runDialogAction(
+                    spec.getId(), DependencyService.DialogAction.AUTO_FIX);
+            results.add(result);
+            restartRequired = restartRequired || result.isRestartRequired();
+            allSucceeded = allSucceeded && result.isSuccess();
+        }
+        dependencyService.invalidateStatusCache();
+
+        String outcome;
+        if (allSucceeded) {
+            outcome = restartRequired ? "Success - restart required" : "Success";
+        } else {
+            outcome = restartRequired ? "Partial - restart still required for completed fixes" : "Partial";
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("Outcome: ").append(outcome).append("\n");
+        sb.append("Planned download size: ").append(formatApproxSizeOrNone(plan.getTotalApproxDownloadBytes())).append("\n");
+        sb.append("Restart Fiji after repair: ").append(restartRequired ? "required" : "not required");
+        for (DependencyFixResult result : results) {
+            DependencySpec spec = DependencyRegistry.get(result.getDependencyId());
+            String name = spec == null ? result.getDependencyId().name() : spec.getDisplayName();
+            sb.append("\n\n").append(name).append(": ")
+                    .append(result.isSuccess() ? "SUCCESS" : "INCOMPLETE");
+            if (result.getMessage() != null && !result.getMessage().trim().isEmpty()) {
+                sb.append("\n").append(result.getMessage().trim());
+            }
+        }
+        appendSkippedDependencies(sb, "Skipped healthy", plan.getAlreadySatisfied());
+        appendSkippedDependencies(sb, "Not fixable in-app", plan.getBlockedDependencies());
+        showScrollableMessage(
+                "Pipeline Dependencies - Auto-Fix All",
+                sb.toString(),
+                allSucceeded ? JOptionPane.INFORMATION_MESSAGE : JOptionPane.WARNING_MESSAGE);
+    }
+
+    private boolean confirmAutoFixAll(DependencyFixPlan plan) {
+        PipelineDialog confirm = new PipelineDialog("Pipeline Dependencies - Auto-Fix All");
+        confirm.addHeader("Will Fix");
+        if (plan.getDependenciesToFix().isEmpty()) {
+            confirm.addMessage("Nothing fixable currently needs repair.");
+        } else {
+            for (DependencySpec spec : plan.getDependenciesToFix()) {
+                confirm.addMessage(spec.getDisplayName() + " - " + defaultAutoFixLabel(spec));
+            }
+        }
+
+        confirm.addHelpText("Total download: " + formatApproxSizeOrNone(plan.getTotalApproxDownloadBytes()));
+        confirm.addHelpText("Restart Fiji after repair: " + (plan.isRestartRequired() ? "required." : "not required."));
+        if (planContains(plan, DependencyId.CELLPOSE_RUNTIME)) {
+            confirm.addHelpText("Auto-Fix All uses the Cellpose CPU install "
+                    + DependencyRegistry.formatApproxSize(DependencyRegistry.CELLPOSE_CPU_RUNTIME_BYTES)
+                    + ". Use the Cellpose row's GPU button for the GPU install "
+                    + DependencyRegistry.formatApproxSize(DependencyRegistry.CELLPOSE_GPU_RUNTIME_BYTES) + ".");
+        }
+
+        if (!plan.getAlreadySatisfied().isEmpty()) {
+            confirm.addHeader("Will Skip");
+            for (DependencySpec spec : plan.getAlreadySatisfied()) {
+                confirm.addMessage(spec.getDisplayName() + " - already healthy.");
+            }
+        }
+
+        if (!plan.getBlockedDependencies().isEmpty()) {
+            confirm.addHeader("Not Fixable In-App");
+            for (DependencySpec spec : plan.getBlockedDependencies()) {
+                String reason = spec.getNonFixableReason() == null || spec.getNonFixableReason().trim().isEmpty()
+                        ? "Not fixable in-app - see README."
+                        : "Not fixable in-app - see README. " + spec.getNonFixableReason().trim();
+                confirm.addMessage(spec.getDisplayName() + " - " + reason);
+            }
+        }
+
+        return confirm.showDialog();
+    }
+
+    private static String buildAutoFixAllLabel(DependencyFixPlan plan) {
+        String size = DependencyRegistry.formatApproxSize(plan.getTotalApproxDownloadBytes());
+        return size.isEmpty() ? "Auto-Fix All" : "Auto-Fix All " + size;
+    }
+
+    private static void appendSkippedDependencies(StringBuilder sb, String header, List<DependencySpec> specs) {
+        if (specs == null || specs.isEmpty()) {
+            return;
+        }
+        sb.append("\n\n").append(header).append(":");
+        for (DependencySpec spec : specs) {
+            if (spec == null) {
+                continue;
+            }
+            sb.append("\n- ").append(spec.getDisplayName());
+            if ("Not fixable in-app".equals(header)) {
+                String reason = spec.getNonFixableReason();
+                if (reason != null && !reason.trim().isEmpty()) {
+                    sb.append(": ").append(reason.trim());
+                }
+            }
+        }
+    }
+
+    private static boolean planContains(DependencyFixPlan plan, DependencyId id) {
+        if (plan == null || id == null) {
+            return false;
+        }
+        for (DependencySpec spec : plan.getDependenciesToFix()) {
+            if (spec != null && id == spec.getId()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String defaultAutoFixLabel(DependencySpec spec) {
+        if (spec == null) {
+            return "Auto-Fix";
+        }
+        if (!spec.getInstallOptions().isEmpty()) {
+            return spec.getInstallOptions().get(0).formatButtonLabel();
+        }
+        String label = spec.formatButtonLabel(DependencyStatus.missing("missing"));
+        return (label == null || label.trim().isEmpty()) ? "Auto-Fix" : label.trim();
+    }
+
+    private static String buildDependencyRowActionCommand(DependencyId id, String actionId) {
+        return "row:" + id.name() + ":" + actionId;
+    }
+
+    private static JLabel createDependencyTextLabel(String text, float fontSize, int fontStyle) {
+        JLabel label = new JLabel("<html><body width='560'>"
+                + htmlText(text) + "</body></html>");
+        label.setAlignmentX(Component.LEFT_ALIGNMENT);
+        label.setFont(label.getFont().deriveFont(fontStyle, fontSize));
+        return label;
+    }
+
+    private static Color dependencyStatusColor(DependencyStatus status) {
+        if (status == null) {
+            return new Color(79, 79, 79);
+        }
+        if (status.isPresent()) {
+            return new Color(46, 125, 50);
+        }
+        if (status.isError()) {
+            return new Color(183, 28, 28);
+        }
+        return new Color(156, 101, 0);
+    }
+
+    private static void showScrollableMessage(String title, String message, int messageType) {
+        JTextArea area = new JTextArea(message == null ? "" : message);
+        area.setEditable(false);
+        area.setLineWrap(true);
+        area.setWrapStyleWord(true);
+        area.setCaretPosition(0);
+        area.setBackground(new Color(245, 245, 245));
+        area.setFont(area.getFont().deriveFont(Font.PLAIN, 12f));
+
+        JScrollPane scrollPane = new JScrollPane(area);
+        scrollPane.setPreferredSize(new java.awt.Dimension(640, 300));
+        JOptionPane.showMessageDialog(null, scrollPane, title, messageType);
+    }
+
+    /**
+     * Creates a fresh QualityReport for one pipeline run.
+     * Cleans stale report artifacts from any prior run in the same directory.
+     */
+    static QualityReport createQualityReportForRun(String dir, boolean enabled,
+                                                    boolean headless, boolean parallel,
+                                                    int threadCount, boolean aggressiveMemory,
+                                                    boolean verboseLogging, String overwriteBehavior) {
+        if (enabled) {
+            cleanStaleReportArtifacts(dir);
+        }
+        QualityReport report = new QualityReport();
+        report.setEnabled(enabled);
+        report.setDirectory(dir);
+        report.setGlobalSettings(headless, parallel, threadCount,
+                aggressiveMemory, verboseLogging, overwriteBehavior);
+        return report;
+    }
+
+    /**
+     * Removes stale report-owned artifacts from a prior run so the new run
+     * starts clean. Best-effort: failures are logged but never abort the batch.
+     */
+    private static void cleanStaleReportArtifacts(String dir) {
+        FlashProjectLayout layout = FlashProjectLayout.forDirectory(dir);
+        for (File reportDir : layout.qualityReportReadDirs()) {
+            cleanStaleReportArtifactsIn(reportDir);
+        }
+    }
+
+    private static void cleanStaleReportArtifactsIn(File reportDir) {
+        if (reportDir == null || !reportDir.exists()) return;
+
+        // Remove overlay directory contents
+        File overlayDir = new File(reportDir, "overlays");
+        if (overlayDir.isDirectory()) {
+            File[] overlays = overlayDir.listFiles();
+            if (overlays != null) {
+                for (File f : overlays) {
+                    if (!f.delete()) {
+                        IJ.log("QC Report: could not remove stale overlay: " + f.getName());
+                    }
+                }
+            }
+        }
+
+        // Remove old HTML report so it's never stale between write calls
+        File oldHtml = new File(reportDir, "QC_Report.html");
+        if (oldHtml.exists() && !oldHtml.delete()) {
+            IJ.log("QC Report: could not remove stale QC_Report.html");
+        }
+    }
+
+    /**
+     * Applies all common run options to an analysis instance.
+     * Both GUI and CLI paths route through this method so configuration
+     * is never duplicated or accidentally omitted.
+     */
+    void configureAnalysis(Analysis analysis, int index,
+                           boolean suppressDialogs,
+                           QualityReport qualityReport) {
+        boolean analysisHeadless = headlessMode;
+        if (!cliInvocation
+                && (analysis.requiresHeadedMode()
+                || index == IDX_SPECTRAL_DECONTAMINATION)) {
+            analysisHeadless = false;
+        }
+        FeatureDependencyGate.setUiMode(analysisHeadless);
+        analysis.setHeadless(analysisHeadless);
+        analysis.setAggressiveMemory(aggressiveMemory);
+        analysis.setVerboseLogging(verboseLogging);
+        analysis.setSkipExisting("Skip Existing".equals(overwriteBehavior));
+        analysis.setParallelThreads(parallelProcessing ? parallelThreadCount : 1);
+        analysis.setLoaderThreads(parallelProcessing ? loaderThreadCount : 1);
+        analysis.setLoaderPercent(parallelProcessing ? loaderPercent : 0);
+        analysis.setUseTifCache(useTifCache);
+        analysis.setQualityReport(qualityReport);
+        analysis.setSuppressDialogs(suppressDialogs);
+        analysis.setCliConfig(cliConfig);
+        if (index == IDX_SPLIT_MERGE || index == IDX_3D_OBJECT || index == IDX_INTENSITY
+                || index == IDX_SPECTRAL_DECONTAMINATION) {
+            ImageCache cache = getImageCacheOrReport();
+            if (cache != null) {
+                analysis.setImageCache(cache);
+            }
+        }
+    }
+
+    void setCliInvocation(boolean cliInvocation) {
+        this.cliInvocation = cliInvocation;
+    }
+
+    private void writeRunAudit(Analysis analysis, int index) {
+        if (analysis == null || index < 0 || index >= analyses.length) return;
+        if (BinSetupDispatcher.getLastOutcome() == BinSetupDispatcher.Outcome.CANCELLED) {
+            return;
+        }
+        try {
+            RunSettingsSnapshot.writeForAnalysis(directory, analyses[index], index,
+                    analysis.requiredBinFields(),
+                    BinSetupDispatcher.getLastFieldSources(),
+                    cliConfig);
+        } catch (IOException e) {
+            IJ.log("[FLASH] Warning: could not write run settings snapshot for "
+                    + analyses[index] + ": " + e.getMessage());
+        }
+    }
+
+    private ImageCache getImageCacheOrReport() {
+        if (imageCache != null) return imageCache;
+
+        try {
+            imageCache = new ImageCache();
+            return imageCache;
+        } catch (NoClassDefFoundError e) {
+            PluginInstallGuard.reportMissingInternalClass("FLASH", e);
+            return null;
+        }
+    }
+
+    private void releaseImageCache() {
+        if (imageCache == null) return;
+        imageCache.release();
+    }
+
+    private void initAnalyses() {
+        analysisMap.clear();
+        analysisMap.put(IDX_CREATE_BIN, new CreateBinFileAnalysis());
+        analysisMap.put(IDX_DRAW_ROIS, new DrawAndSaveROIsAnalysis());
+        analysisMap.put(IDX_DECONVOLUTION, new DeconvolutionAnalysis());
+        analysisMap.put(IDX_SPLIT_MERGE, new SplitAndMergeImageChannelsAnalysis());
+        analysisMap.put(IDX_3D_OBJECT, new ThreeDObjectAnalysis());
+        analysisMap.put(IDX_SPATIAL, new SpatialAnalysis());
+        analysisMap.put(IDX_LINE_DISTANCE, new LineDistanceAnalysis());
+        analysisMap.put(IDX_INTENSITY, new IntensityAnalysisV2());
+        analysisMap.put(IDX_AGGREGATION, new MasterAggregationAnalysis());
+        analysisMap.put(IDX_STATISTICS, new StatisticalAnalysis());
+        analysisMap.put(IDX_EXCEL_EXPORT, createExcelExportAnalysis());
+        analysisMap.put(IDX_SPECTRAL_DECONTAMINATION, new SpectralDecontaminationAnalysis());
+        analysisMap.put(IDX_ORIENTATION_SETUP, new ImageOrientationSetupAnalysis());
+    }
+
+    private boolean isDeprecatedAnalysis(int analysisIndex) {
+        return analysisIndex == IDX_NUCLEAR;
+    }
+
+    private Analysis createExcelExportAnalysis() {
+        return new Analysis() {
+            private boolean headless = false;
+            private boolean suppressDialogs = false;
+            private flash.pipeline.cli.CLIConfig cliConfig = null;
+
+            @Override
+            public void setHeadless(boolean headless) {
+                this.headless = headless;
+            }
+
+            @Override
+            public void setSuppressDialogs(boolean suppress) {
+                this.suppressDialogs = suppress;
+            }
+
+            @Override
+            public void setCliConfig(flash.pipeline.cli.CLIConfig config) {
+                this.cliConfig = config;
+            }
+
+            @Override
+            public void execute(String directory) {
+                if (!FeatureDependencyGate.gate(DependencyId.APACHE_POI_RUNTIME, "Excel Summary Export")) {
+                    return;
+                }
+                try {
+                    Class<?> clazz = Class.forName(EXCEL_EXPORT_ANALYSIS_CLASS);
+                    Analysis delegate = (Analysis) clazz.getDeclaredConstructor().newInstance();
+                    delegate.setHeadless(headless);
+                    delegate.setSuppressDialogs(suppressDialogs);
+                    delegate.setCliConfig(cliConfig);
+                    delegate.execute(directory);
+                } catch (ReflectiveOperationException | LinkageError e) {
+                    if (!FeatureDependencyGate.gate(DependencyId.APACHE_POI_RUNTIME, "Excel Summary Export")) {
+                        return;
+                    }
+                    IJ.handleException(e);
+                }
+            }
+        };
+    }
+
+    private static String formatApproxSizeOrNone(long bytes) {
+        String formatted = DependencyRegistry.formatApproxSize(bytes);
+        return formatted.isEmpty() ? "none" : formatted;
+    }
+
+    private static String htmlText(String text) {
+        if (text == null || text.trim().isEmpty()) {
+            return "";
+        }
+        String escaped = text.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;");
+        return escaped.replace("\n", "<br>");
+    }
+
+    /**
+     * Silent pre-flight guards. Runs once per batch invocation, before analyses.
+     * Returns true if the batch should proceed. P-11 write-permission is the
+     * only hard block; the rest are warnings the user can override.
+     */
+    private boolean runPreFlightGuards(String dir) {
+        // P-11: write-permission is a hard block.
+        String writeErr = PreFlightChecks.checkWritePermission(dir);
+        if (writeErr != null) {
+            IJ.showMessage("FLASH",
+                    "Cannot proceed — output folder is not writable:\n\n" + writeErr
+                    + "\n\nPick a different folder or fix permissions.");
+            return false;
+        }
+
+        PreFlightChecks.DirectoryFileScan fileScan = PreFlightChecks.scanCleanFiles(dir);
+
+        // L-08: truncated files. Warn and let user decide.
+        List<File> truncated = PreFlightChecks.findTruncatedImages(fileScan);
+        if (!truncated.isEmpty()) {
+            StringBuilder sb = new StringBuilder();
+            sb.append(truncated.size()).append(" file(s) look truncated or incomplete:\n\n");
+            int shown = Math.min(5, truncated.size());
+            for (int i = 0; i < shown; i++) {
+                sb.append("    ").append(truncated.get(i).getName()).append("\n");
+            }
+            if (truncated.size() > shown) {
+                sb.append("    ... and ").append(truncated.size() - shown).append(" more\n");
+            }
+            sb.append("\nThese may cause errors during analysis. Continue anyway?");
+            int choice = JOptionPane.showConfirmDialog(null, sb.toString(),
+                    "Truncated files detected",
+                    JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+            if (choice != JOptionPane.YES_OPTION) return false;
+        }
+
+        // P-10: disk space warning (non-blocking, log only).
+        PreFlightChecks.DiskSpaceResult ds = PreFlightChecks.checkDiskSpace(fileScan);
+        if (ds.warn) {
+            IJ.log("[PreFlight] Disk space low — free: "
+                    + PreFlightChecks.humanBytes(ds.freeBytes)
+                    + ", estimated output: "
+                    + PreFlightChecks.humanBytes(ds.estimatedOutputBytes)
+                    + (ds.likelyInsufficient ? " (likely insufficient)" : ""));
+        }
+
+        // P-13: filename issues (non-blocking, log only).
+        List<PreFlightChecks.PathIssue> pathIssues = PreFlightChecks.findPathIssues(fileScan);
+        if (!pathIssues.isEmpty()) {
+            IJ.log("[PreFlight] " + pathIssues.size() + " filename issue(s):");
+            int shown = Math.min(10, pathIssues.size());
+            for (int i = 0; i < shown; i++) {
+                PreFlightChecks.PathIssue issue = pathIssues.get(i);
+                IJ.log("    " + issue.file.getName() + " -- " + issue.reason);
+            }
+            if (pathIssues.size() > shown) {
+                IJ.log("    ... and " + (pathIssues.size() - shown) + " more");
+            }
+        }
+
+        return true;
+    }
+}

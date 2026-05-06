@@ -1,0 +1,13 @@
+{
+  "name": "Amyloid plaques - count + loose coloc",
+  "description": "Count plaques and partners with loose colocalization for partial plaque overlap.",
+  "libraryVersion": "1",
+  "doVolumetric": true,
+  "doCpc": true,
+  "extractProcessLength": false,
+  "runSpatial": false,
+  "classicalCentroidFiltering": false,
+  "colocThresholdPercent": 10,
+  "processMarkerHints": [],
+  "nuclearMarkerHints": ["nuclei", "dapi", "hoechst"]
+}

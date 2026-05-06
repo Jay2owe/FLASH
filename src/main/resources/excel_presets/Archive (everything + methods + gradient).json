@@ -1,0 +1,14 @@
+{
+  "name": "Archive (everything + methods + gradient)",
+  "description": "Every sheet; per-metric summary + raw; methods appendix on; figure-ready headers; p-gradient; significance stars.",
+  "libraryVersion": "1",
+  "includeExperimentalConditionsSheet": true,
+  "includeDataSummarySheet": true,
+  "includePerMetricSheets": true,
+  "includeStatisticsSheet": true,
+  "metricSheetDetail": "both",
+  "includeMethodsAppendix": true,
+  "significanceHighlight": "p_gradient",
+  "headerStyle": "figure_ready",
+  "significanceStars": true
+}

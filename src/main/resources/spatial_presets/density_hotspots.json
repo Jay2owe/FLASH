@@ -1,0 +1,21 @@
+{
+  "name": "Density hotspots + clusters",
+  "description": "Density heatmaps and k-means clustering.",
+  "libraryVersion": "1",
+  "doDistances": false,
+  "doSpatialStats": false,
+  "doVolColoc": false,
+  "doCpc": false,
+  "doVoronoi": false,
+  "doHeatmaps": true,
+  "doPhenotyping": true,
+  "do2DMorphology": false,
+  "do3DMorphology": false,
+  "doCompositeIndices": false,
+  "doPopMorphometrics": false,
+  "doSpatialMorphometrics": false,
+  "kdeBandwidth": 0,
+  "heatmapLut": "Fire",
+  "clusterK": 0,
+  "colocThresholdPercent": 30
+}

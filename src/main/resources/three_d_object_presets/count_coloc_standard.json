@@ -1,0 +1,13 @@
+{
+  "name": "Count + coloc standard",
+  "description": "Count objects and run volumetric plus CPC colocalization at the standard threshold.",
+  "libraryVersion": "1",
+  "doVolumetric": true,
+  "doCpc": true,
+  "extractProcessLength": false,
+  "runSpatial": false,
+  "classicalCentroidFiltering": false,
+  "colocThresholdPercent": 30,
+  "processMarkerHints": [],
+  "nuclearMarkerHints": ["nuclei", "dapi", "hoechst"]
+}

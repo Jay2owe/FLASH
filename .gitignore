@@ -1,0 +1,67 @@
+# Build output
+/target/
+
+# Maven wrapper distribution (downloaded at build time)
+.mvn/wrapper/maven-dist/
+
+# IDE files
+/.idea/
+*.iml
+/.vscode/
+/.classpath
+/.project
+/.settings/
+*.swp
+*~
+
+# Claude AI context files
+CLAUDE_CONTEXT.md
+CLAUDE_CONTEXT_CONDENSED.md
+MACRO_VS_PLUGIN_CONTEXT.md
+IMPLEMENTATION_PLAN.md
+HANDOFF_*.md
+IHF Master Plan.txt
+Potential_Names.md
+/.claude/
+/.task/
+
+# graphify knowledge graph artifacts (regenerated on commit via post-commit hook)
+/graphify-out/
+/.graphify_*.json
+
+# Local planning, generated concepts, and private development notes
+/docs/
+/Legacy/
+/SVG Concepts/
+/Named Filters/
+*_Flowchart.svg
+StarDist_vs_Traditional*.svg
+Example_Parallel_3D_Log.txt
+Test.java
+TestCmds.java
+/scripts/
+
+# Temp files
+*.tmp.*
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+
+# local Maven user-dir (per-developer, not shared)
+.m2/
+
+# Codex local Maven cache
+/.codex-m2/
+
+# graphify regenerated artifacts in any subdir (not just top-level)
+**/graphify-out/
+
+# Python bytecode caches
+__pycache__/
+*.pyc
+
+# graphify temp/state files
+.graphify_detect.json

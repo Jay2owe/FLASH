@@ -1,0 +1,138 @@
+package flash.pipeline.io;
+
+import ij.measure.ResultsTable;
+import flash.pipeline.results.ObjectCsvColumnOrder;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
+
+import java.io.File;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+
+import static org.junit.Assert.assertArrayEquals;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+
+public class CsvTableIOTest {
+
+    @Rule
+    public TemporaryFolder temp = new TemporaryFolder();
+
+    @Test
+    public void formatDist_usesDotDecimalUnderGermanLocale() {
+        Locale original = Locale.getDefault();
+        Locale.setDefault(Locale.GERMANY);
+        try {
+            assertEquals("1.500000", CsvTableIO.formatDist(1.5));
+        } finally {
+            Locale.setDefault(original);
+        }
+    }
+
+    @Test
+    public void formatDist_preservesInfSentinelUnderGermanLocale() {
+        Locale original = Locale.getDefault();
+        Locale.setDefault(Locale.GERMANY);
+        try {
+            assertEquals("Inf", CsvTableIO.formatDist(Double.NaN));
+            assertEquals("Inf", CsvTableIO.formatDist(Double.POSITIVE_INFINITY));
+            assertEquals("Inf", CsvTableIO.formatDist(Double.MAX_VALUE));
+        } finally {
+            Locale.setDefault(original);
+        }
+    }
+
+    @Test
+    public void writeAndLoadChannelCsv_roundTripsQuotedFieldsAndTrailingEmpty() throws Exception {
+        List<String> header = new ArrayList<String>(Arrays.asList("Name", "Note", "Comment", "EmptyTail"));
+        Map<String, Integer> colIdx = new LinkedHashMap<String, Integer>();
+        for (int i = 0; i < header.size(); i++) {
+            colIdx.put(header.get(i), i);
+        }
+
+        List<List<String>> rows = new ArrayList<List<String>>();
+        rows.add(new ArrayList<String>(Arrays.asList(
+                "Animal, \"Alpha\"",
+                "He said \"hello\"",
+                "Line1\nLine2",
+                "")));
+
+        CsvTableIO.ChannelData channel = new CsvTableIO.ChannelData("C1", header, rows, colIdx);
+        File csv = temp.newFile("channel.csv");
+        CsvTableIO.writeChannelCsv(csv, channel);
+
+        CsvTableIO.ChannelData loaded = CsvTableIO.loadChannelCsv(csv, "C1");
+        assertNotNull(loaded);
+        assertArrayEquals(header.toArray(new String[0]), loaded.header.toArray(new String[0]));
+        assertEquals("Animal, \"Alpha\"", loaded.get(0, "Name"));
+        assertEquals("He said \"hello\"", loaded.get(0, "Note"));
+        assertEquals("Line1\nLine2", loaded.get(0, "Comment"));
+        assertEquals("", loaded.get(0, "EmptyTail"));
+    }
+
+    @Test
+    public void writeResultsTableCsv_honorsOrderedObjectColumns() throws Exception {
+        ResultsTable table = new ResultsTable();
+        table.incrementCounter();
+        table.setValue("XM_um", 0, 10);
+        table.setValue("Colocalisation with B", 0, 12);
+        table.setValue("A_Costes_p_B", 0, 0.04);
+        table.setValue("A_Pearson_B", 0, 0.7);
+        table.setValue("A_Manders_M1_B", 0, 0.8);
+        table.setValue("A_Manders_M2_B", 0, 0.6);
+        table.setValue("A_Costes_Ta_B", 0, 21);
+        table.setValue("A_Costes_Tb_B", 0, 18);
+        table.setValue("A_Pearson_t_B", 0, 0.5);
+        table.setValue("Label", 0, 7);
+        table.setValue("Animal Name", 0, "Mouse1");
+        table.setValue("Volume (micron^3)", 0, 101);
+        table.setValue("Region", 0, "SCN");
+        table.setValue("Hemisphere", 0, "RH");
+        table.setValue("ROI", 0, "SCN1");
+        table.setValue("XM", 0, 1);
+        table.setValue("YM", 0, 2);
+        table.setValue("ZM", 0, 3);
+        table.setValue("Mean", 0, 4);
+
+        List<String> ordered = ObjectCsvColumnOrder.orderedColumns("A",
+                Arrays.asList(table.getHeadings()), Arrays.asList("A", "B"));
+
+        File csv = temp.newFile("ordered-results.csv");
+        CsvTableIO.writeResultsTableCsv(csv, table, ordered);
+
+        CsvTableIO.ChannelData loaded = CsvTableIO.loadChannelCsv(csv, "A");
+        assertNotNull(loaded);
+        assertEquals(Arrays.asList(
+                "Region",
+                "Hemisphere",
+                "ROI",
+                "Animal Name",
+                "Label",
+                "Volume (micron^3)",
+                "Mean",
+                "XM",
+                "YM",
+                "ZM",
+                "XM_um",
+                "Colocalisation with B",
+                "A_Pearson_B",
+                "A_Manders_M1_B",
+                "A_Manders_M2_B",
+                "A_Costes_Ta_B",
+                "A_Costes_Tb_B",
+                "A_Pearson_t_B",
+                "A_Costes_p_B"
+        ), loaded.header);
+        assertEquals("Mouse1", loaded.get(0, "Animal Name"));
+        assertEquals("7", loaded.get(0, "Label"));
+        assertEquals("10", loaded.get(0, "XM_um"));
+        assertEquals("12", loaded.get(0, "Colocalisation with B"));
+        assertEquals(0.7, Double.parseDouble(loaded.get(0, "A_Pearson_B")), 0.0001);
+        assertEquals(0.04, Double.parseDouble(loaded.get(0, "A_Costes_p_B")), 0.0001);
+    }
+}

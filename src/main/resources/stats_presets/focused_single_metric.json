@@ -1,0 +1,9 @@
+{
+  "name": "Focused single metric (template)",
+  "description": "Restrict testing to a single metric column. Replace __REPLACE_ME__ with the exact column name from Project_Master_Objects.csv before running.",
+  "libraryVersion": "1",
+  "pairedMode": "OFF",
+  "distributionMode": "AUTO",
+  "postHocMethod": "BONFERRONI",
+  "metricFilter": ["__REPLACE_ME__"]
+}

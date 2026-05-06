@@ -1,0 +1,9 @@
+{
+  "name": "Multi-group Dunn's test",
+  "description": "Three or more non-parametric groups with Dunn's post-hoc (pooled rank sums from Kruskal-Wallis). Less conservative than Bonferroni for skewed data.",
+  "libraryVersion": "1",
+  "pairedMode": "OFF",
+  "distributionMode": "ASSUME_SKEWED",
+  "postHocMethod": "DUNNS",
+  "metricFilter": null
+}

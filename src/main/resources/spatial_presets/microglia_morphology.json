@@ -1,0 +1,21 @@
+{
+  "name": "Microglia morphology (cell-level)",
+  "description": "3D and complex morphology without spatial distribution.",
+  "libraryVersion": "1",
+  "doDistances": false,
+  "doSpatialStats": false,
+  "doVolColoc": false,
+  "doCpc": false,
+  "doVoronoi": false,
+  "doHeatmaps": false,
+  "doPhenotyping": false,
+  "do2DMorphology": false,
+  "do3DMorphology": true,
+  "doCompositeIndices": true,
+  "doPopMorphometrics": false,
+  "doSpatialMorphometrics": false,
+  "kdeBandwidth": 0,
+  "heatmapLut": "Fire",
+  "clusterK": 0,
+  "colocThresholdPercent": 30
+}

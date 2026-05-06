@@ -1,0 +1,7 @@
+{
+  "name": "Per-region subdivision",
+  "description": "One row per (animal, region). Keeps raw totals and per-mm^3 so region-level comparisons stay tractable.",
+  "libraryVersion": "1",
+  "granularity": "region",
+  "output": "both"
+}

@@ -1,0 +1,9 @@
+{
+  "name": "Quick cell count",
+  "description": "Draw ROIs, count 3D objects, and combine the results.",
+  "flashVersion": "0.x",
+  "analyses": ["DrawROIs", "ThreeDObject", "Aggregation"],
+  "modulePresets": {
+    "ThreeDObject": "count_only"
+  }
+}

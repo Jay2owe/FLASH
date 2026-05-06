@@ -1,0 +1,13 @@
+{
+  "name": "Count only",
+  "description": "Count objects per channel without colocalization, process length, or spatial analysis.",
+  "libraryVersion": "1",
+  "doVolumetric": false,
+  "doCpc": false,
+  "extractProcessLength": false,
+  "runSpatial": false,
+  "classicalCentroidFiltering": false,
+  "colocThresholdPercent": 30,
+  "processMarkerHints": [],
+  "nuclearMarkerHints": ["nuclei", "dapi", "hoechst"]
+}

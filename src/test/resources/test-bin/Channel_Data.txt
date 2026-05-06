@@ -1,0 +1,7 @@
+DAPI GFP RFP
+Blue Green Red
+default 500 1000
+100-Infinity 50-5000 200-10000
+None 0-4095 100-3000
+default 750 default
+classical stardist:0.5:0.4 classical
