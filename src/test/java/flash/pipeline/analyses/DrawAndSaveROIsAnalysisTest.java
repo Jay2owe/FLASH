@@ -8,6 +8,7 @@ import flash.pipeline.naming.NameParts;
 import flash.pipeline.naming.OrientationManifestRow;
 import flash.pipeline.naming.ResolvedImageMetadata;
 import flash.pipeline.orientation.OrientationTransformState;
+import flash.pipeline.orientation.RoiOrientationManifestService;
 import flash.pipeline.zslice.ZSliceMode;
 import ij.ImagePlus;
 import ij.process.ByteProcessor;
@@ -210,6 +211,50 @@ public class DrawAndSaveROIsAnalysisTest {
         OrientationTransformState reset = prepared.transformState.reset();
         prepared.transformState = reset;
         assertTrue(prepared.transformState.isIdentity());
+    }
+
+    @Test
+    public void saveOrientationDecisionWritesPreparedTransformAsManualRow() throws Exception {
+        File dir = temp.newFolder("saveOrientation");
+        assertTrue(new File(dir, "ImageA.tif").createNewFile());
+        String title = "ImageA";
+        ImagePlus original = new ImagePlus(title, new ByteProcessor(4, 3));
+        ImagePlus max = new ImagePlus("MAX_delete", new ByteProcessor(4, 3));
+        ImagePlus roiStack = new ImagePlus("delete", new ByteProcessor(4, 3));
+        ResolvedImageMetadata seed = new ResolvedImageMetadata(
+                "",
+                title,
+                title,
+                "SeedMouse",
+                "LH",
+                "SCN",
+                OrientationManifestRow.RotationDegrees.DEG_0,
+                false,
+                false,
+                OrientationManifestRow.ViewPolicy.MANUAL_ONLY,
+                ResolvedImageMetadata.Source.FILENAME_FALLBACK);
+
+        DrawAndSaveROIsAnalysis.PreparedImage prepared =
+                DrawAndSaveROIsAnalysis.buildPreparedImage(
+                        dir.getAbsolutePath(), 0, original, max, roiStack,
+                        new NameParts("Exp", "ManualMouse", "RH", "PVN", true),
+                        seed);
+        prepared.transformState = OrientationTransformState.fromCsv("90", true, true);
+
+        OrientationManifestRow row = DrawAndSaveROIsAnalysis.saveOrientationDecision(
+                new RoiOrientationManifestService(dir.getAbsolutePath()),
+                prepared,
+                "unit test");
+
+        assertEquals("ManualMouse", row.animalName);
+        assertEquals(OrientationManifestRow.Hemisphere.RH, row.hemisphere);
+        assertEquals("PVN", row.region);
+        assertEquals(OrientationManifestRow.RotationDegrees.DEG_90, row.rotateDegrees);
+        assertTrue(row.flipHorizontal);
+        assertTrue(row.flipVertical);
+        assertEquals(OrientationManifestRow.ViewPolicy.MANUAL_ONLY, row.viewPolicy);
+        assertEquals(OrientationManifestRow.DecisionSource.MANUAL, row.decisionSource);
+        assertEquals(OrientationManifestRow.ConfirmationState.YES, row.confirmed);
     }
 
     private static void installDispatcherChoice(final BinSetupChooser.Choice choice,

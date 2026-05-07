@@ -13,6 +13,7 @@ import flash.pipeline.naming.OrientationManifestRow;
 import flash.pipeline.naming.ResolvedImageMetadata;
 import flash.pipeline.orientation.OrientationImageIdentity;
 import flash.pipeline.orientation.OrientationTransformState;
+import flash.pipeline.orientation.RoiOrientationManifestService;
 import flash.pipeline.results.CsvAppend;
 import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.FeatureDependencyGate;
@@ -26,6 +27,7 @@ import flash.pipeline.zslice.ZSliceOps;
 import flash.pipeline.zslice.ZSliceMode;
 
 import flash.pipeline.ui.PipelineDialog;
+import flash.pipeline.ui.RoiOrientationPanel;
 import flash.pipeline.ui.ToggleSwitch;
 
 import ij.IJ;
@@ -42,6 +44,7 @@ import java.awt.Color;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.GraphicsEnvironment;
+import java.awt.Point;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -254,6 +257,8 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
         }
 
         ResultsTable roiProps = new ResultsTable();
+        RoiOrientationManifestService orientationManifestService =
+                new RoiOrientationManifestService(directory);
 
         RoiSeriesRange range = RoiSeriesRange.forMode(createNew, rm.getCount(), totalImages);
         if (range.imageCountToProcess == 0) {
@@ -318,28 +323,34 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
             }
 
             ImagePlus imp = prep.original;
-            ImagePlus max = prep.maxProjection;
-            ImagePlus roiStack = prep.roiStack;
             NameParts parts = prep.parts;
             String imgTitle = imp.getTitle();
             IJ.log("  Image: " + imp.getNSlices() + " Z-slices, " + imp.getNChannels()
                     + " channels (using ch " + roiChannel + " for ROI)");
 
             if ("Manual".equals(imageProcessing)) {
-                IJ.run(max, "Brightness/Contrast...", "");
+                IJ.run(prep.maxProjection, "Brightness/Contrast...", "");
             }
-            max.show();
+            prep.maxProjection.show();
+            RoiOrientationPanel orientationPanel =
+                    new RoiOrientationPanel(null, createOrientationTarget(prep));
+            orientationPanel.showNear(prep.maxProjection);
 
-            // Auto-select freehand tool and open ROI Manager
-            IJ.setTool(Toolbar.FREEROI);
-            IJ.run("ROI Manager...");
+            try {
+                // Auto-select freehand tool and open ROI Manager
+                IJ.setTool(Toolbar.FREEROI);
+                IJ.run("ROI Manager...");
 
-            new WaitForUserDialog("Draw ROI",
-                    "Image " + (i + 1) + "/" + totalImages + "\n" +
-                            "Draw ROI for: " + imgTitle + "\n\n" +
-                            "Use the freehand tool to draw, then click OK.").show();
+                new WaitForUserDialog("Draw ROI",
+                        "Image " + (i + 1) + "/" + totalImages + "\n" +
+                                "Draw ROI for: " + imgTitle + "\n\n" +
+                                "Use the freehand tool to draw, then click OK.").show();
+            } finally {
+                orientationPanel.close();
+            }
 
             // Expect user has drawn a ROI on max
+            ImagePlus max = prep.maxProjection;
             Roi roi = max.getRoi();
             if (roi == null) {
                 int width = max.getWidth();
@@ -347,20 +358,21 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
 
                 IJ.log("Warning: no ROI drawn for " + imgTitle + " in ROI set \"" + chosen + "\"");
 
-                max.changes = false;
-                max.close();
-                roiStack.changes = false;
-                roiStack.close();
-                imp.changes = false;
-                imp.close();
+                closePreparedImages(prep);
 
                 int countAfter = rm.getCount();
                 int expectedAfter = startOffset + (processingIndex + 1) * 2;
                 int missing = expectedAfter - countAfter;
-                if (missing <= 0) continue;
+                if (missing <= 0) {
+                    saveOrientationDecision(orientationManifestService, prep,
+                            "Saved during Draw and Save ROIs");
+                    continue;
+                }
 
                 if (headless || GraphicsEnvironment.isHeadless()) {
                     padPlaceholderRois(rm, processingIndex, i, startOffset, width, height);
+                    saveOrientationDecision(orientationManifestService, prep,
+                            "Skipped during Draw and Save ROIs; placeholder ROIs padded");
                     IJ.log("[DrawROIs] image " + (i + 1) + " missing " + missing
                             + " ROI(s) — padded with placeholders (headless mode).");
                     continue;
@@ -382,6 +394,8 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
                     continue;
                 } else if (choice == 1) {
                     padPlaceholderRois(rm, processingIndex, i, startOffset, width, height);
+                    saveOrientationDecision(orientationManifestService, prep,
+                            "Skipped during Draw and Save ROIs; placeholder ROIs padded");
                     IJ.log("[DrawROIs] image " + (i + 1)
                             + " padded with " + missing + " placeholder ROI(s).");
                     continue;
@@ -463,15 +477,13 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
                 IJ.saveAs(cropped, "PNG", new File(imgAnalysisDir, croppedName).getAbsolutePath());
             }
 
+            saveOrientationDecision(orientationManifestService, prep,
+                    "Saved during Draw and Save ROIs");
+
             // Cleanup
             cropped.changes = false;
             cropped.close();
-            max.changes = false;
-            max.close();
-            roiStack.changes = false;
-            roiStack.close();
-            imp.changes = false;
-            imp.close();
+            closePreparedImages(prep);
         }
         prepPool.shutdownNow();
         for (Future<PreparedImage> f : prepCache.values()) {
@@ -563,6 +575,149 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
             }
         }
         IJ.run("Close All");
+    }
+
+    private RoiOrientationPanel.OrientationActionTarget createOrientationTarget(
+            final PreparedImage prep) {
+        return new RoiOrientationPanel.OrientationActionTarget() {
+            @Override
+            public OrientationTransformState getState() {
+                return prep == null ? OrientationTransformState.identity() : prep.transformState;
+            }
+
+            @Override
+            public void setState(OrientationTransformState state) {
+                if (prep != null) {
+                    prep.transformState = state == null
+                            ? OrientationTransformState.identity()
+                            : state;
+                }
+            }
+
+            @Override
+            public void redrawFromState() {
+                rebuildDisplayedImages(prep);
+            }
+
+            @Override
+            public void clearUnsavedRoiAfterOrientationChange() {
+                ImagePlus max = prep == null ? null : prep.maxProjection;
+                if (max != null && max.getRoi() != null) {
+                    max.deleteRoi();
+                    max.updateAndDraw();
+                    IJ.log("[DrawROIs] Orientation changed after ROI drawing; "
+                            + "cleared unsaved ROI so it can be redrawn.");
+                }
+            }
+
+            @Override
+            public String statusText() {
+                return orientationStatusText(getState());
+            }
+        };
+    }
+
+    private void rebuildDisplayedImages(PreparedImage prep) {
+        if (prep == null) return;
+        ImagePlus source = prep.original == null ? prep.roiStack : prep.original;
+        if (source == null) return;
+
+        ImagePlus oldMax = prep.maxProjection;
+        ImagePlus oldStack = prep.roiStack;
+        Point windowLocation = imageWindowLocation(oldMax);
+        double displayMin = oldMax == null ? Double.NaN : oldMax.getDisplayRangeMin();
+        double displayMax = oldMax == null ? Double.NaN : oldMax.getDisplayRangeMax();
+
+        ImagePlus nextStack = ImageOps.duplicateThreadSafe(source);
+        if (nextStack == null) return;
+        nextStack.setTitle("delete");
+        prep.applyCurrentTransformTo(nextStack);
+        ImagePlus nextMax = ZProjector.run(nextStack, "max");
+        nextMax.setTitle("MAX_delete");
+
+        if ("Automatic".equals(prep.imageProcessing)) {
+            IJ.run(nextMax, "Enhance Contrast", "saturated=1");
+        } else if (!Double.isNaN(displayMin) && !Double.isNaN(displayMax)
+                && displayMax > displayMin) {
+            nextMax.setDisplayRange(displayMin, displayMax);
+        }
+
+        closeImageNoPrompt(oldMax);
+        if (oldStack != source) {
+            closeImageNoPrompt(oldStack);
+        }
+
+        prep.roiStack = nextStack;
+        prep.maxProjection = nextMax;
+        nextMax.show();
+        if (windowLocation != null && nextMax.getWindow() != null) {
+            nextMax.getWindow().setLocation(windowLocation);
+        }
+        IJ.setTool(Toolbar.FREEROI);
+    }
+
+    static OrientationManifestRow saveOrientationDecision(
+            RoiOrientationManifestService service,
+            PreparedImage prep,
+            String notes) {
+        if (service == null || prep == null || prep.identity == null) return null;
+        try {
+            NameParts parts = prep.parts;
+            String animal = parts == null ? "" : parts.animal;
+            String hemisphere = parts == null ? "" : parts.hemisphere;
+            String region = parts == null ? "" : parts.region;
+            OrientationManifestRow row = service.upsertDecision(
+                    prep.identity,
+                    prep.seedMetadata,
+                    prep.transformState,
+                    animal,
+                    OrientationManifestRow.Hemisphere.fromCsv(hemisphere),
+                    region,
+                    notes);
+            IJ.log("[DrawROIs] Saved orientation decision for "
+                    + prep.identity.displayName + ".");
+            return row;
+        } catch (Exception e) {
+            String label = prep.identity == null ? "image" : prep.identity.displayName;
+            IJ.log("[DrawROIs] WARN: could not save orientation decision for "
+                    + label + ": " + e.getMessage());
+            return null;
+        }
+    }
+
+    private static void closePreparedImages(PreparedImage prep) {
+        if (prep == null) return;
+        closeImageNoPrompt(prep.maxProjection);
+        if (prep.roiStack != prep.original) {
+            closeImageNoPrompt(prep.roiStack);
+        }
+        closeImageNoPrompt(prep.original);
+    }
+
+    private static void closeImageNoPrompt(ImagePlus image) {
+        if (image == null) return;
+        image.changes = false;
+        image.close();
+        image.flush();
+    }
+
+    private static Point imageWindowLocation(ImagePlus image) {
+        return image == null || image.getWindow() == null
+                ? null
+                : image.getWindow().getLocation();
+    }
+
+    private static String orientationStatusText(OrientationTransformState state) {
+        OrientationTransformState safe = state == null
+                ? OrientationTransformState.identity()
+                : state;
+        return "Rotate: " + safe.rotateDegrees.degrees()
+                + " deg; Flip H: " + yesNo(safe.flipHorizontal)
+                + "; Flip V: " + yesNo(safe.flipVertical);
+    }
+
+    private static String yesNo(boolean value) {
+        return value ? "Yes" : "No";
     }
 
     /**
@@ -754,12 +909,20 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
                 directory, imp.getTitle(), seriesIndex + 1);
         NameParts parts = metadata.toNameParts();
         logOrientationResolution(metadata);
-        OrientationOps.applyTransform(imp, metadata);
+        OrientationTransformState transformState =
+                OrientationTransformState.fromMetadata(metadata);
 
         // Since we only loaded one channel, we duplicate from channel 1
         ImagePlus roiStack = ImageOps.duplicateThreadSafe(imp, 1, 1,
                 1, imp.getNSlices(), 1, imp.getNFrames());
         roiStack.setTitle("delete");
+        OrientationOps.applyTransform(
+                roiStack,
+                transformState.rotateDegrees.degrees(),
+                transformState.flipHorizontal,
+                transformState.flipVertical,
+                metadata.hemisphere,
+                OrientationManifestRow.ViewPolicy.MANUAL_ONLY);
         ImagePlus max = ZProjector.run(roiStack, "max");
         max.setTitle("MAX_delete");
 
@@ -767,7 +930,8 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
             IJ.run(max, "Enhance Contrast", "saturated=1");
         }
 
-        return buildPreparedImage(directory, seriesIndex, imp, max, roiStack, parts, metadata);
+        return buildPreparedImage(directory, seriesIndex, imp, max, roiStack, parts, metadata,
+                imageProcessing);
     }
 
     private static void logOrientationResolution(ResolvedImageMetadata metadata) {
@@ -785,6 +949,19 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
                                             NameParts parts,
                                             ResolvedImageMetadata seedMetadata)
             throws Exception {
+        return buildPreparedImage(directory, seriesIndex, original, maxProjection, roiStack,
+                parts, seedMetadata, "");
+    }
+
+    static PreparedImage buildPreparedImage(String directory,
+                                            int seriesIndex,
+                                            ImagePlus original,
+                                            ImagePlus maxProjection,
+                                            ImagePlus roiStack,
+                                            NameParts parts,
+                                            ResolvedImageMetadata seedMetadata,
+                                            String imageProcessing)
+            throws Exception {
         OrientationImageIdentity identity =
                 OrientationImageIdentity.fromProjectSeries(
                         directory, seriesIndex, original == null ? "" : original.getTitle());
@@ -792,7 +969,7 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
                 OrientationTransformState.fromMetadata(seedMetadata);
         return new PreparedImage(
                 seriesIndex, original, maxProjection, roiStack, parts,
-                identity, seedMetadata, transformState);
+                identity, seedMetadata, transformState, imageProcessing);
     }
 
     static final class RoiSeriesRange {
@@ -824,11 +1001,12 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
     static class PreparedImage {
         final int seriesIndex;
         final ImagePlus original;
-        final ImagePlus maxProjection;
-        final ImagePlus roiStack;
+        ImagePlus maxProjection;
+        ImagePlus roiStack;
         final NameParts parts;
         final OrientationImageIdentity identity;
         final ResolvedImageMetadata seedMetadata;
+        final String imageProcessing;
         OrientationTransformState transformState;
 
         PreparedImage(int seriesIndex,
@@ -839,6 +1017,19 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
                       OrientationImageIdentity identity,
                       ResolvedImageMetadata seedMetadata,
                       OrientationTransformState transformState) {
+            this(seriesIndex, original, maxProjection, roiStack, parts, identity,
+                    seedMetadata, transformState, "");
+        }
+
+        PreparedImage(int seriesIndex,
+                      ImagePlus original,
+                      ImagePlus maxProjection,
+                      ImagePlus roiStack,
+                      NameParts parts,
+                      OrientationImageIdentity identity,
+                      ResolvedImageMetadata seedMetadata,
+                      OrientationTransformState transformState,
+                      String imageProcessing) {
             this.seriesIndex = seriesIndex;
             this.original = original;
             this.maxProjection = maxProjection;
@@ -846,6 +1037,7 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
             this.parts = parts;
             this.identity = identity;
             this.seedMetadata = seedMetadata;
+            this.imageProcessing = imageProcessing == null ? "" : imageProcessing;
             this.transformState = transformState == null
                     ? OrientationTransformState.identity()
                     : transformState;
