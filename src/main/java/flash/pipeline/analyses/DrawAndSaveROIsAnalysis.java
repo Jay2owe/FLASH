@@ -9,7 +9,10 @@ import flash.pipeline.image.ImageOps;
 import flash.pipeline.image.OrientationOps;
 import flash.pipeline.naming.ImageOrientationResolver;
 import flash.pipeline.naming.NameParts;
+import flash.pipeline.naming.OrientationManifestRow;
 import flash.pipeline.naming.ResolvedImageMetadata;
+import flash.pipeline.orientation.OrientationImageIdentity;
+import flash.pipeline.orientation.OrientationTransformState;
 import flash.pipeline.results.CsvAppend;
 import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.FeatureDependencyGate;
@@ -252,12 +255,18 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
 
         ResultsTable roiProps = new ResultsTable();
 
-        // If appending, ROI indices continue after existing
-        int startRoiIndex = 1;
-        if (!createNew) {
-            startRoiIndex = (rm.getCount() / 2) + 1;
+        RoiSeriesRange range = RoiSeriesRange.forMode(createNew, rm.getCount(), totalImages);
+        if (range.imageCountToProcess == 0) {
+            rm.close();
+            String message = createNew
+                    ? "No images were found to draw ROIs."
+                    : "Selected ROI set already contains ROI pairs for all "
+                    + totalImages + " images. No new images to append.";
+            showOrLog("Draw and Save ROIs", message);
+            return;
         }
-        final int startOffset = createNew ? 0 : (startRoiIndex - 1) * 2;
+        int startRoiIndex = range.firstSeriesIndexInclusive + 1;
+        final int startOffset = range.firstSeriesIndexInclusive * 2;
 
         final boolean finalDrawOnSubset = drawOnSubset;
         final BinConfig finalRoiBinCfg = roiBinCfg;
@@ -269,14 +278,16 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
         });
         ConcurrentHashMap<Integer, Future<PreparedImage>> prepCache =
                 new ConcurrentHashMap<Integer, Future<PreparedImage>>();
-        for (int k = 0; k < Math.min(lookahead, totalImages); k++) {
+        for (int k = range.firstSeriesIndexInclusive;
+             k < Math.min(range.firstSeriesIndexInclusive + lookahead, totalImages); k++) {
             final int idx = k;
             prepCache.put(k, prepPool.submit(() ->
                     prepareImage(directory, supplier, idx, roiChannel, imageProcessing,
                             finalDrawOnSubset, finalRoiBinCfg)));
         }
 
-        for (int i = 0; i < totalImages; i++) {
+        for (int i = range.firstSeriesIndexInclusive; i < totalImages; i++) {
+            int processingIndex = range.processingIndexFor(i);
             IJ.log("Loading image " + (i + 1) + "/" + totalImages + "...");
             PreparedImage prep;
             try {
@@ -344,12 +355,12 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
                 imp.close();
 
                 int countAfter = rm.getCount();
-                int expectedAfter = startOffset + (i + 1) * 2;
+                int expectedAfter = startOffset + (processingIndex + 1) * 2;
                 int missing = expectedAfter - countAfter;
                 if (missing <= 0) continue;
 
                 if (headless || GraphicsEnvironment.isHeadless()) {
-                    padPlaceholderRois(rm, i, startOffset, width, height);
+                    padPlaceholderRois(rm, processingIndex, i, startOffset, width, height);
                     IJ.log("[DrawROIs] image " + (i + 1) + " missing " + missing
                             + " ROI(s) — padded with placeholders (headless mode).");
                     continue;
@@ -370,7 +381,7 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
                     i--;
                     continue;
                 } else if (choice == 1) {
-                    padPlaceholderRois(rm, i, startOffset, width, height);
+                    padPlaceholderRois(rm, processingIndex, i, startOffset, width, height);
                     IJ.log("[DrawROIs] image " + (i + 1)
                             + " padded with " + missing + " placeholder ROI(s).");
                     continue;
@@ -411,7 +422,7 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
             String regionLabel = (parts.hemisphere.isEmpty() && parts.region.isEmpty())
                     ? "" : parts.hemisphere + parts.region;
             roiProps.setValue("Region", row, regionLabel);
-            roiProps.setValue(chosen, row, startRoiIndex + i);
+            roiProps.setValue(chosen, row, startRoiIndex + processingIndex);
             ij.measure.Calibration cal = imp.getCalibration();
             boolean hasCalibration = cal != null
                     && !"pixel".equalsIgnoreCase(cal.getUnit())
@@ -502,7 +513,7 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
         String partialZipPath = savePartialZip(directory, rm);
 
         // ── Validate ROI ordering ───────────────────────────────────────
-        if (!RoiSetValidator.validateStrictWithDialog(rm, startOffset, totalImages,
+        if (!RoiSetValidator.validateStrictWithDialog(rm, startOffset, range.imageCountToProcess,
                 partialZipPath)) {
             rm.close();
             return;
@@ -606,17 +617,18 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
      * cropped). Names follow the strict-validator convention so the final
      * RoiSetValidator pass succeeds.
      */
-    private static void padPlaceholderRois(RoiManager rm, int imageIndex,
-                                           int startOffset, int width, int height) {
+    private static void padPlaceholderRois(RoiManager rm, int processingIndex,
+                                           int sourceSeriesIndex, int startOffset,
+                                           int width, int height) {
         int countAfter = rm.getCount();
-        int expectedAfter = startOffset + (imageIndex + 1) * 2;
+        int expectedAfter = startOffset + (processingIndex + 1) * 2;
         int missing = expectedAfter - countAfter;
         for (int p = 0; p < missing; p++) {
             int slot = countAfter + p;
             int relSlot = slot - startOffset;
             boolean isCroppedSlot = (relSlot % 2) == 1;
             Roi placeholder = new Roi(0, 0, width, height);
-            placeholder.setName("PLACEHOLDER_image" + (imageIndex + 1)
+            placeholder.setName("PLACEHOLDER_image" + (sourceSeriesIndex + 1)
                     + (isCroppedSlot ? "_Cropped" : ""));
             rm.addRoi(placeholder);
         }
@@ -755,7 +767,7 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
             IJ.run(max, "Enhance Contrast", "saturated=1");
         }
 
-        return new PreparedImage(imp, max, roiStack, parts);
+        return buildPreparedImage(directory, seriesIndex, imp, max, roiStack, parts, metadata);
     }
 
     private static void logOrientationResolution(ResolvedImageMetadata metadata) {
@@ -765,19 +777,91 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
                 : "  Orientation transform skipped.");
     }
 
+    static PreparedImage buildPreparedImage(String directory,
+                                            int seriesIndex,
+                                            ImagePlus original,
+                                            ImagePlus maxProjection,
+                                            ImagePlus roiStack,
+                                            NameParts parts,
+                                            ResolvedImageMetadata seedMetadata)
+            throws Exception {
+        OrientationImageIdentity identity =
+                OrientationImageIdentity.fromProjectSeries(
+                        directory, seriesIndex, original == null ? "" : original.getTitle());
+        OrientationTransformState transformState =
+                OrientationTransformState.fromMetadata(seedMetadata);
+        return new PreparedImage(
+                seriesIndex, original, maxProjection, roiStack, parts,
+                identity, seedMetadata, transformState);
+    }
+
+    static final class RoiSeriesRange {
+        final int firstSeriesIndexInclusive;
+        final int totalSeries;
+        final int imageCountToProcess;
+
+        private RoiSeriesRange(int firstSeriesIndexInclusive,
+                               int totalSeries,
+                               int imageCountToProcess) {
+            this.firstSeriesIndexInclusive = firstSeriesIndexInclusive;
+            this.totalSeries = totalSeries;
+            this.imageCountToProcess = imageCountToProcess;
+        }
+
+        static RoiSeriesRange forMode(boolean createNew, int existingRoiCount, int totalSeries) {
+            int normalizedTotal = Math.max(0, totalSeries);
+            int first = createNew ? 0 : Math.max(0, existingRoiCount / 2);
+            if (first > normalizedTotal) first = normalizedTotal;
+            return new RoiSeriesRange(first, normalizedTotal, normalizedTotal - first);
+        }
+
+        int processingIndexFor(int sourceSeriesIndex) {
+            return sourceSeriesIndex - firstSeriesIndexInclusive;
+        }
+    }
+
     /** Bundled result from background image preparation. */
-    private static class PreparedImage {
+    static class PreparedImage {
+        final int seriesIndex;
         final ImagePlus original;
         final ImagePlus maxProjection;
         final ImagePlus roiStack;
         final NameParts parts;
+        final OrientationImageIdentity identity;
+        final ResolvedImageMetadata seedMetadata;
+        OrientationTransformState transformState;
 
-        PreparedImage(ImagePlus original, ImagePlus maxProjection,
-                      ImagePlus roiStack, NameParts parts) {
+        PreparedImage(int seriesIndex,
+                      ImagePlus original,
+                      ImagePlus maxProjection,
+                      ImagePlus roiStack,
+                      NameParts parts,
+                      OrientationImageIdentity identity,
+                      ResolvedImageMetadata seedMetadata,
+                      OrientationTransformState transformState) {
+            this.seriesIndex = seriesIndex;
             this.original = original;
             this.maxProjection = maxProjection;
             this.roiStack = roiStack;
             this.parts = parts;
+            this.identity = identity;
+            this.seedMetadata = seedMetadata;
+            this.transformState = transformState == null
+                    ? OrientationTransformState.identity()
+                    : transformState;
+        }
+
+        void applyCurrentTransformTo(ImagePlus imp) {
+            OrientationTransformState state = transformState == null
+                    ? OrientationTransformState.identity()
+                    : transformState;
+            OrientationOps.applyTransform(
+                    imp,
+                    state.rotateDegrees.degrees(),
+                    state.flipHorizontal,
+                    state.flipVertical,
+                    seedMetadata == null ? "" : seedMetadata.hemisphere,
+                    OrientationManifestRow.ViewPolicy.MANUAL_ONLY);
         }
     }
 }

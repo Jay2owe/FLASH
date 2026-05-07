@@ -4,7 +4,13 @@ import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinField;
 import flash.pipeline.bin.BinSetupChooser;
 import flash.pipeline.bin.BinSetupDispatcher;
+import flash.pipeline.naming.NameParts;
+import flash.pipeline.naming.OrientationManifestRow;
+import flash.pipeline.naming.ResolvedImageMetadata;
+import flash.pipeline.orientation.OrientationTransformState;
 import flash.pipeline.zslice.ZSliceMode;
+import ij.ImagePlus;
+import ij.process.ByteProcessor;
 import org.junit.After;
 import org.junit.Rule;
 import org.junit.Test;
@@ -140,6 +146,70 @@ public class DrawAndSaveROIsAnalysisTest {
 
         cfg.zSliceMode = ZSliceMode.SAME_COUNT;
         assertTrue(DrawAndSaveROIsAnalysis.shouldShowZSliceSourceChoice(cfg));
+    }
+
+    @Test
+    public void createNewRangeStartsAtFirstSeries() {
+        DrawAndSaveROIsAnalysis.RoiSeriesRange range =
+                DrawAndSaveROIsAnalysis.RoiSeriesRange.forMode(true, 4, 5);
+
+        assertEquals(0, range.firstSeriesIndexInclusive);
+        assertEquals(5, range.totalSeries);
+        assertEquals(5, range.imageCountToProcess);
+        assertEquals(0, range.processingIndexFor(0));
+    }
+
+    @Test
+    public void appendRangeStartsAfterExistingRoiPairs() {
+        DrawAndSaveROIsAnalysis.RoiSeriesRange range =
+                DrawAndSaveROIsAnalysis.RoiSeriesRange.forMode(false, 4, 5);
+
+        assertEquals(2, range.firstSeriesIndexInclusive);
+        assertEquals(5, range.totalSeries);
+        assertEquals(3, range.imageCountToProcess);
+        assertEquals(0, range.processingIndexFor(2));
+    }
+
+    @Test
+    public void appendRangeProcessesZeroImagesWhenCoverageIsComplete() {
+        DrawAndSaveROIsAnalysis.RoiSeriesRange range =
+                DrawAndSaveROIsAnalysis.RoiSeriesRange.forMode(false, 10, 5);
+
+        assertEquals(5, range.firstSeriesIndexInclusive);
+        assertEquals(5, range.totalSeries);
+        assertEquals(0, range.imageCountToProcess);
+    }
+
+    @Test
+    public void buildPreparedImageCarriesIdentitySeedMetadataAndTransformState() throws Exception {
+        File dir = temp.newFolder("prepared");
+        assertTrue(new File(dir, "Experiment.lif").createNewFile());
+        String title = "Experiment.lif - Mouse_RH_SCN";
+        ImagePlus original = new ImagePlus(title, new ByteProcessor(4, 3));
+        ImagePlus max = new ImagePlus("MAX_delete", new ByteProcessor(4, 3));
+        ImagePlus roiStack = new ImagePlus("delete", new ByteProcessor(4, 3));
+        ResolvedImageMetadata seed = ResolvedImageMetadata.fromNameParts(
+                new NameParts("Experiment", "Mouse", "RH", "SCN", true),
+                ResolvedImageMetadata.Source.STRICT_FILENAME);
+
+        DrawAndSaveROIsAnalysis.PreparedImage prepared =
+                DrawAndSaveROIsAnalysis.buildPreparedImage(
+                        dir.getAbsolutePath(), 0, original, max, roiStack,
+                        seed.toNameParts(), seed);
+
+        assertEquals(0, prepared.seriesIndex);
+        assertEquals("Experiment.lif", prepared.identity.sourceFile);
+        assertEquals(1, prepared.identity.seriesIndex);
+        assertEquals(title, prepared.identity.originalName);
+        assertEquals(seed, prepared.seedMetadata);
+        assertEquals(OrientationManifestRow.RotationDegrees.DEG_270,
+                prepared.transformState.rotateDegrees);
+        assertTrue(prepared.transformState.flipHorizontal);
+        assertFalse(prepared.transformState.flipVertical);
+
+        OrientationTransformState reset = prepared.transformState.reset();
+        prepared.transformState = reset;
+        assertTrue(prepared.transformState.isIdentity());
     }
 
     private static void installDispatcherChoice(final BinSetupChooser.Choice choice,
