@@ -1,5 +1,5 @@
 @echo off
-setlocal
+setlocal EnableDelayedExpansion
 
 set "MAVEN_PROJECTBASEDIR=%~dp0"
 set "WRAPPER_PROPERTIES=%MAVEN_PROJECTBASEDIR%.mvn\wrapper\maven-wrapper.properties"
@@ -28,22 +28,28 @@ if not exist "%MAVEN_HOME%\bin\mvn.cmd" (
 
     rem Read distribution URL
     for /f "tokens=1,* delims==" %%a in ('findstr "distributionUrl" "%WRAPPER_PROPERTIES%"') do set "DIST_URL=%%b"
+    if not defined DIST_URL (
+        set "DIST_URL=https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/3.9.6/apache-maven-3.9.6-bin.zip"
+    )
+    if "%DIST_URL%"=="" (
+        set "DIST_URL=https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/3.9.6/apache-maven-3.9.6-bin.zip"
+    )
 
     set "TMPFILE=%TEMP%\maven-dist.zip"
-    powershell -Command "Invoke-WebRequest -Uri '%DIST_URL%' -OutFile '%TMPFILE%'" || (
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-WebRequest -Uri '!DIST_URL!' -OutFile '!TMPFILE!'" || (
         echo Error: Failed to download Maven >&2
         exit /b 1
     )
 
     set "TMPDIR=%TEMP%\maven-extract"
-    mkdir "%TMPDIR%" 2>NUL
-    powershell -Command "Expand-Archive -Path '%TMPFILE%' -DestinationPath '%TMPDIR%' -Force"
+    mkdir "!TMPDIR!" 2>NUL
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Path '!TMPFILE!' -DestinationPath '!TMPDIR!' -Force"
 
-    for /d %%d in ("%TMPDIR%\apache-maven-*") do (
+    for /d %%d in ("!TMPDIR!\apache-maven-*") do (
         xcopy /s /e /y "%%d\*" "%MAVEN_HOME%\" >NUL
     )
-    rmdir /s /q "%TMPDIR%" 2>NUL
-    del "%TMPFILE%" 2>NUL
+    rmdir /s /q "!TMPDIR!" 2>NUL
+    del "!TMPFILE!" 2>NUL
     echo Maven downloaded to %MAVEN_HOME%
 )
 
