@@ -12,6 +12,8 @@ import java.util.Collections;
 import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 public class AnalysisStatusScannerTest {
 
@@ -19,24 +21,28 @@ public class AnalysisStatusScannerTest {
     public TemporaryFolder temp = new TemporaryFolder();
 
     @Test
-    public void scan_marksOrientationSetupDoneWhenManifestExists() throws Exception {
+    public void scan_foldsOrientationManifestIntoDrawRoisTooltip() throws Exception {
         File dir = temp.newFolder("orientation-done");
         OrientationManifestIO.saveRows(dir.getAbsolutePath(), Collections.emptyList());
 
-        Map<Integer, AnalysisStatus> statuses = new AnalysisStatusScanner().scan(dir);
+        AnalysisStatusScanner scanner = new AnalysisStatusScanner();
+        Map<Integer, AnalysisStatus> statuses = scanner.scan(dir);
 
-        assertEquals(AnalysisStatus.DONE,
-                statuses.get(Integer.valueOf(FLASH_Pipeline.IDX_ORIENTATION_SETUP)));
+        assertFalse(statuses.containsKey(Integer.valueOf(FLASH_Pipeline.IDX_ORIENTATION_SETUP)));
+        assertEquals(AnalysisStatus.NOT_STARTED,
+                statuses.get(Integer.valueOf(FLASH_Pipeline.IDX_DRAW_ROIS)));
+        assertTrue(scanner.tooltipFor(FLASH_Pipeline.IDX_DRAW_ROIS).contains("orientation transforms"));
     }
 
     @Test
-    public void scan_marksOrientationSetupNotStartedWhenManifestIsMissing() throws Exception {
+    public void scan_doesNotRequireHiddenOrientationStatusWhenManifestIsMissing() throws Exception {
         File dir = temp.newFolder("orientation-missing");
 
         Map<Integer, AnalysisStatus> statuses = new AnalysisStatusScanner().scan(dir);
 
+        assertFalse(statuses.containsKey(Integer.valueOf(FLASH_Pipeline.IDX_ORIENTATION_SETUP)));
         assertEquals(AnalysisStatus.NOT_STARTED,
-                statuses.get(Integer.valueOf(FLASH_Pipeline.IDX_ORIENTATION_SETUP)));
+                statuses.get(Integer.valueOf(FLASH_Pipeline.IDX_DRAW_ROIS)));
     }
 
     @Test

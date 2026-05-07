@@ -132,7 +132,7 @@ public class FLASH_Pipeline implements PlugIn {
 
     private static final String[] DESCRIPTIONS = {
             "Set up channel names, thresholds, and size filters for this experiment.",
-            "Manually draw regions of interest on each image.",
+            "Draw ROIs with rotate/flip controls; saved image transforms are reused on later runs.",
             "Sharpen Z-stacks using a theoretical PSF before segmentation.",
             "Make presentation-ready per-channel and composite images.",
             "Count cells in 3D, measure size/shape, and check colocalisation.",
@@ -144,7 +144,7 @@ public class FLASH_Pipeline implements PlugIn {
             "Group comparisons - t-tests, ANOVA, Tukey / Dunn's post-hoc.",
             "Make a publication-ready .xlsx workbook from the master CSVs.",
             "Remove channel bleed-through / autofluorescence (placeholder).",
-            "Set hemisphere labels, rotate/flip images, and save orientation rules for later analyses."
+            "Legacy standalone orientation manifest editor retained for backward compatibility."
     };
 
     /** Analysis indices. Keep in sync with {@link #analyses}. */
@@ -166,7 +166,6 @@ public class FLASH_Pipeline implements PlugIn {
     private static final int[] VISIBLE_ANALYSIS_ORDER = {
             IDX_CREATE_BIN,
             IDX_DRAW_ROIS,
-            IDX_ORIENTATION_SETUP,
             IDX_DECONVOLUTION,
             IDX_SPECTRAL_DECONTAMINATION,
             IDX_SPLIT_MERGE,
@@ -506,7 +505,6 @@ public class FLASH_Pipeline implements PlugIn {
             }, pendingIcon, statusRowsByAnalysis, nextStatusRow, togglesByAnalysis);
 
             addAnalysisSection(pd, "Image Preparation", new int[]{
-                    IDX_ORIENTATION_SETUP,
                     IDX_DECONVOLUTION,
                     IDX_SPECTRAL_DECONTAMINATION
             }, pendingIcon, statusRowsByAnalysis, nextStatusRow, togglesByAnalysis);

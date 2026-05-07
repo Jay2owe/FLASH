@@ -65,18 +65,17 @@ public class FLASH_PipelineIndexShiftTest {
     }
 
     @Test
-    public void visibleAnalysisOrderGroupsMainDialogAndHidesLineDistance() throws Exception {
+    public void visibleAnalysisOrderGroupsMainDialogAndHidesStandaloneOrientation() throws Exception {
         Field orderField = FLASH_Pipeline.class.getDeclaredField("VISIBLE_ANALYSIS_ORDER");
         orderField.setAccessible(true);
         int[] visibleOrder = (int[]) orderField.get(null);
 
-        assertEquals(12, visibleOrder.length);
+        assertEquals(11, visibleOrder.length);
         assertFalse(contains(visibleOrder, FLASH_Pipeline.IDX_NUCLEAR));
         assertFalse(contains(visibleOrder, FLASH_Pipeline.IDX_LINE_DISTANCE));
+        assertFalse(contains(visibleOrder, FLASH_Pipeline.IDX_ORIENTATION_SETUP));
         assertTrue(indexOf(visibleOrder, FLASH_Pipeline.IDX_CREATE_BIN)
                 < indexOf(visibleOrder, FLASH_Pipeline.IDX_DRAW_ROIS));
-        assertTrue(indexOf(visibleOrder, FLASH_Pipeline.IDX_ORIENTATION_SETUP)
-                < indexOf(visibleOrder, FLASH_Pipeline.IDX_DECONVOLUTION));
         assertTrue(indexOf(visibleOrder, FLASH_Pipeline.IDX_DECONVOLUTION)
                 < indexOf(visibleOrder, FLASH_Pipeline.IDX_SPECTRAL_DECONTAMINATION));
         assertTrue(indexOf(visibleOrder, FLASH_Pipeline.IDX_INTENSITY)

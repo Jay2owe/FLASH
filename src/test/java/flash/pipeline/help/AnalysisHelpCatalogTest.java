@@ -62,6 +62,9 @@ public class AnalysisHelpCatalogTest {
 
         assertFalse(contains(visibleOrder, FLASH_Pipeline.IDX_LINE_DISTANCE));
         assertFalse(AnalysisHelpCatalog.hasTopic(FLASH_Pipeline.IDX_LINE_DISTANCE));
+
+        assertFalse(contains(visibleOrder, FLASH_Pipeline.IDX_ORIENTATION_SETUP));
+        assertFalse(AnalysisHelpCatalog.hasTopic(FLASH_Pipeline.IDX_ORIENTATION_SETUP));
     }
 
     @Test
@@ -94,8 +97,10 @@ public class AnalysisHelpCatalogTest {
 
         assertFalse(contains(visibleOrder, FLASH_Pipeline.IDX_NUCLEAR));
         assertFalse(contains(visibleOrder, FLASH_Pipeline.IDX_LINE_DISTANCE));
+        assertFalse(contains(visibleOrder, FLASH_Pipeline.IDX_ORIENTATION_SETUP));
         assertTrue(FLASH_Pipeline.analysisHelpTopicForTests(FLASH_Pipeline.IDX_NUCLEAR) == null);
         assertTrue(FLASH_Pipeline.analysisHelpTopicForTests(FLASH_Pipeline.IDX_LINE_DISTANCE) == null);
+        assertTrue(FLASH_Pipeline.analysisHelpTopicForTests(FLASH_Pipeline.IDX_ORIENTATION_SETUP) == null);
     }
 
     @Test(expected = UnsupportedOperationException.class)
@@ -115,8 +120,6 @@ public class AnalysisHelpCatalogTest {
                 AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_CREATE_BIN).key);
         assertEquals("draw-save-rois",
                 AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_DRAW_ROIS).key);
-        assertEquals("image-orientation-setup",
-                AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_ORIENTATION_SETUP).key);
         assertEquals("deconvolution",
                 AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_DECONVOLUTION).key);
         assertEquals("spectral-decontamination",
@@ -218,6 +221,17 @@ public class AnalysisHelpCatalogTest {
     }
 
     @Test
+    public void drawRoisTopicOwnsOrientationGuidance() {
+        AnalysisHelpTopic topic = AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_DRAW_ROIS);
+
+        assertContains(topic.summary, "rotate/flip controls");
+        assertContains(topic.setup, "always-available orientation panel");
+        assertContains(topic.workflow, "saved transforms");
+        assertContains(topic.outputs, "Project_Image_Orientation.csv");
+        assertContains(topic.pitfalls, "Changing orientation after drawing an unsaved ROI");
+    }
+
+    @Test
     public void splitMergeTopicDistinguishesDisplayFromQuantification() {
         AnalysisHelpTopic topic = AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_SPLIT_MERGE);
 
@@ -233,7 +247,7 @@ public class AnalysisHelpCatalogTest {
                 "FLASH/00 - Configuration/Channel_Data.txt");
         assertContains(AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_DRAW_ROIS).outputs,
                 "FLASH/01 - Regions of Interest/ROI Sets/");
-        assertContains(AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_ORIENTATION_SETUP).outputs,
+        assertContains(AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_DRAW_ROIS).outputs,
                 "ImageJ Exports/Project_Image_Orientation.csv");
         assertContains(AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_DECONVOLUTION).outputs,
                 "FLASH/02 - 3D Deconvolution/");
@@ -339,7 +353,6 @@ public class AnalysisHelpCatalogTest {
         return new int[]{
                 FLASH_Pipeline.IDX_CREATE_BIN,
                 FLASH_Pipeline.IDX_DRAW_ROIS,
-                FLASH_Pipeline.IDX_ORIENTATION_SETUP,
                 FLASH_Pipeline.IDX_DECONVOLUTION,
                 FLASH_Pipeline.IDX_SPECTRAL_DECONTAMINATION
         };

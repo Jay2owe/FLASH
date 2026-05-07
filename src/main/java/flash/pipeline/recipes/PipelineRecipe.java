@@ -19,7 +19,6 @@ import static flash.pipeline.FLASH_Pipeline.IDX_EXCEL_EXPORT;
 import static flash.pipeline.FLASH_Pipeline.IDX_INTENSITY;
 import static flash.pipeline.FLASH_Pipeline.IDX_LINE_DISTANCE;
 import static flash.pipeline.FLASH_Pipeline.IDX_NUCLEAR;
-import static flash.pipeline.FLASH_Pipeline.IDX_ORIENTATION_SETUP;
 import static flash.pipeline.FLASH_Pipeline.IDX_SPATIAL;
 import static flash.pipeline.FLASH_Pipeline.IDX_SPECTRAL_DECONTAMINATION;
 import static flash.pipeline.FLASH_Pipeline.IDX_SPLIT_MERGE;
@@ -50,13 +49,24 @@ public final class PipelineRecipe {
         keys.put("Statistics", Integer.valueOf(IDX_STATISTICS));
         keys.put("Excel", Integer.valueOf(IDX_EXCEL_EXPORT));
         keys.put("Spectral", Integer.valueOf(IDX_SPECTRAL_DECONTAMINATION));
-        keys.put("OrientationSetup", Integer.valueOf(IDX_ORIENTATION_SETUP));
+        // Legacy recipes used OrientationSetup before orientation moved into Draw ROIs.
+        keys.put("OrientationSetup", Integer.valueOf(IDX_DRAW_ROIS));
         KEY_TO_IDX = Collections.unmodifiableMap(keys);
 
         Map<Integer, String> indexes = new HashMap<Integer, String>();
-        for (Map.Entry<String, Integer> entry : keys.entrySet()) {
-            indexes.put(entry.getValue(), entry.getKey());
-        }
+        indexes.put(Integer.valueOf(IDX_CREATE_BIN), "CreateBin");
+        indexes.put(Integer.valueOf(IDX_DRAW_ROIS), "DrawROIs");
+        indexes.put(Integer.valueOf(IDX_DECONVOLUTION), "Deconvolution");
+        indexes.put(Integer.valueOf(IDX_SPLIT_MERGE), "SplitMerge");
+        indexes.put(Integer.valueOf(IDX_3D_OBJECT), "ThreeDObject");
+        indexes.put(Integer.valueOf(IDX_SPATIAL), "Spatial");
+        indexes.put(Integer.valueOf(IDX_LINE_DISTANCE), "LineDistance");
+        indexes.put(Integer.valueOf(IDX_INTENSITY), "Intensity");
+        indexes.put(Integer.valueOf(IDX_NUCLEAR), "Nuclear");
+        indexes.put(Integer.valueOf(IDX_AGGREGATION), "Aggregation");
+        indexes.put(Integer.valueOf(IDX_STATISTICS), "Statistics");
+        indexes.put(Integer.valueOf(IDX_EXCEL_EXPORT), "Excel");
+        indexes.put(Integer.valueOf(IDX_SPECTRAL_DECONTAMINATION), "Spectral");
         IDX_TO_KEY = Collections.unmodifiableMap(indexes);
     }
 

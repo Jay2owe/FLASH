@@ -42,16 +42,17 @@ public class AnalysisStatusScanner {
                 sidecarStatus(directory, CREATE_BIN_ID, currentBinHash,
                         firstExistingFile(layout.channelDataReadFiles()) != null),
                 "Set Up Configuration");
+        boolean roiOutputs = hasRoiOutputs(layout);
+        boolean orientationManifest = OrientationManifestIO.getFile(directory.getAbsolutePath()).isFile();
         put(out, FLASH_Pipeline.IDX_DRAW_ROIS,
-                fallbackStatus(directory, hasRoiOutputs(layout)),
+                fallbackStatus(directory, roiOutputs),
                 "Draw and Save ROIs");
+        tooltips.put(Integer.valueOf(FLASH_Pipeline.IDX_DRAW_ROIS),
+                roiTooltip(roiOutputs, orientationManifest));
         put(out, FLASH_Pipeline.IDX_DECONVOLUTION,
                 fallbackStatus(directory, hasAnyFile(layout.analysisReadDirs(
                         FlashProjectLayout.AnalysisFolder.DECONVOLUTION))),
                 "3D Deconvolution");
-        put(out, FLASH_Pipeline.IDX_ORIENTATION_SETUP,
-                fallbackStatus(directory, OrientationManifestIO.getFile(directory.getAbsolutePath()).isFile()),
-                "Image Orientation Setup");
         put(out, FLASH_Pipeline.IDX_SPLIT_MERGE,
                 fallbackStatus(directory, hasAnyFile(layout.analysisReadDirs(
                         FlashProjectLayout.AnalysisFolder.SPLIT_MERGE))),
@@ -160,6 +161,19 @@ public class AnalysisStatusScanner {
 
     private AnalysisStatus fallbackStatus(File directory, boolean outputExists) {
         return outputExists ? AnalysisStatus.DONE : AnalysisStatus.NOT_STARTED;
+    }
+
+    private String roiTooltip(boolean roiOutputs, boolean orientationManifest) {
+        if (roiOutputs && orientationManifest) {
+            return "Draw and Save ROIs outputs and saved image orientation transforms found on this folder";
+        }
+        if (roiOutputs) {
+            return "Draw and Save ROIs outputs found on this folder";
+        }
+        if (orientationManifest) {
+            return "Saved image orientation transforms found; ROI outputs not found on this folder";
+        }
+        return "Not run on this folder";
     }
 
     private SidecarStatus readSidecar(File sidecar) {

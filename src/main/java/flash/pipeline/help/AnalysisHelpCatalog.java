@@ -33,7 +33,6 @@ public final class AnalysisHelpCatalog {
         Map<Integer, AnalysisHelpTopic> topics = new LinkedHashMap<Integer, AnalysisHelpTopic>();
         put(topics, setupConfigurationTopic());
         put(topics, drawAndSaveRoisTopic());
-        put(topics, imageOrientationSetupTopic());
         put(topics, deconvolutionTopic());
         put(topics, spectralDecontaminationTopic());
         put(topics, splitAndMergeTopic());
@@ -95,75 +94,43 @@ public final class AnalysisHelpCatalog {
                 FLASH_Pipeline.IDX_DRAW_ROIS,
                 "draw-save-rois",
                 "Draw and Save ROIs",
-                "Create the regions of interest that limit later measurements to the anatomical areas you want to analyse.",
+                "Create the regions of interest that limit later measurements, with integrated rotate/flip controls that save each image transform for reuse.",
                 list(
                         "Use this after Set Up Configuration and before intensity, object, spatial, or aggregation steps that need region boundaries.",
-                        "Use it when each image needs manually drawn anatomical regions instead of measuring the whole image.",
-                        "Use append mode only when you are adding missing regions to an existing ROI set."),
+                        "Use it when each image needs manually drawn anatomical regions or orientation correction before downstream measurement.",
+                        "Use append mode only when you are adding missing regions to an existing ROI set; images that already have saved ROIs are not revisited."),
                 list(
                         "A saved channel configuration so FLASH knows which channel is best for display.",
                         "Images opened from the selected project folder.",
                         "Region names that will be used consistently across animals, conditions, and images.",
-                        "Optional orientation setup if non-standard filenames or left-right corrections matter for drawing."),
+                        "Any needed rotate or flip corrections; the ROI drawing panel saves them with the project orientation manifest."),
                 list(
                         "Open a representative image and pick the display channel that makes the region boundary easiest to see.",
+                        "Use the always-available orientation panel to rotate, flip, or reset the displayed image before drawing when needed.",
                         "Draw each anatomical region carefully and name it consistently.",
                         "Save the ROI set for the image, then repeat or append until all required images have ROI files."),
                 list(
+                        "Apply any saved image transform before the image is shown for drawing.",
                         "FLASH stores the main ROI zip files in FLASH/01 - Regions of Interest/ROI Sets/.",
                         "FLASH also stores ROI properties and a copy of the ROI zip in FLASH/01 - Regions of Interest/Attributes/ for later volume and aggregation steps.",
-                        "Later analyses load these ROI sets automatically and restrict measurements to the saved regions."),
+                        "FLASH writes or updates ImageJ Exports/Project_Image_Orientation.csv with the confirmed orientation transform for each image.",
+                        "Later analyses load these ROI sets and saved transforms automatically."),
                 list(
                         "FLASH/01 - Regions of Interest/ROI Sets/<name> ROIs.zip contains the drawn regions for an image or region set.",
                         "FLASH/01 - Regions of Interest/Attributes/<name> ROI Properties.csv records ROI measurements used by aggregation and normalization.",
-                        "FLASH/01 - Regions of Interest/Attributes/<name> ROIs.zip keeps the ROI set with its region attributes."),
+                        "FLASH/01 - Regions of Interest/Attributes/<name> ROIs.zip keeps the ROI set with its region attributes.",
+                        "ImageJ Exports/Project_Image_Orientation.csv records saved rotate and flip transforms confirmed during ROI drawing."),
                 list(
                         "Inconsistent ROI names create separate groups during aggregation, even if they refer to the same anatomical region.",
-                        "Drawing ROIs before fixing image orientation can put left-right labels on the wrong side of the tissue.",
+                        "Changing orientation after drawing an unsaved ROI clears or invalidates that ROI so coordinates still match the displayed image.",
                         "Missing ROI files cause later measurements to skip images or fail preflight checks.",
+                        "Old ROI files drawn with the wrong orientation should be redrawn or verified rather than relying on a later transform alone.",
                         "Very loose ROIs include background; very tight ROIs can cut off real signal at the boundary."),
                 optionalImages(
                         "draw-save-rois",
-                        image("setup.png", "ROI drawing setup", "Choose the display channel and decide whether to create new ROI sets or append to existing ones."),
-                        image("workflow.png", "ROI workflow", "Open image, draw named regions, save ROI set, then reuse those regions for downstream measurements."),
-                        image("example-output.png", "ROI output files", "ROI zip files and ROI Properties CSV files are saved under FLASH/01 - Regions of Interest.")));
-    }
-
-    private static AnalysisHelpTopic imageOrientationSetupTopic() {
-        return new AnalysisHelpTopic(
-                FLASH_Pipeline.IDX_ORIENTATION_SETUP,
-                "image-orientation-setup",
-                "Image Orientation Setup",
-                "Record hemisphere labels and rotate or flip rules so later analyses use the same orientation for every image.",
-                list(
-                        "Use this for unnamed series, unusual hemisphere labels, upside-down images, or files that do not follow the standard Experiment-Animal_LH_Region naming pattern.",
-                        "Use it before drawing ROIs if left-right labels or manual rotations could affect where you draw.",
-                        "Skip it when standard filenames already describe the image correctly and no manual rotation or flip is needed."),
-                list(
-                        "The selected project folder and image metadata that FLASH can scan.",
-                        "The correct animal, hemisphere, region, rotation, flip, and view policy for each image or series.",
-                        "Any local naming aliases that should be reviewed and saved rather than guessed silently."),
-                list(
-                        "Preview each row in the setup table and confirm or edit the suggested hemisphere and region.",
-                        "Apply rotate or flip actions only when the image is physically acquired in the wrong orientation.",
-                        "Save the confirmed table when the rules are correct."),
-                list(
-                        "FLASH writes ImageJ Exports/Project_Image_Orientation.csv after you save the setup.",
-                        "Downstream analyses use the saved manifest first, then fall back to strict standard filenames, then to no-orientation behavior.",
-                        "Suggestions are not active until they are saved, so reviewing the table alone does not change analysis behavior."),
-                list(
-                        "ImageJ Exports/Project_Image_Orientation.csv contains one saved row per image or series, including hemisphere, region, rotate degrees, flip flags, view policy, decision source, and confirmation state.",
-                        "If no manifest exists, existing standard-filename behavior remains unchanged."),
-                list(
-                        "Mixing left and right labels changes the biological meaning of the output even when numeric measurements look plausible.",
-                        "Applying orientation rules after ROIs were drawn incorrectly does not repair those old ROI files; redraw or verify them.",
-                        "Unconfirmed alias suggestions are only suggestions and are ignored by later analyses until saved.",
-                        "Manual rotate and flip corrections affect downstream analysis, so preview them before saving."),
-                optionalImages(
-                        "image-orientation-setup",
-                        image("setup.png", "Orientation setup table", "Review image names, hemisphere labels, rotations, flips, and confirmation state before saving."),
-                        image("workflow.png", "Orientation workflow", "Scan images, confirm or edit rows, preview transforms, save the manifest, then run later analyses."),
-                        image("example-output.png", "Orientation manifest", "The saved Project_Image_Orientation.csv file is reused silently by downstream analyses.")));
+                        image("setup.png", "ROI drawing setup", "Choose the display channel, review orientation controls, and decide whether to create new ROI sets or append to existing ones."),
+                        image("workflow.png", "ROI workflow", "Open image, apply saved or adjusted orientation, draw named regions, save ROI set, then reuse those regions for downstream measurements."),
+                        image("example-output.png", "ROI output files", "ROI zip files, ROI Properties CSV files, and saved image transforms are written for downstream analyses.")));
     }
 
     private static AnalysisHelpTopic deconvolutionTopic() {
