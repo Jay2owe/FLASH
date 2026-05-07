@@ -6,6 +6,9 @@ import flash.pipeline.naming.ImageOrientationResolver;
 import flash.pipeline.naming.NameParts;
 import flash.pipeline.naming.OrientationManifestRow;
 import flash.pipeline.naming.ResolvedImageMetadata;
+import flash.pipeline.orientation.OrientationImageIdentity;
+import flash.pipeline.orientation.OrientationTransformState;
+import flash.pipeline.orientation.RoiOrientationManifestService;
 import ij.ImagePlus;
 import ij.ImageStack;
 import ij.process.ByteProcessor;
@@ -19,6 +22,7 @@ import java.util.Arrays;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 public class OrientationResolverIntegrationTest {
 
@@ -181,6 +185,43 @@ public class OrientationResolverIntegrationTest {
         assertEquals(ResolvedImageMetadata.Source.FILENAME_FALLBACK, fallback.source);
         assertEquals("not_in_manifest", fallback.animalName);
         assertFalse(fallback.hasTransform());
+    }
+
+    @Test
+    public void savedRoiOrientation_isResolvedOnRerun() throws Exception {
+        File dir = temp.newFolder("roi-rerun");
+        assertFalse(new File(dir, "Exp-Mouse_LH_SCN.tif").exists());
+        assertTrue(new File(dir, "Exp-Mouse_LH_SCN.tif").createNewFile());
+        String title = "Exp-Mouse_LH_SCN";
+        OrientationImageIdentity identity = OrientationImageIdentity.fromProjectSeries(
+                dir.getAbsolutePath(), 0, title);
+        ResolvedImageMetadata seed = ResolvedImageMetadata.fromNameParts(
+                new NameParts("Exp", "Mouse", "LH", "SCN", true),
+                ResolvedImageMetadata.Source.STRICT_FILENAME);
+        RoiOrientationManifestService service =
+                new RoiOrientationManifestService(dir.getAbsolutePath());
+
+        service.upsertDecision(
+                identity,
+                seed,
+                OrientationTransformState.fromCsv("180", false, false),
+                "Mouse",
+                OrientationManifestRow.Hemisphere.LH,
+                "SCN",
+                "Saved during Draw and Save ROIs");
+
+        ResolvedImageMetadata metadata = ImageOrientationResolver.resolve(
+                dir.getAbsolutePath(), title, 1);
+        ImagePlus resolved = image(title);
+        OrientationOps.applyTransform(resolved, metadata);
+
+        assertEquals(ResolvedImageMetadata.Source.SAVED_MANIFEST, metadata.source);
+        assertEquals(OrientationManifestRow.RotationDegrees.DEG_180, metadata.rotateDegrees);
+        assertEquals(OrientationManifestRow.ViewPolicy.MANUAL_ONLY, metadata.viewPolicy);
+        assertEquals("Mouse", metadata.animalName);
+        assertEquals("LH", metadata.hemisphere);
+        assertEquals("SCN", metadata.region);
+        assertArrayEquals(new int[] { 4, 3, 2, 1 }, pixels(resolved));
     }
 
     private static ImagePlus image(String title) {

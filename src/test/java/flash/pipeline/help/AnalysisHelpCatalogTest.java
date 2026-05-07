@@ -226,6 +226,7 @@ public class AnalysisHelpCatalogTest {
 
         assertContains(topic.summary, "rotate/flip controls");
         assertContains(topic.setup, "always-available orientation panel");
+        assertContains(topic.setup, "if you do nothing, FLASH keeps the current orientation");
         assertContains(topic.workflow, "saved transforms");
         assertContains(topic.outputs, "Project_Image_Orientation.csv");
         assertContains(topic.pitfalls, "Changing orientation after drawing an unsaved ROI");

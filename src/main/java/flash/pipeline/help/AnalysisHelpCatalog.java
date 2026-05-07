@@ -94,7 +94,7 @@ public final class AnalysisHelpCatalog {
                 FLASH_Pipeline.IDX_DRAW_ROIS,
                 "draw-save-rois",
                 "Draw and Save ROIs",
-                "Create the regions of interest that limit later measurements, with integrated rotate/flip controls that save each image transform for reuse.",
+                "Create the regions of interest that limit later measurements, with always-open rotate/flip controls that save each image transform for reuse.",
                 list(
                         "Use this after Set Up Configuration and before intensity, object, spatial, or aggregation steps that need region boundaries.",
                         "Use it when each image needs manually drawn anatomical regions or orientation correction before downstream measurement.",
@@ -103,17 +103,18 @@ public final class AnalysisHelpCatalog {
                         "A saved channel configuration so FLASH knows which channel is best for display.",
                         "Images opened from the selected project folder.",
                         "Region names that will be used consistently across animals, conditions, and images.",
-                        "Any needed rotate or flip corrections; the ROI drawing panel saves them with the project orientation manifest."),
+                        "Any needed rotate or flip corrections; the ROI drawing panel saves them with Project_Image_Orientation.csv."),
                 list(
                         "Open a representative image and pick the display channel that makes the region boundary easiest to see.",
-                        "Use the always-available orientation panel to rotate, flip, or reset the displayed image before drawing when needed.",
+                        "When each ROI image opens, the orientation buttons are available beside the image.",
+                        "Use the always-available orientation panel only if the image needs rotating or flipping; if you do nothing, FLASH keeps the current orientation.",
                         "Draw each anatomical region carefully and name it consistently.",
                         "Save the ROI set for the image, then repeat or append until all required images have ROI files."),
                 list(
                         "Apply any saved image transform before the image is shown for drawing.",
                         "FLASH stores the main ROI zip files in FLASH/01 - Regions of Interest/ROI Sets/.",
                         "FLASH also stores ROI properties and a copy of the ROI zip in FLASH/01 - Regions of Interest/Attributes/ for later volume and aggregation steps.",
-                        "FLASH writes or updates ImageJ Exports/Project_Image_Orientation.csv with the confirmed orientation transform for each image.",
+                        "After each image, FLASH writes or updates ImageJ Exports/Project_Image_Orientation.csv with the confirmed orientation transform.",
                         "Later analyses load these ROI sets and saved transforms automatically."),
                 list(
                         "FLASH/01 - Regions of Interest/ROI Sets/<name> ROIs.zip contains the drawn regions for an image or region set.",

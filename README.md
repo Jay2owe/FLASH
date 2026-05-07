@@ -63,8 +63,7 @@ The main dialog groups modules into setup, image preparation, display, image ana
 ## Analysis Modules
 
 - **Set Up Configuration**: Define channels, colors, thresholds, segmentation settings, filters, display ranges, and Z-slice selections.
-- **Draw and Save ROIs**: Draw and save regions of interest for downstream measurements.
-- **Image Orientation Setup**: Save image rotation, flipping, hemisphere, and region metadata for projects with non-standard image names.
+- **Draw and Save ROIs**: Open each image with ROI drawing tools and always-available rotate/flip controls. Saved orientation transforms are reused by ROI reruns and downstream analyses.
 - **3D Deconvolution**: Run optional deconvolution before downstream image analysis.
 - **Spectral Decontamination**: Run experimental channel bleed-through and autofluorescence correction workflows.
 - **Split and Merge Image Channels**: Export display-ready split-channel and merged images.

@@ -4,6 +4,7 @@ import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinField;
 import flash.pipeline.bin.BinSetupChooser;
 import flash.pipeline.bin.BinSetupDispatcher;
+import flash.pipeline.io.OrientationManifestIO;
 import flash.pipeline.naming.NameParts;
 import flash.pipeline.naming.OrientationManifestRow;
 import flash.pipeline.naming.ResolvedImageMetadata;
@@ -23,6 +24,7 @@ import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.EnumSet;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.Assert.assertArrayEquals;
@@ -255,6 +257,80 @@ public class DrawAndSaveROIsAnalysisTest {
         assertEquals(OrientationManifestRow.ViewPolicy.MANUAL_ONLY, row.viewPolicy);
         assertEquals(OrientationManifestRow.DecisionSource.MANUAL, row.decisionSource);
         assertEquals(OrientationManifestRow.ConfirmationState.YES, row.confirmed);
+    }
+
+    @Test
+    public void roiOrientationSave_flattensStrictFilenameTransformToManualOnly() throws Exception {
+        File dir = temp.newFolder("flattenStrict");
+        assertTrue(new File(dir, "Exp-Mouse_RH_SCN.tif").createNewFile());
+        String title = "Exp-Mouse_RH_SCN";
+        ImagePlus original = new ImagePlus(title, new ByteProcessor(4, 3));
+        ImagePlus max = new ImagePlus("MAX_delete", new ByteProcessor(4, 3));
+        ImagePlus roiStack = new ImagePlus("delete", new ByteProcessor(4, 3));
+        ResolvedImageMetadata seed = ResolvedImageMetadata.fromNameParts(
+                new NameParts("Exp", "Mouse", "RH", "SCN", true),
+                ResolvedImageMetadata.Source.STRICT_FILENAME);
+
+        DrawAndSaveROIsAnalysis.PreparedImage prepared =
+                DrawAndSaveROIsAnalysis.buildPreparedImage(
+                        dir.getAbsolutePath(), 0, original, max, roiStack,
+                        seed.toNameParts(), seed);
+
+        OrientationManifestRow row = DrawAndSaveROIsAnalysis.saveOrientationDecision(
+                new RoiOrientationManifestService(dir.getAbsolutePath()),
+                prepared,
+                "Saved during Draw and Save ROIs");
+
+        assertEquals(OrientationManifestRow.RotationDegrees.DEG_270, row.rotateDegrees);
+        assertTrue(row.flipHorizontal);
+        assertFalse(row.flipVertical);
+        assertEquals(OrientationManifestRow.ViewPolicy.MANUAL_ONLY, row.viewPolicy);
+        assertEquals(OrientationManifestRow.DecisionSource.MANUAL, row.decisionSource);
+        assertEquals(OrientationManifestRow.ConfirmationState.YES, row.confirmed);
+    }
+
+    @Test
+    public void skippedImage_stillSavesConfirmedOrientationRow() throws Exception {
+        File dir = temp.newFolder("skippedOrientation");
+        assertTrue(new File(dir, "Skipped_Mouse_LH_SCN.tif").createNewFile());
+        String title = "Skipped_Mouse_LH_SCN";
+        ImagePlus original = new ImagePlus(title, new ByteProcessor(4, 3));
+        ImagePlus max = new ImagePlus("MAX_delete", new ByteProcessor(4, 3));
+        ImagePlus roiStack = new ImagePlus("delete", new ByteProcessor(4, 3));
+        ResolvedImageMetadata seed = new ResolvedImageMetadata(
+                "",
+                title,
+                title,
+                "SkippedMouse",
+                "LH",
+                "SCN",
+                OrientationManifestRow.RotationDegrees.DEG_0,
+                false,
+                false,
+                OrientationManifestRow.ViewPolicy.MANUAL_ONLY,
+                ResolvedImageMetadata.Source.FILENAME_FALLBACK);
+
+        DrawAndSaveROIsAnalysis.PreparedImage prepared =
+                DrawAndSaveROIsAnalysis.buildPreparedImage(
+                        dir.getAbsolutePath(), 0, original, max, roiStack,
+                        new NameParts("Exp", "SkippedMouse", "LH", "SCN", true),
+                        seed);
+
+        OrientationManifestRow row = DrawAndSaveROIsAnalysis.saveOrientationDecision(
+                new RoiOrientationManifestService(dir.getAbsolutePath()),
+                prepared,
+                "Skipped during Draw and Save ROIs; placeholder ROIs padded");
+
+        assertEquals(OrientationManifestRow.RotationDegrees.DEG_0, row.rotateDegrees);
+        assertFalse(row.flipHorizontal);
+        assertFalse(row.flipVertical);
+        assertEquals(OrientationManifestRow.ConfirmationState.YES, row.confirmed);
+        assertTrue(row.notes.contains("Skipped during Draw and Save ROIs"));
+
+        List<OrientationManifestRow> rows =
+                OrientationManifestIO.readIfExists(dir.getAbsolutePath());
+        assertEquals(1, rows.size());
+        assertEquals(row.imageKey, rows.get(0).imageKey);
     }
 
     private static void installDispatcherChoice(final BinSetupChooser.Choice choice,
