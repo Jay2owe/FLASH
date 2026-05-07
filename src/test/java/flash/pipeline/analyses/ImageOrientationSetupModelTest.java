@@ -1,6 +1,7 @@
 package flash.pipeline.analyses;
 
 import flash.pipeline.naming.OrientationManifestRow;
+import flash.pipeline.orientation.OrientationTransformState;
 import org.junit.Test;
 
 import java.util.List;
@@ -40,6 +41,22 @@ public class ImageOrientationSetupModelTest {
         assertEquals(OrientationManifestRow.RotationDegrees.DEG_0, reset.rotateDegrees);
         assertFalse(reset.flipHorizontal);
         assertFalse(reset.flipVertical);
+    }
+
+    @Test
+    public void transformStateMatchesSharedOrientationTransformState() {
+        ImageOrientationSetupAnalysis.TransformState setup =
+                ImageOrientationSetupAnalysis.transformFrom("180", true, false)
+                        .rotateRight()
+                        .flipVertical();
+        OrientationTransformState shared =
+                OrientationTransformState.fromCsv("180", true, false)
+                        .rotateRight()
+                        .flipVertical();
+
+        assertEquals(shared.rotateDegrees, setup.rotateDegrees);
+        assertEquals(shared.flipHorizontal, setup.flipHorizontal);
+        assertEquals(shared.flipVertical, setup.flipVertical);
     }
 
     @Test

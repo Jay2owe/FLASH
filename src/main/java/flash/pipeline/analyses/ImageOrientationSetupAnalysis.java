@@ -10,6 +10,8 @@ import flash.pipeline.naming.HemisphereAliasMatcher;
 import flash.pipeline.naming.ImageNameParser;
 import flash.pipeline.naming.NameParts;
 import flash.pipeline.naming.OrientationManifestRow;
+import flash.pipeline.orientation.OrientationImageIdentity;
+import flash.pipeline.orientation.OrientationTransformState;
 import flash.pipeline.ui.PipelineDialog;
 import ij.IJ;
 import ij.ImagePlus;
@@ -182,7 +184,8 @@ public class ImageOrientationSetupAnalysis implements Analysis {
         List<SeriesMeta> metas = ImageSourceDispatcher.readAllMetadata(directory);
         if (metas == null || metas.isEmpty()) return Collections.emptyList();
 
-        SourceContext source = SourceContext.resolve(directory);
+        OrientationImageIdentity.SourceContext source =
+                OrientationImageIdentity.SourceContext.resolve(directory);
         LinkedHashMap<String, OrientationManifestRow> saved =
                 OrientationManifestIO.readByImageKeyIfExists(directory);
 
@@ -190,16 +193,19 @@ public class ImageOrientationSetupAnalysis implements Analysis {
         for (int i = 0; i < metas.size(); i++) {
             SeriesMeta meta = metas.get(i);
             if (meta == null) continue;
-            String sourceFile = source.sourceFileFor(meta);
-            String originalName = originalNameFor(meta, sourceFile);
-            int seriesIndex = meta.index < 0 ? i + 1 : meta.index + 1;
-            String imageKey = OrientationManifestRow.buildImageKey(
-                    source.sourceKind, sourceFile, seriesIndex, originalName);
-            OrientationManifestRow existing = saved.get(imageKey);
+            OrientationImageIdentity identity = source.identityFor(
+                    meta.index < 0 ? i : meta.index,
+                    meta.name);
+            OrientationManifestRow existing = saved.get(identity.imageKey);
             if (existing != null) {
                 rows.add(SetupRow.fromExisting(existing));
             } else {
-                rows.add(suggestRow(imageKey, sourceFile, seriesIndex, originalName, aliases));
+                rows.add(suggestRow(
+                        identity.imageKey,
+                        identity.sourceFile,
+                        identity.seriesIndex,
+                        identity.originalName,
+                        aliases));
             }
         }
         return rows;
@@ -274,13 +280,6 @@ public class ImageOrientationSetupAnalysis implements Analysis {
                 STATUS_UNKNOWN);
     }
 
-    private static String originalNameFor(SeriesMeta meta, String sourceFile) {
-        if (meta != null && meta.name != null && !meta.name.trim().isEmpty()) {
-            return meta.name.trim();
-        }
-        return sourceFile == null ? "" : sourceFile.trim();
-    }
-
     private static String displayNameFor(String originalName) {
         String display = ImageNameParser.extractBioFormatsSeriesName(originalName);
         if (display == null || display.trim().isEmpty()) display = originalName;
@@ -339,10 +338,8 @@ public class ImageOrientationSetupAnalysis implements Analysis {
     }
 
     static TransformState transformFrom(String rotateDegrees, boolean flipHorizontal, boolean flipVertical) {
-        return new TransformState(
-                OrientationManifestRow.RotationDegrees.fromCsv(rotateDegrees),
-                flipHorizontal,
-                flipVertical);
+        return new TransformState(OrientationTransformState.fromCsv(
+                rotateDegrees, flipHorizontal, flipVertical));
     }
 
     static List<AlternatingAssignment> buildAlternatingAssignments(
@@ -376,42 +373,39 @@ public class ImageOrientationSetupAnalysis implements Analysis {
         final OrientationManifestRow.RotationDegrees rotateDegrees;
         final boolean flipHorizontal;
         final boolean flipVertical;
+        private final OrientationTransformState delegate;
 
         TransformState(OrientationManifestRow.RotationDegrees rotateDegrees,
                        boolean flipHorizontal,
                        boolean flipVertical) {
-            this.rotateDegrees = rotateDegrees == null
-                    ? OrientationManifestRow.RotationDegrees.DEG_0 : rotateDegrees;
-            this.flipHorizontal = flipHorizontal;
-            this.flipVertical = flipVertical;
+            this(new OrientationTransformState(rotateDegrees, flipHorizontal, flipVertical));
+        }
+
+        private TransformState(OrientationTransformState delegate) {
+            this.delegate = delegate == null ? OrientationTransformState.identity() : delegate;
+            this.rotateDegrees = this.delegate.rotateDegrees;
+            this.flipHorizontal = this.delegate.flipHorizontal;
+            this.flipVertical = this.delegate.flipVertical;
         }
 
         TransformState rotateLeft() {
-            return rotateBy(270);
+            return new TransformState(delegate.rotateLeft());
         }
 
         TransformState rotateRight() {
-            return rotateBy(90);
+            return new TransformState(delegate.rotateRight());
         }
 
         TransformState flipHorizontal() {
-            return new TransformState(rotateDegrees, !flipHorizontal, flipVertical);
+            return new TransformState(delegate.flipHorizontal());
         }
 
         TransformState flipVertical() {
-            return new TransformState(rotateDegrees, flipHorizontal, !flipVertical);
+            return new TransformState(delegate.flipVertical());
         }
 
         TransformState reset() {
-            return new TransformState(OrientationManifestRow.RotationDegrees.DEG_0, false, false);
-        }
-
-        private TransformState rotateBy(int deltaDegrees) {
-            int next = (rotateDegrees.degrees() + deltaDegrees) % 360;
-            return new TransformState(
-                    OrientationManifestRow.RotationDegrees.fromDegrees(next),
-                    flipHorizontal,
-                    flipVertical);
+            return new TransformState(delegate.reset());
         }
     }
 
@@ -437,43 +431,6 @@ public class ImageOrientationSetupAnalysis implements Analysis {
         AliasParts(String animalName, String region) {
             this.animalName = animalName == null ? "" : animalName;
             this.region = region == null ? "" : region;
-        }
-    }
-
-    private static final class SourceContext {
-        final String sourceKind;
-        final String containerFile;
-        final List<File> tiffFiles;
-        final String tiffPrefix;
-
-        private SourceContext(String sourceKind, String containerFile, List<File> tiffFiles, String tiffPrefix) {
-            this.sourceKind = sourceKind;
-            this.containerFile = containerFile == null ? "" : containerFile;
-            this.tiffFiles = tiffFiles == null ? Collections.<File>emptyList() : tiffFiles;
-            this.tiffPrefix = tiffPrefix == null ? "" : tiffPrefix;
-        }
-
-        static SourceContext resolve(String directory) {
-            File dir = new File(directory);
-            ImageSourceDispatcher.SourceMode mode = ImageSourceDispatcher.detectMode(directory);
-            if (mode == ImageSourceDispatcher.SourceMode.CONTAINER) {
-                File container = ImageSourceDispatcher.selectContainer(dir);
-                return new SourceContext("CONTAINER", container.getName(), null, "");
-            }
-            if (mode == ImageSourceDispatcher.SourceMode.TIFF_INPUT_SUBFOLDER) {
-                return new SourceContext("TIFF", "", ImageSourceDispatcher.listTiffs(new File(dir, "input")), "input/");
-            }
-            return new SourceContext("TIFF", "", ImageSourceDispatcher.listTiffs(dir), "");
-        }
-
-        String sourceFileFor(SeriesMeta meta) {
-            if ("CONTAINER".equals(sourceKind)) return containerFile;
-            int index = meta == null ? 0 : meta.index;
-            if (index < 0) index = 0;
-            if (index < tiffFiles.size()) {
-                return tiffPrefix + tiffFiles.get(index).getName();
-            }
-            return meta != null && meta.name != null ? meta.name : "";
         }
     }
 
