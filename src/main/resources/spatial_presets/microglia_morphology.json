@@ -1,5 +1,5 @@
 {
-  "name": "Microglia morphology (cell-level)",
+  "name": "Cell-level morphology",
   "description": "3D and complex morphology without spatial distribution.",
   "libraryVersion": "1",
   "doDistances": false,

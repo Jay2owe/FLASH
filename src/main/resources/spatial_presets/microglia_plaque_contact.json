@@ -1,5 +1,5 @@
 {
-  "name": "Microglia + plaque contact",
+  "name": "Cell morphology + contact",
   "description": "Colocalization/contact analysis with 3D morphology.",
   "libraryVersion": "1",
   "doDistances": true,

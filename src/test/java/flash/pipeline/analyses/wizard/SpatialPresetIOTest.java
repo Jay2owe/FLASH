@@ -9,9 +9,12 @@ import org.junit.rules.TemporaryFolder;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class SpatialPresetIOTest {
@@ -50,6 +53,22 @@ public class SpatialPresetIOTest {
         List<SpatialPreset> presets = io.listAll();
 
         assertEquals(6, presets.size());
+        assertEquals(Arrays.asList(
+                "exploratory_all.json",
+                "microglia_morphology.json",
+                "microglia_plaque_contact.json",
+                "population_phenotype.json",
+                "density_hotspots.json",
+                "ripley_clustering.json"), io.stockResourceFiles());
+        assertEquals(Arrays.asList(
+                "Exploratory (all features)",
+                "Cell-level morphology",
+                "Cell morphology + contact",
+                "Population phenotype scoring",
+                "Density hotspots + clusters",
+                "Ripley clustering analysis"), presetNames(presets));
+        assertFalse("Exploratory remains broad, but follows the default-off Ripley's K policy.",
+                presets.get(0).isDoSpatialStats());
         assertTrue(new File(io.presetDirectory(), "microglia_plaque_contact.json").isFile());
         assertTrue(new File(io.presetDirectory(), "exploratory_all.json").isFile());
     }
@@ -88,5 +107,13 @@ public class SpatialPresetIOTest {
 
         assertTrue(loaded.isDoDistances());
         assertEquals("Legacy Spatial", loaded.getName());
+    }
+
+    private static List<String> presetNames(List<SpatialPreset> presets) {
+        List<String> names = new ArrayList<String>();
+        for (SpatialPreset preset : presets) {
+            names.add(preset.getName());
+        }
+        return names;
     }
 }

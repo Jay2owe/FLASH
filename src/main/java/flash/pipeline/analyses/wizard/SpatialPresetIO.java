@@ -7,8 +7,10 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 
 /**
@@ -21,12 +23,22 @@ public class SpatialPresetIO extends PresetIO<SpatialPreset> {
 
     private static final List<String> STOCK_RESOURCE_FILES = Collections.unmodifiableList(
             Arrays.asList(
+                    "exploratory_all.json",
                     "microglia_morphology.json",
                     "microglia_plaque_contact.json",
                     "population_phenotype.json",
                     "density_hotspots.json",
-                    "ripley_clustering.json",
-                    "exploratory_all.json"
+                    "ripley_clustering.json"
+            ));
+
+    private static final List<String> STOCK_PRESET_NAMES = Collections.unmodifiableList(
+            Arrays.asList(
+                    "Exploratory (all features)",
+                    "Cell-level morphology",
+                    "Cell morphology + contact",
+                    "Population phenotype scoring",
+                    "Density hotspots + clusters",
+                    "Ripley clustering analysis"
             ));
 
     public SpatialPresetIO() {
@@ -52,6 +64,22 @@ public class SpatialPresetIO extends PresetIO<SpatialPreset> {
 
     protected List<String> stockResourceFiles() {
         return STOCK_RESOURCE_FILES;
+    }
+
+    @Override
+    public List<SpatialPreset> listAll() throws IOException {
+        List<SpatialPreset> presets = new ArrayList<SpatialPreset>(super.listAll());
+        Collections.sort(presets, new Comparator<SpatialPreset>() {
+            @Override
+            public int compare(SpatialPreset left, SpatialPreset right) {
+                int order = stockPresetOrder(left) - stockPresetOrder(right);
+                if (order != 0) {
+                    return order;
+                }
+                return left.getName().compareToIgnoreCase(right.getName());
+            }
+        });
+        return presets;
     }
 
     @Override
@@ -94,5 +122,13 @@ public class SpatialPresetIO extends PresetIO<SpatialPreset> {
     private static File defaultProjectRoot() {
         String userDir = System.getProperty("user.dir");
         return userDir == null || userDir.trim().isEmpty() ? new File(".") : new File(userDir);
+    }
+
+    private static int stockPresetOrder(SpatialPreset preset) {
+        if (preset == null) {
+            return STOCK_PRESET_NAMES.size();
+        }
+        int index = STOCK_PRESET_NAMES.indexOf(preset.getName());
+        return index < 0 ? STOCK_PRESET_NAMES.size() : index;
     }
 }
