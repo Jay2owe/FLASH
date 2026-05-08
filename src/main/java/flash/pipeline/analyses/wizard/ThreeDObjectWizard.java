@@ -125,7 +125,7 @@ public class ThreeDObjectWizard extends WizardFlow {
         ChannelIdentities safeIdentities = identities == null ? new ChannelIdentities(null) : identities;
         ThreeDObjectPreset safePreset = preset == null
                 ? new ThreeDObjectPreset("Count only", null, "1", false, false,
-                false, false, false, 30.0, null, null)
+                false, false, true, 30.0, null, null)
                 : preset;
         DerivedConfig out = new DerivedConfig(safeCfg.numChannels());
         out.doVolumetric = safePreset.isDoVolumetric();

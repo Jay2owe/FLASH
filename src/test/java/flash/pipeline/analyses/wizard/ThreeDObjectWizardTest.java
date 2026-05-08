@@ -2,10 +2,14 @@ package flash.pipeline.analyses.wizard;
 
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.ChannelIdentities;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 
 import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
@@ -13,6 +17,9 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class ThreeDObjectWizardTest {
+
+    @Rule
+    public TemporaryFolder temp = new TemporaryFolder();
 
     @Test
     public void mapsIntentCombinationsAcrossStrictnessOptions() {
@@ -90,6 +97,56 @@ public class ThreeDObjectWizardTest {
     }
 
     @Test
+    public void fallbackPresetLoadDefaultsCentroidRoiFilteringOn() {
+        ThreeDObjectWizard.DerivedConfig derived = ThreeDObjectWizard.fromPreset(
+                dapiIba1AbetaConfig(), dapiIba1AbetaIdentities(), null);
+
+        assertTrue(derived.classicalCentroidFiltering);
+    }
+
+    @Test
+    public void stockPresetsKeepCentroidRoiFilteringOnAfterLoad() throws Exception {
+        ThreeDObjectPresetIO io = new ThreeDObjectPresetIO(temp.newFolder("stock-presets"));
+        List<ThreeDObjectPreset> presets = io.listAll();
+
+        assertEquals(6, presets.size());
+        assertEquals(Arrays.asList(
+                "Full workflow",
+                "Count Only",
+                "Count + Coloc Standard",
+                "Count + Coloc Strict",
+                "Count + Coloc Loose",
+                "Count + Process Length"), presetNames(presets));
+        for (ThreeDObjectPreset preset : presets) {
+            ThreeDObjectWizard.DerivedConfig derived = ThreeDObjectWizard.fromPreset(
+                    dapiIba1AbetaConfig(), dapiIba1AbetaIdentities(), preset);
+
+            assertTrue(preset.getName(), derived.classicalCentroidFiltering);
+        }
+    }
+
+    @Test
+    public void explicitPresetWithCentroidRoiFilteringOffIsRespected() {
+        ThreeDObjectPreset preset = new ThreeDObjectPreset(
+                "User preset",
+                "Explicitly disables centroid ROI filtering",
+                ThreeDObjectPreset.CURRENT_LIBRARY_VERSION,
+                false,
+                false,
+                false,
+                false,
+                false,
+                30.0,
+                null,
+                null);
+
+        ThreeDObjectWizard.DerivedConfig derived = ThreeDObjectWizard.fromPreset(
+                dapiIba1AbetaConfig(), dapiIba1AbetaIdentities(), preset);
+
+        assertFalse(derived.classicalCentroidFiltering);
+    }
+
+    @Test
     public void twoChannelColocalizationDoesNotRequirePairSelection() {
         BinConfig cfg = new BinConfig();
         cfg.channelNames.add("DAPI");
@@ -108,6 +165,14 @@ public class ThreeDObjectWizardTest {
         Map<String, Object> answers = new LinkedHashMap<String, Object>();
         answers.put("intent.coloc", Boolean.TRUE);
         return answers;
+    }
+
+    private static List<String> presetNames(List<ThreeDObjectPreset> presets) {
+        List<String> names = new ArrayList<String>();
+        for (ThreeDObjectPreset preset : presets) {
+            names.add(preset.getName());
+        }
+        return names;
     }
 
     static BinConfig dapiIba1AbetaConfig() {

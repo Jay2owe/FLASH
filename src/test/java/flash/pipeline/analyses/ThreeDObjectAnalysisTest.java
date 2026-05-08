@@ -1,8 +1,13 @@
 package flash.pipeline.analyses;
 
 import flash.pipeline.bin.BinField;
+import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinSetupChooser;
 import flash.pipeline.bin.BinSetupDispatcher;
+import flash.pipeline.bin.ChannelIdentities;
+import flash.pipeline.analyses.wizard.ThreeDObjectPreset;
+import flash.pipeline.analyses.wizard.ThreeDObjectPresetIO;
+import flash.pipeline.analyses.wizard.ThreeDObjectWizard;
 import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.DependencyService;
 import flash.pipeline.runtime.DependencyStatus;
@@ -14,12 +19,15 @@ import org.junit.rules.TemporaryFolder;
 
 import java.io.File;
 import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.Arrays;
 import java.util.EnumMap;
 import java.util.EnumSet;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -116,6 +124,55 @@ public class ThreeDObjectAnalysisTest {
                 wizardFields.get());
         assertTrue(new File(new File(dir, ".bin"), "C1_Filters.ijm").isFile());
         assertTrue(new File(new File(dir, ".bin"), "C2_Filters.ijm").isFile());
+    }
+
+    @Test
+    public void dialogCentroidRoiFilteringDefaultsOnWithoutPreset() throws Exception {
+        ThreeDObjectAnalysis analysis = new ThreeDObjectAnalysis();
+
+        assertTrue(classicalCentroidFilter(analysis));
+    }
+
+    @Test
+    public void applyingEveryStockPresetLeavesDialogCentroidRoiFilteringOn() throws Exception {
+        BinConfig cfg = dapiIba1AbetaConfig();
+        ChannelIdentities identities = dapiIba1AbetaIdentities();
+        ThreeDObjectPresetIO io = new ThreeDObjectPresetIO(temp.newFolder("analysis-stock-presets"));
+        List<ThreeDObjectPreset> presets = io.listAll();
+
+        assertEquals(6, presets.size());
+        for (ThreeDObjectPreset preset : presets) {
+            ThreeDObjectAnalysis analysis = new ThreeDObjectAnalysis();
+            ThreeDObjectWizard.DerivedConfig derived = ThreeDObjectWizard.fromPreset(cfg, identities, preset);
+
+            applyThreeDObjectDerivedConfig(analysis, cfg, derived);
+
+            assertTrue(preset.getName(), classicalCentroidFilter(analysis));
+        }
+    }
+
+    @Test
+    public void applyingExplicitPresetWithCentroidRoiFilteringOffIsRespected() throws Exception {
+        BinConfig cfg = dapiIba1AbetaConfig();
+        ThreeDObjectPreset preset = new ThreeDObjectPreset(
+                "User preset",
+                "Explicitly disables centroid ROI filtering",
+                ThreeDObjectPreset.CURRENT_LIBRARY_VERSION,
+                false,
+                false,
+                false,
+                false,
+                false,
+                30.0,
+                null,
+                null);
+        ThreeDObjectAnalysis analysis = new ThreeDObjectAnalysis();
+        ThreeDObjectWizard.DerivedConfig derived = ThreeDObjectWizard.fromPreset(
+                cfg, dapiIba1AbetaIdentities(), preset);
+
+        applyThreeDObjectDerivedConfig(analysis, cfg, derived);
+
+        assertFalse(classicalCentroidFilter(analysis));
     }
 
     private static void installDispatcherChoice(final BinSetupChooser.Choice choice,
@@ -218,6 +275,38 @@ public class ThreeDObjectAnalysisTest {
         ctor.setAccessible(true);
         FeatureDependencyGate.configure(ctor.newInstance(provider), null);
         FeatureDependencyGate.setUiMode(false);
+    }
+
+    private static boolean classicalCentroidFilter(ThreeDObjectAnalysis analysis) throws Exception {
+        Field field = ThreeDObjectAnalysis.class.getDeclaredField("classicalCentroidFilter");
+        field.setAccessible(true);
+        return field.getBoolean(analysis);
+    }
+
+    private static void applyThreeDObjectDerivedConfig(ThreeDObjectAnalysis analysis,
+                                                       BinConfig cfg,
+                                                       ThreeDObjectWizard.DerivedConfig derived) throws Exception {
+        Method method = ThreeDObjectAnalysis.class.getDeclaredMethod(
+                "applyThreeDObjectDerivedConfig",
+                BinConfig.class,
+                ThreeDObjectWizard.DerivedConfig.class);
+        method.setAccessible(true);
+        method.invoke(analysis, cfg, derived);
+    }
+
+    private static BinConfig dapiIba1AbetaConfig() {
+        BinConfig cfg = new BinConfig();
+        cfg.channelNames.add("DAPI");
+        cfg.channelNames.add("IBA1");
+        cfg.channelNames.add("Abeta");
+        return cfg;
+    }
+
+    private static ChannelIdentities dapiIba1AbetaIdentities() {
+        return new ChannelIdentities(Arrays.asList(
+                new ChannelIdentities.Entry(0, "nuclei_dapi", "round", false),
+                new ChannelIdentities.Entry(1, "microglia_iba1", "complex", true),
+                new ChannelIdentities.Entry(2, "amyloid_abeta_pan", "puncta_like", false)));
     }
 
     private static void writeChannelData(File dir, String... lines) throws Exception {
