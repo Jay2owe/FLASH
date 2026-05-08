@@ -932,9 +932,9 @@ public class FLASH_Pipeline implements PlugIn {
 
     private void saveProjectRecipe(boolean[] selections) {
         try {
-            File projectRecipeDir = FlashProjectLayout.forDirectory(directory).statusRoot();
             PipelineRecipe recipe = PipelineRecipe.fromSelections("last-run", "Last successful run", selections);
-            PipelineRecipeIO.saveToFile(recipe, new File(projectRecipeDir, "recipe.json"));
+            PipelineRecipeIO.saveToFile(recipe,
+                    FlashProjectLayout.forDirectory(directory).statusWriteFile("recipe.json"));
         } catch (IOException e) {
             IJ.log("[FLASH] Warning: could not save project pipeline recipe: " + e.getMessage());
         }

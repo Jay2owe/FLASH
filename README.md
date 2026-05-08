@@ -52,7 +52,8 @@ Project/
     |-- 09 - Result Aggregation/
     |-- 10 - Statistical Analysis/
     |-- 11 - Excel Summary Export/
-    |-- Presets/
+    |-- .settings/
+    |   `-- Presets/
     |-- Reports/
     |-- Cache/
     `-- Status/
