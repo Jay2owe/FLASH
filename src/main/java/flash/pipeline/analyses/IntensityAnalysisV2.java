@@ -1,5 +1,6 @@
 package flash.pipeline.analyses;
 
+import flash.pipeline.FLASH_Pipeline;
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinConfigIO;
 import flash.pipeline.bin.ChannelIdentities;
@@ -273,6 +274,7 @@ public class IntensityAnalysisV2 implements Analysis {
             if (intensityStep == 0) {
                 // --- Primary dialog ---
                 PipelineDialog gd = new PipelineDialog("Fluorescence Intensity Analysis", PipelineDialog.Phase.ANALYSE);
+                gd.addAnalysisHelpHeader("Fluorescence Intensity Analysis", FLASH_Pipeline.IDX_INTENSITY);
                 final IntensityDialogBindings intensityBindings = new IntensityDialogBindings(channelNames.length);
                 addIntensitySetupControls(gd, directory, cfg, channelIdentities, roiSetNameList,
                         binarization, thresholds, roiZipSelected, channelNames,
@@ -293,7 +295,7 @@ public class IntensityAnalysisV2 implements Analysis {
                         + "3D Object Analysis. \"Basic background and noise removal\" "
                         + "applies a generic Median r=2 + Subtract Background rolling=50.");
 
-                gd.addHeader("Analysis Options");
+                gd.addSubHeader("Analysis Options");
                 intensityBindings.useDeconvolvedInputToggle =
                         gd.addToggle("Use deconvolved stacks if available", useDeconvolvedInput);
                 intensityBindings.roiAnalysisToggle = gd.addToggle("ROI Analysis", anyRois);
@@ -357,6 +359,7 @@ public class IntensityAnalysisV2 implements Analysis {
                 // --- Secondary dialog ---
                 PipelineDialog gd2 = new PipelineDialog("ROI and Threshold Settings", PipelineDialog.Phase.ANALYSE);
                 gd2.enableBackButton();
+                gd2.addAnalysisHelpHeader("Fluorescence Intensity Analysis", FLASH_Pipeline.IDX_INTENSITY);
 
                 // Decide which channels need user threshold input. A channel needs
                 // input only if binarisation is on AND either the user picked the

@@ -1,5 +1,6 @@
 package flash.pipeline.analyses;
 
+import flash.pipeline.FLASH_Pipeline;
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinConfigIO;
 import flash.pipeline.bin.BinField;
@@ -162,7 +163,8 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
         boolean hasExisting = !roiNames.isEmpty();
 
         PipelineDialog pd = new PipelineDialog("Draw & Save ROIs", PipelineDialog.Phase.SETUP);
-        pd.addHeader("ROI Set Selection");
+        pd.addAnalysisHelpHeader("Draw and Save ROIs", FLASH_Pipeline.IDX_DRAW_ROIS);
+        pd.addSubHeader("ROI Set Selection");
 
         ToggleSwitch createNewToggle = null;
         JComboBox<String> appendChoice = null;

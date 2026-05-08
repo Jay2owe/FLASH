@@ -1,5 +1,6 @@
 package flash.pipeline.analyses;
 
+import flash.pipeline.FLASH_Pipeline;
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinConfigIO;
 import flash.pipeline.bin.BinField;
@@ -613,6 +614,7 @@ public class ThreeDObjectAnalysis implements Analysis {
         while (!suppressDialogs && dialogStep >= 0) {
             if (dialogStep == 0) {
                 PipelineDialog gdOpts = new PipelineDialog("3D Object Analysis Options", PipelineDialog.Phase.ANALYSE);
+                gdOpts.addAnalysisHelpHeader("3D Object Analysis", FLASH_Pipeline.IDX_3D_OBJECT);
                 final ThreeDObjectDialogBindings objectBindings = new ThreeDObjectDialogBindings();
                 addThreeDObjectSetupControls(gdOpts, directory, cfg, channelIdentities,
                         Arrays.asList(roiSetNames), objectBindings,
@@ -624,7 +626,7 @@ public class ThreeDObjectAnalysis implements Analysis {
                                         objectBindings, selectedPresetName);
                             }
                         });
-                gdOpts.addHeader("Input");
+                gdOpts.addSubHeader("Input");
                 objectBindings.useDeconvolvedInputToggle =
                         gdOpts.addToggle("Use deconvolved stacks if available", useDeconvolvedInput);
 
@@ -714,7 +716,8 @@ public class ThreeDObjectAnalysis implements Analysis {
 
                 PipelineDialog gdPA = new PipelineDialog("Process Analysis", PipelineDialog.Phase.ANALYSE);
                 gdPA.enableBackButton();
-                gdPA.addHeader("Nuclear Marker");
+                gdPA.addAnalysisHelpHeader("3D Object Analysis", FLASH_Pipeline.IDX_3D_OBJECT);
+                gdPA.addSubHeader("Nuclear Marker");
                 String defaultNuclear = nuclearMarkerIndex >= 0 && nuclearMarkerIndex < names.length
                         ? names[nuclearMarkerIndex] : names[0];
                 gdPA.addChoice("Nuclear Marker Channel", names, defaultNuclear);

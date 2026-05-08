@@ -1,5 +1,6 @@
 package flash.pipeline.analyses;
 
+import flash.pipeline.FLASH_Pipeline;
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinConfigIO;
 import flash.pipeline.bin.BinField;
@@ -347,7 +348,8 @@ public class CreateBinFileAnalysis implements Analysis {
         int n = cfg.names.isEmpty() ? 3 : cfg.names.size();
         while (true) {
             PipelineDialog count = new PipelineDialog("Set Up Configuration - Channel Names");
-            count.addHeader("Channel Names");
+            count.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
+            count.addSubHeader("Channel Names");
             count.addNumericField("Number of channels", n, 0);
             if (!count.showDialog()) return false;
             n = (int) count.getNextNumber();
@@ -359,7 +361,8 @@ public class CreateBinFileAnalysis implements Analysis {
             padConfigToChannelCount(cfg, n);
             trimConfigToChannelCount(cfg, n);
             PipelineDialog names = new PipelineDialog("Set Up Configuration - Channel Names");
-            names.addHeader("Channel Names");
+            names.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
+            names.addSubHeader("Channel Names");
             names.addMessage("Name each image channel.");
             for (int i = 0; i < n; i++) {
                 names.addStringField("C" + (i + 1), cfg.names.get(i), 20);
@@ -378,7 +381,8 @@ public class CreateBinFileAnalysis implements Analysis {
         if (!canShowFilteredDialogs()) return false;
         ensureConfigHasChannels(cfg);
         PipelineDialog dialog = new PipelineDialog("Set Up Configuration - Channel Colours");
-        dialog.addHeader("Channel Colours");
+        dialog.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
+        dialog.addSubHeader("Channel Colours");
         for (int i = 0; i < cfg.names.size(); i++) {
             String defColor = i < cfg.colors.size() ? toLutName(cfg.colors.get(i)) : "Grays";
             dialog.addChoice("C" + (i + 1) + " (" + cfg.names.get(i) + ")", COLOR_OPTIONS, defColor);
@@ -396,7 +400,8 @@ public class CreateBinFileAnalysis implements Analysis {
         ensureConfigHasChannels(cfg);
         PipelineDialog dialog = new PipelineDialog("Set Up Configuration - Filter Presets");
         dialog.setModal(false);
-        dialog.addHeader("Filter Presets");
+        dialog.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
+        dialog.addSubHeader("Filter Presets");
         dialog.addHelpText("'Custom' will open the custom filter builder after QC image selection. Saved custom filters can be reused from this list on later runs.");
         for (int i = 0; i < cfg.names.size(); i++) {
             String defPreset = i < cfg.filterPresets.size() ? cfg.filterPresets.get(i) : FILTER_PRESETS[0];
@@ -419,7 +424,8 @@ public class CreateBinFileAnalysis implements Analysis {
         if (!canShowFilteredDialogs()) return false;
         ensureConfigHasChannels(cfg);
         PipelineDialog dialog = new PipelineDialog("Set Up Configuration - Segmentation Methods");
-        dialog.addHeader("Segmentation Methods");
+        dialog.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
+        dialog.addSubHeader("Segmentation Methods");
         boolean starDistAvailable = StarDistDetector.isAvailable();
         CellposeRuntime.Status cellposeStatus = CellposeRuntime.probeConfigured();
         boolean cellposeReady = cellposeStatus != null && cellposeStatus.ready;
@@ -652,7 +658,8 @@ public class CreateBinFileAnalysis implements Analysis {
             }
 
             PipelineDialog ovr = new PipelineDialog("Set Up Configuration", PipelineDialog.Phase.SETUP);
-            ovr.addHeader("Existing Configuration Found");
+            ovr.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
+            ovr.addSubHeader("Existing Configuration Found");
             ovr.addMessage("Configuration folder already exists at:\n" + binFolder.getAbsolutePath());
             final BinConfig existingCfgForPreset = existingCfg;
             addCreateBinSetupControls(ovr, directory, null,
@@ -749,7 +756,8 @@ public class CreateBinFileAnalysis implements Analysis {
         // ── Fresh creation: confirm ─────────────────────────────────────
         if (!overrideMode) {
             PipelineDialog confirm = new PipelineDialog("Set Up Configuration", PipelineDialog.Phase.SETUP);
-            confirm.addHeader("New Configuration");
+            confirm.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
+            confirm.addSubHeader("New Configuration");
             confirm.addMessage("No Configuration folder detected. Click OK to create one.");
             if (!confirm.showDialog()) return;
             if (!binFolder.isDirectory() && !binFolder.mkdirs() && !binFolder.isDirectory()) {
@@ -1154,7 +1162,8 @@ public class CreateBinFileAnalysis implements Analysis {
                                                boolean[][] initialSettings) {
         PipelineDialog fork = new PipelineDialog("Settings Mode");
         fork.enableBackButton();
-        fork.addHeader("Settings Mode");
+        fork.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
+        fork.addSubHeader("Settings Mode");
         fork.addMessage("Toggle ON the settings you want to adjust interactively per channel.");
 
         int n = channelNames.size();
@@ -1619,7 +1628,8 @@ public class CreateBinFileAnalysis implements Analysis {
             n = seriesInfo.sizeC;
         } else {
             PipelineDialog gdCount = new PipelineDialog("Set Up Configuration", PipelineDialog.Phase.SETUP);
-            gdCount.addHeader("Channel Setup");
+            gdCount.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
+            gdCount.addSubHeader("Channel Setup");
             gdCount.addNumericField("Number of channels", 3, 0);
             if (!gdCount.showDialog()) return null;
             n = (int) gdCount.getNextNumber();
@@ -1639,6 +1649,7 @@ public class CreateBinFileAnalysis implements Analysis {
             PipelineDialog pd = new PipelineDialog("Set Up Configuration - Channel Identity", PipelineDialog.Phase.SETUP);
             pd.setModal(false);
             if (existing == null) pd.enableBackButton();
+            pd.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
             boolean starDistAvailable = StarDistDetector.isAvailable();
             CellposeRuntime.Status cellposeStatus = CellposeRuntime.probeConfigured();
             boolean cellposeReady = cellposeStatus != null && cellposeStatus.ready;
@@ -1658,7 +1669,7 @@ public class CreateBinFileAnalysis implements Analysis {
                                     dialogDefaults, binBindings);
                         }
                     });
-            pd.addHeader("Antibody Names, Colors, Filters & Segmentation");
+            pd.addSubHeader("Antibody Names, Colors, Filters & Segmentation");
             pd.addMessage("Assign a name, pseudocolor, filter preset, and segmentation method for each channel.");
             pd.addHelpText("'Custom' will open the custom filter builder after QC image selection. Saved custom filters can be reused from this list on later runs.");
             JComboBox<String>[] segmentationChoices = new JComboBox[n];
@@ -1703,7 +1714,8 @@ public class CreateBinFileAnalysis implements Analysis {
                             dialogDefaults, binBindings);
                     // Go back to channel count
                     PipelineDialog gdCount2 = new PipelineDialog("Set Up Configuration");
-                    gdCount2.addHeader("Channel Setup");
+                    gdCount2.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
+                    gdCount2.addSubHeader("Channel Setup");
                     gdCount2.addNumericField("Number of channels", n, 0);
                     if (!gdCount2.showDialog()) return null;
                     n = (int) gdCount2.getNextNumber();
@@ -2341,7 +2353,8 @@ public class CreateBinFileAnalysis implements Analysis {
         lastWasBack = false;
         PipelineDialog pd = new PipelineDialog("Set Up Configuration - Analysis Scope", PipelineDialog.Phase.SETUP);
         if (allowBack) pd.enableBackButton();
-        pd.addHeader("Analysis Scope");
+        pd.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
+        pd.addSubHeader("Analysis Scope");
         pd.addMessage("Choose whether the analysis should use the full z-stack or a contiguous z-slice subset.");
         pd.addToggle(Z_SLICE_SCOPE_LABEL, cfg != null && cfg.usesZSliceSubset());
         pd.addHelpText("Default OFF analyses the full stack. When ON, every image series will be reviewed before the other QC stages.");
@@ -2908,7 +2921,8 @@ public class CreateBinFileAnalysis implements Analysis {
                     PipelineDialog pd = new PipelineDialog("Set Up Configuration - Z-Slice Subset");
                     pd.enableBackButton();
                     pd.setModal(false);
-                    pd.addHeader("Z-Slice Subset");
+                    pd.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
+                    pd.addSubHeader("Z-Slice Subset");
                     pd.addMessage("Image " + (idx + 1) + "/" + totalSeries + ": "
                             + seriesDisplayLabel(lifFile, meta));
                     pd.addMessage("Total z-slices: " + meta.nSlices);
@@ -3581,7 +3595,8 @@ public class CreateBinFileAnalysis implements Analysis {
                             "StarDist 3D Parameters \u2014 C" + channelNum + " (" + cfg.names.get(ch) + ")");
                     sdDialog.setModal(false);
                     sdDialog.enableBackButton();
-                    sdDialog.addHeader("Detection");
+                    sdDialog.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
+                    sdDialog.addSubHeader("Detection");
                     sdDialog.addMessage("Image " + (imgIdx + 1) + "/" + images.size() + ": " + imp.getTitle());
                     sdDialog.addMessage("The filtered channel is shown on the left (" + cfg.filterPresets.get(ch) + " filter).");
                     final JTextField probField = sdDialog.addNumericField("Probability Threshold", sdParams[0], 2);
@@ -3857,7 +3872,8 @@ public class CreateBinFileAnalysis implements Analysis {
                             "Cellpose Parameters \u2014 C" + channelNum + " (" + cfg.names.get(ch) + ")");
                     cpDialog.setModal(false);
                     cpDialog.enableBackButton();
-                    cpDialog.addHeader("Built-in Model");
+                    cpDialog.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
+                    cpDialog.addSubHeader("Built-in Model");
                     cpDialog.addMessage("Image " + (imgIdx + 1) + "/" + images.size() + ": " + imp.getTitle());
                     cpDialog.addMessage("The filtered channel is shown on the left (" + cfg.filterPresets.get(ch) + " filter).");
                     JComboBox<String> modelChoice = cpDialog.addChoice(
@@ -4294,7 +4310,8 @@ public class CreateBinFileAnalysis implements Analysis {
                         // Confirmation: particle size
                         PipelineDialog gdSize = new PipelineDialog("Particle Sizes \u2014 " + chLabel);
                         gdSize.enableBackButton();
-                        gdSize.addHeader("Particle Sizes (n Voxels)");
+                        gdSize.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
+                        gdSize.addSubHeader("Particle Sizes (n Voxels)");
                         gdSize.addNumericField("Min Size (n Voxels)", minSize, 0);
                         String maxStr = maxSize >= 99999999 ? "Infinity" : String.valueOf(maxSize);
                         gdSize.addStringField("Max Size (n Voxels)", maxStr, 15);
@@ -4628,7 +4645,8 @@ public class CreateBinFileAnalysis implements Analysis {
         while (true) {
             PipelineDialog dialog = new PipelineDialog(dialogTitle);
             dialog.enableBackButton();
-            dialog.addHeader(header);
+            dialog.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
+            dialog.addSubHeader(header);
             dialog.addMessage("Current saved threshold: " + thresholdTokenDisplay(persistedToken));
             if (readThreshold != null) {
                 dialog.addMessage("Read from image: " + formatThresholdValue(readThreshold));

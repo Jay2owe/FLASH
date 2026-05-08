@@ -5,6 +5,7 @@ import ij.ImagePlus;
 import ij.measure.Calibration;
 import ij.process.ImageProcessor;
 
+import flash.pipeline.FLASH_Pipeline;
 import flash.pipeline.analyses.wizard.SpatialAnalysisWizard;
 import flash.pipeline.analyses.wizard.SpatialPreset;
 import flash.pipeline.analyses.wizard.SpatialPresetIO;
@@ -286,6 +287,7 @@ public class SpatialAnalysis implements Analysis {
             boolean dialogDone = false;
             while (!dialogDone) {
             PipelineDialog opts = new PipelineDialog("Spatial Analysis Options", PipelineDialog.Phase.ANALYSE);
+            opts.addAnalysisHelpHeader("Spatial Analysis", FLASH_Pipeline.IDX_SPATIAL);
             final SpatialDialogBindings spatialBindings = new SpatialDialogBindings();
             addSpatialSetupControls(opts, directory, spatialBindings,
                     new SpatialConfigApplier() {
@@ -296,7 +298,7 @@ public class SpatialAnalysis implements Analysis {
                                     spatialBindings, selectedPresetName);
                         }
                     });
-            opts.addHeader("Spatial Distances");
+            opts.addSubHeader("Spatial Distances");
             spatialBindings.doDistancesToggle = opts.addToggle("Nearest neighbor distances", doDistances);
             opts.addHelpText("Computes 3D nearest neighbor distance between every channel pair.");
             spatialBindings.lineDistanceToggle = opts.addToggle("Line distance to drawn line ROI sets",

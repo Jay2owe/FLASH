@@ -1,5 +1,6 @@
 package flash.pipeline.analyses;
 
+import flash.pipeline.FLASH_Pipeline;
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinConfigIO;
 import flash.pipeline.bin.BinField;
@@ -798,7 +799,8 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
         final PipelineDialog pd = new PipelineDialog("Split and Merge Image Channels", PipelineDialog.Phase.SETUP);
 
         // ── Section: Input ──
-        pd.addHeader("Input");
+        pd.addAnalysisHelpHeader("Split and Merge Image Channels", FLASH_Pipeline.IDX_SPLIT_MERGE);
+        pd.addSubHeader("Input");
         final ToggleSwitch useDeconvToggle = pd.addToggle("Use deconvolved stacks if available",
                 useDeconvolvedInput);
 
