@@ -1,5 +1,6 @@
 package flash.pipeline.analyses;
 
+import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinField;
 import flash.pipeline.bin.BinSetupChooser;
 import flash.pipeline.bin.BinSetupDispatcher;
@@ -118,9 +119,57 @@ public class IntensityAnalysisV2Test {
                 missingFields.get());
     }
 
+    @Test
+    public void filterSummaryShowsNotNeededWhenNoThresholdAndNoBinarisation() throws Exception {
+        BinConfig cfg = intensityConfig("DAPI", "default");
+        String summary = invokeFilterSummaryLine(0, cfg,
+                new String[]{"DAPI"}, new String[]{"Bin filter"}, new boolean[]{false});
+
+        assertTrue(summary.contains("Threshold: not needed unless Binarise is enabled"));
+    }
+
+    @Test
+    public void filterSummaryShowsConfiguredNumericThresholdWhenBinarisationOff() throws Exception {
+        BinConfig cfg = intensityConfig("GFAP", "750");
+        String summary = invokeFilterSummaryLine(0, cfg,
+                new String[]{"GFAP"}, new String[]{"Bin filter"}, new boolean[]{false});
+
+        assertTrue(summary.contains("Threshold: 750 (from configuration; used if Binarise is enabled)"));
+        assertFalse(summary.contains("not needed"));
+    }
+
+    @Test
+    public void filterSummaryPromptsNextDialogForDefaultThresholdWhenBinarisationEnabled() throws Exception {
+        BinConfig cfg = intensityConfig("IBA1", "default");
+        String summary = invokeFilterSummaryLine(0, cfg,
+                new String[]{"IBA1"}, new String[]{"Bin filter"}, new boolean[]{true});
+
+        assertTrue(summary.contains("Threshold: Enter on next dialogue"));
+        assertFalse(summary.contains("not needed"));
+    }
+
     private static void installDispatcherChoice(final BinSetupChooser.Choice choice,
                                                 final AtomicInteger chooserCalls) throws Exception {
         installDispatcherChoice(choice, chooserCalls, null);
+    }
+
+    private static BinConfig intensityConfig(String channelName, String intensityThreshold) {
+        BinConfig cfg = new BinConfig();
+        cfg.channelNames.add(channelName);
+        cfg.channelIntensityThresholds.add(intensityThreshold);
+        cfg.channelFilterPresets.add("Default");
+        return cfg;
+    }
+
+    private static String invokeFilterSummaryLine(int channelIndex,
+                                                  BinConfig cfg,
+                                                  String[] channelNames,
+                                                  String[] filterSources,
+                                                  boolean[] binarization) throws Exception {
+        Method method = IntensityAnalysisV2.class.getDeclaredMethod("buildFilterSummaryLine",
+                int.class, BinConfig.class, String[].class, String[].class, boolean[].class);
+        method.setAccessible(true);
+        return (String) method.invoke(null, channelIndex, cfg, channelNames, filterSources, binarization);
     }
 
     private static void installDispatcherChoice(final BinSetupChooser.Choice choice,

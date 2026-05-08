@@ -1530,11 +1530,44 @@ public class IntensityAnalysisV2 implements Analysis {
         boolean needsBinarizationThreshold = binarization != null
                 && c < binarization.length
                 && binarization[c];
-        String thrText = needsBinarizationThreshold
-                ? "Enter on next dialogue"
-                : "not needed unless Binarise is enabled";
+        String thrText = describeConfiguredThreshold(c, cfg, useBin, needsBinarizationThreshold);
         return channelNames[c] + ":   Filter: " + filterText
                 + "<br>Threshold: " + thrText;
+    }
+
+    private static String describeConfiguredThreshold(int c, BinConfig cfg, boolean useBin,
+                                                      boolean needsBinarizationThreshold) {
+        String configuredThreshold = configuredNumericThreshold(c, cfg);
+        if (needsBinarizationThreshold) {
+            if (useBin && configuredThreshold != null) {
+                return configuredThreshold + " (from configuration)";
+            }
+            return "Enter on next dialogue";
+        }
+        if (configuredThreshold != null) {
+            return configuredThreshold + " (from configuration; used if Binarise is enabled)";
+        }
+        return "not needed unless Binarise is enabled";
+    }
+
+    private static String configuredNumericThreshold(int c, BinConfig cfg) {
+        if (cfg == null || c < 0 || c >= cfg.channelIntensityThresholds.size()) {
+            return null;
+        }
+        String threshold = cfg.channelIntensityThresholds.get(c);
+        if (threshold == null) {
+            return null;
+        }
+        String trimmed = threshold.trim();
+        if (trimmed.isEmpty() || "default".equalsIgnoreCase(trimmed)) {
+            return null;
+        }
+        try {
+            double parsed = Double.parseDouble(trimmed);
+            return !Double.isNaN(parsed) && !Double.isInfinite(parsed) ? trimmed : null;
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     private static String savedFilterChoiceLabel(int c, BinConfig cfg) {
