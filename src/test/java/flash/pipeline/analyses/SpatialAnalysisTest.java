@@ -595,6 +595,73 @@ public class SpatialAnalysisTest {
     }
 
     @Test
+    public void execute_reusesExisting3DObjectOutputsWhenSelected() throws Exception {
+        File root = temp.newFolder("spatial-reuse-existing-object-data");
+        File objectsDir = objectsDir(root);
+
+        String morph2D = "Morph_Area_um2,Morph_Perimeter_um,Morph_Circularity,Morph_Solidity,"
+                + "Morph_AspectRatio,Morph_Feret_um,Morph_Extent,Morph_ConvexHullArea_um2";
+        String morph3D = "Morph_Sphericity,Morph_Compactness,Morph_Elongation,Morph_Flatness,"
+                + "Morph_Spareness,Morph_MajorRadius_um,Morph_Feret3D_um,"
+                + "Morph_Moment1,Morph_Moment2,Morph_Moment3,Morph_Moment4,Morph_Moment5,"
+                + "Morph_DistCenter_Min_um,Morph_DistCenter_Max_um,"
+                + "Morph_DistCenter_Mean_um,Morph_DistCenter_SD_um";
+        String composites = "Morph_RI,Morph_SRI,Morph_PB,Morph_MP,Morph_VSD";
+        String population = "Morph_CMS,Morph_SMSD,Morph_IMDI";
+        String spatialMorph = "Morph_TDR,Morph_FEV_Mag";
+        String commonMeasurements = "SCN,Animal Name,Hemisphere,ROI,Label,Volume (micron^3),"
+                + "Surface (micron^2),IntDen,Mean,XM,YM,ZM,Length";
+
+        writeChannel(objectsDir, "A.csv",
+                commonMeasurements
+                        + ",Colocalisation with B,A_VolColoc30_B,A_VolContains30_B,"
+                        + "A_DistToClosest_B,A_ClosestTo_B,A_CPCColoc_B,A_CPCContains_B,"
+                        + "A_CPCTargetsHit,A_CPCPattern," + morph2D + "," + morph3D + ","
+                        + composites + "," + population + "," + spatialMorph,
+                "1,Mouse1,LH,SCN,1,10,5,100,20,0,0,0,123,55,1,7,99,4,1,1,1,B,"
+                        + "11,12,0.9,0.8,1.2,6,0.7,13,"
+                        + "0.42,0.2,1.3,1.1,0.8,4,9,0.1,0.2,0.3,0.4,0.5,1,2,1.5,0.2,"
+                        + "2.3,0.4,0.5,0.6,0.7,0.8,1.1,0.2,1.3,1.4");
+        writeChannel(objectsDir, "B.csv",
+                commonMeasurements
+                        + ",Colocalisation with A,B_VolColoc30_A,B_VolContains30_A,"
+                        + "B_DistToClosest_A,B_ClosestTo_A,B_CPCColoc_A,B_CPCContains_A,"
+                        + "B_CPCTargetsHit,B_CPCPattern," + morph2D + "," + morph3D + ","
+                        + composites + "," + population + "," + spatialMorph,
+                "1,Mouse1,LH,SCN,1,12,6,120,22,3,4,0,456,50,1,8,88,5,1,1,1,A,"
+                        + "21,22,0.8,0.7,1.1,5,0.6,23,"
+                        + "0.52,0.3,1.4,1.2,0.7,5,10,0.2,0.3,0.4,0.5,0.6,1,2,1.5,0.2,"
+                        + "2.4,0.5,0.6,0.7,0.8,0.9,1.2,0.3,1.4,1.5");
+
+        SpatialAnalysisWizard.DerivedConfig config = new SpatialAnalysisWizard.DerivedConfig();
+        config.doDistances = true;
+        config.doVolColoc = true;
+        config.doCpc = true;
+        config.do2DMorphology = true;
+        config.do3DMorphology = true;
+        config.doCompositeIndices = true;
+        config.doPopMorphometrics = true;
+        config.doSpatialMorphometrics = true;
+
+        SpatialAnalysis sa = new SpatialAnalysis();
+        sa.setSuppressDialogs(true);
+        sa.setWizardConfig(config);
+        sa.execute(root.getAbsolutePath());
+
+        ChannelData a = CsvTableIO.loadChannelCsv(new File(objectsDir, "A.csv"), "A");
+        ChannelData b = CsvTableIO.loadChannelCsv(new File(objectsDir, "B.csv"), "B");
+        assertNotNull(a);
+        assertNotNull(b);
+        assertEquals("99", a.get(0, "A_DistToClosest_B"));
+        assertEquals("7", a.get(0, "A_VolContains30_B"));
+        assertEquals("1", a.get(0, "A_CPCColoc_B"));
+        assertEquals("123", a.get(0, "Length"));
+        assertEquals("0.42", a.get(0, "Morph_Sphericity"));
+        assertEquals("88", b.get(0, "B_DistToClosest_A"));
+        assertFalse(new File(root, "FLASH/06 - Spatial Analysis/Morphometry").exists());
+    }
+
+    @Test
     public void reorderManagedSpatialColumns_groupsByAnalysisPhaseAndPartner() throws Exception {
         File root = temp.newFolder("spatial-column-order");
         File objectsDir = objectsDir(root);

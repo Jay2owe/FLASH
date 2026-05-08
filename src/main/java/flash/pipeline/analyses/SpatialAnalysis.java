@@ -86,6 +86,50 @@ public class SpatialAnalysis implements Analysis {
     private static final String YM_UM = "YM_um";
     private static final String ZM_UM = "ZM_um";
     private static final long CPC_MEMORY_SAFETY_MULTIPLIER = 3L;
+    private static final String[] MORPH_2D_COLUMNS = {
+            "Morph_Area_um2",
+            "Morph_Perimeter_um",
+            "Morph_Circularity",
+            "Morph_Solidity",
+            "Morph_AspectRatio",
+            "Morph_Feret_um",
+            "Morph_Extent",
+            "Morph_ConvexHullArea_um2"
+    };
+    private static final String[] MORPH_3D_COLUMNS = {
+            "Morph_Sphericity",
+            "Morph_Compactness",
+            "Morph_Elongation",
+            "Morph_Flatness",
+            "Morph_Spareness",
+            "Morph_MajorRadius_um",
+            "Morph_Feret3D_um",
+            "Morph_Moment1",
+            "Morph_Moment2",
+            "Morph_Moment3",
+            "Morph_Moment4",
+            "Morph_Moment5",
+            "Morph_DistCenter_Min_um",
+            "Morph_DistCenter_Max_um",
+            "Morph_DistCenter_Mean_um",
+            "Morph_DistCenter_SD_um"
+    };
+    private static final String[] MORPH_COMPOSITE_COLUMNS = {
+            "Morph_RI",
+            "Morph_SRI",
+            "Morph_PB",
+            "Morph_MP",
+            "Morph_VSD"
+    };
+    private static final String[] MORPH_POPULATION_COLUMNS = {
+            "Morph_CMS",
+            "Morph_SMSD",
+            "Morph_IMDI"
+    };
+    private static final String[] MORPH_SPATIAL_COLUMNS = {
+            "Morph_TDR",
+            "Morph_FEV_Mag"
+    };
 
     private Map<String, Double> markerThresholds = new HashMap<String, Double>();
     private final Map<String, ScnParityFallbackSummary> scnParityFallbackCache =
@@ -108,6 +152,295 @@ public class SpatialAnalysis implements Analysis {
         PROCEED,
         RECONFIGURE,
         ABORT
+    }
+
+    static final class SpatialObjectDataAvailability {
+        private final Map<String, ChannelData> channels;
+        private final List<String> channelNames;
+        private final Map<String, Integer> objectRows = new LinkedHashMap<String, Integer>();
+        private final Set<String> objectSizeChannels = new LinkedHashSet<String>();
+        private final Set<String> processLengthChannels = new LinkedHashSet<String>();
+        private final Set<String> morph2DChannels = new LinkedHashSet<String>();
+        private final Set<String> morph3DChannels = new LinkedHashSet<String>();
+        private final Set<String> morphCompositeChannels = new LinkedHashSet<String>();
+        private final Set<String> morphPopulationChannels = new LinkedHashSet<String>();
+        private final Set<String> morphSpatialChannels = new LinkedHashSet<String>();
+        private final Set<String> distancePairs = new LinkedHashSet<String>();
+        private final Set<String> volumetricOverlapPairs = new LinkedHashSet<String>();
+        private final Set<String> volumetricFlagPairs = new LinkedHashSet<String>();
+        private final Set<String> volumetricContainsPairs = new LinkedHashSet<String>();
+        private final Set<String> cpcPairs = new LinkedHashSet<String>();
+
+        private SpatialObjectDataAvailability(Map<String, ChannelData> channels, List<String> channelNames) {
+            this.channels = channels;
+            this.channelNames = channelNames == null
+                    ? new ArrayList<String>()
+                    : new ArrayList<String>(channelNames);
+        }
+
+        static SpatialObjectDataAvailability detect(Map<String, ChannelData> channels,
+                                                    List<String> channelNames) {
+            SpatialObjectDataAvailability detected =
+                    new SpatialObjectDataAvailability(channels, channelNames);
+            detected.scan();
+            return detected;
+        }
+
+        private void scan() {
+            if (channels == null) return;
+            for (String channelName : channelNames) {
+                ChannelData cd = channels.get(channelName);
+                if (cd == null) continue;
+                objectRows.put(channelName, Integer.valueOf(cd.rows.size()));
+                if (hasAnyVolumeColumn(cd) && hasAnySurfaceColumn(cd)) objectSizeChannels.add(channelName);
+                if (hasProcessLengthColumn(cd)) processLengthChannels.add(channelName);
+                if (hasUsableColumns(cd, MORPH_2D_COLUMNS)) morph2DChannels.add(channelName);
+                if (hasUsableColumns(cd, MORPH_3D_COLUMNS)) morph3DChannels.add(channelName);
+                if (hasUsableColumns(cd, MORPH_COMPOSITE_COLUMNS)) morphCompositeChannels.add(channelName);
+                if (hasUsableColumns(cd, MORPH_POPULATION_COLUMNS)) morphPopulationChannels.add(channelName);
+                if (hasUsableColumns(cd, MORPH_SPATIAL_COLUMNS)) morphSpatialChannels.add(channelName);
+            }
+
+            for (String source : channelNames) {
+                ChannelData cd = channels.get(source);
+                if (cd == null) continue;
+                for (String partner : channelNames) {
+                    if (source.equals(partner)) continue;
+                    String key = directedKey(source, partner);
+                    if (hasDirectedDistance(source, partner)) distancePairs.add(key);
+                    if (findVolOverlapColumn(cd, source, partner) != null) volumetricOverlapPairs.add(key);
+                    if (hasAnyUsableColumnWithPrefixSuffix(cd, source + "_VolColoc", "_" + partner)) {
+                        volumetricFlagPairs.add(key);
+                    }
+                    if (hasAnyUsableColumnWithPrefixSuffix(cd, source + "_VolContains", "_" + partner)) {
+                        volumetricContainsPairs.add(key);
+                    }
+                    if (hasDirectedCpc(source, partner)) cpcPairs.add(key);
+                }
+            }
+        }
+
+        void logDetectedData() {
+            IJ.log("Detected reusable 3D object output data: " + detectedSummary());
+        }
+
+        String distanceHelperText() {
+            if (!distancePairs.isEmpty()) {
+                return "Detected existing nearest-neighbor distance columns for "
+                        + pairCount(distancePairs) + " channel pair(s). Matching pairs will be reused.";
+            }
+            return "Loaded 3D Object Analysis object rows (" + objectCountSummary()
+                    + "). Selected missing distance columns will be computed.";
+        }
+
+        String colocalizationHelperText() {
+            List<String> parts = new ArrayList<String>();
+            if (!volumetricOverlapPairs.isEmpty()) {
+                parts.add("volumetric overlap percentages");
+            }
+            if (!volumetricFlagPairs.isEmpty() || !volumetricContainsPairs.isEmpty()) {
+                parts.add("thresholded volumetric columns");
+            }
+            if (!cpcPairs.isEmpty()) {
+                parts.add("CPC contact columns");
+            }
+            if (parts.isEmpty()) {
+                return "No saved colocalization/contact columns were detected. Selected outputs will be computed.";
+            }
+            return "Detected saved " + joinSummary(parts)
+                    + ". Existing matching columns will be reused; missing selected outputs will be computed.";
+        }
+
+        String morphometryHelperText() {
+            List<String> parts = new ArrayList<String>();
+            if (!objectSizeChannels.isEmpty()) parts.add("3D object volume/surface data");
+            if (!morph2DChannels.isEmpty()) parts.add("2D morphology columns");
+            if (!morph3DChannels.isEmpty()) parts.add("3D shape columns");
+            if (!morphCompositeChannels.isEmpty()) parts.add("complex shape columns");
+            if (!morphPopulationChannels.isEmpty()) parts.add("population morphometric columns");
+            if (!morphSpatialChannels.isEmpty()) parts.add("spatial-morphometric columns");
+            if (!processLengthChannels.isEmpty()) parts.add("process length data");
+            if (parts.isEmpty()) {
+                return "No reusable morphometric columns were detected. Selected morphology outputs will be computed.";
+            }
+            return "Detected " + joinSummary(parts)
+                    + ". Existing columns will be reused; selected missing morphometry will be computed.";
+        }
+
+        boolean hasObjectSizeDataForAllChannels(List<String> names) {
+            return allChannelsHave(objectSizeChannels, names);
+        }
+
+        boolean hasProcessLengthData() {
+            return !processLengthChannels.isEmpty();
+        }
+
+        boolean hasDirectedVolumetricOverlap(String source, String partner) {
+            return volumetricOverlapPairs.contains(directedKey(source, partner));
+        }
+
+        boolean hasVolumetricPair(String a, String b, int thresholdA, int thresholdB) {
+            return hasDirectedVolumetricFlag(a, b, thresholdA)
+                    && hasDirectedVolumetricFlag(b, a, thresholdB)
+                    && hasDirectedVolumetricContains(a, b, thresholdB)
+                    && hasDirectedVolumetricContains(b, a, thresholdA);
+        }
+
+        boolean hasDistancePair(String a, String b) {
+            return distancePairs.contains(directedKey(a, b))
+                    && distancePairs.contains(directedKey(b, a));
+        }
+
+        boolean hasCompleteCpcForAllChannels(List<String> names) {
+            if (names == null || names.size() < 2) return false;
+            for (String source : names) {
+                ChannelData cd = channels.get(source);
+                if (!hasUsableColumn(cd, source + "_CPCTargetsHit")
+                        || !hasUsableColumn(cd, source + "_CPCPattern")) {
+                    return false;
+                }
+                for (String partner : names) {
+                    if (source.equals(partner)) continue;
+                    if (!cpcPairs.contains(directedKey(source, partner))) return false;
+                }
+            }
+            return true;
+        }
+
+        boolean has2DMorphologyForAllChannels(List<String> names) {
+            return allChannelsHave(morph2DChannels, names);
+        }
+
+        boolean has3DMorphologyForAllChannels(List<String> names) {
+            return allChannelsHave(morph3DChannels, names);
+        }
+
+        boolean hasCompositeMorphologyForAllChannels(List<String> names) {
+            return allChannelsHave(morphCompositeChannels, names);
+        }
+
+        boolean hasPopulationMorphometricsForAllChannels(List<String> names) {
+            return allChannelsHave(morphPopulationChannels, names);
+        }
+
+        boolean hasSpatialMorphometricsForAllChannels(List<String> names) {
+            return allChannelsHave(morphSpatialChannels, names);
+        }
+
+        private boolean hasDirectedDistance(String source, String partner) {
+            ChannelData cd = channels.get(source);
+            return hasUsableColumn(cd, source + "_DistToClosest_" + partner)
+                    && hasUsableColumn(cd, source + "_ClosestTo_" + partner);
+        }
+
+        private boolean hasDirectedCpc(String source, String partner) {
+            ChannelData cd = channels.get(source);
+            return hasUsableColumn(cd, source + "_CPCColoc_" + partner)
+                    && hasUsableColumn(cd, source + "_CPCContains_" + partner);
+        }
+
+        private boolean hasDirectedVolumetricFlag(String source, String partner, int threshold) {
+            ChannelData cd = channels.get(source);
+            return hasUsableColumn(cd, source + "_VolColoc" + threshold + "_" + partner);
+        }
+
+        private boolean hasDirectedVolumetricContains(String source, String partner, int threshold) {
+            ChannelData cd = channels.get(source);
+            return hasUsableColumn(cd, source + "_VolContains" + threshold + "_" + partner);
+        }
+
+        private static boolean hasAnyVolumeColumn(ChannelData cd) {
+            if (cd == null) return false;
+            for (String h : cd.header) {
+                if (h.startsWith("Volume (") && h.contains("^3") && hasUsableColumn(cd, h)) return true;
+            }
+            return false;
+        }
+
+        private static boolean hasAnySurfaceColumn(ChannelData cd) {
+            if (cd == null) return false;
+            for (String h : cd.header) {
+                if (h.startsWith("Surface (") && h.contains("^2") && hasUsableColumn(cd, h)) return true;
+            }
+            return false;
+        }
+
+        private static boolean hasProcessLengthColumn(ChannelData cd) {
+            return hasUsableColumn(cd, "Length")
+                    || hasUsableColumn(cd, "Process Length")
+                    || hasUsableColumn(cd, "Process_Length");
+        }
+
+        private static boolean hasAnyUsableColumnWithPrefixSuffix(ChannelData cd,
+                                                                  String prefix,
+                                                                  String suffix) {
+            if (cd == null) return false;
+            for (String col : cd.header) {
+                if (col.startsWith(prefix) && col.endsWith(suffix)
+                        && hasUsableColumn(cd, col)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static boolean allChannelsHave(Set<String> detectedChannels, List<String> names) {
+            if (names == null || names.isEmpty()) return false;
+            for (String name : names) {
+                if (!detectedChannels.contains(name)) return false;
+            }
+            return true;
+        }
+
+        private String detectedSummary() {
+            List<String> parts = new ArrayList<String>();
+            parts.add("object rows " + objectCountSummary());
+            if (hasObjectSizeDataForAllChannels(channelNames)) parts.add("volume/surface columns");
+            if (!volumetricOverlapPairs.isEmpty()) parts.add("volumetric overlap");
+            if (!cpcPairs.isEmpty()) parts.add("CPC");
+            if (!morph2DChannels.isEmpty()) parts.add("2D morphology");
+            if (!morph3DChannels.isEmpty()) parts.add("3D shape");
+            if (!morphCompositeChannels.isEmpty()) parts.add("complex shape");
+            if (!morphPopulationChannels.isEmpty()) parts.add("population morphometrics");
+            if (!morphSpatialChannels.isEmpty()) parts.add("spatial morphometrics");
+            if (!processLengthChannels.isEmpty()) parts.add("process length");
+            return joinSummary(parts);
+        }
+
+        private String objectCountSummary() {
+            if (objectRows.isEmpty()) return "none";
+            List<String> parts = new ArrayList<String>();
+            for (Map.Entry<String, Integer> entry : objectRows.entrySet()) {
+                parts.add(entry.getKey() + "=" + entry.getValue());
+            }
+            return joinSummary(parts);
+        }
+
+        private static int pairCount(Set<String> directedPairs) {
+            Set<String> unique = new LinkedHashSet<String>();
+            for (String key : directedPairs) {
+                int idx = key.indexOf("->");
+                if (idx < 0) continue;
+                String a = key.substring(0, idx);
+                String b = key.substring(idx + 2);
+                unique.add(a.compareTo(b) <= 0 ? a + "<->" + b : b + "<->" + a);
+            }
+            return unique.size();
+        }
+
+        private static String directedKey(String source, String partner) {
+            return source + "->" + partner;
+        }
+
+        private static String joinSummary(List<String> parts) {
+            if (parts == null || parts.isEmpty()) return "none";
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < parts.size(); i++) {
+                if (i > 0) sb.append(", ");
+                sb.append(parts.get(i));
+            }
+            return sb.toString();
+        }
     }
 
     @Override
@@ -234,6 +567,9 @@ public class SpatialAnalysis implements Analysis {
         appendCalibratedCentroids(channels, cal);
 
         List<String> channelNames = new ArrayList<String>(channels.keySet());
+        SpatialObjectDataAvailability existingObjectData =
+                SpatialObjectDataAvailability.detect(channels, channelNames);
+        existingObjectData.logDetectedData();
         File linesDir = new File(directory, "Data Analysis" + File.separator + "Lines");
         List<String> availableLineSets = lineSetNames(linesDir);
         boolean hasLineRoiSets = !availableLineSets.isEmpty();
@@ -301,6 +637,7 @@ public class SpatialAnalysis implements Analysis {
             opts.addSubHeader("Spatial Distances");
             spatialBindings.doDistancesToggle = opts.addToggle("Nearest neighbor distances", doDistances);
             opts.addHelpText("Computes 3D nearest neighbor distance between every channel pair.");
+            opts.addHelpText(existingObjectData.distanceHelperText());
             spatialBindings.lineDistanceToggle = opts.addToggle("Line distance to drawn line ROI sets",
                     doLineDistance && hasLineRoiSets);
             if (!hasLineRoiSets) {
@@ -338,6 +675,7 @@ public class SpatialAnalysis implements Analysis {
             spatialBindings.doCpcToggle = opts.addToggle("CPC centroid coincidence", doCpc);
             opts.addHelpText("Centroid-in-object colocalization from saved label images. "
                     + "Skips computation if CPC columns already exist from 3D Object Analysis.");
+            opts.addHelpText(existingObjectData.colocalizationHelperText());
 
             opts.beginAdvancedSection("spatial");
             opts.addHeader("Voronoi Tessellation");
@@ -347,7 +685,8 @@ public class SpatialAnalysis implements Analysis {
             opts.endAdvancedSection();
 
             addMorphometricControls(opts, spatialBindings, doMorphology, do3DShapeFeatures,
-                    doCompositeIndices, doPopMorphometrics, doSpatialMorphometrics);
+                    doCompositeIndices, doPopMorphometrics, doSpatialMorphometrics,
+                    existingObjectData);
 
             opts.addHeader("Cell Phenotyping");
             spatialBindings.doPhenotypingToggle = opts.addToggle("K-means clustering", doPhenotyping);
@@ -406,11 +745,36 @@ public class SpatialAnalysis implements Analysis {
             }
         }
 
+        if (doPopMorphometrics
+                && existingObjectData.hasPopulationMorphometricsForAllChannels(channelNames)) {
+            IJ.log("--- Reusing existing population morphometric columns; skipping population scoring ---");
+            doPopMorphometrics = false;
+        }
+        if (doSpatialMorphometrics
+                && existingObjectData.hasSpatialMorphometricsForAllChannels(channelNames)) {
+            IJ.log("--- Reusing existing spatial-morphometric columns; skipping spatial morphometrics ---");
+            doSpatialMorphometrics = false;
+        }
         if (doPopMorphometrics) {
             doCompositeIndices = true;
         }
         if (doCompositeIndices || doSpatialMorphometrics) {
             do3DShapeFeatures = true;
+        }
+        if (doMorphology && existingObjectData.has2DMorphologyForAllChannels(channelNames)) {
+            IJ.log("--- Reusing existing 2D morphology columns; skipping 2D morphology extraction ---");
+            doMorphology = false;
+        }
+        if (do3DShapeFeatures
+                && existingObjectData.has3DMorphologyForAllChannels(channelNames)
+                && (!doCompositeIndices
+                || existingObjectData.hasCompositeMorphologyForAllChannels(channelNames))) {
+            IJ.log("--- Reusing existing 3D morphometry columns; skipping 3D shape extraction ---");
+            if (doCompositeIndices) {
+                IJ.log("--- Reusing existing complex shape columns; skipping composite shape derivation ---");
+            }
+            do3DShapeFeatures = false;
+            doCompositeIndices = false;
         }
 
         RuntimeDependencyAction dependencyAction =
@@ -420,26 +784,50 @@ public class SpatialAnalysis implements Analysis {
         }
 
         if (doVolumetric) {
-            refreshVolumetricColocFlags(channels, channelNames);
+            refreshVolumetricColocFlags(channels, channelNames, existingObjectData);
+            existingObjectData = SpatialObjectDataAvailability.detect(channels, channelNames);
         }
 
         if (doDistances || doVolumetric) {
-            IJ.log("--- Computing inter-marker nearest neighbor distances ---");
+            IJ.log("--- Computing/reusing inter-marker nearest neighbor distances ---");
             int totalPairs = (channelNames.size() * (channelNames.size() - 1)) / 2;
             int pairCount = 1;
             for (int a = 0; a < channelNames.size(); a++) {
                 for (int b = a + 1; b < channelNames.size(); b++) {
                     String nameA = channelNames.get(a);
                     String nameB = channelNames.get(b);
-                    IJ.log("  Pair [" + (pairCount++) + "/" + totalPairs + "]: " + nameA + " <-> " + nameB);
+                    int currentPair = pairCount++;
+                    boolean needsDistances = doDistances
+                            && !existingObjectData.hasDistancePair(nameA, nameB);
+                    boolean needsVolumetric = doVolumetric
+                            && !existingObjectData.hasVolumetricPair(nameA, nameB,
+                            (int) getThreshold(nameA), (int) getThreshold(nameB));
+                    if (!needsDistances && !needsVolumetric) {
+                        String reuseReason = doDistances && doVolumetric
+                                ? "reusing existing distance/volumetric columns"
+                                : (doDistances ? "reusing existing distance columns"
+                                : "reusing existing volumetric columns");
+                        IJ.log("  Pair [" + currentPair + "/" + totalPairs + "]: " + nameA + " <-> " + nameB
+                                + " (" + reuseReason + ")");
+                        continue;
+                    }
+                    String reuseNote = "";
+                    if (doDistances && !needsDistances) {
+                        reuseNote += " (distance columns already present)";
+                    }
+                    if (doVolumetric && !needsVolumetric) {
+                        reuseNote += " (volumetric columns already present)";
+                    }
+                    IJ.log("  Pair [" + currentPair + "/" + totalPairs + "]: " + nameA + " <-> " + nameB
+                            + reuseNote);
                     computeInterMarkerDistances(channels.get(nameA), channels.get(nameB), cal,
-                            doVolumetric);
+                            needsVolumetric);
                 }
             }
         }
 
         if (doCpc) {
-            runCpcIfNeeded(directory, channels, channelNames);
+            runCpcIfNeeded(directory, channels, channelNames, existingObjectData);
         }
 
         reorderManagedSpatialColumns(channels, channelNames);
@@ -967,16 +1355,21 @@ public class SpatialAnalysis implements Analysis {
         IJ.log("  Migrated column: " + oldCol + " -> " + newCol);
     }
 
-    private void refreshVolumetricColocFlags(Map<String, ChannelData> channels, List<String> channelNames) {
+    private void refreshVolumetricColocFlags(Map<String, ChannelData> channels, List<String> channelNames,
+                                             SpatialObjectDataAvailability detectedData) {
         for (String source : channelNames) {
             ChannelData cd = channels.get(source);
             if (cd == null) continue;
             double threshold = getThreshold(source);
             for (String partner : channelNames) {
                 if (source.equals(partner)) continue;
+                String colocCol = volColocCol(source, partner);
+                if (detectedData != null && hasUsableColumn(cd, colocCol)) {
+                    IJ.log("  Reusing existing volumetric colocalization flag: " + colocCol);
+                    continue;
+                }
                 String overlapCol = findVolOverlapColumn(cd, source, partner);
                 if (overlapCol == null) continue;
-                String colocCol = volColocCol(source, partner);
                 cd.addColumn(colocCol);
                 for (int row = 0; row < cd.rows.size(); row++) {
                     double overlap = cd.getDouble(row, overlapCol);
@@ -986,21 +1379,23 @@ public class SpatialAnalysis implements Analysis {
         }
     }
 
-    private String findVolOverlapColumn(ChannelData cd, String source, String partner) {
+    private static String findVolOverlapColumn(ChannelData cd, String source, String partner) {
+        if (cd == null) return null;
         String legacy = "Colocalisation with " + partner;
-        if (cd.colIdx.containsKey(legacy)) {
+        if (hasUsableColumn(cd, legacy)) {
             return legacy;
         }
         String prefix = source + "_VolOverlap";
         String suffix = "_" + partner;
         for (String col : cd.header) {
-            if (col.startsWith(prefix) && col.endsWith(suffix)) {
+            if (col.startsWith(prefix) && col.endsWith(suffix) && hasUsableColumn(cd, col)) {
                 return col;
             }
         }
         prefix = source + "_VolColoc";
         for (String col : cd.header) {
-            if (col.startsWith(prefix) && col.endsWith(suffix) && !looksBinaryNumericColumn(cd, col)) {
+            if (col.startsWith(prefix) && col.endsWith(suffix) && hasUsableColumn(cd, col)
+                    && !looksBinaryNumericColumn(cd, col)) {
                 return col;
             }
         }
@@ -1011,7 +1406,7 @@ public class SpatialAnalysis implements Analysis {
         return source + "_VolColoc" + (int) getThreshold(source) + "_" + partner;
     }
 
-    private String extractVolumetricPartner(String col, String source, String token) {
+    private static String extractVolumetricPartner(String col, String source, String token) {
         String prefix = source + token;
         if (!col.startsWith(prefix)) return null;
         int rest = prefix.length();
@@ -1020,7 +1415,7 @@ public class SpatialAnalysis implements Analysis {
         return col.substring(rest + 1);
     }
 
-    private boolean looksBinaryNumericColumn(ChannelData cd, String colName) {
+    private static boolean looksBinaryNumericColumn(ChannelData cd, String colName) {
         if (!cd.colIdx.containsKey(colName)) return false;
         for (int row = 0; row < cd.rows.size(); row++) {
             String raw = cd.get(row, colName);
@@ -1344,14 +1739,12 @@ public class SpatialAnalysis implements Analysis {
      * If CPC columns are missing from the object CSVs, compute them retroactively
      * by loading saved label images from the object image-output folders and running CPC.
      */
-    private void runCpcIfNeeded(String directory, Map<String, ChannelData> channels, List<String> channelNames) {
+    private void runCpcIfNeeded(String directory, Map<String, ChannelData> channels, List<String> channelNames,
+                                SpatialObjectDataAvailability detectedData) {
         if (channelNames.size() < 2) return;
 
-        // Check if CPC columns already exist (from 3D Object Analysis)
-        ChannelData first = channels.get(channelNames.get(0));
-        String checkCol = channelNames.get(0) + "_CPCColoc_" + channelNames.get(1);
-        if (first.colIdx.containsKey(checkCol)) {
-            IJ.log("--- CPC columns already present, skipping retroactive computation ---");
+        if (detectedData != null && detectedData.hasCompleteCpcForAllChannels(channelNames)) {
+            IJ.log("--- Reusing existing CPC columns from 3D Object Analysis; skipping retroactive computation ---");
             return;
         }
 
@@ -2646,16 +3039,13 @@ public class SpatialAnalysis implements Analysis {
             String channelName = entry.getKey();
             IJ.log("  [" + (channelCounter++) + "/" + totalChannels + "] Morphology: " + channelName);
             ChannelData cd = entry.getValue();
+            if (hasUsableColumns(cd, MORPH_2D_COLUMNS)) {
+                IJ.log("  " + channelName + ": reusing existing 2D morphology columns");
+                continue;
+            }
 
             // Add morphology columns
-            cd.addColumn("Morph_Area_um2");
-            cd.addColumn("Morph_Perimeter_um");
-            cd.addColumn("Morph_Circularity");
-            cd.addColumn("Morph_Solidity");
-            cd.addColumn("Morph_AspectRatio");
-            cd.addColumn("Morph_Feret_um");
-            cd.addColumn("Morph_Extent");
-            cd.addColumn("Morph_ConvexHullArea_um2");
+            for (String column : MORPH_2D_COLUMNS) cd.addColumn(column);
 
             // Per-channel morphology CSV
             List<String> morphHeader = Arrays.asList(
@@ -2766,6 +3156,24 @@ public class SpatialAnalysis implements Analysis {
         return false;
     }
 
+    private static boolean hasUsableColumns(ChannelData cd, String[] colNames) {
+        if (colNames == null || colNames.length == 0) return false;
+        for (String colName : colNames) {
+            if (!hasUsableColumn(cd, colName)) return false;
+        }
+        return true;
+    }
+
+    private static boolean hasUsableColumn(ChannelData cd, String colName) {
+        if (cd == null || colName == null || !cd.colIdx.containsKey(colName)) return false;
+        if (cd.rows.isEmpty()) return true;
+        for (int row = 0; row < cd.rows.size(); row++) {
+            String value = cd.get(row, colName);
+            if (value != null && !value.trim().isEmpty()) return true;
+        }
+        return false;
+    }
+
     /**
      * Extracts 3D morphometric features from saved label images using mcib3d.
      * Follows the same label-image-loading pattern as {@link #runMorphologyExtraction}.
@@ -2793,27 +3201,18 @@ public class SpatialAnalysis implements Analysis {
             String channelName = entry.getKey();
             IJ.log("  [" + (channelCounter++) + "/" + totalChannels + "] 3D Morphometry: " + channelName);
             ChannelData cd = entry.getValue();
+            boolean hasRequired3DData = hasUsableColumns(cd, MORPH_3D_COLUMNS)
+                    && (!doComposites || hasUsableColumns(cd, MORPH_COMPOSITE_COLUMNS));
+            if (hasRequired3DData) {
+                IJ.log("  " + channelName + ": reusing existing 3D morphometry columns");
+                continue;
+            }
 
             // Add raw 3D feature columns
-            cd.addColumn("Morph_Sphericity");
-            cd.addColumn("Morph_Compactness");
-            cd.addColumn("Morph_Elongation");
-            cd.addColumn("Morph_Flatness");
-            cd.addColumn("Morph_Spareness");
-            cd.addColumn("Morph_MajorRadius_um");
-            cd.addColumn("Morph_Feret3D_um");
-            for (int m = 1; m <= 5; m++) cd.addColumn("Morph_Moment" + m);
-            cd.addColumn("Morph_DistCenter_Min_um");
-            cd.addColumn("Morph_DistCenter_Max_um");
-            cd.addColumn("Morph_DistCenter_Mean_um");
-            cd.addColumn("Morph_DistCenter_SD_um");
+            for (String column : MORPH_3D_COLUMNS) cd.addColumn(column);
 
             if (doComposites) {
-                cd.addColumn("Morph_RI");
-                cd.addColumn("Morph_SRI");
-                cd.addColumn("Morph_PB");
-                cd.addColumn("Morph_MP");
-                cd.addColumn("Morph_VSD");
+                for (String column : MORPH_COMPOSITE_COLUMNS) cd.addColumn(column);
             }
 
             // Group by section (same as CPC/2D morphology) to match label images
@@ -3644,7 +4043,22 @@ public class SpatialAnalysis implements Analysis {
                                          boolean doCompositeIndices,
                                          boolean doPopMorphometrics,
                                          boolean doSpatialMorphometrics) {
+        addMorphometricControls(opts, spatialBindings, doMorphology, do3DShapeFeatures,
+                doCompositeIndices, doPopMorphometrics, doSpatialMorphometrics, null);
+    }
+
+    private void addMorphometricControls(PipelineDialog opts,
+                                         final SpatialDialogBindings spatialBindings,
+                                         boolean doMorphology,
+                                         boolean do3DShapeFeatures,
+                                         boolean doCompositeIndices,
+                                         boolean doPopMorphometrics,
+                                         boolean doSpatialMorphometrics,
+                                         SpatialObjectDataAvailability detectedData) {
         opts.addHeader("Morphometric Analysis");
+        if (detectedData != null) {
+            opts.addHelpText(detectedData.morphometryHelperText());
+        }
         spatialBindings.do2DMorphologyToggle = opts.addToggle("Extract 2D morphology from label images", doMorphology);
         opts.addHelpText("Loads saved object label images and extracts 2D shape features "
                 + "(area, circularity, solidity, Feret diameter, etc.).");
