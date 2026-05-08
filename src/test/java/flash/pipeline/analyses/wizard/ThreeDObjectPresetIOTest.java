@@ -10,10 +10,12 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class ThreeDObjectPresetIOTest {
@@ -28,8 +30,29 @@ public class ThreeDObjectPresetIOTest {
         List<ThreeDObjectPreset> presets = io.listAll();
 
         assertEquals(6, presets.size());
+        assertEquals(Arrays.asList(
+                "Full workflow",
+                "Count Only",
+                "Count + Coloc Standard",
+                "Count + Coloc Strict",
+                "Count + Coloc Loose",
+                "Count + Process Length"), presetNames(presets));
+        assertEquals(Arrays.asList(
+                "full_workflow.json",
+                "count_only.json",
+                "count_coloc_standard.json",
+                "count_coloc_strict.json",
+                "count_coloc_loose.json",
+                "count_process_length.json"), io.stockResourceFiles());
+        for (ThreeDObjectPreset preset : presets) {
+            assertTrue(preset.getName(), preset.isClassicalCentroidFiltering());
+        }
+        assertTrue(new File(io.presetDirectory(), "full_workflow.json").isFile());
         assertTrue(new File(io.presetDirectory(), "count_only.json").isFile());
-        assertTrue(new File(io.presetDirectory(), "microglia_processes.json").isFile());
+        assertTrue(new File(io.presetDirectory(), "count_coloc_loose.json").isFile());
+        assertTrue(new File(io.presetDirectory(), "count_process_length.json").isFile());
+        assertFalse(new File(io.presetDirectory(), "amyloid_loose.json").isFile());
+        assertFalse(new File(io.presetDirectory(), "microglia_processes.json").isFile());
     }
 
     @Test
@@ -86,6 +109,14 @@ public class ThreeDObjectPresetIOTest {
         return new ThreeDObjectPreset(name, "test", "1",
                 true, true, true, false, false, threshold,
                 Arrays.asList("microglia"), Arrays.asList("nuclei"));
+    }
+
+    private static List<String> presetNames(List<ThreeDObjectPreset> presets) {
+        List<String> names = new ArrayList<String>();
+        for (ThreeDObjectPreset preset : presets) {
+            names.add(preset.getName());
+        }
+        return names;
     }
 
     private static final class CrashyThreeDObjectPresetIO extends ThreeDObjectPresetIO {

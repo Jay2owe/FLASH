@@ -1,12 +1,12 @@
 {
-  "name": "Count + coloc strict (puncta)",
+  "name": "Count + Coloc Strict",
   "description": "Count objects and use stricter colocalization for puncta-like signals.",
   "libraryVersion": "1",
   "doVolumetric": true,
   "doCpc": true,
   "extractProcessLength": false,
   "runSpatial": false,
-  "classicalCentroidFiltering": false,
+  "classicalCentroidFiltering": true,
   "colocThresholdPercent": 60,
   "processMarkerHints": [],
   "nuclearMarkerHints": ["nuclei", "dapi", "hoechst"]

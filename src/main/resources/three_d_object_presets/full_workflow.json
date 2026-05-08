@@ -1,12 +1,12 @@
 {
-  "name": "Full workflow (count + coloc + process length)",
+  "name": "Full workflow",
   "description": "Count objects, run both colocalization metrics, and extract process length.",
   "libraryVersion": "1",
   "doVolumetric": true,
   "doCpc": true,
   "extractProcessLength": true,
   "runSpatial": false,
-  "classicalCentroidFiltering": false,
+  "classicalCentroidFiltering": true,
   "colocThresholdPercent": 30,
   "processMarkerHints": ["microglia", "iba1", "astro", "gfap", "neuron"],
   "nuclearMarkerHints": ["nuclei", "dapi", "hoechst"]
