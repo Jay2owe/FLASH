@@ -30,7 +30,7 @@ public class FlashOutputLayoutCompatibilityTest {
         BinConfigIO.writeFromConfig(project.getAbsolutePath(), cfg);
 
         File newChannelData = new File(project,
-                "FLASH/Set Up Configuration/Channel_Data.txt");
+                "FLASH/Set Up Configuration/.settings/Channel_Data.txt");
         assertTrue(newChannelData.isFile());
         assertFalse(new File(project, ".bin/Channel_Data.txt").exists());
         assertEquals("DAPI", BinConfigIO.readFromDirectory(

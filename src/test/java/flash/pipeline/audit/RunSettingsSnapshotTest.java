@@ -75,14 +75,16 @@ public class RunSettingsSnapshotTest {
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(dir.getAbsolutePath());
         File objectOutput = layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.OBJECTS);
         File auditOutput = new File(layout.auditRoot(), "04 - 3D Object Analysis");
-        assertTrue(new File(objectOutput, RunSettingsSnapshot.SETTINGS_FILENAME).isFile());
-        assertTrue(new File(objectOutput, RunSettingsSnapshot.REPLAY_FILENAME).isFile());
-        assertTrue(new File(auditOutput, RunSettingsSnapshot.SETTINGS_FILENAME).isFile());
-        assertTrue(new File(auditOutput, RunSettingsSnapshot.REPLAY_FILENAME).isFile());
+        File objectSettings = FlashProjectLayout.settingsDir(objectOutput);
+        File auditSettings = FlashProjectLayout.settingsDir(auditOutput);
+        assertTrue(new File(objectSettings, RunSettingsSnapshot.SETTINGS_FILENAME).isFile());
+        assertTrue(new File(objectSettings, RunSettingsSnapshot.REPLAY_FILENAME).isFile());
+        assertTrue(new File(auditSettings, RunSettingsSnapshot.SETTINGS_FILENAME).isFile());
+        assertTrue(new File(auditSettings, RunSettingsSnapshot.REPLAY_FILENAME).isFile());
         assertFalse(new File(dir, "Data Analysis").exists());
 
         String replay = new String(Files.readAllBytes(
-                new File(objectOutput, RunSettingsSnapshot.REPLAY_FILENAME).toPath()),
+                new File(objectSettings, RunSettingsSnapshot.REPLAY_FILENAME).toPath()),
                 StandardCharsets.UTF_8);
         assertTrue(replay.contains("run_3d"));
         assertTrue(replay.contains("dir=["));

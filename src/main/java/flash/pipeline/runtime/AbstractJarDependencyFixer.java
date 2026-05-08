@@ -75,7 +75,11 @@ abstract class AbstractJarDependencyFixer implements DependencyFixer {
                 && before != null
                 && !before.isPresent()
                 && (success || madeRuntimeChange(actions));
-        String detail = appendDetails(joinLines(actions), remainingIssues(spec, remainingIssues), restartHint(spec, after));
+        String detail = appendDetails(
+                joinLines(actions),
+                restoreGuidance(spec, actions),
+                remainingIssues(spec, remainingIssues),
+                restartHint(spec, after));
         return new DependencyFixResult(
                 spec.getId(),
                 true,
@@ -169,7 +173,8 @@ abstract class AbstractJarDependencyFixer implements DependencyFixer {
         for (String action : actions) {
             String trimmed = action == null ? "" : action.trim();
             if (trimmed.startsWith("Downloaded:")
-                    || trimmed.startsWith("Disabled:")) {
+                    || trimmed.startsWith("Disabled:")
+                    || trimmed.startsWith("Scheduled disable after Fiji closes:")) {
                 return true;
             }
         }
@@ -190,11 +195,21 @@ abstract class AbstractJarDependencyFixer implements DependencyFixer {
         return "Required jars are in place, but Fiji must restart before class-based verification can pass.";
     }
 
-    private static String appendDetails(String first, String second, String third) {
+    private static String restoreGuidance(DependencySpec spec, List<String> actions) {
+        if (!DependencyRegistry.hasDisabledJarActions(actions)) {
+            return "";
+        }
+        return DependencyRegistry.disabledJarRestoreGuidance(
+                spec == null ? "" : spec.getDisplayName());
+    }
+
+    private static String appendDetails(String... details) {
         StringBuilder sb = new StringBuilder();
-        appendDetail(sb, first);
-        appendDetail(sb, second);
-        appendDetail(sb, third);
+        if (details != null) {
+            for (String detail : details) {
+                appendDetail(sb, detail);
+            }
+        }
         return sb.toString();
     }
 

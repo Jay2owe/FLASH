@@ -12,6 +12,7 @@ import java.util.List;
  */
 public final class FlashProjectLayout {
     public static final String FLASH_DIR = "FLASH";
+    public static final String SETTINGS_DIR = ".settings";
     public static final String CONFIGURATION_DIR = "Set Up Configuration";
     public static final String PRESETS_DIR = "Presets";
     public static final String REPORTS_DIR = "Reports";
@@ -125,8 +126,20 @@ public final class FlashProjectLayout {
         return new File(projectRoot, FLASH_DIR);
     }
 
-    public File configurationWriteDir() {
+    public File settingsRoot() {
+        return new File(flashRoot(), SETTINGS_DIR);
+    }
+
+    public static File settingsDir(File directory) {
+        return new File(directory, SETTINGS_DIR);
+    }
+
+    public File visibleConfigurationDir() {
         return new File(flashRoot(), CONFIGURATION_DIR);
+    }
+
+    public File configurationWriteDir() {
+        return settingsDir(visibleConfigurationDir());
     }
 
     public File legacyBinDir() {
@@ -138,10 +151,15 @@ public final class FlashProjectLayout {
     }
 
     public List<File> configurationReadDirs() {
-        return immutableList(configurationWriteDir(), legacyConfigurationDir(), legacyBinDir());
+        return immutableList(configurationWriteDir(),
+                visibleConfigurationDir(),
+                legacyConfigurationDir(),
+                legacyBinDir());
     }
 
     public File existingConfigurationDir() {
+        File channelData = firstExistingFile(channelDataReadFiles());
+        if (channelData != null) return channelData.getParentFile();
         return firstExistingDirectory(configurationReadDirs());
     }
 
@@ -151,6 +169,7 @@ public final class FlashProjectLayout {
 
     public List<File> channelDataReadFiles() {
         return immutableList(channelDataWriteFile(),
+                new File(visibleConfigurationDir(), CHANNEL_DATA_FILENAME),
                 new File(legacyConfigurationDir(), CHANNEL_DATA_FILENAME),
                 new File(legacyBinDir(), CHANNEL_DATA_FILENAME));
     }
@@ -370,6 +389,10 @@ public final class FlashProjectLayout {
     }
 
     public File presetsRoot() {
+        return new File(settingsRoot(), PRESETS_DIR);
+    }
+
+    public File legacyPresetsRoot() {
         return new File(flashRoot(), PRESETS_DIR);
     }
 
@@ -380,8 +403,18 @@ public final class FlashProjectLayout {
         return new File(presetsRoot(), categoryName);
     }
 
+    public List<File> presetReadDirs(String categoryName) {
+        if (categoryName == null || categoryName.trim().isEmpty()) {
+            return Collections.emptyList();
+        }
+        return immutableList(presetWriteDir(categoryName),
+                new File(legacyPresetsRoot(), categoryName));
+    }
+
     public List<File> presetsReadDirs() {
-        return immutableList(presetsRoot(), new File(legacyBinDir(), LEGACY_CUSTOM_FILTER_PRESET_DIR));
+        return immutableList(presetsRoot(),
+                legacyPresetsRoot(),
+                new File(legacyBinDir(), LEGACY_CUSTOM_FILTER_PRESET_DIR));
     }
 
     public File customFilterPresetWriteDir() {
@@ -390,6 +423,7 @@ public final class FlashProjectLayout {
 
     public List<File> customFilterPresetReadDirs() {
         return immutableList(customFilterPresetWriteDir(),
+                new File(legacyPresetsRoot(), CUSTOM_FILTER_PRESET_DIR),
                 new File(legacyBinDir(), LEGACY_CUSTOM_FILTER_PRESET_DIR));
     }
 
@@ -427,29 +461,36 @@ public final class FlashProjectLayout {
         return new File(flashRoot(), STATUS_DIR);
     }
 
+    public File statusSettingsRoot() {
+        return settingsDir(statusRoot());
+    }
+
     public List<File> statusReadDirs() {
-        return immutableList(statusRoot(), new File(projectRoot, LEGACY_STATUS_DIR));
+        return immutableList(statusSettingsRoot(), statusRoot(), new File(projectRoot, LEGACY_STATUS_DIR));
     }
 
     public File analysisStatusWriteDir() {
-        return new File(statusRoot(), ANALYSIS_STATUS_DIR);
+        return new File(statusSettingsRoot(), ANALYSIS_STATUS_DIR);
     }
 
     public List<File> analysisStatusReadDirs() {
         return immutableList(analysisStatusWriteDir(),
+                new File(statusRoot(), ANALYSIS_STATUS_DIR),
                 new File(projectRoot, LEGACY_STATUS_DIR));
     }
 
     public File auditRoot() {
-        return new File(statusRoot(), AUDIT_DIR);
+        return new File(statusSettingsRoot(), AUDIT_DIR);
     }
 
     public File statusWriteFile(String fileName) {
-        return new File(statusRoot(), fileName);
+        return new File(statusSettingsRoot(), fileName);
     }
 
     public List<File> statusReadFiles(String fileName) {
-        return immutableList(statusWriteFile(fileName), new File(projectRoot, fileName));
+        return immutableList(statusWriteFile(fileName),
+                new File(statusRoot(), fileName),
+                new File(projectRoot, fileName));
     }
 
     private static void requireFolder(AnalysisFolder folder) {
@@ -486,6 +527,16 @@ public final class FlashProjectLayout {
         out.add(first);
         out.add(second);
         out.add(third);
+        return Collections.unmodifiableList(out);
+    }
+
+    private static List<File> immutableList(File... files) {
+        List<File> out = new ArrayList<File>();
+        if (files != null) {
+            for (int i = 0; i < files.length; i++) {
+                out.add(files[i]);
+            }
+        }
         return Collections.unmodifiableList(out);
     }
 

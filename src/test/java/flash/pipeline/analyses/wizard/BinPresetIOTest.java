@@ -30,7 +30,8 @@ public class BinPresetIOTest {
 
         io.save(preset);
 
-        assertTrue(new File(root, "FLASH/Presets/Channel Configuration/my_bin_preset.json").isFile());
+        assertTrue(new File(root,
+                "FLASH/.settings/Presets/Channel Configuration/my_bin_preset.json").isFile());
         assertFalse(new File(root, "Bin Presets/my_bin_preset.json").exists());
         BinPreset loaded = io.load("my_bin_preset");
         assertEquals("My Bin Preset", loaded.getName());

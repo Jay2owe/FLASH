@@ -34,7 +34,8 @@ public class SpatialPresetIOTest {
 
         io.save(preset);
 
-        assertTrue(new File(root, "FLASH/Presets/Spatial Analysis/my_spatial_preset.json").isFile());
+        assertTrue(new File(root,
+                "FLASH/.settings/Presets/Spatial Analysis/my_spatial_preset.json").isFile());
         SpatialPreset loaded = io.load("my_spatial_preset");
 
         assertEquals("My Spatial Preset", loaded.getName());

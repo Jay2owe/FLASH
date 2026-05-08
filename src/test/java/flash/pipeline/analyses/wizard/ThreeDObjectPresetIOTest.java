@@ -62,7 +62,8 @@ public class ThreeDObjectPresetIOTest {
 
         io.save(preset);
 
-        assertTrue(new File(temp.getRoot(), "roundtrip/FLASH/Presets/3D Object Analysis/my_object_preset.json").isFile());
+        assertTrue(new File(temp.getRoot(),
+                "roundtrip/FLASH/.settings/Presets/3D Object Analysis/my_object_preset.json").isFile());
         ThreeDObjectPreset loaded = io.load("my_object_preset");
         assertEquals("My Object Preset", loaded.getName());
         assertEquals(42.0, loaded.getColocThresholdPercent(), 0.0001);

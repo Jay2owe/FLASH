@@ -35,7 +35,8 @@ public class PostRunSummaryTest {
         File json = SummaryHistoryStore.historyWriteFile(root.getAbsolutePath());
         assertTrue(json.isFile());
         assertTrue(json.getAbsolutePath().contains(
-                new File("FLASH/Status/" + SummaryHistoryStore.FILE_NAME).getPath()));
+                new File("FLASH/Status/" + FlashProjectLayout.SETTINGS_DIR
+                        + "/" + SummaryHistoryStore.FILE_NAME).getPath()));
         assertTrue(!new File(root, SummaryHistoryStore.LEGACY_FILE_NAME).exists());
 
         writeBin(root, "500");
@@ -110,6 +111,28 @@ public class PostRunSummaryTest {
         SummaryHistoryStore.Snapshot snapshot = SummaryHistoryStore.load(root.getAbsolutePath());
         assertTrue(snapshot != null);
         assertTrue(snapshot.tables.containsKey(FlashProjectLayout.MASTER_OBJECTS_FILENAME));
+    }
+
+    @Test
+    public void writeIfPossible_handlesIntensityOnlyAggregation() throws Exception {
+        File root = temp.newFolder("post-run-intensity-only");
+        File binDir = new File(root, ".bin");
+        File aggregationDir = FlashProjectLayout.forDirectory(root.getAbsolutePath()).aggregationWriteDir();
+        assertTrue(binDir.mkdirs());
+        assertTrue(aggregationDir.mkdirs());
+
+        writeBin(root, "default");
+        Files.write(new File(aggregationDir, FlashProjectLayout.MASTER_INTENSITIES_FILENAME).toPath(),
+                ("Animal Name,Region,DAPI_Mean\n"
+                        + "Mouse1,SCN,42\n").getBytes(StandardCharsets.UTF_8));
+
+        PostRunSummary.writeIfPossible(root.getAbsolutePath());
+
+        File txt = new File(aggregationDir, "ihf-summary.txt");
+        assertTrue(txt.isFile());
+        SummaryHistoryStore.Snapshot snapshot = SummaryHistoryStore.load(root.getAbsolutePath());
+        assertTrue(snapshot != null);
+        assertTrue(snapshot.tables.containsKey(FlashProjectLayout.MASTER_INTENSITIES_FILENAME));
     }
 
     private void writeBin(File root, String threshold) throws Exception {

@@ -174,7 +174,7 @@ public class CreateBinFileAnalysisTest {
         File project = temp.newFolder("project-with-saved-filters");
         File binFolder = configurationDir(project);
         assertTrue(binFolder.mkdirs());
-        File presetDir = new File(project, "FLASH/Presets/Custom Filter Presets");
+        File presetDir = new File(project, "FLASH/.settings/Presets/Custom Filter Presets");
         assertTrue(presetDir.mkdirs());
         Files.write(new File(presetDir, "IBA1 cleanup filter.ijm").toPath(),
                 "run(\"Median...\", \"radius=2 stack\");\n".getBytes(StandardCharsets.UTF_8));
@@ -202,7 +202,7 @@ public class CreateBinFileAnalysisTest {
                 "run(\"Median...\", \"radius=2 stack\");\n");
 
         assertTrue(new File(project,
-                "FLASH/Presets/Custom Filter Presets/IBA1 cleanup filter.ijm").isFile());
+                "FLASH/.settings/Presets/Custom Filter Presets/IBA1 cleanup filter.ijm").isFile());
         assertFalse(new File(binFolder, "Custom Filter Presets/IBA1 cleanup filter.ijm").exists());
     }
 
@@ -415,7 +415,7 @@ public class CreateBinFileAnalysisTest {
     }
 
     private static File configurationDir(File dir) {
-        return new File(dir, "FLASH/Set Up Configuration");
+        return new File(dir, "FLASH/Set Up Configuration/.settings");
     }
 
     private static File configurationFile(File dir, String name) {

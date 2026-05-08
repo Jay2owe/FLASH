@@ -27,7 +27,7 @@ import java.util.TreeSet;
  *   R-08 Zero-count sentinel
  *   R-09 Hemisphere completeness
  *
- * It also persists a JSON snapshot to {@code FLASH/Status/summary_history.json} so future
+ * It also persists a JSON snapshot to {@code FLASH/Status/.settings/summary_history.json} so future
  * runs in the same folder can compare settings and summary-table values.
  */
 public final class PostRunSummary {
@@ -57,7 +57,7 @@ public final class PostRunSummary {
             lines.add("Time:   " + new Date());
             lines.add("");
 
-            if (objectsMaster.isFile()) {
+            if (objectsMaster != null && objectsMaster.isFile()) {
                 List<String[]> rows = readCsv(objectsMaster);
                 if (rows.size() >= 2) {
                     String[] header = rows.get(0);

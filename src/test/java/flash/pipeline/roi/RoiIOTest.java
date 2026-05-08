@@ -64,6 +64,18 @@ public class RoiIOTest {
                 csvs.get(1).getAbsolutePath());
     }
 
+    @Test
+    public void roiImageOutputsWriteUnderFlashRoiFolder() throws Exception {
+        File dir = temp.newFolder("roiImageOutputs");
+
+        assertEquals(new File(dir, "FLASH/Draw and Save ROIs/Image Outputs"),
+                RoiIO.imageOutputsWriteDir(dir));
+        assertEquals(new File(dir, "FLASH/Draw and Save ROIs/Image Outputs/AnimalA"),
+                RoiIO.imageOutputsWriteDir(dir, "AnimalA"));
+        assertEquals(new File(dir, "FLASH/Draw and Save ROIs/Image Outputs/AnimalA"),
+                RoiIO.imageOutputsWriteDir(dir, " AnimalA "));
+    }
+
     private static void writeBytes(File file) throws Exception {
         Files.write(file.toPath(), new byte[]{1, 2, 3});
     }

@@ -239,7 +239,10 @@ public abstract class PresetIO<T extends Preset<?>> {
 
     private List<File> presetReadDirectories() throws IOException {
         List<File> dirs = new ArrayList<File>();
-        addUniqueDirectory(dirs, presetDirectory());
+        FlashProjectLayout layout = FlashProjectLayout.forDirectory(projectRoot.getPath());
+        for (File dir : layout.presetReadDirs(presetDirectoryName())) {
+            addUniqueDirectory(dirs, dir);
+        }
         for (File legacy : legacyPresetDirectories()) {
             addUniqueDirectory(dirs, legacy);
         }

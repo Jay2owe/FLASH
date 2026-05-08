@@ -26,6 +26,7 @@ import java.util.zip.ZipInputStream;
 public final class RoiIO {
     public static final String ROI_SETS_DIR = "ROI Sets";
     public static final String ATTRIBUTES_DIR = "Attributes";
+    public static final String IMAGE_OUTPUTS_DIR = "Image Outputs";
     public static final String PARTIAL_DIR = "Partial";
     public static final String LEGACY_ROI_DIR = "ROIs";
     public static final String LEGACY_FLASH_ROI_DIR = FlashProjectLayout.FLASH_DIR
@@ -44,6 +45,15 @@ public final class RoiIO {
 
     public static File attributesWriteDir(File directory) {
         return new File(roiRoot(directory), ATTRIBUTES_DIR);
+    }
+
+    public static File imageOutputsWriteDir(File directory) {
+        return new File(roiRoot(directory), IMAGE_OUTPUTS_DIR);
+    }
+
+    public static File imageOutputsWriteDir(File directory, String animalName) {
+        String safeAnimal = animalName == null ? "" : animalName.trim();
+        return new File(imageOutputsWriteDir(directory), safeAnimal);
     }
 
     public static File partialWriteDir(File directory) {

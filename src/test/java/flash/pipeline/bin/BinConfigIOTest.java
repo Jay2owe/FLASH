@@ -43,7 +43,7 @@ public class BinConfigIOTest {
     }
 
     private void writeNewSavedCustomFilterPreset(File dir, String presetName, String content) throws IOException {
-        File presetDir = new File(dir, "FLASH/Presets/Custom Filter Presets");
+        File presetDir = new File(dir, "FLASH/.settings/Presets/Custom Filter Presets");
         presetDir.mkdirs();
         Files.write(new File(presetDir, presetName + ".ijm").toPath(), content.getBytes(StandardCharsets.UTF_8));
     }
@@ -59,7 +59,7 @@ public class BinConfigIOTest {
     }
 
     private static File configurationDir(File dir) {
-        return new File(dir, "FLASH/Set Up Configuration");
+        return new File(dir, "FLASH/Set Up Configuration/.settings");
     }
 
     private static File configurationFile(File dir, String name) {

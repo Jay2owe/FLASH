@@ -1,5 +1,7 @@
 package flash.pipeline.deconv.wizard;
 
+import flash.pipeline.io.FlashProjectLayout;
+
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -47,25 +49,33 @@ public class DeconvPresetIO {
 
     public List<DeconvPreset> listAll() throws IOException {
         ensureStockPresetsIfEmpty();
-        File dir = presetDirectory();
-        if (!dir.isDirectory()) {
-            return Collections.emptyList();
-        }
-
-        File[] files = dir.listFiles((parent, name) -> name != null && name.toLowerCase(Locale.ROOT).endsWith(".json"));
-        if (files == null || files.length == 0) {
-            return Collections.emptyList();
-        }
-        Arrays.sort(files, new Comparator<File>() {
-            @Override
-            public int compare(File left, File right) {
-                return left.getName().compareToIgnoreCase(right.getName());
-            }
-        });
-
         List<DeconvPreset> presets = new ArrayList<DeconvPreset>();
-        for (File file : files) {
-            presets.add(readPreset(file));
+        List<String> seen = new ArrayList<String>();
+        for (File dir : presetReadDirectories()) {
+            if (!dir.isDirectory()) {
+                continue;
+            }
+
+            File[] files = dir.listFiles((parent, name) -> name != null && name.toLowerCase(Locale.ROOT).endsWith(".json"));
+            if (files == null || files.length == 0) {
+                continue;
+            }
+            Arrays.sort(files, new Comparator<File>() {
+                @Override
+                public int compare(File left, File right) {
+                    return left.getName().compareToIgnoreCase(right.getName());
+                }
+            });
+
+            for (File file : files) {
+                DeconvPreset preset = readPreset(file);
+                String key = sanitizeLookup(preset.getName());
+                if (seen.contains(key)) {
+                    continue;
+                }
+                seen.add(key);
+                presets.add(preset);
+            }
         }
         return presets;
     }
@@ -110,7 +120,7 @@ public class DeconvPresetIO {
     }
 
     public File presetDirectory() {
-        return new File(projectRoot, PRESET_DIR_NAME);
+        return FlashProjectLayout.forDirectory(projectRoot.getPath()).presetWriteDir(PRESET_DIR_NAME);
     }
 
     protected void beforeAtomicReplace(File temp, File target) throws IOException {
@@ -187,28 +197,53 @@ public class DeconvPresetIO {
         String requested = sanitizeLookup(name);
         if (requested == null) return null;
 
-        File dir = presetDirectory();
-        if (!dir.isDirectory()) {
-            return null;
-        }
-
-        File[] files = dir.listFiles((parent, fileName) -> fileName != null && fileName.toLowerCase(Locale.ROOT).endsWith(".json"));
-        if (files == null) return null;
-
-        for (File file : files) {
-            String base = stripExtension(file.getName());
-            if (sanitizeLookup(base).equals(requested)) {
-                return file;
+        for (File dir : presetReadDirectories()) {
+            if (!dir.isDirectory()) {
+                continue;
             }
-        }
 
-        for (File file : files) {
-            DeconvPreset preset = readPreset(file);
-            if (sanitizeLookup(preset.getName()).equals(requested)) {
-                return file;
+            File[] files = dir.listFiles((parent, fileName) -> fileName != null && fileName.toLowerCase(Locale.ROOT).endsWith(".json"));
+            if (files == null) continue;
+
+            for (File file : files) {
+                String base = stripExtension(file.getName());
+                if (sanitizeLookup(base).equals(requested)) {
+                    return file;
+                }
+            }
+
+            for (File file : files) {
+                DeconvPreset preset = readPreset(file);
+                if (sanitizeLookup(preset.getName()).equals(requested)) {
+                    return file;
+                }
             }
         }
         return null;
+    }
+
+    private List<File> presetReadDirectories() throws IOException {
+        List<File> dirs = new ArrayList<File>();
+        FlashProjectLayout layout = FlashProjectLayout.forDirectory(projectRoot.getPath());
+        addUniqueDirectory(dirs, presetDirectory());
+        for (File dir : layout.presetReadDirs(PRESET_DIR_NAME)) {
+            addUniqueDirectory(dirs, dir);
+        }
+        addUniqueDirectory(dirs, new File(projectRoot, PRESET_DIR_NAME));
+        return dirs;
+    }
+
+    private static void addUniqueDirectory(List<File> dirs, File dir) throws IOException {
+        if (dir == null) {
+            return;
+        }
+        File canonical = dir.getCanonicalFile();
+        for (File existing : dirs) {
+            if (existing.getCanonicalFile().equals(canonical)) {
+                return;
+            }
+        }
+        dirs.add(dir);
     }
 
     private DeconvPreset readPreset(File file) throws IOException {

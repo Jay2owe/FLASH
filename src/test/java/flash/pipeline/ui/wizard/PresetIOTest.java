@@ -33,7 +33,8 @@ public class PresetIOTest {
 
         assertEquals(preset, io.load("my_preset"));
         assertEquals(1, io.listAll().size());
-        assertTrue(new File(temp.getRoot(), "roundtrip/FLASH/Presets/Test Presets/my_preset.json").isFile());
+        assertTrue(new File(temp.getRoot(),
+                "roundtrip/FLASH/.settings/Presets/Test Presets/my_preset.json").isFile());
         io.delete("My Preset");
         assertFalse(new File(io.presetDirectory(), "my_preset.json").exists());
     }

@@ -470,13 +470,13 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
             roiProps.setValue("Height", row, b.height);
 
             // Save cropped image preview
-            File imgAnalysisDir = new File(directory + File.separator + "Image Analysis" + File.separator + parts.animal);
+            File imgAnalysisDir = RoiIO.imageOutputsWriteDir(projectRoot, parts.animal);
             boolean imgAnalysisDirReady = true;
             try {
                 IoUtils.mustMkdirs(imgAnalysisDir);
             } catch (IOException e) {
                 imgAnalysisDirReady = false;
-                IJ.log("[FLASH] Could not create per-animal Image Analysis directory: "
+                IJ.log("[FLASH] Could not create ROI image output directory: "
                         + e.getMessage() + " — skipping cropped preview for " + parts.animal);
             }
             if (imgAnalysisDirReady) {

@@ -178,7 +178,7 @@ public class SplitAndMergeImageChannelsAnalysisTest {
                 2);
 
         File activeChannelData = new File(
-                new File(new File(dir, "FLASH"), "Set Up Configuration"), "Channel_Data.txt");
+                new File(new File(new File(dir, "FLASH"), "Set Up Configuration"), ".settings"), "Channel_Data.txt");
         List<String> lines = Files.readAllLines(activeChannelData.toPath());
         assertEquals("DAPI GFAP", lines.get(0));
         assertEquals("Blue Green", lines.get(1));
@@ -201,7 +201,7 @@ public class SplitAndMergeImageChannelsAnalysisTest {
         BinConfigIO.updateMinMax(dir.getAbsolutePath(), new String[]{"10-200", "50-4000"});
 
         File activeChannelData = new File(
-                new File(new File(dir, "FLASH"), "Set Up Configuration"), "Channel_Data.txt");
+                new File(new File(new File(dir, "FLASH"), "Set Up Configuration"), ".settings"), "Channel_Data.txt");
         List<String> lines = Files.readAllLines(activeChannelData.toPath());
         assertEquals(5, lines.size());
         assertEquals("DAPI GFAP", lines.get(0));
@@ -234,7 +234,7 @@ public class SplitAndMergeImageChannelsAnalysisTest {
                 new double[]{0.35, 0.5});
 
         File saturationFile = new File(
-                new File(new File(dir, "FLASH"), "Set Up Configuration"), "Saturations.txt");
+                new File(new File(new File(dir, "FLASH"), "Set Up Configuration"), ".settings"), "Saturations.txt");
         List<String> lines = Files.readAllLines(saturationFile.toPath(), StandardCharsets.UTF_8);
         assertEquals("DAPI 0.35", lines.get(0));
         assertEquals("GFAP N/A", lines.get(1));

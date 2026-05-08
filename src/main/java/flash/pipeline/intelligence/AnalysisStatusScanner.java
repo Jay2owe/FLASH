@@ -25,6 +25,7 @@ import java.util.TimeZone;
  */
 public class AnalysisStatusScanner {
     public static final String STATUS_DIR = FlashProjectLayout.STATUS_DIR + File.separator
+            + FlashProjectLayout.SETTINGS_DIR + File.separator
             + FlashProjectLayout.ANALYSIS_STATUS_DIR;
     public static final String CREATE_BIN_ID = "createBin";
     public static final String AGGREGATION_ID = "aggregation";
@@ -261,6 +262,8 @@ public class AnalysisStatusScanner {
         if (files == null) return false;
         for (int i = 0; i < files.length; i++) {
             if (files[i].isFile()) return true;
+            if (files[i].isDirectory()
+                    && FlashProjectLayout.SETTINGS_DIR.equals(files[i].getName())) continue;
             if (files[i].isDirectory() && hasAnyFile(files[i])) return true;
         }
         return false;

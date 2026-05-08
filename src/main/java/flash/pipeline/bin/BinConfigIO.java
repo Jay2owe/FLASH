@@ -200,7 +200,8 @@ public class BinConfigIO {
             throw new IOException("Cannot write configuration without a directory.");
         }
         BinConfig safe = cfg == null ? new BinConfig() : cfg;
-        File binFolder = FlashProjectLayout.forDirectory(directory).configurationWriteDir();
+        FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
+        File binFolder = layout.configurationWriteDir();
         if (!binFolder.isDirectory() && !binFolder.mkdirs() && !binFolder.isDirectory()) {
             throw new IOException("Failed to create " + binFolder.getAbsolutePath());
         }
@@ -221,8 +222,7 @@ public class BinConfigIO {
         lines.add(joinTokens(filterPresetTokens));
         lines.add(ZSliceConfigIO.modeLine(safe.zSliceMode));
 
-        File channelData = new File(binFolder, "Channel_Data.txt");
-        writeAtomic(channelData.toPath(), lines);
+        writeAtomic(layout.channelDataWriteFile().toPath(), lines);
         ZSliceConfigIO.writeSelections(binFolder, new ZSliceConfig(safe.zSliceMode, safe.zSliceSelections));
         writeFilterMacrosFromConfig(binFolder, safe);
     }
@@ -536,6 +536,14 @@ public class BinConfigIO {
             return parent;
         }
         String folderName = binFolder.getName();
+        if (FlashProjectLayout.SETTINGS_DIR.equals(folderName)
+                && parent != null
+                && FlashProjectLayout.CONFIGURATION_DIR.equals(parent.getName())
+                && parent.getParentFile() != null
+                && FlashProjectLayout.FLASH_DIR.equals(parent.getParentFile().getName())
+                && parent.getParentFile().getParentFile() != null) {
+            return parent.getParentFile().getParentFile();
+        }
         if ((FlashProjectLayout.CONFIGURATION_DIR.equals(folderName)
                 || FlashProjectLayout.LEGACY_CONFIGURATION_DIR.equals(folderName))
                 && parent != null

@@ -231,7 +231,7 @@ public class StarDist3DRunner {
                     }
 
                     if (!trackmate.execDetection()) {
-                        IJ.log("WARNING: StarDist detection failed: " + trackmate.getErrorMessage());
+                        logTrackMateFailure("detection", trackmate.getErrorMessage());
                         return null;
                     }
 
@@ -424,6 +424,19 @@ public class StarDist3DRunner {
             }
         }
         return (int) maxVal;
+    }
+
+    private static void logTrackMateFailure(String phase, String message) {
+        String safeMessage = message == null || message.trim().isEmpty()
+                ? "No error message was returned by TrackMate."
+                : message;
+        IJ.log("WARNING: StarDist " + phase + " failed: " + safeMessage);
+        if (safeMessage.contains("NullPointerException")) {
+            IJ.log("WARNING: StarDist returned a NullPointerException inside TrackMate/StarDist. "
+                    + "This is commonly caused by a broken Fiji StarDist runtime, including duplicate "
+                    + "or Dropbox-conflicted StarDist jars. Use Dependencies > Auto-Fix StarDist, "
+                    + "close Fiji, and restart Fiji before retrying.");
+        }
     }
 
 }

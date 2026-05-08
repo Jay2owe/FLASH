@@ -37,7 +37,8 @@ public class IntensityPresetIOTest {
 
         io.save(preset);
 
-        assertTrue(new File(root, "FLASH/Presets/Fluorescence Intensity/my_intensity_preset.json").isFile());
+        assertTrue(new File(root,
+                "FLASH/.settings/Presets/Fluorescence Intensity/my_intensity_preset.json").isFile());
         IntensityPreset loaded = io.load("my_intensity_preset");
 
         assertEquals("My Intensity Preset", loaded.getName());

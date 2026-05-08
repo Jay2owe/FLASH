@@ -211,21 +211,25 @@ public final class DependencyService {
         List<DialogRow> rows = new ArrayList<DialogRow>();
         for (DependencySpec spec : getVisibleDependencies()) {
             DependencyStatus status = statusCache.get(spec.getId());
-            rows.add(new DialogRow(
-                    spec,
-                    status,
-                    spec.getDialogSectionLabel(),
-                    formatStatusLabel(status),
-                    formatStatusDetail(status),
-                    buildBlockedLabel(spec),
-                    spec.getDescription(),
-                    spec.isRestartRequired()
-                            ? "Restart Fiji after repair: required."
-                            : "Restart Fiji after repair: not required.",
-                    buildActionNote(spec, status),
-                    buildActions(spec, status)));
+            rows.add(buildDialogRow(spec, status));
         }
         return rows;
+    }
+
+    public synchronized List<DialogRow> getDialogRowsNeedingAttention() {
+        ensureCache();
+        List<DialogRow> rows = new ArrayList<DialogRow>();
+        for (DependencySpec spec : getVisibleDependencies()) {
+            DependencyStatus status = statusCache.get(spec.getId());
+            if (status != null && !status.isPresent()) {
+                rows.add(buildDialogRow(spec, status));
+            }
+        }
+        return rows;
+    }
+
+    public synchronized boolean hasVisibleDependenciesNeedingAttention() {
+        return !getDialogRowsNeedingAttention().isEmpty();
     }
 
     public synchronized DependencyFixPlan planFixAll() {
@@ -316,6 +320,22 @@ public final class DependencyService {
             }
         }
         return false;
+    }
+
+    private DialogRow buildDialogRow(DependencySpec spec, DependencyStatus status) {
+        return new DialogRow(
+                spec,
+                status,
+                spec.getDialogSectionLabel(),
+                formatStatusLabel(status),
+                formatStatusDetail(status),
+                buildBlockedLabel(spec),
+                spec.getDescription(),
+                spec.isRestartRequired()
+                        ? "Restart Fiji after repair: required."
+                        : "Restart Fiji after repair: not required.",
+                buildActionNote(spec, status),
+                buildActions(spec, status));
     }
 
     private static long defaultEstimatedBytes(DependencySpec spec) {

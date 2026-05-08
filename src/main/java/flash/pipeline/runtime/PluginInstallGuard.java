@@ -2,6 +2,11 @@ package flash.pipeline.runtime;
 
 import ij.IJ;
 
+import java.io.File;
+import java.util.ArrayList;
+import java.util.EnumMap;
+import java.util.List;
+
 /**
  * User-facing guard for stale or partial plugin installs.
  */
@@ -9,6 +14,7 @@ public final class PluginInstallGuard {
 
     private static final String INTERNAL_PREFIX_DOTTED = "flash.pipeline.";
     private static final String INTERNAL_PREFIX_SLASHED = "flash/pipeline/";
+    private static boolean pinnedRuntimeCheckedThisSession = false;
 
     private PluginInstallGuard() {}
 
@@ -35,6 +41,56 @@ public final class PluginInstallGuard {
         return true;
     }
 
+    /**
+     * Startup audit for optional runtimes where one wrong jar version can break
+     * a later class load even if the main plugin itself loaded cleanly.
+     */
+    public static synchronized void auditPinnedRuntimeJarsOnStartup(DependencyId... ids) {
+        if (pinnedRuntimeCheckedThisSession || ids == null || ids.length == 0) {
+            return;
+        }
+
+        File fijiDir = DependencyRegistry.resolveFijiDir();
+        if (fijiDir == null) {
+            return;
+        }
+        pinnedRuntimeCheckedThisSession = true;
+
+        try {
+            List<DependencySpec> specs = new ArrayList<DependencySpec>();
+            for (DependencyId id : ids) {
+                DependencySpec spec = DependencyRegistry.get(id);
+                if (spec != null && hasExactJarPins(spec)) {
+                    specs.add(spec);
+                }
+            }
+            EnumMap<DependencyId, DependencyStatus> statuses = DependencyRegistry.snapshotStatuses(specs);
+            StringBuilder sb = new StringBuilder();
+            for (DependencySpec spec : specs) {
+                DependencyStatus status = statuses.get(spec.getId());
+                if (status == null || status.isPresent()) {
+                    continue;
+                }
+                if (sb.length() > 0) {
+                    sb.append('\n');
+                }
+                sb.append(spec.getDisplayName()).append(": ");
+                String detail = status.getDetailMessage();
+                sb.append(detail == null || detail.trim().isEmpty()
+                        ? status.getState().name()
+                        : detail.trim());
+            }
+            if (sb.length() > 0) {
+                IJ.log("FLASH startup pinned runtime jar check found issue(s). "
+                        + "Open Dependencies and run Auto-Fix before using the affected feature.\n"
+                        + sb.toString());
+            }
+        } catch (Throwable t) {
+            IJ.log("FLASH startup pinned runtime jar check failed: "
+                    + t.getClass().getSimpleName() + ": " + safeMessage(t));
+        }
+    }
+
     static String missingClassName(NoClassDefFoundError error) {
         if (error == null) return null;
 
@@ -56,5 +112,24 @@ public final class PluginInstallGuard {
             return message;
         }
         return message.replace('/', '.');
+    }
+
+    private static boolean hasExactJarPins(DependencySpec spec) {
+        if (spec == null || spec.getJarRequirements().isEmpty()) {
+            return false;
+        }
+        for (DependencySpec.JarRequirement requirement : spec.getJarRequirements()) {
+            if (!requirement.isAcceptAnyExisting()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String safeMessage(Throwable throwable) {
+        if (throwable == null || throwable.getMessage() == null || throwable.getMessage().trim().isEmpty()) {
+            return "no detail message";
+        }
+        return throwable.getMessage().trim();
     }
 }

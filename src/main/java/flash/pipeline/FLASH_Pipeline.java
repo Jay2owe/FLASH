@@ -189,6 +189,9 @@ public class FLASH_Pipeline implements PlugIn {
         cliInvocation = false;
         cliConfig = null;
         configureFeatureDependencyGate();
+        PluginInstallGuard.auditPinnedRuntimeJarsOnStartup(
+                DependencyId.STARDIST_RUNTIME,
+                DependencyId.TENSORFLOW_NATIVE_RUNTIME);
 
         // Kick off the GPU probe as early as possible so its ~200 ms cost
         // overlaps with the directory picker / dependency check, not the
@@ -201,6 +204,8 @@ public class FLASH_Pipeline implements PlugIn {
             runCli(macroOptions);
             return;
         }
+
+        showStartupDependencyWarningIfNeeded();
 
         if (directory == null) {
             DirectoryChooser dc = new DirectoryChooser("Choose a Directory");
@@ -533,16 +538,21 @@ public class FLASH_Pipeline implements PlugIn {
                 }
             }));
 
-            JButton depsBtn = pd.addFooterButton("Dependencies");
-            depsBtn.addActionListener(e -> pd.runChildWorkflow(new Runnable() {
-                @Override public void run() {
-                    showDependenciesDialog();
-                }
-            }));
+            List<DependencyService.DialogRow> dependencyAttentionRows = refreshDependencyAttentionRows();
+            JButton depsBtn = pd.addFooterButton(dependencyButtonLabel(!dependencyAttentionRows.isEmpty()));
+            if (!dependencyAttentionRows.isEmpty()) {
+                depsBtn.setForeground(new Color(183, 28, 28));
+                depsBtn.setToolTipText(dependencyAttentionTooltip(dependencyAttentionRows));
+            }
+            depsBtn.addActionListener(e -> pd.closeWithAction("dependencies"));
 
             if (!pd.showDialog()) {
                 if ("check_my_data".equals(pd.getActionCommand())) {
                     new DiagnosticsDialog(directory).openBlocking();
+                    continue;
+                }
+                if ("dependencies".equals(pd.getActionCommand())) {
+                    showDependenciesDialog();
                     continue;
                 }
                 return null;
@@ -1091,6 +1101,100 @@ public class FLASH_Pipeline implements PlugIn {
             autoAggregate = opts.getNextBoolean();
             generateQcReport = opts.getNextBoolean();
         }
+    }
+
+    private void showStartupDependencyWarningIfNeeded() {
+        if (cliInvocation || GraphicsEnvironment.isHeadless()) {
+            return;
+        }
+
+        while (true) {
+            List<DependencyService.DialogRow> rows = refreshDependencyAttentionRows();
+            if (rows.isEmpty()) {
+                return;
+            }
+
+            DependencyFixPlan fixPlan = dependencyService.planFixAll();
+            PipelineDialog pd = new PipelineDialog("FLASH Dependencies Need Attention");
+            pd.setDefaultButtonsVisible(false);
+            pd.addHeader("Missing Dependencies");
+            pd.addMessage("FLASH found missing or conflicting dependencies. Fix these before running affected analyses to avoid failed runs.");
+            pd.addSpacer(4);
+
+            int shown = Math.min(rows.size(), 8);
+            for (int i = 0; i < shown; i++) {
+                DependencyService.DialogRow row = rows.get(i);
+                pd.addMessage(row.getSpec().getDisplayName() + " - " + row.getStatusLabel());
+                String detail = firstDependencyDetailLine(row.getStatusDetail());
+                if (!detail.isEmpty()) {
+                    pd.addHelpText(detail);
+                }
+            }
+            if (rows.size() > shown) {
+                pd.addHelpText((rows.size() - shown) + " more dependency issue(s) are listed in Dependencies.");
+            }
+
+            JButton autoFixBtn = pd.addFooterButton(buildAutoFixAllLabel(fixPlan));
+            autoFixBtn.setEnabled(!fixPlan.getDependenciesToFix().isEmpty());
+            if (fixPlan.getDependenciesToFix().isEmpty()) {
+                autoFixBtn.setToolTipText("No missing dependency currently has an in-app auto-fix.");
+            }
+            autoFixBtn.addActionListener(e -> pd.closeWithAction("auto_fix_all"));
+
+            JButton openBtn = pd.addFooterButton("Open Dependencies");
+            openBtn.addActionListener(e -> pd.closeWithAction("open_dependencies"));
+            JButton continueBtn = pd.addFooterButton("Continue Anyway");
+            continueBtn.addActionListener(e -> pd.closeWithAction("continue_anyway"));
+
+            pd.showDialog();
+            String action = pd.getActionCommand();
+            if ("auto_fix_all".equals(action)) {
+                runAutoFixAll(fixPlan);
+                continue;
+            }
+            if ("open_dependencies".equals(action)) {
+                showDependenciesDialog();
+                continue;
+            }
+            return;
+        }
+    }
+
+    private List<DependencyService.DialogRow> refreshDependencyAttentionRows() {
+        try {
+            dependencyService.refreshStatuses();
+            return dependencyService.getDialogRowsNeedingAttention();
+        } catch (RuntimeException e) {
+            IJ.log("[FLASH] Could not refresh dependency warning status: " + e.getMessage());
+            return new ArrayList<DependencyService.DialogRow>();
+        }
+    }
+
+    static String dependencyButtonLabel(boolean hasDependencyIssues) {
+        return hasDependencyIssues ? "Dependencies !" : "Dependencies";
+    }
+
+    private static String dependencyAttentionTooltip(List<DependencyService.DialogRow> rows) {
+        int count = rows == null ? 0 : rows.size();
+        if (count <= 0) {
+            return "Open dependency checks and installers.";
+        }
+        return count + " dependency issue(s) need attention before affected analyses will run.";
+    }
+
+    private static String firstDependencyDetailLine(String detail) {
+        if (detail == null) {
+            return "";
+        }
+        String trimmed = detail.trim();
+        if (trimmed.isEmpty()) {
+            return "";
+        }
+        int newline = trimmed.indexOf('\n');
+        if (newline >= 0) {
+            return trimmed.substring(0, newline).trim();
+        }
+        return trimmed;
     }
 
     private void showDependenciesDialog() {

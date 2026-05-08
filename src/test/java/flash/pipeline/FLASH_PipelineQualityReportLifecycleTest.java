@@ -128,7 +128,7 @@ public class FLASH_PipelineQualityReportLifecycleTest {
         FLASH_Pipeline.writeCliStatus(tmp.getRoot(), false,
                 Collections.singletonList("3D Object Analysis"), "failed");
 
-        File status = new File(tmp.getRoot(), "FLASH/Status/cli_status.txt");
+        File status = new File(tmp.getRoot(), "FLASH/Status/.settings/cli_status.txt");
         assertTrue(status.isFile());
         assertFalse(new File(tmp.getRoot(), ".cli_status").exists());
 

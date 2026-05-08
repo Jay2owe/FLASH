@@ -5,10 +5,14 @@ import flash.pipeline.cellpose.CellposeRuntime.Status;
 import ij.Menus;
 import ij.Prefs;
 
+import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.io.FileWriter;
+import java.io.IOException;
 import java.io.InputStream;
+import java.lang.management.ManagementFactory;
 import java.net.URL;
 import java.net.URLConnection;
 import java.security.MessageDigest;
@@ -20,16 +24,24 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
 import java.util.EnumMap;
+import java.util.HashSet;
 import java.util.Hashtable;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Single source of truth for runtime dependency metadata, probes, and jar manifests.
  */
 public final class DependencyRegistry {
+
+    interface JarFileOps {
+        boolean rename(File source, File disabled);
+
+        boolean scheduleDisable(File source, File disabled);
+    }
 
     /** Pip spec for the Cellpose Python package this build expects.
      *  Upgrade procedure: bump here; verify via /Help → Cellpose Setup
@@ -50,6 +62,21 @@ public final class DependencyRegistry {
 
     private static final List<String> STARDIST_IGNORE_PREFIXES =
             Collections.unmodifiableList(Arrays.asList("protobuf-java-util-", "proto-google-"));
+
+    private static final Set<String> SCHEDULED_DISABLES =
+            Collections.synchronizedSet(new HashSet<String>());
+    private static final JarFileOps DEFAULT_JAR_FILE_OPS = new JarFileOps() {
+        @Override
+        public boolean rename(File source, File disabled) {
+            return source.renameTo(disabled);
+        }
+
+        @Override
+        public boolean scheduleDisable(File source, File disabled) {
+            return scheduleWindowsDisableAfterExit(source, disabled);
+        }
+    };
+    private static JarFileOps jarFileOps = DEFAULT_JAR_FILE_OPS;
 
     private static final List<DependencySpec.JarRequirement> BIO_FORMATS_RUNTIME_JARS =
             Collections.unmodifiableList(Arrays.asList(
@@ -319,6 +346,9 @@ public final class DependencyRegistry {
             File dir = new File(fijiDir, requirement.getFolder());
             File expected = new File(dir, requirement.getExpectedFile());
             if (expected.exists()) {
+                addConflictIssues(issues, dir, requirement, null, ignorePrefixes);
+                String otherFolder = "jars".equals(requirement.getFolder()) ? "plugins" : "jars";
+                addConflictIssues(issues, new File(fijiDir, otherFolder), requirement, otherFolder, ignorePrefixes);
                 continue;
             }
 
@@ -365,6 +395,9 @@ public final class DependencyRegistry {
             }
             File expected = new File(dir, requirement.getExpectedFile());
             if (expected.exists()) {
+                disableWrongVersions(dir, requirement, dateSuffix, actions, null, ignorePrefixes);
+                String otherFolder = "jars".equals(requirement.getFolder()) ? "plugins" : "jars";
+                disableWrongVersions(new File(fijiDir, otherFolder), requirement, dateSuffix, actions, otherFolder, ignorePrefixes);
                 continue;
             }
 
@@ -393,6 +426,11 @@ public final class DependencyRegistry {
         }
 
         return actions;
+    }
+
+    static void setJarFileOpsForTesting(JarFileOps ops) {
+        jarFileOps = ops == null ? DEFAULT_JAR_FILE_OPS : ops;
+        SCHEDULED_DISABLES.clear();
     }
 
     private static Map<DependencyId, DependencySpec> buildSpecs() {
@@ -769,17 +807,73 @@ public final class DependencyRegistry {
             if (!file.isFile()) {
                 continue;
             }
+            if (isScheduledForDisable(file)) {
+                continue;
+            }
             if (!name.endsWith(".jar")) {
                 continue;
             }
             if (shouldIgnore(name, ignorePrefixes)) {
                 continue;
             }
-            if (name.startsWith(prefix)) {
+            if (matchesVersionedJarPrefix(name, prefix)) {
                 return file;
             }
         }
         return null;
+    }
+
+    private static void addConflictIssues(List<String> issues,
+                                          File dir,
+                                          DependencySpec.JarRequirement requirement,
+                                          String folderLabel,
+                                          List<String> ignorePrefixes) {
+        List<String> conflicts = findConflictingJars(dir, requirement, ignorePrefixes);
+        if (conflicts.isEmpty()) {
+            return;
+        }
+        if (folderLabel == null) {
+            issues.add(requirement.getLabel() + ": conflicting extra jar(s) beside "
+                    + requirement.getExpectedFile() + ": " + joinComma(conflicts));
+        } else {
+            issues.add(requirement.getLabel() + ": conflicting extra jar(s) in "
+                    + folderLabel + "/ while using " + requirement.getExpectedFile()
+                    + ": " + joinComma(conflicts));
+        }
+    }
+
+    private static List<String> findConflictingJars(File dir,
+                                                    DependencySpec.JarRequirement requirement,
+                                                    List<String> ignorePrefixes) {
+        List<String> conflicts = new ArrayList<String>();
+        File[] candidates = dir.listFiles();
+        if (candidates == null) {
+            return conflicts;
+        }
+        for (File file : candidates) {
+            String name = file.getName();
+            if (!file.isFile()) {
+                continue;
+            }
+            if (isScheduledForDisable(file)) {
+                continue;
+            }
+            if (!name.endsWith(".jar")) {
+                continue;
+            }
+            if (shouldIgnore(name, ignorePrefixes)) {
+                continue;
+            }
+            if (!matchesVersionedJarPrefix(name, requirement.getMatchPrefix())) {
+                continue;
+            }
+            if (name.equals(requirement.getExpectedFile())) {
+                continue;
+            }
+            conflicts.add(name);
+        }
+        Collections.sort(conflicts);
+        return conflicts;
     }
 
     private static void disableWrongVersions(File dir,
@@ -797,28 +891,62 @@ public final class DependencyRegistry {
             if (!file.isFile()) {
                 continue;
             }
+            if (isScheduledForDisable(file)) {
+                continue;
+            }
             if (!name.endsWith(".jar")) {
                 continue;
             }
             if (shouldIgnore(name, ignorePrefixes)) {
                 continue;
             }
-            if (!name.startsWith(requirement.getMatchPrefix())) {
+            if (!matchesVersionedJarPrefix(name, requirement.getMatchPrefix())) {
                 continue;
             }
             if (name.equals(requirement.getExpectedFile())) {
                 continue;
             }
 
-            File disabled = new File(dir, name + ".disabled-" + dateSuffix);
-            if (file.renameTo(disabled)) {
+            File disabled = uniqueDisabledFile(dir, name, dateSuffix);
+            if (jarFileOps.rename(file, disabled)) {
                 actions.add(folderLabel == null
                         ? "Disabled: " + name
                         : "Disabled: " + name + " (from " + folderLabel + "/)");
+            } else if (jarFileOps.scheduleDisable(file, disabled)) {
+                SCHEDULED_DISABLES.add(fileKey(file));
+                actions.add(folderLabel == null
+                        ? "Scheduled disable after Fiji closes: " + name
+                        : "Scheduled disable after Fiji closes: " + name + " (from " + folderLabel + "/)");
             } else {
-                actions.add("FAILED to disable: " + name + " (is Fiji running? Close it first.)");
+                actions.add("FAILED to disable: " + name
+                        + " (the jar stayed locked and could not be scheduled for after-exit cleanup; "
+                        + "close Fiji, rename or remove this jar manually, then restart Fiji.)");
             }
         }
+    }
+
+    public static boolean hasDisabledJarActions(List<String> actions) {
+        if (actions == null) {
+            return false;
+        }
+        for (String action : actions) {
+            String trimmed = action == null ? "" : action.trim();
+            if (trimmed.startsWith("Disabled:")
+                    || trimmed.startsWith("Scheduled disable after Fiji closes:")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static String disabledJarRestoreGuidance(String runtimeName) {
+        String label = runtimeName == null || runtimeName.trim().isEmpty()
+                ? "this runtime"
+                : runtimeName.trim();
+        return "Disabled jars are not deleted. If another Fiji tool needs a newer jar later, "
+                + "close Fiji, rename that file from .jar.disabled-YYYYMMDD back to .jar, "
+                + "and restart Fiji. Re-run Auto-Fix for " + label
+                + " before using the pinned FLASH workflow again.";
     }
 
     private static boolean shouldIgnore(String fileName, List<String> ignorePrefixes) {
@@ -831,6 +959,129 @@ public final class DependencyRegistry {
             }
         }
         return false;
+    }
+
+    private static boolean matchesVersionedJarPrefix(String fileName, String prefix) {
+        if (fileName == null || prefix == null || !fileName.startsWith(prefix)) {
+            return false;
+        }
+        if (fileName.length() <= prefix.length()) {
+            return false;
+        }
+        return Character.isDigit(fileName.charAt(prefix.length()));
+    }
+
+    private static File uniqueDisabledFile(File dir, String name, String dateSuffix) {
+        File candidate = new File(dir, name + ".disabled-" + dateSuffix);
+        if (!candidate.exists()) {
+            return candidate;
+        }
+        for (int i = 2; i < 1000; i++) {
+            candidate = new File(dir, name + ".disabled-" + dateSuffix + "-" + i);
+            if (!candidate.exists()) {
+                return candidate;
+            }
+        }
+        return new File(dir, name + ".disabled-" + dateSuffix + "-" + System.currentTimeMillis());
+    }
+
+    private static boolean isScheduledForDisable(File file) {
+        return file != null && SCHEDULED_DISABLES.contains(fileKey(file));
+    }
+
+    private static String fileKey(File file) {
+        if (file == null) {
+            return "";
+        }
+        try {
+            return file.getCanonicalPath();
+        } catch (IOException e) {
+            return file.getAbsolutePath();
+        }
+    }
+
+    private static boolean scheduleWindowsDisableAfterExit(File source, File disabled) {
+        if (!isWindows() || source == null || disabled == null) {
+            return false;
+        }
+        try {
+            File script = File.createTempFile("flash-runtime-disable-", ".ps1");
+            File log = new File(source.getParentFile(), "FLASH-runtime-repair.log");
+            writeDeferredDisableScript(script);
+
+            List<String> command = new ArrayList<String>();
+            command.add("powershell.exe");
+            command.add("-NoProfile");
+            command.add("-ExecutionPolicy");
+            command.add("Bypass");
+            command.add("-WindowStyle");
+            command.add("Hidden");
+            command.add("-File");
+            command.add(script.getAbsolutePath());
+            command.add(currentProcessId());
+            command.add(source.getAbsolutePath());
+            command.add(disabled.getAbsolutePath());
+            command.add(log.getAbsolutePath());
+
+            ProcessBuilder builder = new ProcessBuilder(command);
+            builder.redirectErrorStream(true);
+            builder.redirectOutput(ProcessBuilder.Redirect.appendTo(log));
+            builder.start();
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static void writeDeferredDisableScript(File script) throws IOException {
+        BufferedWriter writer = new BufferedWriter(new FileWriter(script));
+        try {
+            writer.write("param([string]$ParentPid,[string]$SourcePath,[string]$DestPath,[string]$LogPath)\n");
+            writer.write("$ErrorActionPreference = 'Stop'\n");
+            writer.write("function Write-RepairLog([string]$Message) {\n");
+            writer.write("  $stamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'\n");
+            writer.write("  Add-Content -LiteralPath $LogPath -Value \"$stamp $Message\" -ErrorAction SilentlyContinue\n");
+            writer.write("}\n");
+            writer.write("try {\n");
+            writer.write("  Write-RepairLog \"Waiting to disable locked Fiji jar: $SourcePath\"\n");
+            writer.write("  if ($ParentPid -match '^[0-9]+$') {\n");
+            writer.write("    while (Get-Process -Id ([int]$ParentPid) -ErrorAction SilentlyContinue) { Start-Sleep -Seconds 2 }\n");
+            writer.write("  }\n");
+            writer.write("  for ($i = 0; $i -lt 300; $i++) {\n");
+            writer.write("    if (-not (Test-Path -LiteralPath $SourcePath)) { Write-RepairLog 'Source already gone.'; exit 0 }\n");
+            writer.write("    try {\n");
+            writer.write("      Rename-Item -LiteralPath $SourcePath -NewName (Split-Path -Leaf $DestPath) -Force\n");
+            writer.write("      Write-RepairLog \"Disabled $SourcePath -> $DestPath\"\n");
+            writer.write("      Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue\n");
+            writer.write("      exit 0\n");
+            writer.write("    } catch {\n");
+            writer.write("      Start-Sleep -Seconds 1\n");
+            writer.write("    }\n");
+            writer.write("  }\n");
+            writer.write("  Write-RepairLog \"FAILED to disable $SourcePath after Fiji closed.\"\n");
+            writer.write("  exit 1\n");
+            writer.write("} catch {\n");
+            writer.write("  Write-RepairLog \"FAILED to disable ${SourcePath}: $($_.Exception.Message)\"\n");
+            writer.write("  exit 1\n");
+            writer.write("}\n");
+        } finally {
+            writer.close();
+        }
+    }
+
+    private static String currentProcessId() {
+        String runtimeName = ManagementFactory.getRuntimeMXBean().getName();
+        if (runtimeName == null) {
+            return "";
+        }
+        int at = runtimeName.indexOf('@');
+        String pid = at >= 0 ? runtimeName.substring(0, at) : runtimeName;
+        return pid == null ? "" : pid.trim();
+    }
+
+    private static boolean isWindows() {
+        String os = System.getProperty("os.name");
+        return os != null && os.toLowerCase(Locale.ROOT).contains("win");
     }
 
     private static void downloadFile(String urlStr, File dest, String expectedSha1) throws Exception {

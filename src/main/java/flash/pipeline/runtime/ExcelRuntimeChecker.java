@@ -156,15 +156,20 @@ public final class ExcelRuntimeChecker {
                 hadFailure = true;
             }
         }
+        String restoreGuidance = DependencyRegistry.hasDisabledJarActions(actions)
+                ? "\n" + DependencyRegistry.disabledJarRestoreGuidance("Excel") + "\n"
+                : "";
 
         if (hadFailure) {
             IJ.showMessage("IHF Pipeline - Excel Repair Incomplete",
                     "Some repairs failed:\n\n" + sb
-                            + "\nTry closing Fiji first, or run:\n"
+                            + restoreGuidance
+                            + "\nExit Fiji and run this script manually if the locked jar remains:\n"
                             + "scripts/repair-fiji-runtime.ps1");
         } else {
             IJ.showMessage("IHF Pipeline - Excel Repair Complete",
                     "Excel runtime repaired:\n\n" + sb
+                            + restoreGuidance
                             + "\nPlease restart Fiji for changes to take effect.\n"
                             + "Excel Summary Export will work after restart.");
         }

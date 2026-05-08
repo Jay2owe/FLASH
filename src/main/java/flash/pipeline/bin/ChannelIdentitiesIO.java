@@ -107,9 +107,15 @@ public final class ChannelIdentitiesIO {
             File projectRoot = dir.getParentFile();
             if (projectRoot != null) {
                 FlashProjectLayout layout = FlashProjectLayout.forDirectory(projectRoot.getAbsolutePath());
-                File newFile = file(layout.configurationWriteDir());
-                if (newFile.isFile()) return newFile;
+                for (File candidateDir : layout.configurationReadDirs()) {
+                    File candidate = file(candidateDir);
+                    if (candidate.isFile()) return candidate;
+                }
             }
+        }
+        if (FlashProjectLayout.CONFIGURATION_DIR.equals(dir.getName())) {
+            File newFile = file(FlashProjectLayout.settingsDir(dir));
+            if (newFile.isFile()) return newFile;
         }
         return file(dir);
     }
@@ -120,6 +126,9 @@ public final class ChannelIdentitiesIO {
             if (projectRoot != null) {
                 return FlashProjectLayout.forDirectory(projectRoot.getAbsolutePath()).configurationWriteDir();
             }
+        }
+        if (FlashProjectLayout.CONFIGURATION_DIR.equals(dir.getName())) {
+            return FlashProjectLayout.settingsDir(dir);
         }
         return dir;
     }

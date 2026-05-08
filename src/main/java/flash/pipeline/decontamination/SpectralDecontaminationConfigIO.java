@@ -88,10 +88,11 @@ public class SpectralDecontaminationConfigIO {
 
     private static File configReadFile(String directory) {
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
-        File newFile = configWriteFile(directory);
-        if (newFile.isFile()) return newFile;
-        File legacyFile = new File(layout.legacyBinDir(), CONFIG_FILENAME);
-        return legacyFile.isFile() ? legacyFile : newFile;
+        for (File dir : layout.configurationReadDirs()) {
+            File candidate = new File(dir, CONFIG_FILENAME);
+            if (candidate.isFile()) return candidate;
+        }
+        return configWriteFile(directory);
     }
 
     public static void write(File file, SpectralDecontaminationConfig config) throws IOException {

@@ -147,6 +147,37 @@ public class DependencyServiceTest {
         assertEquals("Auto-Fix 3D Objects Counter (~22 KB)", labels.get(DependencyId.OBJECTS_COUNTER_3D));
     }
 
+    @Test
+    public void dialogRowsNeedingAttentionIncludeOnlyVisibleMissingRows() {
+        DependencyService service = DependencyRuntimeTestSupport.serviceWith(
+                DependencyRuntimeTestSupport.withStatuses(
+                        DependencyId.PLUGIN_JAR_INTEGRITY,
+                        DependencyStatus.missing("FLASH jar missing"),
+                        DependencyId.APACHE_POI_RUNTIME,
+                        DependencyStatus.missing("Excel jars missing"),
+                        DependencyId.STARDIST_RUNTIME,
+                        DependencyStatus.error("StarDist jar conflict")));
+
+        List<DependencyService.DialogRow> rows = service.getDialogRowsNeedingAttention();
+        Set<DependencyId> ids = rowIds(rows);
+
+        assertTrue(service.hasVisibleDependenciesNeedingAttention());
+        assertTrue(ids.contains(DependencyId.APACHE_POI_RUNTIME));
+        assertTrue(ids.contains(DependencyId.STARDIST_RUNTIME));
+        assertFalse(ids.contains(DependencyId.PLUGIN_JAR_INTEGRITY));
+    }
+
+    @Test
+    public void dialogRowsNeedingAttentionAreEmptyWhenOnlyHiddenRowsAreMissing() {
+        DependencyService service = DependencyRuntimeTestSupport.serviceWith(
+                DependencyRuntimeTestSupport.withStatuses(
+                        DependencyId.PLUGIN_JAR_INTEGRITY,
+                        DependencyStatus.missing("FLASH jar missing")));
+
+        assertTrue(service.getDialogRowsNeedingAttention().isEmpty());
+        assertFalse(service.hasVisibleDependenciesNeedingAttention());
+    }
+
     private static Map<DependencyId, DependencyFixer> fakeFixers() {
         Map<DependencyId, DependencyFixer> fixers = new LinkedHashMap<DependencyId, DependencyFixer>();
         int order = 0;
@@ -172,6 +203,14 @@ public class DependencyServiceTest {
             set.add(id);
         }
         return set;
+    }
+
+    private static Set<DependencyId> rowIds(List<DependencyService.DialogRow> rows) {
+        Set<DependencyId> ids = new LinkedHashSet<DependencyId>();
+        for (DependencyService.DialogRow row : rows) {
+            ids.add(row.getSpec().getId());
+        }
+        return ids;
     }
 
     private static Map<DependencyId, String> firstActionLabels(List<DependencyService.DialogRow> rows) {

@@ -126,12 +126,13 @@ public final class RunSettingsSnapshot {
 
     private static void writeToFolder(RunSettingsSnapshot snapshot, File outputDir) throws IOException {
         if (outputDir == null) return;
-        if (!outputDir.isDirectory() && !outputDir.mkdirs() && !outputDir.isDirectory()) {
-            throw new IOException("Could not create audit output folder: " + outputDir.getAbsolutePath());
+        File settingsDir = FlashProjectLayout.settingsDir(outputDir);
+        if (!settingsDir.isDirectory() && !settingsDir.mkdirs() && !settingsDir.isDirectory()) {
+            throw new IOException("Could not create audit settings folder: " + settingsDir.getAbsolutePath());
         }
-        Files.write(new File(outputDir, SETTINGS_FILENAME).toPath(),
+        Files.write(new File(settingsDir, SETTINGS_FILENAME).toPath(),
                 snapshot.toJson().getBytes(StandardCharsets.UTF_8));
-        Files.write(new File(outputDir, REPLAY_FILENAME).toPath(),
+        Files.write(new File(settingsDir, REPLAY_FILENAME).toPath(),
                 (snapshot.replayCommand + "\n").getBytes(StandardCharsets.UTF_8));
     }
 
@@ -148,7 +149,7 @@ public final class RunSettingsSnapshot {
 
     private static File analysisOutputFolder(FlashProjectLayout layout, int analysisIndex) {
         switch (analysisIndex) {
-            case 0: return layout.configurationWriteDir();
+            case 0: return layout.visibleConfigurationDir();
             case 1: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.ROIS);
             case 2: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.DECONVOLUTION);
             case 3: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.SPLIT_MERGE);
@@ -160,7 +161,7 @@ public final class RunSettingsSnapshot {
             case 10: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.STATISTICS);
             case 11: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.EXCEL);
             case 12: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.SPECTRAL);
-            case 13: return layout.configurationWriteDir();
+            case 13: return layout.visibleConfigurationDir();
             default: return null;
         }
     }
