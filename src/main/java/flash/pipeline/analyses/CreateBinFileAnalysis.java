@@ -15,6 +15,7 @@ import flash.pipeline.analyses.wizard.ChannelSetupWizard;
 import flash.pipeline.cli.CLIConfig;
 import flash.pipeline.image.FilterMacroEditorModel;
 import flash.pipeline.image.FilterExecutor;
+import flash.pipeline.image.WindowManagerLock;
 import flash.pipeline.image.NamedFilterLoader;
 import flash.pipeline.image.dag.DagIRSerializer;
 import flash.pipeline.intelligence.AnalysisStatusScanner;
@@ -25,6 +26,7 @@ import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.LifIO;
 import flash.pipeline.io.SeriesMeta;
 import flash.pipeline.naming.ImageNameParser;
+import flash.pipeline.objects.ObjectsCounter3DWrapper;
 import flash.pipeline.qc.QcMinMaxPerConditionSelector;
 import flash.pipeline.qc.QcSelectionChannel;
 import flash.pipeline.runtime.DependencyId;
@@ -43,6 +45,7 @@ import flash.pipeline.ui.config.ChannelThresholdStage;
 import flash.pipeline.ui.config.CellposeParameterStage;
 import flash.pipeline.ui.config.DisplayRangeStage;
 import flash.pipeline.ui.config.FilterParameterStage;
+import flash.pipeline.ui.config.ParticleSizeStage;
 import flash.pipeline.ui.config.StarDistParameterStage;
 import flash.pipeline.ui.config.ZSliceSelectionStage;
 import flash.pipeline.ui.sandbox.SandboxDialog;
@@ -4368,6 +4371,11 @@ public class CreateBinFileAnalysis implements Analysis {
 
             // ── Step 4: Particle Size with 3D Objects Counter preview ──
             if (doSz) {
+                if (useEmbeddedParticleSizeStage()) {
+                    String sizeResult = interactiveParticleSizeQC(images, cfg, binFolder, ch);
+                    if ("cancel".equals(sizeResult)) return "cancel";
+                    if ("back".equals(sizeResult)) return "back";
+                } else {
                 if (!gateObjectsCounterFeature("3D Objects Counter preview")) {
                     return "back";
                 }
@@ -4501,9 +4509,169 @@ public class CreateBinFileAnalysis implements Analysis {
                     if ("restart".equals(action)) { imgIdx = 0; continue; }
                     imgIdx++;
                 }
+                }
             }
         }
         return "done";
+    }
+
+    private String interactiveParticleSizeQC(List<QcImageSelection> images, BinUserConfig cfg,
+                                             File binFolder, int channelIndex) {
+        if (!gateObjectsCounterFeature("3D Objects Counter preview")) {
+            return "back";
+        }
+        if (GraphicsEnvironment.isHeadless()) {
+            return "cancel";
+        }
+        ConfigQcContext context = new ConfigQcContext(
+                projectRootForConfigurationDir(binFolder),
+                binFolder,
+                cfg,
+                filterParameterContextImages(images),
+                cfg.names,
+                channelIndex);
+        ParticleSizeStage stage = createParticleSizeStage(cfg, binFolder, channelIndex);
+        ConfigQcDialog dialog = ConfigQcDialog.createModal(
+                null, context, Collections.<ConfigQcStage>singletonList(stage));
+        ConfigQcResult result = dialog.showDialog();
+        if (result == ConfigQcResult.DONE || result == ConfigQcResult.SKIP_CURRENT_IMAGE) {
+            return "continue";
+        }
+        if (result == ConfigQcResult.BACK) {
+            return "back";
+        }
+        return "cancel";
+    }
+
+    private boolean useEmbeddedParticleSizeStage() {
+        return true;
+    }
+
+    ParticleSizeStage createParticleSizeStage(final BinUserConfig cfg,
+                                              final File binFolder,
+                                              final int channelIndex) {
+        final int channelNum = channelIndex + 1;
+        final String chLabel = "C" + channelNum + " (" + cfg.names.get(channelIndex) + ")";
+        return new ParticleSizeStage(
+                new ParticleSizeStage.SizeStore() {
+                    @Override public String get() {
+                        return cfg.sizes.get(channelIndex);
+                    }
+
+                    @Override public void set(String token) {
+                        cfg.sizes.set(channelIndex, token);
+                    }
+                },
+                new ParticleSizeStage.PreviewAdapter() {
+                    @Override public ImagePlus createFilteredSource(ConfigQcContext context) {
+                        ImagePlus source = duplicateCurrentChannel(context, channelNum);
+                        if (source == null) return null;
+                        String filterContent = resolveFilterContent(binFolder, cfg, channelIndex);
+                        if (filterContent != null && !filterContent.trim().isEmpty()) {
+                            FilterExecutor.runThreadSafe(source, filterContent);
+                        }
+                        source.setTitle("Particle size filtered input | " + chLabel + " | "
+                                + (context == null ? "" : context.getCurrentImageDisplayName()));
+                        return applyPreviewLut(source, channelColor(cfg, channelIndex));
+                    }
+
+                    @Override public int resolveThreshold(ImagePlus filteredSource,
+                                                          ConfigQcContext context) {
+                        String token = cfg.objectThresholds.get(channelIndex);
+                        if (token != null && !"default".equalsIgnoreCase(token.trim())) {
+                            try {
+                                return (int) Math.round(Double.parseDouble(token.trim()));
+                            } catch (NumberFormatException ignored) {
+                                // Fall back to the same automatic threshold used by legacy QC.
+                            }
+                        }
+                        return autoThreshold(filteredSource);
+                    }
+
+                    @Override public ObjectsCounter3DWrapper.Result runPreview(ImagePlus filteredSource,
+                                                                               int threshold,
+                                                                               int minSize,
+                                                                               int maxSize) {
+                        if (filteredSource == null) return null;
+                        ImagePlus input = filteredSource.duplicate();
+                        input.setTitle("Particle size preview input | " + chLabel);
+                        try {
+                            ObjectsCounter3DWrapper wrapper = new ObjectsCounter3DWrapper();
+                            ObjectsCounter3DWrapper.Result result;
+                            if (ObjectsCounter3DWrapper.isMcib3dAvailable()) {
+                                result = wrapper.runNative(
+                                        input,
+                                        threshold,
+                                        minSize,
+                                        maxSize,
+                                        false,
+                                        null,
+                                        true,
+                                        false);
+                            } else {
+                                WindowManagerLock.LOCK.lock();
+                                try {
+                                    result = wrapper.run(
+                                            input,
+                                            threshold,
+                                            minSize,
+                                            maxSize,
+                                            false,
+                                            false,
+                                            true,
+                                            false);
+                                    result = detachVisibleCounterPreview(result);
+                                    closeResultsWindows();
+                                } finally {
+                                    closeResultsWindows();
+                                    WindowManagerLock.LOCK.unlock();
+                                }
+                            }
+                            ImagePlus map = result == null ? null : result.getObjectsMap();
+                            if (map != null) {
+                                map.setTitle("Object label preview | " + chLabel);
+                            }
+                            return result;
+                        } finally {
+                            closeImageQuietly(input);
+                        }
+                    }
+
+                    @Override public int countObjects(ObjectsCounter3DWrapper.Result result) {
+                        if (result == null || result.getStatistics() == null) return 0;
+                        return result.getStatistics().size();
+                    }
+
+                    @Override public void close(ImagePlus image) {
+                        closeImageQuietly(image);
+                    }
+                });
+    }
+
+    private ObjectsCounter3DWrapper.Result detachVisibleCounterPreview(
+            ObjectsCounter3DWrapper.Result result) {
+        if (result == null) return null;
+        ImagePlus map = result.getObjectsMap();
+        ImagePlus masked = result.getMaskedImage();
+        boolean changed = false;
+        if (map != null && map.getWindow() != null) {
+            ImagePlus detached = map.duplicate();
+            detached.setTitle(map.getTitle());
+            closeImageQuietly(map);
+            map = detached;
+            changed = true;
+            IJ.log("Warning: legacy 3D Objects Counter opened an objects-map window during config QC; closing it.");
+        }
+        if (masked != null && masked.getWindow() != null) {
+            closeImageQuietly(masked);
+            masked = null;
+            changed = true;
+            IJ.log("Warning: legacy 3D Objects Counter opened a masked-image window during config QC; closing it.");
+        }
+        return changed
+                ? new ObjectsCounter3DWrapper.Result(
+                result.getStatistics(), map, masked, result.isFoundObjects())
+                : result;
     }
 
     private String interactiveDisplayRangeQC(List<QcImageSelection> images, BinUserConfig cfg,
