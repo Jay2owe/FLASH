@@ -395,6 +395,25 @@ public class CreateBinFileAnalysisTest {
         assertEquals(Double.valueOf(17.0), threshold);
     }
 
+    @Test
+    public void prepareChannelThresholdPreview_usesReplacementReturnedByFilterHook() throws Exception {
+        ReplacementThresholdPreviewAnalysis analysis = new ReplacementThresholdPreviewAnalysis();
+        ByteProcessor rawProcessor = new ByteProcessor(1, 1);
+        rawProcessor.set(0, 0, 5);
+        ImagePlus raw = new ImagePlus("raw-threshold-preview", rawProcessor);
+        analysis.replacement.getProcessor().setThreshold(44.0, 255.0, ImageProcessor.NO_LUT_UPDATE);
+
+        ImagePlus preview = analysis.prepareChannelThresholdPreview(raw, "fake replacement filter");
+        Double threshold = invokeReadThresholdFromImage(analysis, preview);
+
+        assertTrue("Returned filter image must become the threshold preview",
+                preview == analysis.replacement);
+        assertEquals("Raw duplicate should remain separate from replacement preview",
+                5, raw.getProcessor().get(0, 0));
+        assertEquals("Threshold readback should use replacement preview",
+                Double.valueOf(44.0), threshold);
+    }
+
     private static File configurationDir(File dir) {
         return new File(dir, "FLASH/00 - Configuration");
     }
@@ -517,6 +536,21 @@ public class CreateBinFileAnalysisTest {
             if (expected.equals(value)) return true;
         }
         return false;
+    }
+
+    private static final class ReplacementThresholdPreviewAnalysis extends CreateBinFileAnalysis {
+        final ImagePlus replacement;
+
+        ReplacementThresholdPreviewAnalysis() {
+            ByteProcessor replacementProcessor = new ByteProcessor(1, 1);
+            replacementProcessor.set(0, 0, 123);
+            replacement = new ImagePlus("filtered-threshold-preview", replacementProcessor);
+        }
+
+        @Override
+        protected ImagePlus runChannelThresholdFilter(ImagePlus rawDuplicate, String filterContent) {
+            return replacement;
+        }
     }
 
     private static final class RecordingFilteredAnalysis extends CreateBinFileAnalysis {

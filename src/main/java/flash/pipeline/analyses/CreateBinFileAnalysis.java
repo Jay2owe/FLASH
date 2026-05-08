@@ -4273,26 +4273,27 @@ public class CreateBinFileAnalysis implements Analysis {
                         closeQcToolWindows();
                         QcImageSelection imageSelection = images.get(imgIdx2);
                         ImagePlus imp = imageSelection.image;
-                        ImagePlus dup = new Duplicator().run(imp, channelNum, channelNum,
+                        ImagePlus rawDup = new Duplicator().run(imp, channelNum, channelNum,
                                 1, imp.getNSlices(), 1, imp.getNFrames());
-                        dup.setTitle("Channel Threshold QC | " + chLabel + " | " + imp.getTitle());
+                        rawDup.setTitle("Channel Threshold QC | " + chLabel + " | " + imp.getTitle());
 
                         String filterContent = resolveFilterContent(binFolder, cfg, ch);
-                        if (filterContent != null) FilterExecutor.runThreadSafe(dup, filterContent);
-                        dup.show();
-                        IJ.run(dup, toLutName(cfg.colors.get(ch)), "");
-                        positionImageLeft(dup);
+                        ImagePlus thresholdPreview = prepareChannelThresholdPreview(rawDup, filterContent);
+                        thresholdPreview.setTitle("Channel Threshold QC | " + chLabel + " | " + imp.getTitle());
+                        thresholdPreview.show();
+                        IJ.run(thresholdPreview, toLutName(cfg.colors.get(ch)), "");
+                        positionImageLeft(thresholdPreview);
 
                         // Open Threshold dialog first, then apply persisted value
-                        IJ.run(dup, "Threshold...", "");
+                        IJ.run(thresholdPreview, "Threshold...", "");
                         positionToolWindowNextToImage(THRESHOLD_WINDOW_TITLES);
                         String curThresh = cfg.objectThresholds.get(ch);
                         if (!"default".equalsIgnoreCase(curThresh)) {
                             try {
                                 double t = Double.parseDouble(curThresh);
-                                double imageMax = dup.getProcessor().getMax();
-                                IJ.setThreshold(dup, t, Math.max(t, imageMax));
-                                dup.updateAndDraw();
+                                double imageMax = thresholdPreview.getProcessor().getMax();
+                                IJ.setThreshold(thresholdPreview, t, Math.max(t, imageMax));
+                                thresholdPreview.updateAndDraw();
                             } catch (NumberFormatException ignored) {}
                         }
 
@@ -4303,18 +4304,16 @@ public class CreateBinFileAnalysis implements Analysis {
                                 curThresh,
                                 imgIdx2,
                                 images.size(),
-                                dup);
+                                thresholdPreview);
 
                         Double readThresh = null;
                         int suggestedAutoThresh = 1;
                         if (!ACTION_SKIP_CURRENT_IMAGE.equals(thresholdAction)
                                 && !"cancel".equals(thresholdAction)) {
-                            readThresh = readThresholdFromImage(dup);
-                            suggestedAutoThresh = autoThreshold(dup);
+                            readThresh = readThresholdFromImage(thresholdPreview);
+                            suggestedAutoThresh = autoThreshold(thresholdPreview);
                         }
-                        dup.changes = false;
-                        dup.close();
-                        dup.flush();
+                        closeChannelThresholdPreviewImages(rawDup, thresholdPreview);
                         closeToolWindows(THRESHOLD_WINDOW_TITLES);
 
                         if (ACTION_SKIP_CURRENT_IMAGE.equals(thresholdAction)) {
@@ -4684,6 +4683,25 @@ public class CreateBinFileAnalysis implements Analysis {
         }
         Dimension screen = Toolkit.getDefaultToolkit().getScreenSize();
         dialog.setLocation(Math.max(50, screen.width - 420), Math.min(50, screen.height / 6));
+    }
+
+    ImagePlus prepareChannelThresholdPreview(ImagePlus rawDuplicate, String filterContent) {
+        if (rawDuplicate == null) return null;
+        if (filterContent == null || filterContent.trim().isEmpty()) return rawDuplicate;
+        ImagePlus filtered = runChannelThresholdFilter(rawDuplicate, filterContent);
+        return filtered != null ? filtered : rawDuplicate;
+    }
+
+    protected ImagePlus runChannelThresholdFilter(ImagePlus rawDuplicate, String filterContent) {
+        FilterExecutor.runThreadSafe(rawDuplicate, filterContent);
+        return rawDuplicate;
+    }
+
+    private void closeChannelThresholdPreviewImages(ImagePlus rawDuplicate, ImagePlus thresholdPreview) {
+        closeImageQuietly(thresholdPreview);
+        if (rawDuplicate != thresholdPreview) {
+            closeImageQuietly(rawDuplicate);
+        }
     }
 
     private ImagePlus renderFilterParameterPreview(ImagePlus source, String macroContent,
