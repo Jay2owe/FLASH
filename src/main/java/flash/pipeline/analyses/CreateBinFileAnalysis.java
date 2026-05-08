@@ -2878,6 +2878,10 @@ public class CreateBinFileAnalysis implements Analysis {
                 toastShown = true;
                 if ("cancel".equals(action)) return "cancel";
                 if ("adjust".equals(action)) return "adjust";
+                if (ACTION_SKIP_CURRENT_IMAGE.equals(action)) {
+                    imgIdx++;
+                    continue;
+                }
                 if ("apply".equals(action)) return "done";
                 if ("restart".equals(action)) {
                     imgIdx = 0;
@@ -2910,8 +2914,11 @@ public class CreateBinFileAnalysis implements Analysis {
         if (savedToast != null && !savedToast.isEmpty()) {
             pd.setTransientStatus(savedToast);
         }
+        addSkipCurrentImageButton(pd);
         positionPipelineDialogBesideImage(pd, previewImage);
-        if (!pd.showDialog()) return "cancel";
+        if (!pd.showDialog()) {
+            return isSkipCurrentImageAction(pd) ? ACTION_SKIP_CURRENT_IMAGE : "cancel";
+        }
 
         String choice = pd.getNextChoice();
         if (choice.contains("Adjust")) return "adjust";
@@ -3009,6 +3016,7 @@ public class CreateBinFileAnalysis implements Analysis {
                 while (true) {
                     PipelineDialog pd = new PipelineDialog("Set Up Configuration - Z-Slice Subset");
                     pd.enableBackButton();
+                    pd.setPrimaryButtonText("Lock in");
                     pd.setModal(false);
                     pd.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
                     pd.addSubHeader("Z-Slice Subset");
@@ -3027,9 +3035,14 @@ public class CreateBinFileAnalysis implements Analysis {
                             ? new String[]{"Accept selection", "Restart from first image"}
                             : new String[]{"Next image", "Restart from first image", "Apply current range to all remaining images"};
                     pd.addChoice("Action", actions, actions[0]);
+                    addSkipCurrentImageButton(pd);
 
                     if (!pd.showDialog()) {
                         closeImageQuietly(imp);
+                        if (isSkipCurrentImageAction(pd)) {
+                            idx++;
+                            break;
+                        }
                         return pd.wasBackPressed() ? "back" : "cancel";
                     }
 
@@ -3575,12 +3588,30 @@ public class CreateBinFileAnalysis implements Analysis {
                     IJ.run(dup, "Brightness/Contrast...", "");
                     positionToolWindowNextToImage(BRIGHTNESS_CONTRAST_WINDOW_TITLES);
 
-                    WaitForUserDialog mmDialog = new WaitForUserDialog(
+                    String mmAction = showLockInSkipDialog(
                             "Custom Min-Max Display Ranges \u2014 " + chLabel,
-                            "Image " + (imgIdx + 1) + "/" + images.size() + ": " + imp.getTitle() + "\n\n" +
-                                    "Adjust the Brightness/Contrast on this Max Projection.\n" +
-                                    "When satisfied, click OK to lock in these values.");
-                    showDialogBesideImage(mmDialog, BRIGHTNESS_CONTRAST_WINDOW_TITLES);
+                            "Adjust Display Range",
+                            new String[]{
+                                    "Image " + (imgIdx + 1) + "/" + images.size() + ": " + imp.getTitle(),
+                                    "Adjust the Brightness/Contrast on this max projection.",
+                                    "Click Lock in to save these values for the channel, or skip this image to leave the saved range unchanged."
+                            },
+                            dup);
+                    if (ACTION_SKIP_CURRENT_IMAGE.equals(mmAction)) {
+                        dup.changes = false;
+                        dup.close();
+                        dup.flush();
+                        closeToolWindows(BRIGHTNESS_CONTRAST_WINDOW_TITLES);
+                        imgIdx++;
+                        continue;
+                    }
+                    if ("cancel".equals(mmAction)) {
+                        dup.changes = false;
+                        dup.close();
+                        dup.flush();
+                        closeToolWindows(BRIGHTNESS_CONTRAST_WINDOW_TITLES);
+                        return "cancel";
+                    }
 
                     double newMin = dup.getDisplayRangeMin();
                     double newMax = dup.getDisplayRangeMax();
@@ -3674,7 +3705,7 @@ public class CreateBinFileAnalysis implements Analysis {
                     ImagePlus filteredPreview = chDup.duplicate();
                     filteredPreview.setTitle("StarDist QC | Filtered | " + chLabel + " | " + imp.getTitle());
                     if (sdFilterContent != null) {
-                        FilterExecutor.runMacroString(filteredPreview, sdFilterContent);
+                        FilterExecutor.runThreadSafe(filteredPreview, sdFilterContent);
                     }
                     filteredPreview.show();
                     IJ.run(filteredPreview, toLutName(cfg.colors.get(ch)), "");
@@ -3684,6 +3715,7 @@ public class CreateBinFileAnalysis implements Analysis {
                             "StarDist 3D Parameters \u2014 C" + channelNum + " (" + cfg.names.get(ch) + ")");
                     sdDialog.setModal(false);
                     sdDialog.enableBackButton();
+                    sdDialog.setPrimaryButtonText("Lock in");
                     sdDialog.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
                     sdDialog.addSubHeader("Detection");
                     sdDialog.addMessage("Image " + (imgIdx + 1) + "/" + images.size() + ": " + imp.getTitle());
@@ -3716,6 +3748,7 @@ public class CreateBinFileAnalysis implements Analysis {
 
                     // Preview button — runs StarDist on the filtered image with current params
                     JButton previewBtn = sdDialog.addFooterButton("Run StarDist Preview");
+                    addSkipCurrentImageButton(sdDialog);
                     final ImagePlus previewSource = chDup;
                     final String previewFilterContent = sdFilterContent;
                     final ImagePlus previewAnchor = filteredPreview;
@@ -3810,6 +3843,11 @@ public class CreateBinFileAnalysis implements Analysis {
                         chDup.changes = false;
                         chDup.close();
                         chDup.flush();
+                        closePreviewImagesByPrefix("StarDist 3D Preview");
+                        if (isSkipCurrentImageAction(sdDialog)) {
+                            imgIdx++;
+                            continue;
+                        }
                         if (sdDialog.wasBackPressed()) {
                             sdParams[0] = sdDialog.getNextNumber();
                             sdParams[1] = sdDialog.getNextNumber();
@@ -3951,7 +3989,7 @@ public class CreateBinFileAnalysis implements Analysis {
                     ImagePlus filteredPreview = chDup.duplicate();
                     filteredPreview.setTitle("Cellpose QC | Filtered | " + chLabel + " | " + imp.getTitle());
                     if (cpFilterContent != null) {
-                        FilterExecutor.runMacroString(filteredPreview, cpFilterContent);
+                        FilterExecutor.runThreadSafe(filteredPreview, cpFilterContent);
                     }
                     filteredPreview.show();
                     IJ.run(filteredPreview, toLutName(cfg.colors.get(ch)), "");
@@ -3961,6 +3999,7 @@ public class CreateBinFileAnalysis implements Analysis {
                             "Cellpose Parameters \u2014 C" + channelNum + " (" + cfg.names.get(ch) + ")");
                     cpDialog.setModal(false);
                     cpDialog.enableBackButton();
+                    cpDialog.setPrimaryButtonText("Lock in");
                     cpDialog.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
                     cpDialog.addSubHeader("Built-in Model");
                     cpDialog.addMessage("Image " + (imgIdx + 1) + "/" + images.size() + ": " + imp.getTitle());
@@ -4039,6 +4078,7 @@ public class CreateBinFileAnalysis implements Analysis {
                             : runtimeStatus.message);
 
                     JButton previewBtn = cpDialog.addFooterButton("Run Cellpose Preview");
+                    addSkipCurrentImageButton(cpDialog);
                     final ImagePlus previewSource = chDup;
                     final String previewFilterContent = cpFilterContent;
                     final String previewChannelName = cfg.names.get(ch);
@@ -4152,6 +4192,11 @@ public class CreateBinFileAnalysis implements Analysis {
                         chDup.changes = false;
                         chDup.close();
                         chDup.flush();
+                        closePreviewImagesByPrefix("Cellpose Preview");
+                        if (isSkipCurrentImageAction(cpDialog)) {
+                            imgIdx++;
+                            continue;
+                        }
                         if (cpDialog.wasBackPressed()) {
                             cpModelParam[0] = cpDialog.getNextChoice();
                             cpSecondChannelParam[0] = selectedCellposeCompanionIndex(companionChoices, cpDialog.getNextChoice());
@@ -4233,7 +4278,7 @@ public class CreateBinFileAnalysis implements Analysis {
                         dup.setTitle("Channel Threshold QC | " + chLabel + " | " + imp.getTitle());
 
                         String filterContent = resolveFilterContent(binFolder, cfg, ch);
-                        if (filterContent != null) FilterExecutor.runMacroString(dup, filterContent);
+                        if (filterContent != null) FilterExecutor.runThreadSafe(dup, filterContent);
                         dup.show();
                         IJ.run(dup, toLutName(cfg.colors.get(ch)), "");
                         positionImageLeft(dup);
@@ -4282,7 +4327,7 @@ public class CreateBinFileAnalysis implements Analysis {
                         ThresholdConfirmationResult confirm = promptForThresholdToken(
                                 "Channel Threshold \u2014 " + chLabel,
                                 "Confirm Channel Threshold",
-                                "Channel Threshold ('default' or numeric)",
+                                "Channel Threshold (left/min value, 'default' or numeric)",
                                 readThresh,
                                 cfg.objectThresholds.get(ch),
                                 suggestedAutoThresh);
@@ -4326,6 +4371,7 @@ public class CreateBinFileAnalysis implements Analysis {
                 int imgIdx = 0;
                 while (imgIdx < images.size()) {
                     boolean imageAccepted = false;
+                    boolean skipCurrentImage = false;
                     while (!imageAccepted) {
                         QcImageSelection imageSelection = images.get(imgIdx);
                         ImagePlus imp = imageSelection.image;
@@ -4335,7 +4381,7 @@ public class CreateBinFileAnalysis implements Analysis {
 
                         // Apply custom filter
                         String filterContent = resolveFilterContent(binFolder, cfg, ch);
-                        if (filterContent != null) FilterExecutor.runMacroString(dup, filterContent);
+                        if (filterContent != null) FilterExecutor.runThreadSafe(dup, filterContent);
 
                         // Determine object threshold
                         String objThresh = cfg.objectThresholds.get(ch);
@@ -4376,18 +4422,22 @@ public class CreateBinFileAnalysis implements Analysis {
                         // Find the objects map and apply high-vis visualization
                         ImagePlus objectsMap = findObjectsMap();
                         if (objectsMap != null) {
-                            IJ.run(objectsMap, toLutName(cfg.colors.get(ch)), "");
-                            objectsMap.setDisplayRange(0, 0);
-                            objectsMap.updateAndDraw();
+                            // Objects maps are label images: pixel values are object IDs,
+                            // so they should use a categorical label LUT, not the channel LUT.
+                            applyLabelMapLut(objectsMap);
                         }
 
                         String sizeLabel = minSize + "-" + (maxSize >= 99999999 ? "Infinity" : String.valueOf(maxSize));
-                        new WaitForUserDialog("Particle Size QC \u2014 " + chLabel,
-                                "Image " + (imgIdx + 1) + "/" + images.size() + ": " + imp.getTitle() + "\n\n" +
-                                        "3D Objects Counter has been run with:\n" +
-                                        "  Threshold: " + threshValue + "\n" +
-                                        "  Particle Sizes (n Voxels): " + sizeLabel + "\n\n" +
-                                        "Review the objects map. Click OK to set size range.").show();
+                        String particleAction = showLockInSkipDialog(
+                                "Particle Size QC \u2014 " + chLabel,
+                                "Review Particle Size Preview",
+                                new String[]{
+                                        "Image " + (imgIdx + 1) + "/" + images.size() + ": " + imp.getTitle(),
+                                        "3D Objects Counter has been run with threshold " + threshValue
+                                                + " and particle sizes " + sizeLabel + ".",
+                                        "Review the label map, then click Lock in to set the size range or skip this image."
+                                },
+                                objectsMap != null ? objectsMap : dup);
 
                         // Cleanup preview images
                         if (objectsMap != null) { objectsMap.changes = false; objectsMap.close(); objectsMap.flush(); }
@@ -4396,15 +4446,29 @@ public class CreateBinFileAnalysis implements Analysis {
                         dup.close();
                         dup.flush();
 
+                        if (ACTION_SKIP_CURRENT_IMAGE.equals(particleAction)) {
+                            skipCurrentImage = true;
+                            imageAccepted = true;
+                            continue;
+                        }
+                        if ("cancel".equals(particleAction)) return "cancel";
+
                         // Confirmation: particle size
                         PipelineDialog gdSize = new PipelineDialog("Particle Sizes \u2014 " + chLabel);
                         gdSize.enableBackButton();
+                        gdSize.setPrimaryButtonText("Lock in");
                         gdSize.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
                         gdSize.addSubHeader("Particle Sizes (n Voxels)");
                         gdSize.addNumericField("Min Size (n Voxels)", minSize, 0);
                         String maxStr = maxSize >= 99999999 ? "Infinity" : String.valueOf(maxSize);
                         gdSize.addStringField("Max Size (n Voxels)", maxStr, 15);
+                        addSkipCurrentImageButton(gdSize);
                         if (!gdSize.showDialog()) {
+                            if (isSkipCurrentImageAction(gdSize)) {
+                                skipCurrentImage = true;
+                                imageAccepted = true;
+                                continue;
+                            }
                             if (gdSize.wasBackPressed()) {
                                 int newMinSize = (int) gdSize.getNextNumber();
                                 String newMaxStr = gdSize.getNextString().trim();
@@ -4418,6 +4482,11 @@ public class CreateBinFileAnalysis implements Analysis {
                         String newMaxStr = gdSize.getNextString().trim();
                         cfg.sizes.set(ch, newMinSize + "-" + newMaxStr);
                         imageAccepted = true;
+                    }
+
+                    if (skipCurrentImage) {
+                        imgIdx++;
+                        continue;
                     }
 
                     String action = showContinueRestartDialog(
@@ -4465,13 +4534,22 @@ public class CreateBinFileAnalysis implements Analysis {
             };
 
             GenericDialog dialog = new NonBlockingGenericDialog("Filter Hyperparameters \u2014 " + chLabel);
+            dialog.setOKLabel("Lock in");
             dialog.addMessage("Image " + (imgIdx + 1) + "/" + images.size() + ": " + imp.getTitle());
-            dialog.addMessage("Scroll through the filtered Z-stack on the left. Adjust any parameters if needed, click Apply Preview to rerun the filter on this image, then click OK when satisfied.");
+            dialog.addMessage("Scroll through the filtered Z-stack on the left. Adjust any parameters if needed, click Apply Preview to rerun the filter on this image, then click Lock in when satisfied.");
             List<FilterFieldBinding> bindings = addFilterParameterEditor(dialog, definition);
             addFilterPreviewButton(dialog, bindings, definition, previewHolder, source,
                     cfg.colors.get(channelIndex), chLabel, imp.getTitle());
+            final boolean[] skipCurrentImage = new boolean[]{false};
+            addGenericDialogSkipCurrentButton(dialog, skipCurrentImage);
             positionDialogBesideImage(dialog, previewHolder[0]);
             dialog.showDialog();
+            if (skipCurrentImage[0]) {
+                closeImageQuietly(previewHolder[0]);
+                closeImageQuietly(source);
+                imgIdx++;
+                continue;
+            }
             if (dialog.wasCanceled()) {
                 closeImageQuietly(previewHolder[0]);
                 closeImageQuietly(source);
@@ -4574,6 +4652,20 @@ public class CreateBinFileAnalysis implements Analysis {
         dialog.addPanel(previewPanel);
     }
 
+    private void addGenericDialogSkipCurrentButton(final GenericDialog dialog,
+                                                   final boolean[] skipCurrentImage) {
+        if (dialog == null || skipCurrentImage == null || skipCurrentImage.length == 0) return;
+        java.awt.Panel panel = new java.awt.Panel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
+        java.awt.Button skip = new java.awt.Button("Skip Current Image");
+        skip.addActionListener(e -> {
+            skipCurrentImage[0] = true;
+            dialog.dispose();
+        });
+        panel.add(skip);
+        dialog.setInsets(10, 0, 0);
+        dialog.addPanel(panel);
+    }
+
     private void syncFilterFieldBindings(List<FilterFieldBinding> bindings) {
         for (int i = 0; i < bindings.size(); i++) {
             FilterFieldBinding binding = bindings.get(i);
@@ -4653,17 +4745,75 @@ public class CreateBinFileAnalysis implements Analysis {
         if (labelImage == null) return;
         labelImage.setTitle(title);
         labelImage.show();
-        labelImage.setDisplayRange(0, Math.max(1, objectCount));
+        applyLabelMapLut(labelImage, Math.max(1, objectCount));
+        positionImageRightOf(anchorImage, labelImage);
+        labelImage.updateAndDraw();
+    }
+
+    private void applyLabelMapLut(ImagePlus labelImage) {
+        applyLabelMapLut(labelImage, maxDisplayValue(labelImage));
+    }
+
+    private void applyLabelMapLut(ImagePlus labelImage, double maxLabelValue) {
+        if (labelImage == null) return;
+        // Label maps encode object IDs, not channel intensity, so use a
+        // categorical label LUT instead of the configured channel colour.
+        labelImage.setDisplayRange(0, Math.max(1, maxLabelValue));
         try {
             IJ.run(labelImage, "glasbey_on_dark", "");
         } catch (Exception ignored) {
             // Best-effort only. The preview is still useful in grayscale.
         }
-        positionImageRightOf(anchorImage, labelImage);
         labelImage.updateAndDraw();
     }
 
+    private double maxDisplayValue(ImagePlus imp) {
+        if (imp == null) return 1;
+        double max = 0;
+        if (imp.getStack() != null && imp.getStackSize() > 0) {
+            for (int i = 1; i <= imp.getStackSize(); i++) {
+                ImageProcessor processor = imp.getStack().getProcessor(i);
+                if (processor != null) max = Math.max(max, processor.getMax());
+            }
+        } else if (imp.getProcessor() != null) {
+            max = imp.getProcessor().getMax();
+        }
+        return isValidThresholdValue(max) ? max : 1;
+    }
+
     // ── Continue/Restart/Skip dialog ────────────────────────────────────
+
+    private void addSkipCurrentImageButton(final PipelineDialog dialog) {
+        if (dialog == null) return;
+        JButton skip = dialog.addFooterButton("Skip Current Image");
+        skip.addActionListener(e -> dialog.closeWithAction(ACTION_SKIP_CURRENT_IMAGE));
+    }
+
+    private boolean isSkipCurrentImageAction(PipelineDialog dialog) {
+        return dialog != null && ACTION_SKIP_CURRENT_IMAGE.equals(dialog.getActionCommand());
+    }
+
+    private String showLockInSkipDialog(String title, String header, String[] messages, ImagePlus anchorImage) {
+        PipelineDialog dialog = new PipelineDialog(title);
+        dialog.setModal(false);
+        dialog.setPrimaryButtonText("Lock in");
+        if (header != null && !header.trim().isEmpty()) {
+            dialog.addHeader(header);
+        }
+        if (messages != null) {
+            for (String message : messages) {
+                if (message != null && !message.trim().isEmpty()) {
+                    dialog.addMessage(message);
+                }
+            }
+        }
+        addSkipCurrentImageButton(dialog);
+        positionPipelineDialogBesideImage(dialog, anchorImage);
+        if (!dialog.showDialog()) {
+            return isSkipCurrentImageAction(dialog) ? ACTION_SKIP_CURRENT_IMAGE : "cancel";
+        }
+        return "continue";
+    }
 
     private String showThresholdAdjustmentDialog(String title,
                                                  String imageTitle,
@@ -4681,14 +4831,12 @@ public class CreateBinFileAnalysis implements Analysis {
         dialog.addSpacer(6);
         dialog.addMessage("The per-channel filter (" + filterPreset + ") has been applied.");
         dialog.addMessage("This single threshold is shared by classical object detection and ROI intensity measurements.");
-        dialog.addMessage("Adjust the Threshold, then click Lock in. Skip Current Image leaves the saved threshold unchanged and moves to the next image.");
-        JButton skip = dialog.addFooterButton("Skip Current Image");
-        skip.addActionListener(e -> dialog.closeWithAction(ACTION_SKIP_CURRENT_IMAGE));
+        dialog.addMessage("Adjust the left/minimum Threshold slider, then click Lock in. FLASH saves the left/minimum value; the right/maximum slider can stay at the image maximum.");
+        dialog.addMessage("Skip Current Image leaves the saved threshold unchanged and moves to the next image.");
+        addSkipCurrentImageButton(dialog);
         positionPipelineDialogBesideImage(dialog, anchorImage);
         if (!dialog.showDialog()) {
-            return ACTION_SKIP_CURRENT_IMAGE.equals(dialog.getActionCommand())
-                    ? ACTION_SKIP_CURRENT_IMAGE
-                    : "cancel";
+            return isSkipCurrentImageAction(dialog) ? ACTION_SKIP_CURRENT_IMAGE : "cancel";
         }
         return "continue";
     }
@@ -4738,7 +4886,7 @@ public class CreateBinFileAnalysis implements Analysis {
             dialog.addSubHeader(header);
             dialog.addMessage("Current saved threshold: " + thresholdTokenDisplay(persistedToken));
             if (readThreshold != null) {
-                dialog.addMessage("Read from image: " + formatThresholdValue(readThreshold));
+                dialog.addMessage("Read from image left/min slider: " + formatThresholdValue(readThreshold));
             } else {
                 dialog.addMessage("Threshold could not be read from the image.");
                 dialog.addHelpText("Enter a numeric threshold manually. Type 'default' only if you want automatic thresholding.");
@@ -4790,6 +4938,8 @@ public class CreateBinFileAnalysis implements Analysis {
 
     private Double sanitizeThresholdValue(ImageProcessor processor) {
         if (processor == null) return null;
+        // ImageJ's left slider is the minimum threshold. The setup UI tells
+        // users to adjust this side, so this is the value persisted to config.
         double threshold = processor.getMinThreshold();
         if (!isValidThresholdValue(threshold)) return null;
         return threshold;

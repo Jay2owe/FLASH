@@ -5,6 +5,9 @@ import flash.pipeline.bin.BinField;
 import flash.pipeline.image.NamedFilterLoader;
 import flash.pipeline.ui.ToggleSwitch;
 import flash.pipeline.zslice.ZSliceMode;
+import ij.ImagePlus;
+import ij.process.ByteProcessor;
+import ij.process.ImageProcessor;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -380,6 +383,18 @@ public class CreateBinFileAnalysisTest {
         assertTrue(globalSelector.isSelected());
     }
 
+    @Test
+    public void readThresholdFromImage_returnsLeftMinThreshold() throws Exception {
+        CreateBinFileAnalysis analysis = new CreateBinFileAnalysis();
+        ByteProcessor processor = new ByteProcessor(2, 2, new byte[]{0, 40, 80, (byte) 200}, null);
+        processor.setThreshold(17.0, 203.0, ImageProcessor.NO_LUT_UPDATE);
+        ImagePlus imp = new ImagePlus("threshold-min", processor);
+
+        Double threshold = invokeReadThresholdFromImage(analysis, imp);
+
+        assertEquals(Double.valueOf(17.0), threshold);
+    }
+
     private static File configurationDir(File dir) {
         return new File(dir, "FLASH/00 - Configuration");
     }
@@ -488,6 +503,13 @@ public class CreateBinFileAnalysisTest {
                 "saveCustomFilterPreset", File.class, String.class, String.class);
         method.setAccessible(true);
         method.invoke(analysis, binFolder, presetName, macroContent);
+    }
+
+    private static Double invokeReadThresholdFromImage(CreateBinFileAnalysis analysis,
+                                                       ImagePlus imp) throws Exception {
+        Method method = CreateBinFileAnalysis.class.getDeclaredMethod("readThresholdFromImage", ImagePlus.class);
+        method.setAccessible(true);
+        return (Double) method.invoke(analysis, imp);
     }
 
     private static boolean contains(String[] values, String expected) {
