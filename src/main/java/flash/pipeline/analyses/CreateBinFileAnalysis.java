@@ -40,8 +40,10 @@ import flash.pipeline.ui.config.ConfigQcDialog;
 import flash.pipeline.ui.config.ConfigQcResult;
 import flash.pipeline.ui.config.ConfigQcStage;
 import flash.pipeline.ui.config.ChannelThresholdStage;
+import flash.pipeline.ui.config.CellposeParameterStage;
 import flash.pipeline.ui.config.DisplayRangeStage;
 import flash.pipeline.ui.config.FilterParameterStage;
+import flash.pipeline.ui.config.StarDistParameterStage;
 import flash.pipeline.ui.config.ZSliceSelectionStage;
 import flash.pipeline.ui.sandbox.SandboxDialog;
 import flash.pipeline.ui.wizard.MarkerAutoComplete;
@@ -3715,6 +3717,12 @@ public class CreateBinFileAnalysis implements Analysis {
             boolean isStarDist = cfg.segmentationMethods.get(ch).startsWith("stardist");
             boolean isCellpose = cfg.segmentationMethods.get(ch).startsWith("cellpose");
             if (isStarDist && (doObjTh || doSz)) {
+                if (useEmbeddedStarDistParameterStage()) {
+                    String starDistResult = runEmbeddedStarDistParameterQC(images, cfg, binFolder, ch);
+                    if ("cancel".equals(starDistResult)) return "cancel";
+                    if ("back".equals(starDistResult)) return "back";
+                    if (!doRoiIntensityTh) continue;
+                } else {
                 if (!gateStarDistFeature("StarDist 3D preview")) {
                     return "back";
                 }
@@ -4011,9 +4019,16 @@ public class CreateBinFileAnalysis implements Analysis {
                 // If the user did not also opt into the channel-threshold step,
                 // skip the unified Channel Threshold QC for this stardist channel.
                 if (!doRoiIntensityTh) continue;
+                }
             }
 
             if (isCellpose && (doObjTh || doSz)) {
+                if (useEmbeddedCellposeParameterStage()) {
+                    String cellposeResult = runEmbeddedCellposeParameterQC(images, cfg, binFolder, ch);
+                    if ("cancel".equals(cellposeResult)) return "cancel";
+                    if ("back".equals(cellposeResult)) return "back";
+                    if (!doRoiIntensityTh) continue;
+                } else {
                 if (!gateCellposeFeature("Cellpose segmentation")) {
                     return "back";
                 }
@@ -4334,6 +4349,7 @@ public class CreateBinFileAnalysis implements Analysis {
                 // If the user did not also opt into the channel-threshold step,
                 // skip the unified Channel Threshold QC for this cellpose channel.
                 if (!doRoiIntensityTh) continue;
+                }
             }
 
             // \u2500\u2500 Step 3: Channel Threshold QC \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
@@ -4818,6 +4834,233 @@ public class CreateBinFileAnalysis implements Analysis {
             imgIdx2++;
         }
         return "continue";
+    }
+
+    private boolean useEmbeddedStarDistParameterStage() {
+        return true;
+    }
+
+    private String runEmbeddedStarDistParameterQC(List<QcImageSelection> images, BinUserConfig cfg,
+                                                  File binFolder, int channelIndex) {
+        if (!gateStarDistFeature("StarDist 3D preview")) {
+            return "back";
+        }
+        if (GraphicsEnvironment.isHeadless()) {
+            return "cancel";
+        }
+        ConfigQcContext context = new ConfigQcContext(
+                projectRootForConfigurationDir(binFolder),
+                binFolder,
+                cfg,
+                filterParameterContextImages(images),
+                cfg.names,
+                channelIndex);
+        StarDistParameterStage stage = createStarDistParameterStage(cfg, binFolder, channelIndex);
+        ConfigQcDialog dialog = ConfigQcDialog.createModal(
+                null, context, Collections.<ConfigQcStage>singletonList(stage));
+        ConfigQcResult result = dialog.showDialog();
+        if (result == ConfigQcResult.DONE || result == ConfigQcResult.SKIP_CURRENT_IMAGE) {
+            cfg.objectThresholds.set(channelIndex, "default");
+            cfg.sizes.set(channelIndex, "100-Infinity");
+            return "continue";
+        }
+        if (result == ConfigQcResult.BACK) {
+            return "back";
+        }
+        return "cancel";
+    }
+
+    StarDistParameterStage createStarDistParameterStage(final BinUserConfig cfg,
+                                                        final File binFolder,
+                                                        final int channelIndex) {
+        final int channelNum = channelIndex + 1;
+        final String chLabel = "C" + channelNum + " (" + cfg.names.get(channelIndex) + ")";
+        return new StarDistParameterStage(
+                new StarDistParameterStage.ParameterStore() {
+                    @Override public String getMethodToken() {
+                        return cfg.segmentationMethods.get(channelIndex);
+                    }
+
+                    @Override public void save(String methodToken) {
+                        cfg.segmentationMethods.set(channelIndex, methodToken);
+                    }
+                },
+                new StarDistParameterStage.PreviewAdapter() {
+                    @Override public ImagePlus createFilteredSource(ConfigQcContext context) {
+                        return createFilteredAiSource(context, cfg, binFolder, channelIndex,
+                                "StarDist filtered input");
+                    }
+
+                    @Override public ImagePlus runPreview(ImagePlus filteredSource,
+                                                          StarDistParameterStage.Parameters parameters) {
+                        if (filteredSource == null) return null;
+                        ImagePlus input = filteredSource.duplicate();
+                        input.setTitle("StarDist preview input | " + chLabel);
+                        try {
+                            return StarDist3DRunner.run(input,
+                                    parameters.probabilityThreshold,
+                                    parameters.nmsThreshold,
+                                    cfg.names.get(channelIndex),
+                                    parameters.linkingMaxDistance,
+                                    parameters.gapClosingMaxDistance,
+                                    parameters.maxFrameGap,
+                                    parameters.areaMin,
+                                    parameters.areaMax,
+                                    parameters.qualityMin,
+                                    parameters.intensityMin);
+                        } finally {
+                            closeImageQuietly(input);
+                        }
+                    }
+
+                    @Override public int countLabels(ImagePlus labelImage) {
+                        return labelImage == null ? 0 : StarDist3DRunner.countLabels(labelImage);
+                    }
+
+                    @Override public void close(ImagePlus image) {
+                        closeImageQuietly(image);
+                    }
+                });
+    }
+
+    private boolean useEmbeddedCellposeParameterStage() {
+        return true;
+    }
+
+    private String runEmbeddedCellposeParameterQC(List<QcImageSelection> images, BinUserConfig cfg,
+                                                  File binFolder, int channelIndex) {
+        if (!gateCellposeFeature("Cellpose segmentation")) {
+            return "back";
+        }
+        if (GraphicsEnvironment.isHeadless()) {
+            return "cancel";
+        }
+        ConfigQcContext context = new ConfigQcContext(
+                projectRootForConfigurationDir(binFolder),
+                binFolder,
+                cfg,
+                filterParameterContextImages(images),
+                cfg.names,
+                channelIndex);
+        CellposeParameterStage stage = createCellposeParameterStage(cfg, binFolder, channelIndex);
+        ConfigQcDialog dialog = ConfigQcDialog.createModal(
+                null, context, Collections.<ConfigQcStage>singletonList(stage));
+        ConfigQcResult result = dialog.showDialog();
+        if (result == ConfigQcResult.DONE || result == ConfigQcResult.SKIP_CURRENT_IMAGE) {
+            cfg.objectThresholds.set(channelIndex, "default");
+            cfg.sizes.set(channelIndex, "100-Infinity");
+            return "continue";
+        }
+        if (result == ConfigQcResult.BACK) {
+            return "back";
+        }
+        return "cancel";
+    }
+
+    CellposeParameterStage createCellposeParameterStage(final BinUserConfig cfg,
+                                                        final File binFolder,
+                                                        final int channelIndex) {
+        final int channelNum = channelIndex + 1;
+        final String chLabel = "C" + channelNum + " (" + cfg.names.get(channelIndex) + ")";
+        CellposeRuntime.Status runtimeStatus = CellposeRuntime.probeConfigured();
+        final boolean defaultUseGpu = runtimeStatus.ready
+                ? runtimeStatus.gpuAvailable
+                : BinConfig.DEFAULT_CELLPOSE_USE_GPU;
+        return new CellposeParameterStage(
+                new CellposeParameterStage.ParameterStore() {
+                    @Override public String getMethodToken() {
+                        return cfg.segmentationMethods.get(channelIndex);
+                    }
+
+                    @Override public void save(String methodToken) {
+                        cfg.segmentationMethods.set(channelIndex, methodToken);
+                    }
+                },
+                new CellposeParameterStage.PreviewAdapter() {
+                    @Override public ImagePlus createFilteredSource(ConfigQcContext context) {
+                        return createFilteredAiSource(context, cfg, binFolder, channelIndex,
+                                "Cellpose filtered input");
+                    }
+
+                    @Override public ImagePlus createFilteredCompanionSource(ConfigQcContext context,
+                                                                             int companionChannelIndex) {
+                        return createFilteredAiSource(context, cfg, binFolder, companionChannelIndex,
+                                "Cellpose companion input");
+                    }
+
+                    @Override public ImagePlus runPreview(ImagePlus filteredSource,
+                                                          ImagePlus filteredCompanionSource,
+                                                          CellposeParameterStage.Parameters parameters) {
+                        if (filteredSource == null) return null;
+                        ImagePlus input = filteredSource.duplicate();
+                        ImagePlus companion = filteredCompanionSource == null
+                                ? null : filteredCompanionSource.duplicate();
+                        input.setTitle("Cellpose preview input | " + chLabel);
+                        if (companion != null) {
+                            companion.setTitle("Cellpose preview companion | " + chLabel);
+                        }
+                        try {
+                            return Cellpose3DRunner.run(input, companion,
+                                    parameters.modelToken,
+                                    parameters.diameter,
+                                    parameters.flowThreshold,
+                                    parameters.cellprobThreshold,
+                                    parameters.useGpu,
+                                    cfg.names.get(channelIndex));
+                        } finally {
+                            closeImageQuietly(input);
+                            closeImageQuietly(companion);
+                        }
+                    }
+
+                    @Override public int countLabels(ImagePlus labelImage) {
+                        return labelImage == null ? 0 : Cellpose3DRunner.countLabels(labelImage);
+                    }
+
+                    @Override public void close(ImagePlus image) {
+                        closeImageQuietly(image);
+                    }
+                },
+                new CellposeParameterStage.RuntimeAdapter() {
+                    @Override public String runtimeSummary() {
+                        CellposeRuntime.Status status = CellposeRuntime.probeConfigured();
+                        return status.ready
+                                ? ("Configured runtime: Cellpose "
+                                + (status.cellposeVersion.isEmpty() ? "unknown" : status.cellposeVersion)
+                                + ", GPU available=" + status.gpuAvailable)
+                                : status.message;
+                    }
+
+                    @Override public boolean nvidiaGpuLikelyAvailable() {
+                        return CellposeRuntime.isNvidiaGpuLikelyAvailable();
+                    }
+
+                    @Override public CellposeParameterStage.GpuInstallResult installGpuSupport() {
+                        CellposeRuntime.InstallResult result = CellposeRuntime.installManagedGpu();
+                        return new CellposeParameterStage.GpuInstallResult(
+                                result.success,
+                                result.message,
+                                result.details);
+                    }
+                },
+                cfg.names,
+                channelIndex,
+                defaultUseGpu);
+    }
+
+    private ImagePlus createFilteredAiSource(ConfigQcContext context, BinUserConfig cfg, File binFolder,
+                                             int channelIndex, String titlePrefix) {
+        int channelNum = channelIndex + 1;
+        String chLabel = "C" + channelNum + " (" + cfg.names.get(channelIndex) + ")";
+        ImagePlus source = duplicateCurrentChannel(context, channelNum);
+        if (source == null) return null;
+        String filterContent = resolveFilterContent(binFolder, cfg, channelIndex);
+        if (filterContent != null && !filterContent.trim().isEmpty()) {
+            FilterExecutor.runThreadSafe(source, filterContent);
+        }
+        source.setTitle(titlePrefix + " | " + chLabel + " | "
+                + (context == null ? "" : context.getCurrentImageDisplayName()));
+        return applyPreviewLut(source, channelColor(cfg, channelIndex));
     }
 
     private String interactiveFilterParameterQC(List<QcImageSelection> images, BinUserConfig cfg,
