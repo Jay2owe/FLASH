@@ -35,7 +35,6 @@ import ij.IJ;
 import ij.ImagePlus;
 import ij.WindowManager;
 import ij.gui.Toolbar;
-import ij.gui.WaitForUserDialog;
 import ij.plugin.ZProjector;
 import ij.plugin.frame.RoiManager;
 import ij.measure.ResultsTable;
@@ -335,21 +334,29 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
                 IJ.run(prep.maxProjection, "Brightness/Contrast...", "");
             }
             prep.maxProjection.show();
-            RoiOrientationPanel orientationPanel =
-                    new RoiOrientationPanel(null, createOrientationTarget(prep));
-            orientationPanel.showNear(prep.maxProjection);
+            RoiOrientationPanel drawDialog =
+                    new RoiOrientationPanel(null, createOrientationTarget(prep),
+                            "Image " + (i + 1) + "/" + totalImages, imgTitle);
 
             try {
                 // Auto-select freehand tool and open ROI Manager
                 IJ.setTool(Toolbar.FREEROI);
                 IJ.run("ROI Manager...");
 
-                new WaitForUserDialog("Draw ROI",
-                        "Image " + (i + 1) + "/" + totalImages + "\n" +
-                                "Draw ROI for: " + imgTitle + "\n\n" +
-                                "Use the freehand tool to draw, then click OK.").show();
+                RoiOrientationPanel.DrawDialogResult drawResult =
+                        drawDialog.showNearAndWait(prep.maxProjection);
+                if (drawResult != RoiOrientationPanel.DrawDialogResult.CONFIRMED) {
+                    prepPool.shutdownNow();
+                    for (Future<PreparedImage> f : prepCache.values()) {
+                        f.cancel(true);
+                    }
+                    prepCache.clear();
+                    closePreparedImages(prep);
+                    savePartialAndExit(directory, rm, "user-cancelled at image " + (i + 1));
+                    return;
+                }
             } finally {
-                orientationPanel.close();
+                drawDialog.close();
             }
 
             // Expect user has drawn a ROI on max

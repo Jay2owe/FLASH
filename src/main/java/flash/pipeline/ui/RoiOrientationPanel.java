@@ -11,6 +11,7 @@ import javax.swing.JButton;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.SwingUtilities;
 import javax.swing.WindowConstants;
 import java.awt.Color;
 import java.awt.Dialog;
@@ -19,10 +20,15 @@ import java.awt.FlowLayout;
 import java.awt.Frame;
 import java.awt.GraphicsEnvironment;
 import java.awt.Rectangle;
+import java.awt.SecondaryLoop;
+import java.awt.Toolkit;
 import java.awt.Window;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 
 /**
- * Modeless rotate/flip controls shown beside each ROI drawing image.
+ * Modeless draw confirmation and rotate/flip controls shown beside each ROI
+ * drawing image.
  */
 public final class RoiOrientationPanel {
     private static final Color BG_COLOR = new Color(245, 245, 245);
@@ -32,6 +38,9 @@ public final class RoiOrientationPanel {
     private final JDialog dialog;
     private final OrientationActionTarget target;
     private final JLabel statusLabel;
+    private final Object resultLock = new Object();
+    private DrawDialogResult result;
+    private SecondaryLoop waitLoop;
 
     public enum OrientationAction {
         ROTATE_LEFT,
@@ -39,6 +48,11 @@ public final class RoiOrientationPanel {
         FLIP_HORIZONTAL,
         FLIP_VERTICAL,
         RESET
+    }
+
+    public enum DrawDialogResult {
+        CONFIRMED,
+        CANCELLED
     }
 
     public interface OrientationActionTarget {
@@ -50,6 +64,11 @@ public final class RoiOrientationPanel {
     }
 
     public RoiOrientationPanel(Window owner, OrientationActionTarget target) {
+        this(owner, target, "", "");
+    }
+
+    public RoiOrientationPanel(Window owner, OrientationActionTarget target,
+                               String imageProgress, String imageTitle) {
         this.target = target;
         if (GraphicsEnvironment.isHeadless()) {
             this.dialog = null;
@@ -58,10 +77,17 @@ public final class RoiOrientationPanel {
         }
 
         this.dialog = owner == null
-                ? new JDialog((Frame) null, "ROI Orientation", false)
-                : new JDialog(owner, "ROI Orientation", Dialog.ModalityType.MODELESS);
-        this.dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+                ? new JDialog((Frame) null, "Draw ROI and Orientation", false)
+                : new JDialog(owner, "Draw ROI and Orientation",
+                        Dialog.ModalityType.MODELESS);
+        this.dialog.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
         this.dialog.setAlwaysOnTop(false);
+        this.dialog.addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowClosing(WindowEvent e) {
+                finish(DrawDialogResult.CANCELLED);
+            }
+        });
 
         JPanel body = new JPanel();
         body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
@@ -70,7 +96,11 @@ public final class RoiOrientationPanel {
                 BorderFactory.createLineBorder(BORDER_COLOR),
                 BorderFactory.createEmptyBorder(8, 10, 8, 10)));
 
+        JLabel instructionLabel = new JLabel(instructionHtml(imageProgress, imageTitle));
+        instructionLabel.setAlignmentX(JLabel.LEFT_ALIGNMENT);
+
         JPanel buttonRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+        buttonRow.setAlignmentX(JPanel.LEFT_ALIGNMENT);
         buttonRow.setOpaque(false);
         buttonRow.add(button("Rotate left", OrientationAction.ROTATE_LEFT));
         buttonRow.add(button("Rotate right", OrientationAction.ROTATE_RIGHT));
@@ -83,16 +113,35 @@ public final class RoiOrientationPanel {
         statusLabel.setFont(statusLabel.getFont().deriveFont(11f));
         statusLabel.setAlignmentX(JLabel.LEFT_ALIGNMENT);
 
+        JButton cancelButton = new JButton("Cancel ROI run");
+        cancelButton.setFocusPainted(false);
+        cancelButton.addActionListener(e -> finish(DrawDialogResult.CANCELLED));
+
+        JButton confirmButton = new JButton("Finish drawing");
+        confirmButton.setFocusPainted(false);
+        confirmButton.addActionListener(e -> finish(DrawDialogResult.CONFIRMED));
+
+        JPanel confirmationRow = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
+        confirmationRow.setAlignmentX(JPanel.LEFT_ALIGNMENT);
+        confirmationRow.setOpaque(false);
+        confirmationRow.add(cancelButton);
+        confirmationRow.add(confirmButton);
+
+        body.add(instructionLabel);
+        body.add(Box.createVerticalStrut(8));
         body.add(buttonRow);
         body.add(Box.createVerticalStrut(6));
         body.add(statusLabel);
+        body.add(Box.createVerticalStrut(10));
+        body.add(confirmationRow);
         dialog.getContentPane().add(body);
+        dialog.getRootPane().setDefaultButton(confirmButton);
     }
 
     public void showNear(ImagePlus image) {
         if (dialog == null) return;
         dialog.pack();
-        dialog.setMinimumSize(new Dimension(520, dialog.getPreferredSize().height));
+        dialog.setMinimumSize(new Dimension(560, dialog.getPreferredSize().height));
         ImageWindow window = image == null ? null : image.getWindow();
         if (window != null) {
             Rectangle bounds = window.getBounds();
@@ -105,10 +154,39 @@ public final class RoiOrientationPanel {
         dialog.toFront();
     }
 
+    public DrawDialogResult showNearAndWait(ImagePlus image) {
+        if (dialog == null) return DrawDialogResult.CANCELLED;
+        showNear(image);
+        waitForResult();
+        return resultOrCancelled();
+    }
+
     public void close() {
-        if (dialog != null) {
-            dialog.dispose();
+        finish(DrawDialogResult.CANCELLED);
+    }
+
+    void performOrientationAction(OrientationAction action) {
+        applyAction(target, action);
+        refreshStatus();
+    }
+
+    static String instructionHtml(String imageProgress, String imageTitle) {
+        String progress = safeTrim(imageProgress);
+        String title = safeTrim(imageTitle);
+        StringBuilder html = new StringBuilder("<html><body style='width:430px'>");
+        if (!progress.isEmpty()) {
+            html.append("<b>").append(escapeHtml(progress)).append("</b><br>");
         }
+        if (!title.isEmpty()) {
+            html.append("Draw ROI for: ")
+                    .append(escapeHtml(title))
+                    .append("<br><br>");
+        }
+        html.append("Draw or edit the ROI in ImageJ. Use orientation buttons ")
+                .append("if needed, then click <b>Finish drawing</b> to lock ")
+                .append("in this image's ROI.");
+        html.append("</body></html>");
+        return html.toString();
     }
 
     public static void applyAction(OrientationActionTarget target,
@@ -148,10 +226,7 @@ public final class RoiOrientationPanel {
     private JButton button(String label, final OrientationAction action) {
         JButton button = new JButton(label);
         button.setFocusPainted(false);
-        button.addActionListener(e -> {
-            applyAction(target, action);
-            refreshStatus();
-        });
+        button.addActionListener(e -> performOrientationAction(action));
         return button;
     }
 
@@ -164,6 +239,100 @@ public final class RoiOrientationPanel {
     private String statusText() {
         String text = target == null ? "" : target.statusText();
         return text == null || text.trim().isEmpty() ? "Orientation ready" : text;
+    }
+
+    private void waitForResult() {
+        synchronized (resultLock) {
+            if (result != null) return;
+        }
+
+        if (SwingUtilities.isEventDispatchThread()) {
+            SecondaryLoop loop =
+                    Toolkit.getDefaultToolkit().getSystemEventQueue().createSecondaryLoop();
+            synchronized (resultLock) {
+                if (result != null) return;
+                waitLoop = loop;
+            }
+            loop.enter();
+            return;
+        }
+
+        synchronized (resultLock) {
+            while (result == null) {
+                try {
+                    resultLock.wait();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    finish(DrawDialogResult.CANCELLED);
+                    return;
+                }
+            }
+        }
+    }
+
+    private DrawDialogResult resultOrCancelled() {
+        synchronized (resultLock) {
+            return result == null ? DrawDialogResult.CANCELLED : result;
+        }
+    }
+
+    private void finish(DrawDialogResult next) {
+        DrawDialogResult safeNext = next == null
+                ? DrawDialogResult.CANCELLED
+                : next;
+        SecondaryLoop loopToExit;
+        synchronized (resultLock) {
+            if (result != null) return;
+            result = safeNext;
+            loopToExit = waitLoop;
+            resultLock.notifyAll();
+        }
+        disposeDialog();
+        if (loopToExit != null) {
+            loopToExit.exit();
+        }
+    }
+
+    private void disposeDialog() {
+        if (dialog == null) return;
+        if (SwingUtilities.isEventDispatchThread()) {
+            dialog.dispose();
+        } else {
+            SwingUtilities.invokeLater(dialog::dispose);
+        }
+    }
+
+    private static String safeTrim(String value) {
+        return value == null ? "" : value.trim();
+    }
+
+    private static String escapeHtml(String value) {
+        String text = value == null ? "" : value;
+        StringBuilder escaped = new StringBuilder(text.length());
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            switch (ch) {
+                case '&':
+                    escaped.append("&amp;");
+                    break;
+                case '<':
+                    escaped.append("&lt;");
+                    break;
+                case '>':
+                    escaped.append("&gt;");
+                    break;
+                case '"':
+                    escaped.append("&quot;");
+                    break;
+                case '\'':
+                    escaped.append("&#39;");
+                    break;
+                default:
+                    escaped.append(ch);
+                    break;
+            }
+        }
+        return escaped.toString();
     }
 
     private static boolean sameState(OrientationTransformState a,

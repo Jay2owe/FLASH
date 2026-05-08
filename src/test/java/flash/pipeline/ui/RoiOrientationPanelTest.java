@@ -66,6 +66,25 @@ public class RoiOrientationPanelTest {
         assertEquals(1, target.redrawCount);
     }
 
+    @Test
+    public void combinedPanelActionAppliesOrientationDecisionThroughInstanceHandler() {
+        FakeTarget target = new FakeTarget(OrientationTransformState.identity());
+        RoiOrientationPanel panel = new RoiOrientationPanel(
+                null, target, "Image 1/3", "Mouse <LH> & SCN");
+
+        panel.performOrientationAction(RoiOrientationPanel.OrientationAction.ROTATE_RIGHT);
+
+        assertEquals(OrientationManifestRow.RotationDegrees.DEG_90,
+                target.state.rotateDegrees);
+        assertEquals(1, target.clearCount);
+        assertEquals(1, target.redrawCount);
+        assertTrue(RoiOrientationPanel
+                .instructionHtml("Image 1/3", "Mouse <LH> & SCN")
+                .contains("Mouse &lt;LH&gt; &amp; SCN"));
+
+        panel.close();
+    }
+
     private static final class FakeTarget
             implements RoiOrientationPanel.OrientationActionTarget {
         private OrientationTransformState state;
