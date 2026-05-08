@@ -50,8 +50,8 @@ public class CLIAggregateOptionsTest {
         CLIConfig cfg = CLIArgumentParser.parse(
                 "dir=[/tmp] aggregate.granularity=region");
         assertNotNull(cfg);
-        // Index 9 is Master Data Aggregation
-        assertTrue(cfg.getSelectedAnalyses()[9]);
+        // Index 8 is Master Data Aggregation
+        assertTrue(cfg.getSelectedAnalyses()[8]);
     }
 
     @Test

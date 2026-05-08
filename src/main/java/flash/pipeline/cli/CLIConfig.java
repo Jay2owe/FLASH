@@ -38,7 +38,6 @@ public class CLIConfig {
     int gpuPermits = 0;
     boolean splitMergeUseDeconv = true;
     boolean threeDUseDeconv = true;
-    boolean nuclearCounterUseDeconv = true;
     boolean intensityV2UseDeconv = true;
     final DeconvConfig deconv = new DeconvConfig();
     final EnumMap<BinField, String> headlessBinFields = new EnumMap<BinField, String>(BinField.class);
@@ -67,7 +66,6 @@ public class CLIConfig {
     public int getGpuPermits() { return gpuPermits; }
     public boolean isSplitMergeUseDeconv() { return splitMergeUseDeconv; }
     public boolean isThreeDUseDeconv() { return threeDUseDeconv; }
-    public boolean isNuclearCounterUseDeconv() { return nuclearCounterUseDeconv; }
     public boolean isIntensityV2UseDeconv() { return intensityV2UseDeconv; }
     public DeconvConfig getDeconv() { return deconv; }
     public boolean hasBinField(BinField field) {
@@ -317,7 +315,6 @@ public class CLIConfig {
 
         if (!splitMergeUseDeconv) parts.add("splitmerge.useDeconv=false");
         if (!threeDUseDeconv) parts.add("threeD.useDeconv=false");
-        if (!nuclearCounterUseDeconv) parts.add("nuclearCounter.useDeconv=false");
         if (!intensityV2UseDeconv) parts.add("intensityV2.useDeconv=false");
 
         StringBuilder sb = new StringBuilder();

@@ -192,7 +192,8 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
 
     @Override
     public void execute(String directory) {
-        if (!FeatureDependencyGate.gate(DependencyId.BIO_FORMATS_RUNTIME, "Split and Merge Image Channels")) {
+        if (!FeatureDependencyGate.gate(DependencyId.BIO_FORMATS_RUNTIME,
+                "Split and Merge Image Channels", "Bio-Formats image loading and OME-TIFF writing")) {
             return;
         }
 

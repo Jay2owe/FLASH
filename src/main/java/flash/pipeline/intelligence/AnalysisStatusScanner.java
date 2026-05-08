@@ -71,9 +71,6 @@ public class AnalysisStatusScanner {
         put(out, FLASH_Pipeline.IDX_INTENSITY,
                 fallbackStatus(directory, hasCsv(layout.intensityDataReadDirs())),
                 "Fluorescence Intensity Analysis");
-        put(out, FLASH_Pipeline.IDX_NUCLEAR,
-                fallbackStatus(directory, false),
-                "Nuclear Counter");
         put(out, FLASH_Pipeline.IDX_AGGREGATION,
                 sidecarStatus(directory, AGGREGATION_ID, currentBinHash,
                         hasFile(layout.aggregationReadDirs(), "Project_Master_Objects.csv")

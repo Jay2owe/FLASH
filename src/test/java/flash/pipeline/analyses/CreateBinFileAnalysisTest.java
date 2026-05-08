@@ -1,5 +1,6 @@
 package flash.pipeline.analyses;
 
+import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinField;
 import flash.pipeline.image.NamedFilterLoader;
 import flash.pipeline.zslice.ZSliceMode;
@@ -262,6 +263,56 @@ public class CreateBinFileAnalysisTest {
         assertFalse(new File(bin, "C1_Filters.ijm").exists());
     }
 
+    @Test
+    public void segmentationDialogDefaultDemotesUnavailableLegacyAiSegmentation() {
+        assertEquals("Classical",
+                CreateBinFileAnalysis.segmentationChoiceForDialogDefault(
+                        "stardist:0.5:0.4", false, true));
+        assertEquals("Classical",
+                CreateBinFileAnalysis.segmentationChoiceForDialogDefault(
+                        "cellpose:30:cyto3:0.4:0.0:gpu=true", true, false));
+        assertEquals("StarDist 3D",
+                CreateBinFileAnalysis.segmentationChoiceForDialogDefault(
+                        "stardist:0.5:0.4", true, true));
+        assertEquals("Cellpose",
+                CreateBinFileAnalysis.segmentationChoiceForDialogDefault(
+                        "cellpose:30:cyto3:0.4:0.0:gpu=true", true, true));
+    }
+
+    @Test
+    public void buildConfigFromDialogUsesDraftAndAppliedHiddenChannelMetadata() throws Exception {
+        CreateBinFileAnalysis analysis = new CreateBinFileAnalysis();
+        CreateBinFileAnalysis.BinUserConfig draft = twoChannelConfig();
+        draft.names.set(0, "NeuN");
+        draft.names.set(1, "IBA1");
+        draft.objectThresholds.set(0, "120");
+        draft.objectThresholds.set(1, "220");
+        draft.filterPresets.set(1, "Ramified Cells (Microglia/Astrocytes)");
+
+        CreateBinFileAnalysis.BinUserConfig applied = CreateBinFileAnalysis.copyBinUserConfig(draft);
+        applied.markerIds.clear();
+        applied.markerIds.addAll(Arrays.asList("neun", "iba1"));
+        applied.markerShapes.clear();
+        applied.markerShapes.addAll(Arrays.asList("round", "ramified"));
+        applied.markerCrowdingSensitive.clear();
+        applied.markerCrowdingSensitive.addAll(Arrays.asList(Boolean.FALSE, Boolean.TRUE));
+        applied.zSliceMode = ZSliceMode.SAME_COUNT;
+
+        Object bindings = newBinSetupBindings(2);
+        setAppliedConfig(bindings, applied);
+
+        CreateBinFileAnalysis.BinUserConfig result =
+                invokeBuildBinUserConfigFromDialog(analysis, 2, draft, bindings);
+
+        assertEquals(Arrays.asList("NeuN", "IBA1"), result.names);
+        assertEquals(Arrays.asList("120", "220"), result.objectThresholds);
+        assertEquals("Ramified Cells (Microglia/Astrocytes)", result.filterPresets.get(1));
+        assertEquals(Arrays.asList("neun", "iba1"), result.markerIds);
+        assertEquals(Arrays.asList("round", "ramified"), result.markerShapes);
+        assertEquals(Arrays.asList(Boolean.FALSE, Boolean.TRUE), result.markerCrowdingSensitive);
+        assertEquals(ZSliceMode.SAME_COUNT, result.zSliceMode);
+    }
+
     private static File configurationDir(File dir) {
         return new File(dir, "FLASH/00 - Configuration");
     }
@@ -296,6 +347,47 @@ public class CreateBinFileAnalysisTest {
         List<String> intensity = new ArrayList<String>();
         intensity.add("default");
         return new CreateBinFileAnalysis.BinUserConfig(names, colors, thresholds, sizes, minmax, filters, intensity);
+    }
+
+    private static CreateBinFileAnalysis.BinUserConfig twoChannelConfig() {
+        return new CreateBinFileAnalysis.BinUserConfig(
+                new ArrayList<String>(Arrays.asList("Channel1", "Channel2")),
+                new ArrayList<String>(Arrays.asList("Blue", "Green")),
+                new ArrayList<String>(Arrays.asList("default", "default")),
+                new ArrayList<String>(Arrays.asList("100-Infinity", "100-Infinity")),
+                new ArrayList<String>(Arrays.asList("None", "None")),
+                new ArrayList<String>(Arrays.asList("Default", "Default")),
+                new ArrayList<String>(Arrays.asList("default", "default")));
+    }
+
+    private static Object newBinSetupBindings(int channelCount) throws Exception {
+        Class<?> type = Class.forName("flash.pipeline.analyses.CreateBinFileAnalysis$BinSetupBindings");
+        java.lang.reflect.Constructor<?> constructor = type.getDeclaredConstructor(int.class);
+        constructor.setAccessible(true);
+        return constructor.newInstance(Integer.valueOf(channelCount));
+    }
+
+    private static void setAppliedConfig(Object bindings,
+                                         CreateBinFileAnalysis.BinUserConfig cfg) throws Exception {
+        java.lang.reflect.Field field = bindings.getClass().getDeclaredField("appliedConfig");
+        field.setAccessible(true);
+        field.set(bindings, cfg);
+    }
+
+    private static CreateBinFileAnalysis.BinUserConfig invokeBuildBinUserConfigFromDialog(
+            CreateBinFileAnalysis analysis,
+            int channelCount,
+            CreateBinFileAnalysis.BinUserConfig draft,
+            Object bindings) throws Exception {
+        Method method = CreateBinFileAnalysis.class.getDeclaredMethod(
+                "buildBinUserConfigFromDialog",
+                int.class,
+                BinConfig.class,
+                CreateBinFileAnalysis.BinUserConfig.class,
+                bindings.getClass());
+        method.setAccessible(true);
+        return (CreateBinFileAnalysis.BinUserConfig) method.invoke(
+                analysis, Integer.valueOf(channelCount), null, draft, bindings);
     }
 
     private static void invokeWriteChannelFilters(CreateBinFileAnalysis analysis, File binFolder,

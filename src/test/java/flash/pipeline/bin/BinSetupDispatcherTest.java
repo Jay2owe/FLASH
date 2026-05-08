@@ -91,7 +91,7 @@ public class BinSetupDispatcherTest {
         File dir = temp.newFolder("macro");
         final AtomicInteger chooserCalls = new AtomicInteger(0);
         BinSetupDispatcher.setHeadlessProbeForTest(new BinSetupDispatcher.HeadlessProbe() {
-            @Override public boolean isHeadlessOrMacro(boolean suppressDialogs) {
+            @Override public boolean isHeadlessOrMacro() {
                 return true;
             }
         });
@@ -125,11 +125,11 @@ public class BinSetupDispatcherTest {
     }
 
     @Test
-    public void headlessModeWithoutCliArgsFailsWithPreciseMessage() throws Exception {
-        File dir = temp.newFolder("suppress");
+    public void unattendedModeWithoutCliArgsFailsWithPreciseMessage() throws Exception {
+        File dir = temp.newFolder("unattended");
         BinSetupDispatcher.setHeadlessProbeForTest(new BinSetupDispatcher.HeadlessProbe() {
-            @Override public boolean isHeadlessOrMacro(boolean suppressDialogs) {
-                return suppressDialogs;
+            @Override public boolean isHeadlessOrMacro() {
+                return true;
             }
         });
 
@@ -147,11 +147,42 @@ public class BinSetupDispatcherTest {
     }
 
     @Test
+    public void suppressDialogsInInteractiveModeStillShowsMissingBinChooser() throws Exception {
+        File dir = temp.newFolder("suppressedInteractive");
+        final AtomicInteger chooserCalls = new AtomicInteger(0);
+        BinSetupDispatcher.setHeadlessProbeForTest(new BinSetupDispatcher.HeadlessProbe() {
+            @Override public boolean isHeadlessOrMacro() {
+                return false;
+            }
+        });
+        BinSetupDispatcher.setChooserForTest(new BinSetupDispatcher.Chooser() {
+            @Override public BinSetupChooser.Choice show(String analysisDisplayName,
+                                                         Set<BinField> missing,
+                                                         boolean showRoiTip) {
+                chooserCalls.incrementAndGet();
+                assertEquals(EnumSet.of(BinField.CHANNEL_NAMES,
+                                BinField.INTENSITY_THRESHOLDS,
+                                BinField.Z_SLICE),
+                        missing);
+                return BinSetupChooser.Choice.CANCELLED;
+            }
+        });
+
+        BinSetupDispatcher.Outcome outcome = BinSetupDispatcher.ensure(
+                dir.getAbsolutePath(), "Intensity Analysis",
+                EnumSet.of(BinField.CHANNEL_NAMES, BinField.INTENSITY_THRESHOLDS, BinField.Z_SLICE),
+                false, true);
+
+        assertEquals(BinSetupDispatcher.Outcome.CANCELLED, outcome);
+        assertEquals(1, chooserCalls.get());
+    }
+
+    @Test
     public void headlessModeReusesExistingChannelNamesAndWritesOnlyMissingCliFields() throws Exception {
         File dir = temp.newFolder("existingNames");
         writeChannelData(dir, "DAPI GFP");
         BinSetupDispatcher.setHeadlessProbeForTest(new BinSetupDispatcher.HeadlessProbe() {
-            @Override public boolean isHeadlessOrMacro(boolean suppressDialogs) {
+            @Override public boolean isHeadlessOrMacro() {
                 return true;
             }
         });
@@ -174,7 +205,7 @@ public class BinSetupDispatcherTest {
     public void headlessModeWritesFilterPresetMacrosFromCliValues() throws Exception {
         File dir = temp.newFolder("headlessFilters");
         BinSetupDispatcher.setHeadlessProbeForTest(new BinSetupDispatcher.HeadlessProbe() {
-            @Override public boolean isHeadlessOrMacro(boolean suppressDialogs) {
+            @Override public boolean isHeadlessOrMacro() {
                 return true;
             }
         });
@@ -213,7 +244,7 @@ public class BinSetupDispatcherTest {
         Files.write(new File(newRoiDir, "SCN ROIs.zip").toPath(), new byte[]{1, 2, 3});
 
         BinSetupDispatcher.setHeadlessProbeForTest(new BinSetupDispatcher.HeadlessProbe() {
-            @Override public boolean isHeadlessOrMacro(boolean suppressDialogs) {
+            @Override public boolean isHeadlessOrMacro() {
                 return false;
             }
         });
@@ -247,9 +278,8 @@ public class BinSetupDispatcherTest {
 
     @Test
     public void choicesRouteToFullPartialBypassAndCancel() throws Exception {
-        File dir = temp.newFolder("routes");
         BinSetupDispatcher.setHeadlessProbeForTest(new BinSetupDispatcher.HeadlessProbe() {
-            @Override public boolean isHeadlessOrMacro(boolean suppressDialogs) {
+            @Override public boolean isHeadlessOrMacro() {
                 return false;
             }
         });
@@ -259,37 +289,73 @@ public class BinSetupDispatcherTest {
         BinSetupDispatcher.setWizardRunnerForTest(new BinSetupDispatcher.WizardRunner() {
             @Override public void run(String directory, Set<BinField> fields) {
                 wizardFields.set(fields);
+                try {
+                    writeCompleteChannelData(new File(directory));
+                } catch (IOException e) {
+                    throw new IllegalStateException(e);
+                }
             }
         });
         BinSetupDispatcher.setBypassRunnerForTest(new BinSetupDispatcher.BypassRunner() {
             @Override public boolean show(String directory, Set<BinField> fields) {
                 bypassFields.set(fields);
+                try {
+                    writeChannelData(new File(directory), "DAPI");
+                } catch (IOException e) {
+                    throw new IllegalStateException(e);
+                }
                 return true;
             }
         });
 
+        File fullDir = temp.newFolder("routesFull");
         setChoice(BinSetupChooser.Choice.FULL);
         assertEquals(BinSetupDispatcher.Outcome.COMPLETED, BinSetupDispatcher.ensure(
-                dir.getAbsolutePath(), "Test", EnumSet.of(BinField.CHANNEL_NAMES), false));
+                fullDir.getAbsolutePath(), "Test", EnumSet.of(BinField.CHANNEL_NAMES), false));
         assertEquals(BinField.all(), wizardFields.get());
 
+        File partialDir = temp.newFolder("routesPartial");
         setChoice(BinSetupChooser.Choice.PARTIAL);
         assertEquals(BinSetupDispatcher.Outcome.COMPLETED, BinSetupDispatcher.ensure(
-                dir.getAbsolutePath(), "Test", EnumSet.of(BinField.CHANNEL_NAMES), false));
+                partialDir.getAbsolutePath(), "Test", EnumSet.of(BinField.CHANNEL_NAMES), false));
         assertEquals(EnumSet.of(BinField.CHANNEL_NAMES), wizardFields.get());
         assertEquals(BinSetupDispatcher.SOURCE_PROMPTED_PARTIAL,
                 BinSetupDispatcher.getLastFieldSources().get(BinField.CHANNEL_NAMES));
 
+        File bypassDir = temp.newFolder("routesBypass");
         setChoice(BinSetupChooser.Choice.BYPASS);
         assertEquals(BinSetupDispatcher.Outcome.COMPLETED, BinSetupDispatcher.ensure(
-                dir.getAbsolutePath(), "Test", EnumSet.of(BinField.CHANNEL_NAMES), false));
+                bypassDir.getAbsolutePath(), "Test", EnumSet.of(BinField.CHANNEL_NAMES), false));
         assertEquals(EnumSet.of(BinField.CHANNEL_NAMES), bypassFields.get());
         assertEquals(BinSetupDispatcher.SOURCE_BYPASS_DIALOG,
                 BinSetupDispatcher.getLastFieldSources().get(BinField.CHANNEL_NAMES));
 
+        File cancelDir = temp.newFolder("routesCancel");
         setChoice(BinSetupChooser.Choice.CANCELLED);
         assertEquals(BinSetupDispatcher.Outcome.CANCELLED, BinSetupDispatcher.ensure(
-                dir.getAbsolutePath(), "Test", EnumSet.of(BinField.CHANNEL_NAMES), false));
+                cancelDir.getAbsolutePath(), "Test", EnumSet.of(BinField.CHANNEL_NAMES), false));
+        assertEquals(BinSetupDispatcher.Outcome.CANCELLED, BinSetupDispatcher.getLastOutcome());
+    }
+
+    @Test
+    public void wizardThatClosesWithoutWritingRequiredConfigReturnsCancelled() throws Exception {
+        File dir = temp.newFolder("incompleteWizard");
+        BinSetupDispatcher.setHeadlessProbeForTest(new BinSetupDispatcher.HeadlessProbe() {
+            @Override public boolean isHeadlessOrMacro() {
+                return false;
+            }
+        });
+        setChoice(BinSetupChooser.Choice.PARTIAL);
+        BinSetupDispatcher.setWizardRunnerForTest(new BinSetupDispatcher.WizardRunner() {
+            @Override public void run(String directory, Set<BinField> fields) {
+            }
+        });
+
+        BinSetupDispatcher.Outcome outcome = BinSetupDispatcher.ensure(
+                dir.getAbsolutePath(), "Intensity",
+                EnumSet.of(BinField.CHANNEL_NAMES), false);
+
+        assertEquals(BinSetupDispatcher.Outcome.CANCELLED, outcome);
         assertEquals(BinSetupDispatcher.Outcome.CANCELLED, BinSetupDispatcher.getLastOutcome());
     }
 
@@ -305,13 +371,26 @@ public class BinSetupDispatcherTest {
 
     private static void writeChannelData(File dir, String... lines) throws IOException {
         File bin = new File(dir, ".bin");
-        assertTrue(bin.mkdirs());
+        assertTrue(bin.isDirectory() || bin.mkdirs());
         StringBuilder content = new StringBuilder();
         for (int i = 0; i < lines.length; i++) {
             content.append(lines[i]).append("\n");
         }
         Files.write(new File(bin, "Channel_Data.txt").toPath(),
                 content.toString().getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static void writeCompleteChannelData(File dir) throws IOException {
+        writeChannelData(dir,
+                "DAPI",
+                "Blue",
+                "default",
+                "100-Infinity",
+                "None",
+                "default",
+                "classical",
+                "default",
+                "zslice:full");
     }
 
     private static File configurationDir(File dir) {

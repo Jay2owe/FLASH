@@ -107,21 +107,21 @@ public class CLIArgumentParserTest {
         CLIConfig cfg = CLIArgumentParser.parse("dir=[/tmp] run_spectral_decontamination");
         assertNotNull(cfg);
         boolean[] sel = cfg.getSelectedAnalyses();
-        assertTrue("run_spectral_decontamination -> index 12", sel[12]);
-        assertFalse("run_excel should be off", sel[11]);
+        assertTrue("run_spectral_decontamination -> index 11", sel[11]);
+        assertFalse("run_excel should be off", sel[10]);
     }
 
     // ── parse: analyses list ──
 
     @Test
     public void parse_analysesList() {
-        CLIConfig cfg = CLIArgumentParser.parse("dir=[/tmp] analyses=0,2,6,12");
+        CLIConfig cfg = CLIArgumentParser.parse("dir=[/tmp] analyses=0,2,6,11");
         assertNotNull(cfg);
         boolean[] sel = cfg.getSelectedAnalyses();
         assertTrue(sel[0]);
         assertTrue(sel[2]);
         assertTrue(sel[6]);
-        assertTrue("index 12 -> spectral decontamination", sel[12]);
+        assertTrue("index 11 -> spectral decontamination", sel[11]);
         assertFalse(sel[1]);
     }
 

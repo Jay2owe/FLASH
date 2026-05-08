@@ -91,8 +91,8 @@ public class CLIArgumentParserStatsTest {
         CLIConfig cfg = CLIArgumentParser.parse(
                 "dir=[/tmp] stats.posthoc=dunns");
         assertNotNull(cfg);
-        // Index 10 is Statistical Analysis
-        assertTrue(cfg.getSelectedAnalyses()[10]);
+        // Index 9 is Statistical Analysis
+        assertTrue(cfg.getSelectedAnalyses()[9]);
     }
 
     @Test

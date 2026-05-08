@@ -390,7 +390,8 @@ public class LineDistanceAnalysis implements Analysis {
                                 String lineName,
                                 BinConfig configuredBinConfig,
                                 boolean drawOnSubset) {
-        if (!FeatureDependencyGate.gate(DependencyId.BIO_FORMATS_RUNTIME, "Draw New Line Set")) {
+        if (!FeatureDependencyGate.gate(DependencyId.BIO_FORMATS_RUNTIME,
+                "Line Distance Analysis", "Bio-Formats image loading for drawing a new line set")) {
             return false;
         }
 

@@ -125,11 +125,10 @@ public class DependencyServiceTest {
 
         assertEquals(DependencyId.BIO_FORMATS_RUNTIME, ordered.get(0));
         assertEquals(DependencyId.OBJECTS_COUNTER_3D, ordered.get(1));
-        assertEquals(DependencyId.NUCLEUS_COUNTER, ordered.get(2));
-        assertEquals(DependencyId.STARDIST_RUNTIME, ordered.get(3));
-        assertEquals(DependencyId.TENSORFLOW_NATIVE_RUNTIME, ordered.get(4));
-        assertEquals(DependencyId.APACHE_POI_RUNTIME, ordered.get(5));
-        assertEquals(DependencyId.JTS_CORE, ordered.get(6));
+        assertEquals(DependencyId.STARDIST_RUNTIME, ordered.get(2));
+        assertEquals(DependencyId.TENSORFLOW_NATIVE_RUNTIME, ordered.get(3));
+        assertEquals(DependencyId.APACHE_POI_RUNTIME, ordered.get(4));
+        assertEquals(DependencyId.JTS_CORE, ordered.get(5));
         assertEquals(DependencyId.CELLPOSE_RUNTIME, ordered.get(ordered.size() - 1));
     }
 
@@ -140,15 +139,12 @@ public class DependencyServiceTest {
                         DependencyId.BIO_FORMATS_RUNTIME,
                         DependencyStatus.missing("Bio-Formats missing"),
                         DependencyId.OBJECTS_COUNTER_3D,
-                        DependencyStatus.missing("3D Objects Counter missing"),
-                        DependencyId.NUCLEUS_COUNTER,
-                        DependencyStatus.missing("Nucleus Counter missing")));
+                        DependencyStatus.missing("3D Objects Counter missing")));
 
         Map<DependencyId, String> labels = firstActionLabels(service.getDialogRows());
 
         assertEquals("Auto-Fix Bio-Formats (~245 KB)", labels.get(DependencyId.BIO_FORMATS_RUNTIME));
         assertEquals("Auto-Fix 3D Objects Counter (~22 KB)", labels.get(DependencyId.OBJECTS_COUNTER_3D));
-        assertEquals("Auto-Fix Nucleus Counter (~98 KB)", labels.get(DependencyId.NUCLEUS_COUNTER));
     }
 
     private static Map<DependencyId, DependencyFixer> fakeFixers() {

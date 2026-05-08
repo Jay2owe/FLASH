@@ -41,7 +41,6 @@ public class FLASH_PipelineIndexShiftTest {
         assertTrue(analysisMap.get(FLASH_Pipeline.IDX_SPATIAL) instanceof SpatialAnalysis);
         assertTrue(analysisMap.get(FLASH_Pipeline.IDX_LINE_DISTANCE) instanceof LineDistanceAnalysis);
         assertTrue(analysisMap.get(FLASH_Pipeline.IDX_INTENSITY) instanceof IntensityAnalysisV2);
-        assertFalse(analysisMap.containsKey(FLASH_Pipeline.IDX_NUCLEAR));
         assertTrue(analysisMap.get(FLASH_Pipeline.IDX_AGGREGATION) instanceof MasterAggregationAnalysis);
         assertTrue(analysisMap.get(FLASH_Pipeline.IDX_STATISTICS) instanceof StatisticalAnalysis);
         assertNotNull(analysisMap.get(FLASH_Pipeline.IDX_EXCEL_EXPORT));
@@ -55,7 +54,7 @@ public class FLASH_PipelineIndexShiftTest {
         analysesField.setAccessible(true);
         String[] analyses = (String[]) analysesField.get(new FLASH_Pipeline());
 
-        assertEquals(14, analyses.length);
+        assertEquals(13, analyses.length);
         assertEquals("Set Up Configuration", analyses[FLASH_Pipeline.IDX_CREATE_BIN]);
         assertEquals("Draw and Save ROIs", analyses[FLASH_Pipeline.IDX_DRAW_ROIS]);
         assertEquals("3D Deconvolution", analyses[FLASH_Pipeline.IDX_DECONVOLUTION]);
@@ -71,7 +70,6 @@ public class FLASH_PipelineIndexShiftTest {
         int[] visibleOrder = (int[]) orderField.get(null);
 
         assertEquals(11, visibleOrder.length);
-        assertFalse(contains(visibleOrder, FLASH_Pipeline.IDX_NUCLEAR));
         assertFalse(contains(visibleOrder, FLASH_Pipeline.IDX_LINE_DISTANCE));
         assertFalse(contains(visibleOrder, FLASH_Pipeline.IDX_ORIENTATION_SETUP));
         assertTrue(indexOf(visibleOrder, FLASH_Pipeline.IDX_CREATE_BIN)
@@ -89,6 +87,7 @@ public class FLASH_PipelineIndexShiftTest {
         assertFalse(hasDeclaredMethod("ensureValidBinForAnalysis"));
         assertFalse(hasDeclaredMethod("isBinDependentAnalysis"));
         assertFalse(hasDeclaredMethod("isSelfManagedBinSetup"));
+        assertFalse(hasDeclaredMethod("isDeprecatedAnalysis"));
     }
 
     private static boolean contains(int[] values, int target) {

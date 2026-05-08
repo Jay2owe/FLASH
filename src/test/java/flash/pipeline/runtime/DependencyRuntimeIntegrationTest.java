@@ -63,7 +63,7 @@ public class DependencyRuntimeIntegrationTest {
                 service.getStatus(DependencyId.APACHE_POI_RUNTIME).getState());
         assertFalse(FeatureDependencyGate.gate(DependencyId.APACHE_POI_RUNTIME, "Excel Summary Export"));
         assertTrue(join(ui.logs).contains("Missing dependency: Apache POI runtime"));
-        assertTrue(join(ui.logs).contains("Blocked feature: Excel Summary Export"));
+        assertTrue(join(ui.logs).contains("Blocked analysis: Excel Summary Export"));
     }
 
     @Test
@@ -102,7 +102,7 @@ public class DependencyRuntimeIntegrationTest {
 
         assertEquals(1, ui.prompts.size());
         assertTrue(ui.prompts.get(0).plainMessage.contains("StarDist"));
-        assertTrue(ui.prompts.get(0).buttonLabels.contains("Fix Now"));
+        assertTrue(ui.prompts.get(0).buttonLabels.contains("Auto-Fix StarDist"));
     }
 
     @Test
@@ -120,7 +120,7 @@ public class DependencyRuntimeIntegrationTest {
 
         assertFalse(FeatureDependencyGate.gate(DependencyId.BIO_FORMATS_RUNTIME, ".lif opening"));
         assertTrue(join(ui.logs).contains("Missing dependency: Bio-Formats / OME / SCIFIO runtime"));
-        assertTrue(join(ui.logs).contains("Blocked feature: .lif opening"));
+        assertTrue(join(ui.logs).contains("Blocked analysis: .lif opening"));
         assertTrue(FeatureDependencyGate.gate(DependencyId.JTS_CORE, "Spatial Analysis"));
     }
 
@@ -180,7 +180,8 @@ public class DependencyRuntimeIntegrationTest {
         }
 
         @Override
-        public String showMissingDependencyDialog(String feature,
+        public String showMissingDependencyDialog(String analysis,
+                                                  String requirement,
                                                   DependencySpec spec,
                                                   DependencyStatus status,
                                                   String plainMessage,

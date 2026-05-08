@@ -81,7 +81,7 @@ public final class CLIArgumentParser {
 
         String[] flagNames = {
                 "run_bin", "run_roi", "run_deconv", "run_split", "run_3d", "run_spatial",
-                "run_distance", "run_intensity", "run_nuclear", "run_aggregate",
+                "run_distance", "run_intensity", "run_aggregate",
                 "run_statistics", "run_excel", "run_spectral_decontamination"
         };
         for (int i = 0; i < flagNames.length; i++) {
@@ -148,17 +148,17 @@ public final class CLIArgumentParser {
         if (cfg.intensity.hasConfiguration()) {
             cfg.selectedAnalyses[7] = true;
         }
-        if (cfg.spectral.hasConfiguration()) {
-            cfg.selectedAnalyses[12] = true;
-        }
         if (cfg.aggregate.hasConfiguration()) {
-            cfg.selectedAnalyses[9] = true;
+            cfg.selectedAnalyses[8] = true;
         }
         if (cfg.excel.hasConfiguration()) {
-            cfg.selectedAnalyses[11] = true;
+            cfg.selectedAnalyses[10] = true;
         }
         if (cfg.stats.hasConfiguration()) {
-            cfg.selectedAnalyses[10] = true;
+            cfg.selectedAnalyses[9] = true;
+        }
+        if (cfg.spectral.hasConfiguration()) {
+            cfg.selectedAnalyses[11] = true;
         }
 
         return cfg;
@@ -190,11 +190,10 @@ public final class CLIArgumentParser {
                 + "  run_spatial           Spatial Analysis (5)\n"
                 + "  run_distance          Line Distance (6)\n"
                 + "  run_intensity         Fluorescence Intensity (7)\n"
-                + "  run_nuclear           Deprecated; ignored. Use 3D Object Analysis for nuclear counts.\n"
-                + "  run_aggregate         Master Data Aggregation (9)\n"
-                + "  run_statistics        Statistical Analysis (10)\n"
-                + "  run_excel             Excel Summary Export (11)\n"
-                + "  run_spectral_decontamination  Spectral Decontamination (Experimental) (12)\n"
+                + "  run_aggregate         Master Data Aggregation (8)\n"
+                + "  run_statistics        Statistical Analysis (9)\n"
+                + "  run_excel             Excel Summary Export (10)\n"
+                + "  run_spectral_decontamination  Spectral Decontamination (Experimental) (11)\n"
                 + "\n"
                 + "  Or use: analyses=0,2,4,7  or analysisIndex=2\n"
                 + "\n"
@@ -271,7 +270,6 @@ public final class CLIArgumentParser {
                 + "  stats.metrics=Col1,Col2,Col3\n"
                 + "  splitmerge.useDeconv=true|false\n"
                 + "  threeD.useDeconv=true|false\n"
-                + "  nuclearCounter.useDeconv=true|false\n"
                 + "  intensityV2.useDeconv=true|false\n"
                 + "\n"
                 + "PyImageJ Example:\n"
@@ -797,11 +795,6 @@ public final class CLIArgumentParser {
         String threeDUseDeconv = getValue(options, "threeD.useDeconv");
         if (threeDUseDeconv != null) {
             cfg.threeDUseDeconv = parseBooleanValue("threeD.useDeconv", threeDUseDeconv, true);
-        }
-
-        String nuclearCounterUseDeconv = getValue(options, "nuclearCounter.useDeconv");
-        if (nuclearCounterUseDeconv != null) {
-            cfg.nuclearCounterUseDeconv = parseBooleanValue("nuclearCounter.useDeconv", nuclearCounterUseDeconv, true);
         }
 
         String intensityUseDeconv = getValue(options, "intensityV2.useDeconv");

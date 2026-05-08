@@ -1511,7 +1511,8 @@ public class DeconvolutionAnalysis implements Analysis {
     }
 
     protected boolean isBioFormatsAvailable() {
-        return FeatureDependencyGate.gate(DependencyId.BIO_FORMATS_RUNTIME, TITLE);
+        return FeatureDependencyGate.gate(DependencyId.BIO_FORMATS_RUNTIME,
+                TITLE, "Bio-Formats metadata and image loading");
     }
 
     protected boolean isPsfGeneratorAvailable() {

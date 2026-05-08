@@ -62,7 +62,7 @@ public class FLASH_PipelineAnalysisConfigurationTest {
         FLASH_Pipeline pipeline = new FLASH_Pipeline();
         SpyAnalysis spy = new SpyAnalysis();
 
-        pipeline.configureAnalysis(spy, 8, false, new QualityReport());
+        pipeline.configureAnalysis(spy, FLASH_Pipeline.IDX_AGGREGATION, false, new QualityReport());
 
         assertFalse("Single GUI run should not suppress dialogs", spy.suppressDialogs);
     }
@@ -71,8 +71,22 @@ public class FLASH_PipelineAnalysisConfigurationTest {
     public void configureAnalysis_setsImageCacheForSplitMerge3DAndIntensity() {
         FLASH_Pipeline pipeline = new FLASH_Pipeline();
 
-        int[] cacheable = {3, 4, 7}; // IDX_SPLIT_MERGE, IDX_3D_OBJECT, IDX_INTENSITY
-        int[] nonCacheable = {0, 1, 2, 5, 6, 8, 9, 10, 11};
+        int[] cacheable = {
+                FLASH_Pipeline.IDX_SPLIT_MERGE,
+                FLASH_Pipeline.IDX_3D_OBJECT,
+                FLASH_Pipeline.IDX_INTENSITY,
+                FLASH_Pipeline.IDX_SPECTRAL_DECONTAMINATION
+        };
+        int[] nonCacheable = {
+                FLASH_Pipeline.IDX_CREATE_BIN,
+                FLASH_Pipeline.IDX_DRAW_ROIS,
+                FLASH_Pipeline.IDX_DECONVOLUTION,
+                FLASH_Pipeline.IDX_SPATIAL,
+                FLASH_Pipeline.IDX_LINE_DISTANCE,
+                FLASH_Pipeline.IDX_AGGREGATION,
+                FLASH_Pipeline.IDX_STATISTICS,
+                FLASH_Pipeline.IDX_EXCEL_EXPORT
+        };
 
         for (int idx : cacheable) {
             SpyAnalysis spy = new SpyAnalysis();
@@ -93,7 +107,7 @@ public class FLASH_PipelineAnalysisConfigurationTest {
         SpyAnalysis spy = new SpyAnalysis();
 
         // Default FLASH_Pipeline has headlessMode=true
-        pipeline.configureAnalysis(spy, 4, true, new QualityReport());
+        pipeline.configureAnalysis(spy, FLASH_Pipeline.IDX_3D_OBJECT, true, new QualityReport());
 
         assertTrue("headless flag should propagate", spy.headless);
     }
@@ -105,7 +119,7 @@ public class FLASH_PipelineAnalysisConfigurationTest {
         spy.requiresHeadedMode = true;
 
         // Default FLASH_Pipeline has headlessMode=true.
-        pipeline.configureAnalysis(spy, 1, true, new QualityReport());
+        pipeline.configureAnalysis(spy, FLASH_Pipeline.IDX_DRAW_ROIS, true, new QualityReport());
 
         assertFalse("Headed-only analyses must run with image windows enabled",
                 spy.headless);
@@ -119,7 +133,7 @@ public class FLASH_PipelineAnalysisConfigurationTest {
         spy.requiresHeadedMode = true;
         pipeline.setCliInvocation(true);
 
-        pipeline.configureAnalysis(spy, 1, true, new QualityReport());
+        pipeline.configureAnalysis(spy, FLASH_Pipeline.IDX_DRAW_ROIS, true, new QualityReport());
 
         assertTrue("CLI should not open headed-only interactive analyses",
                 spy.headless);
@@ -131,7 +145,7 @@ public class FLASH_PipelineAnalysisConfigurationTest {
         FLASH_Pipeline pipeline = new FLASH_Pipeline();
         SpyAnalysis spy = new SpyAnalysis();
 
-        pipeline.configureAnalysis(spy, 12, false, new QualityReport());
+        pipeline.configureAnalysis(spy, FLASH_Pipeline.IDX_SPECTRAL_DECONTAMINATION, false, new QualityReport());
 
         assertFalse("Single GUI Spectral Decontamination run should open setup dialogs", spy.headless);
         assertFalse(spy.suppressDialogs);
@@ -142,7 +156,7 @@ public class FLASH_PipelineAnalysisConfigurationTest {
         FLASH_Pipeline pipeline = new FLASH_Pipeline();
         SpyAnalysis spy = new SpyAnalysis();
 
-        pipeline.configureAnalysis(spy, 12, true, new QualityReport());
+        pipeline.configureAnalysis(spy, FLASH_Pipeline.IDX_SPECTRAL_DECONTAMINATION, true, new QualityReport());
 
         assertFalse("GUI Spectral Decontamination should still open setup dialogs when queued with other analyses",
                 spy.headless);
@@ -155,7 +169,7 @@ public class FLASH_PipelineAnalysisConfigurationTest {
         SpyAnalysis spy = new SpyAnalysis();
         pipeline.setCliInvocation(true);
 
-        pipeline.configureAnalysis(spy, 12, true, new QualityReport());
+        pipeline.configureAnalysis(spy, FLASH_Pipeline.IDX_SPECTRAL_DECONTAMINATION, true, new QualityReport());
 
         assertTrue("CLI Spectral Decontamination should stay headless", spy.headless);
         assertTrue(spy.suppressDialogs);

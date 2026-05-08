@@ -304,12 +304,15 @@ public class ThreeDObjectAnalysis implements Analysis {
     }
 
     private static boolean gateStarDistFeature(String featureDisplayName) {
-        return FeatureDependencyGate.gate(DependencyId.STARDIST_RUNTIME, featureDisplayName)
-                && FeatureDependencyGate.gate(DependencyId.TENSORFLOW_NATIVE_RUNTIME, featureDisplayName);
+        return FeatureDependencyGate.gate(DependencyId.STARDIST_RUNTIME,
+                "3D Object Analysis", featureDisplayName)
+                && FeatureDependencyGate.gate(DependencyId.TENSORFLOW_NATIVE_RUNTIME,
+                "3D Object Analysis", featureDisplayName);
     }
 
     private static boolean gateCellposeFeature(String featureDisplayName) {
-        return FeatureDependencyGate.gate(DependencyId.CELLPOSE_RUNTIME, featureDisplayName);
+        return FeatureDependencyGate.gate(DependencyId.CELLPOSE_RUNTIME,
+                "3D Object Analysis", featureDisplayName);
     }
 
     private static boolean isMcib3dAvailable() {
@@ -337,6 +340,14 @@ public class ThreeDObjectAnalysis implements Analysis {
         if (cfg == null) return false;
         for (int i = 0; i < cfg.numChannels(); i++) {
             if (cfg.isCellpose(i)) return true;
+        }
+        return false;
+    }
+
+    private static boolean usesClassicalSegmentation(BinConfig cfg) {
+        if (cfg == null) return false;
+        for (int i = 0; i < cfg.numChannels(); i++) {
+            if (!cfg.usesLabelImageSegmentation(i)) return true;
         }
         return false;
     }
@@ -517,7 +528,8 @@ public class ThreeDObjectAnalysis implements Analysis {
 
     @Override
     public void execute(String directory) {
-        if (!FeatureDependencyGate.gate(DependencyId.BIO_FORMATS_RUNTIME, "3D Object Analysis")) {
+        if (!FeatureDependencyGate.gate(DependencyId.BIO_FORMATS_RUNTIME,
+                "3D Object Analysis", "Bio-Formats image loading")) {
             return;
         }
 
@@ -530,6 +542,11 @@ public class ThreeDObjectAnalysis implements Analysis {
         }
 
         BinConfig cfg = BinConfigIO.readPartialFromDirectory(directory);
+        if (usesClassicalSegmentation(cfg)
+                && !FeatureDependencyGate.gate(DependencyId.OBJECTS_COUNTER_3D,
+                "3D Object Analysis", "classical 3D object counting")) {
+            return;
+        }
         if (usesStarDistSegmentation(cfg) && !gateStarDistFeature("StarDist 3D segmentation")) {
             return;
         }
@@ -538,6 +555,7 @@ public class ThreeDObjectAnalysis implements Analysis {
         }
         if (requiresMcib3dMorphometry(cfg)
                 && !FeatureDependencyGate.gate(DependencyId.MCIB3D_CORE,
+                "3D Object Analysis",
                 "mcib3d-backed 3D morphometry / shape analysis")) {
             return;
         }
@@ -709,6 +727,14 @@ public class ThreeDObjectAnalysis implements Analysis {
 
                 if (!gdPA.showDialog()) {
                     if (gdPA.wasBackPressed()) {
+                        String nuclearMarkerName = gdPA.getNextChoice();
+                        nuclearMarkerIndex = cfg.channelNames.indexOf(nuclearMarkerName);
+                        processChannels = new boolean[names.length];
+                        for (int pc = 0; pc < names.length; pc++) {
+                            processChannels[pc] = gdPA.getNextBoolean();
+                        }
+                        wizardNuclearMarkerIndex = nuclearMarkerIndex;
+                        wizardProcessChannels = Arrays.copyOf(processChannels, processChannels.length);
                         dialogStep = 0; // go back
                         continue;
                     }

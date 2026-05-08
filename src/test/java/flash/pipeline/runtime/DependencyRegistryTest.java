@@ -48,7 +48,6 @@ public class DependencyRegistryTest {
         assertFlags(DependencyId.BIO_FORMATS_RUNTIME, true, true, true);
         assertFlags(DependencyId.OBJECTS_COUNTER_3D, true, true, true);
         assertFlags(DependencyId.MCIB3D_CORE, false, true, true);
-        assertFlags(DependencyId.NUCLEUS_COUNTER, true, true, true);
         assertFlags(DependencyId.STARDIST_RUNTIME, true, true, true);
         assertFlags(DependencyId.TENSORFLOW_NATIVE_RUNTIME, true, true, true);
         assertFlags(DependencyId.APACHE_POI_RUNTIME, true, true, true);

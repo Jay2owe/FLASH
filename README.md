@@ -74,8 +74,6 @@ The main dialog groups modules into setup, image preparation, display, image ana
 - **Statistical Analysis**: Run configured group comparisons from aggregated result tables.
 - **Excel Summary Export**: Export formatted `.xlsx` workbooks from aggregated and statistical outputs.
 
-The old standalone Nuclear Counter path is deprecated and hidden from the main workflow. Nuclear counting should be done with **3D Object Analysis** on the nuclear channel.
-
 ## Supported Inputs
 
 FLASH is designed for multi-channel fluorescence microscopy projects. It supports common Bio-Formats-readable microscopy containers and TIFF-based workflows through Fiji/Bio-Formats.

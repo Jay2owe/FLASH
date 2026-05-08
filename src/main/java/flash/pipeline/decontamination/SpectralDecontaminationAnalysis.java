@@ -129,7 +129,8 @@ public class SpectralDecontaminationAnalysis implements Analysis {
 
     @Override
     public void execute(String directory) {
-        if (!FeatureDependencyGate.gate(DependencyId.BIO_FORMATS_RUNTIME, TITLE)) {
+        if (!FeatureDependencyGate.gate(DependencyId.BIO_FORMATS_RUNTIME,
+                TITLE, "Bio-Formats image loading")) {
             return;
         }
 

@@ -131,7 +131,8 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
             return;
         }
 
-        if (!FeatureDependencyGate.gate(DependencyId.BIO_FORMATS_RUNTIME, "Draw and Save ROIs")) {
+        if (!FeatureDependencyGate.gate(DependencyId.BIO_FORMATS_RUNTIME,
+                "Draw and Save ROIs", "Bio-Formats image loading")) {
             return;
         }
 

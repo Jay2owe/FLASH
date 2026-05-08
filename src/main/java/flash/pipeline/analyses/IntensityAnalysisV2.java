@@ -178,7 +178,8 @@ public class IntensityAnalysisV2 implements Analysis {
 
     @Override
     public void execute(String directory) {
-        if (!FeatureDependencyGate.gate(DependencyId.BIO_FORMATS_RUNTIME, "Fluorescence Intensity Analysis")) {
+        if (!FeatureDependencyGate.gate(DependencyId.BIO_FORMATS_RUNTIME,
+                "Fluorescence Intensity Analysis", "Bio-Formats image loading")) {
             return;
         }
 
@@ -413,6 +414,29 @@ public class IntensityAnalysisV2 implements Analysis {
 
                 if (!gd2.showDialog()) {
                     if (gd2.wasBackPressed()) {
+                        if (anyBinarize) {
+                            for (int i = 0; i < channelNames.length; i++) {
+                                if (binarization[i] && needsThresholdInput[i]) {
+                                    thresholds[i] = gd2.getNextString();
+                                }
+                            }
+                        }
+                        if (roiAnalysis) {
+                            if (!roiZips.isEmpty()) {
+                                for (int r = 0; r < roiZipSelected.length; r++) {
+                                    roiZipSelected[r] = gd2.getNextBoolean();
+                                }
+                            }
+                            roiChannelChoice = gd2.getNextChoice();
+                            roiChannelIndex1Based = -1;
+                            if (!"None".equals(roiChannelChoice)) {
+                                for (int i = 0; i < channelNames.length; i++) {
+                                    if (channelNames[i].equals(roiChannelChoice)) {
+                                        roiChannelIndex1Based = i + 1;
+                                    }
+                                }
+                            }
+                        }
                         intensityStep = 0; // go back to primary dialog
                         continue;
                     }

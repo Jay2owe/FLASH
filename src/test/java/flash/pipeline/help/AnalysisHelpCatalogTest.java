@@ -54,11 +54,8 @@ public class AnalysisHelpCatalogTest {
     }
 
     @Test
-    public void hiddenDeprecatedAnalysesAreNotRequiredTopics() throws Exception {
+    public void hiddenAnalysesAreNotRequiredTopics() throws Exception {
         int[] visibleOrder = visibleAnalysisOrder();
-
-        assertFalse(contains(visibleOrder, FLASH_Pipeline.IDX_NUCLEAR));
-        assertFalse(AnalysisHelpCatalog.hasTopic(FLASH_Pipeline.IDX_NUCLEAR));
 
         assertFalse(contains(visibleOrder, FLASH_Pipeline.IDX_LINE_DISTANCE));
         assertFalse(AnalysisHelpCatalog.hasTopic(FLASH_Pipeline.IDX_LINE_DISTANCE));
@@ -71,12 +68,12 @@ public class AnalysisHelpCatalogTest {
     public void visibleOrderHelperReturnsDefensiveCopy() {
         int[] first = FLASH_Pipeline.visibleAnalysisOrderForTests();
         int originalFirstIndex = first[0];
-        first[0] = FLASH_Pipeline.IDX_NUCLEAR;
+        first[0] = FLASH_Pipeline.IDX_LINE_DISTANCE;
 
         int[] second = FLASH_Pipeline.visibleAnalysisOrderForTests();
 
         assertEquals(originalFirstIndex, second[0]);
-        assertFalse(contains(second, FLASH_Pipeline.IDX_NUCLEAR));
+        assertFalse(contains(second, FLASH_Pipeline.IDX_LINE_DISTANCE));
     }
 
     @Test
@@ -95,10 +92,8 @@ public class AnalysisHelpCatalogTest {
                     pipeline.analysisLabelForTests(analysisIndex), topic.title);
         }
 
-        assertFalse(contains(visibleOrder, FLASH_Pipeline.IDX_NUCLEAR));
         assertFalse(contains(visibleOrder, FLASH_Pipeline.IDX_LINE_DISTANCE));
         assertFalse(contains(visibleOrder, FLASH_Pipeline.IDX_ORIENTATION_SETUP));
-        assertTrue(FLASH_Pipeline.analysisHelpTopicForTests(FLASH_Pipeline.IDX_NUCLEAR) == null);
         assertTrue(FLASH_Pipeline.analysisHelpTopicForTests(FLASH_Pipeline.IDX_LINE_DISTANCE) == null);
         assertTrue(FLASH_Pipeline.analysisHelpTopicForTests(FLASH_Pipeline.IDX_ORIENTATION_SETUP) == null);
     }
@@ -320,22 +315,6 @@ public class AnalysisHelpCatalogTest {
                 "FLASH/11 - Excel Summary Export/Project_Summary.xlsx");
     }
 
-    @Test
-    public void resultsExportTopicsDoNotRestoreNuclearCounterContent() {
-        int[] indices = resultsExportTopicIndices();
-        for (int i = 0; i < indices.length; i++) {
-            AnalysisHelpTopic topic = AnalysisHelpCatalog.forAnalysis(indices[i]);
-            assertFalse(topic.title.contains("Nuclear Counter"));
-            assertFalse(topic.summary.contains("Nuclear Counter"));
-            assertNoNuclearCounterText(topic.whenToUse, topic.key);
-            assertNoNuclearCounterText(topic.inputs, topic.key);
-            assertNoNuclearCounterText(topic.setup, topic.key);
-            assertNoNuclearCounterText(topic.workflow, topic.key);
-            assertNoNuclearCounterText(topic.outputs, topic.key);
-            assertNoNuclearCounterText(topic.pitfalls, topic.key);
-        }
-    }
-
     private static int[] visibleAnalysisOrder() throws Exception {
         return FLASH_Pipeline.visibleAnalysisOrderForTests();
     }
@@ -393,13 +372,6 @@ public class AnalysisHelpCatalogTest {
                     value.contains("selected project needs this analysis step")
                             || value.contains("standard FLASH outputs for this module")
                             || value.contains("Review inputs, run the module"));
-        }
-    }
-
-    private static void assertNoNuclearCounterText(Iterable<String> values, String topicKey) {
-        for (String value : values) {
-            assertFalse("Nuclear Counter content appears in " + topicKey + ": " + value,
-                    value.contains("Nuclear Counter"));
         }
     }
 

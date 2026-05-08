@@ -294,7 +294,6 @@ public final class DependencyService {
         LinkedHashMap<DependencyId, DependencyFixer> fixers = new LinkedHashMap<DependencyId, DependencyFixer>();
         fixers.put(DependencyId.BIO_FORMATS_RUNTIME, new FijiPluginRuntimeFixer(5));
         fixers.put(DependencyId.OBJECTS_COUNTER_3D, new FijiPluginRuntimeFixer(6));
-        fixers.put(DependencyId.NUCLEUS_COUNTER, new FijiPluginRuntimeFixer(7));
         fixers.put(DependencyId.STARDIST_RUNTIME, new StarDistRuntimeFixer());
         fixers.put(DependencyId.TENSORFLOW_NATIVE_RUNTIME, new TensorFlowNativeRuntimeFixer());
         fixers.put(DependencyId.APACHE_POI_RUNTIME, new ExcelRuntimeFixer());

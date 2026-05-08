@@ -31,7 +31,6 @@ public class CLIArgumentParserDeconvTest {
                 + "deconv.skipPreview=true "
                 + "splitmerge.useDeconv=false "
                 + "threeD.useDeconv=true "
-                + "nuclearCounter.useDeconv=false "
                 + "intensityV2.useDeconv=true";
 
         CLIConfig parsed = CLIArgumentParser.parse(options);
@@ -52,7 +51,6 @@ public class CLIArgumentParserDeconvTest {
         assertTrue(parsed.getDeconv().isSkipPreview());
         assertEquals(false, parsed.isSplitMergeUseDeconv());
         assertEquals(true, parsed.isThreeDUseDeconv());
-        assertEquals(false, parsed.isNuclearCounterUseDeconv());
         assertEquals(true, parsed.isIntensityV2UseDeconv());
 
         CLIConfig reparsed = CLIArgumentParser.parse(CLIArgumentParser.serialize(parsed));
@@ -73,7 +71,6 @@ public class CLIArgumentParserDeconvTest {
         assertEquals(parsed.getDeconv().isSkipPreview(), reparsed.getDeconv().isSkipPreview());
         assertEquals(parsed.isSplitMergeUseDeconv(), reparsed.isSplitMergeUseDeconv());
         assertEquals(parsed.isThreeDUseDeconv(), reparsed.isThreeDUseDeconv());
-        assertEquals(parsed.isNuclearCounterUseDeconv(), reparsed.isNuclearCounterUseDeconv());
         assertEquals(parsed.isIntensityV2UseDeconv(), reparsed.isIntensityV2UseDeconv());
     }
 }

@@ -24,6 +24,8 @@ import flash.pipeline.io.IoUtils;
 import flash.pipeline.io.CsvTableIO.ChannelData;
 import flash.pipeline.results.MorphometryDetailsWriter;
 import flash.pipeline.results.ObjectCsvColumnOrder;
+import flash.pipeline.runtime.DependencyId;
+import flash.pipeline.runtime.FeatureDependencyGate;
 import flash.pipeline.spatial.CellClustering;
 import flash.pipeline.spatial.DensityHeatmapGenerator;
 import flash.pipeline.spatial.MorphologyExtractor;
@@ -100,6 +102,12 @@ public class SpatialAnalysis implements Analysis {
     private int parallelThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
     private CLIConfig cliConfig = null;
     private SpatialAnalysisWizard.DerivedConfig configuredOptions = null;
+
+    private enum RuntimeDependencyAction {
+        PROCEED,
+        RECONFIGURE,
+        ABORT
+    }
 
     @Override
     public void setHeadless(boolean headless) {
@@ -416,6 +424,17 @@ public class SpatialAnalysis implements Analysis {
             clusterK = (int) opts.getNextNumber();
             heatmapBandwidth = opts.getNextNumber();
             heatmapLut = opts.getNextChoice();
+
+            boolean effective3DShapeFeatures = do3DShapeFeatures
+                    || doCompositeIndices || doPopMorphometrics || doSpatialMorphometrics;
+            RuntimeDependencyAction dependencyAction =
+                    checkRuntimeDependencies(doVoronoi, effective3DShapeFeatures);
+            if (dependencyAction == RuntimeDependencyAction.RECONFIGURE) {
+                continue;
+            }
+            if (dependencyAction == RuntimeDependencyAction.ABORT) {
+                return;
+            }
             dialogDone = true;
             }
         }
@@ -425,6 +444,12 @@ public class SpatialAnalysis implements Analysis {
         }
         if (doCompositeIndices || doSpatialMorphometrics) {
             do3DShapeFeatures = true;
+        }
+
+        RuntimeDependencyAction dependencyAction =
+                checkRuntimeDependencies(doVoronoi, do3DShapeFeatures);
+        if (dependencyAction != RuntimeDependencyAction.PROCEED) {
+            return;
         }
 
         if (doVolumetric) {
@@ -547,6 +572,41 @@ public class SpatialAnalysis implements Analysis {
      */
     public void run(String directory) {
         execute(directory);
+    }
+
+    private RuntimeDependencyAction checkRuntimeDependencies(boolean doVoronoi,
+                                                             boolean do3DShapeFeatures) {
+        if (doVoronoi) {
+            FeatureDependencyGate.GateDecision decision = FeatureDependencyGate.check(
+                    DependencyId.JTS_CORE,
+                    "Spatial Analysis",
+                    "Voronoi territory analysis");
+            RuntimeDependencyAction action = actionFromGateDecision(decision);
+            if (action != RuntimeDependencyAction.PROCEED) {
+                return action;
+            }
+        }
+        if (do3DShapeFeatures) {
+            FeatureDependencyGate.GateDecision decision = FeatureDependencyGate.check(
+                    DependencyId.MCIB3D_CORE,
+                    "Spatial Analysis",
+                    "3D shape features and spatial morphometry");
+            RuntimeDependencyAction action = actionFromGateDecision(decision);
+            if (action != RuntimeDependencyAction.PROCEED) {
+                return action;
+            }
+        }
+        return RuntimeDependencyAction.PROCEED;
+    }
+
+    private static RuntimeDependencyAction actionFromGateDecision(FeatureDependencyGate.GateDecision decision) {
+        if (decision != null && decision.isAllowed()) {
+            return RuntimeDependencyAction.PROCEED;
+        }
+        if (decision != null && decision.isChangeSetupRequested()) {
+            return RuntimeDependencyAction.RECONFIGURE;
+        }
+        return RuntimeDependencyAction.ABORT;
     }
 
     private static File firstExistingDirectory(List<File> dirs) {

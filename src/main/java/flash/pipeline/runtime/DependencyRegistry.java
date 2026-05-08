@@ -41,7 +41,6 @@ public final class DependencyRegistry {
     public static final long BIO_FORMATS_RUNTIME_BYTES = 250459L;
     public static final long OBJECTS_COUNTER_3D_BYTES = 22913L;
     public static final long MCIB3D_CORE_BYTES = 1572864L;
-    public static final long NUCLEUS_COUNTER_BYTES = 100488L;
     public static final long STARDIST_RUNTIME_BYTES = 22775071L;
     public static final long TENSORFLOW_NATIVE_RUNTIME_BYTES = 143819615L;
     public static final long APACHE_POI_RUNTIME_BYTES = 13820232L;
@@ -73,18 +72,6 @@ public final class DependencyRegistry {
                             "plugins",
                             "https://sites.imagej.net/Java-8/plugins/3D_Objects_Counter-2.0.1.jar-20170530201750",
                             "8ee3f3828526c3358695f9160e18c124e077c02c",
-                            true)
-            ));
-
-    private static final List<DependencySpec.JarRequirement> NUCLEUS_COUNTER_JARS =
-            Collections.unmodifiableList(Arrays.asList(
-                    new DependencySpec.JarRequirement(
-                            "Fiji Cookbook Nucleus Counter",
-                            "cookbook_.jar",
-                            "cookbook_",
-                            "plugins",
-                            "https://sites.imagej.net/Cookbook/plugins/cookbook_.jar-20191007151226",
-                            "c7c4130b70d35f734bf627f2272dce07e4d3d7e9",
                             true)
             ));
 
@@ -497,24 +484,6 @@ public final class DependencyRegistry {
                 .fixableInApp(false)
                 .nonFixableReason("Install the 3D ImageJ Suite runtime through Fiji's updater and restart.")
                 .visibleInDependenciesDialog(true)
-                .build());
-
-        specs.put(DependencyId.NUCLEUS_COUNTER, DependencySpec.builder(
-                        DependencyId.NUCLEUS_COUNTER,
-                        "Nucleus Counter")
-                .description("External Fiji plugin used only by the Nuclear Counter module.")
-                .affectedFeatures("Nuclear Counter module")
-                .criticality(DependencySpec.Criticality.OPTIONAL_FEATURE)
-                .detectionStrategyLabel("ImageJ command probe")
-                .probe(commandProbe("Nucleus Counter"))
-                .fixerStrategy(DependencySpec.FixerStrategy.FIJI_UPDATER)
-                .approxDownloadSizeBytes(NUCLEUS_COUNTER_BYTES)
-                .restartRequired(true)
-                .fixableInApp(true)
-                .fixButtonLabelTemplate("Auto-Fix Nucleus Counter%s")
-                .presentButtonLabel("Verify Nucleus Counter")
-                .visibleInDependenciesDialog(true)
-                .jarRequirements(NUCLEUS_COUNTER_JARS)
                 .build());
 
         specs.put(DependencyId.STARDIST_RUNTIME, DependencySpec.builder(

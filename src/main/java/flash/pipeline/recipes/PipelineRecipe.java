@@ -18,7 +18,6 @@ import static flash.pipeline.FLASH_Pipeline.IDX_DRAW_ROIS;
 import static flash.pipeline.FLASH_Pipeline.IDX_EXCEL_EXPORT;
 import static flash.pipeline.FLASH_Pipeline.IDX_INTENSITY;
 import static flash.pipeline.FLASH_Pipeline.IDX_LINE_DISTANCE;
-import static flash.pipeline.FLASH_Pipeline.IDX_NUCLEAR;
 import static flash.pipeline.FLASH_Pipeline.IDX_SPATIAL;
 import static flash.pipeline.FLASH_Pipeline.IDX_SPECTRAL_DECONTAMINATION;
 import static flash.pipeline.FLASH_Pipeline.IDX_SPLIT_MERGE;
@@ -44,7 +43,6 @@ public final class PipelineRecipe {
         keys.put("Spatial", Integer.valueOf(IDX_SPATIAL));
         keys.put("LineDistance", Integer.valueOf(IDX_LINE_DISTANCE));
         keys.put("Intensity", Integer.valueOf(IDX_INTENSITY));
-        keys.put("Nuclear", Integer.valueOf(IDX_NUCLEAR));
         keys.put("Aggregation", Integer.valueOf(IDX_AGGREGATION));
         keys.put("Statistics", Integer.valueOf(IDX_STATISTICS));
         keys.put("Excel", Integer.valueOf(IDX_EXCEL_EXPORT));
@@ -62,7 +60,6 @@ public final class PipelineRecipe {
         indexes.put(Integer.valueOf(IDX_SPATIAL), "Spatial");
         indexes.put(Integer.valueOf(IDX_LINE_DISTANCE), "LineDistance");
         indexes.put(Integer.valueOf(IDX_INTENSITY), "Intensity");
-        indexes.put(Integer.valueOf(IDX_NUCLEAR), "Nuclear");
         indexes.put(Integer.valueOf(IDX_AGGREGATION), "Aggregation");
         indexes.put(Integer.valueOf(IDX_STATISTICS), "Statistics");
         indexes.put(Integer.valueOf(IDX_EXCEL_EXPORT), "Excel");

@@ -80,7 +80,7 @@ public class FeatureDependencyGateTest {
         assertFalse(FeatureDependencyGate.gate(DependencyId.APACHE_POI_RUNTIME, "Excel Summary Export"));
 
         assertEquals(0, ui.prompts.size());
-        assertTrue(join(ui.logs).contains("Blocked feature: Excel Summary Export"));
+        assertTrue(join(ui.logs).contains("Blocked analysis: Excel Summary Export"));
         assertTrue(join(ui.logs).contains("Missing dependency: Apache POI runtime"));
         assertTrue(join(ui.logs).contains("poi-3.17.jar missing"));
         assertEquals(0, opener.calls);
@@ -99,10 +99,34 @@ public class FeatureDependencyGateTest {
         assertFalse(FeatureDependencyGate.gate(DependencyId.MCIB3D_CORE, "3D morphometry"));
 
         assertEquals(1, ui.prompts.size());
-        assertEquals("Open Dependencies,Close", ui.prompts.get(0).buttonLabels);
-        assertFalse(ui.prompts.get(0).buttonLabels.contains("Fix Now"));
+        assertEquals("Open Dependencies,Go Back / Change Setup", ui.prompts.get(0).buttonLabels);
+        assertFalse(ui.prompts.get(0).buttonLabels.contains("Auto-Fix"));
         assertTrue(ui.prompts.get(0).plainMessage.contains("mcib3d-core"));
         assertEquals(1, opener.calls);
+    }
+
+    @Test
+    public void missingDependencyPromptNamesAnalysisRequirementAndCanReturnChangeSetup() {
+        EnumMap<DependencyId, DependencyStatus> statuses =
+                DependencyRuntimeTestSupport.withStatuses(
+                        DependencyId.APACHE_POI_RUNTIME,
+                        DependencyStatus.missing("POI jars missing"));
+        FeatureDependencyGate.configure(DependencyRuntimeTestSupport.serviceWith(statuses), opener);
+        ui.headless = false;
+        ui.nextAction = "change_setup";
+
+        FeatureDependencyGate.GateDecision decision = FeatureDependencyGate.check(
+                DependencyId.APACHE_POI_RUNTIME,
+                "Excel Summary Export",
+                "Apache POI .xlsx workbook writing");
+
+        assertEquals(FeatureDependencyGate.GateDecision.CHANGE_SETUP, decision);
+        assertEquals(1, ui.prompts.size());
+        assertTrue(ui.prompts.get(0).plainMessage.contains("Analysis you tried to run: Excel Summary Export"));
+        assertTrue(ui.prompts.get(0).plainMessage.contains("Required for: Apache POI .xlsx workbook writing"));
+        assertTrue(ui.prompts.get(0).buttonLabels.contains("Auto-Fix Excel"));
+        assertTrue(ui.prompts.get(0).buttonLabels.contains("Go Back / Change Setup"));
+        assertEquals(0, opener.calls);
     }
 
     private static String join(List<String> values) {
@@ -177,7 +201,8 @@ public class FeatureDependencyGateTest {
         }
 
         @Override
-        public String showMissingDependencyDialog(String feature,
+        public String showMissingDependencyDialog(String analysis,
+                                                  String requirement,
                                                   DependencySpec spec,
                                                   DependencyStatus status,
                                                   String plainMessage,
@@ -189,7 +214,7 @@ public class FeatureDependencyGateTest {
                 }
                 labels.append(action.getLabel());
             }
-            prompts.add(new PromptRecord(feature, plainMessage, labels.toString()));
+            prompts.add(new PromptRecord(analysis, plainMessage, labels.toString()));
             return nextAction;
         }
     }

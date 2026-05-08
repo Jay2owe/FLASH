@@ -121,7 +121,6 @@ public class FLASH_Pipeline implements PlugIn {
             "Spatial Analysis",
             "Line Distance Analysis",
             "Fluorescence Intensity Analysis",
-            "Nuclear Counter",
             // UI clarity pass intentionally flips the old Aggregation label to plain English.
             "Combine results per condition / animal",
             "Statistical Analysis",
@@ -139,7 +138,6 @@ public class FLASH_Pipeline implements PlugIn {
             "Re-run spatial / nearest-neighbour analysis from existing object CSVs.",
             "Distance from each object to a drawn anatomical landmark.",
             "Per-region fluorescence intensity (mean, area-fraction, thresholded).",
-            "Deprecated legacy path; use 3D Object Analysis on the nuclear channel.",
             "Aggregates all per-image CSVs into master summary tables (Master Data Aggregation).",
             "Group comparisons - t-tests, ANOVA, Tukey / Dunn's post-hoc.",
             "Make a publication-ready .xlsx workbook from the master CSVs.",
@@ -156,12 +154,11 @@ public class FLASH_Pipeline implements PlugIn {
     public static final int IDX_SPATIAL = 5;
     public static final int IDX_LINE_DISTANCE = 6;
     public static final int IDX_INTENSITY = 7;
-    public static final int IDX_NUCLEAR = 8;
-    public static final int IDX_AGGREGATION = 9;
-    public static final int IDX_STATISTICS = 10;
-    public static final int IDX_EXCEL_EXPORT = 11;
-    public static final int IDX_SPECTRAL_DECONTAMINATION = 12;
-    public static final int IDX_ORIENTATION_SETUP = 13;
+    public static final int IDX_AGGREGATION = 8;
+    public static final int IDX_STATISTICS = 9;
+    public static final int IDX_EXCEL_EXPORT = 10;
+    public static final int IDX_SPECTRAL_DECONTAMINATION = 11;
+    public static final int IDX_ORIENTATION_SETUP = 12;
 
     private static final int[] VISIBLE_ANALYSIS_ORDER = {
             IDX_CREATE_BIN,
@@ -247,11 +244,6 @@ public class FLASH_Pipeline implements PlugIn {
 
             for (int i = 0; i < selections.length; i++) {
                 if (!selections[i]) continue;
-
-                if (isDeprecatedAnalysis(i)) {
-                    IJ.log("Skipping " + analyses[i] + " — this module has been deprecated. Use 3D Object Analysis for nuclear counts.");
-                    continue;
-                }
 
                 Analysis analysis = analysisMap.get(i);
                 if (analysis != null) {
@@ -371,12 +363,6 @@ public class FLASH_Pipeline implements PlugIn {
         // Execute selected analyses — CLI always suppresses dialogs
         for (int i = 0; i < selections.length; i++) {
             if (!selections[i]) continue;
-
-            if (isDeprecatedAnalysis(i)) {
-                IJ.log("[CLI] Skipping " + analyses[i]
-                        + " — this module has been deprecated. Use 3D Object Analysis for nuclear counts.");
-                continue;
-            }
 
             Analysis analysis = analysisMap.get(i);
             if (analysis != null) {
@@ -1490,7 +1476,7 @@ public class FLASH_Pipeline implements PlugIn {
                 || index == IDX_SPECTRAL_DECONTAMINATION)) {
             analysisHeadless = false;
         }
-        FeatureDependencyGate.setUiMode(analysisHeadless);
+        FeatureDependencyGate.setUiMode(isDependencyGateUnattended());
         analysis.setHeadless(analysisHeadless);
         analysis.setAggressiveMemory(aggressiveMemory);
         analysis.setVerboseLogging(verboseLogging);
@@ -1565,10 +1551,6 @@ public class FLASH_Pipeline implements PlugIn {
         analysisMap.put(IDX_ORIENTATION_SETUP, new ImageOrientationSetupAnalysis());
     }
 
-    private boolean isDeprecatedAnalysis(int analysisIndex) {
-        return analysisIndex == IDX_NUCLEAR;
-    }
-
     private Analysis createExcelExportAnalysis() {
         return new Analysis() {
             private boolean headless = false;
@@ -1592,7 +1574,8 @@ public class FLASH_Pipeline implements PlugIn {
 
             @Override
             public void execute(String directory) {
-                if (!FeatureDependencyGate.gate(DependencyId.APACHE_POI_RUNTIME, "Excel Summary Export")) {
+                if (!FeatureDependencyGate.gate(DependencyId.APACHE_POI_RUNTIME,
+                        "Excel Summary Export", "Apache POI .xlsx workbook writing")) {
                     return;
                 }
                 try {
@@ -1603,13 +1586,18 @@ public class FLASH_Pipeline implements PlugIn {
                     delegate.setCliConfig(cliConfig);
                     delegate.execute(directory);
                 } catch (ReflectiveOperationException | LinkageError e) {
-                    if (!FeatureDependencyGate.gate(DependencyId.APACHE_POI_RUNTIME, "Excel Summary Export")) {
+                    if (!FeatureDependencyGate.gate(DependencyId.APACHE_POI_RUNTIME,
+                            "Excel Summary Export", "Apache POI .xlsx workbook writing")) {
                         return;
                     }
                     IJ.handleException(e);
                 }
             }
         };
+    }
+
+    private boolean isDependencyGateUnattended() {
+        return cliInvocation || GraphicsEnvironment.isHeadless();
     }
 
     private static String formatApproxSizeOrNone(long bytes) {

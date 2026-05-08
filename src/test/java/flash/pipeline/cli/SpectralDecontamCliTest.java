@@ -21,7 +21,7 @@ public class SpectralDecontamCliTest {
         CLIConfig parsed = CLIArgumentParser.parse(
                 "dir=[/tmp/data] spectral.preset=combined_aggressive spectral.target=0");
 
-        assertTrue(parsed.getSelectedAnalyses()[12]);
+        assertTrue(parsed.getSelectedAnalyses()[11]);
         assertEquals("combined_aggressive", parsed.getSpectral().getPresetName());
         assertEquals(Integer.valueOf(0), parsed.getSpectral().getTargetChannelIndex());
 

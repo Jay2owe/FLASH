@@ -32,7 +32,7 @@ public final class BinSetupDispatcher {
     private static final ThreadLocal<Outcome> lastOutcome = new ThreadLocal<Outcome>();
 
     interface HeadlessProbe {
-        boolean isHeadlessOrMacro(boolean suppressDialogs);
+        boolean isHeadlessOrMacro();
     }
 
     interface Chooser {
@@ -48,10 +48,9 @@ public final class BinSetupDispatcher {
     }
 
     private static HeadlessProbe headlessProbe = new HeadlessProbe() {
-        @Override public boolean isHeadlessOrMacro(boolean suppressDialogs) {
+        @Override public boolean isHeadlessOrMacro() {
             return GraphicsEnvironment.isHeadless()
                     || IJ.getInstance() == null
-                    || suppressDialogs
                     || Macro.getOptions() != null;
         }
     };
@@ -99,7 +98,9 @@ public final class BinSetupDispatcher {
             return Outcome.COMPLETED;
         }
 
-        if (headlessProbe.isHeadlessOrMacro(suppressDialogs)) {
+        // suppressDialogs only hides ordinary module option/completion dialogs.
+        // Missing configuration still needs an interactive setup chooser when a UI is available.
+        if (headlessProbe.isHeadlessOrMacro()) {
             applyHeadlessCliValues(directory, analysisDisplayName, existing, missing, cli);
             recordMissingSources(sources, missing, SOURCE_CLI_ARGUMENT);
             recordOutcome(Outcome.COMPLETED, sources);
@@ -111,19 +112,19 @@ public final class BinSetupDispatcher {
         switch (choice) {
             case FULL:
                 wizardRunner.run(directory, BinField.all());
-                recordMissingSources(sources, BinField.all(), SOURCE_PROMPTED_FULL);
-                recordOutcome(Outcome.COMPLETED, sources);
-                return Outcome.COMPLETED;
+                return completeIfConfigurationNowSatisfiesRequiredFields(
+                        directory, analysisDisplayName, BinField.all(), sources,
+                        BinField.all(), SOURCE_PROMPTED_FULL);
             case PARTIAL:
                 wizardRunner.run(directory, copyOf(missing));
-                recordMissingSources(sources, missing, SOURCE_PROMPTED_PARTIAL);
-                recordOutcome(Outcome.COMPLETED, sources);
-                return Outcome.COMPLETED;
+                return completeIfConfigurationNowSatisfiesRequiredFields(
+                        directory, analysisDisplayName, required, sources,
+                        missing, SOURCE_PROMPTED_PARTIAL);
             case BYPASS:
                 if (bypassRunner.show(directory, copyOf(missing))) {
-                    recordMissingSources(sources, missing, SOURCE_BYPASS_DIALOG);
-                    recordOutcome(Outcome.COMPLETED, sources);
-                    return Outcome.COMPLETED;
+                    return completeIfConfigurationNowSatisfiesRequiredFields(
+                            directory, analysisDisplayName, required, sources,
+                            missing, SOURCE_BYPASS_DIALOG);
                 }
                 recordOutcome(Outcome.CANCELLED, sources);
                 return Outcome.CANCELLED;
@@ -132,6 +133,27 @@ public final class BinSetupDispatcher {
                 recordOutcome(Outcome.CANCELLED, sources);
                 return Outcome.CANCELLED;
         }
+    }
+
+    private static Outcome completeIfConfigurationNowSatisfiesRequiredFields(
+            String directory,
+            String analysisDisplayName,
+            Set<BinField> required,
+            EnumMap<BinField, String> sources,
+            Set<BinField> promptedFields,
+            String promptedSource) {
+        BinConfig updated = BinConfigIO.readPartialFromDirectory(directory);
+        EnumSet<BinField> stillMissing = missingFields(updated, required);
+        addChannelNamesIfContextNeedsThem(updated, stillMissing);
+        if (!stillMissing.isEmpty()) {
+            IJ.log("[FLASH] " + cleanAnalysisName(analysisDisplayName)
+                    + " setup did not complete. Still missing: " + stillMissing + ".");
+            recordOutcome(Outcome.CANCELLED, sources);
+            return Outcome.CANCELLED;
+        }
+        recordMissingSources(sources, promptedFields, promptedSource);
+        recordOutcome(Outcome.COMPLETED, sources);
+        return Outcome.COMPLETED;
     }
 
     public static Map<BinField, String> getLastFieldSources() {
@@ -354,10 +376,9 @@ public final class BinSetupDispatcher {
     static void resetForTest() {
         clearLastFieldSources();
         headlessProbe = new HeadlessProbe() {
-            @Override public boolean isHeadlessOrMacro(boolean suppressDialogs) {
+            @Override public boolean isHeadlessOrMacro() {
                 return GraphicsEnvironment.isHeadless()
                         || IJ.getInstance() == null
-                        || suppressDialogs
                         || Macro.getOptions() != null;
             }
         };

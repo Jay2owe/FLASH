@@ -146,6 +146,16 @@ public class ThreeDObjectAnalysisTest {
                     @Override public Object invoke(Method method, Object[] args) throws Exception {
                         Set<BinField> fields = (Set<BinField>) args[1];
                         wizardFields.set(fields);
+                        writeChannelData(new File((String) args[0]),
+                                "DAPI GFAP",
+                                "Blue Green",
+                                "100 200",
+                                "50-Infinity 25-500",
+                                "None None",
+                                "default default",
+                                "classical classical",
+                                "default default",
+                                "zslice:full");
                         if (writeFilterMacros && fields.contains(BinField.FILTER_PRESETS)) {
                             File bin = new File((String) args[0], ".bin");
                             assertTrue(bin.isDirectory() || bin.mkdirs());
@@ -212,7 +222,7 @@ public class ThreeDObjectAnalysisTest {
 
     private static void writeChannelData(File dir, String... lines) throws Exception {
         File bin = new File(dir, ".bin");
-        assertTrue(bin.mkdirs());
+        assertTrue(bin.isDirectory() || bin.mkdirs());
         StringBuilder content = new StringBuilder();
         for (int i = 0; i < lines.length; i++) {
             content.append(lines[i]).append("\n");

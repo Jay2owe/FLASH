@@ -96,7 +96,11 @@ public abstract class WizardFlow {
         screen.build(dialog, answers);
         boolean ok = dialog.showDialog();
         if (!ok) {
-            return dialog.wasBackPressed() ? ScreenResult.BACK : ScreenResult.CANCEL;
+            if (dialog.wasBackPressed()) {
+                screen.read(dialog, answers);
+                return ScreenResult.BACK;
+            }
+            return ScreenResult.CANCEL;
         }
         screen.read(dialog, answers);
         return ScreenResult.NEXT;
