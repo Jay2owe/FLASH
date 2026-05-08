@@ -3,6 +3,7 @@ package flash.pipeline.analyses;
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinField;
 import flash.pipeline.image.NamedFilterLoader;
+import flash.pipeline.ui.ToggleSwitch;
 import flash.pipeline.zslice.ZSliceMode;
 import org.junit.Rule;
 import org.junit.Test;
@@ -311,6 +312,72 @@ public class CreateBinFileAnalysisTest {
         assertEquals(Arrays.asList("round", "ramified"), result.markerShapes);
         assertEquals(Arrays.asList(Boolean.FALSE, Boolean.TRUE), result.markerCrowdingSensitive);
         assertEquals(ZSliceMode.SAME_COUNT, result.zSliceMode);
+    }
+
+    @Test
+    public void settingsModeTickAllGroup_selectsAndClearsMemberToggles() {
+        ToggleSwitch selector = new ToggleSwitch(false);
+        ToggleSwitch c1 = new ToggleSwitch(false);
+        ToggleSwitch c2 = new ToggleSwitch(true);
+        CreateBinFileAnalysis.SettingsModeTickAllGroup group =
+                new CreateBinFileAnalysis.SettingsModeTickAllGroup(selector);
+
+        group.add(c1);
+        group.add(c2);
+
+        assertFalse(selector.isSelected());
+        selector.setSelected(true);
+        assertTrue(c1.isSelected());
+        assertTrue(c2.isSelected());
+        assertTrue(selector.isSelected());
+        assertTrue(group.allSelected());
+
+        selector.setSelected(false);
+        assertFalse(c1.isSelected());
+        assertFalse(c2.isSelected());
+        assertFalse(selector.isSelected());
+        assertFalse(group.allSelected());
+    }
+
+    @Test
+    public void settingsModeTickAllGroup_globalControlSelectsAndTracksGroupedToggles() {
+        ToggleSwitch globalSelector = new ToggleSwitch(false);
+        ToggleSwitch displaySelector = new ToggleSwitch(false);
+        ToggleSwitch thresholdSelector = new ToggleSwitch(false);
+        ToggleSwitch displayC1 = new ToggleSwitch(false);
+        ToggleSwitch displayC2 = new ToggleSwitch(false);
+        ToggleSwitch thresholdC1 = new ToggleSwitch(false);
+        CreateBinFileAnalysis.SettingsModeTickAllGroup globalGroup =
+                new CreateBinFileAnalysis.SettingsModeTickAllGroup(globalSelector);
+        CreateBinFileAnalysis.SettingsModeTickAllGroup displayGroup =
+                new CreateBinFileAnalysis.SettingsModeTickAllGroup(displaySelector);
+        CreateBinFileAnalysis.SettingsModeTickAllGroup thresholdGroup =
+                new CreateBinFileAnalysis.SettingsModeTickAllGroup(thresholdSelector);
+
+        displayGroup.add(displayC1);
+        displayGroup.add(displayC2);
+        thresholdGroup.add(thresholdC1);
+        globalGroup.add(displayC1);
+        globalGroup.add(displayC2);
+        globalGroup.add(thresholdC1);
+
+        globalSelector.setSelected(true);
+        assertTrue(displayC1.isSelected());
+        assertTrue(displayC2.isSelected());
+        assertTrue(thresholdC1.isSelected());
+        assertTrue(displaySelector.isSelected());
+        assertTrue(thresholdSelector.isSelected());
+        assertTrue(globalSelector.isSelected());
+
+        displayC1.setSelected(false);
+        assertFalse(displaySelector.isSelected());
+        assertTrue(thresholdSelector.isSelected());
+        assertFalse(globalSelector.isSelected());
+
+        displaySelector.setSelected(true);
+        assertTrue(displayC1.isSelected());
+        assertTrue(displayC2.isSelected());
+        assertTrue(globalSelector.isSelected());
     }
 
     private static File configurationDir(File dir) {

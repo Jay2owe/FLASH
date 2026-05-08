@@ -1165,6 +1165,8 @@ public class CreateBinFileAnalysis implements Analysis {
         fork.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
         fork.addSubHeader("Settings Mode");
         fork.addMessage("Toggle ON the settings you want to adjust interactively per channel.");
+        SettingsModeTickAllGroup allSettingsGroup = new SettingsModeTickAllGroup(
+                fork.addHeaderToggle("All Settings Mode Options", false));
 
         int n = channelNames.size();
         boolean[] isStarDist = new boolean[n];
@@ -1182,71 +1184,82 @@ public class CreateBinFileAnalysis implements Analysis {
 
         if (showFilterParameters) {
             fork.addHeader("Channel Identity & Processing");
-            fork.addSubHeader("Filter Hyperparameters");
+            SettingsModeTickAllGroup filterGroup = addSettingsModeTickAllGroup(fork, "Filter Hyperparameters");
             fork.addHelpText("Open filtered Z-stack previews and adjust detected key=value filter parameters per channel.");
             for (int i = 0; i < n; i++) {
-                fork.addToggle("C" + (i + 1) + " (" + channelNames.get(i) + ")",
-                        settingSelected(initialSettings, SETTINGS_FILTER_PARAMETERS, i));
+                addSettingsModeToggle(fork, "C" + (i + 1) + " (" + channelNames.get(i) + ")",
+                        settingSelected(initialSettings, SETTINGS_FILTER_PARAMETERS, i),
+                        filterGroup, allSettingsGroup);
             }
         }
         if (showMinMax) {
             fork.addHeader("Image Display");
-            fork.addSubHeader("Display Ranges");
+            SettingsModeTickAllGroup minMaxGroup = addSettingsModeTickAllGroup(fork, "Display Ranges");
             fork.addHelpText("Min-Max display ranges via B&C on a max projection.");
             for (int i = 0; i < n; i++) {
-                fork.addToggle("C" + (i + 1) + " (" + channelNames.get(i) + ")",
-                        settingSelected(initialSettings, SETTINGS_MIN_MAX, i));
+                addSettingsModeToggle(fork, "C" + (i + 1) + " (" + channelNames.get(i) + ")",
+                        settingSelected(initialSettings, SETTINGS_MIN_MAX, i),
+                        minMaxGroup, allSettingsGroup);
             }
         }
         if (showThreshold) {
             fork.addHeader("ROI / Intensity Analysis");
-            fork.addSubHeader("Channel Thresholds");
+            SettingsModeTickAllGroup thresholdGroup = addSettingsModeTickAllGroup(fork, "Channel Thresholds");
             fork.addHelpText("Set the channel threshold (after the per-channel filter). The same value feeds both classical object detection and ROI intensity measurements.");
             for (int i = 0; i < n; i++) {
                 boolean selected = settingSelected(initialSettings, SETTINGS_ROI_INTENSITY_THRESHOLD, i)
                         || (!isStarDist[i] && !isCellpose[i]
                         && settingSelected(initialSettings, SETTINGS_OBJECT_THRESHOLD, i));
-                fork.addToggle("C" + (i + 1) + " (" + channelNames.get(i) + ")", selected);
+                addSettingsModeToggle(fork, "C" + (i + 1) + " (" + channelNames.get(i) + ")",
+                        selected, thresholdGroup, allSettingsGroup);
             }
         }
         if (((showThreshold || showParticleSize) && anyClassical)
                 || (showThreshold && (anyStarDist || anyCellpose))) {
             fork.addHeader("Object Analysis");
         }
+        SettingsModeTickAllGroup classicalGroup = null;
         if ((showThreshold || showParticleSize) && anyClassical) {
-            fork.addSubHeader("Classical Object Analysis");
+            if (showParticleSize) {
+                classicalGroup = addSettingsModeTickAllGroup(fork, "Classical Object Analysis");
+            } else {
+                fork.addSubHeader("Classical Object Analysis");
+            }
         }
         if (showParticleSize && anyClassical) {
-            fork.addSubHeader("Object Size Filter");
+            SettingsModeTickAllGroup objectSizeGroup = addSettingsModeTickAllGroup(fork, "Object Size Filter");
             fork.addHelpText("Preview 3D Objects Counter results and adjust the object size range.");
             for (int i = 0; i < n; i++) {
                 if (!isStarDist[i] && !isCellpose[i]) {
-                    fork.addToggle("C" + (i + 1) + " (" + channelNames.get(i) + ")",
-                            settingSelected(initialSettings, SETTINGS_OBJECT_SIZE_FILTER, i));
+                    addSettingsModeToggle(fork, "C" + (i + 1) + " (" + channelNames.get(i) + ")",
+                            settingSelected(initialSettings, SETTINGS_OBJECT_SIZE_FILTER, i),
+                            objectSizeGroup, classicalGroup, allSettingsGroup);
                 }
             }
         }
         if (showThreshold && (anyStarDist || anyCellpose)) {
-            fork.addSubHeader("AI-Assisted Object Analysis");
+            SettingsModeTickAllGroup aiAssistedGroup = addSettingsModeTickAllGroup(fork, "AI-Assisted Object Analysis");
             if (anyStarDist) {
-                fork.addSubHeader("TrackMate-StarDist Parameters");
+                SettingsModeTickAllGroup starDistGroup = addSettingsModeTickAllGroup(fork, "TrackMate-StarDist Parameters");
                 fork.addHelpText("Adjust detection thresholds and post-detection filters (area, quality, intensity).");
                 for (int i = 0; i < n; i++) {
                     if (isStarDist[i]) {
-                        fork.addToggle("C" + (i + 1) + " (" + channelNames.get(i) + ")",
+                        addSettingsModeToggle(fork, "C" + (i + 1) + " (" + channelNames.get(i) + ")",
                                 settingSelected(initialSettings, SETTINGS_OBJECT_THRESHOLD, i)
-                                        || settingSelected(initialSettings, SETTINGS_OBJECT_SIZE_FILTER, i));
+                                        || settingSelected(initialSettings, SETTINGS_OBJECT_SIZE_FILTER, i),
+                                starDistGroup, aiAssistedGroup, allSettingsGroup);
                     }
                 }
             }
             if (anyCellpose) {
-                fork.addSubHeader("Cellpose 3D Parameters");
+                SettingsModeTickAllGroup cellposeGroup = addSettingsModeTickAllGroup(fork, "Cellpose 3D Parameters");
                 fork.addHelpText("Adjust model choice and Cellpose thresholds for irregular, whole-cell, or companion-channel segmentation.");
                 for (int i = 0; i < n; i++) {
                     if (isCellpose[i]) {
-                        fork.addToggle("C" + (i + 1) + " (" + channelNames.get(i) + ")",
+                        addSettingsModeToggle(fork, "C" + (i + 1) + " (" + channelNames.get(i) + ")",
                                 settingSelected(initialSettings, SETTINGS_OBJECT_THRESHOLD, i)
-                                        || settingSelected(initialSettings, SETTINGS_OBJECT_SIZE_FILTER, i));
+                                        || settingSelected(initialSettings, SETTINGS_OBJECT_SIZE_FILTER, i),
+                                cellposeGroup, aiAssistedGroup, allSettingsGroup);
                     }
                 }
             }
@@ -1346,6 +1359,82 @@ public class CreateBinFileAnalysis implements Analysis {
             if (source[row] == null || target[row] == null) continue;
             for (int col = 0; col < source[row].length && col < target[row].length; col++) {
                 target[row][col] = source[row][col];
+            }
+        }
+    }
+
+    private static SettingsModeTickAllGroup addSettingsModeTickAllGroup(PipelineDialog dialog, String label) {
+        return new SettingsModeTickAllGroup(dialog.addSubHeaderToggle(label, false));
+    }
+
+    private static ToggleSwitch addSettingsModeToggle(PipelineDialog dialog, String label, boolean selected,
+                                                      SettingsModeTickAllGroup... groups) {
+        ToggleSwitch toggle = dialog.addToggle(label, selected);
+        if (groups != null) {
+            for (int i = 0; i < groups.length; i++) {
+                if (groups[i] != null) {
+                    groups[i].add(toggle);
+                }
+            }
+        }
+        return toggle;
+    }
+
+    static final class SettingsModeTickAllGroup {
+        private final ToggleSwitch tickAll;
+        private final List<ToggleSwitch> toggles = new ArrayList<ToggleSwitch>();
+        private boolean updating;
+
+        SettingsModeTickAllGroup(ToggleSwitch tickAll) {
+            this.tickAll = tickAll;
+            if (this.tickAll != null) {
+                this.tickAll.addChangeListener(new Runnable() {
+                    @Override public void run() {
+                        applyTickAllSelection();
+                    }
+                });
+            }
+        }
+
+        void add(ToggleSwitch toggle) {
+            if (toggle == null) return;
+            toggles.add(toggle);
+            toggle.addChangeListener(new Runnable() {
+                @Override public void run() {
+                    syncTickAllSelection();
+                }
+            });
+            syncTickAllSelection();
+        }
+
+        boolean allSelected() {
+            if (toggles.isEmpty()) return false;
+            for (int i = 0; i < toggles.size(); i++) {
+                if (!toggles.get(i).isSelected()) return false;
+            }
+            return true;
+        }
+
+        private void applyTickAllSelection() {
+            if (updating || tickAll == null) return;
+            updating = true;
+            try {
+                boolean selected = tickAll.isSelected();
+                for (int i = 0; i < toggles.size(); i++) {
+                    toggles.get(i).setSelected(selected);
+                }
+            } finally {
+                updating = false;
+            }
+        }
+
+        private void syncTickAllSelection() {
+            if (updating || tickAll == null) return;
+            updating = true;
+            try {
+                tickAll.setSelected(allSelected());
+            } finally {
+                updating = false;
             }
         }
     }

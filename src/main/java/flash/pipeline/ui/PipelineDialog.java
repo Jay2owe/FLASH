@@ -339,6 +339,29 @@ public class PipelineDialog {
         addToBody(Box.createVerticalStrut(3));
     }
 
+    /**
+     * Adds a subsection label with a controlling toggle. The returned toggle is
+     * not part of the sequential getNextBoolean() list.
+     */
+    public ToggleSwitch addSubHeaderToggle(String text, boolean defaultValue) {
+        addToBody(Box.createVerticalStrut(6));
+
+        JPanel row = createRow();
+        row.setBorder(new EmptyBorder(0, 20, 0, 4));
+        JLabel label = new JLabel(text);
+        label.setFont(label.getFont().deriveFont(Font.BOLD, 12f));
+        label.setForeground(SUBHEADER_COLOR);
+        row.add(label);
+        row.add(Box.createHorizontalStrut(8));
+        ToggleSwitch toggle = new ToggleSwitch(defaultValue);
+        row.add(toggle);
+        row.add(Box.createHorizontalGlue());
+
+        addToBody(row);
+        addToBody(Box.createVerticalStrut(3));
+        return toggle;
+    }
+
     /** Adds a labeled toggle switch. Returns the ToggleSwitch for listener attachment. */
     public ToggleSwitch addToggle(String label, boolean defaultValue) {
         ToggleSwitch toggle = new ToggleSwitch(defaultValue);
