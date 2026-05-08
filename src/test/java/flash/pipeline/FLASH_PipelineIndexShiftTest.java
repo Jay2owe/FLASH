@@ -58,7 +58,7 @@ public class FLASH_PipelineIndexShiftTest {
         assertEquals("Set Up Configuration", analyses[FLASH_Pipeline.IDX_CREATE_BIN]);
         assertEquals("Draw and Save ROIs", analyses[FLASH_Pipeline.IDX_DRAW_ROIS]);
         assertEquals("3D Deconvolution", analyses[FLASH_Pipeline.IDX_DECONVOLUTION]);
-        assertEquals("Split and Merge Image Channels", analyses[FLASH_Pipeline.IDX_SPLIT_MERGE]);
+        assertEquals("Make Presentation-Ready Images", analyses[FLASH_Pipeline.IDX_SPLIT_MERGE]);
         assertEquals("Spectral Decontamination (Experimental)", analyses[FLASH_Pipeline.IDX_SPECTRAL_DECONTAMINATION]);
         assertEquals("Image Orientation Setup", analyses[FLASH_Pipeline.IDX_ORIENTATION_SETUP]);
     }

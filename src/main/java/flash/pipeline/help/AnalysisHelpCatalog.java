@@ -218,7 +218,7 @@ public final class AnalysisHelpCatalog {
         return new AnalysisHelpTopic(
                 FLASH_Pipeline.IDX_SPLIT_MERGE,
                 "split-merge",
-                "Split and Merge Image Channels",
+                "Make Presentation-Ready Images",
                 "Create per-channel images, merged composites, and display-ready exports for visual checking and figure preparation.",
                 list(
                         "Use this when you need channel-separated images, merged colour composites, or OME-TIFF exports for review, presentation, or figure assembly.",

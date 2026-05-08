@@ -7,8 +7,6 @@ import flash.pipeline.bin.BinField;
 import flash.pipeline.bin.BinSetupDispatcher;
 import flash.pipeline.bin.ChannelIdentities;
 import flash.pipeline.bin.ChannelIdentitiesIO;
-import flash.pipeline.analyses.wizard.SplitMergePreset;
-import flash.pipeline.analyses.wizard.SplitMergePresetIO;
 import flash.pipeline.cli.CLIConfig;
 import flash.pipeline.deconv.DeconvolvedInputResolver;
 import flash.pipeline.image.AdaptiveParallelism;
@@ -787,34 +785,19 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
         if (java.awt.GraphicsEnvironment.isHeadless()) {
             return buildHeadlessDefaults(channelNames, defaultMinMax, autoBackgroundIndex);
         }
-        final SplitMergePresetIO presetIO = new SplitMergePresetIO(
-                projectRoot == null ? new File(".") : projectRoot);
-
         final String[] bgChoices = new String[nCh + 1];
         bgChoices[0] = NONE_OPTION;
         for (int i = 0; i < nCh; i++) {
             bgChoices[i + 1] = channelNames[i] + (i == autoBackgroundIndex ? " (auto-detected)" : "");
         }
 
-        final PipelineDialog pd = new PipelineDialog("Split and Merge Image Channels", PipelineDialog.Phase.SETUP);
+        final PipelineDialog pd = new PipelineDialog("Make Presentation-Ready Images", PipelineDialog.Phase.SETUP);
 
         // ── Section: Input ──
-        pd.addAnalysisHelpHeader("Split and Merge Image Channels", FLASH_Pipeline.IDX_SPLIT_MERGE);
+        pd.addAnalysisHelpHeader("Make Presentation-Ready Images", FLASH_Pipeline.IDX_SPLIT_MERGE);
         pd.addSubHeader("Input");
         final ToggleSwitch useDeconvToggle = pd.addToggle("Use deconvolved stacks if available",
                 useDeconvolvedInput);
-
-        // Custom row: Preset combo + Save-as-preset button (kept out of the
-        // combos retrieval list so retrieval order stays clean).
-        final JComboBox<String> presetCombo = new JComboBox<String>();
-        populatePresetChoice(presetCombo, presetIO);
-        final JButton savePresetBtn = new JButton("Save as preset...");
-        JPanel presetRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
-        presetRow.setOpaque(false);
-        presetRow.add(new JLabel("Preset:"));
-        presetRow.add(presetCombo);
-        presetRow.add(savePresetBtn);
-        pd.addComponent(presetRow);
 
         // ── Section: Channel Processing ──
         pd.addHeader("Channel Processing");
@@ -909,52 +892,6 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                 }
                 for (int i = 0; i < nCh; i++) {
                     subtractToggles[i].setEnabled(on);
-                }
-            }
-        });
-
-        presetCombo.addActionListener(new java.awt.event.ActionListener() {
-            @Override
-            public void actionPerformed(java.awt.event.ActionEvent e) {
-                Object selected = presetCombo.getSelectedItem();
-                if (selected == null || "Choose preset...".equals(String.valueOf(selected))) {
-                    return;
-                }
-                try {
-                    SplitMergePreset preset = presetIO.load(String.valueOf(selected));
-                    applyPresetToDialog(preset, autoBackgroundIndex, methodBoxes, satFields, mmFields,
-                            createMergeToggle, saveOmeTiffToggle, additionalMergesField,
-                            subtractBgToggle, bgChannelBox, subtractToggles);
-                } catch (IOException ex) {
-                    IJ.log("WARNING: Could not load Split & Merge preset '" + selected + "': " + ex.getMessage());
-                    JOptionPane.showMessageDialog(null,
-                            "Could not load preset: " + ex.getMessage(),
-                            "Split and Merge Image Channels",
-                            JOptionPane.WARNING_MESSAGE);
-                }
-            }
-        });
-
-        savePresetBtn.addActionListener(new java.awt.event.ActionListener() {
-            @Override
-            public void actionPerformed(java.awt.event.ActionEvent e) {
-                String name = JOptionPane.showInputDialog(null, "Preset name:",
-                        "Save Split & Merge Preset", JOptionPane.PLAIN_MESSAGE);
-                if (name == null || name.trim().isEmpty()) {
-                    return;
-                }
-                try {
-                    presetIO.save(buildPresetFromDialog(name.trim(), methodBoxes, satFields, mmFields,
-                            createMergeToggle, saveOmeTiffToggle, additionalMergesField,
-                            subtractBgToggle, bgChannelBox, subtractToggles));
-                    populatePresetChoice(presetCombo, presetIO);
-                    presetCombo.setSelectedItem(name.trim());
-                } catch (IOException ex) {
-                    IJ.log("WARNING: Could not save Split & Merge preset '" + name + "': " + ex.getMessage());
-                    JOptionPane.showMessageDialog(null,
-                            "Could not save preset: " + ex.getMessage(),
-                            "Split and Merge Image Channels",
-                            JOptionPane.WARNING_MESSAGE);
                 }
             }
         });
@@ -1058,98 +995,6 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
             }
         }
         return -1;
-    }
-
-    private static void populatePresetChoice(JComboBox<String> combo, SplitMergePresetIO presetIO) {
-        Object previous = combo.getSelectedItem();
-        combo.removeAllItems();
-        combo.addItem("Choose preset...");
-        try {
-            List<SplitMergePreset> presets = presetIO.listAll();
-            for (SplitMergePreset preset : presets) {
-                combo.addItem(preset.getName());
-            }
-            if (previous != null) {
-                combo.setSelectedItem(previous);
-            }
-        } catch (IOException e) {
-            IJ.log("WARNING: Could not list Split & Merge presets: " + e.getMessage());
-        }
-    }
-
-    private static void applyPresetToDialog(SplitMergePreset preset,
-                                            int autoBackgroundIndex,
-                                            JComboBox<String>[] methodBoxes,
-                                            JTextField[] satFields,
-                                            JTextField[] mmFields,
-                                            ToggleSwitch createMergeToggle,
-                                            ToggleSwitch saveOmeTiffToggle,
-                                            JTextField additionalMergesField,
-                                            ToggleSwitch subtractBgToggle,
-                                            JComboBox<String> bgChannelBox,
-                                            ToggleSwitch[] subtractToggles) {
-        if (preset == null) {
-            return;
-        }
-        for (int i = 0; i < methodBoxes.length; i++) {
-            methodBoxes[i].setSelectedItem(preset.methodForChannel(i, (String) methodBoxes[i].getSelectedItem()));
-            String mm = preset.customMinMaxForChannel(i, mmFields[i].getText());
-            mmFields[i].setText(NONE_OPTION.equalsIgnoreCase(mm) ? "" : mm);
-            double currentSat = parseSaturationOrDefault(satFields[i].getText(), 0.35);
-            double nextSat = preset.saturationForChannel(i, currentSat);
-            satFields[i].setText(formatSaturation(nextSat));
-        }
-        createMergeToggle.setSelected(preset.isCreateMerge());
-        saveOmeTiffToggle.setSelected(preset.isSaveOmeTiff());
-        additionalMergesField.setText(preset.getAdditionalMergeSpec());
-
-        int backgroundIndex = preset.getBackgroundIndex() >= 0
-                ? preset.getBackgroundIndex()
-                : autoBackgroundIndex;
-        boolean hasBackground = preset.isSubtractBackground()
-                && backgroundIndex >= 0
-                && backgroundIndex < subtractToggles.length;
-        subtractBgToggle.setSelected(hasBackground);
-        bgChannelBox.setSelectedIndex(hasBackground ? backgroundIndex + 1 : 0);
-        for (int i = 0; i < subtractToggles.length; i++) {
-            boolean fallback = hasBackground && i != backgroundIndex;
-            subtractToggles[i].setSelected(i == backgroundIndex ? false : preset.subtractFromChannel(i, fallback));
-        }
-    }
-
-    private static SplitMergePreset buildPresetFromDialog(String name,
-                                                          JComboBox<String>[] methodBoxes,
-                                                          JTextField[] satFields,
-                                                          JTextField[] mmFields,
-                                                          ToggleSwitch createMergeToggle,
-                                                          ToggleSwitch saveOmeTiffToggle,
-                                                          JTextField additionalMergesField,
-                                                          ToggleSwitch subtractBgToggle,
-                                                          JComboBox<String> bgChannelBox,
-                                                          ToggleSwitch[] subtractToggles) {
-        List<String> methods = new ArrayList<String>();
-        List<String> customRanges = new ArrayList<String>();
-        List<Double> saturations = new ArrayList<Double>();
-        List<Boolean> subtractFrom = new ArrayList<Boolean>();
-        for (int i = 0; i < methodBoxes.length; i++) {
-            methods.add((String) methodBoxes[i].getSelectedItem());
-            String mm = mmFields[i].getText() == null ? "" : mmFields[i].getText().trim();
-            customRanges.add(mm.isEmpty() ? NONE_OPTION : mm);
-            saturations.add(Double.valueOf(parseSaturationOrDefault(satFields[i].getText(), 0.35)));
-            subtractFrom.add(Boolean.valueOf(subtractToggles[i].isSelected()));
-        }
-        int backgroundIndex = bgChannelBox.getSelectedIndex() > 0 ? bgChannelBox.getSelectedIndex() - 1 : -1;
-        return new SplitMergePreset(name,
-                "Saved from Split and Merge Image Channels.",
-                methods,
-                customRanges,
-                saturations,
-                createMergeToggle.isSelected(),
-                saveOmeTiffToggle.isSelected(),
-                additionalMergesField.getText(),
-                subtractBgToggle.isSelected() && backgroundIndex >= 0,
-                backgroundIndex,
-                subtractFrom);
     }
 
     private static double parseSaturationOrDefault(String text, double fallback) {
