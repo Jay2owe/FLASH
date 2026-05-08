@@ -35,6 +35,11 @@ import flash.pipeline.ui.CustomFilterContinueDialog;
 import flash.pipeline.ui.CustomFilterEntryDialog;
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.ToggleSwitch;
+import flash.pipeline.ui.config.ConfigQcContext;
+import flash.pipeline.ui.config.ConfigQcDialog;
+import flash.pipeline.ui.config.ConfigQcResult;
+import flash.pipeline.ui.config.ConfigQcStage;
+import flash.pipeline.ui.config.ZSliceSelectionStage;
 import flash.pipeline.ui.sandbox.SandboxDialog;
 import flash.pipeline.ui.wizard.MarkerAutoComplete;
 import flash.pipeline.ui.wizard.SetupHelperButton;
@@ -2713,6 +2718,10 @@ public class CreateBinFileAnalysis implements Analysis {
     }
 
     private String seriesDisplayLabel(File lifFile, SeriesMeta meta) {
+        return seriesDisplayLabelText(lifFile, meta);
+    }
+
+    static String seriesDisplayLabelText(File lifFile, SeriesMeta meta) {
         if (meta == null) return "Series";
         String fallback = "Series " + (meta.index + 1);
         String seriesName = (meta.name == null || meta.name.trim().isEmpty()) ? fallback : meta.name.trim();
@@ -2993,6 +3002,10 @@ public class CreateBinFileAnalysis implements Analysis {
                 return "done";
             }
 
+            if (useEmbeddedZSliceSelectionStage()) {
+                return runEmbeddedZSliceSelection(directory, lifFile, cfg, metas);
+            }
+
             DeferredImageSupplier supplier = LifIO.createDeferredSupplier(directory);
             int totalSeries = metas.size();
             ZSliceRange lastAcceptedRange = null;
@@ -3139,6 +3152,118 @@ public class CreateBinFileAnalysis implements Analysis {
                     "Error while selecting z-slices: " + e.getMessage());
             return "cancel";
         }
+    }
+
+    private boolean useEmbeddedZSliceSelectionStage() {
+        return true;
+    }
+
+    private String runEmbeddedZSliceSelection(String directory, File lifFile,
+                                              BinUserConfig cfg, List<SeriesMeta> metas) throws Exception {
+        if (GraphicsEnvironment.isHeadless()) {
+            return "cancel";
+        }
+        DeferredImageSupplier supplier = LifIO.createDeferredSupplier(directory);
+        ConfigQcContext context = new ConfigQcContext(
+                new File(directory),
+                null,
+                cfg,
+                zSliceContextImages(lifFile, metas),
+                cfg.names,
+                0);
+        ZSliceSelectionStage stage = createZSliceSelectionStage(supplier, metas, cfg);
+        ConfigQcDialog dialog = ConfigQcDialog.createModal(
+                null, context, Collections.<ConfigQcStage>singletonList(stage));
+        ConfigQcResult result = dialog.showDialog();
+        if (result == ConfigQcResult.DONE || result == ConfigQcResult.SKIP_CURRENT_IMAGE) {
+            return finalizeZSliceSelections(cfg);
+        }
+        if (result == ConfigQcResult.BACK) {
+            return "back";
+        }
+        return "cancel";
+    }
+
+    ZSliceSelectionStage createZSliceSelectionStage(final DeferredImageSupplier supplier,
+                                                   List<SeriesMeta> metas,
+                                                   final BinUserConfig cfg) {
+        return new ZSliceSelectionStage(
+                metas,
+                new ZSliceSelectionStage.SelectionStore() {
+                    @Override public ZSliceSelection get(int seriesIndex) {
+                        return cfg.zSliceSelections.get(Integer.valueOf(seriesIndex));
+                    }
+
+                    @Override public void put(ZSliceSelection selection) {
+                        if (selection != null) {
+                            cfg.zSliceSelections.put(Integer.valueOf(selection.seriesIndex), selection);
+                        }
+                    }
+                },
+                new ZSliceSelectionStage.ImageOpener() {
+                    @Override public ImagePlus open(SeriesMeta meta) throws Exception {
+                        return supplier.openSeries(meta.index);
+                    }
+
+                    @Override public void close(ImagePlus image) {
+                        closeImageQuietly(image);
+                    }
+                },
+                new ZSliceSelectionStage.PartialApplyHandler() {
+                    @Override public ZSliceSelectionStage.PartialApplyChoice choose(
+                            ZSliceRange range,
+                            List<SeriesMeta> compatibleMetas,
+                            List<SeriesMeta> incompatibleMetas) {
+                        return promptEmbeddedPartialApplyDecision(
+                                range, compatibleMetas, incompatibleMetas);
+                    }
+                });
+    }
+
+    private ZSliceSelectionStage.PartialApplyChoice promptEmbeddedPartialApplyDecision(
+            ZSliceRange range, List<SeriesMeta> compatibleMetas, List<SeriesMeta> incompatibleMetas) {
+        int compatibleCount = compatibleMetas == null ? 0 : compatibleMetas.size();
+        int incompatibleCount = incompatibleMetas == null ? 0 : incompatibleMetas.size();
+        int remainingCount = compatibleCount + incompatibleCount;
+
+        String applyLabel = "Apply to the " + compatibleCount
+                + " compatible images, handle the " + incompatibleCount + " outlier"
+                + (incompatibleCount == 1 ? "" : "s") + " manually";
+        String manualLabel = "Continue manually on all " + remainingCount + " remaining images";
+
+        PipelineDialog dlg = new PipelineDialog("Set Up Configuration - Range Does Not Fit All Remaining");
+        dlg.addHeader("Range Does Not Fit Every Remaining Image");
+        dlg.addMessage("The range " + range.toToken() + " fits " + compatibleCount
+                + " of " + remainingCount + " remaining image" + (remainingCount == 1 ? "" : "s") + ".");
+        dlg.addMessage("These remaining images cannot accept the range:");
+        dlg.addMessage(formatIncompatibleListHtml(incompatibleMetas));
+        dlg.addChoice("Action", new String[]{applyLabel, manualLabel}, applyLabel);
+        dlg.addHelpText(
+                "<b>Apply to compatible</b>: writes the range to every compatible image now, "
+                + "then pauses on the first outlier so you can pick a range for it manually.<br>"
+                + "<b>Continue manually</b>: keeps the current image's range, leaves the "
+                + "remaining images untouched, and advances image-by-image.<br>"
+                + "Cancel returns to the z-slice widget so you can pick a different range.");
+
+        if (!dlg.showDialog()) return ZSliceSelectionStage.PartialApplyChoice.CANCEL;
+        String picked = dlg.getNextChoice();
+        if (picked != null && picked.equals(applyLabel)) {
+            return ZSliceSelectionStage.PartialApplyChoice.APPLY_TO_COMPATIBLE;
+        }
+        return ZSliceSelectionStage.PartialApplyChoice.CONTINUE_MANUAL;
+    }
+
+    static List<ConfigQcContext.ConfigQcImage> zSliceContextImages(File lifFile, List<SeriesMeta> metas) {
+        List<ConfigQcContext.ConfigQcImage> images = new ArrayList<ConfigQcContext.ConfigQcImage>();
+        if (metas != null) {
+            for (int i = 0; i < metas.size(); i++) {
+                SeriesMeta meta = metas.get(i);
+                if (meta == null) continue;
+                images.add(new ConfigQcContext.ConfigQcImage(
+                        meta.index, seriesDisplayLabelText(lifFile, meta), null));
+            }
+        }
+        return images;
     }
 
     private ZSliceDefault defaultZSliceSelection(BinUserConfig cfg, SeriesMeta meta,

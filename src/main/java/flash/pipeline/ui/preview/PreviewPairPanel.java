@@ -15,6 +15,10 @@ import java.awt.event.ActionListener;
 
 public final class PreviewPairPanel extends JPanel {
 
+    public interface SharedZChangeListener {
+        void zSliceChanged(int zSlice);
+    }
+
     public enum PreviewState {
         EMPTY,
         READY,
@@ -35,6 +39,7 @@ public final class PreviewPairPanel extends JPanel {
     private int currentZ = 1;
     private boolean syncingSlices;
     private LargePreviewDialog largePreviewDialog;
+    private SharedZChangeListener sharedZChangeListener;
 
     public PreviewPairPanel(String originalTitle, String adjustedTitle) {
         this(null, originalTitle, adjustedTitle);
@@ -83,6 +88,10 @@ public final class PreviewPairPanel extends JPanel {
 
     public void setCurrentZ(int zSlice) {
         applyCurrentZ(zSlice);
+    }
+
+    public void setSharedZChangeListener(SharedZChangeListener listener) {
+        this.sharedZChangeListener = listener;
     }
 
     public JButton largeViewButton() {
@@ -171,6 +180,7 @@ public final class PreviewPairPanel extends JPanel {
         if (syncingSlices) return;
         syncingSlices = true;
         try {
+            int previousZ = currentZ;
             int originalSlices = originalImage == null ? adjustedPreview.getSliceCount() : originalPreview.getSliceCount();
             int adjustedSlices = adjustedImage == null ? originalPreview.getSliceCount() : adjustedPreview.getSliceCount();
             currentZ = clampSharedZ(requestedZ, originalSlices, adjustedSlices);
@@ -178,6 +188,9 @@ public final class PreviewPairPanel extends JPanel {
             adjustedPreview.setCurrentZ(currentZ);
             if (largePreviewDialog != null) {
                 largePreviewDialog.setCurrentZ(currentZ);
+            }
+            if (sharedZChangeListener != null && currentZ != previousZ) {
+                sharedZChangeListener.zSliceChanged(currentZ);
             }
         } finally {
             syncingSlices = false;

@@ -3,7 +3,9 @@ package flash.pipeline.analyses;
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinField;
 import flash.pipeline.image.NamedFilterLoader;
+import flash.pipeline.io.SeriesMeta;
 import flash.pipeline.ui.ToggleSwitch;
+import flash.pipeline.ui.config.ConfigQcContext;
 import flash.pipeline.zslice.ZSliceMode;
 import ij.ImagePlus;
 import ij.process.ByteProcessor;
@@ -99,6 +101,24 @@ public class CreateBinFileAnalysisTest {
         assertEquals(lifFile.getAbsolutePath(), result.lifFile.getAbsolutePath());
         assertEquals(Collections.singletonList(Integer.valueOf(2)), result.selectedSeriesIndexes);
         assertTrue(result.message.isEmpty());
+    }
+
+    @Test
+    public void zSliceContextImagesUseMetadataPlaceholders() {
+        File lifFile = new File("Experiment_Mouse3.lif");
+        List<SeriesMeta> metas = Arrays.asList(
+                new SeriesMeta(2, "Mouse3_LH_CA1", 12, 1.0, 1.0, 1.0, "pixel"),
+                new SeriesMeta(5, "", 8, 1.0, 1.0, 1.0, "pixel"));
+
+        List<ConfigQcContext.ConfigQcImage> images =
+                CreateBinFileAnalysis.zSliceContextImages(lifFile, metas);
+
+        assertEquals(2, images.size());
+        assertEquals(2, images.get(0).getSeriesIndex());
+        assertEquals("Experiment_Mouse3.lif :: Mouse3_LH_CA1", images.get(0).getSeriesName());
+        assertEquals(5, images.get(1).getSeriesIndex());
+        assertEquals("Experiment_Mouse3.lif :: Series 6", images.get(1).getSeriesName());
+        assertEquals(null, images.get(0).getImage());
     }
 
     @Test

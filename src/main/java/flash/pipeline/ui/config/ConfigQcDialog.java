@@ -328,7 +328,19 @@ public final class ConfigQcDialog {
     }
 
     private void advanceImageOrStage(ConfigQcResult terminalIfComplete) {
-        if (context.moveToNextImage()) {
+        boolean forceStageComplete = false;
+        Integer requestedNextImage = context.consumeRequestedNextImageIndex();
+        if (requestedNextImage != null) {
+            int target = requestedNextImage.intValue();
+            if (target >= 0 && target < context.getImageCount()) {
+                context.setCurrentImageIndex(target);
+                rebuildCurrentStage();
+                return;
+            }
+            forceStageComplete = true;
+        }
+
+        if (!forceStageComplete && context.moveToNextImage()) {
             rebuildCurrentStage();
             return;
         }

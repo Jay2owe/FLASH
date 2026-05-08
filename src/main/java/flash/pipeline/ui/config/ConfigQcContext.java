@@ -53,6 +53,7 @@ public final class ConfigQcContext {
     private final Map<String, Object> attributes = new HashMap<String, Object>();
     private int channelIndex;
     private int currentImageIndex;
+    private Integer requestedNextImageIndex;
 
     public ConfigQcContext(File projectDirectory, File binFolder, Object config,
                            List<ConfigQcImage> images, List<String> channelNames,
@@ -126,6 +127,16 @@ public final class ConfigQcContext {
         }
         currentImageIndex++;
         return true;
+    }
+
+    public void requestNextImageIndex(int index) {
+        requestedNextImageIndex = Integer.valueOf(index);
+    }
+
+    Integer consumeRequestedNextImageIndex() {
+        Integer requested = requestedNextImageIndex;
+        requestedNextImageIndex = null;
+        return requested;
     }
 
     public ConfigQcImage getCurrentImage() {
