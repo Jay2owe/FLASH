@@ -4736,13 +4736,29 @@ public class CreateBinFileAnalysis implements Analysis {
 
     private ImagePlus renderDagPreview(ImagePlus preview, ImagePlus existingPreview,
                                        String colorName, String chLabel, String imageTitle) {
-        closeImageQuietly(existingPreview);
+        if (existingPreview != null && existingPreview != preview) {
+            closeImageQuietly(existingPreview);
+        }
         if (preview == null) return null;
         preview.setTitle("Filter Preview | " + chLabel + " | " + imageTitle);
-        preview.show();
-        IJ.run(preview, toLutName(colorName), "");
-        positionImageLeft(preview);
-        return preview;
+        return applyPreviewLut(preview, colorName);
+    }
+
+    private ImagePlus applyPreviewLut(ImagePlus image, String colorName) {
+        if (image == null) return null;
+        try {
+            IJ.run(image, toLutName(colorName), "");
+        } catch (RuntimeException e) {
+            IJ.log("WARNING: could not apply preview LUT: " + e.getMessage());
+        }
+        image.updateAndDraw();
+        return image;
+    }
+
+    private static String channelColor(BinUserConfig cfg, int channelIndex) {
+        if (cfg == null || channelIndex < 0 || channelIndex >= cfg.colors.size()) return "Grays";
+        String color = cfg.colors.get(channelIndex);
+        return color == null || color.trim().isEmpty() ? "Grays" : color;
     }
 
     private void closeImageQuietly(ImagePlus imp) {
@@ -5361,6 +5377,8 @@ public class CreateBinFileAnalysis implements Analysis {
                                                                      final int channelIndex,
                                                                      final String chLabel) {
         return new SandboxDialog.PreviewHandler() {
+            private ImagePlus displaySource;
+
             @Override public ImagePlus createSource() {
                 ImagePlus current = WindowManager.getCurrentImage();
                 if (current == null) return null;
@@ -5372,13 +5390,30 @@ public class CreateBinFileAnalysis implements Analysis {
                 return current.duplicate();
             }
 
+            @Override public ImagePlus getSourceForDisplay() {
+                if (displaySource == null) {
+                    displaySource = createSource();
+                    if (displaySource != null) {
+                        String imageTitle = displaySource.getTitle() == null
+                                ? "Source"
+                                : displaySource.getTitle();
+                        displaySource.setTitle("Sandbox Source | " + chLabel + " | " + imageTitle);
+                        applyPreviewLut(displaySource, channelColor(cfg, channelIndex));
+                    }
+                }
+                return displaySource;
+            }
+
             @Override public ImagePlus showPreview(ImagePlus result, ImagePlus existingPreview) {
-                String color = channelIndex < cfg.colors.size() ? cfg.colors.get(channelIndex) : "Grays";
+                String color = channelColor(cfg, channelIndex);
                 String imageTitle = result == null || result.getTitle() == null ? "Preview" : result.getTitle();
                 return renderDagPreview(result, existingPreview, color, chLabel, imageTitle);
             }
 
             @Override public void close(ImagePlus imp) {
+                if (imp == displaySource) {
+                    displaySource = null;
+                }
                 closeImageQuietly(imp);
             }
         };
@@ -5389,19 +5424,32 @@ public class CreateBinFileAnalysis implements Analysis {
                                                                        final String chLabel,
                                                                        final List<QcImageSelection> images) {
         return new SandboxDialog.PreviewHandler() {
+            private ImagePlus displaySource;
+
             @Override public ImagePlus createSource() {
                 if (images == null || images.isEmpty()) return null;
                 return duplicateQcChannel(images.get(0), channelIndex,
-                        cfg.colors.get(channelIndex), "Sandbox Source | " + chLabel, false);
+                        channelColor(cfg, channelIndex), "Sandbox Source | " + chLabel, false);
+            }
+
+            @Override public ImagePlus getSourceForDisplay() {
+                if (displaySource == null) {
+                    displaySource = createSource();
+                    applyPreviewLut(displaySource, channelColor(cfg, channelIndex));
+                }
+                return displaySource;
             }
 
             @Override public ImagePlus showPreview(ImagePlus result, ImagePlus existingPreview) {
-                String color = channelIndex < cfg.colors.size() ? cfg.colors.get(channelIndex) : "Grays";
+                String color = channelColor(cfg, channelIndex);
                 String imageTitle = result == null || result.getTitle() == null ? "Preview" : result.getTitle();
                 return renderDagPreview(result, existingPreview, color, chLabel, imageTitle);
             }
 
             @Override public void close(ImagePlus imp) {
+                if (imp == displaySource) {
+                    displaySource = null;
+                }
                 closeImageQuietly(imp);
             }
         };

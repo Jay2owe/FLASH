@@ -6,6 +6,7 @@ import flash.pipeline.image.dag.DagIR;
 import flash.pipeline.image.dag.DagIRSerializer;
 import flash.pipeline.image.dag.DagToIjmEmitter;
 import flash.pipeline.image.dag.IjmToDagLoader;
+import flash.pipeline.ui.preview.PreviewPairPanel;
 import ij.IJ;
 import ij.ImagePlus;
 
@@ -35,6 +36,11 @@ public final class SandboxDialog extends JDialog {
 
     public interface PreviewHandler {
         ImagePlus createSource() throws Exception;
+
+        default ImagePlus getSourceForDisplay() throws Exception {
+            return createSource();
+        }
+
         ImagePlus showPreview(ImagePlus result, ImagePlus existingPreview) throws Exception;
         void close(ImagePlus imp);
     }
@@ -60,6 +66,7 @@ public final class SandboxDialog extends JDialog {
     private final CombinerEditorPanel combinerEditor;
     private final DagCanvasPanel canvas;
     private final FilterCatalog catalog;
+    private final PreviewPairPanel previews;
     private final JLabel status = new JLabel(" ");
     private final JLabel legacyBanner = new JLabel("This chain runs through legacy execution (slower, single-threaded per image).");
     private final JButton previewSelected = new JButton("Preview up to selected step");
@@ -71,6 +78,7 @@ public final class SandboxDialog extends JDialog {
 
     private SecondaryLoop loop;
     private Result result = Result.cancel();
+    private ImagePlus sourceImage;
     private ImagePlus previewImage;
     private boolean busy = false;
     private final String initialIjm;
@@ -102,6 +110,9 @@ public final class SandboxDialog extends JDialog {
         }, new Runnable() {
             @Override public void run() { refreshEditors(); }
         });
+        this.previews = new PreviewPairPanel(this, "Source image", "Preview output");
+        this.previews.largeViewButton().setToolTipText(
+                "Open source and preview images in a larger synced view");
         catalog.setAddRequestListener(new FilterCatalog.AddRequestListener() {
             @Override public void onAddRequested(FilterCatalog.Entry entry) {
                 SandboxModel.Line target = resolveTargetLine();
@@ -122,6 +133,7 @@ public final class SandboxDialog extends JDialog {
         add(buildMain(), BorderLayout.CENTER);
         add(buildFooter(), BorderLayout.SOUTH);
         wireButtons();
+        refreshSourcePreview();
         refreshEditors();
         pack();
         setLocationRelativeTo(null);
@@ -196,13 +208,21 @@ public final class SandboxDialog extends JDialog {
         left.add(intro, BorderLayout.NORTH);
         left.add(canvasScroll, BorderLayout.CENTER);
 
-        JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, left, right);
-        split.setResizeWeight(0.72);
-        split.setDividerLocation(700);
+        JSplitPane editorSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, left, right);
+        editorSplit.setResizeWeight(0.72);
+        editorSplit.setDividerLocation(700);
+
+        JPanel previewColumn = new JPanel(new BorderLayout());
+        previewColumn.setMinimumSize(new Dimension(260, 1));
+        previewColumn.add(previews, BorderLayout.CENTER);
+
+        JSplitPane mainSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, previewColumn, editorSplit);
+        mainSplit.setResizeWeight(0.30);
+        mainSplit.setDividerLocation(320);
 
         JPanel main = new JPanel(new BorderLayout());
         main.setBorder(BorderFactory.createEmptyBorder(8, 8, 0, 8));
-        main.add(split, BorderLayout.CENTER);
+        main.add(mainSplit, BorderLayout.CENTER);
         return main;
     }
 
@@ -212,11 +232,13 @@ public final class SandboxDialog extends JDialog {
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets = new Insets(0, 0, 0, 6);
 
-        // Left cluster: start-from-preset, then help.
+        // Left cluster: large view, start-from-preset, then help.
         gbc.gridx = 0;
         gbc.gridy = 0;
         gbc.weightx = 0.0;
         gbc.fill = GridBagConstraints.NONE;
+        footer.add(previews.largeViewButton(), gbc);
+        gbc.gridx++;
         footer.add(startFromPreset, gbc);
         gbc.gridx++;
         footer.add(help, gbc);
@@ -262,6 +284,9 @@ public final class SandboxDialog extends JDialog {
                 + "<b>Preview full filter</b><br>"
                 + "Runs the entire chain on the sample image."
                 + "<br><br>"
+                + "<b>Large view</b><br>"
+                + "Opens the source and preview images in a larger window with synced Z sliders."
+                + "<br><br>"
                 + "<b>Save</b><br>"
                 + "Saves the current chain as the channel's custom filter."
                 + "<br><br>"
@@ -303,11 +328,45 @@ public final class SandboxDialog extends JDialog {
                 close();
             }
             @Override public void windowClosed(java.awt.event.WindowEvent e) {
-                if (previewHandler != null) previewHandler.close(previewImage);
+                if (previewHandler != null) {
+                    previewHandler.close(previewImage);
+                    if (sourceImage != previewImage) {
+                        previewHandler.close(sourceImage);
+                    }
+                }
+                previewImage = null;
+                sourceImage = null;
                 done.countDown();
                 if (loop != null) loop.exit();
             }
         });
+    }
+
+    private void refreshSourcePreview() {
+        if (previewHandler == null) {
+            replaceSourceImage(null);
+            return;
+        }
+        try {
+            replaceSourceImage(previewHandler.getSourceForDisplay());
+        } catch (Exception ex) {
+            replaceSourceImage(null);
+            status.setText("Source preview unavailable.");
+            IJ.log("WARNING: sandbox source preview unavailable: " + ex.getMessage());
+        }
+    }
+
+    private void replaceSourceImage(ImagePlus display) {
+        if (display == sourceImage) {
+            previews.setOriginal(sourceImage);
+            return;
+        }
+        ImagePlus oldSource = sourceImage;
+        sourceImage = display;
+        previews.setOriginal(sourceImage);
+        if (oldSource != null && oldSource != previewImage && previewHandler != null) {
+            previewHandler.close(oldSource);
+        }
     }
 
     private boolean confirmDiscardIfDirty() {
@@ -340,9 +399,13 @@ public final class SandboxDialog extends JDialog {
     private void preview(final DagIR dag) {
         if (previewHandler == null) {
             IJ.showMessage("Sandbox Preview", "No preview image is available.");
+            previews.setAdjustedState(PreviewPairPanel.PreviewState.ERROR,
+                    "No preview image is available.");
             return;
         }
+        refreshSourcePreview();
         setBusy(true, "Running preview...");
+        previews.setAdjustedState(PreviewPairPanel.PreviewState.RUNNING, "Running preview...");
         Thread worker = new Thread(new Runnable() {
             @Override public void run() {
                 ImagePlus source = null;
@@ -360,10 +423,15 @@ public final class SandboxDialog extends JDialog {
                         @Override public void run() {
                             try {
                                 previewImage = previewHandler.showPreview(previewResult, previewImage);
+                                previews.setAdjusted(previewImage);
+                                previews.setAdjustedState(PreviewPairPanel.PreviewState.READY,
+                                        "Preview complete.");
                                 setBusy(false, "Preview complete.");
                             } catch (Exception ex) {
                                 previewHandler.close(previewResult);
                                 IJ.showMessage("Sandbox Preview", "Preview display failed:\n" + ex.getMessage());
+                                previews.setAdjustedState(PreviewPairPanel.PreviewState.ERROR,
+                                        ex.getMessage());
                                 setBusy(false, "Preview failed.");
                             }
                         }
@@ -374,6 +442,7 @@ public final class SandboxDialog extends JDialog {
                     SwingUtilities.invokeLater(new Runnable() {
                         @Override public void run() {
                             IJ.showMessage("Sandbox Preview", "Preview failed:\n" + message);
+                            previews.setAdjustedState(PreviewPairPanel.PreviewState.ERROR, message);
                             setBusy(false, "Preview failed.");
                         }
                     });
