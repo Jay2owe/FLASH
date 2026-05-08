@@ -96,6 +96,37 @@ public class SpatialAnalysisWizardTest {
     }
 
     @Test
+    public void exploratorySpatialQuestionDoesNotEnableRipleyByDefault() {
+        Map<String, Object> answers = new LinkedHashMap<String, Object>();
+        answers.put("spatial.question", SpatialAnalysisWizard.SPATIAL_ALL);
+        answers.put("morph.question", SpatialAnalysisWizard.MORPH_NONE);
+
+        SpatialAnalysisWizard.DerivedConfig config = SpatialAnalysisWizard.deriveConfig(
+                identities(), null, true, answers);
+
+        assertTrue(config.doDistances);
+        assertFalse(config.doSpatialStats);
+        assertTrue(config.doVolColoc);
+        assertTrue(config.doCpc);
+        assertTrue(config.doVoronoi);
+        assertTrue(config.doHeatmaps);
+        assertTrue(config.doPhenotyping);
+    }
+
+    @Test
+    public void explicitRipleySpatialQuestionStillEnablesSpatialStats() {
+        Map<String, Object> answers = new LinkedHashMap<String, Object>();
+        answers.put("spatial.question", SpatialAnalysisWizard.SPATIAL_CLUSTERED);
+        answers.put("morph.question", SpatialAnalysisWizard.MORPH_NONE);
+
+        SpatialAnalysisWizard.DerivedConfig config = SpatialAnalysisWizard.deriveConfig(
+                identities(), null, true, answers);
+
+        assertTrue(config.doDistances);
+        assertTrue(config.doSpatialStats);
+    }
+
+    @Test
     public void amyloidAndMicrogliaDefaultToContactAnd3dShape() {
         SpatialAnalysisWizard wizard = new SpatialAnalysisWizard(
                 flash.pipeline.ui.wizard.WizardFlow.MainPanelBinding.NULL,

@@ -15,11 +15,13 @@ import org.junit.rules.TemporaryFolder;
 
 import javax.swing.JButton;
 import javax.swing.JDialog;
+import javax.swing.JLabel;
 import javax.swing.JPanel;
 import java.awt.Component;
 import java.awt.Container;
 import java.io.File;
 import java.io.PrintWriter;
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
@@ -190,7 +192,13 @@ public class SpatialAnalysisTest {
                 "1,Mouse1,LH,SCN,10,5,0,0,1,0.70,0.70,1\n" +
                 "1,Mouse1,LH,SCN,10,5,0,0,1,0.60,0.70,1");
 
-        runSuppressed(root);
+        SpatialAnalysisWizard.DerivedConfig config = new SpatialAnalysisWizard.DerivedConfig();
+        config.doDistances = true;
+        config.doSpatialStats = true;
+        SpatialAnalysis sa = new SpatialAnalysis();
+        sa.setSuppressDialogs(true);
+        sa.setWizardConfig(config);
+        sa.execute(root.getAbsolutePath());
 
         File statsFile = new File(root, "FLASH/06 - Spatial Analysis/Spatial/Spatial_Statistics_A.csv");
         assertTrue(statsFile.exists());
@@ -202,6 +210,25 @@ public class SpatialAnalysisTest {
         assertTrue(lines.get(0).contains("Radius_um"));
         assertTrue(lines.get(1).contains("Mouse1"));
         assertTrue(lines.get(1).contains("derived_from_centroids"));
+    }
+
+    @Test
+    public void execute_defaultOptionsDoNotWriteSpatialStatisticsCsv() throws Exception {
+        File root = temp.newFolder("spatial-stats-default-off");
+        File objectsDir = objectsDir(root);
+        CalibrationIO.write(objectsDir, 1.0, 1.0, 1.0, "um");
+
+        writeChannel(objectsDir, "A.csv",
+                "SCN,Animal Name,Hemisphere,Region,Volume (micron^3),Surface (micron^2),XM,YM,ZM,XM_um,YM_um,ZM_um",
+                "1,Mouse1,LH,SCN,10,5,0,0,1,0.10,0.10,1\n" +
+                "1,Mouse1,LH,SCN,10,5,0,0,1,0.20,0.10,1\n" +
+                "1,Mouse1,LH,SCN,10,5,0,0,1,0.20,0.20,1\n" +
+                "1,Mouse1,LH,SCN,10,5,0,0,1,0.10,0.20,1");
+
+        runSuppressed(root);
+
+        assertFalse(new File(root,
+                "FLASH/06 - Spatial Analysis/Spatial/Spatial_Statistics_A.csv").exists());
     }
 
     @Test
@@ -290,6 +317,49 @@ public class SpatialAnalysisTest {
                     saveButton.getActionListeners().length > 0);
         } finally {
             backingDialog(dialog).dispose();
+        }
+    }
+
+    @Test
+    public void morphometricShapeControlsAreOutsideAdvancedSection() throws Exception {
+        boolean advancedGlobal = ij.Prefs.get("flash.advanced.global", false);
+        boolean advancedSpatial = ij.Prefs.get("flash.advanced.spatial", false);
+        ij.Prefs.set("flash.advanced.global", false);
+        ij.Prefs.set("flash.advanced.spatial", false);
+
+        SpatialAnalysis analysis = new SpatialAnalysis();
+        PipelineDialog dialog = new PipelineDialog("Spatial Morph Controls");
+        try {
+            Class<?> bindingsClass = Class.forName(
+                    "flash.pipeline.analyses.SpatialAnalysis$SpatialDialogBindings");
+            Constructor<?> bindingsConstructor = bindingsClass.getDeclaredConstructor();
+            bindingsConstructor.setAccessible(true);
+            Object bindings = bindingsConstructor.newInstance();
+            Method method = SpatialAnalysis.class.getDeclaredMethod(
+                    "addMorphometricControls",
+                    PipelineDialog.class,
+                    bindingsClass,
+                    boolean.class,
+                    boolean.class,
+                    boolean.class,
+                    boolean.class,
+                    boolean.class);
+            method.setAccessible(true);
+            method.invoke(analysis, dialog, bindings, false, false, false, false, false);
+
+            JPanel content = contentPanel(dialog);
+            assertFalse("3D shape features should be visible without opening advanced options",
+                    hasHiddenAncestor(findLabel(content, "3D shape features"), content));
+            assertFalse("Complex shape analysis should be visible without opening advanced options",
+                    hasHiddenAncestor(findLabel(content, "Complex shape analysis"), content));
+            assertTrue("Population morphometric scoring should remain advanced",
+                    hasHiddenAncestor(findLabel(content, "Population morphometric scoring"), content));
+            assertTrue("Spatial-morphometric analysis should remain advanced",
+                    hasHiddenAncestor(findLabel(content, "Spatial-morphometric analysis"), content));
+        } finally {
+            backingDialog(dialog).dispose();
+            ij.Prefs.set("flash.advanced.global", advancedGlobal);
+            ij.Prefs.set("flash.advanced.spatial", advancedSpatial);
         }
     }
 
@@ -676,5 +746,32 @@ public class SpatialAnalysisTest {
             }
         }
         return null;
+    }
+
+    private static JLabel findLabel(Container container, String text) {
+        for (Component component : container.getComponents()) {
+            if (component instanceof JLabel && text.equals(((JLabel) component).getText())) {
+                return (JLabel) component;
+            }
+            if (component instanceof Container) {
+                JLabel nested = findLabel((Container) component, text);
+                if (nested != null) {
+                    return nested;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static boolean hasHiddenAncestor(Component component, Container stopAt) {
+        assertNotNull(component);
+        Component current = component;
+        while (current != null && current != stopAt) {
+            if (!current.isVisible()) {
+                return true;
+            }
+            current = current.getParent();
+        }
+        return false;
     }
 }

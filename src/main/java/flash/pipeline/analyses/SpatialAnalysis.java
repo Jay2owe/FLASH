@@ -241,7 +241,7 @@ public class SpatialAnalysis implements Analysis {
         // Options dialog
         boolean doDistances = true;
         boolean doLineDistance = false;
-        boolean doSpatialStats = true;
+        boolean doSpatialStats = false;
         boolean doCpc = true;
         boolean doVolumetric = false;
         boolean doVoronoi = false;
@@ -346,34 +346,8 @@ public class SpatialAnalysis implements Analysis {
                     + "neighbor count, and inter-channel interaction matrix with permutation test.");
             opts.endAdvancedSection();
 
-            opts.addHeader("Morphometric Analysis");
-            spatialBindings.do2DMorphologyToggle = opts.addToggle("Extract 2D morphology from label images", doMorphology);
-            opts.addHelpText("Loads saved object label images and extracts 2D shape features "
-                    + "(area, circularity, solidity, Feret diameter, etc.).");
-            opts.beginAdvancedSection("spatial");
-            final ToggleSwitch raw3DToggle = opts.addToggle("3D shape features", do3DShapeFeatures);
-            spatialBindings.do3DMorphologyToggle = raw3DToggle;
-            opts.addHelpText("Extracts per-object 3D shape descriptors from label images using "
-                    + "mcib3d: sphericity, compactness, elongation, flatness, spareness, 3D Feret, "
-                    + "3D moments, and centroid-to-surface distance statistics.");
-            final ToggleSwitch complexToggle = opts.addToggle("Complex shape analysis", doCompositeIndices);
-            spatialBindings.doCompositeIndicesToggle = complexToggle;
-            opts.addHelpText("Derives composite indices from 3D features: "
-                    + "Ramification Index (RI), Surface Roughness (SRI), "
-                    + "Process Burden (PB), Morphological Polarity (MP), "
-                    + "Volume-Span Discrepancy (VSD). Requires 3D shape features.");
-            final ToggleSwitch popToggle = opts.addToggle("Population morphometric scoring", doPopMorphometrics);
-            spatialBindings.doPopMorphometricsToggle = popToggle;
-            opts.addHelpText("Population-normalised composites: "
-                    + "Composite Morphological Score (CMS), Shape Moment Signature Distance (SMSD), "
-                    + "Intensity-Morphology Dissociation Index (IMDI), Morphological Diversity Score. "
-                    + "Requires complex shape analysis.");
-            final ToggleSwitch spatialMorphToggle = opts.addToggle("Spatial-morphometric analysis", doSpatialMorphometrics);
-            spatialBindings.doSpatialMorphometricsToggle = spatialMorphToggle;
-            opts.addHelpText("Territorial Dominance Ratio (TDR), Feret Eccentricity Vector (FEV), "
-                    + "Pathology Proximity Response Profile (PPRP). "
-                    + "Requires distances and/or Voronoi + 3D shape features.");
-            opts.endAdvancedSection();
+            addMorphometricControls(opts, spatialBindings, doMorphology, do3DShapeFeatures,
+                    doCompositeIndices, doPopMorphometrics, doSpatialMorphometrics);
 
             opts.addHeader("Cell Phenotyping");
             spatialBindings.doPhenotypingToggle = opts.addToggle("K-means clustering", doPhenotyping);
@@ -390,15 +364,6 @@ public class SpatialAnalysis implements Analysis {
             opts.addHelpText("Kernel bandwidth in microns. 0 uses Scott's rule automatically.");
             String[] lutOptions = {"Fire", "Grays", "Cyan", "Green", "Magenta", "Red"};
             spatialBindings.heatmapLutChoice = opts.addChoice("Heatmap LUT", lutOptions, heatmapLut);
-
-            // Dependencies: Complex and Spatial Morph require 3D features; Population requires Complex
-            raw3DToggle.addChangeListener(() -> {
-                updateMorphometricDependencyControls(spatialBindings);
-            });
-
-            complexToggle.addChangeListener(() -> {
-                updateMorphometricDependencyControls(spatialBindings);
-            });
 
             // Initial states
             updateVolumetricThresholdEnablement(spatialBindings);
@@ -3670,6 +3635,57 @@ public class SpatialAnalysis implements Analysis {
                 field.setEnabled(on);
             }
         }
+    }
+
+    private void addMorphometricControls(PipelineDialog opts,
+                                         final SpatialDialogBindings spatialBindings,
+                                         boolean doMorphology,
+                                         boolean do3DShapeFeatures,
+                                         boolean doCompositeIndices,
+                                         boolean doPopMorphometrics,
+                                         boolean doSpatialMorphometrics) {
+        opts.addHeader("Morphometric Analysis");
+        spatialBindings.do2DMorphologyToggle = opts.addToggle("Extract 2D morphology from label images", doMorphology);
+        opts.addHelpText("Loads saved object label images and extracts 2D shape features "
+                + "(area, circularity, solidity, Feret diameter, etc.).");
+        final ToggleSwitch raw3DToggle = opts.addToggle("3D shape features", do3DShapeFeatures);
+        spatialBindings.do3DMorphologyToggle = raw3DToggle;
+        opts.addHelpText("Extracts per-object 3D shape descriptors from label images using "
+                + "mcib3d: sphericity, compactness, elongation, flatness, spareness, 3D Feret, "
+                + "3D moments, and centroid-to-surface distance statistics.");
+        final ToggleSwitch complexToggle = opts.addToggle("Complex shape analysis", doCompositeIndices);
+        spatialBindings.doCompositeIndicesToggle = complexToggle;
+        opts.addHelpText("Derives composite indices from 3D features: "
+                + "Ramification Index (RI), Surface Roughness (SRI), "
+                + "Process Burden (PB), Morphological Polarity (MP), "
+                + "Volume-Span Discrepancy (VSD). Requires 3D shape features.");
+        opts.beginAdvancedSection("spatial");
+        final ToggleSwitch popToggle = opts.addToggle("Population morphometric scoring", doPopMorphometrics);
+        spatialBindings.doPopMorphometricsToggle = popToggle;
+        opts.addHelpText("Population-normalised composites: "
+                + "Composite Morphological Score (CMS), Shape Moment Signature Distance (SMSD), "
+                + "Intensity-Morphology Dissociation Index (IMDI), Morphological Diversity Score. "
+                + "Requires complex shape analysis.");
+        final ToggleSwitch spatialMorphToggle = opts.addToggle("Spatial-morphometric analysis", doSpatialMorphometrics);
+        spatialBindings.doSpatialMorphometricsToggle = spatialMorphToggle;
+        opts.addHelpText("Territorial Dominance Ratio (TDR), Feret Eccentricity Vector (FEV), "
+                + "Pathology Proximity Response Profile (PPRP). "
+                + "Requires distances and/or Voronoi + 3D shape features.");
+        opts.endAdvancedSection();
+
+        raw3DToggle.addChangeListener(new Runnable() {
+            @Override
+            public void run() {
+                updateMorphometricDependencyControls(spatialBindings);
+            }
+        });
+
+        complexToggle.addChangeListener(new Runnable() {
+            @Override
+            public void run() {
+                updateMorphometricDependencyControls(spatialBindings);
+            }
+        });
     }
 
     private static void updateMorphometricDependencyControls(SpatialDialogBindings bindings) {

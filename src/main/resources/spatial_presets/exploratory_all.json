@@ -1,9 +1,9 @@
 {
   "name": "Exploratory (all features)",
-  "description": "Enable every spatial and morphometric feature.",
+  "description": "Enable broad spatial and morphometric outputs while leaving Ripley's K/L/G off.",
   "libraryVersion": "1",
   "doDistances": true,
-  "doSpatialStats": true,
+  "doSpatialStats": false,
   "doVolColoc": true,
   "doCpc": true,
   "doVoronoi": true,

@@ -197,7 +197,6 @@ public class SpatialAnalysisWizard extends WizardFlow {
             out.doPhenotyping = true;
         } else if (SPATIAL_ALL.equals(option)) {
             out.doDistances = true;
-            out.doSpatialStats = true;
             out.doVolColoc = true;
             out.doCpc = true;
             out.doVoronoi = true;
