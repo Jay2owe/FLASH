@@ -355,6 +355,16 @@ public class CreateBinFileAnalysis implements Analysis {
                 && Macro.getOptions() == null;
     }
 
+    protected boolean embeddedConfigQcUiAvailable() {
+        return !GraphicsEnvironment.isHeadless();
+    }
+
+    protected ConfigQcResult showEmbeddedConfigQcDialog(ConfigQcContext context,
+                                                        List<ConfigQcStage> stages) {
+        ConfigQcDialog dialog = ConfigQcDialog.createModal(null, context, stages);
+        return dialog.showDialog();
+    }
+
     protected boolean showFilteredChannelNamesPage(String directory, File binFolder,
                                                    BinUserConfig cfg) {
         if (!canShowFilteredDialogs()) return false;
@@ -3163,12 +3173,14 @@ public class CreateBinFileAnalysis implements Analysis {
     }
 
     private boolean useEmbeddedZSliceSelectionStage() {
+        // Config QC stays in the owned embedded widget; the legacy native
+        // code path below is retained only as disabled rollback reference.
         return true;
     }
 
     private String runEmbeddedZSliceSelection(String directory, File lifFile,
                                               BinUserConfig cfg, List<SeriesMeta> metas) throws Exception {
-        if (GraphicsEnvironment.isHeadless()) {
+        if (!embeddedConfigQcUiAvailable()) {
             return "cancel";
         }
         DeferredImageSupplier supplier = LifIO.createDeferredSupplier(directory);
@@ -3180,9 +3192,8 @@ public class CreateBinFileAnalysis implements Analysis {
                 cfg.names,
                 0);
         ZSliceSelectionStage stage = createZSliceSelectionStage(supplier, metas, cfg);
-        ConfigQcDialog dialog = ConfigQcDialog.createModal(
-                null, context, Collections.<ConfigQcStage>singletonList(stage));
-        ConfigQcResult result = dialog.showDialog();
+        ConfigQcResult result = showEmbeddedConfigQcDialog(
+                context, Collections.<ConfigQcStage>singletonList(stage));
         if (result == ConfigQcResult.DONE || result == ConfigQcResult.SKIP_CURRENT_IMAGE) {
             return finalizeZSliceSelections(cfg);
         }
@@ -4520,7 +4531,7 @@ public class CreateBinFileAnalysis implements Analysis {
         if (!gateObjectsCounterFeature("3D Objects Counter preview")) {
             return "back";
         }
-        if (GraphicsEnvironment.isHeadless()) {
+        if (!embeddedConfigQcUiAvailable()) {
             return "cancel";
         }
         ConfigQcContext context = new ConfigQcContext(
@@ -4531,9 +4542,8 @@ public class CreateBinFileAnalysis implements Analysis {
                 cfg.names,
                 channelIndex);
         ParticleSizeStage stage = createParticleSizeStage(cfg, binFolder, channelIndex);
-        ConfigQcDialog dialog = ConfigQcDialog.createModal(
-                null, context, Collections.<ConfigQcStage>singletonList(stage));
-        ConfigQcResult result = dialog.showDialog();
+        ConfigQcResult result = showEmbeddedConfigQcDialog(
+                context, Collections.<ConfigQcStage>singletonList(stage));
         if (result == ConfigQcResult.DONE || result == ConfigQcResult.SKIP_CURRENT_IMAGE) {
             return "continue";
         }
@@ -4544,6 +4554,8 @@ public class CreateBinFileAnalysis implements Analysis {
     }
 
     private boolean useEmbeddedParticleSizeStage() {
+        // Config QC stays in the owned embedded widget; legacy 3D Objects
+        // Counter windows must not be selected by normal setup routing.
         return true;
     }
 
@@ -4676,19 +4688,12 @@ public class CreateBinFileAnalysis implements Analysis {
 
     private String interactiveDisplayRangeQC(List<QcImageSelection> images, BinUserConfig cfg,
                                              File binFolder, int channelIndex) {
-        if (useEmbeddedDisplayRangeStage()) {
-            return runEmbeddedDisplayRangeQC(images, cfg, binFolder, channelIndex);
-        }
-        return legacyInteractiveDisplayRangeQC(images, cfg, channelIndex);
-    }
-
-    private boolean useEmbeddedDisplayRangeStage() {
-        return true;
+        return runEmbeddedDisplayRangeQC(images, cfg, binFolder, channelIndex);
     }
 
     private String runEmbeddedDisplayRangeQC(List<QcImageSelection> images, BinUserConfig cfg,
                                              File binFolder, int channelIndex) {
-        if (GraphicsEnvironment.isHeadless()) {
+        if (!embeddedConfigQcUiAvailable()) {
             return "cancel";
         }
         ConfigQcContext context = new ConfigQcContext(
@@ -4699,9 +4704,8 @@ public class CreateBinFileAnalysis implements Analysis {
                 cfg.names,
                 channelIndex);
         DisplayRangeStage stage = createDisplayRangeStage(cfg, channelIndex);
-        ConfigQcDialog dialog = ConfigQcDialog.createModal(
-                null, context, Collections.<ConfigQcStage>singletonList(stage));
-        ConfigQcResult result = dialog.showDialog();
+        ConfigQcResult result = showEmbeddedConfigQcDialog(
+                context, Collections.<ConfigQcStage>singletonList(stage));
         if (result == ConfigQcResult.DONE || result == ConfigQcResult.SKIP_CURRENT_IMAGE) {
             return "continue";
         }
@@ -4747,6 +4751,8 @@ public class CreateBinFileAnalysis implements Analysis {
 
     private String legacyInteractiveDisplayRangeQC(List<QcImageSelection> images, BinUserConfig cfg,
                                                    int channelIndex) {
+        // Disabled legacy native ImageJ-window flow. Config QC routing calls
+        // runEmbeddedDisplayRangeQC(...) directly.
         int channelNum = channelIndex + 1;
         String chLabel = "C" + channelNum + " (" + cfg.names.get(channelIndex) + ")";
         double[] range = parseMinMax(cfg.minmax.get(channelIndex));
@@ -4819,19 +4825,12 @@ public class CreateBinFileAnalysis implements Analysis {
 
     private String interactiveChannelThresholdQC(List<QcImageSelection> images, BinUserConfig cfg,
                                                  File binFolder, int channelIndex) {
-        if (useEmbeddedChannelThresholdStage()) {
-            return runEmbeddedChannelThresholdQC(images, cfg, binFolder, channelIndex);
-        }
-        return legacyInteractiveChannelThresholdQC(images, cfg, binFolder, channelIndex);
-    }
-
-    private boolean useEmbeddedChannelThresholdStage() {
-        return true;
+        return runEmbeddedChannelThresholdQC(images, cfg, binFolder, channelIndex);
     }
 
     private String runEmbeddedChannelThresholdQC(List<QcImageSelection> images, BinUserConfig cfg,
                                                 File binFolder, int channelIndex) {
-        if (GraphicsEnvironment.isHeadless()) {
+        if (!embeddedConfigQcUiAvailable()) {
             return "cancel";
         }
         ConfigQcContext context = new ConfigQcContext(
@@ -4842,9 +4841,8 @@ public class CreateBinFileAnalysis implements Analysis {
                 cfg.names,
                 channelIndex);
         ChannelThresholdStage stage = createChannelThresholdStage(cfg, binFolder, channelIndex);
-        ConfigQcDialog dialog = ConfigQcDialog.createModal(
-                null, context, Collections.<ConfigQcStage>singletonList(stage));
-        ConfigQcResult result = dialog.showDialog();
+        ConfigQcResult result = showEmbeddedConfigQcDialog(
+                context, Collections.<ConfigQcStage>singletonList(stage));
         if (result == ConfigQcResult.DONE || result == ConfigQcResult.SKIP_CURRENT_IMAGE) {
             return "continue";
         }
@@ -4907,6 +4905,8 @@ public class CreateBinFileAnalysis implements Analysis {
 
     private String legacyInteractiveChannelThresholdQC(List<QcImageSelection> images, BinUserConfig cfg,
                                                        File binFolder, int channelIndex) {
+        // Disabled legacy native ImageJ-window flow. Config QC routing calls
+        // runEmbeddedChannelThresholdQC(...) directly.
         int channelNum = channelIndex + 1;
         String chLabel = "C" + channelNum + " (" + cfg.names.get(channelIndex) + ")";
         int imgIdx2 = 0;
@@ -5005,6 +5005,8 @@ public class CreateBinFileAnalysis implements Analysis {
     }
 
     private boolean useEmbeddedStarDistParameterStage() {
+        // Config QC stays in the owned embedded widget; legacy label-image
+        // windows must not be selected by normal setup routing.
         return true;
     }
 
@@ -5013,7 +5015,7 @@ public class CreateBinFileAnalysis implements Analysis {
         if (!gateStarDistFeature("StarDist 3D preview")) {
             return "back";
         }
-        if (GraphicsEnvironment.isHeadless()) {
+        if (!embeddedConfigQcUiAvailable()) {
             return "cancel";
         }
         ConfigQcContext context = new ConfigQcContext(
@@ -5024,9 +5026,8 @@ public class CreateBinFileAnalysis implements Analysis {
                 cfg.names,
                 channelIndex);
         StarDistParameterStage stage = createStarDistParameterStage(cfg, binFolder, channelIndex);
-        ConfigQcDialog dialog = ConfigQcDialog.createModal(
-                null, context, Collections.<ConfigQcStage>singletonList(stage));
-        ConfigQcResult result = dialog.showDialog();
+        ConfigQcResult result = showEmbeddedConfigQcDialog(
+                context, Collections.<ConfigQcStage>singletonList(stage));
         if (result == ConfigQcResult.DONE || result == ConfigQcResult.SKIP_CURRENT_IMAGE) {
             cfg.objectThresholds.set(channelIndex, "default");
             cfg.sizes.set(channelIndex, "100-Infinity");
@@ -5092,6 +5093,8 @@ public class CreateBinFileAnalysis implements Analysis {
     }
 
     private boolean useEmbeddedCellposeParameterStage() {
+        // Config QC stays in the owned embedded widget; legacy label-image
+        // windows must not be selected by normal setup routing.
         return true;
     }
 
@@ -5100,7 +5103,7 @@ public class CreateBinFileAnalysis implements Analysis {
         if (!gateCellposeFeature("Cellpose segmentation")) {
             return "back";
         }
-        if (GraphicsEnvironment.isHeadless()) {
+        if (!embeddedConfigQcUiAvailable()) {
             return "cancel";
         }
         ConfigQcContext context = new ConfigQcContext(
@@ -5111,9 +5114,8 @@ public class CreateBinFileAnalysis implements Analysis {
                 cfg.names,
                 channelIndex);
         CellposeParameterStage stage = createCellposeParameterStage(cfg, binFolder, channelIndex);
-        ConfigQcDialog dialog = ConfigQcDialog.createModal(
-                null, context, Collections.<ConfigQcStage>singletonList(stage));
-        ConfigQcResult result = dialog.showDialog();
+        ConfigQcResult result = showEmbeddedConfigQcDialog(
+                context, Collections.<ConfigQcStage>singletonList(stage));
         if (result == ConfigQcResult.DONE || result == ConfigQcResult.SKIP_CURRENT_IMAGE) {
             cfg.objectThresholds.set(channelIndex, "default");
             cfg.sizes.set(channelIndex, "100-Infinity");
@@ -5233,19 +5235,12 @@ public class CreateBinFileAnalysis implements Analysis {
 
     private String interactiveFilterParameterQC(List<QcImageSelection> images, BinUserConfig cfg,
                                                 File binFolder, int channelIndex) {
-        if (useEmbeddedFilterParameterStage()) {
-            return runEmbeddedFilterParameterQC(images, cfg, binFolder, channelIndex);
-        }
-        return legacyInteractiveFilterParameterQC(images, cfg, binFolder, channelIndex);
-    }
-
-    private boolean useEmbeddedFilterParameterStage() {
-        return true;
+        return runEmbeddedFilterParameterQC(images, cfg, binFolder, channelIndex);
     }
 
     private String runEmbeddedFilterParameterQC(List<QcImageSelection> images, BinUserConfig cfg,
                                                 File binFolder, int channelIndex) {
-        if (GraphicsEnvironment.isHeadless()) {
+        if (!embeddedConfigQcUiAvailable()) {
             return "cancel";
         }
         ConfigQcContext context = new ConfigQcContext(
@@ -5256,9 +5251,8 @@ public class CreateBinFileAnalysis implements Analysis {
                 cfg.names,
                 channelIndex);
         FilterParameterStage stage = createFilterParameterStage(images, cfg, binFolder, channelIndex);
-        ConfigQcDialog dialog = ConfigQcDialog.createModal(
-                null, context, Collections.<ConfigQcStage>singletonList(stage));
-        ConfigQcResult result = dialog.showDialog();
+        ConfigQcResult result = showEmbeddedConfigQcDialog(
+                context, Collections.<ConfigQcStage>singletonList(stage));
         if (result == ConfigQcResult.DONE || result == ConfigQcResult.SKIP_CURRENT_IMAGE) {
             return "continue";
         }
@@ -5412,6 +5406,8 @@ public class CreateBinFileAnalysis implements Analysis {
 
     private String legacyInteractiveFilterParameterQC(List<QcImageSelection> images, BinUserConfig cfg,
                                                       File binFolder, int channelIndex) {
+        // Disabled legacy native ImageJ-window flow. Config QC routing calls
+        // runEmbeddedFilterParameterQC(...) directly.
         int channelNum = channelIndex + 1;
         String chLabel = "C" + channelNum + " (" + cfg.names.get(channelIndex) + ")";
         String currentMacro = resolveFilterContent(binFolder, cfg, channelIndex);

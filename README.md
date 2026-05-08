@@ -75,6 +75,12 @@ The main dialog groups modules into setup, image preparation, display, image ana
 - **Statistical Analysis**: Run configured group comparisons from aggregated result tables.
 - **Excel Summary Export**: Export formatted `.xlsx` workbooks from aggregated and statistical outputs.
 
+### Set Up Configuration QC
+
+Interactive configuration quality checks use an embedded FLASH preview screen instead of separate native ImageJ Brightness/Contrast, Threshold, or 3D Objects Counter windows. The preview keeps the original image stacked above the adjusted or output image, and **Large view** opens a bigger raw-vs-adjusted comparison where that helps.
+
+Display min/max and threshold controls update the preview live. Filter parameters, StarDist, Cellpose, and 3D object previews rerun only from their explicit preview buttons.
+
 ## Supported Inputs
 
 FLASH is designed for multi-channel fluorescence microscopy projects. It supports common Bio-Formats-readable microscopy containers and TIFF-based workflows through Fiji/Bio-Formats.

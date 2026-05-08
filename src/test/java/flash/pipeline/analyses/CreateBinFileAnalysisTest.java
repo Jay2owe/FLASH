@@ -5,7 +5,14 @@ import flash.pipeline.bin.BinField;
 import flash.pipeline.image.NamedFilterLoader;
 import flash.pipeline.io.SeriesMeta;
 import flash.pipeline.ui.ToggleSwitch;
+import flash.pipeline.ui.config.ChannelThresholdStage;
+import flash.pipeline.ui.config.ConfigQcActions;
 import flash.pipeline.ui.config.ConfigQcContext;
+import flash.pipeline.ui.config.ConfigQcResult;
+import flash.pipeline.ui.config.ConfigQcStage;
+import flash.pipeline.ui.config.DisplayRangeStage;
+import flash.pipeline.ui.config.FilterParameterStage;
+import flash.pipeline.ui.preview.PreviewPairPanel;
 import flash.pipeline.zslice.ZSliceMode;
 import ij.ImagePlus;
 import ij.process.ByteProcessor;
@@ -16,6 +23,7 @@ import org.junit.rules.TemporaryFolder;
 
 import java.awt.GraphicsEnvironment;
 import java.io.File;
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -434,6 +442,68 @@ public class CreateBinFileAnalysisTest {
                 Double.valueOf(44.0), threshold);
     }
 
+    @Test
+    public void interactiveQcRoutesDisplayThresholdAndFilterStagesThroughEmbeddedDialog() throws Exception {
+        File binFolder = temp.newFolder("embedded-qc-routing");
+        Files.write(new File(binFolder, "C1_Filters.ijm").toPath(),
+                "".getBytes(StandardCharsets.UTF_8));
+        CreateBinFileAnalysis.BinUserConfig cfg = oneChannelConfig("Custom");
+        List<?> images = privateQcSelections(byteImage("embedded route"));
+        RecordingEmbeddedDialogAnalysis analysis = new RecordingEmbeddedDialogAnalysis();
+
+        assertEquals("continue", invokePrivateQcStep(
+                analysis, "interactiveDisplayRangeQC", images, cfg, binFolder, 0));
+        assertEquals(Collections.<Class<?>>singletonList(DisplayRangeStage.class), analysis.stageTypes);
+
+        analysis.stageTypes.clear();
+        assertEquals("continue", invokePrivateQcStep(
+                analysis, "interactiveChannelThresholdQC", images, cfg, binFolder, 0));
+        assertEquals(Collections.<Class<?>>singletonList(ChannelThresholdStage.class), analysis.stageTypes);
+
+        analysis.stageTypes.clear();
+        assertEquals("continue", invokePrivateQcStep(
+                analysis, "interactiveFilterParameterQC", images, cfg, binFolder, 0));
+        assertEquals(Collections.<Class<?>>singletonList(FilterParameterStage.class), analysis.stageTypes);
+    }
+
+    @Test
+    public void embeddedStageFactoriesWriteBackToBinUserConfig() throws Exception {
+        File binFolder = temp.newFolder("embedded-stage-writeback");
+        Files.write(new File(binFolder, "C1_Filters.ijm").toPath(),
+                "".getBytes(StandardCharsets.UTF_8));
+        CreateBinFileAnalysis analysis = new CreateBinFileAnalysis();
+        CreateBinFileAnalysis.BinUserConfig cfg = oneChannelConfig("Custom");
+        ConfigQcContext context = ConfigQcContext.fromImages(
+                temp.getRoot(),
+                binFolder,
+                cfg,
+                Arrays.asList(byteImage("writeback")),
+                cfg.names,
+                0);
+        NoopConfigQcActions actions = new NoopConfigQcActions();
+
+        DisplayRangeStage displayStage = analysis.createDisplayRangeStage(cfg, 0);
+        displayStage.buildControls(context, actions);
+        displayStage.onEnter(context, new PreviewPairPanel("Original", "Adjusted"));
+        invokeStageTestMethod(displayStage, "setRangeForTest",
+                new Class<?>[]{double.class, double.class},
+                new Object[]{Double.valueOf(12.0), Double.valueOf(90.0)});
+        assertTrue(displayStage.lockIn(context));
+        displayStage.onLeave(context);
+        assertEquals("12-90", cfg.minmax.get(0));
+
+        ChannelThresholdStage thresholdStage = analysis.createChannelThresholdStage(cfg, binFolder, 0);
+        thresholdStage.buildControls(context, actions);
+        thresholdStage.onEnter(context, new PreviewPairPanel("Original", "Adjusted"));
+        invokeStageTestMethod(thresholdStage, "setThresholdForTest",
+                new Class<?>[]{double.class, double.class},
+                new Object[]{Double.valueOf(44.0), Double.valueOf(255.0)});
+        assertTrue(thresholdStage.lockIn(context));
+        thresholdStage.onLeave(context);
+        assertEquals("44", cfg.objectThresholds.get(0));
+        assertEquals("44", cfg.intensityThresholds.get(0));
+    }
+
     private static File configurationDir(File dir) {
         return new File(dir, "FLASH/Set Up Configuration/.settings");
     }
@@ -551,6 +621,46 @@ public class CreateBinFileAnalysisTest {
         return (Double) method.invoke(analysis, imp);
     }
 
+    private static String invokePrivateQcStep(CreateBinFileAnalysis analysis,
+                                              String methodName,
+                                              List<?> images,
+                                              CreateBinFileAnalysis.BinUserConfig cfg,
+                                              File binFolder,
+                                              int channelIndex) throws Exception {
+        Method method = CreateBinFileAnalysis.class.getDeclaredMethod(
+                methodName, List.class, CreateBinFileAnalysis.BinUserConfig.class, File.class, int.class);
+        method.setAccessible(true);
+        return (String) method.invoke(
+                analysis, images, cfg, binFolder, Integer.valueOf(channelIndex));
+    }
+
+    private static void invokeStageTestMethod(Object target,
+                                              String methodName,
+                                              Class<?>[] parameterTypes,
+                                              Object[] args) throws Exception {
+        Method method = target.getClass().getDeclaredMethod(methodName, parameterTypes);
+        method.setAccessible(true);
+        method.invoke(target, args);
+    }
+
+    private static List<?> privateQcSelections(ImagePlus image) throws Exception {
+        Class<?> type = Class.forName(
+                "flash.pipeline.analyses.CreateBinFileAnalysis$QcImageSelection");
+        Constructor<?> constructor = type.getDeclaredConstructor(int.class, String.class, ImagePlus.class);
+        constructor.setAccessible(true);
+        return Collections.singletonList(constructor.newInstance(
+                Integer.valueOf(0), image == null ? "" : image.getTitle(), image));
+    }
+
+    private static ImagePlus byteImage(String title) {
+        ByteProcessor processor = new ByteProcessor(4, 1);
+        processor.set(0, 0, 0);
+        processor.set(1, 0, 25);
+        processor.set(2, 0, 75);
+        processor.set(3, 0, 100);
+        return new ImagePlus(title, processor);
+    }
+
     private static boolean contains(String[] values, String expected) {
         for (String value : values) {
             if (expected.equals(value)) return true;
@@ -570,6 +680,49 @@ public class CreateBinFileAnalysisTest {
         @Override
         protected ImagePlus runChannelThresholdFilter(ImagePlus rawDuplicate, String filterContent) {
             return replacement;
+        }
+    }
+
+    private static final class RecordingEmbeddedDialogAnalysis extends CreateBinFileAnalysis {
+        final List<Class<?>> stageTypes = new ArrayList<Class<?>>();
+
+        @Override
+        protected boolean embeddedConfigQcUiAvailable() {
+            return true;
+        }
+
+        @Override
+        protected ConfigQcResult showEmbeddedConfigQcDialog(ConfigQcContext context,
+                                                            List<ConfigQcStage> stages) {
+            if (stages != null) {
+                for (ConfigQcStage stage : stages) {
+                    stageTypes.add(stage == null ? null : stage.getClass());
+                }
+            }
+            return ConfigQcResult.DONE;
+        }
+    }
+
+    private static final class NoopConfigQcActions implements ConfigQcActions {
+        @Override public void setStatus(String text) {
+        }
+
+        @Override public void markPreviewStale(String text) {
+        }
+
+        @Override public void setAdjustedPreview(ImagePlus image, String text) {
+        }
+
+        @Override public void nextImage() {
+        }
+
+        @Override public void skipCurrentImage() {
+        }
+
+        @Override public void restartStage() {
+        }
+
+        @Override public void cancel() {
         }
     }
 
