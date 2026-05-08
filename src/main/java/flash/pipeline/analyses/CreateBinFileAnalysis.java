@@ -39,6 +39,7 @@ import flash.pipeline.ui.config.ConfigQcContext;
 import flash.pipeline.ui.config.ConfigQcDialog;
 import flash.pipeline.ui.config.ConfigQcResult;
 import flash.pipeline.ui.config.ConfigQcStage;
+import flash.pipeline.ui.config.FilterParameterStage;
 import flash.pipeline.ui.config.ZSliceSelectionStage;
 import flash.pipeline.ui.sandbox.SandboxDialog;
 import flash.pipeline.ui.wizard.MarkerAutoComplete;
@@ -3699,6 +3700,7 @@ public class CreateBinFileAnalysis implements Analysis {
             if (doFilter) {
                 String filterResult = interactiveFilterParameterQC(images, cfg, binFolder, ch);
                 if ("cancel".equals(filterResult)) return "cancel";
+                if ("back".equals(filterResult)) return "back";
             }
 
             if (doMM) {
@@ -4639,6 +4641,185 @@ public class CreateBinFileAnalysis implements Analysis {
 
     private String interactiveFilterParameterQC(List<QcImageSelection> images, BinUserConfig cfg,
                                                 File binFolder, int channelIndex) {
+        if (useEmbeddedFilterParameterStage()) {
+            return runEmbeddedFilterParameterQC(images, cfg, binFolder, channelIndex);
+        }
+        return legacyInteractiveFilterParameterQC(images, cfg, binFolder, channelIndex);
+    }
+
+    private boolean useEmbeddedFilterParameterStage() {
+        return true;
+    }
+
+    private String runEmbeddedFilterParameterQC(List<QcImageSelection> images, BinUserConfig cfg,
+                                                File binFolder, int channelIndex) {
+        if (GraphicsEnvironment.isHeadless()) {
+            return "cancel";
+        }
+        ConfigQcContext context = new ConfigQcContext(
+                projectRootForConfigurationDir(binFolder),
+                binFolder,
+                cfg,
+                filterParameterContextImages(images),
+                cfg.names,
+                channelIndex);
+        FilterParameterStage stage = createFilterParameterStage(images, cfg, binFolder, channelIndex);
+        ConfigQcDialog dialog = ConfigQcDialog.createModal(
+                null, context, Collections.<ConfigQcStage>singletonList(stage));
+        ConfigQcResult result = dialog.showDialog();
+        if (result == ConfigQcResult.DONE || result == ConfigQcResult.SKIP_CURRENT_IMAGE) {
+            return "continue";
+        }
+        if (result == ConfigQcResult.BACK) {
+            return "back";
+        }
+        return "cancel";
+    }
+
+    private List<ConfigQcContext.ConfigQcImage> filterParameterContextImages(List<QcImageSelection> images) {
+        List<ConfigQcContext.ConfigQcImage> contextImages =
+                new ArrayList<ConfigQcContext.ConfigQcImage>();
+        if (images != null) {
+            for (int i = 0; i < images.size(); i++) {
+                QcImageSelection selection = images.get(i);
+                if (selection == null) continue;
+                contextImages.add(new ConfigQcContext.ConfigQcImage(
+                        selection.seriesIndex,
+                        selection.seriesName,
+                        selection.image));
+            }
+        }
+        return contextImages;
+    }
+
+    FilterParameterStage createFilterParameterStage(final List<QcImageSelection> images,
+                                                    final BinUserConfig cfg,
+                                                    final File binFolder,
+                                                    final int channelIndex) {
+        final int channelNum = channelIndex + 1;
+        final String chLabel = "C" + channelNum + " (" + cfg.names.get(channelIndex) + ")";
+        return new FilterParameterStage(
+                filterPresetOptionList(binFolder, cfg.filterPresets.get(channelIndex)),
+                new FilterParameterStage.MacroStore() {
+                    @Override public String getInitialPreset() {
+                        return cfg.filterPresets.get(channelIndex);
+                    }
+
+                    @Override public String loadInitialMacro() {
+                        return resolveFilterContent(binFolder, cfg, channelIndex);
+                    }
+
+                    @Override public String loadPresetMacro(String presetName) {
+                        if ("Custom".equals(presetName)) {
+                            return resolveFilterContent(binFolder, cfg, channelIndex);
+                        }
+                        return getFilterPresetContent(binFolder, presetName);
+                    }
+
+                    @Override public void save(String presetName, String macroContent) throws Exception {
+                        String safePreset = presetName == null || presetName.trim().isEmpty()
+                                ? "Custom"
+                                : presetName.trim();
+                        cfg.filterPresets.set(channelIndex, safePreset);
+                        Path filterPath = binFolder.toPath().resolve(
+                                "C" + channelNum + "_Filters.ijm");
+                        Files.write(filterPath, safe(macroContent).getBytes(StandardCharsets.UTF_8));
+                    }
+                },
+                new FilterParameterStage.PreviewAdapter() {
+                    @Override public ImagePlus createSource(ConfigQcContext context) {
+                        ImagePlus imp = context == null ? null : context.getCurrentImagePlus();
+                        if (imp == null) return null;
+                        ImagePlus source = imp.getNChannels() >= channelNum
+                                ? new Duplicator().run(imp, channelNum, channelNum,
+                                1, imp.getNSlices(), 1, imp.getNFrames())
+                                : imp.duplicate();
+                        source.setTitle("Filter source | " + chLabel + " | "
+                                + (context == null ? "" : context.getCurrentImageDisplayName()));
+                        return applyPreviewLut(source, channelColor(cfg, channelIndex));
+                    }
+
+                    @Override public ImagePlus createFilteredPreview(ImagePlus source, String macroContent) {
+                        if (source == null) return null;
+                        ImagePlus filtered = source.duplicate();
+                        if (macroContent != null && !macroContent.trim().isEmpty()) {
+                            FilterExecutor.runThreadSafe(filtered, macroContent);
+                        }
+                        filtered.setTitle("Filter preview | " + chLabel + " | " + source.getTitle());
+                        return applyPreviewLut(filtered, channelColor(cfg, channelIndex));
+                    }
+
+                    @Override public void close(ImagePlus image) {
+                        closeImageQuietly(image);
+                    }
+                },
+                new FilterParameterStage.CustomFilterBuilder() {
+                    @Override public FilterParameterStage.CustomFilterResult open(
+                            ConfigQcContext context, String currentPreset, String currentMacro) throws Exception {
+                        return openCustomFilterBuilderFromFilterStage(
+                                images, cfg, binFolder, channelIndex, chLabel, currentMacro);
+                    }
+                },
+                new FilterParameterStage.PresetDescriptionProvider() {
+                    @Override public String describe(String presetName) {
+                        return filterDescriptionFor(presetName);
+                    }
+                });
+    }
+
+    private List<String> filterPresetOptionList(File binFolder, String selectedPreset) {
+        String[] values = filterPresetOptions(binFolder, selectedPreset);
+        List<String> options = new ArrayList<String>();
+        for (int i = 0; i < values.length; i++) {
+            options.add(values[i]);
+        }
+        return options;
+    }
+
+    private FilterParameterStage.CustomFilterResult openCustomFilterBuilderFromFilterStage(
+            final List<QcImageSelection> images,
+            final BinUserConfig cfg,
+            final File binFolder,
+            final int channelIndex,
+            final String chLabel,
+            final String seedMacro) throws Exception {
+        if (!canShowCustomFilterDialog()) {
+            return new FilterParameterStage.CustomFilterResult(false, null, null);
+        }
+        final ImagePlus[] sampleHolder = new ImagePlus[1];
+        flash.pipeline.ui.RecorderDialog.SampleSupplier sampleSupplier =
+                createQcCustomFilterSampleSupplier(images, cfg, channelIndex, chLabel, sampleHolder);
+        try {
+            if (sampleSupplier != null) {
+                sampleSupplier.openSample();
+            }
+            CustomFilterEntryDialog.Result result = CustomFilterEntryDialog.show(
+                    chLabel,
+                    createQcCustomFilterPreviewHandler(images, cfg, channelIndex, chLabel),
+                    createQcSandboxHandler(binFolder, cfg, channelIndex, chLabel, images,
+                            seedMacro != null && seedMacro.trim().length() > 0),
+                    sampleSupplier,
+                    seedMacro);
+            boolean applied = applyCustomFilterEntryResult(binFolder, cfg, channelIndex, result, false);
+            if (!applied) {
+                return new FilterParameterStage.CustomFilterResult(false, null, null);
+            }
+            rememberHandledCustomFilter(binFolder, channelIndex, cfg);
+            return new FilterParameterStage.CustomFilterResult(
+                    true,
+                    cfg.filterPresets.get(channelIndex),
+                    resolveFilterContent(binFolder, cfg, channelIndex));
+        } finally {
+            closeImageQuietly(sampleHolder[0]);
+        }
+    }
+
+    private static String safe(String value) {
+        return value == null ? "" : value;
+    }
+
+    private String legacyInteractiveFilterParameterQC(List<QcImageSelection> images, BinUserConfig cfg,
+                                                      File binFolder, int channelIndex) {
         int channelNum = channelIndex + 1;
         String chLabel = "C" + channelNum + " (" + cfg.names.get(channelIndex) + ")";
         String currentMacro = resolveFilterContent(binFolder, cfg, channelIndex);
