@@ -10,7 +10,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 
 /**
- * Upserts ROI-driven orientation decisions into Project_Image_Orientation.csv.
+ * Upserts ROI-driven orientation decisions into Image Orientation.csv.
  */
 public final class RoiOrientationManifestService {
     private final String directory;

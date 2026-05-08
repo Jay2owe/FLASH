@@ -1066,7 +1066,7 @@ public class FLASH_Pipeline implements PlugIn {
         opts.addHeader("Export");
         opts.addToggle("Auto-Save Aggregated Summaries", autoAggregate);
         opts.addHelpText("When enabled, master summary CSVs are automatically generated "
-                + "in the ImageJ Exports/ folder after running 3D Object or Intensity analyses. "
+                + "in FLASH/Results Export after running 3D Object or Intensity analyses. "
                 + "Disable to skip automatic aggregation.");
 
         opts.addHeader("Reporting");

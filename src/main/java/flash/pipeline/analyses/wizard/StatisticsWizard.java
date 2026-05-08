@@ -444,7 +444,7 @@ public class StatisticsWizard extends WizardFlow {
             final boolean restricting = METRIC_SELECTED.equals(selected);
 
             if (availableMetrics.isEmpty()) {
-                dialog.addHelpText("Project_Master_Objects.csv was not found. "
+                dialog.addHelpText("3D Objects.csv was not found. "
                         + "Enter metric column names below as a comma-separated list.");
                 final JTextField freeform = dialog.addStringField("Metrics (comma-separated)",
                         answers.getString("metric.freeform", ""), 32);

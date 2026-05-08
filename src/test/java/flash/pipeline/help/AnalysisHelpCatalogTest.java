@@ -186,10 +186,10 @@ public class AnalysisHelpCatalogTest {
         assertNotNull(topic);
         assertContains(topic.summary, "3D Object Analysis");
         assertContains(topic.whenToUse, "without resegmenting images");
-        assertContains(topic.inputs, "FLASH/05 - 3D Object Analysis/Objects/");
+        assertContains(topic.inputs, "FLASH/Image Analysis/3D Objects/Objects/");
         assertContains(topic.workflow, "update the same object CSV tables");
-        assertContains(topic.outputs, "FLASH/06 - Spatial Analysis/Spatial/");
-        assertContains(topic.outputs, "FLASH/06 - Spatial Analysis/Morphometry/");
+        assertContains(topic.outputs, "FLASH/Image Analysis/Spatial Analysis/Spatial/");
+        assertContains(topic.outputs, "FLASH/Image Analysis/Spatial Analysis/Morphometry/");
         assertContains(topic.pitfalls, "Bad segmentation creates bad spatial findings");
         assertFalse("missing image references for " + topic.key, topic.images.isEmpty());
 
@@ -223,7 +223,7 @@ public class AnalysisHelpCatalogTest {
         assertContains(topic.setup, "always-available orientation panel");
         assertContains(topic.setup, "if you do nothing, FLASH keeps the current orientation");
         assertContains(topic.workflow, "saved transforms");
-        assertContains(topic.outputs, "Project_Image_Orientation.csv");
+        assertContains(topic.outputs, "Image Orientation.csv");
         assertContains(topic.pitfalls, "Changing orientation after drawing an unsaved ROI");
     }
 
@@ -240,29 +240,29 @@ public class AnalysisHelpCatalogTest {
     @Test
     public void setupAndPrepOutputPathsMatchCurrentLayout() {
         assertContains(AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_CREATE_BIN).outputs,
-                "FLASH/00 - Configuration/Channel_Data.txt");
+                "FLASH/Set Up Configuration/Channel_Data.txt");
         assertContains(AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_DRAW_ROIS).outputs,
-                "FLASH/01 - Regions of Interest/ROI Sets/");
+                "FLASH/Draw and Save ROIs/ROI Sets/");
         assertContains(AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_DRAW_ROIS).outputs,
-                "ImageJ Exports/Project_Image_Orientation.csv");
+                "FLASH/Draw and Save ROIs/Image Orientation.csv");
         assertContains(AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_DECONVOLUTION).outputs,
-                "FLASH/02 - 3D Deconvolution/");
+                "FLASH/3D Deconvolution/");
         assertContains(AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_SPECTRAL_DECONTAMINATION).outputs,
-                "FLASH/08 - Spectral Decontamination/");
+                "FLASH/Spectral Decontamination/");
     }
 
     @Test
     public void coreAnalysisOutputPathsMatchCurrentLayout() {
         assertContains(AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_SPLIT_MERGE).outputs,
-                "FLASH/03 - Split and Merge/Images/");
+                "FLASH/Make Presentation-Ready Images/Images/");
         assertContains(AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_SPLIT_MERGE).outputs,
-                "FLASH/03 - Split and Merge/OME-TIFF/");
+                "FLASH/Make Presentation-Ready Images/OME-TIFF/");
         assertContains(AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_INTENSITY).outputs,
-                "FLASH/04 - Fluorescence Intensity/<channel>.csv");
+                "FLASH/Image Analysis/Image Intensities/<channel>.csv");
         assertContains(AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_3D_OBJECT).outputs,
-                "FLASH/05 - 3D Object Analysis/Objects/<channel>.csv");
+                "FLASH/Image Analysis/3D Objects/Objects/<channel>.csv");
         assertContains(AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_3D_OBJECT).outputs,
-                "FLASH/05 - 3D Object Analysis/Image Outputs/");
+                "FLASH/Image Analysis/3D Objects/Image Outputs/");
     }
 
     @Test
@@ -285,34 +285,34 @@ public class AnalysisHelpCatalogTest {
     @Test
     public void resultsExportTopicsNameRequiredDependencies() {
         AnalysisHelpTopic aggregation = AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_AGGREGATION);
-        assertContains(aggregation.inputs, "FLASH/04 - Fluorescence Intensity/");
-        assertContains(aggregation.inputs, "FLASH/05 - 3D Object Analysis/");
-        assertContains(aggregation.inputs, "FLASH/06 - Spatial Analysis/");
-        assertContains(aggregation.inputs, "FLASH/09 - Result Aggregation/Project_Conditions.csv");
+        assertContains(aggregation.inputs, "FLASH/Image Analysis/Image Intensities/");
+        assertContains(aggregation.inputs, "FLASH/Image Analysis/3D Objects/");
+        assertContains(aggregation.inputs, "FLASH/Image Analysis/Spatial Analysis/");
+        assertContains(aggregation.inputs, "FLASH/Results Export/Conditions.csv");
 
         AnalysisHelpTopic statistics = AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_STATISTICS);
         assertContains(statistics.whenToUse, "Combine results per condition / animal");
-        assertContains(statistics.inputs, "FLASH/09 - Result Aggregation/Project_Master_Objects.csv");
-        assertContains(statistics.inputs, "Project_Master_Intensities.csv");
-        assertContains(statistics.inputs, "FLASH/09 - Result Aggregation/Project_Conditions.csv");
+        assertContains(statistics.inputs, "FLASH/Results Export/3D Objects.csv");
+        assertContains(statistics.inputs, "Image Intensities.csv");
+        assertContains(statistics.inputs, "FLASH/Results Export/Conditions.csv");
 
         AnalysisHelpTopic excel = AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_EXCEL_EXPORT);
         assertContains(excel.whenToUse, "after aggregation");
-        assertContains(excel.inputs, "FLASH/09 - Result Aggregation/Project_Master_Objects.csv");
-        assertContains(excel.inputs, "FLASH/09 - Result Aggregation/Project_Conditions.csv");
-        assertContains(excel.inputs, "FLASH/10 - Statistical Analysis/Project_Statistics.csv");
+        assertContains(excel.inputs, "FLASH/Results Export/3D Objects.csv");
+        assertContains(excel.inputs, "FLASH/Results Export/Conditions.csv");
+        assertContains(excel.inputs, "FLASH/Results Export/Statistics.csv");
     }
 
     @Test
     public void resultsExportOutputPathsMatchCurrentLayout() {
         assertContains(AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_AGGREGATION).outputs,
-                "FLASH/09 - Result Aggregation/Project_Master_Objects.csv");
+                "FLASH/Results Export/3D Objects.csv");
         assertContains(AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_AGGREGATION).outputs,
-                "FLASH/09 - Result Aggregation/Project_Master_Intensities.csv");
+                "FLASH/Results Export/Image Intensities.csv");
         assertContains(AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_STATISTICS).outputs,
-                "FLASH/10 - Statistical Analysis/Project_Statistics.csv");
+                "FLASH/Results Export/Statistics.csv");
         assertContains(AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_EXCEL_EXPORT).outputs,
-                "FLASH/11 - Excel Summary Export/Project_Summary.xlsx");
+                "FLASH/Results Export/Summary.xlsx");
     }
 
     private static int[] visibleAnalysisOrder() throws Exception {

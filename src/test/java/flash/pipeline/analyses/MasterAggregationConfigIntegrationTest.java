@@ -98,7 +98,7 @@ public class MasterAggregationConfigIntegrationTest {
         analysis.execute(root.getAbsolutePath());
 
         List<String> lines = Files.readAllLines(
-                aggregationFile(root, "Project_Master_Objects.csv").toPath(),
+                aggregationFile(root, "3D Objects.csv").toPath(),
                 StandardCharsets.UTF_8);
         // Header + two rows (Mouse1-LH, Mouse1-RH)
         assertEquals(3, lines.size());
@@ -136,7 +136,7 @@ public class MasterAggregationConfigIntegrationTest {
         analysis.execute(root.getAbsolutePath());
 
         List<String> lines = Files.readAllLines(
-                aggregationFile(root, "Project_Master_Objects.csv").toPath(),
+                aggregationFile(root, "3D Objects.csv").toPath(),
                 StandardCharsets.UTF_8);
         String header = lines.get(0);
         assertFalse("RAW_ONLY output must not contain any _permm3 columns",
@@ -169,7 +169,7 @@ public class MasterAggregationConfigIntegrationTest {
         analysis.execute(root.getAbsolutePath());
 
         List<String> lines = Files.readAllLines(
-                aggregationFile(root, "Project_Master_Objects.csv").toPath(),
+                aggregationFile(root, "3D Objects.csv").toPath(),
                 StandardCharsets.UTF_8);
         String header = lines.get(0);
         assertTrue("PERMM3_ONLY must contain _permm3 columns", header.contains("_permm3"));

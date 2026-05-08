@@ -18,8 +18,8 @@ public class RoiIOTest {
     @Test
     public void roiZipDiscovery_prefersNewRoiSetFolderAndReadsLegacyFallbacks() throws Exception {
         File dir = temp.newFolder("roiLayout");
-        File newRoiSets = new File(dir, "FLASH/01 - Regions of Interest/ROI Sets");
-        File newAttributes = new File(dir, "FLASH/01 - Regions of Interest/Attributes");
+        File newRoiSets = new File(dir, "FLASH/Draw and Save ROIs/ROI Sets");
+        File newAttributes = new File(dir, "FLASH/Draw and Save ROIs/Attributes");
         File legacyRois = new File(dir, "ROIs");
         File legacyAttributes = new File(dir, "Data Analysis/Attributes");
         assertTrue(newRoiSets.mkdirs());
@@ -46,7 +46,7 @@ public class RoiIOTest {
     @Test
     public void roiPropertiesDiscovery_prefersNewAttributesAndReadsLegacyFallbacks() throws Exception {
         File dir = temp.newFolder("roiPropsLayout");
-        File newAttributes = new File(dir, "FLASH/01 - Regions of Interest/Attributes");
+        File newAttributes = new File(dir, "FLASH/Draw and Save ROIs/Attributes");
         File legacyAttributes = new File(dir, "Data Analysis/Attributes");
         assertTrue(newAttributes.mkdirs());
         assertTrue(legacyAttributes.mkdirs());

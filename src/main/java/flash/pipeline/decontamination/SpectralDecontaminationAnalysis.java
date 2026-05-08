@@ -2078,7 +2078,7 @@ public class SpectralDecontaminationAnalysis implements Analysis {
 
         LinkedHashMap<String, String> assignments = resolveConditionAssignments(directory, metas, source);
         if (source == SpectralDecontaminationConfig.ConditionSource.USE_EXISTING_CONDITION_FILE
-                && !ConditionManifestIO.getFile(directory).isFile()) {
+                && ConditionManifestIO.getExistingFile(directory) == null) {
             IJ.showMessage("Spectral Decontamination",
                     "No existing condition file was found. Assign conditions manually for this preview.");
             assignments = showManualAssignmentDialog(assignments);
@@ -2120,7 +2120,7 @@ public class SpectralDecontaminationAnalysis implements Analysis {
         dialog.addHeader("Conditions");
         dialog.addMessage("Choose how Spectral Decontamination should assign images to experimental conditions.");
         String defaultLabel = config.getConditionSource().getLabel();
-        if (!ConditionManifestIO.getFile(directory).isFile()
+        if (ConditionManifestIO.getExistingFile(directory) == null
                 && config.getConditionSource()
                 == SpectralDecontaminationConfig.ConditionSource.USE_EXISTING_CONDITION_FILE) {
             defaultLabel = SpectralDecontaminationConfig.ConditionSource.INFER_FROM_IMAGE_NAMES.getLabel();
@@ -2136,11 +2136,11 @@ public class SpectralDecontaminationAnalysis implements Analysis {
             SpectralDecontaminationConfig.ConditionSource source) {
         LinkedHashSet<String> animals = animalNames(metas);
         if (source == SpectralDecontaminationConfig.ConditionSource.USE_EXISTING_CONDITION_FILE
-                && ConditionManifestIO.getFile(directory).isFile()) {
+                && ConditionManifestIO.getExistingFile(directory) != null) {
             return ConditionManifestIO.resolveAssignments(directory, animals);
         }
         if (source == SpectralDecontaminationConfig.ConditionSource.ASSIGN_MANUALLY
-                && ConditionManifestIO.getFile(directory).isFile()) {
+                && ConditionManifestIO.getExistingFile(directory) != null) {
             return ConditionManifestIO.resolveAssignments(directory, animals);
         }
         return SpectralPreviewSelector.inferAssignments(animals);

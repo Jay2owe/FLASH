@@ -23,45 +23,47 @@ public class FlashProjectLayoutTest {
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(project.getAbsolutePath());
 
         assertPath(new File(project, "FLASH"), layout.flashRoot());
-        assertPath(new File(project, "FLASH/00 - Configuration"), layout.configurationWriteDir());
-        assertPath(new File(project, "FLASH/00 - Configuration/Channel_Data.txt"),
+        assertPath(new File(project, "FLASH/Set Up Configuration"), layout.configurationWriteDir());
+        assertPath(new File(project, "FLASH/Set Up Configuration/Channel_Data.txt"),
                 layout.channelDataWriteFile());
-        assertPath(new File(project, "FLASH/01 - Regions of Interest"),
+        assertPath(new File(project, "FLASH/Draw and Save ROIs"),
                 layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.ROIS));
-        assertPath(new File(project, "FLASH/05 - 3D Object Analysis/Objects"),
+        assertPath(new File(project, "FLASH/Image Analysis/3D Objects/Objects"),
                 layout.objectDataWriteDir());
-        assertPath(new File(project, "FLASH/04 - Fluorescence Intensity"),
+        assertPath(new File(project, "FLASH/Image Analysis/Image Intensities"),
                 layout.intensityDataWriteDir());
-        assertPath(new File(project, "FLASH/04 - Fluorescence Intensity/Analysis Details"),
+        assertPath(new File(project, "FLASH/Image Analysis/Image Intensities/Analysis Details"),
                 layout.intensityAnalysisDetailsWriteDir());
-        assertPath(new File(project, "FLASH/05 - 3D Object Analysis/Objects/Analysis Details"),
+        assertPath(new File(project, "FLASH/Image Analysis/3D Objects/Objects/Analysis Details"),
                 layout.objectAnalysisDetailsWriteDir());
-        assertPath(new File(project, "FLASH/05 - 3D Object Analysis/Image Outputs"),
+        assertPath(new File(project, "FLASH/Image Analysis/3D Objects/Image Outputs"),
                 layout.objectImageOutputsWriteDir());
-        assertPath(new File(project, "FLASH/06 - Spatial Analysis/Spatial"),
+        assertPath(new File(project, "FLASH/Image Analysis/Spatial Analysis/Spatial"),
                 layout.spatialDataWriteDir());
-        assertPath(new File(project, "FLASH/06 - Spatial Analysis/Morphometry"),
+        assertPath(new File(project, "FLASH/Image Analysis/Spatial Analysis/Morphometry"),
                 layout.spatialMorphometryWriteDir());
-        assertPath(new File(project, "FLASH/06 - Spatial Analysis/Image Outputs"),
+        assertPath(new File(project, "FLASH/Image Analysis/Spatial Analysis/Image Outputs"),
                 layout.spatialImageOutputsWriteDir());
-        assertPath(new File(project, "FLASH/07 - Line Distance"),
+        assertPath(new File(project, "FLASH/Image Analysis/Line Distance Analysis"),
                 layout.lineDistanceWriteDir());
-        assertPath(new File(project, "FLASH/07 - Line Distance/Line Sets"),
+        assertPath(new File(project, "FLASH/Image Analysis/Line Distance Analysis/Line Sets"),
                 layout.lineSetWriteDir());
-        assertPath(new File(project, "FLASH/09 - Result Aggregation"),
+        assertPath(new File(project, "FLASH/Results Export"),
                 layout.aggregationWriteDir());
-        assertPath(new File(project, "FLASH/10 - Statistical Analysis"),
+        assertPath(new File(project, "FLASH/Results Export"),
                 layout.statisticsWriteDir());
-        assertPath(new File(project, "FLASH/09 - Result Aggregation/Project_Conditions.csv"),
-                layout.conditionManifestWriteFile("Project_Conditions.csv"));
-        assertPath(new File(project, "FLASH/10 - Statistical Analysis/Project_Statistics.csv"),
-                layout.statisticsWriteFile("Project_Statistics.csv"));
-        assertPath(new File(project, "FLASH/11 - Excel Summary Export"),
+        assertPath(new File(project, "FLASH/Results Export/Conditions.csv"),
+                layout.conditionManifestWriteFile());
+        assertPath(new File(project, "FLASH/Results Export/Statistics.csv"),
+                layout.statisticsWriteFile(FlashProjectLayout.STATISTICS_FILENAME));
+        assertPath(new File(project, "FLASH/Results Export"),
                 layout.excelWriteDir());
-        assertPath(new File(project, "FLASH/11 - Excel Summary Export/Project_Summary.xlsx"),
-                layout.excelWriteFile("Project_Summary.xlsx"));
-        assertPath(new File(project, "FLASH/08 - Spectral Decontamination"),
+        assertPath(new File(project, "FLASH/Results Export/Summary.xlsx"),
+                layout.excelWriteFile(FlashProjectLayout.SUMMARY_WORKBOOK_FILENAME));
+        assertPath(new File(project, "FLASH/Spectral Decontamination"),
                 layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.SPECTRAL));
+        assertPath(new File(project, "FLASH/Draw and Save ROIs/Image Orientation.csv"),
+                layout.orientationManifestWriteFile(FlashProjectLayout.ORIENTATION_MANIFEST_FILENAME));
         assertPath(new File(project, "FLASH/Presets"), layout.presetsRoot());
         assertPath(new File(project, "FLASH/Reports"), layout.reportsRoot());
         assertPath(new File(project, "FLASH/Reports/Quality Report"), layout.qualityReportWriteDir());
@@ -80,13 +82,15 @@ public class FlashProjectLayoutTest {
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(project.getAbsolutePath());
 
         assertPaths(layout.configurationReadDirs(),
+                new File(project, "FLASH/Set Up Configuration"),
                 new File(project, "FLASH/00 - Configuration"),
                 new File(project, ".bin"));
         assertPaths(layout.channelDataReadFiles(),
+                new File(project, "FLASH/Set Up Configuration/Channel_Data.txt"),
                 new File(project, "FLASH/00 - Configuration/Channel_Data.txt"),
                 new File(project, ".bin/Channel_Data.txt"));
         assertNull(layout.existingConfigurationDir());
-        assertPath(new File(project, "FLASH/00 - Configuration/Channel_Data.txt"),
+        assertPath(new File(project, "FLASH/Set Up Configuration/Channel_Data.txt"),
                 layout.channelDataReadFile());
         assertFalse(new File(project, "FLASH").exists());
         assertFalse(new File(project, ".bin").exists());
@@ -98,7 +102,7 @@ public class FlashProjectLayoutTest {
         assertPath(legacyBin, layout.existingConfigurationDir());
         assertPath(legacyChannelData, layout.channelDataReadFile());
 
-        File newConfig = new File(project, "FLASH/00 - Configuration");
+        File newConfig = new File(project, "FLASH/Set Up Configuration");
         assertTrue(newConfig.mkdirs());
         File newChannelData = new File(newConfig, "Channel_Data.txt");
         assertTrue(newChannelData.createNewFile());
@@ -112,60 +116,81 @@ public class FlashProjectLayoutTest {
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(project.getAbsolutePath());
 
         assertPaths(layout.analysisReadDirs(FlashProjectLayout.AnalysisFolder.ROIS),
+                new File(project, "FLASH/Draw and Save ROIs"),
                 new File(project, "FLASH/01 - Regions of Interest"),
                 new File(project, "ROIs"),
                 new File(project, "Data Analysis/Attributes"));
         assertPaths(layout.analysisReadDirs(FlashProjectLayout.AnalysisFolder.DECONVOLUTION),
+                new File(project, "FLASH/3D Deconvolution"),
                 new File(project, "FLASH/02 - 3D Deconvolution"),
                 new File(project, "Image Analysis/Deconvolved"));
         assertPaths(layout.analysisReadDirs(FlashProjectLayout.AnalysisFolder.SPATIAL),
+                new File(project, "FLASH/Image Analysis/Spatial Analysis"),
                 new File(project, "FLASH/06 - Spatial Analysis"),
                 new File(project, "Data Analysis/Spatial"),
                 new File(project, "Data Analysis/Morphometry"));
         assertPaths(layout.analysisReadDirs(FlashProjectLayout.AnalysisFolder.EXCEL),
+                new File(project, "FLASH/Results Export"),
                 new File(project, "FLASH/11 - Excel Summary Export"),
                 new File(project, "ImageJ Exports"));
         assertPaths(layout.excelReadDirs(),
+                new File(project, "FLASH/Results Export"),
                 new File(project, "FLASH/11 - Excel Summary Export"),
                 new File(project, "ImageJ Exports"));
         assertPaths(layout.objectDataReadDirs(),
+                new File(project, "FLASH/Image Analysis/3D Objects/Objects"),
                 new File(project, "FLASH/05 - 3D Object Analysis/Objects"),
                 new File(project, "Data Analysis/Objects"));
         assertPaths(layout.objectAnalysisDetailsReadDirs(),
+                new File(project, "FLASH/Image Analysis/3D Objects/Objects/Analysis Details"),
                 new File(project, "FLASH/05 - 3D Object Analysis/Objects/Analysis Details"),
                 new File(project, "Data Analysis/Objects/Analysis Details"));
         assertPaths(layout.intensityDataReadDirs(),
+                new File(project, "FLASH/Image Analysis/Image Intensities"),
                 new File(project, "FLASH/04 - Fluorescence Intensity"),
                 new File(project, "Data Analysis/ROI Intensities"));
         assertPaths(layout.intensityAnalysisDetailsReadDirs(),
+                new File(project, "FLASH/Image Analysis/Image Intensities/Analysis Details"),
                 new File(project, "FLASH/04 - Fluorescence Intensity/Analysis Details"),
                 new File(project, "Data Analysis/ROI Intensities/Analysis Details"));
         assertPaths(layout.objectImageOutputReadDirs(),
+                new File(project, "FLASH/Image Analysis/3D Objects/Image Outputs"),
                 new File(project, "FLASH/05 - 3D Object Analysis/Image Outputs"),
                 new File(project, "Image Analysis"));
         assertPaths(layout.spatialDataReadDirs(),
+                new File(project, "FLASH/Image Analysis/Spatial Analysis/Spatial"),
                 new File(project, "FLASH/06 - Spatial Analysis/Spatial"),
                 new File(project, "Data Analysis/Spatial"));
         assertPaths(layout.spatialMorphometryReadDirs(),
+                new File(project, "FLASH/Image Analysis/Spatial Analysis/Morphometry"),
                 new File(project, "FLASH/06 - Spatial Analysis/Morphometry"),
                 new File(project, "Data Analysis/Morphometry"));
         assertPaths(layout.spatialImageOutputReadDirs(),
+                new File(project, "FLASH/Image Analysis/Spatial Analysis/Image Outputs"),
                 new File(project, "FLASH/06 - Spatial Analysis/Image Outputs"),
                 new File(project, "Image Analysis"));
         assertPaths(layout.lineDistanceReadDirs(),
+                new File(project, "FLASH/Image Analysis/Line Distance Analysis"),
                 new File(project, "FLASH/07 - Line Distance"),
                 new File(project, "Data Analysis/Objects"));
         assertPaths(layout.lineSetReadDirs(),
+                new File(project, "FLASH/Image Analysis/Line Distance Analysis/Line Sets"),
                 new File(project, "FLASH/07 - Line Distance/Line Sets"),
                 new File(project, "Data Analysis/Lines"));
         assertPaths(layout.aggregationReadDirs(),
+                new File(project, "FLASH/Results Export"),
                 new File(project, "FLASH/09 - Result Aggregation"),
                 new File(project, "ImageJ Exports"));
         assertPaths(layout.statisticsReadDirs(),
+                new File(project, "FLASH/Results Export"),
                 new File(project, "FLASH/10 - Statistical Analysis"),
                 new File(project, "ImageJ Exports"));
-        assertPaths(layout.conditionManifestReadFiles("Project_Conditions.csv"),
+        assertPaths(layout.conditionManifestReadFiles(),
+                new File(project, "FLASH/Results Export/Conditions.csv"),
+                new File(project, "FLASH/Results Export/Project_Conditions.csv"),
+                new File(project, "FLASH/09 - Result Aggregation/Conditions.csv"),
                 new File(project, "FLASH/09 - Result Aggregation/Project_Conditions.csv"),
+                new File(project, "ImageJ Exports/Conditions.csv"),
                 new File(project, "ImageJ Exports/Project_Conditions.csv"));
     }
 

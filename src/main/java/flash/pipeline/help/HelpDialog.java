@@ -31,7 +31,7 @@ public final class HelpDialog {
     };
 
     private static final String[][] GLOSSARY = {
-            {"Configuration folder", "per-experiment setup: channel names, thresholds, and particle sizes. Lives in FLASH/00 - Configuration. Required by every analysis."},
+            {"Configuration folder", "per-experiment setup: channel names, thresholds, and particle sizes. Lives in FLASH/Set Up Configuration. Required by every analysis."},
             {"ROI (Region of Interest)", "a hand-drawn region used to restrict counting/intensity. Each image needs its own ROI set."},
             {"Colocalisation", "measuring how much two markers occupy the same space. FLASH supports volumetric overlap (% of object A inside object B) and CPC (centroid coincidence)."},
             {"Headless mode", "image windows are not shown during a run. Faster on big batches."},
@@ -82,7 +82,7 @@ public final class HelpDialog {
         pd.addHeader("Quick start");
         pd.addMessage("1. Pick a directory. FLASH works on a folder of images (`.lif`, `.tif`, `.czi`, etc.) — not single files. Drop your acquisition folder anywhere accessible to ImageJ.");
         pd.addMessage("2. Set up channels once with Set Up Configuration. This tells FLASH what each colour channel represents, what intensity threshold counts as \"signal\", and how big a \"cell\" is in pixels. The result is saved into a Configuration folder and reused by every other analysis. You only do this once per experiment.");
-        pd.addMessage("3. Tick what you want and click OK. FLASH runs each analysis in order, drops outputs into `Data Analysis/`, `Image Analysis/`, and `ImageJ Exports/`, and aggregates everything into a master CSV plus an Excel workbook at the end. For a first run, click the Standard 3D + Intensity recipe to skip the picking.");
+        pd.addMessage("3. Tick what you want and click OK. FLASH runs each analysis in order, drops outputs into `FLASH/`, and aggregates everything into master CSV files plus an Excel workbook at the end. For a first run, click the Standard 3D + Intensity recipe to skip the picking.");
     }
 
     private void addAdvisor(final PipelineDialog pd) {

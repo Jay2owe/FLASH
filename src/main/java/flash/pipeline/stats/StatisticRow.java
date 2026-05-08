@@ -2,7 +2,7 @@ package flash.pipeline.stats;
 
 /**
  * Immutable data carrier for one row of statistical output.
- * Maps directly to the columns in {@code Project_Statistics.csv}.
+ * Maps directly to the columns in {@code Statistics.csv}.
  */
 public class StatisticRow {
 

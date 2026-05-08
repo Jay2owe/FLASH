@@ -47,7 +47,7 @@ import java.util.Set;
  *   <li>Runs a global test (ANOVA / Welch's t / Kruskal-Wallis / Mann-Whitney)</li>
  *   <li>Performs pairwise post-hoc comparisons with Bonferroni correction</li>
  * </ol>
- * Results are written to {@code FLASH/10 - Statistical Analysis/Project_Statistics.csv}.
+ * Results are written to {@code FLASH/Results Export/Statistics.csv}.
  * <p>
  * Parametric tests (Welch's t, ANOVA) are backed by Apache Commons Math.
  * Compatible with Java 8.
@@ -140,12 +140,16 @@ public class StatisticalAnalysis implements Analysis {
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
 
         // 1. Load master CSVs
-        File objectsCsv = findFirstExistingFile(layout.aggregationReadDirs(), "Project_Master_Objects.csv");
-        File intensitiesCsv = findFirstExistingFile(layout.aggregationReadDirs(), "Project_Master_Intensities.csv");
+        File objectsCsv = findFirstExistingFile(layout.aggregationReadFiles(
+                FlashProjectLayout.MASTER_OBJECTS_FILENAME,
+                FlashProjectLayout.LEGACY_MASTER_OBJECTS_FILENAME));
+        File intensitiesCsv = findFirstExistingFile(layout.aggregationReadFiles(
+                FlashProjectLayout.MASTER_INTENSITIES_FILENAME,
+                FlashProjectLayout.LEGACY_MASTER_INTENSITIES_FILENAME));
 
         if (objectsCsv == null && intensitiesCsv == null) {
             notifyUser("Statistical Analysis",
-                    "No master CSV files found in FLASH/09 - Result Aggregation or legacy ImageJ Exports.\n"
+                    "No master CSV files found in FLASH/Results Export or legacy result folders.\n"
                             + "Run Master Data Aggregation first.");
             return;
         }
@@ -184,7 +188,7 @@ public class StatisticalAnalysis implements Analysis {
             String msg = "At least 2 conditions are required for statistical testing. Found: "
                     + conditionOrder.size() + ".";
             if (headless || suppressDialogs) {
-                msg += " Edit FLASH/09 - Result Aggregation/Project_Conditions.csv to assign conditions.";
+                msg += " Edit FLASH/Results Export/Conditions.csv to assign conditions.";
             }
             notifyUser("Statistical Analysis", msg);
             return;
@@ -289,7 +293,7 @@ public class StatisticalAnalysis implements Analysis {
         }
 
         // 5. Write output CSV
-        File outFile = layout.statisticsWriteFile("Project_Statistics.csv");
+        File outFile = layout.statisticsWriteFile(FlashProjectLayout.STATISTICS_FILENAME);
         writeStatisticsCsv(outFile, results);
 
         IJ.log("Statistical analysis complete: " + tested + " metrics tested, "
@@ -311,7 +315,7 @@ public class StatisticalAnalysis implements Analysis {
      * Resolves condition assignments. In headless/suppressDialogs mode the
      * manifest (or auto-detection) is used directly. In interactive GUI mode
      * the editable table dialog is shown, and accepted edits are persisted
-     * back to {@code Project_Conditions.csv} for future CLI runs.
+     * back to {@code Conditions.csv} for future CLI runs.
      */
     Map<String, String> resolveConditionAssignments(String directory, Set<String> animals) {
         Map<String, String> resolved = ConditionManifestIO.resolveAssignments(directory, animals);
@@ -531,8 +535,9 @@ public class StatisticalAnalysis implements Analysis {
     private static List<String> readAvailableMetricColumns(String directory) {
         List<String> out = new ArrayList<String>();
         File csv = findFirstExistingFile(
-                FlashProjectLayout.forDirectory(directory).aggregationReadDirs(),
-                "Project_Master_Objects.csv");
+                FlashProjectLayout.forDirectory(directory).aggregationReadFiles(
+                        FlashProjectLayout.MASTER_OBJECTS_FILENAME,
+                        FlashProjectLayout.LEGACY_MASTER_OBJECTS_FILENAME));
         if (csv == null) {
             return out;
         }
@@ -632,6 +637,13 @@ public class StatisticalAnalysis implements Analysis {
         for (File dir : dirs) {
             File candidate = new File(dir, fileName);
             if (candidate.isFile()) return candidate;
+        }
+        return null;
+    }
+
+    private static File findFirstExistingFile(List<File> files) {
+        for (File candidate : files) {
+            if (candidate != null && candidate.isFile()) return candidate;
         }
         return null;
     }

@@ -68,15 +68,15 @@ public final class AnalysisHelpCatalog {
                         "Pick threshold and filter values for objects you want to count, and choose intensity thresholds for signal measurements.",
                         "Confirm whether the full Z-stack or a saved Z-slice range should be used before saving the configuration."),
                 list(
-                        "FLASH writes the configuration to FLASH/00 - Configuration/Channel_Data.txt.",
-                        "Per-channel filter macros are saved as FLASH/00 - Configuration/C1_Filters.ijm, C2_Filters.ijm, and so on.",
-                        "Channel identities are saved in FLASH/00 - Configuration/channel_identities.json, and Z-slice choices are saved in FLASH/00 - Configuration/ZSlice_Selections.csv when used.",
+                        "FLASH writes the configuration to FLASH/Set Up Configuration/Channel_Data.txt.",
+                        "Per-channel filter macros are saved as FLASH/Set Up Configuration/C1_Filters.ijm, C2_Filters.ijm, and so on.",
+                        "Channel identities are saved in FLASH/Set Up Configuration/channel_identities.json, and Z-slice choices are saved in FLASH/Set Up Configuration/ZSlice_Selections.csv when used.",
                         "Later analyses read these files automatically; they do not ask for the same channel setup again."),
                 list(
-                        "FLASH/00 - Configuration/Channel_Data.txt with channel names, lookup-table colours, thresholds, particle-size filters, display ranges, intensity thresholds, filter presets, segmentation methods, and Z-slice mode.",
-                        "FLASH/00 - Configuration/channel_identities.json when marker identities were recorded.",
-                        "FLASH/00 - Configuration/C1_Filters.ijm and matching filter macro files for channels that need object filtering.",
-                        "FLASH/00 - Configuration/ZSlice_Selections.csv when analysis is limited to selected Z slices."),
+                        "FLASH/Set Up Configuration/Channel_Data.txt with channel names, lookup-table colours, thresholds, particle-size filters, display ranges, intensity thresholds, filter presets, segmentation methods, and Z-slice mode.",
+                        "FLASH/Set Up Configuration/channel_identities.json when marker identities were recorded.",
+                        "FLASH/Set Up Configuration/C1_Filters.ijm and matching filter macro files for channels that need object filtering.",
+                        "FLASH/Set Up Configuration/ZSlice_Selections.csv when analysis is limited to selected Z slices."),
                 list(
                         "A wrong channel identity can make every later output hard to interpret, even if the analysis runs successfully.",
                         "Thresholds copied from a different experiment can miss dim signal or include background; check representative images before batch runs.",
@@ -86,7 +86,7 @@ public final class AnalysisHelpCatalog {
                         "set-up-configuration",
                         image("setup.png", "Setup dialog", "Channel names, thresholds, filters, segmentation methods, and Z-slice choices are reviewed before saving."),
                         image("workflow.png", "Configuration workflow", "Choose folder, inspect channels, assign identities, tune filters, save configuration, then run downstream analyses."),
-                        image("example-output.png", "Saved configuration files", "The active setup lives in FLASH/00 - Configuration so it can be reused by the rest of the pipeline.")));
+                        image("example-output.png", "Saved configuration files", "The active setup lives in FLASH/Set Up Configuration so it can be reused by the rest of the pipeline.")));
     }
 
     private static AnalysisHelpTopic drawAndSaveRoisTopic() {
@@ -103,7 +103,7 @@ public final class AnalysisHelpCatalog {
                         "A saved channel configuration so FLASH knows which channel is best for display.",
                         "Images opened from the selected project folder.",
                         "Region names that will be used consistently across animals, conditions, and images.",
-                        "Any needed rotate or flip corrections; the ROI drawing panel saves them with Project_Image_Orientation.csv."),
+                        "Any needed rotate or flip corrections; the ROI drawing panel saves them with Image Orientation.csv."),
                 list(
                         "Open a representative image and pick the display channel that makes the region boundary easiest to see.",
                         "When each ROI image opens, the orientation buttons are available beside the image.",
@@ -112,15 +112,15 @@ public final class AnalysisHelpCatalog {
                         "Save the ROI set for the image, then repeat or append until all required images have ROI files."),
                 list(
                         "Apply any saved image transform before the image is shown for drawing.",
-                        "FLASH stores the main ROI zip files in FLASH/01 - Regions of Interest/ROI Sets/.",
-                        "FLASH also stores ROI properties and a copy of the ROI zip in FLASH/01 - Regions of Interest/Attributes/ for later volume and aggregation steps.",
-                        "After each image, FLASH writes or updates ImageJ Exports/Project_Image_Orientation.csv with the confirmed orientation transform.",
+                        "FLASH stores the main ROI zip files in FLASH/Draw and Save ROIs/ROI Sets/.",
+                        "FLASH also stores ROI properties and a copy of the ROI zip in FLASH/Draw and Save ROIs/Attributes/ for later volume and aggregation steps.",
+                        "After each image, FLASH writes or updates FLASH/Draw and Save ROIs/Image Orientation.csv with the confirmed orientation transform.",
                         "Later analyses load these ROI sets and saved transforms automatically."),
                 list(
-                        "FLASH/01 - Regions of Interest/ROI Sets/<name> ROIs.zip contains the drawn regions for an image or region set.",
-                        "FLASH/01 - Regions of Interest/Attributes/<name> ROI Properties.csv records ROI measurements used by aggregation and normalization.",
-                        "FLASH/01 - Regions of Interest/Attributes/<name> ROIs.zip keeps the ROI set with its region attributes.",
-                        "ImageJ Exports/Project_Image_Orientation.csv records saved rotate and flip transforms confirmed during ROI drawing."),
+                        "FLASH/Draw and Save ROIs/ROI Sets/<name> ROIs.zip contains the drawn regions for an image or region set.",
+                        "FLASH/Draw and Save ROIs/Attributes/<name> ROI Properties.csv records ROI measurements used by aggregation and normalization.",
+                        "FLASH/Draw and Save ROIs/Attributes/<name> ROIs.zip keeps the ROI set with its region attributes.",
+                        "FLASH/Draw and Save ROIs/Image Orientation.csv records saved rotate and flip transforms confirmed during ROI drawing."),
                 list(
                         "Inconsistent ROI names create separate groups during aggregation, even if they refer to the same anatomical region.",
                         "Changing orientation after drawing an unsaved ROI clears or invalidates that ROI so coordinates still match the displayed image.",
@@ -153,13 +153,13 @@ public final class AnalysisHelpCatalog {
                         "Preview representative raw and deconvolved output before committing to the batch.",
                         "Run the batch and let downstream analyses use deconvolved stacks only when their own opt-in setting is enabled."),
                 list(
-                        "FLASH writes corrected stacks to FLASH/02 - 3D Deconvolution/.",
+                        "FLASH writes corrected stacks to FLASH/3D Deconvolution/.",
                         "Per-parameter cache files are stored under FLASH/Cache/3D Deconvolution/ so repeated runs can skip matching work.",
                         "Downstream modules can prefer deconvolved inputs when that option is enabled, with fallback to raw inputs when no matching corrected stack exists."),
                 list(
-                        "FLASH/02 - 3D Deconvolution/<image>_C<channel>.tif contains per-channel corrected stacks.",
-                        "FLASH/02 - 3D Deconvolution/<image>_deconv.tif contains a merged corrected stack when produced.",
-                        "FLASH/02 - 3D Deconvolution/<image>_deconv_details.txt records run details for the corrected image.",
+                        "FLASH/3D Deconvolution/<image>_C<channel>.tif contains per-channel corrected stacks.",
+                        "FLASH/3D Deconvolution/<image>_deconv.tif contains a merged corrected stack when produced.",
+                        "FLASH/3D Deconvolution/<image>_deconv_details.txt records run details for the corrected image.",
                         "FLASH/Cache/3D Deconvolution/<paramsHash>/ stores reusable intermediate outputs for matching settings."),
                 list(
                         "Over-sharpening can create halos or ringing that look like real biological structure.",
@@ -170,7 +170,7 @@ public final class AnalysisHelpCatalog {
                         "deconvolution",
                         image("setup.png", "Deconvolution setup", "Engine, point spread function, iteration, and cache settings are chosen before running the batch."),
                         image("workflow.png", "Deconvolution workflow", "Select stacks, configure blur correction, preview output, write corrected images, then opt in downstream."),
-                        image("example-output.png", "Deconvolution outputs", "Corrected stacks and run details are saved under FLASH/02 - 3D Deconvolution.")));
+                        image("example-output.png", "Deconvolution outputs", "Corrected stacks and run details are saved under FLASH/3D Deconvolution.")));
     }
 
     private static AnalysisHelpTopic spectralDecontaminationTopic() {
@@ -193,15 +193,15 @@ public final class AnalysisHelpCatalog {
                         "Select a correction goal and feature stack, such as linear unmixing, quiet-channel gating, local autofluorescence correction, or object scoring.",
                         "Preview the correction, inspect coefficients or thresholds, then save the settings before running the batch."),
                 list(
-                        "FLASH saves dataset-level settings to FLASH/00 - Configuration/Spectral_Decontamination_Config.json.",
-                        "Batch summaries and coefficients are written to FLASH/08 - Spectral Decontamination/.",
-                        "Corrected images, masks, cleaned object maps, and parameter maps are written under FLASH/08 - Spectral Decontamination/Image Outputs/."),
+                        "FLASH saves dataset-level settings to FLASH/Set Up Configuration/Spectral_Decontamination_Config.json.",
+                        "Batch summaries and coefficients are written to FLASH/Spectral Decontamination/.",
+                        "Corrected images, masks, cleaned object maps, and parameter maps are written under FLASH/Spectral Decontamination/Image Outputs/."),
                 list(
-                        "FLASH/00 - Configuration/Spectral_Decontamination_Config.json records channel roles, correction goal, conditions, and selected feature stack.",
-                        "FLASH/08 - Spectral Decontamination/per_image_summary.csv summarizes each processed image.",
-                        "FLASH/08 - Spectral Decontamination/correction_coefficients.csv records fitted correction values when the chosen stack produces them.",
-                        "FLASH/08 - Spectral Decontamination/preview_selection.csv records the preview subset when saved.",
-                        "FLASH/08 - Spectral Decontamination/Image Outputs/Series 001 - <name>/corrected_<target>.tif and related files store corrected images, masks, object scores, or parameter maps depending on the chosen features."),
+                        "FLASH/Set Up Configuration/Spectral_Decontamination_Config.json records channel roles, correction goal, conditions, and selected feature stack.",
+                        "FLASH/Spectral Decontamination/per_image_summary.csv summarizes each processed image.",
+                        "FLASH/Spectral Decontamination/correction_coefficients.csv records fitted correction values when the chosen stack produces them.",
+                        "FLASH/Spectral Decontamination/preview_selection.csv records the preview subset when saved.",
+                        "FLASH/Spectral Decontamination/Image Outputs/Series 001 - <name>/corrected_<target>.tif and related files store corrected images, masks, object scores, or parameter maps depending on the chosen features."),
                 list(
                         "Over-correction can remove real target signal, especially when controls do not match the experimental tissue.",
                         "Saturated pixels are uncertain; correction cannot recover true signal hidden by clipping.",
@@ -238,9 +238,9 @@ public final class AnalysisHelpCatalog {
                         "Selected channels are combined into merged colour composites, with additional merge specifications used when provided.",
                         "FLASH saves the display outputs and split/merge run details under the Split and Merge analysis folder."),
                 list(
-                        "FLASH/03 - Split and Merge/Images/<animal>/ contains split-channel images and merged composite images.",
-                        "FLASH/03 - Split and Merge/OME-TIFF/ contains OME-TIFF exports when that option is enabled.",
-                        "FLASH/03 - Split and Merge/Analysis Details/ records split/merge settings used for the run.",
+                        "FLASH/Make Presentation-Ready Images/Images/<animal>/ contains split-channel images and merged composite images.",
+                        "FLASH/Make Presentation-Ready Images/OME-TIFF/ contains OME-TIFF exports when that option is enabled.",
+                        "FLASH/Make Presentation-Ready Images/Analysis Details/ records split/merge settings used for the run.",
                         "Saved min-max display settings can also update the active configuration so later display exports use the same ranges."),
                 list(
                         "Contrast stretching, lookup-table colours, and merged composites are display choices, not quantitative fluorescence measurements.",
@@ -251,7 +251,7 @@ public final class AnalysisHelpCatalog {
                         "split-merge",
                         image("setup.png", "Split and merge setup", "Per-channel processing, merge, OME-TIFF, and background-subtraction options are reviewed before export."),
                         image("workflow.png", "Split and merge workflow", "Read configured channels, split images, apply display settings, create composites, then save display outputs."),
-                        image("example-output.png", "Split and merge outputs", "Split-channel images, merged composites, OME-TIFF files, and analysis details live under FLASH/03 - Split and Merge.")));
+                        image("example-output.png", "Split and merge outputs", "Split-channel images, merged composites, OME-TIFF files, and analysis details live under FLASH/Make Presentation-Ready Images.")));
     }
 
     private static AnalysisHelpTopic intensityTopic() {
@@ -279,8 +279,8 @@ public final class AnalysisHelpCatalog {
                         "When Channel ROI Mask is selected, the ROI measurement is also limited to pixels that are positive in the mask channel.",
                         "FLASH saves per-channel intensity CSV files and run details under the Fluorescence Intensity analysis folder."),
                 list(
-                        "FLASH/04 - Fluorescence Intensity/<channel>.csv contains per-image and per-ROI intensity measurements for each measured channel.",
-                        "FLASH/04 - Fluorescence Intensity/Analysis Details/ records the intensity settings used for the run.",
+                        "FLASH/Image Analysis/Image Intensities/<channel>.csv contains per-image and per-ROI intensity measurements for each measured channel.",
+                        "FLASH/Image Analysis/Image Intensities/Analysis Details/ records the intensity settings used for the run.",
                         "Columns can include mean intensity, positive area, area fraction, and thresholded summaries depending on the selected options."),
                 list(
                         "Display-adjusted split/merge images are not the measurement source; avoid treating figure contrast as quantitative signal.",
@@ -291,7 +291,7 @@ public final class AnalysisHelpCatalog {
                         "intensity",
                         image("setup.png", "Intensity setup", "Measurement channels, binarisation thresholds, ROI sets, and optional channel mask are selected before analysis."),
                         image("workflow.png", "Intensity workflow", "Load images and ROIs, choose measurement and mask channels, apply thresholds when selected, then save ROI-level CSV tables."),
-                        image("example-output.png", "Intensity output table", "Per-channel CSV files in FLASH/04 - Fluorescence Intensity contain ROI-level measurements and thresholded summaries.")));
+                        image("example-output.png", "Intensity output table", "Per-channel CSV files in FLASH/Image Analysis/Image Intensities contain ROI-level measurements and thresholded summaries.")));
     }
 
     private static AnalysisHelpTopic threeDObjectTopic() {
@@ -320,10 +320,10 @@ public final class AnalysisHelpCatalog {
                         "When enabled, process images are skeletonised and measured after subtracting the selected nuclear marker signal.",
                         "FLASH saves object CSV tables, calibration data, analysis details, and any produced masks or object maps under the 3D Object Analysis folder."),
                 list(
-                        "FLASH/05 - 3D Object Analysis/Objects/<channel>.csv contains object-level tables for each segmented channel.",
-                        "FLASH/05 - 3D Object Analysis/Objects/calibration.properties records calibration used with object CSV outputs.",
-                        "FLASH/05 - 3D Object Analysis/Objects/Analysis Details/ records object-analysis settings used for the run.",
-                        "FLASH/05 - 3D Object Analysis/Image Outputs/<animal>/ contains masked images and object-label maps when those image outputs are produced."),
+                        "FLASH/Image Analysis/3D Objects/Objects/<channel>.csv contains object-level tables for each segmented channel.",
+                        "FLASH/Image Analysis/3D Objects/Objects/calibration.properties records calibration used with object CSV outputs.",
+                        "FLASH/Image Analysis/3D Objects/Objects/Analysis Details/ records object-analysis settings used for the run.",
+                        "FLASH/Image Analysis/3D Objects/Image Outputs/<animal>/ contains masked images and object-label maps when those image outputs are produced."),
                 list(
                         "Choosing the wrong object channel can produce plausible-looking counts for the wrong marker.",
                         "Size filters that are too strict can remove real cells, puncta, or processes; filters that are too loose can keep debris and merged objects.",
@@ -334,7 +334,7 @@ public final class AnalysisHelpCatalog {
                         "three-d-object",
                         image("setup.png", "3D object setup", "Segmentation, colocalisation, ROI filtering, and process-length options are selected before running object analysis."),
                         image("workflow.png", "3D object workflow", "Load configured channels, threshold or segment in 3D, filter objects, calculate measurements, then save object tables."),
-                        image("example-output.png", "3D object outputs", "Object CSVs, calibration, analysis details, masks, and object maps are saved under FLASH/05 - 3D Object Analysis.")));
+                        image("example-output.png", "3D object outputs", "Object CSVs, calibration, analysis details, masks, and object maps are saved under FLASH/Image Analysis/3D Objects.")));
     }
 
     private static AnalysisHelpTopic spatialTopic() {
@@ -348,8 +348,8 @@ public final class AnalysisHelpCatalog {
                         "Use it when segmentation looks acceptable but you want to change spatial-analysis choices such as nearest-neighbour distances, Ripley's K/L/G statistics, CPC summaries, Voronoi territories, density heatmaps, or k-means phenotyping.",
                         "Use the morphometry options when saved object label images should be re-read to add 2D shape, 3D shape, composite morphology, population scoring, or spatial-morphometric columns."),
                 list(
-                        "Object CSV files from FLASH/05 - 3D Object Analysis/Objects/, or the legacy Data Analysis/Objects folder for older projects.",
-                        "Object label images from FLASH/05 - 3D Object Analysis/Image Outputs/ when CPC, morphology, 3D morphometry, or heatmaps need saved object maps.",
+                        "Object CSV files from FLASH/Image Analysis/3D Objects/Objects/, or the legacy Data Analysis/Objects folder for older projects.",
+                        "Object label images from FLASH/Image Analysis/3D Objects/Image Outputs/ when CPC, morphology, 3D morphometry, or heatmaps need saved object maps.",
                         "Calibration metadata from the object output folder when distances, Ripley's K/L/G statistics, Voronoi territories, heatmaps, or micron-scaled morphometry should be reported in calibrated units.",
                         "Channel identities, object names, ROI or region columns, and optional colocalisation thresholds for deciding which partner objects count as overlapping.",
                         "Optional line ROI sets can be consumed from the existing line-distance workflow when the Spatial Analysis options dialog exposes line-distance calculation for the project."),
@@ -364,12 +364,12 @@ public final class AnalysisHelpCatalog {
                         "Group objects by ROI, region, or section, then compute selected nearest-neighbour, colocalisation, statistics, Voronoi, heatmap, phenotyping, and morphometry measurements.",
                         "Write new spatial or morphometry summary CSVs, and update the same object CSV tables with added spatial and Morph_ columns."),
                 list(
-                        "Updated FLASH/05 - 3D Object Analysis/Objects/<channel>.csv files with added columns such as XM_um, YM_um, ZM_um, <channel>_DistToClosest_<partner>, <channel>_ClosestTo_<partner>, CPC, Voronoi, Cluster, and Morph_ measurements.",
-                        "FLASH/06 - Spatial Analysis/Spatial/Spatial_Statistics_<channel>.csv contains Ripley's K/L/G summaries when spatial statistics run.",
-                        "FLASH/06 - Spatial Analysis/Spatial/CPC_Spatial_Summary.csv and CPC_Multi_Target_Summary.csv summarize centroid-in-object colocalisation when CPC columns are available or recomputed.",
-                        "FLASH/06 - Spatial Analysis/Spatial/Voronoi_<channel>.csv, Interaction_Matrix.csv, and Phenotyping/Clusters_<channel>.csv are written when Voronoi or k-means phenotyping are selected.",
-                        "FLASH/06 - Spatial Analysis/Morphometry/ stores morphology, population summary, PPRP, and morphometry analysis-detail CSVs when morphometric options are selected.",
-                        "FLASH/06 - Spatial Analysis/Image Outputs/<animal>/Heatmaps/ stores density heatmap TIFF and PNG files when heatmaps are selected."),
+                        "Updated FLASH/Image Analysis/3D Objects/Objects/<channel>.csv files with added columns such as XM_um, YM_um, ZM_um, <channel>_DistToClosest_<partner>, <channel>_ClosestTo_<partner>, CPC, Voronoi, Cluster, and Morph_ measurements.",
+                        "FLASH/Image Analysis/Spatial Analysis/Spatial/Spatial_Statistics_<channel>.csv contains Ripley's K/L/G summaries when spatial statistics run.",
+                        "FLASH/Image Analysis/Spatial Analysis/Spatial/CPC_Spatial_Summary.csv and CPC_Multi_Target_Summary.csv summarize centroid-in-object colocalisation when CPC columns are available or recomputed.",
+                        "FLASH/Image Analysis/Spatial Analysis/Spatial/Voronoi_<channel>.csv, Interaction_Matrix.csv, and Phenotyping/Clusters_<channel>.csv are written when Voronoi or k-means phenotyping are selected.",
+                        "FLASH/Image Analysis/Spatial Analysis/Morphometry/ stores morphology, population summary, PPRP, and morphometry analysis-detail CSVs when morphometric options are selected.",
+                        "FLASH/Image Analysis/Spatial Analysis/Image Outputs/<animal>/Heatmaps/ stores density heatmap TIFF and PNG files when heatmaps are selected."),
                 list(
                         "Running this before 3D Object Analysis leaves no object CSVs to load, so Spatial Analysis has nothing to measure.",
                         "Bad segmentation creates bad spatial findings; inspect object maps and object counts before interpreting clustering, proximity, or morphology biologically.",
@@ -395,9 +395,9 @@ public final class AnalysisHelpCatalog {
                         "Use it when you need one project-level table for condition comparisons, animal-level summaries, or Excel export.",
                         "Use it again after changing condition assignments, ROI attributes, object outputs, spatial outputs, or aggregation granularity."),
                 list(
-                        "Per-analysis CSV files from FLASH/04 - Fluorescence Intensity/, FLASH/05 - 3D Object Analysis/, FLASH/06 - Spatial Analysis/, and any legacy Data Analysis folders that still contain compatible outputs.",
-                        "ROI attribute CSV files from FLASH/01 - Regions of Interest/Attributes/ when per-mm3 normalization or ROI metadata should be included.",
-                        "Condition assignments saved in FLASH/09 - Result Aggregation/Project_Conditions.csv, or legacy ImageJ Exports/Project_Conditions.csv when opening older projects.",
+                        "Per-analysis CSV files from FLASH/Image Analysis/Image Intensities/, FLASH/Image Analysis/3D Objects/, FLASH/Image Analysis/Spatial Analysis/, and any legacy Data Analysis folders that still contain compatible outputs.",
+                        "ROI attribute CSV files from FLASH/Draw and Save ROIs/Attributes/ when per-mm3 normalization or ROI metadata should be included.",
+                        "Condition assignments saved in FLASH/Results Export/Conditions.csv, with legacy fallback when opening older projects.",
                         "A selected aggregation granularity and output mode, such as per-animal, per-hemisphere, per-region, per-section, raw, normalized, or both."),
                 list(
                         "Review the condition-assignment table and assign every animal to the correct condition before running.",
@@ -409,11 +409,11 @@ public final class AnalysisHelpCatalog {
                         "Attach parsed animal, condition, image, ROI, region, hemisphere, and analysis-type metadata to compatible rows.",
                         "Combine matching measurements into master object and intensity tables, then write the result aggregation outputs."),
                 list(
-                        "FLASH/09 - Result Aggregation/Project_Master_Objects.csv contains raw object and spatial summary rows at the selected grouping level.",
-                        "FLASH/09 - Result Aggregation/Project_Master_Objects_PerMM3.csv contains volume-normalized object summaries when per-mm3 output is enabled and volume data exist.",
-                        "FLASH/09 - Result Aggregation/Project_Master_Intensities.csv contains aggregated fluorescence intensity measurements.",
-                        "FLASH/09 - Result Aggregation/Project_Conditions.csv records the condition assignments used by aggregation and statistics.",
-                        "FLASH/09 - Result Aggregation/Aggregation_Analysis_Details.txt records aggregation settings and run details."),
+                        "FLASH/Results Export/3D Objects.csv contains raw object and spatial summary rows at the selected grouping level.",
+                        "FLASH/Results Export/3D Objects.csv contains volume-normalized _permm3 columns when per-mm3 output is enabled and volume data exist.",
+                        "FLASH/Results Export/Image Intensities.csv contains aggregated fluorescence intensity measurements.",
+                        "FLASH/Results Export/Conditions.csv records the condition assignments used by aggregation and statistics.",
+                        "FLASH/Results Export/Aggregation_Analysis_Details.txt records aggregation settings and run details."),
                 list(
                         "Running aggregation before upstream CSVs exist leaves empty or missing master tables for statistics and Excel export.",
                         "Inconsistent animal names, ROI names, or filename parsing can split one biological group into multiple rows.",
@@ -424,7 +424,7 @@ public final class AnalysisHelpCatalog {
                         "aggregation",
                         image("setup.png", "Aggregation setup", "Condition assignments, grouping granularity, and raw or normalized output choices are reviewed before combining results."),
                         image("workflow.png", "Aggregation workflow", "Per-analysis CSV folders are scanned, metadata are attached, compatible rows are combined, and master tables are written."),
-                        image("example-output.png", "Master table output", "Project_Master_Objects.csv and Project_Master_Intensities.csv are saved under FLASH/09 - Result Aggregation.")));
+                        image("example-output.png", "Master table output", "3D Objects.csv and Image Intensities.csv are saved under FLASH/Results Export.")));
     }
 
     private static AnalysisHelpTopic statisticsTopic() {
@@ -438,8 +438,8 @@ public final class AnalysisHelpCatalog {
                         "Use it when you need a CSV summary of condition comparisons for selected metrics.",
                         "Use the Statistics Helper or presets when paired design, distribution assumptions, post-hoc method, or metric scope should differ from the default automatic settings."),
                 list(
-                        "FLASH/09 - Result Aggregation/Project_Master_Objects.csv or Project_Master_Intensities.csv from aggregation.",
-                        "Condition assignments from FLASH/09 - Result Aggregation/Project_Conditions.csv, or legacy ImageJ Exports/Project_Conditions.csv for older projects.",
+                        "FLASH/Results Export/3D Objects.csv or Image Intensities.csv from aggregation.",
+                        "Condition assignments from FLASH/Results Export/Conditions.csv, with legacy fallback for older projects.",
                         "A valid statistics configuration, either default automatic selection or a helper/preset choice for paired mode, distribution mode, post-hoc method, and metric filter.",
                         "Enough animal-level or selected grouping-level samples per condition for the configured comparisons to run."),
                 list(
@@ -447,15 +447,15 @@ public final class AnalysisHelpCatalog {
                         "Choose or save a Statistics preset if you need paired tests, forced parametric or non-parametric routing, Tukey HSD, Dunn's test, raw p-values, or selected metrics only.",
                         "Check that the aggregation granularity matches the replicate unit you intend to compare."),
                 list(
-                        "Load available master object and intensity tables from FLASH/09 - Result Aggregation/ with legacy ImageJ Exports fallback.",
+                        "Load available master object and intensity tables from FLASH/Results Export/ with legacy fallback.",
                         "Group numeric metric columns by condition using the saved condition manifest.",
                         "Apply the configured automatic, parametric, non-parametric, paired, and post-hoc routing for each eligible metric.",
                         "Skip metrics with insufficient usable values and record the reason in the output table.",
                         "Write one statistics table for the project without changing the upstream master CSV files."),
                 list(
-                        "FLASH/10 - Statistical Analysis/Project_Statistics.csv contains one row per global test, skipped metric, and eligible pairwise comparison.",
+                        "FLASH/Results Export/Statistics.csv contains one row per global test, skipped metric, and eligible pairwise comparison.",
                         "Statistics rows include metric name, group labels, test name, statistic, p-value, adjusted p-value when applicable, normality result, paired flag, post-hoc method, and notes.",
-                        "Excel Summary Export can read Project_Statistics.csv and add a Statistics sheet when that section is enabled."),
+                        "Excel Summary Export can read Statistics.csv and add a Statistics sheet when that section is enabled."),
                 list(
                         "Running statistics before aggregation means there are no master tables to compare.",
                         "Too few samples per condition can make a metric skipped or make p-values unstable.",
@@ -465,8 +465,8 @@ public final class AnalysisHelpCatalog {
                 optionalImages(
                         "statistics",
                         image("setup.png", "Statistics setup", "Condition assignments, presets, and helper-derived test choices are checked before running statistics."),
-                        image("workflow.png", "Statistics workflow", "Master tables and condition labels are loaded, metrics are grouped, tests are routed, and Project_Statistics.csv is written."),
-                        image("example-output.png", "Statistics table", "Project_Statistics.csv records global tests, pairwise rows, adjusted p-values, paired flags, and skip notes.")));
+                        image("workflow.png", "Statistics workflow", "Master tables and condition labels are loaded, metrics are grouped, tests are routed, and Statistics.csv is written."),
+                        image("example-output.png", "Statistics table", "Statistics.csv records global tests, pairwise rows, adjusted p-values, paired flags, and skip notes.")));
     }
 
     private static AnalysisHelpTopic excelExportTopic() {
@@ -480,9 +480,9 @@ public final class AnalysisHelpCatalog {
                         "Use it when you need a shareable workbook with condition summaries, per-metric sheets, statistics, and method details collected in one file.",
                         "Use an Excel export preset when the workbook should target a specific audience, such as exploratory review, supervisor review, figure-ready supplement, collaborator handoff, methods supplement, minimal export, or archive."),
                 list(
-                        "FLASH/09 - Result Aggregation/Project_Master_Objects.csv or Project_Master_Intensities.csv from aggregation.",
-                        "FLASH/09 - Result Aggregation/Project_Conditions.csv for condition-to-animal groupings.",
-                        "FLASH/10 - Statistical Analysis/Project_Statistics.csv when the Statistics sheet is enabled.",
+                        "FLASH/Results Export/3D Objects.csv or Image Intensities.csv from aggregation.",
+                        "FLASH/Results Export/Conditions.csv for condition-to-animal groupings.",
+                        "FLASH/Results Export/Statistics.csv when the Statistics sheet is enabled.",
                         "Analysis Details files from upstream analysis folders when data summary or methods appendix sheets are enabled.",
                         "An Excel export preset, or the default preset choices shown in the export dialog."),
                 list(
@@ -495,21 +495,21 @@ public final class AnalysisHelpCatalog {
                         "Apply the selected formatting, significance highlighting, summary-statistic mode, and sheet-name cleanup.",
                         "Save the finished workbook to the Excel Summary Export folder."),
                 list(
-                        "FLASH/11 - Excel Summary Export/Project_Summary.xlsx is the generated workbook.",
+                        "FLASH/Results Export/Summary.xlsx is the generated workbook.",
                         "The workbook can include Experimental Conditions, Data Summary, per-metric measurement sheets, Statistics, and Methods Appendix sheets depending on the selected preset.",
-                        "The Statistics sheet reflects FLASH/10 - Statistical Analysis/Project_Statistics.csv when that file exists and the preset includes it.",
-                        "Per-metric sheets are derived from Project_Master_Objects.csv and Project_Master_Intensities.csv; they are not new measurements."),
+                        "The Statistics sheet reflects FLASH/Results Export/Statistics.csv when that file exists and the preset includes it.",
+                        "Per-metric sheets are derived from 3D Objects.csv and Image Intensities.csv; they are not new measurements."),
                 list(
                         "Exporting before aggregation means the workbook has no master object or intensity tables to summarize.",
                         "The Statistics sheet is absent or stale if Statistical Analysis has not been run after the latest aggregation.",
                         "Excel export packages existing CSV values and run details; it does not recalculate segmentation, intensity, aggregation, or p-values.",
-                        "An old Project_Summary.xlsx can be mistaken for a new export, so check the file timestamp after rerunning.",
+                        "An old Summary.xlsx can be mistaken for a new export, so check the file timestamp after rerunning.",
                         "Disabled preset sections are intentionally left out of the workbook, even if the source CSV files exist."),
                 optionalImages(
                         "excel-export",
                         image("setup.png", "Excel export setup", "Workbook presets and included sheet sections are reviewed before export."),
                         image("workflow.png", "Excel export workflow", "Master CSVs, conditions, statistics, and analysis details are collected into a formatted workbook."),
-                        image("example-output.png", "Workbook output", "Project_Summary.xlsx is saved under FLASH/11 - Excel Summary Export with enabled summary, detail, and statistics sheets.")));
+                        image("example-output.png", "Workbook output", "Summary.xlsx is saved under FLASH/Results Export with enabled summary, detail, and statistics sheets.")));
     }
 
     private static java.util.List<String> list(String... values) {

@@ -99,7 +99,7 @@ public class PostRunSummaryTest {
         assertTrue(aggregationDir.mkdirs());
 
         writeBin(root, "default");
-        Files.write(new File(aggregationDir, "Project_Master_Objects.csv").toPath(),
+        Files.write(new File(aggregationDir, FlashProjectLayout.MASTER_OBJECTS_FILENAME).toPath(),
                 ("Animal Name,Region,DAPI_Count\n"
                         + "Mouse1,SCN,22\n").getBytes(StandardCharsets.UTF_8));
 
@@ -109,7 +109,7 @@ public class PostRunSummaryTest {
         assertTrue(txt.isFile());
         SummaryHistoryStore.Snapshot snapshot = SummaryHistoryStore.load(root.getAbsolutePath());
         assertTrue(snapshot != null);
-        assertTrue(snapshot.tables.containsKey("Project_Master_Objects.csv"));
+        assertTrue(snapshot.tables.containsKey(FlashProjectLayout.MASTER_OBJECTS_FILENAME));
     }
 
     private void writeBin(File root, String threshold) throws Exception {

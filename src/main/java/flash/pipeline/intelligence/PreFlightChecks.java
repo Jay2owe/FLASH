@@ -35,7 +35,7 @@ public final class PreFlightChecks {
 
     /** Output sub-folder names that indicate a previous run produced outputs here. */
     private static final Set<String> OUTPUT_FOLDER_NAMES = new HashSet<String>(
-            Arrays.asList("Data Analysis", "Image Analysis", "ImageJ Exports"));
+            Arrays.asList("FLASH", "Data Analysis", "Image Analysis", "ImageJ Exports"));
 
     /** Extensions that should not be scanned for truncation (only raw microscopy). */
     private static final Set<String> RAW_IMAGE_EXTS = new HashSet<String>(

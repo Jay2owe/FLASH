@@ -12,7 +12,7 @@ import java.util.List;
  */
 public final class FlashProjectLayout {
     public static final String FLASH_DIR = "FLASH";
-    public static final String CONFIGURATION_DIR = "00 - Configuration";
+    public static final String CONFIGURATION_DIR = "Set Up Configuration";
     public static final String PRESETS_DIR = "Presets";
     public static final String REPORTS_DIR = "Reports";
     public static final String CACHE_DIR = "Cache";
@@ -23,46 +23,74 @@ public final class FlashProjectLayout {
     public static final String AUDIT_DIR = "Audit";
 
     public static final String LEGACY_BIN_DIR = ".bin";
+    public static final String LEGACY_CONFIGURATION_DIR = "00 - Configuration";
     public static final String LEGACY_STATUS_DIR = ".flash-status";
     public static final String LEGACY_QUALITY_REPORT_DIR = "Quality_Report";
     public static final String LEGACY_TIF_CACHE_DIR = ".tif_cache";
     public static final String LEGACY_CUSTOM_FILTER_PRESET_DIR = "Custom Filter Presets";
     public static final String CUSTOM_FILTER_PRESET_DIR = "Custom Filter Presets";
     public static final String CHANNEL_DATA_FILENAME = "Channel_Data.txt";
+    public static final String CONDITIONS_FILENAME = "Conditions.csv";
+    public static final String LEGACY_CONDITIONS_FILENAME = "Project_Conditions.csv";
+    public static final String MASTER_OBJECTS_FILENAME = "3D Objects.csv";
+    public static final String LEGACY_MASTER_OBJECTS_FILENAME = "Project_Master_Objects.csv";
+    public static final String MASTER_INTENSITIES_FILENAME = "Image Intensities.csv";
+    public static final String LEGACY_MASTER_INTENSITIES_FILENAME = "Project_Master_Intensities.csv";
+    public static final String STATISTICS_FILENAME = "Statistics.csv";
+    public static final String LEGACY_STATISTICS_FILENAME = "Project_Statistics.csv";
+    public static final String SUMMARY_WORKBOOK_FILENAME = "Summary.xlsx";
+    public static final String LEGACY_SUMMARY_WORKBOOK_FILENAME = "Project_Summary.xlsx";
+    public static final String ORIENTATION_MANIFEST_FILENAME = "Image Orientation.csv";
+    public static final String LEGACY_ORIENTATION_MANIFEST_FILENAME = "Project_Image_Orientation.csv";
+    public static final String LEGACY_ORIENTATION_MANIFEST_TYPO_FILENAME = "Project_Image_Oritentation.csv";
+    public static final String ORIENTATION_ALIASES_FILENAME = "Image Orientation Aliases.csv";
+    public static final String LEGACY_ORIENTATION_ALIASES_FILENAME = "Project_Image_Orientation_Aliases.csv";
 
     private static final String DATA_ANALYSIS_DIR = "Data Analysis";
     private static final String IMAGE_ANALYSIS_DIR = "Image Analysis";
     private static final String IMAGES_DIR = "Images";
     private static final String IMAGEJ_EXPORTS_DIR = "ImageJ Exports";
+    private static final String RESULTS_EXPORT_DIR = "Results Export";
 
     private final File projectRoot;
 
     public enum AnalysisFolder {
-        ROIS("01 - Regions of Interest",
+        ROIS("Draw and Save ROIs",
+                FLASH_DIR + File.separator + "01 - Regions of Interest",
                 "ROIs",
                 DATA_ANALYSIS_DIR + File.separator + "Attributes"),
-        DECONVOLUTION("02 - 3D Deconvolution",
+        DECONVOLUTION("3D Deconvolution",
+                FLASH_DIR + File.separator + "02 - 3D Deconvolution",
                 IMAGE_ANALYSIS_DIR + File.separator + "Deconvolved"),
-        SPLIT_MERGE("03 - Split and Merge",
+        SPLIT_MERGE("Make Presentation-Ready Images",
+                FLASH_DIR + File.separator + "03 - Split and Merge",
                 IMAGES_DIR),
-        INTENSITY("04 - Fluorescence Intensity",
+        INTENSITY(IMAGE_ANALYSIS_DIR + File.separator + "Image Intensities",
+                FLASH_DIR + File.separator + "04 - Fluorescence Intensity",
                 DATA_ANALYSIS_DIR + File.separator + "ROI Intensities"),
-        OBJECTS("05 - 3D Object Analysis",
+        OBJECTS(IMAGE_ANALYSIS_DIR + File.separator + "3D Objects",
+                FLASH_DIR + File.separator + "05 - 3D Object Analysis",
                 DATA_ANALYSIS_DIR + File.separator + "Objects"),
-        SPATIAL("06 - Spatial Analysis",
+        SPATIAL(IMAGE_ANALYSIS_DIR + File.separator + "Spatial Analysis",
+                FLASH_DIR + File.separator + "06 - Spatial Analysis",
                 DATA_ANALYSIS_DIR + File.separator + "Spatial",
                 DATA_ANALYSIS_DIR + File.separator + "Morphometry"),
-        LINE_DISTANCE("07 - Line Distance",
+        LINE_DISTANCE(IMAGE_ANALYSIS_DIR + File.separator + "Line Distance Analysis",
+                FLASH_DIR + File.separator + "07 - Line Distance",
                 DATA_ANALYSIS_DIR + File.separator + "Lines",
                 DATA_ANALYSIS_DIR + File.separator + "Objects"),
-        SPECTRAL("08 - Spectral Decontamination",
+        SPECTRAL("Spectral Decontamination",
+                FLASH_DIR + File.separator + "08 - Spectral Decontamination",
                 DATA_ANALYSIS_DIR + File.separator + "Spectral Decontamination",
                 IMAGE_ANALYSIS_DIR + File.separator + "Spectral Decontamination"),
-        AGGREGATION("09 - Result Aggregation",
+        AGGREGATION(RESULTS_EXPORT_DIR,
+                FLASH_DIR + File.separator + "09 - Result Aggregation",
                 IMAGEJ_EXPORTS_DIR),
-        STATISTICS("10 - Statistical Analysis",
+        STATISTICS(RESULTS_EXPORT_DIR,
+                FLASH_DIR + File.separator + "10 - Statistical Analysis",
                 IMAGEJ_EXPORTS_DIR),
-        EXCEL("11 - Excel Summary Export",
+        EXCEL(RESULTS_EXPORT_DIR,
+                FLASH_DIR + File.separator + "11 - Excel Summary Export",
                 IMAGEJ_EXPORTS_DIR);
 
         private final String directoryName;
@@ -105,8 +133,12 @@ public final class FlashProjectLayout {
         return new File(projectRoot, LEGACY_BIN_DIR);
     }
 
+    public File legacyConfigurationDir() {
+        return new File(flashRoot(), LEGACY_CONFIGURATION_DIR);
+    }
+
     public List<File> configurationReadDirs() {
-        return immutableList(configurationWriteDir(), legacyBinDir());
+        return immutableList(configurationWriteDir(), legacyConfigurationDir(), legacyBinDir());
     }
 
     public File existingConfigurationDir() {
@@ -118,7 +150,9 @@ public final class FlashProjectLayout {
     }
 
     public List<File> channelDataReadFiles() {
-        return immutableList(channelDataWriteFile(), new File(legacyBinDir(), CHANNEL_DATA_FILENAME));
+        return immutableList(channelDataWriteFile(),
+                new File(legacyConfigurationDir(), CHANNEL_DATA_FILENAME),
+                new File(legacyBinDir(), CHANNEL_DATA_FILENAME));
     }
 
     public File channelDataReadFile() {
@@ -165,6 +199,8 @@ public final class FlashProjectLayout {
 
     public List<File> objectAnalysisDetailsReadDirs() {
         return immutableList(objectAnalysisDetailsWriteDir(),
+                new File(projectRoot, FLASH_DIR + File.separator + "05 - 3D Object Analysis"
+                        + File.separator + "Objects" + File.separator + "Analysis Details"),
                 new File(projectRoot, DATA_ANALYSIS_DIR + File.separator + "Objects"
                         + File.separator + "Analysis Details"));
     }
@@ -213,16 +249,30 @@ public final class FlashProjectLayout {
         return new File(aggregationWriteDir(), fileName);
     }
 
+    public File conditionManifestWriteFile() {
+        return conditionManifestWriteFile(CONDITIONS_FILENAME);
+    }
+
     public List<File> conditionManifestReadFiles(String fileName) {
-        List<File> out = new ArrayList<File>();
-        for (File dir : aggregationReadDirs()) {
-            out.add(new File(dir, fileName));
-        }
-        return Collections.unmodifiableList(out);
+        return readFilesForNames(aggregationReadDirs(), fileName);
+    }
+
+    public List<File> conditionManifestReadFiles() {
+        return readFilesForNames(aggregationReadDirs(),
+                CONDITIONS_FILENAME,
+                LEGACY_CONDITIONS_FILENAME);
     }
 
     public File statisticsWriteFile(String fileName) {
         return new File(statisticsWriteDir(), fileName);
+    }
+
+    public List<File> aggregationReadFiles(String... fileNames) {
+        return readFilesForNames(aggregationReadDirs(), fileNames);
+    }
+
+    public List<File> statisticsReadFiles(String... fileNames) {
+        return readFilesForNames(statisticsReadDirs(), fileNames);
     }
 
     public File excelWriteDir() {
@@ -237,48 +287,85 @@ public final class FlashProjectLayout {
         return new File(excelWriteDir(), fileName);
     }
 
+    public List<File> excelReadFiles(String... fileNames) {
+        return readFilesForNames(excelReadDirs(), fileNames);
+    }
+
+    public File orientationWriteDir() {
+        return analysisWriteDir(AnalysisFolder.ROIS);
+    }
+
+    public File orientationManifestWriteFile(String fileName) {
+        return new File(orientationWriteDir(), fileName);
+    }
+
+    public List<File> orientationManifestReadFiles(String... fileNames) {
+        return readFilesForNames(orientationReadDirs(), fileNames);
+    }
+
+    public List<File> orientationReadDirs() {
+        return immutableList(orientationWriteDir(),
+                new File(flashRoot(), IMAGEJ_EXPORTS_DIR),
+                new File(projectRoot, IMAGEJ_EXPORTS_DIR));
+    }
+
     public List<File> intensityDataReadDirs() {
         return analysisReadDirs(AnalysisFolder.INTENSITY);
     }
 
     public List<File> intensityAnalysisDetailsReadDirs() {
         return immutableList(intensityAnalysisDetailsWriteDir(),
+                new File(projectRoot, FLASH_DIR + File.separator + "04 - Fluorescence Intensity"
+                        + File.separator + "Analysis Details"),
                 new File(projectRoot, DATA_ANALYSIS_DIR + File.separator + "ROI Intensities"
                         + File.separator + "Analysis Details"));
     }
 
     public List<File> objectDataReadDirs() {
         return immutableList(objectDataWriteDir(),
+                new File(projectRoot, FLASH_DIR + File.separator + "05 - 3D Object Analysis"
+                        + File.separator + "Objects"),
                 new File(projectRoot, DATA_ANALYSIS_DIR + File.separator + "Objects"));
     }
 
     public List<File> objectImageOutputReadDirs() {
         return immutableList(objectImageOutputsWriteDir(),
+                new File(projectRoot, FLASH_DIR + File.separator + "05 - 3D Object Analysis"
+                        + File.separator + "Image Outputs"),
                 new File(projectRoot, IMAGE_ANALYSIS_DIR));
     }
 
     public List<File> spatialDataReadDirs() {
         return immutableList(spatialDataWriteDir(),
+                new File(projectRoot, FLASH_DIR + File.separator + "06 - Spatial Analysis"
+                        + File.separator + "Spatial"),
                 new File(projectRoot, DATA_ANALYSIS_DIR + File.separator + "Spatial"));
     }
 
     public List<File> spatialMorphometryReadDirs() {
         return immutableList(spatialMorphometryWriteDir(),
+                new File(projectRoot, FLASH_DIR + File.separator + "06 - Spatial Analysis"
+                        + File.separator + "Morphometry"),
                 new File(projectRoot, DATA_ANALYSIS_DIR + File.separator + "Morphometry"));
     }
 
     public List<File> spatialImageOutputReadDirs() {
         return immutableList(spatialImageOutputsWriteDir(),
+                new File(projectRoot, FLASH_DIR + File.separator + "06 - Spatial Analysis"
+                        + File.separator + "Image Outputs"),
                 new File(projectRoot, IMAGE_ANALYSIS_DIR));
     }
 
     public List<File> lineDistanceReadDirs() {
         return immutableList(lineDistanceWriteDir(),
+                new File(projectRoot, FLASH_DIR + File.separator + "07 - Line Distance"),
                 new File(projectRoot, DATA_ANALYSIS_DIR + File.separator + "Objects"));
     }
 
     public List<File> lineSetReadDirs() {
         return immutableList(lineSetWriteDir(),
+                new File(projectRoot, FLASH_DIR + File.separator + "07 - Line Distance"
+                        + File.separator + "Line Sets"),
                 new File(projectRoot, DATA_ANALYSIS_DIR + File.separator + "Lines"));
     }
 
@@ -391,6 +478,28 @@ public final class FlashProjectLayout {
         List<File> out = new ArrayList<File>();
         out.add(first);
         out.add(second);
+        return Collections.unmodifiableList(out);
+    }
+
+    private static List<File> immutableList(File first, File second, File third) {
+        List<File> out = new ArrayList<File>();
+        out.add(first);
+        out.add(second);
+        out.add(third);
+        return Collections.unmodifiableList(out);
+    }
+
+    private static List<File> readFilesForNames(List<File> dirs, String... fileNames) {
+        List<File> out = new ArrayList<File>();
+        if (dirs == null || fileNames == null) return Collections.unmodifiableList(out);
+        for (File dir : dirs) {
+            if (dir == null) continue;
+            for (int i = 0; i < fileNames.length; i++) {
+                String fileName = fileNames[i];
+                if (fileName == null || fileName.trim().isEmpty()) continue;
+                out.add(new File(dir, fileName));
+            }
+        }
         return Collections.unmodifiableList(out);
     }
 }

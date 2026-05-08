@@ -31,10 +31,10 @@ public class ExcelSummaryExportAnalysisTest {
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(dir.getAbsolutePath());
         File aggregationDir = layout.aggregationWriteDir();
         File statisticsDir = layout.statisticsWriteDir();
-        assertTrue(aggregationDir.mkdirs());
-        assertTrue(statisticsDir.mkdirs());
+        assertTrue(aggregationDir.isDirectory() || aggregationDir.mkdirs());
+        assertTrue(statisticsDir.isDirectory() || statisticsDir.mkdirs());
 
-        writeCsv(new File(aggregationDir, "Project_Master_Objects.csv"),
+        writeCsv(new File(aggregationDir, FlashProjectLayout.MASTER_OBJECTS_FILENAME),
                 Arrays.asList("AnimalName", "GFAP_Count"),
                 Arrays.asList(
                         Arrays.asList("Mouse1", "1.0"),
@@ -45,7 +45,7 @@ public class ExcelSummaryExportAnalysisTest {
         conditions.put("Mouse2", "CondB");
         ConditionManifestIO.saveAssignments(dir.getAbsolutePath(), conditions);
 
-        writeCsv(new File(statisticsDir, "Project_Statistics.csv"),
+        writeCsv(new File(statisticsDir, FlashProjectLayout.STATISTICS_FILENAME),
                 Arrays.asList("Metric", "Test", "Statistic", "p-value", "Significant", "NormalityResult",
                         "Group1", "Group2", "PairwiseTest", "PairwiseStatistic",
                         "PairwisePValue", "CorrectedPValue", "Significance", "Notes"),
@@ -71,7 +71,7 @@ public class ExcelSummaryExportAnalysisTest {
         analysis.setSuppressDialogs(true);
         analysis.execute(dir.getAbsolutePath());
 
-        File workbookFile = layout.excelWriteFile("Project_Summary.xlsx");
+        File workbookFile = layout.excelWriteFile(FlashProjectLayout.SUMMARY_WORKBOOK_FILENAME);
         assertTrue(workbookFile.isFile());
 
         FileInputStream fis = new FileInputStream(workbookFile);
@@ -96,9 +96,9 @@ public class ExcelSummaryExportAnalysisTest {
         File dir = temp.newFolder("excel-summary-legacy-details");
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(dir.getAbsolutePath());
         File aggregationDir = layout.aggregationWriteDir();
-        assertTrue(aggregationDir.mkdirs());
+        assertTrue(aggregationDir.isDirectory() || aggregationDir.mkdirs());
 
-        writeCsv(new File(aggregationDir, "Project_Master_Objects.csv"),
+        writeCsv(new File(aggregationDir, FlashProjectLayout.MASTER_OBJECTS_FILENAME),
                 Arrays.asList("AnimalName", "GFAP_Count"),
                 Arrays.asList(
                         Arrays.asList("Mouse1", "1.0"),
@@ -120,7 +120,7 @@ public class ExcelSummaryExportAnalysisTest {
         analysis.setSuppressDialogs(true);
         analysis.execute(dir.getAbsolutePath());
 
-        File workbookFile = layout.excelWriteFile("Project_Summary.xlsx");
+        File workbookFile = layout.excelWriteFile(FlashProjectLayout.SUMMARY_WORKBOOK_FILENAME);
         assertTrue(workbookFile.isFile());
 
         FileInputStream fis = new FileInputStream(workbookFile);

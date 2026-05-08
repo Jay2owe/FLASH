@@ -84,7 +84,7 @@ public class SpectralPreviewSelectorTest {
         File project = temp.newFolder("preview-path-project");
 
         assertEquals(new File(project,
-                        "FLASH/08 - Spectral Decontamination/preview_selection.csv")
+                        "FLASH/Spectral Decontamination/preview_selection.csv")
                         .getAbsolutePath(),
                 SpectralPreviewSelector.previewSelectionFile(project.getAbsolutePath()).getAbsolutePath());
     }

@@ -19,12 +19,13 @@ import java.util.Set;
  */
 public final class ConditionManifestIO {
 
-    public static final String FILE_NAME = "Project_Conditions.csv";
+    public static final String FILE_NAME = FlashProjectLayout.CONDITIONS_FILENAME;
+    public static final String LEGACY_FILE_NAME = FlashProjectLayout.LEGACY_CONDITIONS_FILENAME;
 
     private ConditionManifestIO() {}
 
     public static File getFile(String directory) {
-        return FlashProjectLayout.forDirectory(directory).conditionManifestWriteFile(FILE_NAME);
+        return FlashProjectLayout.forDirectory(directory).conditionManifestWriteFile();
     }
 
     public static File getReadFile(String directory) {
@@ -33,8 +34,7 @@ public final class ConditionManifestIO {
     }
 
     public static File getExistingFile(String directory) {
-        List<File> candidates = FlashProjectLayout.forDirectory(directory)
-                .conditionManifestReadFiles(FILE_NAME);
+        List<File> candidates = FlashProjectLayout.forDirectory(directory).conditionManifestReadFiles();
         for (File candidate : candidates) {
             if (candidate.isFile()) return candidate;
         }
@@ -106,7 +106,7 @@ public final class ConditionManifestIO {
     /**
      * Returns condition assignments for the given animals.
      * <p>
-     * Saved assignments in {@code Project_Conditions.csv} are preferred.
+     * Saved assignments in {@code Conditions.csv} are preferred.
      * Legacy auto-generated manifests that collapsed multiple suffix conditions
      * into a single prefix (for example {@code hAPP}) are upgraded in place to
      * preserve the newer suffix-aware detection (for example
@@ -317,7 +317,7 @@ public final class ConditionManifestIO {
     }
 
     /**
-     * Persists condition assignments to {@code FLASH/09 - Result Aggregation/Project_Conditions.csv}.
+     * Persists condition assignments to {@code FLASH/Results Export/Conditions.csv}.
      * Trims keys and values and drops blank rows so the file stays clean.
      */
     public static void saveAssignments(String directory, Map<String, String> assignments) throws IOException {

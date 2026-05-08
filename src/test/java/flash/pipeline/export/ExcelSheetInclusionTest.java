@@ -38,7 +38,7 @@ public class ExcelSheetInclusionTest {
         analysis.execute(dir.getAbsolutePath());
 
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(dir.getAbsolutePath());
-        List<String> sheets = readSheetNames(layout.excelWriteFile("Project_Summary.xlsx"));
+        List<String> sheets = readSheetNames(layout.excelWriteFile(FlashProjectLayout.SUMMARY_WORKBOOK_FILENAME));
         assertTrue("Expected at least one per-metric sheet. Got: " + sheets, sheets.size() >= 1);
         for (String name : sheets) {
             assertSheetIsNotMeta(name);
@@ -56,7 +56,7 @@ public class ExcelSheetInclusionTest {
         analysis.execute(dir.getAbsolutePath());
 
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(dir.getAbsolutePath());
-        File workbookFile = layout.excelWriteFile("Project_Summary.xlsx");
+        File workbookFile = layout.excelWriteFile(FlashProjectLayout.SUMMARY_WORKBOOK_FILENAME);
         assertTrue(workbookFile.isFile());
 
         FileInputStream fis = new FileInputStream(workbookFile);
@@ -87,10 +87,10 @@ public class ExcelSheetInclusionTest {
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(dir.getAbsolutePath());
         File aggregationDir = layout.aggregationWriteDir();
         File statisticsDir = layout.statisticsWriteDir();
-        assertTrue(aggregationDir.mkdirs());
-        assertTrue(statisticsDir.mkdirs());
+        assertTrue(aggregationDir.isDirectory() || aggregationDir.mkdirs());
+        assertTrue(statisticsDir.isDirectory() || statisticsDir.mkdirs());
 
-        writeCsv(new File(aggregationDir, "Project_Master_Objects.csv"),
+        writeCsv(new File(aggregationDir, FlashProjectLayout.MASTER_OBJECTS_FILENAME),
                 Arrays.asList("AnimalName", "GFAP_Count"),
                 Arrays.asList(
                         Arrays.asList("Mouse1", "12.0"),
@@ -105,7 +105,7 @@ public class ExcelSheetInclusionTest {
         conditions.put("Mouse4", "KO");
         ConditionManifestIO.saveAssignments(dir.getAbsolutePath(), conditions);
 
-        writeCsv(new File(statisticsDir, "Project_Statistics.csv"),
+        writeCsv(new File(statisticsDir, FlashProjectLayout.STATISTICS_FILENAME),
                 Arrays.asList("Metric", "Test", "Statistic", "p-value", "Significant", "NormalityResult",
                         "Group1", "Group2", "PairwiseTest", "PairwiseStatistic",
                         "PairwisePValue", "CorrectedPValue", "Significance", "Notes"),

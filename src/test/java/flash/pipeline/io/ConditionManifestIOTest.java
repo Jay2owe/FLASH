@@ -189,7 +189,7 @@ public class ConditionManifestIOTest {
 
         File manifest = ConditionManifestIO.getFile(dir.getAbsolutePath());
         assertTrue("Manifest file should be created", manifest.exists());
-        assertEquals("09 - Result Aggregation", manifest.getParentFile().getName());
+        assertEquals("Results Export", manifest.getParentFile().getName());
         assertEquals("FLASH", manifest.getParentFile().getParentFile().getName());
     }
 
@@ -250,7 +250,7 @@ public class ConditionManifestIOTest {
     }
 
     private static File legacyManifest(File dir) {
-        File manifest = new File(new File(dir, "ImageJ Exports"), ConditionManifestIO.FILE_NAME);
+        File manifest = new File(new File(dir, "ImageJ Exports"), ConditionManifestIO.LEGACY_FILE_NAME);
         assertTrue(manifest.getParentFile().isDirectory() || manifest.getParentFile().mkdirs());
         return manifest;
     }

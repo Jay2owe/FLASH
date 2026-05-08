@@ -64,7 +64,7 @@ public class IntensityAnalysisV2Test {
 
         assertEquals(1, chooserCalls.get());
         assertFalse(new File(dir, "Data Analysis/ROI Intensities").exists());
-        assertFalse(new File(dir, "FLASH/04 - Fluorescence Intensity").exists());
+        assertFalse(new File(dir, "FLASH/Image Analysis/Image Intensities").exists());
     }
 
     @Test
@@ -74,12 +74,14 @@ public class IntensityAnalysisV2Test {
         File writeRoot = IntensityAnalysisV2.intensityWriteRoot(dir.getAbsolutePath());
         List<File> readRoots = IntensityAnalysisV2.intensityReadRoots(dir.getAbsolutePath());
 
-        assertEquals(new File(dir, "FLASH/04 - Fluorescence Intensity").getAbsolutePath(),
+        assertEquals(new File(dir, "FLASH/Image Analysis/Image Intensities").getAbsolutePath(),
                 writeRoot.getAbsolutePath());
-        assertEquals(new File(dir, "FLASH/04 - Fluorescence Intensity").getAbsolutePath(),
+        assertEquals(new File(dir, "FLASH/Image Analysis/Image Intensities").getAbsolutePath(),
                 readRoots.get(0).getAbsolutePath());
-        assertEquals(new File(dir, "Data Analysis/ROI Intensities").getAbsolutePath(),
+        assertEquals(new File(dir, "FLASH/04 - Fluorescence Intensity").getAbsolutePath(),
                 readRoots.get(1).getAbsolutePath());
+        assertEquals(new File(dir, "Data Analysis/ROI Intensities").getAbsolutePath(),
+                readRoots.get(2).getAbsolutePath());
         assertEquals(new File(writeRoot, "GFAP in DAPI ROI.csv").getAbsolutePath(),
                 IntensityAnalysisV2.intensityOutputCsv(writeRoot, "GFAP", true, 1,
                         new String[]{"DAPI", "GFAP"}).getAbsolutePath());

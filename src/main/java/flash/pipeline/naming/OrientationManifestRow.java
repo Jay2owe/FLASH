@@ -3,7 +3,7 @@ package flash.pipeline.naming;
 import java.util.Locale;
 
 /**
- * One saved image-orientation decision from Project_Image_Orientation.csv.
+ * One saved image-orientation decision from Image Orientation.csv.
  */
 public final class OrientationManifestRow {
 

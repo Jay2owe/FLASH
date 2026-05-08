@@ -71,7 +71,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * Macro-faithful rewrite of intensityAnalysis() (Jamie IHF Pipeline 2), focused on outputs.
  *
- * Output: FLASH/04 - Fluorescence Intensity/<channel>.csv and Analysis Details/<channel>.txt
+ * Output: FLASH/Image Analysis/Image Intensities/<channel>.csv and Analysis Details/<channel>.txt
  */
 public class IntensityAnalysisV2 implements Analysis {
 

@@ -54,11 +54,10 @@ import java.util.Set;
 
 /**
  * Aggregates per-object and per-intensity CSV data across all channels into
- * master summary files saved to {@code FLASH/09 - Result Aggregation/}:
+ * master summary files saved to {@code FLASH/Results Export/}:
  * <ul>
- *   <li>{@code Project_Master_Objects.csv} — raw per-animal totals/means</li>
- *   <li>{@code Project_Master_Objects_PerMM3.csv} — volume-normalized (per mm³)</li>
- *   <li>{@code Project_Master_Intensities.csv} — intensity per-animal means</li>
+ *   <li>{@code 3D Objects.csv} - object and spatial per-animal totals/means</li>
+ *   <li>{@code Image Intensities.csv} - intensity per-animal means</li>
  * </ul>
  */
 public class MasterAggregationAnalysis implements Analysis {
@@ -483,7 +482,7 @@ public class MasterAggregationAnalysis implements Analysis {
         try {
             IoUtils.mustMkdirs(exportDir);
         } catch (IOException e) {
-            IJ.log("[FLASH] Could not create Result Aggregation directory: " + e.getMessage());
+            IJ.log("[FLASH] Could not create Results Export directory: " + e.getMessage());
             return;
         }
 
@@ -1341,7 +1340,7 @@ public class MasterAggregationAnalysis implements Analysis {
             table.put(groupKey, row);
         }
 
-        File outFile = new File(exportDir, "Project_Master_Objects.csv");
+        File outFile = new File(exportDir, FlashProjectLayout.MASTER_OBJECTS_FILENAME);
         writeMasterCsv(outFile, columns, allAnimals, table);
 
         // Write aggregation analysis details
@@ -1883,7 +1882,7 @@ public class MasterAggregationAnalysis implements Analysis {
             table.put(groupKey, row);
         }
 
-        File outFile = new File(exportDir, "Project_Master_Intensities.csv");
+        File outFile = new File(exportDir, FlashProjectLayout.MASTER_INTENSITIES_FILENAME);
         writeMasterCsv(outFile, columns, allAnimals, table);
 
         return true;

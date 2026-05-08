@@ -12,7 +12,7 @@ import java.nio.charset.StandardCharsets;
 
 /**
  * Writes macro-style per-channel Analysis Details for Intensity Analysis.
- * Output: FLASH/04 - Fluorescence Intensity/Analysis Details/&lt;channel&gt;.txt
+ * Output: FLASH/Image Analysis/Image Intensities/Analysis Details/&lt;channel&gt;.txt
  * Mirrors the tag structure used by ObjectAnalysisDetailsWriter:
  * {@code <Filter Macro>}, {@code <Analysis Macro>}, {@code <Threshold>}, {@code <In ROI>}.
  */

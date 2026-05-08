@@ -415,7 +415,7 @@ public class CreateBinFileAnalysisTest {
     }
 
     private static File configurationDir(File dir) {
-        return new File(dir, "FLASH/00 - Configuration");
+        return new File(dir, "FLASH/Set Up Configuration");
     }
 
     private static File configurationFile(File dir, String name) {

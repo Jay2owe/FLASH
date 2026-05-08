@@ -66,7 +66,7 @@ public class ObjectAnalysisDetailsWriterTest {
         File root = tempFolder.newFolder("object-details-layout");
 
         assertEquals(
-                new File(root, "FLASH/05 - 3D Object Analysis/Objects/Analysis Details").getAbsolutePath(),
+                new File(root, "FLASH/Image Analysis/3D Objects/Objects/Analysis Details").getAbsolutePath(),
                 ObjectAnalysisDetailsWriter.analysisDetailsWriteDir(root).getAbsolutePath());
     }
 

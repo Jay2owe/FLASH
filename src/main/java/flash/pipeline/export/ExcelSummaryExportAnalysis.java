@@ -135,12 +135,16 @@ public class ExcelSummaryExportAnalysis implements Analysis {
         }
         IJ.log("Excel preset: " + preset.getName());
 
-        File objectsCsv = findFirstExistingFile(layout.aggregationReadDirs(), "Project_Master_Objects.csv");
-        File intensitiesCsv = findFirstExistingFile(layout.aggregationReadDirs(), "Project_Master_Intensities.csv");
+        File objectsCsv = findFirstExistingFile(layout.aggregationReadFiles(
+                FlashProjectLayout.MASTER_OBJECTS_FILENAME,
+                FlashProjectLayout.LEGACY_MASTER_OBJECTS_FILENAME));
+        File intensitiesCsv = findFirstExistingFile(layout.aggregationReadFiles(
+                FlashProjectLayout.MASTER_INTENSITIES_FILENAME,
+                FlashProjectLayout.LEGACY_MASTER_INTENSITIES_FILENAME));
 
         if (objectsCsv == null && intensitiesCsv == null) {
             notifyUser("Excel Summary Export",
-                    "No master CSV files found in FLASH/09 - Result Aggregation or legacy ImageJ Exports.\n"
+                    "No master CSV files found in FLASH/Results Export or legacy result folders.\n"
                             + "Run Master Data Aggregation first.");
             return;
         }
@@ -205,8 +209,10 @@ public class ExcelSummaryExportAnalysis implements Analysis {
 
         Map<String, Map<String, String>> detailsPerMarker = loadAllAnalysisDetails(directory);
 
-        File outFile = layout.excelWriteFile("Project_Summary.xlsx");
-        File statisticsCsv = findFirstExistingFile(layout.statisticsReadDirs(), "Project_Statistics.csv");
+        File outFile = layout.excelWriteFile(FlashProjectLayout.SUMMARY_WORKBOOK_FILENAME);
+        File statisticsCsv = findFirstExistingFile(layout.statisticsReadFiles(
+                FlashProjectLayout.STATISTICS_FILENAME,
+                FlashProjectLayout.LEGACY_STATISTICS_FILENAME));
         try {
             writeExcel(outFile, statisticsCsv, conditionOrder, animalToCondition, allAnimals,
                     metricColumns, mergedData, detailsPerMarker);
@@ -1312,6 +1318,13 @@ public class ExcelSummaryExportAnalysis implements Analysis {
         for (File dir : dirs) {
             File file = new File(dir, fileName);
             if (file.isFile()) return file;
+        }
+        return null;
+    }
+
+    private static File findFirstExistingFile(List<File> files) {
+        for (File file : files) {
+            if (file != null && file.isFile()) return file;
         }
         return null;
     }

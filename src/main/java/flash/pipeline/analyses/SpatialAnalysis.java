@@ -698,7 +698,7 @@ public class SpatialAnalysis implements Analysis {
             opts.addHeader("Density Heatmaps");
             spatialBindings.doHeatmapsToggle = opts.addToggle("Generate density heatmaps", doHeatmaps);
             opts.addHelpText("Gaussian KDE density maps per channel. "
-                    + "Saved as TIFF + PNG to FLASH/06 - Spatial Analysis/Image Outputs/<animal>/Heatmaps/.");
+                    + "Saved as TIFF + PNG to FLASH/Image Analysis/Spatial Analysis/Image Outputs/<animal>/Heatmaps/.");
             spatialBindings.kdeBandwidthField = opts.addNumericField("KDE bandwidth (um, 0=auto)", heatmapBandwidth, 1);
             opts.addHelpText("Kernel bandwidth in microns. 0 uses Scott's rule automatically.");
             String[] lutOptions = {"Fire", "Grays", "Cyan", "Green", "Magenta", "Red"};

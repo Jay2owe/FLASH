@@ -738,7 +738,7 @@ public class ImageOrientationSetupAnalysis implements Analysis {
                     "<html><body style='width:780px'>"
                     + "<b>Image orientation setup</b><br>"
                     + "Review one row per image or series. Yellow rows are filename-alias suggestions and need confirmation. "
-                    + "Red rows are incomplete. Saving writes Project_Image_Orientation.csv under ImageJ Exports."
+                    + "Red rows are incomplete. Saving writes Image Orientation.csv under FLASH/Draw and Save ROIs."
                     + "</body></html>");
         }
 

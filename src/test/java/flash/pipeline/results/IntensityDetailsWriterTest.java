@@ -39,7 +39,8 @@ public class IntensityDetailsWriterTest {
 
         File out = new File(analysisDetailsDir, "GFAP.txt");
         assertTrue(out.getAbsolutePath().contains(
-                "FLASH" + File.separator + "04 - Fluorescence Intensity"
+                "FLASH" + File.separator + "Image Analysis"
+                        + File.separator + "Image Intensities"
                         + File.separator + "Analysis Details"));
         String text = new String(Files.readAllBytes(out.toPath()), StandardCharsets.UTF_8);
 

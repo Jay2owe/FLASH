@@ -59,7 +59,7 @@ import java.util.Set;
  * <p>Lets users draw named reference lines on images and computes the
  * perpendicular distance from every 3D object to those lines. Distances
  * are written as updated per-channel CSV copies in
- * {@code FLASH/07 - Line Distance/}.
+ * {@code FLASH/Image Analysis/Line Distance Analysis/}.
  */
 public class LineDistanceAnalysis implements Analysis {
 
@@ -376,7 +376,7 @@ public class LineDistanceAnalysis implements Analysis {
 
     /**
      * Opens each image, lets the user draw one line per image, saves
-     * all lines to a single zip in FLASH/07 - Line Distance/Line Sets/.
+     * all lines to a single zip in FLASH/Image Analysis/Line Distance Analysis/Line Sets/.
      * Public so it can be called from DrawAndSaveROIsAnalysis.
      *
      * @return true if at least one line was drawn and saved

@@ -44,7 +44,7 @@ public class AnalysisStatusScanner {
                         firstExistingFile(layout.channelDataReadFiles()) != null),
                 "Set Up Configuration");
         boolean roiOutputs = hasRoiOutputs(layout);
-        boolean orientationManifest = OrientationManifestIO.getFile(directory.getAbsolutePath()).isFile();
+        boolean orientationManifest = OrientationManifestIO.getExistingFile(directory.getAbsolutePath()) != null;
         put(out, FLASH_Pipeline.IDX_DRAW_ROIS,
                 fallbackStatus(directory, roiOutputs),
                 "Draw and Save ROIs");
@@ -74,14 +74,21 @@ public class AnalysisStatusScanner {
                 "Fluorescence Intensity Analysis");
         put(out, FLASH_Pipeline.IDX_AGGREGATION,
                 sidecarStatus(directory, AGGREGATION_ID, currentBinHash,
-                        hasFile(layout.aggregationReadDirs(), "Project_Master_Objects.csv")
-                                || hasFile(layout.aggregationReadDirs(), "Project_Master_Intensities.csv")),
+                        firstExistingFile(layout.aggregationReadFiles(
+                                FlashProjectLayout.MASTER_OBJECTS_FILENAME,
+                                FlashProjectLayout.LEGACY_MASTER_OBJECTS_FILENAME,
+                                FlashProjectLayout.MASTER_INTENSITIES_FILENAME,
+                                FlashProjectLayout.LEGACY_MASTER_INTENSITIES_FILENAME)) != null),
                 "Master Aggregation");
         put(out, FLASH_Pipeline.IDX_STATISTICS,
-                fallbackStatus(directory, hasFile(layout.statisticsReadDirs(), "Project_Statistics.csv")),
+                fallbackStatus(directory, firstExistingFile(layout.statisticsReadFiles(
+                        FlashProjectLayout.STATISTICS_FILENAME,
+                        FlashProjectLayout.LEGACY_STATISTICS_FILENAME)) != null),
                 "Statistical Analysis");
         put(out, FLASH_Pipeline.IDX_EXCEL_EXPORT,
-                fallbackStatus(directory, hasFile(layout.excelReadDirs(), "Project_Summary.xlsx")),
+                fallbackStatus(directory, firstExistingFile(layout.excelReadFiles(
+                        FlashProjectLayout.SUMMARY_WORKBOOK_FILENAME,
+                        FlashProjectLayout.LEGACY_SUMMARY_WORKBOOK_FILENAME)) != null),
                 "Excel Summary Export");
         put(out, FLASH_Pipeline.IDX_SPECTRAL_DECONTAMINATION,
                 fallbackStatus(directory, hasCsv(layout.analysisReadDirs(
@@ -274,7 +281,7 @@ public class AnalysisStatusScanner {
         }
         List<File> dirs = layout.analysisReadDirs(FlashProjectLayout.AnalysisFolder.ROIS);
         for (int i = 0; i < dirs.size(); i++) {
-            if (hasZip(dirs.get(i)) || hasCsv(dirs.get(i))) return true;
+            if (hasZip(dirs.get(i))) return true;
         }
         return false;
     }

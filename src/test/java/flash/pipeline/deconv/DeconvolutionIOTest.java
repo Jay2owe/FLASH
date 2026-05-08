@@ -71,22 +71,24 @@ public class DeconvolutionIOTest {
     public void mergedDeconvolvedOutputUsesCanonicalFileName() {
         File root = temp.getRoot();
         File merged = DeconvolutionIO.mergedDeconvFile(root, "My Image");
-        assertEquals(new File(new File(new File(root, "FLASH"), "02 - 3D Deconvolution"), "My Image_deconv.tif"), merged);
+        assertEquals(new File(new File(new File(root, "FLASH"), "3D Deconvolution"), "My Image_deconv.tif"), merged);
     }
 
     @Test
     public void deconvolutionOutputsUseFlashAnalysisFolderWithLegacyReadFallback() {
         File root = temp.getRoot();
 
-        assertEquals(new File(new File(root, "FLASH"), "02 - 3D Deconvolution"),
+        assertEquals(new File(new File(root, "FLASH"), "3D Deconvolution"),
                 DeconvolutionIO.deconvOutDir(root));
 
         List<File> candidates = DeconvolutionIO.mergedDeconvFileReadCandidates(root, "My Image");
-        assertEquals(2, candidates.size());
-        assertEquals(new File(new File(new File(root, "FLASH"), "02 - 3D Deconvolution"), "My Image_deconv.tif"),
+        assertEquals(3, candidates.size());
+        assertEquals(new File(new File(new File(root, "FLASH"), "3D Deconvolution"), "My Image_deconv.tif"),
                 candidates.get(0));
-        assertEquals(new File(new File(new File(root, "Image Analysis"), "Deconvolved"), "My Image_deconv.tif"),
+        assertEquals(new File(new File(new File(root, "FLASH"), "02 - 3D Deconvolution"), "My Image_deconv.tif"),
                 candidates.get(1));
+        assertEquals(new File(new File(new File(root, "Image Analysis"), "Deconvolved"), "My Image_deconv.tif"),
+                candidates.get(2));
     }
 
     @Test

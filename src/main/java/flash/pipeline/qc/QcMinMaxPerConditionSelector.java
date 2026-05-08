@@ -818,8 +818,8 @@ public final class QcMinMaxPerConditionSelector {
         if (!channelSignature(qcChannels).equals(props.getProperty(KEY_QC_CHANNEL_SIGNATURE))) return false;
         if (!ZSliceConfigIO.signature(zSliceConfig).equals(props.getProperty(KEY_Z_SLICE_SIGNATURE, "zslice:full"))) return false;
 
-        File conditionFile = ConditionManifestIO.getFile(directory);
-        boolean conditionExists = conditionFile.isFile();
+        File conditionFile = ConditionManifestIO.getExistingFile(directory);
+        boolean conditionExists = conditionFile != null && conditionFile.isFile();
         if (!String.valueOf(conditionExists).equals(props.getProperty(KEY_CONDITIONS_EXISTS))) return false;
         if (conditionExists) {
             if (!String.valueOf(conditionFile.length()).equals(props.getProperty(KEY_CONDITIONS_LENGTH))) return false;
@@ -842,8 +842,8 @@ public final class QcMinMaxPerConditionSelector {
         props.setProperty(KEY_QC_CHANNEL_SIGNATURE, channelSignature(qcChannels));
         props.setProperty(KEY_Z_SLICE_SIGNATURE, ZSliceConfigIO.signature(zSliceConfig));
 
-        File conditionFile = ConditionManifestIO.getFile(directory);
-        boolean conditionExists = conditionFile.isFile();
+        File conditionFile = ConditionManifestIO.getExistingFile(directory);
+        boolean conditionExists = conditionFile != null && conditionFile.isFile();
         props.setProperty(KEY_CONDITIONS_EXISTS, String.valueOf(conditionExists));
         if (conditionExists) {
             props.setProperty(KEY_CONDITIONS_LENGTH, String.valueOf(conditionFile.length()));

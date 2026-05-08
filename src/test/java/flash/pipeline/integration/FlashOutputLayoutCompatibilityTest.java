@@ -30,7 +30,7 @@ public class FlashOutputLayoutCompatibilityTest {
         BinConfigIO.writeFromConfig(project.getAbsolutePath(), cfg);
 
         File newChannelData = new File(project,
-                "FLASH/00 - Configuration/Channel_Data.txt");
+                "FLASH/Set Up Configuration/Channel_Data.txt");
         assertTrue(newChannelData.isFile());
         assertFalse(new File(project, ".bin/Channel_Data.txt").exists());
         assertEquals("DAPI", BinConfigIO.readFromDirectory(
@@ -53,10 +53,12 @@ public class FlashOutputLayoutCompatibilityTest {
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(
                 project.getAbsolutePath());
 
-        assertEquals(new File(project, "FLASH/05 - 3D Object Analysis/Objects"),
+        assertEquals(new File(project, "FLASH/Image Analysis/3D Objects/Objects"),
                 layout.objectDataReadDirs().get(0));
-        assertEquals(new File(project, "Data Analysis/Objects"),
+        assertEquals(new File(project, "FLASH/05 - 3D Object Analysis/Objects"),
                 layout.objectDataReadDirs().get(1));
+        assertEquals(new File(project, "Data Analysis/Objects"),
+                layout.objectDataReadDirs().get(2));
         assertEquals(new File(project, "FLASH/Reports/Quality Report"),
                 layout.qualityReportReadDirs().get(0));
         assertEquals(new File(project, "Quality_Report"),
@@ -71,7 +73,7 @@ public class FlashOutputLayoutCompatibilityTest {
                 SpectralOutputWriter.expectedOutputs(project.getAbsolutePath(),
                         0, "Sample_LH_SCN", "Target");
         assertEquals(new File(project,
-                        "FLASH/08 - Spectral Decontamination/Image Outputs/"
+                        "FLASH/Spectral Decontamination/Image Outputs/"
                                 + "Series 001 - Sample_LH_SCN/corrected_Target.tif"),
                 outputs.correctedImageFile);
 

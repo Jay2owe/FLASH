@@ -56,7 +56,7 @@ public class MasterAggregationAnalysisTest {
         analysis.execute(root.getAbsolutePath());
 
         List<String> lines = Files.readAllLines(
-                aggregationFile(root, "Project_Master_Objects.csv").toPath(),
+                aggregationFile(root, "3D Objects.csv").toPath(),
                 StandardCharsets.UTF_8);
         assertEquals(2, lines.size());
 
@@ -110,7 +110,7 @@ public class MasterAggregationAnalysisTest {
         analysis.execute(root.getAbsolutePath());
 
         List<String> lines = Files.readAllLines(
-                aggregationFile(root, "Project_Master_Objects.csv").toPath(),
+                aggregationFile(root, "3D Objects.csv").toPath(),
                 StandardCharsets.UTF_8);
         Map<String, String> row = csvRow(lines.get(0), lines.get(1));
 
@@ -145,7 +145,7 @@ public class MasterAggregationAnalysisTest {
         analysis.execute(root.getAbsolutePath());
 
         List<String> lines = Files.readAllLines(
-                aggregationFile(root, "Project_Master_Objects.csv").toPath(),
+                aggregationFile(root, "3D Objects.csv").toPath(),
                 StandardCharsets.UTF_8);
 
         assertFalse(lines.get(0).contains("CK1D_Count_permm3"));
@@ -175,7 +175,7 @@ public class MasterAggregationAnalysisTest {
         analysis.execute(root.getAbsolutePath());
 
         List<String> lines = Files.readAllLines(
-                aggregationFile(root, "Project_Master_Objects.csv").toPath(),
+                aggregationFile(root, "3D Objects.csv").toPath(),
                 StandardCharsets.UTF_8);
         Map<String, String> row = csvRow(lines.get(0), lines.get(1));
 
@@ -203,7 +203,7 @@ public class MasterAggregationAnalysisTest {
         analysis.execute(root.getAbsolutePath());
 
         List<String> lines = Files.readAllLines(
-                aggregationFile(root, "Project_Master_Objects.csv").toPath(),
+                aggregationFile(root, "3D Objects.csv").toPath(),
                 StandardCharsets.UTF_8);
 
         assertFalse(lines.get(0).contains("CK1D_Count_permm3"));
@@ -235,7 +235,7 @@ public class MasterAggregationAnalysisTest {
         analysis.execute(root.getAbsolutePath());
 
         List<String> lines = Files.readAllLines(
-                aggregationFile(root, "Project_Master_Objects.csv").toPath(),
+                aggregationFile(root, "3D Objects.csv").toPath(),
                 StandardCharsets.UTF_8);
         assertEquals(2, lines.size());
 
@@ -249,7 +249,7 @@ public class MasterAggregationAnalysisTest {
     public void execute_readsNewObjectIntensityAndLineDistanceOutputsBeforeLegacy() throws Exception {
         File root = temp.newFolder("master-agg-new-layout");
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(root.getAbsolutePath());
-        File attrs = new File(root, "FLASH/01 - Regions of Interest/Attributes");
+        File attrs = new File(root, "FLASH/Draw and Save ROIs/Attributes");
         File objects = layout.objectDataWriteDir();
         File intensities = layout.intensityDataWriteDir();
         File lineDistances = layout.lineDistanceWriteDir();
@@ -286,11 +286,11 @@ public class MasterAggregationAnalysisTest {
         analysis.execute(root.getAbsolutePath());
 
         List<String> objectLines = Files.readAllLines(
-                aggregationFile(root, "Project_Master_Objects.csv").toPath(),
+                aggregationFile(root, "3D Objects.csv").toPath(),
                 StandardCharsets.UTF_8);
         String objectHeader = objectLines.get(0);
         String intensityHeader = Files.readAllLines(
-                aggregationFile(root, "Project_Master_Intensities.csv").toPath(),
+                aggregationFile(root, "Image Intensities.csv").toPath(),
                 StandardCharsets.UTF_8).get(0);
 
         assertTrue(objectHeader.contains("CK1D_Count"));
@@ -298,7 +298,7 @@ public class MasterAggregationAnalysisTest {
         assertTrue(objectHeader.contains("LegacyOnly_Count"));
         assertTrue(intensityHeader.contains("GFAP_ROI_IntDenMean"));
         assertFalse(objectLines.toString().contains("LegacyDuplicate"));
-        assertFalse(new File(root, "ImageJ Exports/Project_Master_Objects.csv").exists());
+        assertFalse(new File(root, "ImageJ Exports/3D Objects.csv").exists());
     }
 
     private void writeCsv(File file, String header, String rows) throws Exception {

@@ -89,9 +89,9 @@ public class ObjectScoreWriterTest {
                 StandardCharsets.UTF_8);
         assertTrue(ObjectScoreWriter.perObjectScoresFile(directory.getAbsolutePath())
                 .getAbsolutePath()
-                .contains(new File("FLASH/08 - Spectral Decontamination").getPath()));
+                .contains(new File("FLASH/Spectral Decontamination").getPath()));
         assertTrue(cleanedMapFile.getAbsolutePath()
-                .contains(new File("FLASH/08 - Spectral Decontamination/Image Outputs").getPath()));
+                .contains(new File("FLASH/Spectral Decontamination/Image Outputs").getPath()));
         assertTrue(csv.contains("ObjectID"));
         assertTrue(csv.contains("SCN1"));
         assertTrue(csv.contains("7"));
@@ -105,9 +105,9 @@ public class ObjectScoreWriterTest {
     @Test
     public void locatesObjectMapsFromFlashObjectLayout() throws Exception {
         File directory = Files.createTempDirectory("spectral-object-flash-reader").toFile();
-        File objectsDir = new File(directory, "FLASH/05 - 3D Object Analysis/Objects");
+        File objectsDir = new File(directory, "FLASH/Image Analysis/3D Objects/Objects");
         assertTrue(objectsDir.mkdirs());
-        File imageDir = new File(directory, "FLASH/05 - 3D Object Analysis/Image Outputs/AnimalA");
+        File imageDir = new File(directory, "FLASH/Image Analysis/3D Objects/Image Outputs/AnimalA");
         assertTrue(imageDir.mkdirs());
 
         File objectCsv = new File(objectsDir, "Target.csv");

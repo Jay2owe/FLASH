@@ -21,13 +21,33 @@ public class OrientationManifestIOTest {
     public TemporaryFolder temp = new TemporaryFolder();
 
     @Test
-    public void getFile_usesImageJExportsManifestName() throws Exception {
+    public void getFile_usesFlashRoiOrientationManifestName() throws Exception {
         File dir = temp.newFolder("project");
 
         File manifest = OrientationManifestIO.getFile(dir.getAbsolutePath());
 
-        assertEquals("Project_Image_Orientation.csv", manifest.getName());
-        assertEquals("ImageJ Exports", manifest.getParentFile().getName());
+        assertEquals("Image Orientation.csv", manifest.getName());
+        assertEquals("Draw and Save ROIs", manifest.getParentFile().getName());
+        assertEquals("FLASH", manifest.getParentFile().getParentFile().getName());
+    }
+
+    @Test
+    public void readIfExists_readsLegacyImageJExportsManifest() throws Exception {
+        File dir = temp.newFolder("legacy");
+        File manifest = new File(new File(dir, "ImageJ Exports"), OrientationManifestIO.LEGACY_FILE_NAME);
+        assertTrue(manifest.getParentFile().mkdirs());
+        PrintWriter pw = CsvSupport.newWriter(manifest);
+        try {
+            pw.println("ImageKey,SourceFile,SeriesIndex,OriginalName,DisplayName,AnimalName,Hemisphere,Region,RotateDegrees,FlipHorizontal,FlipVertical,ViewPolicy,DecisionSource,Confirmed,Notes");
+            pw.println("KEY,source.tif,1,Original,Display,Animal,LH,SCN,0,No,No,ManualOnly,Manual,Yes,legacy");
+        } finally {
+            pw.close();
+        }
+
+        List<OrientationManifestRow> rows = OrientationManifestIO.readIfExists(dir.getAbsolutePath());
+
+        assertEquals(1, rows.size());
+        assertEquals("legacy", rows.get(0).notes);
     }
 
     @Test

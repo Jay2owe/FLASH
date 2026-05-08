@@ -58,7 +58,7 @@ public class SpectralPreviewSelector {
                     ? new LinkedHashMap<String, String>()
                     : manualAssignments;
         } else if (source == SpectralDecontaminationConfig.ConditionSource.USE_EXISTING_CONDITION_FILE
-                && ConditionManifestIO.getFile(directory).isFile()) {
+                && ConditionManifestIO.getExistingFile(directory) != null) {
             assignments = ConditionManifestIO.resolveAssignments(directory, animals);
         } else {
             assignments = inferAssignments(animals);

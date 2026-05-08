@@ -239,7 +239,7 @@ public class BinSetupDispatcherTest {
         Files.write(new File(roiDir, "SCN ROIs.zip").toPath(), new byte[]{1, 2, 3});
         File withNewLayoutRois = temp.newFolder("withNewLayoutRois");
         File newRoiDir = new File(withNewLayoutRois,
-                "FLASH/01 - Regions of Interest/ROI Sets");
+                "FLASH/Draw and Save ROIs/ROI Sets");
         assertTrue(newRoiDir.mkdirs());
         Files.write(new File(newRoiDir, "SCN ROIs.zip").toPath(), new byte[]{1, 2, 3});
 
@@ -394,7 +394,7 @@ public class BinSetupDispatcherTest {
     }
 
     private static File configurationDir(File dir) {
-        return new File(dir, "FLASH/00 - Configuration");
+        return new File(dir, "FLASH/Set Up Configuration");
     }
 
     private static File configurationFile(File dir, String name) {

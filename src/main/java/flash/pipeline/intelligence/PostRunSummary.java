@@ -38,10 +38,14 @@ public final class PostRunSummary {
         if (directory == null || directory.isEmpty()) return;
 
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
-        File exportDir = firstMasterDirectory(layout);
+        File objectsMaster = firstExistingFile(layout.aggregationReadFiles(
+                FlashProjectLayout.MASTER_OBJECTS_FILENAME,
+                FlashProjectLayout.LEGACY_MASTER_OBJECTS_FILENAME));
+        File intensitiesMaster = firstExistingFile(layout.aggregationReadFiles(
+                FlashProjectLayout.MASTER_INTENSITIES_FILENAME,
+                FlashProjectLayout.LEGACY_MASTER_INTENSITIES_FILENAME));
+        File exportDir = masterDirectory(objectsMaster, intensitiesMaster);
         if (exportDir == null) return;
-        File objectsMaster = new File(exportDir, "Project_Master_Objects.csv");
-        File intensitiesMaster = new File(exportDir, "Project_Master_Intensities.csv");
 
         try {
             SummaryHistoryStore.Snapshot previous = SummaryHistoryStore.load(directory);
@@ -86,11 +90,17 @@ public final class PostRunSummary {
         }
     }
 
-    private static File firstMasterDirectory(FlashProjectLayout layout) {
-        for (File dir : layout.aggregationReadDirs()) {
-            File objectsMaster = new File(dir, "Project_Master_Objects.csv");
-            File intensitiesMaster = new File(dir, "Project_Master_Intensities.csv");
-            if (objectsMaster.isFile() || intensitiesMaster.isFile()) return dir;
+    private static File masterDirectory(File objectsMaster, File intensitiesMaster) {
+        if (objectsMaster != null && objectsMaster.isFile()) return objectsMaster.getParentFile();
+        if (intensitiesMaster != null && intensitiesMaster.isFile()) return intensitiesMaster.getParentFile();
+        return null;
+    }
+
+    private static File firstExistingFile(List<File> files) {
+        if (files == null) return null;
+        for (int i = 0; i < files.size(); i++) {
+            File file = files.get(i);
+            if (file != null && file.isFile()) return file;
         }
         return null;
     }

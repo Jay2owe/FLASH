@@ -178,7 +178,7 @@ public class SplitAndMergeImageChannelsAnalysisTest {
                 2);
 
         File activeChannelData = new File(
-                new File(new File(dir, "FLASH"), "00 - Configuration"), "Channel_Data.txt");
+                new File(new File(dir, "FLASH"), "Set Up Configuration"), "Channel_Data.txt");
         List<String> lines = Files.readAllLines(activeChannelData.toPath());
         assertEquals("DAPI GFAP", lines.get(0));
         assertEquals("Blue Green", lines.get(1));
@@ -201,7 +201,7 @@ public class SplitAndMergeImageChannelsAnalysisTest {
         BinConfigIO.updateMinMax(dir.getAbsolutePath(), new String[]{"10-200", "50-4000"});
 
         File activeChannelData = new File(
-                new File(new File(dir, "FLASH"), "00 - Configuration"), "Channel_Data.txt");
+                new File(new File(dir, "FLASH"), "Set Up Configuration"), "Channel_Data.txt");
         List<String> lines = Files.readAllLines(activeChannelData.toPath());
         assertEquals(5, lines.size());
         assertEquals("DAPI GFAP", lines.get(0));
@@ -214,7 +214,7 @@ public class SplitAndMergeImageChannelsAnalysisTest {
     @Test
     public void splitMergeOutputHelpersUseStageFolderLayout() throws Exception {
         File dir = temp.newFolder("layout");
-        File splitRoot = new File(new File(dir, "FLASH"), "03 - Split and Merge");
+        File splitRoot = new File(new File(dir, "FLASH"), "Make Presentation-Ready Images");
 
         assertEquals(new File(splitRoot, "Images"),
                 SplitAndMergeImageChannelsAnalysis.splitMergeImageWriteRoot(dir.getAbsolutePath()));
@@ -234,7 +234,7 @@ public class SplitAndMergeImageChannelsAnalysisTest {
                 new double[]{0.35, 0.5});
 
         File saturationFile = new File(
-                new File(new File(dir, "FLASH"), "00 - Configuration"), "Saturations.txt");
+                new File(new File(dir, "FLASH"), "Set Up Configuration"), "Saturations.txt");
         List<String> lines = Files.readAllLines(saturationFile.toPath(), StandardCharsets.UTF_8);
         assertEquals("DAPI 0.35", lines.get(0));
         assertEquals("GFAP N/A", lines.get(1));

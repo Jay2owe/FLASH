@@ -10,7 +10,7 @@ import java.util.Date;
 
 /**
  * Writes analysis details for the Split and Merge Image Channels analysis.
- * Output: FLASH/03 - Split and Merge/Analysis Details/SplitAndMerge_Details.txt
+ * Output: FLASH/Make Presentation-Ready Images/Analysis Details/SplitAndMerge_Details.txt
  *
  * Records per-channel display range settings, merge configuration,
  * background subtraction, orientation, and timing information.

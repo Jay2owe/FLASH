@@ -15,7 +15,10 @@ import java.util.List;
  */
 public final class OrientationManifestIO {
 
-    public static final String FILE_NAME = "Project_Image_Orientation.csv";
+    public static final String FILE_NAME = FlashProjectLayout.ORIENTATION_MANIFEST_FILENAME;
+    public static final String LEGACY_FILE_NAME = FlashProjectLayout.LEGACY_ORIENTATION_MANIFEST_FILENAME;
+    public static final String LEGACY_TYPO_FILE_NAME =
+            FlashProjectLayout.LEGACY_ORIENTATION_MANIFEST_TYPO_FILENAME;
 
     private static final List<String> HEADER = Arrays.asList(
             "ImageKey",
@@ -37,12 +40,21 @@ public final class OrientationManifestIO {
     private OrientationManifestIO() {}
 
     public static File getFile(String directory) {
-        return new File(new File(directory, "ImageJ Exports"), FILE_NAME);
+        return FlashProjectLayout.forDirectory(directory).orientationManifestWriteFile(FILE_NAME);
+    }
+
+    public static File getExistingFile(String directory) {
+        List<File> candidates = FlashProjectLayout.forDirectory(directory)
+                .orientationManifestReadFiles(FILE_NAME, LEGACY_FILE_NAME, LEGACY_TYPO_FILE_NAME);
+        for (File candidate : candidates) {
+            if (candidate.isFile()) return candidate;
+        }
+        return null;
     }
 
     public static List<OrientationManifestRow> readIfExists(String directory) {
-        File manifest = getFile(directory);
-        if (!manifest.isFile()) return new ArrayList<OrientationManifestRow>();
+        File manifest = getExistingFile(directory);
+        if (manifest == null || !manifest.isFile()) return new ArrayList<OrientationManifestRow>();
 
         try {
             return read(manifest);

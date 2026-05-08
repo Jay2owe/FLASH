@@ -27,7 +27,7 @@ public class ChannelIdentitiesIOTest {
         ChannelIdentitiesIO.write(bin, identities);
         ChannelIdentities loaded = ChannelIdentitiesIO.read(bin);
 
-        assertTrue(new File(temp.getRoot(), "FLASH/00 - Configuration/" + ChannelIdentitiesIO.FILE_NAME).isFile());
+        assertTrue(new File(temp.getRoot(), "FLASH/Set Up Configuration/" + ChannelIdentitiesIO.FILE_NAME).isFile());
         assertEquals(2, loaded.getEntries().size());
         assertEquals("iba1", loaded.findByChannelIndex(2).getMarkerId());
         assertEquals("complex", loaded.findByChannelIndex(2).getShape());

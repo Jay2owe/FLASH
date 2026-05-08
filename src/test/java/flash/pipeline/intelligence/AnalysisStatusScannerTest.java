@@ -53,8 +53,8 @@ public class AnalysisStatusScannerTest {
     @Test
     public void scan_detectsSavedRoiOutputsInCurrentFlashLayout() throws Exception {
         File dir = temp.newFolder("current-rois-done");
-        File roiSets = new File(dir, "FLASH/01 - Regions of Interest/ROI Sets");
-        File attributes = new File(dir, "FLASH/01 - Regions of Interest/Attributes");
+        File roiSets = new File(dir, "FLASH/Draw and Save ROIs/ROI Sets");
+        File attributes = new File(dir, "FLASH/Draw and Save ROIs/Attributes");
         assertTrue(roiSets.mkdirs());
         assertTrue(attributes.mkdirs());
         writeRoiZip(new File(roiSets, "SCN ROIs.zip"));
@@ -102,7 +102,7 @@ public class AnalysisStatusScannerTest {
         assertEquals(true, layout.objectDataWriteDir().mkdirs());
         assertEquals(true, new File(layout.objectDataWriteDir(), "DAPI.csv").createNewFile());
         assertEquals(true, layout.excelWriteDir().mkdirs());
-        assertEquals(true, new File(layout.excelWriteDir(), "Project_Summary.xlsx").createNewFile());
+        assertEquals(true, new File(layout.excelWriteDir(), "Summary.xlsx").createNewFile());
 
         Map<Integer, AnalysisStatus> statuses = new AnalysisStatusScanner().scan(dir);
 

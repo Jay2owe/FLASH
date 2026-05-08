@@ -96,9 +96,9 @@ public class SpectralOutputWriterTest {
         details.failedImages = 0;
         details.correctedImagesWritten = 1;
         details.maskImagesWritten = 1;
-        details.perImageSummaryPath = "FLASH/08 - Spectral Decontamination/per_image_summary.csv";
-        details.correctionCoefficientsPath = "FLASH/08 - Spectral Decontamination/correction_coefficients.csv";
-        details.previewSelectionPath = "FLASH/08 - Spectral Decontamination/preview_selection.csv";
+        details.perImageSummaryPath = "FLASH/Spectral Decontamination/per_image_summary.csv";
+        details.correctionCoefficientsPath = "FLASH/Spectral Decontamination/correction_coefficients.csv";
+        details.previewSelectionPath = "FLASH/Spectral Decontamination/preview_selection.csv";
         details.runtimeMs = 1500L;
 
         SpectralOutputWriter.writeAnalysisDetails(directory.getAbsolutePath(), details);
@@ -106,7 +106,7 @@ public class SpectralOutputWriterTest {
         assertTrue(outputs.correctedImageFile.isFile());
         assertTrue(outputs.maskImageFile.isFile());
         assertEquals(new File(directory,
-                        "FLASH/08 - Spectral Decontamination/Image Outputs/Series 001 - Mouse1_LH_SCN")
+                        "FLASH/Spectral Decontamination/Image Outputs/Series 001 - Mouse1_LH_SCN")
                         .getAbsolutePath(),
                 outputs.imageOutputDirectory.getAbsolutePath());
         assertTrue(SpectralOutputWriter.perImageSummaryFile(directory.getAbsolutePath()).isFile());
@@ -145,7 +145,7 @@ public class SpectralOutputWriterTest {
         summaryRows.add(SpectralOutputWriter.buildPerImageSummaryRow(
                 0,
                 "Mouse1_LH_SCN",
-                "FLASH/08 - Spectral Decontamination/Image Outputs/Series 001 - Mouse1_LH_SCN",
+                "FLASH/Spectral Decontamination/Image Outputs/Series 001 - Mouse1_LH_SCN",
                 "Control",
                 "control",
                 "Create cleaned image",
@@ -153,7 +153,7 @@ public class SpectralOutputWriterTest {
                 "Basic",
                 "Linear unmixing",
                 "processed",
-                new File(directory, "FLASH/08 - Spectral Decontamination/Image Outputs/Series 001 - Mouse1_LH_SCN/corrected_Target.tif"),
+                new File(directory, "FLASH/Spectral Decontamination/Image Outputs/Series 001 - Mouse1_LH_SCN/corrected_Target.tif"),
                 null,
                 "Full stack",
                 new ArrayList<CorrectionPipeline.FeatureSummary>(),
@@ -223,7 +223,7 @@ public class SpectralOutputWriterTest {
         assertTrue(parameterMapFile.isFile());
         assertTrue(parameterMapFile.getName().contains("local_k_coefficient_channel_2"));
         assertTrue(parameterMapFile.getAbsolutePath().contains(
-                new File("FLASH/08 - Spectral Decontamination/Image Outputs").getPath()));
+                new File("FLASH/Spectral Decontamination/Image Outputs").getPath()));
     }
 
     @Test

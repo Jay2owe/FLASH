@@ -28,7 +28,7 @@ public class StatisticalAnalysisHeadlessTest {
 
     /**
      * Headless execution with a pre-existing manifest and master CSV
-     * should write Project_Statistics.csv without any Swing interaction.
+     * should write Statistics.csv without any Swing interaction.
      */
     @Test
     public void headless_withManifestAndData_writesStatistics() throws Exception {
@@ -36,7 +36,7 @@ public class StatisticalAnalysisHeadlessTest {
         File exportDir = aggregationDir(dir);
 
         // Write a master objects CSV with at least 3 animals per condition
-        writeMasterCsv(new File(exportDir, "Project_Master_Objects.csv"),
+        writeMasterCsv(new File(exportDir, FlashProjectLayout.MASTER_OBJECTS_FILENAME),
                 new String[]{"AnimalName", "Count_A", "Count_B"},
                 new String[][]{
                         {"Syn1", "10", "20"},
@@ -64,7 +64,7 @@ public class StatisticalAnalysisHeadlessTest {
         analysis.execute(dir.getAbsolutePath());
 
         File statsFile = statisticsFile(dir);
-        assertTrue("Project_Statistics.csv should be created", statsFile.exists());
+        assertTrue("Statistics.csv should be created", statsFile.exists());
         assertTrue("Statistics file should not be empty", statsFile.length() > 0);
     }
 
@@ -77,7 +77,7 @@ public class StatisticalAnalysisHeadlessTest {
         File dir = temp.newFolder("project");
         File exportDir = aggregationDir(dir);
 
-        writeMasterCsv(new File(exportDir, "Project_Master_Objects.csv"),
+        writeMasterCsv(new File(exportDir, FlashProjectLayout.MASTER_OBJECTS_FILENAME),
                 new String[]{"AnimalName", "Count"},
                 new String[][]{
                         {"Syn1", "10"},
@@ -112,7 +112,7 @@ public class StatisticalAnalysisHeadlessTest {
         File exportDir = aggregationDir(dir);
 
         // Animal names that auto-detect to different conditions
-        writeMasterCsv(new File(exportDir, "Project_Master_Objects.csv"),
+        writeMasterCsv(new File(exportDir, FlashProjectLayout.MASTER_OBJECTS_FILENAME),
                 new String[]{"AnimalName", "Count"},
                 new String[][]{
                         {"Syn1Week2", "10"},
@@ -168,7 +168,9 @@ public class StatisticalAnalysisHeadlessTest {
         assertTrue("Statistics should be written to the new statistics folder",
                 statisticsFile(dir).exists());
         assertFalse("Legacy statistics output should not be written",
-                new File(exportDir, "Project_Statistics.csv").exists());
+                new File(exportDir, FlashProjectLayout.LEGACY_STATISTICS_FILENAME).exists());
+        assertFalse("New statistics output should not be written outside FLASH",
+                new File(exportDir, FlashProjectLayout.STATISTICS_FILENAME).exists());
     }
 
     /**
@@ -211,7 +213,7 @@ public class StatisticalAnalysisHeadlessTest {
         File dir = temp.newFolder("project");
         File exportDir = aggregationDir(dir);
 
-        writeMasterCsv(new File(exportDir, "Project_Master_Objects.csv"),
+        writeMasterCsv(new File(exportDir, FlashProjectLayout.MASTER_OBJECTS_FILENAME),
                 new String[]{"AnimalName", "Count_A"},
                 new String[][]{
                         {"A1_LH", "10"}, {"A1_RH", "12"},
@@ -244,7 +246,7 @@ public class StatisticalAnalysisHeadlessTest {
         analysis.execute(dir.getAbsolutePath());
 
         File statsFile = statisticsFile(dir);
-        assertTrue("Project_Statistics.csv should be created", statsFile.exists());
+        assertTrue("Statistics.csv should be created", statsFile.exists());
 
         boolean sawPairedYes = false;
         BufferedReader reader = new BufferedReader(new FileReader(statsFile));
@@ -271,7 +273,7 @@ public class StatisticalAnalysisHeadlessTest {
         File dir = temp.newFolder("project");
         File exportDir = aggregationDir(dir);
 
-        writeMasterCsv(new File(exportDir, "Project_Master_Objects.csv"),
+        writeMasterCsv(new File(exportDir, FlashProjectLayout.MASTER_OBJECTS_FILENAME),
                 new String[]{"AnimalName", "Count_A"},
                 new String[][]{
                         {"A1", "10"}, {"A2", "11"}, {"A3", "12"},
@@ -296,7 +298,7 @@ public class StatisticalAnalysisHeadlessTest {
         analysis.execute(dir.getAbsolutePath());
 
         File statsFile = statisticsFile(dir);
-        assertTrue("Project_Statistics.csv should be created", statsFile.exists());
+        assertTrue("Statistics.csv should be created", statsFile.exists());
 
         boolean sawDunns = false;
         BufferedReader reader = new BufferedReader(new FileReader(statsFile));
@@ -322,7 +324,7 @@ public class StatisticalAnalysisHeadlessTest {
 
     private static File statisticsFile(File root) {
         return FlashProjectLayout.forDirectory(root.getAbsolutePath())
-                .statisticsWriteFile("Project_Statistics.csv");
+                .statisticsWriteFile(FlashProjectLayout.STATISTICS_FILENAME);
     }
 
     private static void writeMasterCsv(File file, String[] headers, String[][] rows)

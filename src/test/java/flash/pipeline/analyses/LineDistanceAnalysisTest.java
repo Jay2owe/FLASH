@@ -86,9 +86,9 @@ public class LineDistanceAnalysisTest {
     public void lineDistancePathsUseFlashLayout() throws Exception {
         File dir = temp.newFolder("paths");
 
-        assertEquals(new File(dir, "FLASH/07 - Line Distance").getAbsolutePath(),
+        assertEquals(new File(dir, "FLASH/Image Analysis/Line Distance Analysis").getAbsolutePath(),
                 LineDistanceAnalysis.lineDistanceOutputDir(dir.getAbsolutePath()).getAbsolutePath());
-        assertEquals(new File(dir, "FLASH/07 - Line Distance/Line Sets").getAbsolutePath(),
+        assertEquals(new File(dir, "FLASH/Image Analysis/Line Distance Analysis/Line Sets").getAbsolutePath(),
                 LineDistanceAnalysis.lineSetWriteDir(dir.getAbsolutePath()).getAbsolutePath());
     }
 
@@ -122,7 +122,7 @@ public class LineDistanceAnalysisTest {
                 LineDistanceAnalysis.lineSetWriteDir(dir.getAbsolutePath()),
                 Arrays.asList("MissingLineSet"));
 
-        File out = new File(dir, "FLASH/07 - Line Distance/Marker_A.csv");
+        File out = new File(dir, "FLASH/Image Analysis/Line Distance Analysis/Marker_A.csv");
         assertTrue(out.isFile());
         assertTrue(new String(Files.readAllBytes(out.toPath()), StandardCharsets.UTF_8)
                 .contains("Region,XM,YM"));

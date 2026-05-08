@@ -28,6 +28,8 @@ public final class RoiIO {
     public static final String ATTRIBUTES_DIR = "Attributes";
     public static final String PARTIAL_DIR = "Partial";
     public static final String LEGACY_ROI_DIR = "ROIs";
+    public static final String LEGACY_FLASH_ROI_DIR = FlashProjectLayout.FLASH_DIR
+            + File.separator + "01 - Regions of Interest";
     public static final String LEGACY_ATTRIBUTES_DIR = "Data Analysis" + File.separator + "Attributes";
 
     private RoiIO() {}
@@ -53,6 +55,8 @@ public final class RoiIO {
         ArrayList<File> dirs = new ArrayList<File>();
         dirs.add(roiSetWriteDir(root));
         dirs.add(attributesWriteDir(root));
+        dirs.add(new File(new File(root, LEGACY_FLASH_ROI_DIR), ROI_SETS_DIR));
+        dirs.add(new File(new File(root, LEGACY_FLASH_ROI_DIR), ATTRIBUTES_DIR));
         dirs.add(new File(root, LEGACY_ROI_DIR));
         dirs.add(new File(root, LEGACY_ATTRIBUTES_DIR));
         return Collections.unmodifiableList(dirs);
@@ -62,6 +66,7 @@ public final class RoiIO {
         File root = requireDirectory(directory);
         ArrayList<File> dirs = new ArrayList<File>();
         dirs.add(attributesWriteDir(root));
+        dirs.add(new File(new File(root, LEGACY_FLASH_ROI_DIR), ATTRIBUTES_DIR));
         dirs.add(new File(root, LEGACY_ATTRIBUTES_DIR));
         return Collections.unmodifiableList(dirs);
     }

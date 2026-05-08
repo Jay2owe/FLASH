@@ -48,15 +48,17 @@ public class ThreeDObjectAnalysisSkipExistingTest {
     public void objectOutputHelpersUseFlashLayoutWithLegacyReadFallbacks() throws IOException {
         File project = temp.newFolder("project");
 
-        assertEquals(new File(project, "FLASH/05 - 3D Object Analysis/Objects"),
+        assertEquals(new File(project, "FLASH/Image Analysis/3D Objects/Objects"),
                 ThreeDObjectAnalysis.objectCsvWriteDir(project.getAbsolutePath()));
-        assertEquals(new File(project, "FLASH/05 - 3D Object Analysis/Image Outputs"),
+        assertEquals(new File(project, "FLASH/Image Analysis/3D Objects/Image Outputs"),
                 ThreeDObjectAnalysis.objectImageOutputWriteRoot(project.getAbsolutePath()));
         assertEquals(Arrays.asList(
+                        new File(project, "FLASH/Image Analysis/3D Objects/Objects"),
                         new File(project, "FLASH/05 - 3D Object Analysis/Objects"),
                         new File(project, "Data Analysis/Objects")),
                 ThreeDObjectAnalysis.objectCsvReadDirs(project.getAbsolutePath()));
         assertEquals(Arrays.asList(
+                        new File(project, "FLASH/Image Analysis/3D Objects/Image Outputs"),
                         new File(project, "FLASH/05 - 3D Object Analysis/Image Outputs"),
                         new File(project, "Image Analysis")),
                 ThreeDObjectAnalysis.objectImageOutputReadRoots(project.getAbsolutePath()));

@@ -75,8 +75,8 @@ import javax.swing.UIManager;
  * - User chooses to create a new ROI set or append to existing
  * - Opens each series from the .lif file
  * - For each image: user draws ROIs and clicks OK to continue
- * - Saves the ROI set to FLASH/01 - Regions of Interest/ROI Sets/<name> ROIs.zip
- * - Copies the ROI zip into FLASH/01 - Regions of Interest/Attributes/
+ * - Saves the ROI set to FLASH/Draw and Save ROIs/ROI Sets/<name> ROIs.zip
+ * - Copies the ROI zip into FLASH/Draw and Save ROIs/Attributes/
  */
 public class DrawAndSaveROIsAnalysis implements Analysis {
 
@@ -179,7 +179,7 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
         pd.addHeader("Line Sets");
         ToggleSwitch drawLineToggle = pd.addToggle("Draw Line Set", false);
         pd.addHelpText("Also draw a named reference line on each image (e.g., ventricle boundary). "
-                + "Lines are saved to FLASH/07 - Line Distance/Line Sets/ for distance analysis.");
+                + "Lines are saved to FLASH/Image Analysis/Line Distance Analysis/Line Sets/ for distance analysis.");
         JTextField lineSetNameField = pd.addStringField("Line Set Name", "Ventricle", 15);
 
         pd.addHeader("Settings");

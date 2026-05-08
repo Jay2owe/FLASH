@@ -2301,7 +2301,9 @@ public class CreateBinFileAnalysis implements Analysis {
         if (FlashProjectLayout.LEGACY_BIN_DIR.equals(binFolder.getName()) && parent != null) {
             return parent;
         }
-        if (FlashProjectLayout.CONFIGURATION_DIR.equals(binFolder.getName())
+        String folderName = binFolder.getName();
+        if ((FlashProjectLayout.CONFIGURATION_DIR.equals(folderName)
+                || FlashProjectLayout.LEGACY_CONFIGURATION_DIR.equals(folderName))
                 && parent != null
                 && FlashProjectLayout.FLASH_DIR.equals(parent.getName())
                 && parent.getParentFile() != null) {
