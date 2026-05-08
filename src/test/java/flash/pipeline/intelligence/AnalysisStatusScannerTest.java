@@ -8,8 +8,13 @@ import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
 import java.io.File;
+import java.io.FileOutputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.Collections;
 import java.util.Map;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -46,6 +51,39 @@ public class AnalysisStatusScannerTest {
     }
 
     @Test
+    public void scan_detectsSavedRoiOutputsInCurrentFlashLayout() throws Exception {
+        File dir = temp.newFolder("current-rois-done");
+        File roiSets = new File(dir, "FLASH/01 - Regions of Interest/ROI Sets");
+        File attributes = new File(dir, "FLASH/01 - Regions of Interest/Attributes");
+        assertTrue(roiSets.mkdirs());
+        assertTrue(attributes.mkdirs());
+        writeRoiZip(new File(roiSets, "SCN ROIs.zip"));
+        Files.write(new File(attributes, "SCN ROI Properties.csv").toPath(),
+                ("Image,ROI,Area,Volume (mm^3)\n"
+                        + "SCN_001,LH,123.0,0.001\n").getBytes(StandardCharsets.UTF_8));
+
+        AnalysisStatusScanner scanner = new AnalysisStatusScanner();
+        Map<Integer, AnalysisStatus> statuses = scanner.scan(dir);
+
+        assertEquals(AnalysisStatus.DONE,
+                statuses.get(Integer.valueOf(FLASH_Pipeline.IDX_DRAW_ROIS)));
+        assertTrue(scanner.tooltipFor(FLASH_Pipeline.IDX_DRAW_ROIS).contains("ROIs outputs"));
+    }
+
+    @Test
+    public void scan_detectsLegacyRoiOutputs() throws Exception {
+        File dir = temp.newFolder("legacy-rois-done");
+        File legacyRois = new File(dir, "ROIs");
+        assertTrue(legacyRois.mkdirs());
+        writeRoiZip(new File(legacyRois, "Legacy ROIs.zip"));
+
+        Map<Integer, AnalysisStatus> statuses = new AnalysisStatusScanner().scan(dir);
+
+        assertEquals(AnalysisStatus.DONE,
+                statuses.get(Integer.valueOf(FLASH_Pipeline.IDX_DRAW_ROIS)));
+    }
+
+    @Test
     public void writeSidecar_usesFlashStatusAnalysisFolder() throws Exception {
         File dir = temp.newFolder("sidecar-new");
 
@@ -72,5 +110,16 @@ public class AnalysisStatusScannerTest {
                 statuses.get(Integer.valueOf(FLASH_Pipeline.IDX_3D_OBJECT)));
         assertEquals(AnalysisStatus.DONE,
                 statuses.get(Integer.valueOf(FLASH_Pipeline.IDX_EXCEL_EXPORT)));
+    }
+
+    private static void writeRoiZip(File file) throws Exception {
+        ZipOutputStream out = new ZipOutputStream(new FileOutputStream(file));
+        try {
+            out.putNextEntry(new ZipEntry("LH.roi"));
+            out.write(new byte[]{73, 111, 117, 116});
+            out.closeEntry();
+        } finally {
+            out.close();
+        }
     }
 }

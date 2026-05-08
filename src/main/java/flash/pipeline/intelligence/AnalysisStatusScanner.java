@@ -4,6 +4,7 @@ import flash.pipeline.FLASH_Pipeline;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.ImageSourceDispatcher;
 import flash.pipeline.io.OrientationManifestIO;
+import flash.pipeline.roi.RoiIO;
 
 import java.io.File;
 import java.io.FilenameFilter;
@@ -267,6 +268,10 @@ public class AnalysisStatusScanner {
     }
 
     private static boolean hasRoiOutputs(FlashProjectLayout layout) {
+        if (!RoiIO.listRoiZipFiles(layout.projectRoot()).isEmpty()
+                || !RoiIO.listRoiPropertiesCsvFiles(layout.projectRoot()).isEmpty()) {
+            return true;
+        }
         List<File> dirs = layout.analysisReadDirs(FlashProjectLayout.AnalysisFolder.ROIS);
         for (int i = 0; i < dirs.size(); i++) {
             if (hasZip(dirs.get(i)) || hasCsv(dirs.get(i))) return true;
