@@ -39,6 +39,8 @@ import flash.pipeline.ui.config.ConfigQcContext;
 import flash.pipeline.ui.config.ConfigQcDialog;
 import flash.pipeline.ui.config.ConfigQcResult;
 import flash.pipeline.ui.config.ConfigQcStage;
+import flash.pipeline.ui.config.ChannelThresholdStage;
+import flash.pipeline.ui.config.DisplayRangeStage;
 import flash.pipeline.ui.config.FilterParameterStage;
 import flash.pipeline.ui.config.ZSliceSelectionStage;
 import flash.pipeline.ui.sandbox.SandboxDialog;
@@ -3704,71 +3706,9 @@ public class CreateBinFileAnalysis implements Analysis {
             }
 
             if (doMM) {
-                double[] range = parseMinMax(cfg.minmax.get(ch));
-                int imgIdx = 0;
-                while (imgIdx < images.size()) {
-                    closeQcToolWindows();
-                    QcImageSelection imageSelection = images.get(imgIdx);
-                    ImagePlus imp = imageSelection.image;
-                    ImagePlus chStack = new Duplicator().run(imp, channelNum, channelNum,
-                            1, imp.getNSlices(), 1, imp.getNFrames());
-                    ImagePlus dup = ZProjector.run(chStack, "max");
-                    chStack.changes = false;
-                    chStack.close();
-                    chStack.flush();
-                    dup.setTitle("Custom Min-Max Display Ranges | " + chLabel + " | " + imp.getTitle());
-
-                    if (range != null) dup.setDisplayRange(range[0], range[1]);
-                    dup.show();
-                    IJ.run(dup, toLutName(cfg.colors.get(ch)), "");
-                    positionImageLeft(dup);
-                    IJ.run(dup, "Brightness/Contrast...", "");
-                    positionToolWindowNextToImage(BRIGHTNESS_CONTRAST_WINDOW_TITLES);
-
-                    String mmAction = showLockInSkipDialog(
-                            "Custom Min-Max Display Ranges \u2014 " + chLabel,
-                            "Adjust Display Range",
-                            new String[]{
-                                    "Image " + (imgIdx + 1) + "/" + images.size() + ": " + imp.getTitle(),
-                                    "Adjust the Brightness/Contrast on this max projection.",
-                                    "Click Lock in to save these values for the channel, or skip this image to leave the saved range unchanged."
-                            },
-                            dup);
-                    if (ACTION_SKIP_CURRENT_IMAGE.equals(mmAction)) {
-                        dup.changes = false;
-                        dup.close();
-                        dup.flush();
-                        closeToolWindows(BRIGHTNESS_CONTRAST_WINDOW_TITLES);
-                        imgIdx++;
-                        continue;
-                    }
-                    if ("cancel".equals(mmAction)) {
-                        dup.changes = false;
-                        dup.close();
-                        dup.flush();
-                        closeToolWindows(BRIGHTNESS_CONTRAST_WINDOW_TITLES);
-                        return "cancel";
-                    }
-
-                    double newMin = dup.getDisplayRangeMin();
-                    double newMax = dup.getDisplayRangeMax();
-                    cfg.minmax.set(ch, (int) newMin + "-" + (int) newMax);
-                    range = new double[]{newMin, newMax};
-
-                    dup.changes = false;
-                    dup.close();
-                    dup.flush();
-                    closeToolWindows(BRIGHTNESS_CONTRAST_WINDOW_TITLES);
-
-                    String action = showContinueRestartDialog(
-                            "Custom Min-Max Display Ranges \u2014 " + chLabel,
-                            "Locked: " + (int) newMin + " - " + (int) newMax,
-                            imgIdx, images.size());
-                    if ("cancel".equals(action)) return "cancel";
-                    if ("skip".equals(action)) break;
-                    if ("restart".equals(action)) { imgIdx = 0; continue; }
-                    imgIdx++;
-                }
+                String displayRangeResult = interactiveDisplayRangeQC(images, cfg, binFolder, ch);
+                if ("cancel".equals(displayRangeResult)) return "cancel";
+                if ("back".equals(displayRangeResult)) return "back";
             }
 
             // ── StarDist 3D branch: replaces threshold + particle size steps ──
@@ -4402,98 +4342,9 @@ public class CreateBinFileAnalysis implements Analysis {
             // cfg.intensityThresholds (line 6) so the on-disk 6-line
             // format and downstream analyses see the same value.
             if (doRoiIntensityTh) {
-                int imgIdx2 = 0;
-                while (imgIdx2 < images.size()) {
-                    boolean imageAccepted = false;
-                    boolean skipCurrentImage = false;
-                    while (!imageAccepted) {
-                        closeQcToolWindows();
-                        QcImageSelection imageSelection = images.get(imgIdx2);
-                        ImagePlus imp = imageSelection.image;
-                        ImagePlus rawDup = new Duplicator().run(imp, channelNum, channelNum,
-                                1, imp.getNSlices(), 1, imp.getNFrames());
-                        rawDup.setTitle("Channel Threshold QC | " + chLabel + " | " + imp.getTitle());
-
-                        String filterContent = resolveFilterContent(binFolder, cfg, ch);
-                        ImagePlus thresholdPreview = prepareChannelThresholdPreview(rawDup, filterContent);
-                        thresholdPreview.setTitle("Channel Threshold QC | " + chLabel + " | " + imp.getTitle());
-                        thresholdPreview.show();
-                        IJ.run(thresholdPreview, toLutName(cfg.colors.get(ch)), "");
-                        positionImageLeft(thresholdPreview);
-
-                        // Open Threshold dialog first, then apply persisted value
-                        IJ.run(thresholdPreview, "Threshold...", "");
-                        positionToolWindowNextToImage(THRESHOLD_WINDOW_TITLES);
-                        String curThresh = cfg.objectThresholds.get(ch);
-                        if (!"default".equalsIgnoreCase(curThresh)) {
-                            try {
-                                double t = Double.parseDouble(curThresh);
-                                double imageMax = thresholdPreview.getProcessor().getMax();
-                                IJ.setThreshold(thresholdPreview, t, Math.max(t, imageMax));
-                                thresholdPreview.updateAndDraw();
-                            } catch (NumberFormatException ignored) {}
-                        }
-
-                        String thresholdAction = showThresholdAdjustmentDialog(
-                                "Channel Threshold QC \u2014 " + chLabel,
-                                imp.getTitle(),
-                                cfg.filterPresets.get(ch),
-                                curThresh,
-                                imgIdx2,
-                                images.size(),
-                                thresholdPreview);
-
-                        Double readThresh = null;
-                        int suggestedAutoThresh = 1;
-                        if (!ACTION_SKIP_CURRENT_IMAGE.equals(thresholdAction)
-                                && !"cancel".equals(thresholdAction)) {
-                            readThresh = readThresholdFromImage(thresholdPreview);
-                            suggestedAutoThresh = autoThreshold(thresholdPreview);
-                        }
-                        closeChannelThresholdPreviewImages(rawDup, thresholdPreview);
-                        closeToolWindows(THRESHOLD_WINDOW_TITLES);
-
-                        if (ACTION_SKIP_CURRENT_IMAGE.equals(thresholdAction)) {
-                            skipCurrentImage = true;
-                            imageAccepted = true;
-                            continue;
-                        }
-                        if ("cancel".equals(thresholdAction)) return "cancel";
-
-                        ThresholdConfirmationResult confirm = promptForThresholdToken(
-                                "Channel Threshold \u2014 " + chLabel,
-                                "Confirm Channel Threshold",
-                                "Channel Threshold (left/min value, 'default' or numeric)",
-                                readThresh,
-                                cfg.objectThresholds.get(ch),
-                                suggestedAutoThresh);
-                        if (confirm.back) continue;
-                        if (confirm.skipCurrentImage) {
-                            skipCurrentImage = true;
-                            imageAccepted = true;
-                            continue;
-                        }
-                        if (confirm.canceled) return "cancel";
-
-                        cfg.objectThresholds.set(ch, confirm.token);
-                        cfg.intensityThresholds.set(ch, confirm.token);
-                        imageAccepted = true;
-                    }
-
-                    if (skipCurrentImage) {
-                        imgIdx2++;
-                        continue;
-                    }
-
-                    String action = showContinueRestartDialog(
-                            "Channel Threshold QC \u2014 " + chLabel,
-                            "Locked: " + cfg.objectThresholds.get(ch),
-                            imgIdx2, images.size());
-                    if ("cancel".equals(action)) return "cancel";
-                    if ("skip".equals(action)) break;
-                    if ("restart".equals(action)) { imgIdx2 = 0; continue; }
-                    imgIdx2++;
-                }
+                String thresholdResult = interactiveChannelThresholdQC(images, cfg, binFolder, ch);
+                if ("cancel".equals(thresholdResult)) return "cancel";
+                if ("back".equals(thresholdResult)) return "back";
             }
 
             // Particle size QC (below) only applies to classical channels.
@@ -4637,6 +4488,336 @@ public class CreateBinFileAnalysis implements Analysis {
             }
         }
         return "done";
+    }
+
+    private String interactiveDisplayRangeQC(List<QcImageSelection> images, BinUserConfig cfg,
+                                             File binFolder, int channelIndex) {
+        if (useEmbeddedDisplayRangeStage()) {
+            return runEmbeddedDisplayRangeQC(images, cfg, binFolder, channelIndex);
+        }
+        return legacyInteractiveDisplayRangeQC(images, cfg, channelIndex);
+    }
+
+    private boolean useEmbeddedDisplayRangeStage() {
+        return true;
+    }
+
+    private String runEmbeddedDisplayRangeQC(List<QcImageSelection> images, BinUserConfig cfg,
+                                             File binFolder, int channelIndex) {
+        if (GraphicsEnvironment.isHeadless()) {
+            return "cancel";
+        }
+        ConfigQcContext context = new ConfigQcContext(
+                projectRootForConfigurationDir(binFolder),
+                binFolder,
+                cfg,
+                filterParameterContextImages(images),
+                cfg.names,
+                channelIndex);
+        DisplayRangeStage stage = createDisplayRangeStage(cfg, channelIndex);
+        ConfigQcDialog dialog = ConfigQcDialog.createModal(
+                null, context, Collections.<ConfigQcStage>singletonList(stage));
+        ConfigQcResult result = dialog.showDialog();
+        if (result == ConfigQcResult.DONE || result == ConfigQcResult.SKIP_CURRENT_IMAGE) {
+            return "continue";
+        }
+        if (result == ConfigQcResult.BACK) {
+            return "back";
+        }
+        return "cancel";
+    }
+
+    DisplayRangeStage createDisplayRangeStage(final BinUserConfig cfg, final int channelIndex) {
+        final int channelNum = channelIndex + 1;
+        final String chLabel = "C" + channelNum + " (" + cfg.names.get(channelIndex) + ")";
+        return new DisplayRangeStage(
+                new DisplayRangeStage.RangeStore() {
+                    @Override public String get() {
+                        return cfg.minmax.get(channelIndex);
+                    }
+
+                    @Override public void set(String token) {
+                        cfg.minmax.set(channelIndex, token);
+                    }
+                },
+                new DisplayRangeStage.PreviewAdapter() {
+                    @Override public ImagePlus createSource(ConfigQcContext context) {
+                        ImagePlus imp = context == null ? null : context.getCurrentImagePlus();
+                        if (imp == null) return null;
+                        ImagePlus chStack = imp.getNChannels() >= channelNum
+                                ? new Duplicator().run(imp, channelNum, channelNum,
+                                1, imp.getNSlices(), 1, imp.getNFrames())
+                                : imp.duplicate();
+                        ImagePlus projection = ZProjector.run(chStack, "max");
+                        closeImageQuietly(chStack);
+                        projection.setTitle("Display range source | " + chLabel + " | "
+                                + (context == null ? "" : context.getCurrentImageDisplayName()));
+                        return applyPreviewLut(projection, channelColor(cfg, channelIndex));
+                    }
+
+                    @Override public void close(ImagePlus image) {
+                        closeImageQuietly(image);
+                    }
+                });
+    }
+
+    private String legacyInteractiveDisplayRangeQC(List<QcImageSelection> images, BinUserConfig cfg,
+                                                   int channelIndex) {
+        int channelNum = channelIndex + 1;
+        String chLabel = "C" + channelNum + " (" + cfg.names.get(channelIndex) + ")";
+        double[] range = parseMinMax(cfg.minmax.get(channelIndex));
+        int imgIdx = 0;
+        while (imgIdx < images.size()) {
+            closeQcToolWindows();
+            QcImageSelection imageSelection = images.get(imgIdx);
+            ImagePlus imp = imageSelection.image;
+            ImagePlus chStack = new Duplicator().run(imp, channelNum, channelNum,
+                    1, imp.getNSlices(), 1, imp.getNFrames());
+            ImagePlus dup = ZProjector.run(chStack, "max");
+            chStack.changes = false;
+            chStack.close();
+            chStack.flush();
+            dup.setTitle("Custom Min-Max Display Ranges | " + chLabel + " | " + imp.getTitle());
+
+            if (range != null) dup.setDisplayRange(range[0], range[1]);
+            dup.show();
+            IJ.run(dup, toLutName(cfg.colors.get(channelIndex)), "");
+            positionImageLeft(dup);
+            IJ.run(dup, "Brightness/Contrast...", "");
+            positionToolWindowNextToImage(BRIGHTNESS_CONTRAST_WINDOW_TITLES);
+
+            String mmAction = showLockInSkipDialog(
+                    "Custom Min-Max Display Ranges \u2014 " + chLabel,
+                    "Adjust Display Range",
+                    new String[]{
+                            "Image " + (imgIdx + 1) + "/" + images.size() + ": " + imp.getTitle(),
+                            "Adjust the Brightness/Contrast on this max projection.",
+                            "Click Lock in to save these values for the channel, or skip this image to leave the saved range unchanged."
+                    },
+                    dup);
+            if (ACTION_SKIP_CURRENT_IMAGE.equals(mmAction)) {
+                dup.changes = false;
+                dup.close();
+                dup.flush();
+                closeToolWindows(BRIGHTNESS_CONTRAST_WINDOW_TITLES);
+                imgIdx++;
+                continue;
+            }
+            if ("cancel".equals(mmAction)) {
+                dup.changes = false;
+                dup.close();
+                dup.flush();
+                closeToolWindows(BRIGHTNESS_CONTRAST_WINDOW_TITLES);
+                return "cancel";
+            }
+
+            double newMin = dup.getDisplayRangeMin();
+            double newMax = dup.getDisplayRangeMax();
+            cfg.minmax.set(channelIndex, (int) newMin + "-" + (int) newMax);
+            range = new double[]{newMin, newMax};
+
+            dup.changes = false;
+            dup.close();
+            dup.flush();
+            closeToolWindows(BRIGHTNESS_CONTRAST_WINDOW_TITLES);
+
+            String action = showContinueRestartDialog(
+                    "Custom Min-Max Display Ranges \u2014 " + chLabel,
+                    "Locked: " + (int) newMin + " - " + (int) newMax,
+                    imgIdx, images.size());
+            if ("cancel".equals(action)) return "cancel";
+            if ("skip".equals(action)) break;
+            if ("restart".equals(action)) { imgIdx = 0; continue; }
+            imgIdx++;
+        }
+        return "continue";
+    }
+
+    private String interactiveChannelThresholdQC(List<QcImageSelection> images, BinUserConfig cfg,
+                                                 File binFolder, int channelIndex) {
+        if (useEmbeddedChannelThresholdStage()) {
+            return runEmbeddedChannelThresholdQC(images, cfg, binFolder, channelIndex);
+        }
+        return legacyInteractiveChannelThresholdQC(images, cfg, binFolder, channelIndex);
+    }
+
+    private boolean useEmbeddedChannelThresholdStage() {
+        return true;
+    }
+
+    private String runEmbeddedChannelThresholdQC(List<QcImageSelection> images, BinUserConfig cfg,
+                                                File binFolder, int channelIndex) {
+        if (GraphicsEnvironment.isHeadless()) {
+            return "cancel";
+        }
+        ConfigQcContext context = new ConfigQcContext(
+                projectRootForConfigurationDir(binFolder),
+                binFolder,
+                cfg,
+                filterParameterContextImages(images),
+                cfg.names,
+                channelIndex);
+        ChannelThresholdStage stage = createChannelThresholdStage(cfg, binFolder, channelIndex);
+        ConfigQcDialog dialog = ConfigQcDialog.createModal(
+                null, context, Collections.<ConfigQcStage>singletonList(stage));
+        ConfigQcResult result = dialog.showDialog();
+        if (result == ConfigQcResult.DONE || result == ConfigQcResult.SKIP_CURRENT_IMAGE) {
+            return "continue";
+        }
+        if (result == ConfigQcResult.BACK) {
+            return "back";
+        }
+        return "cancel";
+    }
+
+    ChannelThresholdStage createChannelThresholdStage(final BinUserConfig cfg, final File binFolder,
+                                                      final int channelIndex) {
+        final int channelNum = channelIndex + 1;
+        final String chLabel = "C" + channelNum + " (" + cfg.names.get(channelIndex) + ")";
+        return new ChannelThresholdStage(
+                new ChannelThresholdStage.ThresholdStore() {
+                    @Override public String get() {
+                        return cfg.objectThresholds.get(channelIndex);
+                    }
+
+                    @Override public void set(String token) {
+                        cfg.objectThresholds.set(channelIndex, token);
+                        cfg.intensityThresholds.set(channelIndex, token);
+                    }
+                },
+                new ChannelThresholdStage.PreviewAdapter() {
+                    @Override public ImagePlus createRawSource(ConfigQcContext context) {
+                        ImagePlus raw = duplicateCurrentChannel(context, channelNum);
+                        if (raw == null) return null;
+                        raw.setTitle("Threshold raw source | " + chLabel + " | "
+                                + (context == null ? "" : context.getCurrentImageDisplayName()));
+                        return applyPreviewLut(raw, channelColor(cfg, channelIndex));
+                    }
+
+                    @Override public ImagePlus createThresholdSource(ConfigQcContext context) {
+                        ImagePlus thresholdInput = duplicateCurrentChannel(context, channelNum);
+                        if (thresholdInput == null) return null;
+                        String filterContent = resolveFilterContent(binFolder, cfg, channelIndex);
+                        if (filterContent != null && !filterContent.trim().isEmpty()) {
+                            FilterExecutor.runThreadSafe(thresholdInput, filterContent);
+                        }
+                        thresholdInput.setTitle("Threshold input | " + chLabel + " | "
+                                + (context == null ? "" : context.getCurrentImageDisplayName()));
+                        return applyPreviewLut(thresholdInput, channelColor(cfg, channelIndex));
+                    }
+
+                    @Override public void close(ImagePlus image) {
+                        closeImageQuietly(image);
+                    }
+                });
+    }
+
+    private ImagePlus duplicateCurrentChannel(ConfigQcContext context, int channelNum) {
+        ImagePlus imp = context == null ? null : context.getCurrentImagePlus();
+        if (imp == null) return null;
+        return imp.getNChannels() >= channelNum
+                ? new Duplicator().run(imp, channelNum, channelNum,
+                1, imp.getNSlices(), 1, imp.getNFrames())
+                : imp.duplicate();
+    }
+
+    private String legacyInteractiveChannelThresholdQC(List<QcImageSelection> images, BinUserConfig cfg,
+                                                       File binFolder, int channelIndex) {
+        int channelNum = channelIndex + 1;
+        String chLabel = "C" + channelNum + " (" + cfg.names.get(channelIndex) + ")";
+        int imgIdx2 = 0;
+        while (imgIdx2 < images.size()) {
+            boolean imageAccepted = false;
+            boolean skipCurrentImage = false;
+            while (!imageAccepted) {
+                closeQcToolWindows();
+                QcImageSelection imageSelection = images.get(imgIdx2);
+                ImagePlus imp = imageSelection.image;
+                ImagePlus rawDup = new Duplicator().run(imp, channelNum, channelNum,
+                        1, imp.getNSlices(), 1, imp.getNFrames());
+                rawDup.setTitle("Channel Threshold QC | " + chLabel + " | " + imp.getTitle());
+
+                String filterContent = resolveFilterContent(binFolder, cfg, channelIndex);
+                ImagePlus thresholdPreview = prepareChannelThresholdPreview(rawDup, filterContent);
+                thresholdPreview.setTitle("Channel Threshold QC | " + chLabel + " | " + imp.getTitle());
+                thresholdPreview.show();
+                IJ.run(thresholdPreview, toLutName(cfg.colors.get(channelIndex)), "");
+                positionImageLeft(thresholdPreview);
+
+                // Open Threshold dialog first, then apply persisted value
+                IJ.run(thresholdPreview, "Threshold...", "");
+                positionToolWindowNextToImage(THRESHOLD_WINDOW_TITLES);
+                String curThresh = cfg.objectThresholds.get(channelIndex);
+                if (!"default".equalsIgnoreCase(curThresh)) {
+                    try {
+                        double t = Double.parseDouble(curThresh);
+                        double imageMax = thresholdPreview.getProcessor().getMax();
+                        IJ.setThreshold(thresholdPreview, t, Math.max(t, imageMax));
+                        thresholdPreview.updateAndDraw();
+                    } catch (NumberFormatException ignored) {}
+                }
+
+                String thresholdAction = showThresholdAdjustmentDialog(
+                        "Channel Threshold QC \u2014 " + chLabel,
+                        imp.getTitle(),
+                        cfg.filterPresets.get(channelIndex),
+                        curThresh,
+                        imgIdx2,
+                        images.size(),
+                        thresholdPreview);
+
+                Double readThresh = null;
+                int suggestedAutoThresh = 1;
+                if (!ACTION_SKIP_CURRENT_IMAGE.equals(thresholdAction)
+                        && !"cancel".equals(thresholdAction)) {
+                    readThresh = readThresholdFromImage(thresholdPreview);
+                    suggestedAutoThresh = autoThreshold(thresholdPreview);
+                }
+                closeChannelThresholdPreviewImages(rawDup, thresholdPreview);
+                closeToolWindows(THRESHOLD_WINDOW_TITLES);
+
+                if (ACTION_SKIP_CURRENT_IMAGE.equals(thresholdAction)) {
+                    skipCurrentImage = true;
+                    imageAccepted = true;
+                    continue;
+                }
+                if ("cancel".equals(thresholdAction)) return "cancel";
+
+                ThresholdConfirmationResult confirm = promptForThresholdToken(
+                        "Channel Threshold \u2014 " + chLabel,
+                        "Confirm Channel Threshold",
+                        "Channel Threshold (left/min value, 'default' or numeric)",
+                        readThresh,
+                        cfg.objectThresholds.get(channelIndex),
+                        suggestedAutoThresh);
+                if (confirm.back) continue;
+                if (confirm.skipCurrentImage) {
+                    skipCurrentImage = true;
+                    imageAccepted = true;
+                    continue;
+                }
+                if (confirm.canceled) return "cancel";
+
+                cfg.objectThresholds.set(channelIndex, confirm.token);
+                cfg.intensityThresholds.set(channelIndex, confirm.token);
+                imageAccepted = true;
+            }
+
+            if (skipCurrentImage) {
+                imgIdx2++;
+                continue;
+            }
+
+            String action = showContinueRestartDialog(
+                    "Channel Threshold QC \u2014 " + chLabel,
+                    "Locked: " + cfg.objectThresholds.get(channelIndex),
+                    imgIdx2, images.size());
+            if ("cancel".equals(action)) return "cancel";
+            if ("skip".equals(action)) break;
+            if ("restart".equals(action)) { imgIdx2 = 0; continue; }
+            imgIdx2++;
+        }
+        return "continue";
     }
 
     private String interactiveFilterParameterQC(List<QcImageSelection> images, BinUserConfig cfg,

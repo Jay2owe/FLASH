@@ -32,7 +32,11 @@ public final class ThresholdControlPanel extends JPanel {
             "RenyiEntropy", "Shanbhag", "Triangle", "Yen"
     };
     private static final String[] BACKGROUNDS = {"Dark", "Light"};
-    private static final String[] PREVIEWS = {"Red overlay", "Black and white", "Over/Under"};
+    private static final String[] PREVIEWS = {
+            ThresholdOverlayRenderer.MODE_RED_OVERLAY,
+            ThresholdOverlayRenderer.MODE_MASK,
+            ThresholdOverlayRenderer.MODE_FILTERED
+    };
 
     private final HistogramPanel histogramPanel = new HistogramPanel();
     private final FijiStyleRangeSliderPanel lowerSlider = new FijiStyleRangeSliderPanel("Lower threshold");
