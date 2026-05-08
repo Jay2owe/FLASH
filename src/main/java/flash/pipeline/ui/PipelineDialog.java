@@ -1,5 +1,8 @@
 package flash.pipeline.ui;
 
+import flash.pipeline.help.AnalysisHelpCatalog;
+import flash.pipeline.help.AnalysisHelpDialog;
+import flash.pipeline.help.AnalysisHelpTopic;
 import ij.IJ;
 
 import javax.swing.*;
@@ -257,6 +260,44 @@ public class PipelineDialog {
         sep.setAlignmentX(Component.LEFT_ALIGNMENT);
         addToBody(sep);
         addToBody(Box.createVerticalStrut(6));
+    }
+
+    /**
+     * Adds a top-level analysis header with the shared question-mark help
+     * control. The help button is not registered as an input field, so
+     * sequential retrieval order for toggles, choices, numbers, and strings is
+     * unchanged.
+     */
+    public JButton addAnalysisHelpHeader(String text, int analysisIndex) {
+        final AnalysisHelpTopic topic = AnalysisHelpCatalog.forAnalysis(analysisIndex);
+        String tooltip = topic == null
+                ? "Analysis help is not available yet."
+                : "About " + topic.title;
+        JButton helpButton = HelpButton.question(tooltip);
+        helpButton.setEnabled(topic != null);
+        if (topic != null) {
+            helpButton.addActionListener(e -> AnalysisHelpDialog.show(dialog, topic));
+        }
+
+        addToBody(Box.createVerticalStrut(10));
+
+        JPanel row = createRow();
+        JLabel label = new JLabel(text);
+        label.setFont(label.getFont().deriveFont(Font.BOLD, 13f));
+        label.setForeground(HEADER_COLOR);
+        row.add(label);
+        row.add(Box.createHorizontalStrut(6));
+        row.add(helpButton);
+        row.add(Box.createHorizontalGlue());
+        addToBody(row);
+        addToBody(Box.createVerticalStrut(4));
+
+        JSeparator sep = new JSeparator(SwingConstants.HORIZONTAL);
+        sep.setMaximumSize(new Dimension(Integer.MAX_VALUE, 1));
+        sep.setAlignmentX(Component.LEFT_ALIGNMENT);
+        addToBody(sep);
+        addToBody(Box.createVerticalStrut(6));
+        return helpButton;
     }
 
     /**

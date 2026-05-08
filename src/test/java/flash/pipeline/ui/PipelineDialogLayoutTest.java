@@ -1,5 +1,6 @@
 package flash.pipeline.ui;
 
+import flash.pipeline.FLASH_Pipeline;
 import org.junit.Test;
 
 import javax.swing.JButton;
@@ -81,6 +82,30 @@ public class PipelineDialogLayoutTest {
         assertTrue(dialog.getNextBoolean());
         assertFalse(dialog.getNextBoolean());
         assertSame(second, ((JPanel) content.getComponent(2)).getComponent(4));
+        backingDialog(dialog).dispose();
+    }
+
+    @Test
+    public void analysisHelpHeaderCreatesQuestionButtonWithoutChangingBooleanOrder() throws Exception {
+        PipelineDialog dialog = new PipelineDialog("Analysis Help Header");
+        JButton help = dialog.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
+        ToggleSwitch toggle = dialog.addToggle("Run setup", true);
+
+        JPanel content = contentPanel(dialog);
+        JPanel headerRow = (JPanel) content.getComponent(1);
+        assertTrue(headerRow.getComponent(0) instanceof JLabel);
+        assertEquals("Set Up Configuration", ((JLabel) headerRow.getComponent(0)).getText());
+        assertEquals(6, headerRow.getComponent(1).getPreferredSize().width);
+        assertSame(help, headerRow.getComponent(2));
+        assertEquals("?", help.getText());
+        assertEquals("About Set Up Configuration", help.getToolTipText());
+        assertEquals("About Set Up Configuration",
+                help.getAccessibleContext().getAccessibleName());
+        assertTrue("header help button should have a click handler",
+                help.getActionListeners().length > 0);
+
+        assertTrue(dialog.getNextBoolean());
+        assertSame(toggle, ((JPanel) content.getComponent(5)).getComponent(2));
         backingDialog(dialog).dispose();
     }
 
