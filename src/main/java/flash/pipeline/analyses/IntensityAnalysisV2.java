@@ -38,8 +38,6 @@ import flash.pipeline.runtime.FeatureDependencyGate;
 import flash.pipeline.runtime.PluginInstallGuard;
 import flash.pipeline.roi.RoiIO;
 import flash.pipeline.ui.PipelineDialog;
-import flash.pipeline.ui.ToggleSwitch;
-import flash.pipeline.ui.wizard.SetupHelperButton;
 import flash.pipeline.zslice.ZSliceOps;
 
 import ij.IJ;
@@ -51,12 +49,7 @@ import ij.gui.Roi;
 import ij.io.Opener;
 
 
-import javax.swing.JButton;
-import javax.swing.JComboBox;
-import javax.swing.JOptionPane;
-import javax.swing.JPanel;
 import javax.swing.JTextField;
-import java.awt.Dimension;
 import java.awt.Frame;
 import java.io.File;
 import java.io.IOException;
@@ -66,7 +59,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.EnumSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -98,7 +90,6 @@ public class IntensityAnalysisV2 implements Analysis {
     private boolean compactLog = false;
     private boolean useDeconvolvedInput = true;
     private CLIConfig cliConfig = null;
-    private static final String INTENSITY_PRESET_PLACEHOLDER = "(choose preset)";
     private int cliConfiguredMaskIndex1Based = -1;
 
     @Override
@@ -275,19 +266,6 @@ public class IntensityAnalysisV2 implements Analysis {
                 // --- Primary dialog ---
                 PipelineDialog gd = new PipelineDialog("Fluorescence Intensity Analysis", PipelineDialog.Phase.ANALYSE);
                 gd.addAnalysisHelpHeader("Fluorescence Intensity Analysis", FLASH_Pipeline.IDX_INTENSITY);
-                final IntensityDialogBindings intensityBindings = new IntensityDialogBindings(channelNames.length);
-                addIntensitySetupControls(gd, directory, cfg, channelIdentities, roiSetNameList,
-                        binarization, thresholds, roiZipSelected, channelNames,
-                        intensityBindings,
-                        new IntensityConfigApplier() {
-                            @Override
-                            public void apply(String selectedPresetName,
-                                              IntensityWizard.DerivedConfig derived) {
-                                applyIntensityConfigToDialog(derived, binarization,
-                                        thresholds, roiZipSelected, channelNames,
-                                        intensityBindings, selectedPresetName);
-                            }
-                        });
 
                 gd.addHelpText("Choose a filter source for each channel: "
                         + "the saved named filter loads the per-channel macro saved in the Configuration folder "
@@ -296,9 +274,8 @@ public class IntensityAnalysisV2 implements Analysis {
                         + "applies a generic Median r=2 + Subtract Background rolling=50.");
 
                 gd.addSubHeader("Analysis Options");
-                intensityBindings.useDeconvolvedInputToggle =
-                        gd.addToggle("Use deconvolved stacks if available", useDeconvolvedInput);
-                intensityBindings.roiAnalysisToggle = gd.addToggle("ROI Analysis", anyRois);
+                gd.addToggle("Use deconvolved stacks if available", useDeconvolvedInput);
+                gd.addToggle("ROI Analysis", anyRois);
 
                 gd.addHeader("Filter Source (per channel)");
                 for (int i = 0; i < channelNames.length; i++) {
@@ -319,10 +296,8 @@ public class IntensityAnalysisV2 implements Analysis {
                 gd.addHelpText("Creates a binary mask from the filtered image at a given threshold, "
                         + "then ANDs it with the raw image.");
 
-                ToggleSwitch[] binarizeToggles = new ToggleSwitch[channelNames.length];
                 for (int i = 0; i < channelNames.length; i++) {
-                    binarizeToggles[i] = gd.addToggle("Binarise " + channelNames[i], binarization[i]);
-                    intensityBindings.binarizeToggles[i] = binarizeToggles[i];
+                    gd.addToggle("Binarise " + channelNames[i], binarization[i]);
                 }
 
                 if (!gd.showDialog()) {
@@ -1469,228 +1444,6 @@ public class IntensityAnalysisV2 implements Analysis {
         return existing == null ? layout.configurationWriteDir() : existing;
     }
 
-    private void addIntensitySetupControls(final PipelineDialog dialog,
-                                           final String directory,
-                                           final BinConfig cfg,
-                                           final ChannelIdentities identities,
-                                           final List<String> roiSetNames,
-                                           final boolean[] binarization,
-                                           final String[] thresholds,
-                                           final boolean[] roiZipSelected,
-                                           final String[] channelNames,
-                                           final IntensityDialogBindings bindings,
-                                           final IntensityConfigApplier applier) {
-        final JComboBox<String> presetCombo = new JComboBox<String>(listIntensityPresetNames(directory));
-        presetCombo.setMaximumSize(new Dimension(260, 24));
-        if (bindings != null) {
-            bindings.presetCombo = presetCombo;
-        }
-        JButton savePreset = new JButton("Save as preset...");
-        savePreset.setToolTipText("Save the current Fluorescence Intensity options as a named preset.");
-        savePreset.addActionListener(e -> handleSaveIntensityPreset(directory, channelNames,
-                roiSetNames, binarization, thresholds, roiZipSelected, bindings));
-        JPanel row = SetupHelperButton.createHeaderRow("Intensity", presetCombo, savePreset,
-                new SetupHelperButton.WizardLauncher() {
-                    @Override public void run() {
-                        final IntensityWizard.DerivedConfig[] selected =
-                                new IntensityWizard.DerivedConfig[1];
-                        dialog.runChildWorkflow(new Runnable() {
-                            @Override public void run() {
-                                selected[0] = runIntensityHelper(directory, cfg, identities, roiSetNames);
-                            }
-                        });
-                        if (selected[0] != null && applier != null) {
-                            applier.apply(null, selected[0]);
-                        }
-                    }
-                });
-        presetCombo.addActionListener(e -> {
-            if (bindings != null && bindings.programmaticChange) {
-                return;
-            }
-            Object selected = presetCombo.getSelectedItem();
-            if (selected != null && !INTENSITY_PRESET_PLACEHOLDER.equals(String.valueOf(selected))) {
-                IntensityWizard.DerivedConfig derived = loadIntensityPresetConfig(
-                        directory, cfg, identities, roiSetNames, String.valueOf(selected));
-                if (derived != null && applier != null) {
-                    applier.apply(String.valueOf(selected), derived);
-                }
-            }
-        });
-        dialog.addComponent(row);
-    }
-
-    private void applyIntensityConfigToDialog(IntensityWizard.DerivedConfig derived,
-                                              boolean[] binarization,
-                                              String[] thresholds,
-                                              boolean[] roiZipSelected,
-                                              String[] channelNames,
-                                              IntensityDialogBindings bindings,
-                                              String selectedPresetName) {
-        if (derived == null || bindings == null) {
-            return;
-        }
-        applyIntensityDerivedConfig(derived, binarization, thresholds, roiZipSelected, channelNames);
-        cliConfiguredMaskIndex1Based = derived.maskChannelIndex + 1;
-        bindings.programmaticChange = true;
-        try {
-            if (bindings.presetCombo != null) {
-                bindings.presetCombo.setSelectedItem(
-                        selectedPresetName == null ? INTENSITY_PRESET_PLACEHOLDER : selectedPresetName);
-            }
-            for (int i = 0; i < bindings.binarizeToggles.length && i < derived.binarization.length; i++) {
-                setToggle(bindings.binarizeToggles[i], derived.binarization[i]);
-            }
-            setToggle(bindings.roiAnalysisToggle, anyTrue(derived.roiSetSelected));
-        } finally {
-            bindings.programmaticChange = false;
-        }
-    }
-
-    private void handleSaveIntensityPreset(String directory,
-                                           String[] channelNames,
-                                           List<String> roiSetNames,
-                                           boolean[] binarization,
-                                           String[] thresholds,
-                                           boolean[] roiZipSelected,
-                                           IntensityDialogBindings bindings) {
-        if (headless || suppressDialogs) return;
-        if (bindings == null) {
-            IJ.showMessage("Intensity Analysis", "Could not save preset: dialog options are not available.");
-            return;
-        }
-        String name = JOptionPane.showInputDialog(
-                bindings.presetCombo,
-                "Preset name:",
-                "Save Intensity Preset",
-                JOptionPane.PLAIN_MESSAGE);
-        if (name == null) {
-            return;
-        }
-        String trimmed = name.trim();
-        if (trimmed.isEmpty()) {
-            IJ.showMessage("Intensity Analysis", "Preset name cannot be empty.");
-            return;
-        }
-        try {
-            IntensityPreset preset = buildIntensityPresetFromBindings(trimmed,
-                    channelNames, roiSetNames, binarization, thresholds, roiZipSelected, bindings);
-            new IntensityPresetIO(new File(directory)).save(preset);
-            IJ.log("Saved Intensity preset: " + trimmed);
-            refreshIntensityPresetChoice(directory, bindings, preset.getName());
-        } catch (IOException e) {
-            IJ.showMessage("Intensity Analysis", "Could not save preset: " + e.getMessage());
-        } catch (IllegalArgumentException e) {
-            IJ.showMessage("Intensity Analysis", "Could not save preset: " + e.getMessage());
-        }
-    }
-
-    private IntensityPreset buildIntensityPresetFromBindings(String name,
-                                                            String[] channelNames,
-                                                            List<String> roiSetNames,
-                                                            boolean[] binarization,
-                                                            String[] thresholds,
-                                                            boolean[] roiZipSelected,
-                                                            IntensityDialogBindings bindings) {
-        Map<String, String> channelModes = new LinkedHashMap<String, String>();
-        Map<String, String> savedThresholds = new LinkedHashMap<String, String>();
-        for (int i = 0; i < channelNames.length; i++) {
-            boolean binarize = i < bindings.binarizeToggles.length && bindings.binarizeToggles[i] != null
-                    ? bindings.binarizeToggles[i].isSelected()
-                    : i < binarization.length && binarization[i];
-            channelModes.put(channelNames[i], binarize
-                    ? IntensityWizard.MODE_THRESHOLD_MEAN
-                    : IntensityWizard.MODE_WHOLE_ROI_MEAN);
-            if (i < thresholds.length && thresholds[i] != null && !thresholds[i].trim().isEmpty()) {
-                savedThresholds.put(channelNames[i], thresholds[i].trim());
-            }
-        }
-
-        String maskHint = null;
-        if (isSelected(bindings.roiAnalysisToggle)
-                && cliConfiguredMaskIndex1Based > 0
-                && cliConfiguredMaskIndex1Based <= channelNames.length) {
-            maskHint = channelNames[cliConfiguredMaskIndex1Based - 1];
-        }
-
-        List<String> roiHints = new ArrayList<String>();
-        if (isSelected(bindings.roiAnalysisToggle) && roiSetNames != null) {
-            for (int i = 0; i < roiSetNames.size() && i < roiZipSelected.length; i++) {
-                if (roiZipSelected[i]) {
-                    roiHints.add(roiSetNames.get(i));
-                }
-            }
-        }
-
-        return new IntensityPreset(
-                name,
-                "Saved from Intensity Analysis dialog",
-                IntensityPreset.CURRENT_LIBRARY_VERSION,
-                "custom",
-                IntensityWizard.MODE_WHOLE_ROI_MEAN,
-                channelModes,
-                savedThresholds,
-                maskHint,
-                roiHints);
-    }
-
-    private void refreshIntensityPresetChoice(String directory,
-                                              IntensityDialogBindings bindings,
-                                              String selectedName) {
-        if (bindings == null || bindings.presetCombo == null) {
-            return;
-        }
-        bindings.programmaticChange = true;
-        try {
-            bindings.presetCombo.removeAllItems();
-            String[] names = listIntensityPresetNames(directory);
-            for (String presetName : names) {
-                bindings.presetCombo.addItem(presetName);
-            }
-            bindings.presetCombo.setSelectedItem(selectedName == null
-                    ? INTENSITY_PRESET_PLACEHOLDER
-                    : selectedName);
-        } finally {
-            bindings.programmaticChange = false;
-        }
-    }
-
-    private String[] listIntensityPresetNames(String directory) {
-        List<String> labels = new ArrayList<String>();
-        labels.add(INTENSITY_PRESET_PLACEHOLDER);
-        try {
-            List<IntensityPreset> presets = new IntensityPresetIO(new File(directory)).listAll();
-            for (IntensityPreset preset : presets) {
-                labels.add(preset.getName());
-            }
-        } catch (IOException e) {
-            IJ.log("WARNING: Could not list Intensity presets: " + e.getMessage());
-        }
-        return labels.toArray(new String[labels.size()]);
-    }
-
-    private IntensityWizard.DerivedConfig runIntensityHelper(String directory,
-                                                            BinConfig cfg,
-                                                            ChannelIdentities identities,
-                                                            List<String> roiSetNames) {
-        try {
-            IntensityWizard wizard = new IntensityWizard(
-                    flash.pipeline.ui.wizard.WizardFlow.MainPanelBinding.NULL,
-                    cfg,
-                    identities,
-                    roiSetNames,
-                    false);
-            wizard.run();
-            if (!wizard.wasFinished()) {
-                return null;
-            }
-            return wizard.deriveCurrentConfig();
-        } catch (Exception e) {
-            IJ.handleException(e);
-            return null;
-        }
-    }
-
     private IntensityWizard.DerivedConfig loadIntensityPresetConfig(String directory,
                                                                     BinConfig cfg,
                                                                     ChannelIdentities identities,
@@ -1758,32 +1511,6 @@ public class IntensityAnalysisV2 implements Analysis {
         }
         for (int r = 0; r < roiZipSelected.length && r < derived.roiSetSelected.length; r++) {
             roiZipSelected[r] = derived.roiSetSelected[r];
-        }
-    }
-
-    private static void setToggle(ToggleSwitch toggle, boolean selected) {
-        if (toggle != null) {
-            toggle.setSelected(selected);
-        }
-    }
-
-    private static boolean isSelected(ToggleSwitch toggle) {
-        return toggle != null && toggle.isSelected();
-    }
-
-    private interface IntensityConfigApplier {
-        void apply(String selectedPresetName, IntensityWizard.DerivedConfig derived);
-    }
-
-    private static final class IntensityDialogBindings {
-        boolean programmaticChange;
-        JComboBox<String> presetCombo;
-        ToggleSwitch useDeconvolvedInputToggle;
-        ToggleSwitch roiAnalysisToggle;
-        final ToggleSwitch[] binarizeToggles;
-
-        IntensityDialogBindings(int channelCount) {
-            this.binarizeToggles = new ToggleSwitch[Math.max(0, channelCount)];
         }
     }
 
