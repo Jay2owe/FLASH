@@ -10,6 +10,7 @@ import java.io.File;
 import java.util.Arrays;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 
 public class SplitAndMergeWizardBehaviorTest {
 
@@ -43,5 +44,12 @@ public class SplitAndMergeWizardBehaviorTest {
                 new ChannelIdentities.Entry(4, "autofluorescence", "background", false)));
 
         assertEquals(-1, SplitAndMergeImageChannelsAnalysis.detectAutofluorescenceChannel(identities, 3));
+    }
+
+    @Test
+    public void presentationImagePresetsAreAbsent() {
+        assertFalse(new File("src/main/resources/split_merge_presets").exists());
+        assertFalse(new File("src/main/java/flash/pipeline/analyses/wizard/SplitMergePreset.java").exists());
+        assertFalse(new File("src/main/java/flash/pipeline/analyses/wizard/SplitMergePresetIO.java").exists());
     }
 }

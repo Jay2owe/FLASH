@@ -13,7 +13,9 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
+import javax.swing.JComboBox;
 import java.io.File;
+import java.awt.Color;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
@@ -24,8 +26,10 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 public class SplitAndMergeImageChannelsAnalysisTest {
@@ -50,6 +54,69 @@ public class SplitAndMergeImageChannelsAnalysisTest {
                 BinField.Z_SLICE),
                 analysis.requiredBinFields());
         assertFalse(analysis.benefitsFromRois());
+    }
+
+    @Test
+    public void channelSettingsGridUsesSettingRowsWithChannelColumnsAndHelperText() {
+        SplitAndMergeImageChannelsAnalysis.ChannelSettingsGrid grid =
+                SplitAndMergeImageChannelsAnalysis.buildChannelSettingsGrid(
+                        new String[]{"DAPI", "GFAP"},
+                        new String[]{"None", "12-345"});
+
+        assertEquals("Processing Method", grid.rowLabels[0].getText());
+        assertEquals("Display Ranges", grid.rowLabels[1].getText());
+        assertEquals("Saturation", grid.rowLabels[2].getText());
+
+        assertEquals(2, grid.methodBoxes.length);
+        assertEquals("Automatic", grid.methodBoxes[0].getSelectedItem());
+        assertEquals("Custom Min-Max Display Ranges", grid.methodBoxes[1].getSelectedItem());
+        assertArrayEquals(new String[]{"None", "Automatic", "Manual", "Custom Min-Max Display Ranges"},
+                comboItems(grid.methodBoxes[0]));
+
+        assertEquals("", grid.displayRangeFields[0].getText());
+        assertEquals("12-345", grid.displayRangeFields[1].getText());
+        assertTrue(grid.saturationFields[0].isEnabled());
+        assertFalse(grid.displayRangeFields[0].isEnabled());
+        assertFalse(grid.saturationFields[1].isEnabled());
+        assertTrue(grid.displayRangeFields[1].isEnabled());
+
+        Color helperGrey = new Color(117, 117, 117);
+        for (int row = 0; row < grid.helperLabels.length; row++) {
+            for (int ch = 0; ch < grid.helperLabels[row].length; ch++) {
+                assertNotNull(grid.helperLabels[row][ch]);
+                assertEquals(helperGrey, grid.helperLabels[row][ch].getForeground());
+                assertFalse(grid.helperLabels[row][ch].getText().trim().isEmpty());
+            }
+        }
+    }
+
+    @Test
+    public void channelSettingsGridReadsDirectSwingValuesWithExistingFallbacks() {
+        SplitAndMergeImageChannelsAnalysis.ChannelSettingsGrid grid =
+                SplitAndMergeImageChannelsAnalysis.buildChannelSettingsGrid(
+                        new String[]{"DAPI", "GFAP"},
+                        new String[]{"None", "10-200"});
+
+        grid.methodBoxes[0].setSelectedItem("Custom Min-Max Display Ranges");
+        grid.displayRangeFields[0].setText(" 25-250 ");
+        grid.saturationFields[0].setText("not-a-number");
+
+        grid.methodBoxes[1].setSelectedItem("Automatic");
+        grid.displayRangeFields[1].setText("   ");
+        grid.saturationFields[1].setText("0.5");
+
+        SplitAndMergeImageChannelsAnalysis.ChannelSettingsSelections selections =
+                SplitAndMergeImageChannelsAnalysis.readChannelSettingsGrid(grid);
+
+        assertArrayEquals(new String[]{"Custom Min-Max Display Ranges", "Automatic"},
+                selections.processMethodPerCh);
+        assertArrayEquals(new String[]{"25-250", "None"}, selections.customMinMaxPerCh);
+        assertEquals(0.0, selections.saturationsPerCh[0], 0.0);
+        assertEquals(0.5, selections.saturationsPerCh[1], 0.0);
+        assertTrue(grid.displayRangeFields[0].isEnabled());
+        assertFalse(grid.saturationFields[0].isEnabled());
+        assertFalse(grid.displayRangeFields[1].isEnabled());
+        assertTrue(grid.saturationFields[1].isEnabled());
     }
 
     @Test
@@ -194,6 +261,14 @@ public class SplitAndMergeImageChannelsAnalysisTest {
                 "saveSaturations", String.class, String[].class, String[].class, double[].class);
         method.setAccessible(true);
         method.invoke(analysis, dir.getAbsolutePath(), channelNames, processMethodPerCh, saturationsPerCh);
+    }
+
+    private static String[] comboItems(JComboBox<String> combo) {
+        String[] items = new String[combo.getItemCount()];
+        for (int i = 0; i < combo.getItemCount(); i++) {
+            items[i] = combo.getItemAt(i);
+        }
+        return items;
     }
 
     private static void installDispatcherChoice(final BinSetupChooser.Choice choice,

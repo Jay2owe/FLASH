@@ -175,6 +175,15 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
     private static final String METHOD_CUSTOM = "Custom Min-Max Display Ranges";
     private static final String[] PROCESS_METHODS = {METHOD_NONE, METHOD_AUTOMATIC, METHOD_MANUAL, METHOD_CUSTOM};
     private static final String NONE_OPTION = "None";
+    private static final double DEFAULT_SATURATION = 0.35;
+    private static final Color CHANNEL_GRID_HELP_COLOR = new Color(117, 117, 117);
+    private static final int CHANNEL_GRID_ROW_LABEL_WIDTH = 120;
+    private static final int CHANNEL_GRID_CELL_WIDTH = 190;
+    private static final int CHANNEL_GRID_TEXT_WIDTH = 120;
+    private static final int CHANNEL_GRID_SATURATION_WIDTH = 80;
+    private static final String METHOD_HELP = "None, Automatic, Manual, or Custom.";
+    private static final String DISPLAY_RANGE_HELP = "Min-max, e.g. 0-4095.";
+    private static final String SATURATION_HELP = "Automatic only; default 0.35.";
 
     private static class MainDialogResult {
         String[] processMethodPerCh;
@@ -187,6 +196,43 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
         int backgroundIndex;
         boolean[] subtractFromChannels;
         boolean useDeconvolvedInput;
+    }
+
+    static final class ChannelSettingsGrid {
+        final JPanel panel;
+        final JComboBox<String>[] methodBoxes;
+        final JTextField[] displayRangeFields;
+        final JTextField[] saturationFields;
+        final JLabel[] rowLabels;
+        final JLabel[][] helperLabels;
+
+        private ChannelSettingsGrid(JPanel panel,
+                                    JComboBox<String>[] methodBoxes,
+                                    JTextField[] displayRangeFields,
+                                    JTextField[] saturationFields,
+                                    JLabel[] rowLabels,
+                                    JLabel[][] helperLabels) {
+            this.panel = panel;
+            this.methodBoxes = methodBoxes;
+            this.displayRangeFields = displayRangeFields;
+            this.saturationFields = saturationFields;
+            this.rowLabels = rowLabels;
+            this.helperLabels = helperLabels;
+        }
+    }
+
+    static final class ChannelSettingsSelections {
+        final String[] processMethodPerCh;
+        final String[] customMinMaxPerCh;
+        final double[] saturationsPerCh;
+
+        private ChannelSettingsSelections(String[] processMethodPerCh,
+                                          String[] customMinMaxPerCh,
+                                          double[] saturationsPerCh) {
+            this.processMethodPerCh = processMethodPerCh;
+            this.customMinMaxPerCh = customMinMaxPerCh;
+            this.saturationsPerCh = saturationsPerCh;
+        }
     }
 
     @Override
@@ -802,38 +848,8 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
         // ── Section: Channel Processing ──
         pd.addHeader("Channel Processing");
 
-        @SuppressWarnings("unchecked")
-        final JComboBox<String>[] methodBoxes = new JComboBox[nCh];
-        final JTextField[] satFields = new JTextField[nCh];
-        final JTextField[] mmFields = new JTextField[nCh];
-
-        for (int ch = 0; ch < nCh; ch++) {
-            pd.addSubHeader(channelNames[ch]);
-
-            boolean hasCustomValue = !NONE_OPTION.equalsIgnoreCase(defaultMinMax[ch])
-                    && defaultMinMax[ch] != null && !defaultMinMax[ch].trim().isEmpty();
-            String defaultMethod = hasCustomValue ? METHOD_CUSTOM : METHOD_AUTOMATIC;
-
-            methodBoxes[ch] = pd.addChoice("Processing Method:", PROCESS_METHODS, defaultMethod);
-            satFields[ch] = pd.addNumericField("Saturation:", 0.35, 2);
-            satFields[ch].setEnabled(!hasCustomValue);
-            String defaultVal = NONE_OPTION.equalsIgnoreCase(defaultMinMax[ch]) ? "" : defaultMinMax[ch];
-            mmFields[ch] = pd.addStringField("Display Range:", defaultVal, 12);
-            mmFields[ch].setEnabled(hasCustomValue);
-
-            final int idx = ch;
-            methodBoxes[ch].addItemListener(new ItemListener() {
-                @Override
-                public void itemStateChanged(ItemEvent e) {
-                    if (e.getStateChange() != ItemEvent.SELECTED) return;
-                    String sel = (String) methodBoxes[idx].getSelectedItem();
-                    boolean isAuto = METHOD_AUTOMATIC.equals(sel);
-                    boolean isCustom = METHOD_CUSTOM.equals(sel);
-                    satFields[idx].setEnabled(isAuto);
-                    mmFields[idx].setEnabled(isCustom);
-                }
-            });
-        }
+        final ChannelSettingsGrid channelGrid = buildChannelSettingsGrid(channelNames, defaultMinMax);
+        pd.addComponent(channelGrid.panel);
 
         // ── Section: Merge Options ──
         pd.addHeader("Merge Options");
@@ -900,28 +916,17 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
         if (!ok) return null;
 
         // ── Sequential retrieval ── add-order per type:
+        //   channelGrid:   read directly from Swing controls
         //   toggles:       useDeconv, createMerge, saveOmeTiff, subtractBg, subtractToggles[0..nCh-1]
-        //   numericFields: satFields[0..nCh-1]
-        //   textFields:    mmFields[0..nCh-1], additionalMergesField
-        //   combos:        methodBoxes[0..nCh-1], bgChannelBox
+        //   textFields:    additionalMergesField
+        //   combos:        bgChannelBox
         final MainDialogResult result = new MainDialogResult();
         result.useDeconvolvedInput = pd.getNextBoolean();
 
-        result.processMethodPerCh = new String[nCh];
-        for (int i = 0; i < nCh; i++) {
-            result.processMethodPerCh[i] = pd.getNextChoice();
-        }
-
-        result.saturationsPerCh = new double[nCh];
-        for (int i = 0; i < nCh; i++) {
-            result.saturationsPerCh[i] = pd.getNextNumber();
-        }
-
-        result.customMinMaxPerCh = new String[nCh];
-        for (int i = 0; i < nCh; i++) {
-            String mmVal = pd.getNextString().trim();
-            result.customMinMaxPerCh[i] = mmVal.isEmpty() ? NONE_OPTION : mmVal;
-        }
+        ChannelSettingsSelections channelSettings = readChannelSettingsGrid(channelGrid);
+        result.processMethodPerCh = channelSettings.processMethodPerCh;
+        result.saturationsPerCh = channelSettings.saturationsPerCh;
+        result.customMinMaxPerCh = channelSettings.customMinMaxPerCh;
 
         result.createMerge = pd.getNextBoolean();
         result.saveOmeTiff = pd.getNextBoolean();
@@ -945,6 +950,174 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
         return result;
     }
 
+    @SuppressWarnings("unchecked")
+    static ChannelSettingsGrid buildChannelSettingsGrid(final String[] channelNames, String[] defaultMinMax) {
+        final int nCh = channelNames == null ? 0 : channelNames.length;
+        final JComboBox<String>[] methodBoxes = new JComboBox[nCh];
+        final JTextField[] displayRangeFields = new JTextField[nCh];
+        final JTextField[] saturationFields = new JTextField[nCh];
+        final JLabel[] rowLabels = new JLabel[]{
+                createChannelGridRowLabel("Processing Method"),
+                createChannelGridRowLabel("Display Ranges"),
+                createChannelGridRowLabel("Saturation")
+        };
+        final JLabel[][] helperLabels = new JLabel[3][nCh];
+
+        JPanel panel = new JPanel(new GridBagLayout());
+        panel.setOpaque(false);
+        panel.setBorder(BorderFactory.createEmptyBorder(0, 4, 6, 4));
+
+        addChannelGridComponent(panel, Box.createHorizontalStrut(CHANNEL_GRID_ROW_LABEL_WIDTH),
+                0, 0, 0.0, GridBagConstraints.NONE, new Insets(0, 0, 4, 8));
+        for (int ch = 0; ch < nCh; ch++) {
+            JLabel channelLabel = new JLabel(channelNames[ch]);
+            channelLabel.setFont(channelLabel.getFont().deriveFont(Font.BOLD, 12f));
+            channelLabel.setForeground(Color.DARK_GRAY);
+            addChannelGridComponent(panel, channelLabel,
+                    ch + 1, 0, 1.0, GridBagConstraints.HORIZONTAL, new Insets(0, 0, 4, 10));
+        }
+
+        for (int ch = 0; ch < nCh; ch++) {
+            String defaultRange = defaultMinMax != null && ch < defaultMinMax.length
+                    ? defaultMinMax[ch] : NONE_OPTION;
+            boolean hasCustomValue = hasCustomDisplayRange(defaultRange);
+            String defaultMethod = hasCustomValue ? METHOD_CUSTOM : METHOD_AUTOMATIC;
+
+            methodBoxes[ch] = new JComboBox<String>(PROCESS_METHODS);
+            methodBoxes[ch].setSelectedItem(defaultMethod);
+            methodBoxes[ch].setName("splitMerge.channel." + ch + ".processingMethod");
+            methodBoxes[ch].setMaximumSize(new Dimension(CHANNEL_GRID_CELL_WIDTH, 24));
+            methodBoxes[ch].setPreferredSize(new Dimension(CHANNEL_GRID_CELL_WIDTH, 24));
+
+            displayRangeFields[ch] = new JTextField(hasCustomValue ? defaultRange : "", 12);
+            displayRangeFields[ch].setName("splitMerge.channel." + ch + ".displayRange");
+            displayRangeFields[ch].setMaximumSize(new Dimension(CHANNEL_GRID_TEXT_WIDTH, 24));
+            displayRangeFields[ch].setPreferredSize(new Dimension(CHANNEL_GRID_TEXT_WIDTH, 24));
+
+            saturationFields[ch] = new JTextField(formatSaturation(DEFAULT_SATURATION), 8);
+            saturationFields[ch].setName("splitMerge.channel." + ch + ".saturation");
+            saturationFields[ch].setMaximumSize(new Dimension(CHANNEL_GRID_SATURATION_WIDTH, 24));
+            saturationFields[ch].setPreferredSize(new Dimension(CHANNEL_GRID_SATURATION_WIDTH, 24));
+
+            final int idx = ch;
+            methodBoxes[ch].addItemListener(new ItemListener() {
+                @Override
+                public void itemStateChanged(ItemEvent e) {
+                    if (e.getStateChange() != ItemEvent.SELECTED) return;
+                    updateChannelGridEnabledState(methodBoxes[idx],
+                            displayRangeFields[idx], saturationFields[idx]);
+                }
+            });
+            updateChannelGridEnabledState(methodBoxes[ch], displayRangeFields[ch], saturationFields[ch]);
+        }
+
+        addChannelGridComponent(panel, rowLabels[0],
+                0, 1, 0.0, GridBagConstraints.NONE, new Insets(4, 0, 4, 8));
+        addChannelGridComponent(panel, rowLabels[1],
+                0, 2, 0.0, GridBagConstraints.NONE, new Insets(4, 0, 4, 8));
+        addChannelGridComponent(panel, rowLabels[2],
+                0, 3, 0.0, GridBagConstraints.NONE, new Insets(4, 0, 0, 8));
+
+        for (int ch = 0; ch < nCh; ch++) {
+            helperLabels[0][ch] = createChannelGridHelperLabel(METHOD_HELP);
+            helperLabels[1][ch] = createChannelGridHelperLabel(DISPLAY_RANGE_HELP);
+            helperLabels[2][ch] = createChannelGridHelperLabel(SATURATION_HELP);
+
+            addChannelGridComponent(panel,
+                    createChannelGridCell(methodBoxes[ch], helperLabels[0][ch]),
+                    ch + 1, 1, 1.0, GridBagConstraints.HORIZONTAL, new Insets(4, 0, 4, 10));
+            addChannelGridComponent(panel,
+                    createChannelGridCell(displayRangeFields[ch], helperLabels[1][ch]),
+                    ch + 1, 2, 1.0, GridBagConstraints.HORIZONTAL, new Insets(4, 0, 4, 10));
+            addChannelGridComponent(panel,
+                    createChannelGridCell(saturationFields[ch], helperLabels[2][ch]),
+                    ch + 1, 3, 1.0, GridBagConstraints.HORIZONTAL, new Insets(4, 0, 0, 10));
+        }
+
+        return new ChannelSettingsGrid(panel, methodBoxes, displayRangeFields,
+                saturationFields, rowLabels, helperLabels);
+    }
+
+    static ChannelSettingsSelections readChannelSettingsGrid(ChannelSettingsGrid grid) {
+        int nCh = grid == null || grid.methodBoxes == null ? 0 : grid.methodBoxes.length;
+        String[] processMethodPerCh = new String[nCh];
+        String[] customMinMaxPerCh = new String[nCh];
+        double[] saturationsPerCh = new double[nCh];
+
+        for (int i = 0; i < nCh; i++) {
+            processMethodPerCh[i] = selectedProcessingMethod(grid.methodBoxes[i]);
+            customMinMaxPerCh[i] = normalizeDisplayRange(grid.displayRangeFields[i].getText());
+            saturationsPerCh[i] = parseSaturationOrDefault(grid.saturationFields[i].getText(), 0.0);
+        }
+
+        return new ChannelSettingsSelections(processMethodPerCh, customMinMaxPerCh, saturationsPerCh);
+    }
+
+    private static JLabel createChannelGridRowLabel(String text) {
+        JLabel label = new JLabel(text);
+        label.setFont(label.getFont().deriveFont(Font.BOLD, 12f));
+        label.setForeground(Color.DARK_GRAY);
+        label.setPreferredSize(new Dimension(CHANNEL_GRID_ROW_LABEL_WIDTH, 24));
+        return label;
+    }
+
+    private static JLabel createChannelGridHelperLabel(String text) {
+        JLabel label = new JLabel(text);
+        label.setFont(label.getFont().deriveFont(Font.PLAIN, 10f));
+        label.setForeground(CHANNEL_GRID_HELP_COLOR);
+        label.setAlignmentX(Component.LEFT_ALIGNMENT);
+        label.setMaximumSize(new Dimension(CHANNEL_GRID_CELL_WIDTH, 28));
+        return label;
+    }
+
+    private static JPanel createChannelGridCell(JComponent input, JLabel helper) {
+        JPanel cell = new JPanel();
+        cell.setLayout(new BoxLayout(cell, BoxLayout.Y_AXIS));
+        cell.setOpaque(false);
+        cell.setAlignmentX(Component.LEFT_ALIGNMENT);
+        input.setAlignmentX(Component.LEFT_ALIGNMENT);
+        helper.setAlignmentX(Component.LEFT_ALIGNMENT);
+        cell.add(input);
+        cell.add(Box.createVerticalStrut(2));
+        cell.add(helper);
+        return cell;
+    }
+
+    private static void addChannelGridComponent(JPanel panel, Component component,
+                                                int gridx, int gridy, double weightx,
+                                                int fill, Insets insets) {
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.gridx = gridx;
+        gbc.gridy = gridy;
+        gbc.weightx = weightx;
+        gbc.fill = fill;
+        gbc.anchor = GridBagConstraints.NORTHWEST;
+        gbc.insets = insets;
+        panel.add(component, gbc);
+    }
+
+    private static void updateChannelGridEnabledState(JComboBox<String> methodBox,
+                                                      JTextField displayRangeField,
+                                                      JTextField saturationField) {
+        String selected = selectedProcessingMethod(methodBox);
+        displayRangeField.setEnabled(METHOD_CUSTOM.equals(selected));
+        saturationField.setEnabled(METHOD_AUTOMATIC.equals(selected));
+    }
+
+    private static String selectedProcessingMethod(JComboBox<String> methodBox) {
+        Object selected = methodBox == null ? null : methodBox.getSelectedItem();
+        return selected == null ? METHOD_NONE : selected.toString();
+    }
+
+    private static boolean hasCustomDisplayRange(String value) {
+        return !NONE_OPTION.equalsIgnoreCase(value) && value != null && !value.trim().isEmpty();
+    }
+
+    private static String normalizeDisplayRange(String value) {
+        String trimmed = value == null ? "" : value.trim();
+        return trimmed.isEmpty() ? NONE_OPTION : trimmed;
+    }
+
     private MainDialogResult buildHeadlessDefaults(String[] channelNames, String[] defaultMinMax,
                                                     int autoBackgroundIndex) {
         int nCh = channelNames.length;
@@ -953,11 +1126,12 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
         result.customMinMaxPerCh = new String[nCh];
         result.saturationsPerCh = new double[nCh];
         for (int i = 0; i < nCh; i++) {
-            boolean hasCustomValue = !NONE_OPTION.equalsIgnoreCase(defaultMinMax[i])
-                    && defaultMinMax[i] != null && !defaultMinMax[i].trim().isEmpty();
+            String defaultRange = defaultMinMax != null && i < defaultMinMax.length
+                    ? defaultMinMax[i] : NONE_OPTION;
+            boolean hasCustomValue = hasCustomDisplayRange(defaultRange);
             result.processMethodPerCh[i] = hasCustomValue ? METHOD_CUSTOM : METHOD_AUTOMATIC;
-            result.customMinMaxPerCh[i] = hasCustomValue ? defaultMinMax[i] : NONE_OPTION;
-            result.saturationsPerCh[i] = 0.35;
+            result.customMinMaxPerCh[i] = hasCustomValue ? defaultRange : NONE_OPTION;
+            result.saturationsPerCh[i] = DEFAULT_SATURATION;
         }
         result.createMerge = true;
         result.saveOmeTiff = false;
@@ -1059,7 +1233,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
         for (int c = 0; c < n; c++) {
             String method = c < processMethodPerCh.length ? processMethodPerCh[c] : METHOD_NONE;
             String customMM = c < customMinMaxPerCh.length ? customMinMaxPerCh[c] : NONE_OPTION;
-            double saturation = c < saturationsPerCh.length ? saturationsPerCh[c] : 0.35;
+            double saturation = c < saturationsPerCh.length ? saturationsPerCh[c] : DEFAULT_SATURATION;
 
             if (!compactLog) {
                 IJ.log("  > Channel " + (c + 1) + "/" + n + ": " + channelNames[c]);
@@ -1212,7 +1386,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                 String color = c < channelColors.length ? channelColors[c] : "?";
                 StringBuilder methodDesc = new StringBuilder();
                 if (METHOD_AUTOMATIC.equals(method)) {
-                    double sat = c < saturationsPerCh.length ? saturationsPerCh[c] : 0.35;
+                    double sat = c < saturationsPerCh.length ? saturationsPerCh[c] : DEFAULT_SATURATION;
                     methodDesc.append("Automatic (sat=").append(sat).append(")");
                 } else if (METHOD_CUSTOM.equals(method)) {
                     String mm = c < customMinMaxPerCh.length ? customMinMaxPerCh[c] : "?";
