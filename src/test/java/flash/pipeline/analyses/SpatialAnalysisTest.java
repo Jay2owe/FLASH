@@ -364,6 +364,55 @@ public class SpatialAnalysisTest {
     }
 
     @Test
+    public void phenotypingAndHeatmapControlsAreInsideAdvancedSection() throws Exception {
+        boolean advancedGlobal = ij.Prefs.get("flash.advanced.global", false);
+        boolean advancedSpatial = ij.Prefs.get("flash.advanced.spatial", false);
+        ij.Prefs.set("flash.advanced.global", false);
+        ij.Prefs.set("flash.advanced.spatial", false);
+
+        SpatialAnalysis analysis = new SpatialAnalysis();
+        PipelineDialog dialog = new PipelineDialog("Spatial Advanced Controls");
+        try {
+            Class<?> bindingsClass = Class.forName(
+                    "flash.pipeline.analyses.SpatialAnalysis$SpatialDialogBindings");
+            Constructor<?> bindingsConstructor = bindingsClass.getDeclaredConstructor();
+            bindingsConstructor.setAccessible(true);
+            Object bindings = bindingsConstructor.newInstance();
+            Method method = SpatialAnalysis.class.getDeclaredMethod(
+                    "addAdvancedPhenotypingAndHeatmapControls",
+                    PipelineDialog.class,
+                    bindingsClass,
+                    boolean.class,
+                    int.class,
+                    boolean.class,
+                    double.class,
+                    String.class);
+            method.setAccessible(true);
+            method.invoke(analysis, dialog, bindings, false, 0, false, 0.0, "Fire");
+
+            JPanel content = contentPanel(dialog);
+            assertTrue("Cell Phenotyping header should be hidden until advanced options are opened",
+                    hasHiddenAncestor(findLabel(content, "Cell Phenotyping"), content));
+            assertTrue("K-means clustering should be hidden until advanced options are opened",
+                    hasHiddenAncestor(findLabel(content, "K-means clustering"), content));
+            assertTrue("Clusters input should be hidden until advanced options are opened",
+                    hasHiddenAncestor(findLabel(content, "Clusters (k, 0=auto)"), content));
+            assertTrue("Density Heatmaps header should be hidden until advanced options are opened",
+                    hasHiddenAncestor(findLabel(content, "Density Heatmaps"), content));
+            assertTrue("Density heatmap toggle should be hidden until advanced options are opened",
+                    hasHiddenAncestor(findLabel(content, "Generate density heatmaps"), content));
+            assertTrue("KDE bandwidth input should be hidden until advanced options are opened",
+                    hasHiddenAncestor(findLabel(content, "KDE bandwidth (um, 0=auto)"), content));
+            assertTrue("Heatmap LUT choice should be hidden until advanced options are opened",
+                    hasHiddenAncestor(findLabel(content, "Heatmap LUT"), content));
+        } finally {
+            backingDialog(dialog).dispose();
+            ij.Prefs.set("flash.advanced.global", advancedGlobal);
+            ij.Prefs.set("flash.advanced.spatial", advancedSpatial);
+        }
+    }
+
+    @Test
     public void execute_excludesZeroVolumePlaceholderRowsFromSpatialMatching() throws Exception {
         File root = temp.newFolder("spatial-placeholder-rows");
         File objectsDir = objectsDir(root);

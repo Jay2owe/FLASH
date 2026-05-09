@@ -688,21 +688,8 @@ public class SpatialAnalysis implements Analysis {
                     doCompositeIndices, doPopMorphometrics, doSpatialMorphometrics,
                     existingObjectData);
 
-            opts.addHeader("Cell Phenotyping");
-            spatialBindings.doPhenotypingToggle = opts.addToggle("K-means clustering", doPhenotyping);
-            opts.addHelpText("Clusters objects by multi-channel feature profile "
-                    + "(volume, intensity, colocalization). Auto-detects optimal k via silhouette score.");
-            spatialBindings.clusterKField = opts.addNumericField("Clusters (k, 0=auto)", clusterK, 0);
-            opts.addHelpText("Number of clusters. 0 auto-detects optimal k (2-10).");
-
-            opts.addHeader("Density Heatmaps");
-            spatialBindings.doHeatmapsToggle = opts.addToggle("Generate density heatmaps", doHeatmaps);
-            opts.addHelpText("Gaussian KDE density maps per channel. "
-                    + "Saved as TIFF + PNG to FLASH/Image Analysis/Spatial Analysis/Image Outputs/<animal>/Heatmaps/.");
-            spatialBindings.kdeBandwidthField = opts.addNumericField("KDE bandwidth (um, 0=auto)", heatmapBandwidth, 1);
-            opts.addHelpText("Kernel bandwidth in microns. 0 uses Scott's rule automatically.");
-            String[] lutOptions = {"Fire", "Grays", "Cyan", "Green", "Magenta", "Red"};
-            spatialBindings.heatmapLutChoice = opts.addChoice("Heatmap LUT", lutOptions, heatmapLut);
+            addAdvancedPhenotypingAndHeatmapControls(opts, spatialBindings,
+                    doPhenotyping, clusterK, doHeatmaps, heatmapBandwidth, heatmapLut);
 
             // Initial states
             updateVolumetricThresholdEnablement(spatialBindings);
@@ -4100,6 +4087,32 @@ public class SpatialAnalysis implements Analysis {
                 updateMorphometricDependencyControls(spatialBindings);
             }
         });
+    }
+
+    private void addAdvancedPhenotypingAndHeatmapControls(PipelineDialog opts,
+                                                          SpatialDialogBindings spatialBindings,
+                                                          boolean doPhenotyping,
+                                                          int clusterK,
+                                                          boolean doHeatmaps,
+                                                          double heatmapBandwidth,
+                                                          String heatmapLut) {
+        opts.beginAdvancedSection("spatial");
+        opts.addHeader("Cell Phenotyping");
+        spatialBindings.doPhenotypingToggle = opts.addToggle("K-means clustering", doPhenotyping);
+        opts.addHelpText("Clusters objects by multi-channel feature profile "
+                + "(volume, intensity, colocalization). Auto-detects optimal k via silhouette score.");
+        spatialBindings.clusterKField = opts.addNumericField("Clusters (k, 0=auto)", clusterK, 0);
+        opts.addHelpText("Number of clusters. 0 auto-detects optimal k (2-10).");
+
+        opts.addHeader("Density Heatmaps");
+        spatialBindings.doHeatmapsToggle = opts.addToggle("Generate density heatmaps", doHeatmaps);
+        opts.addHelpText("Gaussian KDE density maps per channel. "
+                + "Saved as TIFF + PNG to FLASH/Image Analysis/Spatial Analysis/Image Outputs/<animal>/Heatmaps/.");
+        spatialBindings.kdeBandwidthField = opts.addNumericField("KDE bandwidth (um, 0=auto)", heatmapBandwidth, 1);
+        opts.addHelpText("Kernel bandwidth in microns. 0 uses Scott's rule automatically.");
+        String[] lutOptions = {"Fire", "Grays", "Cyan", "Green", "Magenta", "Red"};
+        spatialBindings.heatmapLutChoice = opts.addChoice("Heatmap LUT", lutOptions, heatmapLut);
+        opts.endAdvancedSection();
     }
 
     private static void updateMorphometricDependencyControls(SpatialDialogBindings bindings) {
