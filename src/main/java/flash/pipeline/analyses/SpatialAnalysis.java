@@ -592,144 +592,38 @@ public class SpatialAnalysis implements Analysis {
         String heatmapLut = DEFAULT_HEATMAP_LUT;
         int clusterK = 0; // 0 = auto-detect
 
+        SpatialAnalysisWizard.DerivedConfig effectiveOptions = configuredOptions;
         SpatialAnalysisWizard.DerivedConfig cliDerived = loadCliSpatialConfig(directory);
         if (cliDerived != null) {
-            configuredOptions = cliDerived;
+            effectiveOptions = cliDerived;
         }
-        if (configuredOptions != null) {
-            SpatialAnalysisWizard.enforceDependencies(configuredOptions,
+        if (!suppressDialogs && effectiveOptions == null) {
+            effectiveOptions = showSpatialOptionsDialog(directory, channelNames, existingObjectData,
+                    availableLineSets, null);
+            if (effectiveOptions == null) {
+                return;
+            }
+        }
+        if (effectiveOptions != null) {
+            SpatialAnalysisWizard.enforceDependencies(effectiveOptions,
                     firstSeriesInfoOrNull(directory), calibrationIsAvailable(directory));
-            doDistances = configuredOptions.doDistances;
-            doSpatialStats = configuredOptions.doSpatialStats;
-            doVolumetric = configuredOptions.doVolColoc;
-            doCpc = configuredOptions.doCpc;
-            doVoronoi = configuredOptions.doVoronoi;
-            doHeatmaps = configuredOptions.doHeatmaps;
-            doPhenotyping = configuredOptions.doPhenotyping;
-            doMorphology = configuredOptions.do2DMorphology;
-            do3DShapeFeatures = configuredOptions.do3DMorphology;
-            doCompositeIndices = configuredOptions.doCompositeIndices;
-            doPopMorphometrics = configuredOptions.doPopMorphometrics;
-            doSpatialMorphometrics = configuredOptions.doSpatialMorphometrics;
-            heatmapBandwidth = configuredOptions.kdeBandwidth;
-            heatmapLut = configuredOptions.heatmapLut;
-            clusterK = configuredOptions.clusterK;
-            for (String chName : channelNames) {
-                markerThresholds.put(chName, Double.valueOf(configuredOptions.colocThresholdPercent));
-            }
-        }
-
-        if (!suppressDialogs && configuredOptions == null) {
-            boolean dialogDone = false;
-            while (!dialogDone) {
-            PipelineDialog opts = new PipelineDialog("Spatial Analysis Options", PipelineDialog.Phase.ANALYSE);
-            opts.addAnalysisHelpHeader("Spatial Analysis", FLASH_Pipeline.IDX_SPATIAL);
-            final SpatialDialogBindings spatialBindings = new SpatialDialogBindings();
-            addSpatialSetupControls(opts, directory, spatialBindings,
-                    new SpatialConfigApplier() {
-                        @Override
-                        public void apply(String selectedPresetName,
-                                          SpatialAnalysisWizard.DerivedConfig derived) {
-                            applySpatialConfigToDialog(derived, channelNames,
-                                    spatialBindings, selectedPresetName);
-                        }
-                    });
-            opts.addSubHeader("Spatial Distances");
-            spatialBindings.doDistancesToggle = opts.addToggle("Nearest neighbor distances", doDistances);
-            opts.addHelpText("Computes 3D nearest neighbor distance between every channel pair.");
-            opts.addHelpText(existingObjectData.distanceHelperText());
-            spatialBindings.lineDistanceToggle = opts.addToggle("Line distance to drawn line ROI sets",
-                    doLineDistance && hasLineRoiSets);
-            if (!hasLineRoiSets) {
-                spatialBindings.lineDistanceToggle.setEnabled(false);
-                opts.addHelpText("No line ROI set found in Data Analysis/Lines. Draw a line set first, "
-                        + "then rerun Spatial Analysis.");
-            } else {
-                opts.addHelpText("Uses all line ROI sets found in Data Analysis/Lines: "
-                        + lineSetSummary(availableLineSets) + ".");
-            }
-            opts.beginAdvancedSection("spatial");
-            spatialBindings.doSpatialStatsToggle = opts.addToggle("Spatial statistics (Ripley's K/L/G)", doSpatialStats);
-            opts.addHelpText("Point pattern analysis per channel (requires calibrated centroids).");
-            opts.endAdvancedSection();
-
-            opts.addHeader("Colocalization");
-            final ToggleSwitch volToggle = opts.addToggle("Volumetric overlap", doVolumetric);
-            spatialBindings.doVolColocToggle = volToggle;
-            opts.addHelpText("Counts nearest-neighbor objects exceeding the colocalization "
-                    + "threshold. Uses saved Colocalisation with percentages from 3D Object Analysis.");
-            final List<JTextField> thresholdFields = new ArrayList<JTextField>();
-            for (String chName : channelNames) {
-                JTextField tf = opts.addNumericField(chName + " Coloc Threshold (%)",
-                        getThreshold(chName), 0);
-                tf.setEnabled(doVolumetric);
-                thresholdFields.add(tf);
-            }
-            spatialBindings.thresholdFields = thresholdFields;
-            volToggle.addChangeListener(new Runnable() {
-                @Override
-                public void run() {
-                    updateVolumetricThresholdEnablement(spatialBindings);
-                }
-            });
-            spatialBindings.doCpcToggle = opts.addToggle("CPC centroid coincidence", doCpc);
-            opts.addHelpText("Centroid-in-object colocalization from saved label images. "
-                    + "Skips computation if CPC columns already exist from 3D Object Analysis.");
-            opts.addHelpText(existingObjectData.colocalizationHelperText());
-
-            opts.beginAdvancedSection("spatial");
-            opts.addHeader("Voronoi Tessellation");
-            spatialBindings.doVoronoiToggle = opts.addToggle("Voronoi territory analysis", doVoronoi);
-            opts.addHelpText("Computes Voronoi territories per object: territory area, "
-                    + "neighbor count, and inter-channel interaction matrix with permutation test.");
-            opts.endAdvancedSection();
-
-            addMorphometricControls(opts, spatialBindings, doMorphology, do3DShapeFeatures,
-                    doCompositeIndices, doPopMorphometrics, doSpatialMorphometrics,
-                    existingObjectData);
-
-            addAdvancedPhenotypingAndHeatmapControls(opts, spatialBindings,
-                    doPhenotyping, clusterK, doHeatmaps, heatmapBandwidth, heatmapLut);
-
-            // Initial states
-            updateVolumetricThresholdEnablement(spatialBindings);
-            updateMorphometricDependencyControls(spatialBindings);
-
-            if (!opts.showDialog()) {
-                return;
-            }
-            doDistances = opts.getNextBoolean();
-            doLineDistance = opts.getNextBoolean() && hasLineRoiSets;
-            doSpatialStats = opts.getNextBoolean();
-            doVolumetric = opts.getNextBoolean();
-            doCpc = opts.getNextBoolean();
-            doVoronoi = opts.getNextBoolean();
-            doMorphology = opts.getNextBoolean();
-            do3DShapeFeatures = opts.getNextBoolean();
-            doCompositeIndices = opts.getNextBoolean();
-            doPopMorphometrics = opts.getNextBoolean();
-            doSpatialMorphometrics = opts.getNextBoolean();
-            doPhenotyping = opts.getNextBoolean();
-            doHeatmaps = opts.getNextBoolean();
-            for (String chName : channelNames) {
-                markerThresholds.put(chName, opts.getNextNumber());
-            }
-            clusterK = (int) opts.getNextNumber();
-            heatmapBandwidth = opts.getNextNumber();
-            heatmapLut = opts.getNextChoice();
-
-            boolean effective3DShapeFeatures = do3DShapeFeatures
-                    || doCompositeIndices || doPopMorphometrics || doSpatialMorphometrics;
-            RuntimeDependencyAction dependencyAction =
-                    checkRuntimeDependencies(doVoronoi, effective3DShapeFeatures);
-            if (dependencyAction == RuntimeDependencyAction.RECONFIGURE) {
-                continue;
-            }
-            if (dependencyAction == RuntimeDependencyAction.ABORT) {
-                return;
-            }
-            dialogDone = true;
-            }
+            doDistances = effectiveOptions.doDistances;
+            doLineDistance = effectiveOptions.doLineDistance && hasLineRoiSets;
+            doSpatialStats = effectiveOptions.doSpatialStats;
+            doVolumetric = effectiveOptions.doVolColoc;
+            doCpc = effectiveOptions.doCpc;
+            doVoronoi = effectiveOptions.doVoronoi;
+            doHeatmaps = effectiveOptions.doHeatmaps;
+            doPhenotyping = effectiveOptions.doPhenotyping;
+            doMorphology = effectiveOptions.do2DMorphology;
+            do3DShapeFeatures = effectiveOptions.do3DMorphology;
+            doCompositeIndices = effectiveOptions.doCompositeIndices;
+            doPopMorphometrics = effectiveOptions.doPopMorphometrics;
+            doSpatialMorphometrics = effectiveOptions.doSpatialMorphometrics;
+            heatmapBandwidth = effectiveOptions.kdeBandwidth;
+            heatmapLut = effectiveOptions.heatmapLut;
+            clusterK = effectiveOptions.clusterK;
+            applyConfiguredMarkerThresholds(effectiveOptions, channelNames);
         }
 
         if (doPopMorphometrics
@@ -914,6 +808,206 @@ public class SpatialAnalysis implements Analysis {
      */
     public void run(String directory) {
         execute(directory);
+    }
+
+    SpatialAnalysisWizard.DerivedConfig showOptionsDialogForChainedRun(String directory,
+                                                                       List<String> channelNames) {
+        List<String> safeChannelNames = channelNames == null
+                ? new ArrayList<String>()
+                : new ArrayList<String>(channelNames);
+        File linesDir = new File(directory, "Data Analysis" + File.separator + "Lines");
+        SpatialObjectDataAvailability existingObjectData =
+                SpatialObjectDataAvailability.detect(null, safeChannelNames);
+        return showSpatialOptionsDialog(directory, safeChannelNames, existingObjectData,
+                lineSetNames(linesDir), configuredOptions);
+    }
+
+    private SpatialAnalysisWizard.DerivedConfig showSpatialOptionsDialog(
+            String directory,
+            final List<String> channelNames,
+            SpatialObjectDataAvailability existingObjectData,
+            List<String> availableLineSets,
+            SpatialAnalysisWizard.DerivedConfig initialOptions) {
+        if (channelNames == null || channelNames.isEmpty()) {
+            return null;
+        }
+        if (initialOptions != null) {
+            applyConfiguredMarkerThresholds(initialOptions, channelNames);
+        }
+
+        boolean hasLineRoiSets = availableLineSets != null && !availableLineSets.isEmpty();
+        boolean doDistances = initialOptions == null ? true : initialOptions.doDistances;
+        boolean doLineDistance = initialOptions != null && initialOptions.doLineDistance;
+        boolean doSpatialStats = initialOptions != null && initialOptions.doSpatialStats;
+        boolean doCpc = initialOptions == null ? true : initialOptions.doCpc;
+        boolean doVolumetric = initialOptions != null && initialOptions.doVolColoc;
+        boolean doVoronoi = initialOptions != null && initialOptions.doVoronoi;
+        boolean doHeatmaps = initialOptions != null && initialOptions.doHeatmaps;
+        boolean doPhenotyping = initialOptions != null && initialOptions.doPhenotyping;
+        boolean doMorphology = initialOptions != null && initialOptions.do2DMorphology;
+        boolean do3DShapeFeatures = initialOptions != null && initialOptions.do3DMorphology;
+        boolean doCompositeIndices = initialOptions != null && initialOptions.doCompositeIndices;
+        boolean doPopMorphometrics = initialOptions != null && initialOptions.doPopMorphometrics;
+        boolean doSpatialMorphometrics = initialOptions != null && initialOptions.doSpatialMorphometrics;
+        double heatmapBandwidth = initialOptions == null ? 0.0 : initialOptions.kdeBandwidth;
+        String heatmapLut = initialOptions == null ? DEFAULT_HEATMAP_LUT : initialOptions.heatmapLut;
+        int clusterK = initialOptions == null ? 0 : initialOptions.clusterK;
+
+        boolean dialogDone = false;
+        while (!dialogDone) {
+            PipelineDialog opts = new PipelineDialog("Spatial Analysis Options", PipelineDialog.Phase.ANALYSE);
+            opts.addAnalysisHelpHeader("Spatial Analysis", FLASH_Pipeline.IDX_SPATIAL);
+            final SpatialDialogBindings spatialBindings = new SpatialDialogBindings();
+            addSpatialSetupControls(opts, directory, spatialBindings,
+                    new SpatialConfigApplier() {
+                        @Override
+                        public void apply(String selectedPresetName,
+                                          SpatialAnalysisWizard.DerivedConfig derived) {
+                            applySpatialConfigToDialog(derived, channelNames,
+                                    spatialBindings, selectedPresetName);
+                        }
+                    });
+            opts.addSubHeader("Spatial Distances");
+            spatialBindings.doDistancesToggle = opts.addToggle("Nearest neighbor distances", doDistances);
+            opts.addHelpText("Computes 3D nearest neighbor distance between every channel pair.");
+            opts.addHelpText(existingObjectData.distanceHelperText());
+            spatialBindings.lineDistanceToggle = opts.addToggle("Line distance to drawn line ROI sets",
+                    doLineDistance && hasLineRoiSets);
+            if (!hasLineRoiSets) {
+                spatialBindings.lineDistanceToggle.setEnabled(false);
+                opts.addHelpText("No line ROI set found in Data Analysis/Lines. Draw a line set first, "
+                        + "then rerun Spatial Analysis.");
+            } else {
+                opts.addHelpText("Uses all line ROI sets found in Data Analysis/Lines: "
+                        + lineSetSummary(availableLineSets) + ".");
+            }
+            opts.beginAdvancedSection("spatial");
+            spatialBindings.doSpatialStatsToggle = opts.addToggle("Spatial statistics (Ripley's K/L/G)", doSpatialStats);
+            opts.addHelpText("Point pattern analysis per channel (requires calibrated centroids).");
+            opts.endAdvancedSection();
+
+            opts.addHeader("Colocalization");
+            final ToggleSwitch volToggle = opts.addToggle("Volumetric overlap", doVolumetric);
+            spatialBindings.doVolColocToggle = volToggle;
+            opts.addHelpText("Counts nearest-neighbor objects exceeding the colocalization "
+                    + "threshold. Uses saved Colocalisation with percentages from 3D Object Analysis.");
+            final List<JTextField> thresholdFields = new ArrayList<JTextField>();
+            for (String chName : channelNames) {
+                JTextField tf = opts.addNumericField(chName + " Coloc Threshold (%)",
+                        getThreshold(chName), 0);
+                tf.setEnabled(doVolumetric);
+                thresholdFields.add(tf);
+            }
+            spatialBindings.thresholdFields = thresholdFields;
+            volToggle.addChangeListener(new Runnable() {
+                @Override
+                public void run() {
+                    updateVolumetricThresholdEnablement(spatialBindings);
+                }
+            });
+            spatialBindings.doCpcToggle = opts.addToggle("CPC centroid coincidence", doCpc);
+            opts.addHelpText("Centroid-in-object colocalization from saved label images. "
+                    + "Skips computation if CPC columns already exist from 3D Object Analysis.");
+            opts.addHelpText(existingObjectData.colocalizationHelperText());
+
+            opts.beginAdvancedSection("spatial");
+            opts.addHeader("Voronoi Tessellation");
+            spatialBindings.doVoronoiToggle = opts.addToggle("Voronoi territory analysis", doVoronoi);
+            opts.addHelpText("Computes Voronoi territories per object: territory area, "
+                    + "neighbor count, and inter-channel interaction matrix with permutation test.");
+            opts.endAdvancedSection();
+
+            addMorphometricControls(opts, spatialBindings, doMorphology, do3DShapeFeatures,
+                    doCompositeIndices, doPopMorphometrics, doSpatialMorphometrics,
+                    existingObjectData);
+
+            addAdvancedPhenotypingAndHeatmapControls(opts, spatialBindings,
+                    doPhenotyping, clusterK, doHeatmaps, heatmapBandwidth, heatmapLut);
+
+            updateVolumetricThresholdEnablement(spatialBindings);
+            updateMorphometricDependencyControls(spatialBindings);
+
+            if (!opts.showDialog()) {
+                return null;
+            }
+            doDistances = opts.getNextBoolean();
+            doLineDistance = opts.getNextBoolean() && hasLineRoiSets;
+            doSpatialStats = opts.getNextBoolean();
+            doVolumetric = opts.getNextBoolean();
+            doCpc = opts.getNextBoolean();
+            doVoronoi = opts.getNextBoolean();
+            doMorphology = opts.getNextBoolean();
+            do3DShapeFeatures = opts.getNextBoolean();
+            doCompositeIndices = opts.getNextBoolean();
+            doPopMorphometrics = opts.getNextBoolean();
+            doSpatialMorphometrics = opts.getNextBoolean();
+            doPhenotyping = opts.getNextBoolean();
+            doHeatmaps = opts.getNextBoolean();
+            for (String chName : channelNames) {
+                markerThresholds.put(chName, opts.getNextNumber());
+            }
+            clusterK = (int) opts.getNextNumber();
+            heatmapBandwidth = opts.getNextNumber();
+            heatmapLut = opts.getNextChoice();
+
+            boolean effective3DShapeFeatures = do3DShapeFeatures
+                    || doCompositeIndices || doPopMorphometrics || doSpatialMorphometrics;
+            RuntimeDependencyAction dependencyAction =
+                    checkRuntimeDependencies(doVoronoi, effective3DShapeFeatures);
+            if (dependencyAction == RuntimeDependencyAction.RECONFIGURE) {
+                continue;
+            }
+            if (dependencyAction == RuntimeDependencyAction.ABORT) {
+                return null;
+            }
+            dialogDone = true;
+        }
+
+        SpatialAnalysisWizard.DerivedConfig config = new SpatialAnalysisWizard.DerivedConfig();
+        config.doDistances = doDistances;
+        config.doLineDistance = doLineDistance && hasLineRoiSets;
+        config.doSpatialStats = doSpatialStats;
+        config.doVolColoc = doVolumetric;
+        config.doCpc = doCpc;
+        config.doVoronoi = doVoronoi;
+        config.doHeatmaps = doHeatmaps;
+        config.doPhenotyping = doPhenotyping;
+        config.do2DMorphology = doMorphology;
+        config.do3DMorphology = do3DShapeFeatures;
+        config.doCompositeIndices = doCompositeIndices;
+        config.doPopMorphometrics = doPopMorphometrics;
+        config.doSpatialMorphometrics = doSpatialMorphometrics;
+        config.kdeBandwidth = heatmapBandwidth;
+        config.heatmapLut = heatmapLut;
+        config.clusterK = clusterK;
+        config.colocThresholdPercent = firstConfiguredThreshold(channelNames);
+        config.markerThresholds.putAll(markerThresholds);
+        return config;
+    }
+
+    private void applyConfiguredMarkerThresholds(SpatialAnalysisWizard.DerivedConfig config,
+                                                 List<String> channelNames) {
+        if (config == null || channelNames == null) {
+            return;
+        }
+        for (String chName : channelNames) {
+            Double threshold = config.markerThresholds.get(chName);
+            markerThresholds.put(chName, threshold == null
+                    ? Double.valueOf(config.colocThresholdPercent)
+                    : threshold);
+        }
+    }
+
+    private double firstConfiguredThreshold(List<String> channelNames) {
+        if (channelNames != null) {
+            for (String chName : channelNames) {
+                Double value = markerThresholds.get(chName);
+                if (value != null) {
+                    return value.doubleValue();
+                }
+            }
+        }
+        return DEFAULT_COLOC_THRESHOLD;
     }
 
     private RuntimeDependencyAction checkRuntimeDependencies(boolean doVoronoi,
@@ -3970,6 +4064,7 @@ public class SpatialAnalysis implements Analysis {
                         selectedPresetName == null ? SPATIAL_PRESET_PLACEHOLDER : selectedPresetName);
             }
             setToggle(bindings.doDistancesToggle, config.doDistances);
+            setToggle(bindings.lineDistanceToggle, config.doLineDistance);
             setToggle(bindings.doSpatialStatsToggle, config.doSpatialStats);
             setToggle(bindings.doVolColocToggle, config.doVolColoc);
             setToggle(bindings.doCpcToggle, config.doCpc);
@@ -3992,9 +4087,16 @@ public class SpatialAnalysis implements Analysis {
                 bindings.clusterKField.setText(numericText(config.clusterK, 0));
             }
             if (bindings.thresholdFields != null) {
-                for (JTextField field : bindings.thresholdFields) {
+                for (int i = 0; i < bindings.thresholdFields.size(); i++) {
+                    JTextField field = bindings.thresholdFields.get(i);
                     if (field != null) {
-                        field.setText(numericText(config.colocThresholdPercent, 0));
+                        String channelName = channelNames != null && i < channelNames.size()
+                                ? channelNames.get(i)
+                                : null;
+                        Double threshold = channelName == null ? null : config.markerThresholds.get(channelName);
+                        field.setText(numericText(threshold == null
+                                ? config.colocThresholdPercent
+                                : threshold.doubleValue(), 0));
                     }
                 }
             }

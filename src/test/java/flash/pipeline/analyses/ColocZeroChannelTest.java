@@ -153,8 +153,12 @@ public class ColocZeroChannelTest {
 
         boolean[] channelHasObjects = new boolean[] { false, true, true };
 
-        // Invoke appendColocColumns via reflection.
-        invokeAppendColoc(analysis, cfg, channelHasObjects, tables);
+        String log = captureImageJLogOutput(new ThrowingRunnable() {
+            @Override
+            public void run() throws Exception {
+                invokeAppendColoc(analysis, cfg, channelHasObjects, tables);
+            }
+        });
 
         // The compute path should have written a positive overlap for CH2's objects vs CH3
         // (and vice versa). If the pair fell through to !aHas||!bHas, all values would be 0.
@@ -174,6 +178,8 @@ public class ColocZeroChannelTest {
         // Pairs involving CH1 should be zero
         assertEquals(0.0, ch2.getValue("Colocalisation with CH1", 0), 0.001);
         assertEquals(0.0, ch3.getValue("Colocalisation with CH1", 0), 0.001);
+        assertTrue(log.contains("CH2 vs: CH1 (no objects in CH1), CH3 (2 interactions)"));
+        assertTrue(log.contains("CH3 vs: CH1 (no objects in CH1), CH2 (2 interactions)"));
     }
 
     @Test
@@ -214,6 +220,8 @@ public class ColocZeroChannelTest {
         assertEquals(50.0, ch1.getValue("Colocalisation with CH2", 1), 0.001);
         assertEquals(100.0, ch2.getValue("Colocalisation with CH1", 0), 0.001);
         assertEquals(100.0, ch2.getValue("Colocalisation with CH1", 1), 0.001);
+        assertTrue(log.contains("CH1 vs: CH2 (2 interactions)"));
+        assertTrue(log.contains("CH2 vs: CH1 (2 interactions)"));
         assertFalse(log.contains("[COLOC DEBUG]"));
         assertFalse(log.contains("[COLOC] pixel overlap"));
     }

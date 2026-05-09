@@ -109,36 +109,24 @@ import java.util.concurrent.locks.ReentrantLock;
  */
 public class ThreeDObjectAnalysis implements Analysis {
 
-    interface SpatialSetupLauncher {
+    interface SpatialOptionsDialogLauncher {
         SpatialAnalysisWizard.DerivedConfig launch(String directory,
-                                                   ChannelIdentities identities,
-                                                   boolean thresholdsConfiguredUpstream);
+                                                   List<String> channelNames,
+                                                   Map<String, Double> markerThresholds);
     }
 
-    private static final SpatialSetupLauncher DEFAULT_SPATIAL_SETUP_LAUNCHER =
-            new SpatialSetupLauncher() {
+    private static final SpatialOptionsDialogLauncher DEFAULT_SPATIAL_OPTIONS_DIALOG_LAUNCHER =
+            new SpatialOptionsDialogLauncher() {
                 @Override
                 public SpatialAnalysisWizard.DerivedConfig launch(String directory,
-                                                                  ChannelIdentities identities,
-                                                                  boolean thresholdsConfiguredUpstream) {
-                    try {
-                        IJ.log("Spatial Analysis setup requested by 3D Object Analysis.");
-                        SpatialAnalysisWizard spatialWizard = new SpatialAnalysisWizard(
-                                flash.pipeline.ui.wizard.WizardFlow.MainPanelBinding.NULL,
-                                identities,
-                                firstSeriesInfoOrNull(directory),
-                                calibrationIsAvailable(directory),
-                                thresholdsConfiguredUpstream,
-                                false);
-                        spatialWizard.run();
-                        if (!spatialWizard.wasFinished()) {
-                            return null;
-                        }
-                        return spatialWizard.deriveCurrentConfig();
-                    } catch (Exception e) {
-                        IJ.handleException(e);
-                        return null;
-                    }
+                                                                  List<String> channelNames,
+                                                                  Map<String, Double> markerThresholds) {
+                    SpatialAnalysis spatialOptions = new SpatialAnalysis();
+                    spatialOptions.setSuppressDialogs(false);
+                    spatialOptions.setMarkerThresholds(markerThresholds == null
+                            ? new LinkedHashMap<String, Double>()
+                            : new LinkedHashMap<String, Double>(markerThresholds));
+                    return spatialOptions.showOptionsDialogForChainedRun(directory, channelNames);
                 }
             };
 
@@ -164,7 +152,8 @@ public class ThreeDObjectAnalysis implements Analysis {
     private int wizardNuclearMarkerIndex = -1;
     private boolean[] wizardProcessChannels = null;
     private SpatialAnalysisWizard.DerivedConfig wizardSpatialConfig = null;
-    private SpatialSetupLauncher spatialSetupLauncher = DEFAULT_SPATIAL_SETUP_LAUNCHER;
+    private SpatialOptionsDialogLauncher spatialOptionsDialogLauncher =
+            DEFAULT_SPATIAL_OPTIONS_DIALOG_LAUNCHER;
     private static final String OBJECT_PRESET_PLACEHOLDER = "(choose preset)";
     private final AtomicBoolean calibrationWritten = new AtomicBoolean(false);
     private boolean useDeconvolvedInput = true;
@@ -338,9 +327,9 @@ public class ThreeDObjectAnalysis implements Analysis {
         }
     }
 
-    void setSpatialSetupLauncherForTest(SpatialSetupLauncher launcher) {
-        this.spatialSetupLauncher = launcher == null
-                ? DEFAULT_SPATIAL_SETUP_LAUNCHER
+    void setSpatialOptionsDialogLauncherForTest(SpatialOptionsDialogLauncher launcher) {
+        this.spatialOptionsDialogLauncher = launcher == null
+                ? DEFAULT_SPATIAL_OPTIONS_DIALOG_LAUNCHER
                 : launcher;
     }
 
@@ -701,9 +690,9 @@ public class ThreeDObjectAnalysis implements Analysis {
                         + "marker channel and which channels contain processes.");
 
                 objectBindings.runSpatialToggle =
-                        gdOpts.addToggle("Run Spatial Distance Analysis", runSpatial);
-                gdOpts.addHelpText("Computes inter-marker nearest neighbor distances after "
-                        + "3D object counting.");
+                        gdOpts.addToggle("Run Spatial Analysis", runSpatial);
+                gdOpts.addHelpText("Opens the full Spatial Analysis options next, then runs "
+                        + "the selected spatial and morphometric outputs after 3D object counting.");
 
                 objectBindings.classicalCentroidFilterToggle =
                         gdOpts.addToggle("Use Centroid ROI Filtering (Classical)", classicalCentroidFilter);
@@ -796,7 +785,7 @@ public class ThreeDObjectAnalysis implements Analysis {
             }
         }
 
-        if (!prepareSpatialHandoffBeforeAnalysis(directory, channelIdentities, runSpatial)) {
+        if (!prepareSpatialHandoffBeforeAnalysis(directory, cfg.channelNames, runSpatial)) {
             return;
         }
 
@@ -1249,33 +1238,14 @@ public class ThreeDObjectAnalysis implements Analysis {
                                                                         ChannelIdentities identities,
                                                                         List<String> roiSetNames) {
         try {
-            final SpatialAnalysisWizard.DerivedConfig[] spatialConfig =
-                    new SpatialAnalysisWizard.DerivedConfig[1];
             ThreeDObjectWizard wizard = new ThreeDObjectWizard(
                     flash.pipeline.ui.wizard.WizardFlow.MainPanelBinding.NULL,
                     cfg,
                     identities,
                     roiSetNames,
-                    false,
-                    new ThreeDObjectWizard.SpatialWizardLauncher() {
-                        @Override public void launch(ThreeDObjectWizard.DerivedConfig config) {
-                            IJ.log("Spatial Analysis Setup Helper requested by 3D Object Setup Helper.");
-                            SpatialAnalysisWizard spatialWizard = new SpatialAnalysisWizard(
-                                    flash.pipeline.ui.wizard.WizardFlow.MainPanelBinding.NULL,
-                                    identities,
-                                    firstSeriesInfoOrNull(directory),
-                                    calibrationIsAvailable(directory),
-                                    true,
-                                    false);
-                            spatialWizard.run();
-                            if (!spatialWizard.wasFinished()) {
-                                return;
-                            }
-                            spatialConfig[0] = spatialWizard.deriveCurrentConfig();
-                        }
-                    });
+                    false);
             ThreeDObjectWizard.DerivedConfig derived = wizard.runAndMaybeLaunchSpatial();
-            wizardSpatialConfig = spatialConfig[0];
+            wizardSpatialConfig = null;
             return derived;
         } catch (Exception e) {
             IJ.handleException(e);
@@ -1284,25 +1254,22 @@ public class ThreeDObjectAnalysis implements Analysis {
     }
 
     boolean prepareSpatialHandoffBeforeAnalysis(String directory,
-                                                ChannelIdentities identities,
+                                                List<String> channelNames,
                                                 boolean runSpatial) {
         if (!runSpatial) {
             wizardSpatialConfig = null;
             return true;
         }
-        if (wizardSpatialConfig != null || suppressDialogs || cliConfig != null) {
+        if (wizardSpatialConfig != null || suppressDialogs || headless || cliConfig != null) {
             return true;
         }
-
-        SpatialAnalysisWizard.DerivedConfig spatialConfig = spatialSetupLauncher.launch(
-                directory,
-                identities,
-                !markerThresholds.isEmpty());
+        SpatialAnalysisWizard.DerivedConfig spatialConfig =
+                spatialOptionsDialogLauncher.launch(directory, channelNames, markerThresholds);
         if (spatialConfig == null) {
-            IJ.log("[FLASH] 3D Object Analysis cancelled because Spatial Analysis setup was cancelled.");
+            IJ.log("[FLASH] 3D Object Analysis cancelled because Spatial Analysis options were cancelled.");
             if (!headless && !suppressDialogs) {
                 IJ.showMessage("3D Object Analysis",
-                        "Spatial Analysis setup was cancelled.\n3D Object Analysis has not started.");
+                        "Spatial Analysis options were cancelled.\n3D Object Analysis has not started.");
             }
             return false;
         }
@@ -3784,7 +3751,7 @@ public class ThreeDObjectAnalysis implements Analysis {
         for (int i = 0; i < n; i++) {
             String ch = cfg.channelNames.get(i);
             if (logEntries.get(i).length() > 0) {
-                IJ.log("    - " + ch + ": " + logEntries.get(i).toString());
+                IJ.log("    - " + ch + " vs: " + logEntries.get(i).toString());
             }
         }
     }
@@ -3861,9 +3828,9 @@ public class ThreeDObjectAnalysis implements Analysis {
         if (!logFirst.get(channelIdx)) sb.append(", ");
         logFirst.set(channelIdx, Boolean.FALSE);
         if (interactions < 0) {
-            sb.append("vs ").append(otherChannel).append(" (failed)");
+            sb.append(otherChannel).append(" (failed)");
         } else {
-            sb.append("vs ").append(otherChannel).append(" (").append(interactions).append(" interactions)");
+            sb.append(otherChannel).append(" (").append(interactions).append(" interactions)");
         }
     }
 
@@ -3871,7 +3838,7 @@ public class ThreeDObjectAnalysis implements Analysis {
         StringBuilder sb = logEntries.get(channelIdx);
         if (!logFirst.get(channelIdx)) sb.append(", ");
         logFirst.set(channelIdx, Boolean.FALSE);
-        sb.append("vs ").append(otherChannel).append(" (").append(reason).append(")");
+        sb.append(otherChannel).append(" (").append(reason).append(")");
     }
 
     /**

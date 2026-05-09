@@ -182,44 +182,46 @@ public class ThreeDObjectAnalysisTest {
     }
 
     @Test
-    public void interactiveSpatialHandoffLaunchesSetupAndStoresConfig() throws Exception {
+    public void interactiveSpatialHandoffLaunchesFullSpatialOptionsAndStoresConfig() throws Exception {
         ThreeDObjectAnalysis analysis = new ThreeDObjectAnalysis();
         final SpatialAnalysisWizard.DerivedConfig expected = new SpatialAnalysisWizard.DerivedConfig();
         expected.doHeatmaps = true;
         final AtomicInteger launches = new AtomicInteger(0);
-        final AtomicReference<Boolean> thresholdsConfigured = new AtomicReference<Boolean>();
+        final AtomicReference<List<String>> launchedChannels = new AtomicReference<List<String>>();
+        final AtomicReference<Map<String, Double>> thresholds = new AtomicReference<Map<String, Double>>();
         setMarkerThresholds(analysis, singletonThresholds());
-        analysis.setSpatialSetupLauncherForTest(new ThreeDObjectAnalysis.SpatialSetupLauncher() {
+        analysis.setSpatialOptionsDialogLauncherForTest(new ThreeDObjectAnalysis.SpatialOptionsDialogLauncher() {
             @Override
             public SpatialAnalysisWizard.DerivedConfig launch(String directory,
-                                                             ChannelIdentities identities,
-                                                             boolean thresholdsConfiguredUpstream) {
+                                                              List<String> channelNames,
+                                                              Map<String, Double> markerThresholds) {
                 launches.incrementAndGet();
-                thresholdsConfigured.set(Boolean.valueOf(thresholdsConfiguredUpstream));
+                launchedChannels.set(channelNames);
+                thresholds.set(markerThresholds);
                 return expected;
             }
         });
 
         assertTrue(analysis.prepareSpatialHandoffBeforeAnalysis(
                 temp.newFolder("spatial-handoff").getAbsolutePath(),
-                dapiIba1AbetaIdentities(),
+                dapiIba1AbetaConfig().channelNames,
                 true));
 
         assertEquals(1, launches.get());
-        assertTrue(thresholdsConfigured.get().booleanValue());
+        assertEquals(dapiIba1AbetaConfig().channelNames, launchedChannels.get());
+        assertEquals(singletonThresholds(), thresholds.get());
         assertSame(expected, fieldValue(analysis, "wizardSpatialConfig"));
     }
 
     @Test
-    public void cancelledSpatialHandoffCancelsObjectAnalysisBeforeProcessing() throws Exception {
+    public void cancelledSpatialOptionsCancelsObjectAnalysisBeforeProcessing() throws Exception {
         ThreeDObjectAnalysis analysis = new ThreeDObjectAnalysis();
-        analysis.setHeadless(true);
         final AtomicInteger launches = new AtomicInteger(0);
-        analysis.setSpatialSetupLauncherForTest(new ThreeDObjectAnalysis.SpatialSetupLauncher() {
+        analysis.setSpatialOptionsDialogLauncherForTest(new ThreeDObjectAnalysis.SpatialOptionsDialogLauncher() {
             @Override
             public SpatialAnalysisWizard.DerivedConfig launch(String directory,
-                                                             ChannelIdentities identities,
-                                                             boolean thresholdsConfiguredUpstream) {
+                                                              List<String> channelNames,
+                                                              Map<String, Double> markerThresholds) {
                 launches.incrementAndGet();
                 return null;
             }
@@ -227,7 +229,7 @@ public class ThreeDObjectAnalysisTest {
 
         assertFalse(analysis.prepareSpatialHandoffBeforeAnalysis(
                 temp.newFolder("spatial-cancel").getAbsolutePath(),
-                dapiIba1AbetaIdentities(),
+                dapiIba1AbetaConfig().channelNames,
                 true));
 
         assertEquals(1, launches.get());
@@ -235,28 +237,30 @@ public class ThreeDObjectAnalysisTest {
     }
 
     @Test
-    public void spatialHandoffSkipsLauncherForNoninteractiveRuns() throws Exception {
+    public void spatialHandoffKeepsNoninteractiveRunsNoninteractive() throws Exception {
         ThreeDObjectAnalysis suppressed = new ThreeDObjectAnalysis();
         final AtomicInteger suppressedLaunches = new AtomicInteger(0);
         suppressed.setSuppressDialogs(true);
-        suppressed.setSpatialSetupLauncherForTest(countingSpatialLauncher(suppressedLaunches));
+        suppressed.setSpatialOptionsDialogLauncherForTest(countingSpatialOptionsLauncher(suppressedLaunches));
 
         assertTrue(suppressed.prepareSpatialHandoffBeforeAnalysis(
                 temp.newFolder("spatial-suppressed").getAbsolutePath(),
-                dapiIba1AbetaIdentities(),
+                dapiIba1AbetaConfig().channelNames,
                 true));
         assertEquals(0, suppressedLaunches.get());
+        assertTrue(booleanField(suppressed.createSpatialAnalysisForRun(), "suppressDialogs"));
 
         ThreeDObjectAnalysis cli = new ThreeDObjectAnalysis();
         final AtomicInteger cliLaunches = new AtomicInteger(0);
         cli.setCliConfig(new CLIConfig());
-        cli.setSpatialSetupLauncherForTest(countingSpatialLauncher(cliLaunches));
+        cli.setSpatialOptionsDialogLauncherForTest(countingSpatialOptionsLauncher(cliLaunches));
 
         assertTrue(cli.prepareSpatialHandoffBeforeAnalysis(
                 temp.newFolder("spatial-cli").getAbsolutePath(),
-                dapiIba1AbetaIdentities(),
+                dapiIba1AbetaConfig().channelNames,
                 true));
         assertEquals(0, cliLaunches.get());
+        assertTrue(booleanField(cli.createSpatialAnalysisForRun(), "suppressDialogs"));
     }
 
     @Test
@@ -381,13 +385,13 @@ public class ThreeDObjectAnalysisTest {
         FeatureDependencyGate.setUiMode(false);
     }
 
-    private static ThreeDObjectAnalysis.SpatialSetupLauncher countingSpatialLauncher(
+    private static ThreeDObjectAnalysis.SpatialOptionsDialogLauncher countingSpatialOptionsLauncher(
             final AtomicInteger launches) {
-        return new ThreeDObjectAnalysis.SpatialSetupLauncher() {
+        return new ThreeDObjectAnalysis.SpatialOptionsDialogLauncher() {
             @Override
             public SpatialAnalysisWizard.DerivedConfig launch(String directory,
-                                                             ChannelIdentities identities,
-                                                             boolean thresholdsConfiguredUpstream) {
+                                                              List<String> channelNames,
+                                                              Map<String, Double> markerThresholds) {
                 launches.incrementAndGet();
                 return new SpatialAnalysisWizard.DerivedConfig();
             }

@@ -3,38 +3,31 @@ package flash.pipeline.analyses.wizard;
 import flash.pipeline.ui.PipelineDialog;
 import org.junit.Test;
 
-import java.util.concurrent.atomic.AtomicInteger;
-
-import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 public class ThreeDObjectChainingTest {
 
     @Test
-    public void spatialWizardLaunchesOnlyWhenSpatialIntentIsTicked() {
-        AtomicInteger launches = new AtomicInteger(0);
-        SimulatedWizard spatial = new SimulatedWizard(true, launches);
-        spatial.runAndMaybeLaunchSpatial();
-        assertEquals(1, launches.get());
+    public void spatialIntentOnlySetsRunSpatialFlag() {
+        SimulatedWizard spatial = new SimulatedWizard(true);
+        ThreeDObjectWizard.DerivedConfig spatialConfig = spatial.runAndMaybeLaunchSpatial();
+        assertTrue(spatialConfig.runSpatial);
 
-        SimulatedWizard notSpatial = new SimulatedWizard(false, launches);
-        notSpatial.runAndMaybeLaunchSpatial();
-        assertEquals(1, launches.get());
+        SimulatedWizard notSpatial = new SimulatedWizard(false);
+        ThreeDObjectWizard.DerivedConfig notSpatialConfig = notSpatial.runAndMaybeLaunchSpatial();
+        assertFalse(notSpatialConfig.runSpatial);
     }
 
     private static final class SimulatedWizard extends ThreeDObjectWizard {
         private final boolean spatial;
 
-        private SimulatedWizard(boolean spatial, final AtomicInteger launches) {
+        private SimulatedWizard(boolean spatial) {
             super(flash.pipeline.ui.wizard.WizardFlow.MainPanelBinding.NULL,
                     ThreeDObjectWizardTest.dapiIba1AbetaConfig(),
                     ThreeDObjectWizardTest.dapiIba1AbetaIdentities(),
                     null,
-                    false,
-                    new SpatialWizardLauncher() {
-                        public void launch(DerivedConfig config) {
-                            launches.incrementAndGet();
-                        }
-                    });
+                    false);
             this.spatial = spatial;
         }
 

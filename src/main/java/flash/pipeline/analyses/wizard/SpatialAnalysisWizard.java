@@ -348,6 +348,7 @@ public class SpatialAnalysisWizard extends WizardFlow {
 
     public static final class DerivedConfig {
         public boolean doDistances;
+        public boolean doLineDistance;
         public boolean doSpatialStats;
         public boolean doVolColoc;
         public boolean doCpc;
@@ -363,6 +364,7 @@ public class SpatialAnalysisWizard extends WizardFlow {
         public String heatmapLut = "Fire";
         public int clusterK = 0;
         public double colocThresholdPercent = 30.0;
+        public final Map<String, Double> markerThresholds = new LinkedHashMap<String, Double>();
     }
 
     private final class SpatialQuestionScreen extends Screen {

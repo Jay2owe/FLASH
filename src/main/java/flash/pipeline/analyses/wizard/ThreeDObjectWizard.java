@@ -29,31 +29,16 @@ public class ThreeDObjectWizard extends WizardFlow {
     private final BinConfig binConfig;
     private final ChannelIdentities identities;
     private final List<String> roiSetNames;
-    private final SpatialWizardLauncher spatialLauncher;
-
-    public interface SpatialWizardLauncher {
-        void launch(DerivedConfig config);
-    }
 
     public ThreeDObjectWizard(MainPanelBinding panel,
                               BinConfig binConfig,
                               ChannelIdentities identities,
                               List<String> roiSetNames,
                               boolean headless) {
-        this(panel, binConfig, identities, roiSetNames, headless, null);
-    }
-
-    public ThreeDObjectWizard(MainPanelBinding panel,
-                              BinConfig binConfig,
-                              ChannelIdentities identities,
-                              List<String> roiSetNames,
-                              boolean headless,
-                              SpatialWizardLauncher spatialLauncher) {
         super("3D Object Setup Helper", panel, headless);
         this.binConfig = binConfig == null ? new BinConfig() : binConfig;
         this.identities = identities == null ? new ChannelIdentities(null) : identities;
         this.roiSetNames = roiSetNames == null ? Collections.<String>emptyList() : new ArrayList<String>(roiSetNames);
-        this.spatialLauncher = spatialLauncher;
         register(new IntentScreen());
         register(new PairScreen());
         register(new StrictnessScreen());
@@ -66,11 +51,7 @@ public class ThreeDObjectWizard extends WizardFlow {
         if (!wasFinished()) {
             return null;
         }
-        DerivedConfig config = deriveCurrentConfig();
-        if (config.runSpatial && spatialLauncher != null) {
-            spatialLauncher.launch(config);
-        }
-        return config;
+        return deriveCurrentConfig();
     }
 
     public DerivedConfig deriveCurrentConfig() {
@@ -311,7 +292,7 @@ public class ThreeDObjectWizard extends WizardFlow {
             dialog.addToggle("Count objects per channel", true).setEnabled(false);
             dialog.addToggle("Colocalization between channels", answers.getBoolean("intent.coloc", false));
             dialog.addToggle("Process length", answers.getBoolean("intent.process", false));
-            dialog.addToggle("Spatial distribution / nearest-neighbour / morphology (opens a second helper)",
+            dialog.addToggle("Spatial distribution / nearest-neighbour / morphology",
                     answers.getBoolean("intent.spatial", false));
         }
 
