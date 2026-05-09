@@ -7,9 +7,12 @@ import ij.process.ByteProcessor;
 import org.junit.Test;
 
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 public class FilterParameterStageTest {
@@ -18,6 +21,8 @@ public class FilterParameterStageTest {
             "run(\"Gaussian Blur...\", \"sigma=2 stack\");\n";
     private static final String CUSTOM_MACRO =
             "run(\"Median...\", \"radius=7 stack\");\n";
+    private static final String AUTO_LOCAL_MACRO =
+            "run(\"Auto Local Threshold\", \"method=Bernsen radius=15 parameter_1=0 parameter_2=0 white\");\n";
 
     @Test
     public void textFieldEditMarksPreviewStaleWithoutRunningFilter() {
@@ -148,6 +153,180 @@ public class FilterParameterStageTest {
         assertEquals(1, store.presetMacroLoads);
     }
 
+    // ── Fork state machine tests ─────────────────────────────────────────
+
+    @Test
+    public void fork_bundledLoadIsCleanAndReadOnly() {
+        RecordingMacroStore store = new RecordingMacroStore("Default", DEFAULT_MACRO);
+        FilterParameterStage stage = new FilterParameterStage(
+                Arrays.asList("Default", "Custom"), store, new RecordingPreviewAdapter(), null, null);
+
+        stage.buildControls(context(), new RecordingActions());
+
+        assertFalse("dirty must be false on bundled load", stage.isDirtyForTest());
+        assertFalse("save-as must be disabled when clean", stage.isSaveAsEnabledForTest());
+        assertTrue("readOnlyBase must be true for a bundled preset",
+                stage.isReadOnlyBaseForTest());
+        assertEquals("Default", stage.renderedComboLabelForTest());
+    }
+
+    @Test
+    public void fork_firstEditMarksDirtyAndRenamesCombo() {
+        RecordingMacroStore store = new RecordingMacroStore("Default", DEFAULT_MACRO);
+        FilterParameterStage stage = new FilterParameterStage(
+                Arrays.asList("Default", "Custom"), store, new RecordingPreviewAdapter(), null, null);
+
+        stage.buildControls(context(), new RecordingActions());
+        stage.onEnter(context(), new PreviewPairPanel("Original", "Adjusted"));
+
+        assertFalse(stage.isDirtyForTest());
+
+        stage.setParameterForTest("sigma", "3.5");
+
+        assertTrue("first edit must mark dirty", stage.isDirtyForTest());
+        assertTrue("save-as must enable on first edit", stage.isSaveAsEnabledForTest());
+        assertEquals("Default (modified)", stage.renderedComboLabelForTest());
+    }
+
+    @Test
+    public void fork_manualRevertClearsDirty() {
+        RecordingMacroStore store = new RecordingMacroStore("Default", DEFAULT_MACRO);
+        FilterParameterStage stage = new FilterParameterStage(
+                Arrays.asList("Default", "Custom"), store, new RecordingPreviewAdapter(), null, null);
+
+        stage.buildControls(context(), new RecordingActions());
+        stage.onEnter(context(), new PreviewPairPanel("Original", "Adjusted"));
+
+        stage.setParameterForTest("sigma", "3.5");
+        assertTrue(stage.isDirtyForTest());
+
+        stage.setParameterForTest("sigma", "2");
+
+        assertFalse("manual revert must clear dirty", stage.isDirtyForTest());
+        assertFalse("save-as must disable when clean again", stage.isSaveAsEnabledForTest());
+        assertEquals("Default", stage.renderedComboLabelForTest());
+    }
+
+    @Test
+    public void fork_comboChangeWhileDirtyDiscardsWithoutPrompt() {
+        Map<String, String> macros = new HashMap<String, String>();
+        macros.put("Default", DEFAULT_MACRO);
+        macros.put("Custom", CUSTOM_MACRO);
+        MultiPresetMacroStore store = new MultiPresetMacroStore("Default", macros);
+        FilterParameterStage stage = new FilterParameterStage(
+                Arrays.asList("Default", "Custom"), store, new RecordingPreviewAdapter(), null, null);
+
+        stage.buildControls(context(), new RecordingActions());
+        stage.onEnter(context(), new PreviewPairPanel("Original", "Adjusted"));
+
+        stage.setParameterForTest("sigma", "3.5");
+        assertTrue(stage.isDirtyForTest());
+
+        stage.setPresetForTest("Custom");
+
+        assertFalse("combo change must discard the fork",
+                stage.isDirtyForTest());
+        assertFalse(stage.isSaveAsEnabledForTest());
+        assertEquals("Custom", stage.selectedPresetForTest());
+        assertEquals(CUSTOM_MACRO, stage.currentMacroForTest());
+        assertEquals("Custom", stage.renderedComboLabelForTest());
+    }
+
+    @Test
+    public void fork_saveAsRoundTripPersistsAndReselects() {
+        RecordingMacroStore store = new RecordingMacroStore("Default", DEFAULT_MACRO);
+        FilterParameterStage stage = new FilterParameterStage(
+                Arrays.asList("Default", "Custom"), store, new RecordingPreviewAdapter(), null, null);
+
+        stage.buildControls(context(), new RecordingActions());
+        stage.onEnter(context(), new PreviewPairPanel("Original", "Adjusted"));
+
+        stage.setParameterForTest("sigma", "3.5");
+        assertTrue(stage.isDirtyForTest());
+
+        stage.simulateSaveAsForTest("MyTuned");
+
+        assertEquals("MyTuned", store.savedAsPresetName);
+        assertTrue(store.savedAsMacro.contains("sigma=3.5"));
+        assertEquals("MyTuned", stage.selectedPresetForTest());
+        assertFalse("dirty must clear after save-as", stage.isDirtyForTest());
+        assertFalse(stage.isSaveAsEnabledForTest());
+        assertEquals("MyTuned", stage.renderedComboLabelForTest());
+        assertFalse("custom presets are not bundled and so not read-only",
+                stage.isReadOnlyBaseForTest());
+    }
+
+    @Test
+    public void fork_editAfterSaveAsReforksCustom() {
+        RecordingMacroStore store = new RecordingMacroStore("Default", DEFAULT_MACRO);
+        FilterParameterStage stage = new FilterParameterStage(
+                Arrays.asList("Default", "Custom"), store, new RecordingPreviewAdapter(), null, null);
+
+        stage.buildControls(context(), new RecordingActions());
+        stage.onEnter(context(), new PreviewPairPanel("Original", "Adjusted"));
+
+        stage.setParameterForTest("sigma", "3.5");
+        stage.simulateSaveAsForTest("MyTuned");
+        assertFalse(stage.isDirtyForTest());
+
+        stage.setParameterForTest("sigma", "5");
+
+        assertTrue("editing after save-as must re-fork", stage.isDirtyForTest());
+        assertEquals("MyTuned (modified)", stage.renderedComboLabelForTest());
+        assertTrue(stage.isSaveAsEnabledForTest());
+    }
+
+    // ── Accordion tests ──────────────────────────────────────────────────
+
+    @Test
+    public void accordion_firstSectionExpandedOnEnter() {
+        String multiSectionMacro =
+                "// ===== Step 1 =====\n"
+                + "run(\"Gaussian Blur...\", \"sigma=2 stack\");\n"
+                + "// ===== Step 2 =====\n"
+                + "run(\"Median...\", \"radius=3 stack\");\n";
+        RecordingMacroStore store = new RecordingMacroStore("Default", multiSectionMacro);
+        FilterParameterStage stage = new FilterParameterStage(
+                Arrays.asList("Default", "Custom"), store, new RecordingPreviewAdapter(), null, null);
+
+        stage.buildControls(context(), new RecordingActions());
+
+        assertTrue("must have at least 2 sections", stage.sectionCountForTest() >= 2);
+        assertTrue("first section expanded on enter", stage.isSectionExpandedForTest(0));
+        assertFalse("subsequent sections collapsed on enter", stage.isSectionExpandedForTest(1));
+    }
+
+    @Test
+    public void accordion_advancedKeysGateHiddenParametersByDefault() {
+        RecordingMacroStore store = new RecordingMacroStore("Default", AUTO_LOCAL_MACRO);
+        FilterParameterStage stage = new FilterParameterStage(
+                Arrays.asList("Default", "Custom"), store, new RecordingPreviewAdapter(), null, null);
+
+        stage.buildControls(context(), new RecordingActions());
+
+        assertTrue("method must be visible by default",
+                stage.hasFieldBindingForTest("method"));
+        assertTrue("radius must be visible by default",
+                stage.hasFieldBindingForTest("radius"));
+        assertFalse("parameter_1 must be hidden behind Advanced…",
+                stage.hasFieldBindingForTest("parameter_1"));
+        assertFalse("parameter_2 must be hidden behind Advanced…",
+                stage.hasFieldBindingForTest("parameter_2"));
+    }
+
+    @Test
+    public void openInCanvasButtonIsRenamedAndStillVisible() {
+        RecordingMacroStore store = new RecordingMacroStore("Default", DEFAULT_MACRO);
+        FilterParameterStage stage = new FilterParameterStage(
+                Arrays.asList("Default", "Custom"), store, new RecordingPreviewAdapter(), null, null);
+
+        stage.buildControls(context(), new RecordingActions());
+
+        assertNotNull(stage.customBuilderButtonTextForTest());
+        assertTrue("button label must be renamed to 'Open in canvas...'",
+                stage.customBuilderButtonTextForTest().toLowerCase().contains("open in canvas"));
+    }
+
     private static ConfigQcContext context() {
         return ConfigQcContext.fromImages(
                 null,
@@ -172,6 +351,8 @@ public class FilterParameterStageTest {
         final String presetMacro;
         String savedPreset = "";
         String savedMacro = "";
+        String savedAsPresetName = "";
+        String savedAsMacro = "";
         String lastLoadedPreset = "";
         int initialMacroLoads;
         int presetMacroLoads;
@@ -204,6 +385,41 @@ public class FilterParameterStageTest {
         @Override public void save(String presetName, String macroContent) {
             savedPreset = presetName;
             savedMacro = macroContent;
+        }
+
+        @Override public void saveAsPreset(String presetName, String macroContent) {
+            savedAsPresetName = presetName;
+            savedAsMacro = macroContent;
+        }
+    }
+
+    private static final class MultiPresetMacroStore implements FilterParameterStage.MacroStore {
+        final String initialPreset;
+        final Map<String, String> macros;
+
+        MultiPresetMacroStore(String initialPreset, Map<String, String> macros) {
+            this.initialPreset = initialPreset;
+            this.macros = macros;
+        }
+
+        @Override public String getInitialPreset() {
+            return initialPreset;
+        }
+
+        @Override public String loadInitialMacro() {
+            return macros.get(initialPreset);
+        }
+
+        @Override public String loadPresetMacro(String presetName) {
+            return macros.containsKey(presetName) ? macros.get(presetName) : "";
+        }
+
+        @Override public void save(String presetName, String macroContent) {
+            macros.put(presetName, macroContent);
+        }
+
+        @Override public void saveAsPreset(String presetName, String macroContent) {
+            macros.put(presetName, macroContent);
         }
     }
 

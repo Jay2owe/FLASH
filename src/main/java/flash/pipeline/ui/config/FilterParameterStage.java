@@ -7,23 +7,35 @@ import ij.ImagePlus;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
+import javax.swing.DefaultListCellRenderer;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
+import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
+import javax.swing.SwingConstants;
+import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Component;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
+import java.awt.Window;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 
 public final class FilterParameterStage implements ConfigQcStage {
 
@@ -32,6 +44,7 @@ public final class FilterParameterStage implements ConfigQcStage {
         String loadInitialMacro() throws Exception;
         String loadPresetMacro(String presetName) throws Exception;
         void save(String presetName, String macroContent) throws Exception;
+        void saveAsPreset(String presetName, String macroContent) throws Exception;
     }
 
     public interface PreviewAdapter {
@@ -66,13 +79,34 @@ public final class FilterParameterStage implements ConfigQcStage {
     private static final String STALE_TEXT = "Preview is stale. Press Preview Filter.";
     private static final String EMPTY_TEXT = "Choose a filter preset or open the custom filter builder.";
 
+    /**
+     * Curated map of "default-visible" parameters per ImageJ command. Anything
+     * absent is hidden behind an Advanced... link. Intentional curation, not
+     * heuristic - extend on user feedback rather than deriving programmatically.
+     */
+    private static final Map<String, List<String>> DEFAULT_VISIBLE_KEYS;
+    static {
+        Map<String, List<String>> m = new HashMap<String, List<String>>();
+        m.put(normalizeCommandKey("Gaussian Blur..."),
+                Collections.singletonList("sigma"));
+        m.put(normalizeCommandKey("Subtract Background..."),
+                Collections.singletonList("rolling"));
+        m.put(normalizeCommandKey("Auto Local Threshold"),
+                Arrays.asList("method", "radius"));
+        m.put(normalizeCommandKey("Median..."),
+                Collections.singletonList("radius"));
+        DEFAULT_VISIBLE_KEYS = Collections.unmodifiableMap(m);
+    }
+
     private final List<String> presetOptions;
+    private final Set<String> bundledPresetNames;
     private final MacroStore macroStore;
     private final PreviewAdapter previewAdapter;
     private final CustomFilterBuilder customFilterBuilder;
     private final PresetDescriptionProvider descriptionProvider;
 
     private final List<FilterFieldBinding> fieldBindings = new ArrayList<FilterFieldBinding>();
+    private final List<CollapsibleSection> sectionPanels = new ArrayList<CollapsibleSection>();
 
     private ConfigQcActions actions;
     private PreviewPairPanel preview;
@@ -88,11 +122,15 @@ public final class FilterParameterStage implements ConfigQcStage {
     private JButton previewButton;
     private JButton customBuilderButton;
     private JButton resetButton;
+    private JButton saveAsButton;
 
     private String savedPreset;
     private String savedMacro;
     private String selectedPreset;
     private String currentMacro;
+    private String baseMacro;
+    private boolean dirty;
+    private boolean readOnlyBase;
     private FilterMacroEditorModel.MacroDefinition definition;
     private boolean previewStale;
     private boolean updatingControls;
@@ -109,6 +147,13 @@ public final class FilterParameterStage implements ConfigQcStage {
             throw new IllegalArgumentException("previewAdapter must not be null");
         }
         this.presetOptions = Collections.unmodifiableList(copyOptions(presetOptions));
+        this.bundledPresetNames = new HashSet<String>();
+        for (int i = 0; i < this.presetOptions.size(); i++) {
+            String name = this.presetOptions.get(i);
+            if (!CUSTOM_PRESET.equalsIgnoreCase(name)) {
+                this.bundledPresetNames.add(name);
+            }
+        }
         this.macroStore = macroStore;
         this.previewAdapter = previewAdapter;
         this.customFilterBuilder = customFilterBuilder;
@@ -137,7 +182,7 @@ public final class FilterParameterStage implements ConfigQcStage {
         panel.add(buildPresetPanel(), BorderLayout.NORTH);
         panel.add(buildParameterPanel(), BorderLayout.CENTER);
         panel.add(buildActionPanel(), BorderLayout.SOUTH);
-        rebuildParameterEditor();
+        rebuildAccordion();
         markPreviewStale(STALE_TEXT);
         return panel;
     }
@@ -216,6 +261,54 @@ public final class FilterParameterStage implements ConfigQcStage {
         return currentMacro;
     }
 
+    boolean isDirtyForTest() {
+        return dirty;
+    }
+
+    boolean isReadOnlyBaseForTest() {
+        return readOnlyBase;
+    }
+
+    boolean isSaveAsEnabledForTest() {
+        return saveAsButton != null && saveAsButton.isEnabled();
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    String renderedComboLabelForTest() {
+        if (presetCombo == null) return "";
+        javax.swing.ListCellRenderer renderer = presetCombo.getRenderer();
+        if (renderer == null) {
+            Object v = presetCombo.getSelectedItem();
+            return v == null ? "" : v.toString();
+        }
+        JList list = new JList();
+        Component cell = renderer.getListCellRendererComponent(
+                list, presetCombo.getSelectedItem(), -1, false, false);
+        if (cell instanceof JLabel) return ((JLabel) cell).getText();
+        Object value = presetCombo.getSelectedItem();
+        return value == null ? "" : value.toString();
+    }
+
+    int sectionCountForTest() {
+        return sectionPanels.size();
+    }
+
+    boolean isSectionExpandedForTest(int index) {
+        if (index < 0 || index >= sectionPanels.size()) return false;
+        return sectionPanels.get(index).isExpanded();
+    }
+
+    boolean hasFieldBindingForTest(String parameterKey) {
+        for (int i = 0; i < fieldBindings.size(); i++) {
+            if (fieldBindings.get(i).parameter.key.equalsIgnoreCase(parameterKey)) return true;
+        }
+        return false;
+    }
+
+    String customBuilderButtonTextForTest() {
+        return customBuilderButton == null ? "" : customBuilderButton.getText();
+    }
+
     void setParameterForTest(String key, String value) {
         for (int i = 0; i < fieldBindings.size(); i++) {
             FilterFieldBinding binding = fieldBindings.get(i);
@@ -231,6 +324,10 @@ public final class FilterParameterStage implements ConfigQcStage {
         if (presetCombo == null) return;
         addPresetOption(presetName);
         presetCombo.setSelectedItem(presetName);
+    }
+
+    void simulateSaveAsForTest(String presetName) {
+        saveAsWithName(presetName);
     }
 
     void runPreviewNowForTest() throws Exception {
@@ -259,6 +356,7 @@ public final class FilterParameterStage implements ConfigQcStage {
         row.add(new JLabel("Filter"), gbc);
 
         presetCombo = new JComboBox<String>();
+        installComboRenderer();
         updatingControls = true;
         try {
             for (int i = 0; i < presetOptions.size(); i++) {
@@ -275,7 +373,7 @@ public final class FilterParameterStage implements ConfigQcStage {
         gbc.fill = GridBagConstraints.HORIZONTAL;
         row.add(presetCombo, gbc);
 
-        customBuilderButton = new JButton("Open Custom Filter Builder");
+        customBuilderButton = new JButton("Open in canvas…");
         customBuilderButton.addActionListener(e -> openCustomFilterBuilder());
         gbc.gridx = 2;
         gbc.weightx = 0.0;
@@ -316,6 +414,12 @@ public final class FilterParameterStage implements ConfigQcStage {
         resetButton = new JButton("Reset to saved");
         resetButton.addActionListener(e -> resetToSaved());
         buttons.add(resetButton);
+        buttons.add(Box.createHorizontalStrut(6));
+
+        saveAsButton = new JButton("Save as preset…");
+        saveAsButton.setEnabled(false);
+        saveAsButton.addActionListener(e -> onSaveAsClicked());
+        buttons.add(saveAsButton);
         buttons.add(Box.createHorizontalGlue());
 
         feedbackLabel = new JLabel(" ");
@@ -325,6 +429,24 @@ public final class FilterParameterStage implements ConfigQcStage {
         panel.add(feedbackLabel, BorderLayout.CENTER);
         refreshActionState();
         return panel;
+    }
+
+    private void installComboRenderer() {
+        if (presetCombo == null) return;
+        presetCombo.setRenderer(new DefaultListCellRenderer() {
+            @Override
+            public Component getListCellRendererComponent(JList<?> list, Object value,
+                                                          int index, boolean selected,
+                                                          boolean focused) {
+                String raw = value == null ? "" : value.toString();
+                boolean isSelectionCell = (index == -1);
+                String label = (isSelectionCell && dirty
+                        && raw.equals(selectedPreset))
+                        ? raw + " (modified)"
+                        : raw;
+                return super.getListCellRendererComponent(list, label, index, selected, focused);
+            }
+        });
     }
 
     private void loadSavedState() {
@@ -344,34 +466,50 @@ public final class FilterParameterStage implements ConfigQcStage {
             currentMacro = "";
             setError("Could not load filter macro: " + e.getMessage());
         }
+        baseMacro = currentMacro;
+        dirty = false;
+        readOnlyBase = isBundledPreset(selectedPreset);
     }
 
     private void presetChanged() {
         if (updatingControls || presetCombo == null) return;
         Object selected = presetCombo.getSelectedItem();
         if (selected == null) return;
-        selectedPreset = selected.toString();
+        String name = selected.toString();
         try {
-            currentMacro = safe(macroStore.loadPresetMacro(selectedPreset));
-            rebuildParameterEditor();
-            if (presetDescriptionLabel != null) {
-                presetDescriptionLabel.setText(descriptionProvider.describe(selectedPreset));
-            }
-            clearAdjustedPreview();
-            markPreviewStale(hasMacro() ? STALE_TEXT : EMPTY_TEXT);
+            String macro = safe(macroStore.loadPresetMacro(name));
+            loadPreset(name, macro);
         } catch (Exception e) {
             currentMacro = "";
-            rebuildParameterEditor();
-            setError("Could not load preset '" + selectedPreset + "': " + e.getMessage());
+            rebuildAccordion();
+            setError("Could not load preset '" + name + "': " + e.getMessage());
         }
         refreshActionState();
     }
 
-    private void rebuildParameterEditor() {
+    private void loadPreset(String name, String macro) {
+        selectedPreset = name;
+        baseMacro = safe(macro);
+        currentMacro = baseMacro;
+        dirty = false;
+        readOnlyBase = isBundledPreset(name);
+        if (saveAsButton != null) saveAsButton.setEnabled(false);
+        definition = FilterMacroEditorModel.parse(currentMacro);
+        rebuildAccordion();
+        if (presetDescriptionLabel != null) {
+            presetDescriptionLabel.setText(descriptionProvider.describe(name));
+        }
+        clearAdjustedPreview();
+        markPreviewStale(hasMacro() ? STALE_TEXT : EMPTY_TEXT);
+        if (presetCombo != null) presetCombo.repaint();
+    }
+
+    private void rebuildAccordion() {
         if (parameterPanel == null) return;
         updatingControls = true;
         try {
             fieldBindings.clear();
+            sectionPanels.clear();
             parameterPanel.removeAll();
             definition = FilterMacroEditorModel.parse(currentMacro);
             if (!hasMacro()) {
@@ -379,9 +517,11 @@ public final class FilterParameterStage implements ConfigQcStage {
             } else if (definition == null || !definition.hasEditableParameters()) {
                 addParameterMessage("No editable key=value parameters were detected in this macro.");
             } else {
+                parameterPanel.add(buildAccordionTopBar());
+                parameterPanel.add(Box.createVerticalStrut(2));
                 List<FilterMacroEditorModel.Section> sections = definition.getSections();
                 for (int i = 0; i < sections.size(); i++) {
-                    addSection(sections.get(i));
+                    addAccordionSection(sections.get(i), i);
                 }
             }
         } finally {
@@ -392,55 +532,136 @@ public final class FilterParameterStage implements ConfigQcStage {
         refreshActionState();
     }
 
-    private void addSection(FilterMacroEditorModel.Section section) {
-        JLabel header = new JLabel(section.headerText());
-        header.setAlignmentX(JComponent.LEFT_ALIGNMENT);
-        header.setFont(header.getFont().deriveFont(java.awt.Font.BOLD));
-        parameterPanel.add(header);
-        parameterPanel.add(Box.createVerticalStrut(4));
+    private JComponent buildAccordionTopBar() {
+        JPanel bar = new JPanel(new BorderLayout());
+        bar.setOpaque(false);
+        bar.setAlignmentX(JComponent.LEFT_ALIGNMENT);
 
-        List<FilterMacroEditorModel.Entry> entries = section.entries;
-        for (int i = 0; i < entries.size(); i++) {
-            parameterPanel.add(buildEntryRow(entries.get(i)));
-            parameterPanel.add(Box.createVerticalStrut(3));
-        }
-        parameterPanel.add(Box.createVerticalStrut(8));
+        JPanel right = new JPanel();
+        right.setOpaque(false);
+        right.setLayout(new BoxLayout(right, BoxLayout.X_AXIS));
+
+        JButton expandAll = makeLinkButton("Expand all");
+        expandAll.addActionListener(e -> setAllSectionsExpanded(true));
+        JButton collapseAll = makeLinkButton("Collapse all");
+        collapseAll.addActionListener(e -> setAllSectionsExpanded(false));
+
+        right.add(expandAll);
+        right.add(Box.createHorizontalStrut(4));
+        right.add(new JLabel("|"));
+        right.add(Box.createHorizontalStrut(4));
+        right.add(collapseAll);
+
+        bar.add(right, BorderLayout.EAST);
+        return bar;
     }
 
-    private JComponent buildEntryRow(FilterMacroEditorModel.Entry entry) {
-        JPanel row = new JPanel(new GridBagLayout());
-        row.setOpaque(false);
-        row.setAlignmentX(JComponent.LEFT_ALIGNMENT);
+    private void setAllSectionsExpanded(boolean expanded) {
+        for (int i = 0; i < sectionPanels.size(); i++) {
+            sectionPanels.get(i).setExpanded(expanded);
+        }
+        if (parameterPanel != null) {
+            parameterPanel.revalidate();
+            parameterPanel.repaint();
+        }
+    }
 
+    private void addAccordionSection(FilterMacroEditorModel.Section section, int index) {
+        String sectionLabel = (index + 1) + ". " + section.headerText();
+        boolean expanded = (index == 0);
+        CollapsibleSection collap = new CollapsibleSection(sectionLabel, expanded);
+        collap.setAlignmentX(JComponent.LEFT_ALIGNMENT);
+
+        JComponent body = collap.getBody();
+        List<FilterMacroEditorModel.Entry> entries = section.entries;
+        for (int i = 0; i < entries.size(); i++) {
+            addEntryToBody(body, entries.get(i));
+        }
+        sectionPanels.add(collap);
+        parameterPanel.add(collap);
+        parameterPanel.add(Box.createVerticalStrut(4));
+    }
+
+    private void addEntryToBody(JComponent body, FilterMacroEditorModel.Entry entry) {
+        JLabel name = new JLabel(entry.label);
+        name.setFont(name.getFont().deriveFont(java.awt.Font.BOLD));
+        name.setAlignmentX(Component.LEFT_ALIGNMENT);
+        body.add(name);
+
+        List<String> visibleKeys = DEFAULT_VISIBLE_KEYS.get(normalizeCommandKey(entry.label));
+        List<FilterMacroEditorModel.Parameter> visible = new ArrayList<FilterMacroEditorModel.Parameter>();
+        List<FilterMacroEditorModel.Parameter> hidden = new ArrayList<FilterMacroEditorModel.Parameter>();
+        for (int i = 0; i < entry.parameters.size(); i++) {
+            FilterMacroEditorModel.Parameter p = entry.parameters.get(i);
+            if (visibleKeys == null || keysContain(visibleKeys, p.key)) {
+                visible.add(p);
+            } else {
+                hidden.add(p);
+            }
+        }
+
+        JPanel visiblePanel = buildParameterRows(visible);
+        visiblePanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        body.add(visiblePanel);
+
+        if (!hidden.isEmpty()) {
+            final JPanel hiddenContainer = new JPanel();
+            hiddenContainer.setOpaque(false);
+            hiddenContainer.setLayout(new BoxLayout(hiddenContainer, BoxLayout.Y_AXIS));
+            hiddenContainer.setAlignmentX(Component.LEFT_ALIGNMENT);
+            hiddenContainer.setVisible(false);
+            body.add(hiddenContainer);
+
+            final List<FilterMacroEditorModel.Parameter> hiddenParams = hidden;
+            final boolean[] populated = new boolean[]{false};
+            final JButton advancedLink = makeLinkButton("Advanced…");
+            advancedLink.setAlignmentX(Component.LEFT_ALIGNMENT);
+            advancedLink.addActionListener(e -> {
+                if (!populated[0]) {
+                    JPanel rows = buildParameterRows(hiddenParams);
+                    rows.setAlignmentX(Component.LEFT_ALIGNMENT);
+                    hiddenContainer.add(rows);
+                    populated[0] = true;
+                }
+                boolean nowVisible = !hiddenContainer.isVisible();
+                hiddenContainer.setVisible(nowVisible);
+                advancedLink.setText(nowVisible ? "Hide advanced" : "Advanced…");
+                body.revalidate();
+                body.repaint();
+            });
+            body.add(advancedLink);
+        }
+
+        body.add(Box.createVerticalStrut(6));
+    }
+
+    private JPanel buildParameterRows(List<FilterMacroEditorModel.Parameter> parameters) {
+        JPanel panel = new JPanel(new GridBagLayout());
+        panel.setOpaque(false);
         GridBagConstraints gbc = new GridBagConstraints();
-        gbc.gridy = 0;
         gbc.insets = new Insets(2, 0, 2, 6);
         gbc.anchor = GridBagConstraints.WEST;
 
-        gbc.gridx = 0;
-        gbc.weightx = 0.35;
-        gbc.fill = GridBagConstraints.HORIZONTAL;
-        row.add(new JLabel(entry.label), gbc);
-
-        List<FilterMacroEditorModel.Parameter> parameters = entry.parameters;
         for (int i = 0; i < parameters.size(); i++) {
             FilterMacroEditorModel.Parameter parameter = parameters.get(i);
-            gbc.gridx++;
+
+            gbc.gridy = i;
+            gbc.gridx = 0;
             gbc.weightx = 0.0;
             gbc.fill = GridBagConstraints.NONE;
-            row.add(new JLabel(parameter.key), gbc);
+            panel.add(new JLabel(parameter.key), gbc);
 
-            JTextField field = new JTextField(parameter.getValue(), Math.max(5,
-                    Math.min(12, parameter.getValue().length() + 2)));
+            String value = parameter.getValue() == null ? "" : parameter.getValue();
+            JTextField field = new JTextField(value, Math.max(5, Math.min(12, value.length() + 2)));
             installFieldListener(field);
             fieldBindings.add(new FilterFieldBinding(parameter, field));
 
-            gbc.gridx++;
-            gbc.weightx = 0.2;
+            gbc.gridx = 1;
+            gbc.weightx = 1.0;
             gbc.fill = GridBagConstraints.HORIZONTAL;
-            row.add(field, gbc);
+            panel.add(field, gbc);
         }
-        return row;
+        return panel;
     }
 
     private void installFieldListener(JTextField field) {
@@ -468,7 +689,17 @@ public final class FilterParameterStage implements ConfigQcStage {
 
     private void fieldChanged() {
         if (updatingControls) return;
+        syncFieldBindings();
+        recomputeDirty();
         markPreviewStale(STALE_TEXT);
+    }
+
+    private void recomputeDirty() {
+        boolean nowDirty = !safe(currentMacro).equals(safe(baseMacro));
+        if (nowDirty == dirty) return;
+        dirty = nowDirty;
+        if (saveAsButton != null) saveAsButton.setEnabled(dirty);
+        if (presetCombo != null) presetCombo.repaint();
     }
 
     private void runPreviewOnWorker() {
@@ -538,44 +769,65 @@ public final class FilterParameterStage implements ConfigQcStage {
                 setStatus("Custom filter was not changed.");
                 return;
             }
-            selectedPreset = firstNonBlank(result.presetName, CUSTOM_PRESET);
-            savedPreset = selectedPreset;
-            currentMacro = safe(result.macroContent);
-            savedMacro = currentMacro;
-            addPresetOption(selectedPreset);
+            String newName = firstNonBlank(result.presetName, CUSTOM_PRESET);
+            String newMacro = safe(result.macroContent);
+            savedPreset = newName;
+            savedMacro = newMacro;
+            addPresetOption(newName);
             updatingControls = true;
             try {
-                presetCombo.setSelectedItem(selectedPreset);
+                presetCombo.setSelectedItem(newName);
             } finally {
                 updatingControls = false;
             }
-            if (presetDescriptionLabel != null) {
-                presetDescriptionLabel.setText(descriptionProvider.describe(selectedPreset));
-            }
-            rebuildParameterEditor();
-            clearAdjustedPreview();
+            loadPreset(newName, newMacro);
             markPreviewStale(hasMacro() ? "Custom filter saved. Press Preview Filter." : EMPTY_TEXT);
         } catch (Exception e) {
             setError("Custom filter builder failed: " + e.getMessage());
         }
     }
 
+    private void onSaveAsClicked() {
+        Window owner = saveAsButton == null ? null
+                : SwingUtilities.getWindowAncestor(saveAsButton);
+        String suggested = sanitizePresetName(safe(selectedPreset) + "_modified");
+        String name = SaveAsPresetPopover.prompt(owner, suggested);
+        if (name == null) return;
+        saveAsWithName(name);
+    }
+
+    private void saveAsWithName(String rawName) {
+        if (rawName == null) return;
+        String name = rawName.trim();
+        if (name.isEmpty()) return;
+        try {
+            macroStore.saveAsPreset(name, currentMacro);
+            addPresetOption(name);
+            updatingControls = true;
+            try {
+                if (presetCombo != null) presetCombo.setSelectedItem(name);
+            } finally {
+                updatingControls = false;
+            }
+            savedPreset = name;
+            savedMacro = currentMacro;
+            loadPreset(name, currentMacro);
+        } catch (Exception e) {
+            setError("Could not save preset: " + e.getMessage());
+        }
+    }
+
     private void resetToSaved() {
-        selectedPreset = firstNonBlank(savedPreset, firstPresetOption());
-        currentMacro = safe(savedMacro);
+        String name = firstNonBlank(savedPreset, firstPresetOption());
+        String macro = safe(savedMacro);
         updatingControls = true;
         try {
-            addPresetOption(selectedPreset);
-            if (presetCombo != null) presetCombo.setSelectedItem(selectedPreset);
+            addPresetOption(name);
+            if (presetCombo != null) presetCombo.setSelectedItem(name);
         } finally {
             updatingControls = false;
         }
-        if (presetDescriptionLabel != null) {
-            presetDescriptionLabel.setText(descriptionProvider.describe(selectedPreset));
-        }
-        rebuildParameterEditor();
-        clearAdjustedPreview();
-        markPreviewStale(hasMacro() ? STALE_TEXT : EMPTY_TEXT);
+        loadPreset(name, macro);
     }
 
     private void syncFieldBindings() {
@@ -643,12 +895,14 @@ public final class FilterParameterStage implements ConfigQcStage {
         if (previewButton != null) previewButton.setEnabled(canPreview());
         if (resetButton != null) resetButton.setEnabled(true);
         if (customBuilderButton != null) customBuilderButton.setEnabled(customFilterBuilder != null);
+        if (saveAsButton != null) saveAsButton.setEnabled(dirty);
     }
 
     private void setButtonsEnabled(boolean enabled) {
         if (previewButton != null) previewButton.setEnabled(enabled && canPreview());
         if (resetButton != null) resetButton.setEnabled(enabled);
         if (customBuilderButton != null) customBuilderButton.setEnabled(enabled && customFilterBuilder != null);
+        if (saveAsButton != null) saveAsButton.setEnabled(enabled && dirty);
         if (presetCombo != null) presetCombo.setEnabled(enabled);
     }
 
@@ -662,6 +916,10 @@ public final class FilterParameterStage implements ConfigQcStage {
 
     private boolean hasMacro(String macro) {
         return macro != null && macro.trim().length() > 0;
+    }
+
+    private boolean isBundledPreset(String name) {
+        return name != null && bundledPresetNames.contains(name);
     }
 
     private String lockInSummary() {
@@ -711,6 +969,44 @@ public final class FilterParameterStage implements ConfigQcStage {
         sourceImage = null;
         if (adjusted != null) previewAdapter.close(adjusted);
         if (source != null) previewAdapter.close(source);
+    }
+
+    private static JButton makeLinkButton(String text) {
+        JButton button = new JButton(text);
+        button.setBorderPainted(false);
+        button.setContentAreaFilled(false);
+        button.setFocusPainted(false);
+        button.setMargin(new Insets(0, 4, 0, 4));
+        button.setForeground(new Color(50, 110, 200));
+        button.setHorizontalAlignment(SwingConstants.LEFT);
+        button.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+        return button;
+    }
+
+    private static String normalizeCommandKey(String raw) {
+        if (raw == null) return "";
+        String s = raw.trim();
+        while (s.endsWith(".")) s = s.substring(0, s.length() - 1).trim();
+        s = s.replaceAll("\\s*\\([^)]*\\)\\s*$", "").trim();
+        return s.toLowerCase(Locale.ROOT);
+    }
+
+    private static boolean keysContain(List<String> keys, String key) {
+        if (keys == null || key == null) return false;
+        for (int i = 0; i < keys.size(); i++) {
+            if (key.equalsIgnoreCase(keys.get(i))) return true;
+        }
+        return false;
+    }
+
+    private static String sanitizePresetName(String raw) {
+        if (raw == null) return "";
+        String trimmed = raw.trim();
+        String sanitized = trimmed.replaceAll("[<>:\"/\\\\|?*\\p{Cntrl}]+", "_").trim();
+        while (sanitized.endsWith(".")) {
+            sanitized = sanitized.substring(0, sanitized.length() - 1).trim();
+        }
+        return sanitized;
     }
 
     private static List<String> copyOptions(List<String> source) {
