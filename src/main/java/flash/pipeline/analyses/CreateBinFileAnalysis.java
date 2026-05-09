@@ -116,7 +116,7 @@ import java.util.Set;
  * - defaultFilter.ijm
  *
  * Interactive quality-check workflow (Custom mode, per-channel, per-step):
- * - Step 1: Filter Hyperparameters — edit detected key=value values in C*_Filters.ijm
+ * - Step 1: Set Filter and Parameters — edit detected key=value values in C*_Filters.ijm
  * - Step 2: Custom Min-Max Display Ranges — B&C on Max Projection
  * - Step 3: Channel Threshold — after the per-channel filter
  *           (single user input populates both the object-threshold and
@@ -729,8 +729,8 @@ public class CreateBinFileAnalysis implements Analysis {
             ovr.addHeader("Channel Identity & Processing");
             ovr.addSubHeader("Filter Presets");
             ToggleSwitch fpToggle = ovr.addToggle("Override Filter Presets", false);
-            ovr.addSubHeader("Filter Hyperparameters");
-            ToggleSwitch fhToggle = ovr.addToggle("Adjust Filter Hyperparameters", false);
+            ovr.addSubHeader("Set Filter and Parameters");
+            ToggleSwitch fhToggle = ovr.addToggle("Set Filter and Parameters", false);
 
             ovr.addHeader("Image Display");
             ovr.addSubHeader("Display Ranges");
@@ -1220,8 +1220,8 @@ public class CreateBinFileAnalysis implements Analysis {
 
         if (showFilterParameters) {
             fork.addHeader("Channel Identity & Processing");
-            SettingsModeTickAllGroup filterGroup = addSettingsModeTickAllGroup(fork, "Filter Hyperparameters");
-            fork.addHelpText("Open filtered Z-stack previews and adjust detected key=value filter parameters per channel.");
+            SettingsModeTickAllGroup filterGroup = addSettingsModeTickAllGroup(fork, "Set Filter and Parameters");
+            fork.addHelpText("Choose a filter preset, preview it on the current Z-stack, and adjust detected key=value parameters per channel.");
             for (int i = 0; i < n; i++) {
                 addSettingsModeToggle(fork, "C" + (i + 1) + " (" + channelNames.get(i) + ")",
                         settingSelected(initialSettings, SETTINGS_FILTER_PARAMETERS, i),
@@ -5577,14 +5577,14 @@ public class CreateBinFileAnalysis implements Analysis {
         String chLabel = "C" + channelNum + " (" + cfg.names.get(channelIndex) + ")";
         String currentMacro = resolveFilterContent(binFolder, cfg, channelIndex);
         if (currentMacro == null || currentMacro.trim().isEmpty()) {
-            IJ.showMessage("Filter Hyperparameters",
+            IJ.showMessage("Set Filter and Parameters",
                     "No filter macro could be loaded for " + chLabel + ".\nUsing the current preset without parameter editing.");
             return "continue";
         }
 
         FilterMacroEditorModel.MacroDefinition initialDefinition = FilterMacroEditorModel.parse(currentMacro);
         if (!initialDefinition.hasEditableParameters()) {
-            IJ.showMessage("Filter Hyperparameters",
+            IJ.showMessage("Set Filter and Parameters",
                     "No editable key=value parameters were detected in the filter macro for " + chLabel + ".\nUsing the current .ijm file as-is.");
             return "continue";
         }
@@ -5601,7 +5601,7 @@ public class CreateBinFileAnalysis implements Analysis {
                     renderFilterParameterPreview(source, currentMacro, cfg.colors.get(channelIndex), chLabel, imp.getTitle())
             };
 
-            GenericDialog dialog = new NonBlockingGenericDialog("Filter Hyperparameters \u2014 " + chLabel);
+            GenericDialog dialog = new NonBlockingGenericDialog("Set Filter and Parameters - " + chLabel);
             dialog.setOKLabel("Lock in");
             dialog.addMessage("Image " + (imgIdx + 1) + "/" + images.size() + ": " + imp.getTitle());
             dialog.addMessage("Scroll through the filtered Z-stack on the left. Adjust any parameters if needed, click Apply Preview to rerun the filter on this image, then click Lock in when satisfied.");
@@ -5631,7 +5631,7 @@ public class CreateBinFileAnalysis implements Analysis {
             } catch (IOException e) {
                 closeImageQuietly(previewHolder[0]);
                 closeImageQuietly(source);
-                IJ.showMessage("Filter Hyperparameters",
+                IJ.showMessage("Set Filter and Parameters",
                         "Could not save the updated filter macro for " + chLabel + ":\n" + e.getMessage());
                 return "cancel";
             }
@@ -5646,7 +5646,7 @@ public class CreateBinFileAnalysis implements Analysis {
                 summary = "Updated filter parameters:\n" + summary;
             }
             String action = showContinueRestartDialog(
-                    "Filter Hyperparameters \u2014 " + chLabel,
+                    "Set Filter and Parameters - " + chLabel,
                     summary,
                     imgIdx, images.size());
             if ("cancel".equals(action)) return "cancel";
@@ -5710,7 +5710,7 @@ public class CreateBinFileAnalysis implements Analysis {
                     previewHolder[0] = renderFilterParameterPreview(
                             source, definition.render(), colorName, chLabel, imageTitle, previewHolder[0]);
                 } catch (Exception ex) {
-                    IJ.showMessage("Filter Hyperparameters",
+                    IJ.showMessage("Set Filter and Parameters",
                             "Preview failed for " + chLabel + ":\n" + ex.getMessage());
                 }
             }

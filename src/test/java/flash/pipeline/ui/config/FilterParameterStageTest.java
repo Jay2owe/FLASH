@@ -14,11 +14,16 @@ import static org.junit.Assert.assertTrue;
 
 public class FilterParameterStageTest {
 
+    private static final String DEFAULT_MACRO =
+            "run(\"Gaussian Blur...\", \"sigma=2 stack\");\n";
+    private static final String CUSTOM_MACRO =
+            "run(\"Median...\", \"radius=7 stack\");\n";
+
     @Test
     public void textFieldEditMarksPreviewStaleWithoutRunningFilter() {
         RecordingMacroStore store = new RecordingMacroStore(
                 "Default",
-                "run(\"Gaussian Blur...\", \"sigma=2 stack\");\n");
+                DEFAULT_MACRO);
         RecordingPreviewAdapter previewAdapter = new RecordingPreviewAdapter();
         RecordingActions actions = new RecordingActions();
         FilterParameterStage stage = new FilterParameterStage(
@@ -40,7 +45,7 @@ public class FilterParameterStageTest {
     public void previewRunsOnlyWhenExplicitlyRequested() throws Exception {
         RecordingMacroStore store = new RecordingMacroStore(
                 "Default",
-                "run(\"Gaussian Blur...\", \"sigma=2 stack\");\n");
+                DEFAULT_MACRO);
         RecordingPreviewAdapter previewAdapter = new RecordingPreviewAdapter();
         RecordingActions actions = new RecordingActions();
         FilterParameterStage stage = new FilterParameterStage(
@@ -63,7 +68,7 @@ public class FilterParameterStageTest {
     public void lockInWritesEditedMacroOnlyAfterLockIn() {
         RecordingMacroStore store = new RecordingMacroStore(
                 "Default",
-                "run(\"Gaussian Blur...\", \"sigma=2 stack\");\n");
+                DEFAULT_MACRO);
         FilterParameterStage stage = new FilterParameterStage(
                 Arrays.asList("Default", "Custom"),
                 store,
@@ -82,6 +87,65 @@ public class FilterParameterStageTest {
 
         assertEquals("Default", store.savedPreset);
         assertTrue(store.savedMacro.contains("sigma=5"));
+    }
+
+    @Test
+    public void noSavedPresetDefaultsToDefaultFilterAndLoadsItsMacro() {
+        RecordingMacroStore store = new RecordingMacroStore("", "", DEFAULT_MACRO);
+        FilterParameterStage stage = new FilterParameterStage(
+                Arrays.asList("Punctate Signal / High Background", "Default", "Custom"),
+                store,
+                new RecordingPreviewAdapter(),
+                null,
+                null);
+
+        stage.buildControls(context(), new RecordingActions());
+
+        assertEquals("Default", stage.selectedPresetForTest());
+        assertEquals(DEFAULT_MACRO, stage.currentMacroForTest());
+        assertEquals(0, store.initialMacroLoads);
+        assertEquals(1, store.presetMacroLoads);
+        assertEquals("Default", store.lastLoadedPreset);
+    }
+
+    @Test
+    public void savedCustomPresetRemainsSelectedAndUsesInitialMacro() {
+        RecordingMacroStore store = new RecordingMacroStore(
+                "IBA1 cleanup filter", CUSTOM_MACRO, DEFAULT_MACRO);
+        FilterParameterStage stage = new FilterParameterStage(
+                Arrays.asList("Default", "IBA1 cleanup filter", "Custom"),
+                store,
+                new RecordingPreviewAdapter(),
+                null,
+                null);
+
+        stage.buildControls(context(), new RecordingActions());
+
+        assertEquals("IBA1 cleanup filter", stage.selectedPresetForTest());
+        assertEquals(CUSTOM_MACRO, stage.currentMacroForTest());
+        assertEquals(1, store.initialMacroLoads);
+        assertEquals(0, store.presetMacroLoads);
+    }
+
+    @Test
+    public void previewButtonImmediatelyRunsDefaultFilterWithoutPresetChange() throws Exception {
+        RecordingMacroStore store = new RecordingMacroStore("", "", DEFAULT_MACRO);
+        RecordingPreviewAdapter previewAdapter = new RecordingPreviewAdapter();
+        RecordingActions actions = new RecordingActions();
+        FilterParameterStage stage = new FilterParameterStage(
+                Arrays.asList("Default", "Custom"), store, previewAdapter, null, null);
+
+        stage.buildControls(context(), actions);
+        stage.onEnter(context(), new PreviewPairPanel("Original", "Adjusted"));
+
+        assertTrue(stage.previewButtonEnabledForTest());
+
+        stage.runPreviewNowForTest();
+
+        assertEquals(1, previewAdapter.previewRuns);
+        assertEquals(DEFAULT_MACRO, previewAdapter.lastMacroContent);
+        assertFalse(stage.isPreviewStaleForTest());
+        assertEquals(1, store.presetMacroLoads);
     }
 
     private static ConfigQcContext context() {
@@ -104,13 +168,22 @@ public class FilterParameterStageTest {
 
     private static final class RecordingMacroStore implements FilterParameterStage.MacroStore {
         final String initialPreset;
-        final String macro;
+        final String initialMacro;
+        final String presetMacro;
         String savedPreset = "";
         String savedMacro = "";
+        String lastLoadedPreset = "";
+        int initialMacroLoads;
+        int presetMacroLoads;
 
         RecordingMacroStore(String initialPreset, String macro) {
+            this(initialPreset, macro, macro);
+        }
+
+        RecordingMacroStore(String initialPreset, String initialMacro, String presetMacro) {
             this.initialPreset = initialPreset;
-            this.macro = macro;
+            this.initialMacro = initialMacro;
+            this.presetMacro = presetMacro;
         }
 
         @Override public String getInitialPreset() {
@@ -118,11 +191,14 @@ public class FilterParameterStageTest {
         }
 
         @Override public String loadInitialMacro() {
-            return macro;
+            initialMacroLoads++;
+            return initialMacro;
         }
 
         @Override public String loadPresetMacro(String presetName) {
-            return macro;
+            presetMacroLoads++;
+            lastLoadedPreset = presetName;
+            return presetMacro;
         }
 
         @Override public void save(String presetName, String macroContent) {
@@ -133,6 +209,7 @@ public class FilterParameterStageTest {
 
     private static final class RecordingPreviewAdapter implements FilterParameterStage.PreviewAdapter {
         int previewRuns;
+        String lastMacroContent = "";
 
         @Override public ImagePlus createSource(ConfigQcContext context) {
             return context.getCurrentImagePlus().duplicate();
@@ -140,6 +217,7 @@ public class FilterParameterStageTest {
 
         @Override public ImagePlus createFilteredPreview(ImagePlus source, String macroContent) {
             previewRuns++;
+            lastMacroContent = macroContent;
             ImagePlus preview = source.duplicate();
             preview.setTitle("preview");
             return preview;

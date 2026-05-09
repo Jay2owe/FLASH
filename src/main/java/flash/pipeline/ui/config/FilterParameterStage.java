@@ -62,6 +62,7 @@ public final class FilterParameterStage implements ConfigQcStage {
     }
 
     private static final String CUSTOM_PRESET = "Custom";
+    private static final String DEFAULT_PRESET = "Default";
     private static final String STALE_TEXT = "Preview is stale. Press Preview Filter.";
     private static final String EMPTY_TEXT = "Choose a filter preset or open the custom filter builder.";
 
@@ -122,7 +123,7 @@ public final class FilterParameterStage implements ConfigQcStage {
 
     @Override
     public String title() {
-        return "Filter";
+        return "Set Filter and Parameters";
     }
 
     @Override
@@ -158,8 +159,10 @@ public final class FilterParameterStage implements ConfigQcStage {
                         hasMacro() ? STALE_TEXT : EMPTY_TEXT);
             }
             setStatus(hasMacro() ? STALE_TEXT : EMPTY_TEXT);
+            refreshActionState();
         } catch (Exception e) {
             setError("Could not prepare filter preview source: " + e.getMessage());
+            refreshActionState();
         }
     }
 
@@ -234,6 +237,10 @@ public final class FilterParameterStage implements ConfigQcStage {
         runPreviewNow();
     }
 
+    boolean previewButtonEnabledForTest() {
+        return previewButton != null && previewButton.isEnabled();
+    }
+
     private JComponent buildPresetPanel() {
         JPanel panel = new JPanel();
         panel.setOpaque(false);
@@ -249,7 +256,7 @@ public final class FilterParameterStage implements ConfigQcStage {
         gbc.gridx = 0;
         gbc.weightx = 0.0;
         gbc.fill = GridBagConstraints.NONE;
-        row.add(new JLabel("Preset"), gbc);
+        row.add(new JLabel("Filter"), gbc);
 
         presetCombo = new JComboBox<String>();
         updatingControls = true;
@@ -321,10 +328,16 @@ public final class FilterParameterStage implements ConfigQcStage {
     }
 
     private void loadSavedState() {
-        savedPreset = firstNonBlank(macroStore.getInitialPreset(), firstPresetOption());
+        String initialPreset = trimToNull(macroStore.getInitialPreset());
+        savedPreset = initialPreset == null ? preferredPresetWithoutSavedState() : initialPreset;
         selectedPreset = savedPreset;
         try {
-            savedMacro = safe(macroStore.loadInitialMacro());
+            savedMacro = initialPreset == null
+                    ? safe(macroStore.loadPresetMacro(selectedPreset))
+                    : safe(macroStore.loadInitialMacro());
+            if (!hasMacro(savedMacro)) {
+                savedMacro = safe(macroStore.loadPresetMacro(selectedPreset));
+            }
             currentMacro = savedMacro;
         } catch (Exception e) {
             savedMacro = "";
@@ -644,7 +657,11 @@ public final class FilterParameterStage implements ConfigQcStage {
     }
 
     private boolean hasMacro() {
-        return currentMacro != null && currentMacro.trim().length() > 0;
+        return hasMacro(currentMacro);
+    }
+
+    private boolean hasMacro(String macro) {
+        return macro != null && macro.trim().length() > 0;
     }
 
     private String lockInSummary() {
@@ -668,7 +685,16 @@ public final class FilterParameterStage implements ConfigQcStage {
     }
 
     private String firstPresetOption() {
-        return presetOptions.isEmpty() ? "Default" : presetOptions.get(0);
+        return presetOptions.isEmpty() ? DEFAULT_PRESET : presetOptions.get(0);
+    }
+
+    private String preferredPresetWithoutSavedState() {
+        for (int i = 0; i < presetOptions.size(); i++) {
+            if (DEFAULT_PRESET.equals(presetOptions.get(i))) {
+                return DEFAULT_PRESET;
+            }
+        }
+        return firstPresetOption();
     }
 
     private void closePreviewWorker() {
@@ -697,7 +723,7 @@ public final class FilterParameterStage implements ConfigQcStage {
                 }
             }
         }
-        if (copy.isEmpty()) copy.add("Default");
+        if (copy.isEmpty()) copy.add(DEFAULT_PRESET);
         addUnique(copy, CUSTOM_PRESET);
         return copy;
     }
@@ -711,6 +737,12 @@ public final class FilterParameterStage implements ConfigQcStage {
 
     private static String firstNonBlank(String value, String fallback) {
         return value == null || value.trim().isEmpty() ? fallback : value.trim();
+    }
+
+    private static String trimToNull(String value) {
+        if (value == null) return null;
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 
     private static String safe(String value) {
