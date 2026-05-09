@@ -4,6 +4,10 @@ import flash.pipeline.naming.OrientationManifestRow;
 import flash.pipeline.orientation.OrientationTransformState;
 import org.junit.Test;
 
+import java.awt.Dimension;
+import java.awt.Point;
+import java.awt.Rectangle;
+
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -83,6 +87,26 @@ public class RoiOrientationPanelTest {
                 .contains("Mouse &lt;LH&gt; &amp; SCN"));
 
         panel.close();
+    }
+
+    @Test
+    public void dialogLocationNearImageUsesSameScreenRightSideWhenThereIsRoom() {
+        Point location = RoiOrientationPanel.dialogLocationNearImage(
+                new Rectangle(100, 50, 300, 200),
+                new Dimension(250, 120),
+                new Rectangle(0, 0, 1000, 700));
+
+        assertEquals(new Point(412, 50), location);
+    }
+
+    @Test
+    public void dialogLocationNearImageFlipsLeftAndStaysOnSameScreen() {
+        Point location = RoiOrientationPanel.dialogLocationNearImage(
+                new Rectangle(700, 650, 260, 100),
+                new Dimension(250, 120),
+                new Rectangle(0, 0, 1000, 700));
+
+        assertEquals(new Point(438, 580), location);
     }
 
     private static final class FakeTarget
