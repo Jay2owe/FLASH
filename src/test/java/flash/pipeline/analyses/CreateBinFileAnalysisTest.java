@@ -379,6 +379,16 @@ public class CreateBinFileAnalysisTest {
         draft.filterPresets.set(1, "Ramified Cells (Microglia/Astrocytes)");
 
         CreateBinFileAnalysis.BinUserConfig applied = CreateBinFileAnalysis.copyBinUserConfig(draft);
+        applied.objectThresholds.clear();
+        applied.objectThresholds.addAll(Arrays.asList("25", "45"));
+        applied.sizes.clear();
+        applied.sizes.addAll(Arrays.asList("50-500", "70-Infinity"));
+        applied.minmax.clear();
+        applied.minmax.addAll(Arrays.asList("10-90", "20-120"));
+        applied.filterPresets.clear();
+        applied.filterPresets.addAll(Arrays.asList("Default", "High Signal-Noise Particle Filter"));
+        applied.intensityThresholds.clear();
+        applied.intensityThresholds.addAll(Arrays.asList("33", "44"));
         applied.markerIds.clear();
         applied.markerIds.addAll(Arrays.asList("neun", "iba1"));
         applied.markerShapes.clear();
@@ -394,8 +404,11 @@ public class CreateBinFileAnalysisTest {
                 invokeBuildBinUserConfigFromDialog(analysis, 2, draft, bindings);
 
         assertEquals(Arrays.asList("NeuN", "IBA1"), result.names);
-        assertEquals(Arrays.asList("120", "220"), result.objectThresholds);
-        assertEquals("Ramified Cells (Microglia/Astrocytes)", result.filterPresets.get(1));
+        assertEquals(Arrays.asList("25", "45"), result.objectThresholds);
+        assertEquals(Arrays.asList("50-500", "70-Infinity"), result.sizes);
+        assertEquals(Arrays.asList("10-90", "20-120"), result.minmax);
+        assertEquals(Arrays.asList("Default", "High Signal-Noise Particle Filter"), result.filterPresets);
+        assertEquals(Arrays.asList("33", "44"), result.intensityThresholds);
         assertEquals(Arrays.asList("neun", "iba1"), result.markerIds);
         assertEquals(Arrays.asList("round", "ramified"), result.markerShapes);
         assertEquals(Arrays.asList(Boolean.FALSE, Boolean.TRUE), result.markerCrowdingSensitive);
@@ -521,6 +534,26 @@ public class CreateBinFileAnalysisTest {
         assertEquals("continue", invokePrivateQcStep(
                 analysis, "interactiveFilterParameterQC", images, cfg, binFolder, 0));
         assertEquals(Collections.<Class<?>>singletonList(FilterParameterStage.class), analysis.stageTypes);
+    }
+
+    @Test
+    public void embeddedConfigQcDialogBuildsAndEntersStagesOnSwingThread() {
+        CreateBinFileAnalysis analysis = new ExposedEmbeddedDialogAnalysis();
+        EdtRecordingStage stage = new EdtRecordingStage();
+        ConfigQcContext context = ConfigQcContext.fromImages(
+                temp.getRoot(),
+                temp.getRoot(),
+                oneChannelConfig("Default"),
+                Arrays.asList(byteImage("edt route")),
+                Arrays.asList("IBA1"),
+                0);
+
+        ConfigQcResult result = ((ExposedEmbeddedDialogAnalysis) analysis)
+                .showForTest(context, Collections.<ConfigQcStage>singletonList(stage));
+
+        assertEquals(ConfigQcResult.CANCEL, result);
+        assertTrue(stage.buildControlsOnSwingThread);
+        assertTrue(stage.enteredOnSwingThread);
     }
 
     @Test
@@ -797,6 +830,44 @@ public class CreateBinFileAnalysisTest {
                 }
             }
             return ConfigQcResult.DONE;
+        }
+    }
+
+    private static final class ExposedEmbeddedDialogAnalysis extends CreateBinFileAnalysis {
+        ConfigQcResult showForTest(ConfigQcContext context, List<ConfigQcStage> stages) {
+            return super.showEmbeddedConfigQcDialog(context, stages);
+        }
+    }
+
+    private static final class EdtRecordingStage implements ConfigQcStage {
+        boolean buildControlsOnSwingThread;
+        boolean enteredOnSwingThread;
+        ConfigQcActions actions;
+
+        @Override public String title() {
+            return "EDT Recording";
+        }
+
+        @Override public void onEnter(ConfigQcContext context, PreviewPairPanel preview) {
+            enteredOnSwingThread = javax.swing.SwingUtilities.isEventDispatchThread();
+            javax.swing.SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    if (actions != null) {
+                        actions.cancel();
+                    }
+                }
+            });
+        }
+
+        @Override public javax.swing.JComponent buildControls(ConfigQcContext context,
+                                                              ConfigQcActions actions) {
+            this.actions = actions;
+            buildControlsOnSwingThread = javax.swing.SwingUtilities.isEventDispatchThread();
+            return new javax.swing.JPanel();
+        }
+
+        @Override public boolean lockIn(ConfigQcContext context) {
+            return true;
         }
     }
 

@@ -14,7 +14,6 @@ import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComponent;
-import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
@@ -88,11 +87,12 @@ public final class ParticleSizeStage implements ConfigQcStage {
     private JTextField maxField;
     private JButton previewButton;
     private JButton resetButton;
-    private JComboBox<String> sourceChoice;
+    private JButton sourceToggleButton;
     private JCheckBox overlayCheck;
     private JLabel thresholdLabel;
     private JLabel countLabel;
     private JLabel feedbackLabel;
+    private boolean showRawSource;
 
     public ParticleSizeStage(SizeStore sizeStore, PreviewAdapter previewAdapter) {
         if (sizeStore == null) {
@@ -132,6 +132,8 @@ public final class ParticleSizeStage implements ConfigQcStage {
         closeImages();
         this.activeContext = context;
         this.preview = preview;
+        showRawSource = false;
+        refreshSourceToggleButton();
         if (preview != null) {
             preview.clearLargePreviewImages();
         }
@@ -221,11 +223,11 @@ public final class ParticleSizeStage implements ConfigQcStage {
     }
 
     void selectRawSourceForTest() {
-        if (sourceChoice != null) sourceChoice.setSelectedItem("Raw");
+        setRawSourceVisible(true);
     }
 
     void selectFilteredSourceForTest() {
-        if (sourceChoice != null) sourceChoice.setSelectedItem("Filtered");
+        setRawSourceVisible(false);
     }
 
     void setShowOverlayForTest(boolean showOverlay) {
@@ -319,12 +321,9 @@ public final class ParticleSizeStage implements ConfigQcStage {
         viewControls.setOpaque(false);
         viewControls.setLayout(new BoxLayout(viewControls, BoxLayout.X_AXIS));
         viewControls.setAlignmentX(JComponent.LEFT_ALIGNMENT);
-        viewControls.add(new JLabel("Source view:"));
-        viewControls.add(Box.createHorizontalStrut(6));
-        sourceChoice = new JComboBox<String>(new String[]{"Raw", "Filtered"});
-        sourceChoice.setSelectedItem("Filtered");
-        sourceChoice.addActionListener(e -> refreshSourceAndOutputPreview());
-        viewControls.add(sourceChoice);
+        sourceToggleButton = new JButton("Show Raw Image");
+        sourceToggleButton.addActionListener(e -> setRawSourceVisible(!showRawSource));
+        viewControls.add(sourceToggleButton);
         viewControls.add(Box.createHorizontalStrut(10));
         overlayCheck = new JCheckBox("Show overlay");
         overlayCheck.setOpaque(false);
@@ -541,8 +540,19 @@ public final class ParticleSizeStage implements ConfigQcStage {
     }
 
     private boolean rawSourceSelected() {
-        Object selected = sourceChoice == null ? null : sourceChoice.getSelectedItem();
-        return selected != null && "Raw".equalsIgnoreCase(selected.toString());
+        return showRawSource;
+    }
+
+    private void setRawSourceVisible(boolean showRaw) {
+        showRawSource = showRaw;
+        refreshSourceToggleButton();
+        refreshSourceAndOutputPreview();
+    }
+
+    private void refreshSourceToggleButton() {
+        if (sourceToggleButton != null) {
+            sourceToggleButton.setText(showRawSource ? "Show Filtered Image" : "Show Raw Image");
+        }
     }
 
     private boolean overlaySelected() {
@@ -617,7 +627,7 @@ public final class ParticleSizeStage implements ConfigQcStage {
         if (resetButton != null) resetButton.setEnabled(enabled);
         if (minField != null) minField.setEnabled(enabled);
         if (maxField != null) maxField.setEnabled(enabled);
-        if (sourceChoice != null) sourceChoice.setEnabled(enabled);
+        if (sourceToggleButton != null) sourceToggleButton.setEnabled(enabled);
         if (overlayCheck != null) overlayCheck.setEnabled(enabled);
     }
 

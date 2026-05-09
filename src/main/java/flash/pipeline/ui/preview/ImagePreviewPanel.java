@@ -2,6 +2,7 @@ package flash.pipeline.ui.preview;
 
 import ij.ImagePlus;
 import ij.ImageStack;
+import ij.process.ColorProcessor;
 import ij.process.ImageProcessor;
 
 import javax.swing.BorderFactory;
@@ -43,6 +44,7 @@ public final class ImagePreviewPanel extends JPanel {
     private boolean updatingSlider;
     private ZSliceChangeListener zSliceChangeListener;
     private PreviewDisplaySettings displaySettings = PreviewDisplaySettings.defaultFor("Grays");
+    private boolean displaySettingsEnabled = true;
 
     public ImagePreviewPanel(String title) {
         super(new BorderLayout(6, 6));
@@ -142,6 +144,11 @@ public final class ImagePreviewPanel extends JPanel {
         canvas.repaint();
     }
 
+    void setDisplaySettingsEnabled(boolean enabled) {
+        displaySettingsEnabled = enabled;
+        canvas.repaint();
+    }
+
     public void setZSliceChangeListener(ZSliceChangeListener listener) {
         this.zSliceChangeListener = listener;
     }
@@ -236,16 +243,29 @@ public final class ImagePreviewPanel extends JPanel {
         ImageProcessor processor = stack.getProcessor(stackIndex);
         if (processor == null) return null;
         ImageProcessor copy = processor.duplicate();
+        boolean colorProcessor = copy instanceof ColorProcessor;
+        if (!displaySettingsEnabled) {
+            if (!colorProcessor) {
+                double min = imp.getDisplayRangeMin();
+                double max = imp.getDisplayRangeMax();
+                if (max > min) {
+                    copy.setMinAndMax(min, max);
+                }
+            }
+            return copy;
+        }
         double min = displaySettings.hasDisplayRange()
                 ? displaySettings.getDisplayMin()
                 : imp.getDisplayRangeMin();
         double max = displaySettings.hasDisplayRange()
                 ? displaySettings.getDisplayMax()
                 : imp.getDisplayRangeMax();
-        if (max > min) {
+        if (!colorProcessor && max > min) {
             copy.setMinAndMax(min, max);
         }
-        ColorModel colorModel = colorModelFor(displaySettings.effectiveLutName());
+        ColorModel colorModel = colorProcessor
+                ? null
+                : colorModelFor(displaySettings.effectiveLutName());
         if (colorModel != null) {
             copy.setColorModel(colorModel);
         }

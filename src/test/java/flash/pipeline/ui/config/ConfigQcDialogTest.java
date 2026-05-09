@@ -15,8 +15,10 @@ import java.awt.GraphicsEnvironment;
 import java.util.Arrays;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertTrue;
 import static org.junit.Assume.assumeFalse;
 
 public class ConfigQcDialogTest {
@@ -36,6 +38,18 @@ public class ConfigQcDialogTest {
         assertEquals(1, stage.enterCount);
         assertNotNull(stage.actions);
         assertSame(dialog.previewForTest().largeViewButton(), dialog.largeViewButtonForTest());
+        assertSame(dialog.previewForTest().displayControlsButton(), dialog.displayControlsButtonForTest());
+        assertTrue(dialog.displayControlsButtonForTest().isVisible());
+    }
+
+    @Test
+    public void hidesPreviewDisplayButtonWhenStageDisallowsIt() {
+        RecordingStage stage = new RecordingStage("Display range");
+        stage.previewDisplayControls = false;
+
+        ConfigQcDialog dialog = ConfigQcDialog.createForTest(contextWithTwoImages(), Arrays.asList(stage));
+
+        assertFalse(dialog.displayControlsButtonForTest().isVisible());
     }
 
     @Test
@@ -162,6 +176,7 @@ public class ConfigQcDialogTest {
         private int skipCount;
         private int restartCount;
         private ConfigQcActions actions;
+        private boolean previewDisplayControls = true;
 
         RecordingStage(String title) {
             this.title = title;
@@ -169,6 +184,10 @@ public class ConfigQcDialogTest {
 
         @Override public String title() {
             return title;
+        }
+
+        @Override public boolean showPreviewDisplayControls() {
+            return previewDisplayControls;
         }
 
         @Override public void onEnter(ConfigQcContext context, PreviewPairPanel preview) {

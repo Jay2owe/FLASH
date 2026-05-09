@@ -8,6 +8,7 @@ import javax.swing.JDialog;
 import javax.swing.JPanel;
 import java.awt.BorderLayout;
 import java.awt.Dimension;
+import java.awt.Dialog;
 import java.awt.GraphicsEnvironment;
 import java.awt.GridLayout;
 import java.awt.Rectangle;
@@ -33,6 +34,7 @@ public final class LargePreviewDialog extends JDialog {
 
     public LargePreviewDialog(Window owner) {
         super(owner, "Large preview", ModalityType.MODELESS);
+        installModalExclusion();
         setDefaultCloseOperation(HIDE_ON_CLOSE);
         setLayout(new BorderLayout(8, 8));
         add(buildPreviews(), BorderLayout.CENTER);
@@ -70,6 +72,9 @@ public final class LargePreviewDialog extends JDialog {
 
     public void setDisplaySettings(PreviewDisplaySettings settings) {
         displaySettings = settings == null ? PreviewDisplaySettings.defaultFor("Grays") : settings;
+        originalPreview.setDisplaySettingsEnabled(true);
+        adjustedPreview.setDisplaySettingsEnabled(true);
+        extraPreview.setDisplaySettingsEnabled(!extraPreviewVisible);
         originalPreview.setDisplaySettings(displaySettings);
         adjustedPreview.setDisplaySettings(displaySettings);
         extraPreview.setDisplaySettings(displaySettings);
@@ -106,9 +111,20 @@ public final class LargePreviewDialog extends JDialog {
 
     void raiseForUser() {
         setVisible(true);
+        boolean previousAlwaysOnTop = isAlwaysOnTop();
+        try {
+            setAlwaysOnTop(true);
+        } catch (SecurityException ignored) {
+            // Best-effort only; toFront still handles normal desktop cases.
+        }
         toFront();
         requestFocus();
         requestFocusInWindow();
+        try {
+            setAlwaysOnTop(previousAlwaysOnTop);
+        } catch (SecurityException ignored) {
+            // Leave focus behavior unchanged if the desktop rejects the change.
+        }
     }
 
     private JPanel buildPreviews() {
@@ -171,5 +187,13 @@ public final class LargePreviewDialog extends JDialog {
         int x = bounds.x + Math.max(0, (bounds.width - width) / 2);
         int y = bounds.y + Math.max(0, (bounds.height - height) / 2);
         setBounds(x, y, width, height);
+    }
+
+    private void installModalExclusion() {
+        try {
+            setModalExclusionType(Dialog.ModalExclusionType.APPLICATION_EXCLUDE);
+        } catch (SecurityException ignored) {
+            // Some desktops disallow this; the dialog still remains modeless.
+        }
     }
 }

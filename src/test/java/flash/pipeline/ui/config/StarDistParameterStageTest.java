@@ -62,6 +62,28 @@ public class StarDistParameterStageTest {
         assertFalse(stage.isPreviewStaleForTest());
         assertNotNull(actions.adjustedPreview);
         assertEquals("Objects detected: 3", actions.status);
+        assertEquals(3, stage.largePreviewPaneCountForTest());
+    }
+
+    @Test
+    public void sourceToggleSwapsRawAndFilteredWithoutRunningPreview() {
+        RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
+        StarDistParameterStage stage = new StarDistParameterStage(
+                new RecordingStore("stardist:0.5:0.4"), adapter);
+
+        stage.buildControls(context(), new RecordingActions());
+        stage.onEnter(context(), new PreviewPairPanel("Original", "Adjusted"));
+        adapter.previewRuns = 0;
+
+        assertEquals(1, adapter.rawSourceCreations);
+        assertEquals(1, adapter.filteredSourceCreations);
+        assertTrue(stage.currentSourceTitleForTest().startsWith("filtered"));
+        assertEquals(2, stage.largePreviewPaneCountForTest());
+
+        stage.selectRawSourceForTest();
+
+        assertTrue(stage.currentSourceTitleForTest().startsWith("raw"));
+        assertEquals(0, adapter.previewRuns);
     }
 
     private static ConfigQcContext context() {
@@ -99,9 +121,19 @@ public class StarDistParameterStageTest {
     }
 
     private static final class RecordingPreviewAdapter implements StarDistParameterStage.PreviewAdapter {
+        int rawSourceCreations;
+        int filteredSourceCreations;
         int previewRuns;
 
+        @Override public ImagePlus createRawSource(ConfigQcContext context) {
+            rawSourceCreations++;
+            ImagePlus source = context.getCurrentImagePlus().duplicate();
+            source.setTitle("raw");
+            return source;
+        }
+
         @Override public ImagePlus createFilteredSource(ConfigQcContext context) {
+            filteredSourceCreations++;
             ImagePlus source = context.getCurrentImagePlus().duplicate();
             source.setTitle("filtered");
             return source;

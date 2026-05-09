@@ -76,6 +76,28 @@ public class CellposeParameterStageTest {
         assertFalse(stage.isPreviewStaleForTest());
         assertNotNull(actions.adjustedPreview);
         assertEquals("Objects detected: 2", actions.status);
+        assertEquals(3, stage.largePreviewPaneCountForTest());
+    }
+
+    @Test
+    public void sourceToggleSwapsRawAndFilteredWithoutRunningPreview() {
+        RecordingStore store = new RecordingStore("cellpose:30.0:cyto3:0.4:0.0:gpu=false");
+        RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
+        CellposeParameterStage stage = stage(store, adapter);
+
+        stage.buildControls(context(), new RecordingActions());
+        stage.onEnter(context(), new PreviewPairPanel("Original", "Adjusted"));
+        adapter.previewRuns = 0;
+
+        assertEquals(1, adapter.rawSourceCreations);
+        assertEquals(1, adapter.filteredSourceCreations);
+        assertTrue(stage.currentSourceTitleForTest().startsWith("filtered"));
+        assertEquals(2, stage.largePreviewPaneCountForTest());
+
+        stage.selectRawSourceForTest();
+
+        assertTrue(stage.currentSourceTitleForTest().startsWith("raw"));
+        assertEquals(0, adapter.previewRuns);
     }
 
     private static CellposeParameterStage stage(RecordingStore store,
@@ -124,10 +146,20 @@ public class CellposeParameterStageTest {
     }
 
     private static final class RecordingPreviewAdapter implements CellposeParameterStage.PreviewAdapter {
+        int rawSourceCreations;
+        int filteredSourceCreations;
         int previewRuns;
         int lastCompanionIndex = -2;
 
+        @Override public ImagePlus createRawSource(ConfigQcContext context) {
+            rawSourceCreations++;
+            ImagePlus source = context.getCurrentImagePlus().duplicate();
+            source.setTitle("raw");
+            return source;
+        }
+
         @Override public ImagePlus createFilteredSource(ConfigQcContext context) {
+            filteredSourceCreations++;
             ImagePlus source = context.getCurrentImagePlus().duplicate();
             source.setTitle("filtered");
             return source;

@@ -6,12 +6,16 @@ import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
+import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
 import java.awt.BorderLayout;
+import java.awt.Dialog;
+import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.GraphicsEnvironment;
+import java.awt.Rectangle;
 import java.awt.Window;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
@@ -35,7 +39,9 @@ public final class PreviewPairPanel extends JPanel {
     private final MinMaxControlPanel displayControls = new MinMaxControlPanel(false);
     private final JComboBox<String> lutModeChoice = new JComboBox<String>();
     private final JButton largeViewButton = new JButton("Large view");
+    private final JButton displayControlsButton = new JButton("Adjust Brightness/Contrast");
     private final Window owner;
+    private final JPanel displayControlsPanel;
 
     private ImagePlus originalImage;
     private ImagePlus adjustedImage;
@@ -50,7 +56,10 @@ public final class PreviewPairPanel extends JPanel {
     private int currentZ = 1;
     private boolean syncingSlices;
     private boolean updatingDisplayControls;
+    private boolean displayControlsAvailable = true;
+    private boolean displayRangeInitialized;
     private LargePreviewDialog largePreviewDialog;
+    private JDialog displayControlsDialog;
     private SharedZChangeListener sharedZChangeListener;
 
     public PreviewPairPanel(String originalTitle, String adjustedTitle) {
@@ -62,10 +71,11 @@ public final class PreviewPairPanel extends JPanel {
         this.owner = owner;
         this.originalPreview = new ImagePreviewPanel(originalTitle);
         this.adjustedPreview = new ImagePreviewPanel(adjustedTitle);
+        this.displayControlsPanel = buildDisplayControls();
         setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
         add(buildStackedPreviews(), BorderLayout.CENTER);
-        add(buildDisplayControls(), BorderLayout.SOUTH);
         wireLargeViewButton();
+        wireDisplayControlsButton();
         wireSliceSync();
         wireDisplayControls();
         setAdjustedState(PreviewState.EMPTY, null);
@@ -127,6 +137,7 @@ public final class PreviewPairPanel extends JPanel {
         largePreviewFirstImage = firstImage;
         largePreviewSecondImage = secondImage;
         largePreviewThirdImage = thirdImage;
+        applyDisplaySettings();
         updateLargeImages();
     }
 
@@ -135,11 +146,42 @@ public final class PreviewPairPanel extends JPanel {
         largePreviewFirstImage = null;
         largePreviewSecondImage = null;
         largePreviewThirdImage = null;
+        applyDisplaySettings();
         updateLargeImages();
     }
 
     public JButton largeViewButton() {
         return largeViewButton;
+    }
+
+    public JButton displayControlsButton() {
+        return displayControlsButton;
+    }
+
+    public void setDisplayControlsAvailable(boolean available) {
+        displayControlsAvailable = available;
+        displayControlsButton.setVisible(available);
+        displayControlsButton.setEnabled(available);
+        if (!available) {
+            hideDisplayControlsDialog();
+            displaySettings = PreviewDisplaySettings.defaultFor(channelLutName);
+            applyDisplaySettings();
+        } else {
+            refreshDisplayControlImage();
+        }
+    }
+
+    public void hideDisplayControlsDialog() {
+        if (displayControlsDialog != null) {
+            displayControlsDialog.setVisible(false);
+        }
+    }
+
+    public void disposeDisplayControlsDialog() {
+        if (displayControlsDialog != null) {
+            displayControlsDialog.dispose();
+            displayControlsDialog = null;
+        }
     }
 
     PreviewState adjustedStateForTest() {
@@ -176,11 +218,36 @@ public final class PreviewPairPanel extends JPanel {
         return largePreviewThirdImage == null ? 2 : 3;
     }
 
+    void setDisplayRangeForTest(double min, double max) {
+        displayControls.setRange(min, max);
+        updateDisplaySettingsFromControls();
+    }
+
+    PreviewDisplaySettings displaySettingsForTest() {
+        return displaySettings;
+    }
+
+    ImagePreviewPanel originalPreviewForTest() {
+        return originalPreview;
+    }
+
+    ImagePreviewPanel adjustedPreviewForTest() {
+        return adjustedPreview;
+    }
+
     void disposeLargePreviewForTest() {
         if (largePreviewDialog != null) {
             largePreviewDialog.dispose();
             largePreviewDialog = null;
         }
+    }
+
+    void disposeDisplayControlsDialogForTest() {
+        disposeDisplayControlsDialog();
+    }
+
+    Window displayControlsOwnerForTest() {
+        return displayControlsDialog == null ? null : displayControlsDialog.getOwner();
     }
 
     static int clampSharedZ(int requestedZ, int originalSlices, int adjustedSlices) {
@@ -233,6 +300,14 @@ public final class PreviewPairPanel extends JPanel {
         largeViewButton.addActionListener(new ActionListener() {
             @Override public void actionPerformed(ActionEvent e) {
                 showLargePreview();
+            }
+        });
+    }
+
+    private void wireDisplayControlsButton() {
+        displayControlsButton.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                showDisplayControlsDialog();
             }
         });
     }
@@ -290,6 +365,52 @@ public final class PreviewPairPanel extends JPanel {
             largePreviewDialog.setLocationRelativeTo(currentOwner);
         }
         largePreviewDialog.raiseForUser();
+    }
+
+    private void showDisplayControlsDialog() {
+        if (GraphicsEnvironment.isHeadless() || !displayControlsButton.isEnabled()) return;
+        Window currentOwner = currentOwner();
+        if (displayControlsDialog == null || displayControlsDialog.getOwner() != currentOwner) {
+            disposeDisplayControlsDialog();
+            displayControlsDialog = new JDialog(currentOwner, "Preview Brightness/Contrast",
+                    Dialog.ModalityType.MODELESS);
+            installModalExclusion(displayControlsDialog);
+            displayControlsDialog.setDefaultCloseOperation(JDialog.HIDE_ON_CLOSE);
+            displayControlsDialog.setContentPane(displayControlsPanel);
+            displayControlsDialog.setMinimumSize(new Dimension(360, 420));
+        }
+        displayControlsDialog.pack();
+        positionDisplayControlsDialog(currentOwner);
+        displayControlsDialog.setVisible(true);
+        displayControlsDialog.toFront();
+        displayControlsDialog.requestFocus();
+    }
+
+    private void positionDisplayControlsDialog(Window currentOwner) {
+        if (displayControlsDialog == null) return;
+        if (currentOwner == null || !currentOwner.isShowing()) {
+            displayControlsDialog.setLocationRelativeTo(this);
+            return;
+        }
+        Rectangle ownerBounds = currentOwner.getBounds();
+        Rectangle screen = GraphicsEnvironment
+                .getLocalGraphicsEnvironment()
+                .getMaximumWindowBounds();
+        Dimension size = displayControlsDialog.getSize();
+        int gap = 8;
+        int x = ownerBounds.x + ownerBounds.width + gap;
+        if (x + size.width > screen.x + screen.width) {
+            x = ownerBounds.x - size.width - gap;
+        }
+        if (x < screen.x) {
+            x = Math.max(screen.x, Math.min(ownerBounds.x, screen.x + screen.width - size.width));
+        }
+        int y = ownerBounds.y;
+        if (y + size.height > screen.y + screen.height) {
+            y = screen.y + Math.max(0, screen.height - size.height);
+        }
+        y = Math.max(screen.y, y);
+        displayControlsDialog.setLocation(x, y);
     }
 
     private void wireLargeDialog() {
@@ -364,10 +485,22 @@ public final class PreviewPairPanel extends JPanel {
     }
 
     private void refreshDisplayControlImage() {
-        ImagePlus displayImage = adjustedImage == null ? originalImage : adjustedImage;
+        if (!displayControlsAvailable) {
+            displaySettings = PreviewDisplaySettings.defaultFor(channelLutName);
+            applyDisplaySettings();
+            return;
+        }
+        ImagePlus displayImage = originalImage == null ? adjustedImage : originalImage;
+        boolean preserveRange = displayRangeInitialized && displayImage != null;
+        double previousMin = displayControls.getMinValue();
+        double previousMax = displayControls.getMaxValue();
         updatingDisplayControls = true;
         try {
             displayControls.setImage(displayImage);
+            if (preserveRange) {
+                displayControls.setRange(previousMin, previousMax);
+            }
+            displayRangeInitialized = displayImage != null;
         } finally {
             updatingDisplayControls = false;
         }
@@ -387,6 +520,10 @@ public final class PreviewPairPanel extends JPanel {
     }
 
     private void applyDisplaySettings() {
+        boolean adjustedIsObjectPreview = usingCustomLargePreviewImages
+                && largePreviewThirdImage != null;
+        originalPreview.setDisplaySettingsEnabled(true);
+        adjustedPreview.setDisplaySettingsEnabled(!adjustedIsObjectPreview);
         originalPreview.setDisplaySettings(displaySettings);
         adjustedPreview.setDisplaySettings(displaySettings);
         if (largePreviewDialog != null) {
@@ -397,6 +534,15 @@ public final class PreviewPairPanel extends JPanel {
     private Window currentOwner() {
         Window ancestor = SwingUtilities.getWindowAncestor(this);
         return ancestor == null ? owner : ancestor;
+    }
+
+    private static void installModalExclusion(Window window) {
+        if (window == null) return;
+        try {
+            window.setModalExclusionType(Dialog.ModalExclusionType.APPLICATION_EXCLUDE);
+        } catch (SecurityException ignored) {
+            // Best-effort only; the dialog still remains modeless.
+        }
     }
 
     private void updateLutModeLabels() {

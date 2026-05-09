@@ -39,6 +39,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
     }
 
     public interface PreviewAdapter {
+        ImagePlus createRawSource(ConfigQcContext context) throws Exception;
         ImagePlus createFilteredSource(ConfigQcContext context) throws Exception;
         ImagePlus createFilteredCompanionSource(ConfigQcContext context, int channelIndex) throws Exception;
         ImagePlus runPreview(ImagePlus filteredSource, ImagePlus filteredCompanionSource,
@@ -114,12 +115,15 @@ public final class CellposeParameterStage implements ConfigQcStage {
     private PreviewPairPanel preview;
     private ConfigQcContext activeContext;
     private Parameters savedParameters;
+    private ImagePlus rawSource;
     private ImagePlus filteredSource;
     private ImagePlus labelPreview;
     private SwingWorker<ImagePlus, Void> previewWorker;
     private SwingWorker<GpuInstallResult, Void> installWorker;
     private boolean previewStale = true;
     private boolean updatingControls;
+    private boolean showRawSource;
+    private int lastObjectCount = -1;
 
     private JComboBox<String> modelCombo;
     private JComboBox<String> companionCombo;
@@ -127,6 +131,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
     private JTextField flowField;
     private JTextField cellprobField;
     private JCheckBox gpuCheckBox;
+    private JButton sourceToggleButton;
     private JButton previewButton;
     private JButton installGpuButton;
     private JButton resetButton;
@@ -194,18 +199,29 @@ public final class CellposeParameterStage implements ConfigQcStage {
         closeImages();
         this.activeContext = context;
         this.preview = preview;
+        showRawSource = false;
+        refreshSourceToggleButton();
+        if (preview != null) {
+            preview.clearLargePreviewImages();
+        }
         try {
+            rawSource = previewAdapter.createRawSource(context);
+            if (rawSource == null) {
+                throw new IllegalStateException("No raw Cellpose input image is available.");
+            }
             filteredSource = previewAdapter.createFilteredSource(context);
             if (filteredSource == null) {
                 throw new IllegalStateException("No filtered Cellpose input image is available.");
             }
             if (preview != null) {
-                preview.setOriginal(filteredSource);
+                preview.setOriginal(currentSourceImage());
                 preview.setAdjusted(null);
                 preview.setAdjustedState(PreviewPairPanel.PreviewState.STALE, EMPTY_TEXT);
             }
+            refreshLargePreviewModel();
             setStatus(EMPTY_TEXT);
         } catch (Exception e) {
+            closeImages();
             setError("Could not prepare Cellpose input: " + e.getMessage());
         }
     }
@@ -233,6 +249,9 @@ public final class CellposeParameterStage implements ConfigQcStage {
     public void onLeave(ConfigQcContext context) {
         closePreviewWorker();
         closeInstallWorker();
+        if (preview != null) {
+            preview.clearLargePreviewImages();
+        }
         closeImages();
         preview = null;
         activeContext = null;
@@ -260,6 +279,23 @@ public final class CellposeParameterStage implements ConfigQcStage {
 
     void runPreviewNowForTest() throws Exception {
         runPreviewNow();
+    }
+
+    void selectRawSourceForTest() {
+        setRawSourceVisible(true);
+    }
+
+    void selectFilteredSourceForTest() {
+        setRawSourceVisible(false);
+    }
+
+    String currentSourceTitleForTest() {
+        ImagePlus source = currentSourceImage();
+        return source == null ? null : source.getTitle();
+    }
+
+    int largePreviewPaneCountForTest() {
+        return labelPreview == null ? 2 : 3;
     }
 
     private JComponent buildSummaryPanel(ConfigQcContext context) {
@@ -386,6 +422,11 @@ public final class CellposeParameterStage implements ConfigQcStage {
         JPanel buttons = new JPanel();
         buttons.setOpaque(false);
         buttons.setLayout(new BoxLayout(buttons, BoxLayout.X_AXIS));
+
+        sourceToggleButton = new JButton("Show Raw Image");
+        sourceToggleButton.addActionListener(e -> setRawSourceVisible(!showRawSource));
+        buttons.add(sourceToggleButton);
+        buttons.add(Box.createHorizontalStrut(6));
 
         installGpuButton = new JButton("Install GPU Support");
         installGpuButton.addActionListener(e -> installGpuSupport());
@@ -553,18 +594,65 @@ public final class CellposeParameterStage implements ConfigQcStage {
         ImagePlus old = labelPreview;
         labelPreview = labelImage;
         previewStale = false;
+        lastObjectCount = count;
         String text = "Objects detected: " + count;
         if (countLabel != null) countLabel.setText(text);
-        if (actions != null) {
-            actions.setAdjustedPreview(labelImage, text);
-        } else if (preview != null) {
-            preview.setAdjusted(labelImage);
-            preview.setAdjustedState(PreviewPairPanel.PreviewState.READY, text);
-        }
+        refreshSourceAndOutputPreview();
         setStatus(text);
         if (old != null && old != labelImage) {
             previewAdapter.close(old);
         }
+    }
+
+    private void refreshSourceAndOutputPreview() {
+        if (preview != null) {
+            preview.setOriginal(currentSourceImage());
+        }
+        refreshLargePreviewModel();
+        if (labelPreview == null) return;
+
+        String text = objectCountText();
+        if (previewStale) {
+            if (preview != null) {
+                preview.setAdjusted(labelPreview);
+                preview.setAdjustedState(PreviewPairPanel.PreviewState.STALE, text);
+            }
+            if (actions != null) {
+                actions.markPreviewStale(text);
+            }
+        } else if (actions != null) {
+            actions.setAdjustedPreview(labelPreview, text);
+        } else if (preview != null) {
+            preview.setAdjusted(labelPreview);
+            preview.setAdjustedState(PreviewPairPanel.PreviewState.READY, text);
+        }
+    }
+
+    private void refreshLargePreviewModel() {
+        if (preview == null) return;
+        preview.setLargePreviewImages(rawSource, filteredSource, labelPreview);
+    }
+
+    private ImagePlus currentSourceImage() {
+        return showRawSource && rawSource != null ? rawSource : filteredSource;
+    }
+
+    private void setRawSourceVisible(boolean showRaw) {
+        showRawSource = showRaw;
+        refreshSourceToggleButton();
+        refreshSourceAndOutputPreview();
+    }
+
+    private void refreshSourceToggleButton() {
+        if (sourceToggleButton != null) {
+            sourceToggleButton.setText(showRawSource ? "Show Filtered Image" : "Show Raw Image");
+        }
+    }
+
+    private String objectCountText() {
+        return lastObjectCount >= 0
+                ? "Objects detected: " + lastObjectCount
+                : "Objects detected: not previewed";
     }
 
     private void installGpuSupport() {
@@ -675,6 +763,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
     }
 
     private void setButtonsEnabled(boolean enabled) {
+        if (sourceToggleButton != null) sourceToggleButton.setEnabled(enabled);
         if (previewButton != null) previewButton.setEnabled(enabled);
         if (installGpuButton != null) installGpuButton.setEnabled(enabled);
         if (resetButton != null) resetButton.setEnabled(enabled);
@@ -702,11 +791,15 @@ public final class CellposeParameterStage implements ConfigQcStage {
 
     private void closeImages() {
         ImagePlus label = labelPreview;
-        ImagePlus source = filteredSource;
+        ImagePlus filtered = filteredSource;
+        ImagePlus raw = rawSource;
         labelPreview = null;
+        rawSource = null;
         filteredSource = null;
-        if (label != null && label != source) previewAdapter.close(label);
-        if (source != null) previewAdapter.close(source);
+        lastObjectCount = -1;
+        if (label != null && label != filtered && label != raw) previewAdapter.close(label);
+        if (filtered != null && filtered != raw) previewAdapter.close(filtered);
+        if (raw != null) previewAdapter.close(raw);
     }
 
     public static Parameters parseMethod(String method) {

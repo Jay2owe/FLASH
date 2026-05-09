@@ -113,6 +113,8 @@ public final class SandboxDialog extends JDialog {
         this.previews = new PreviewPairPanel(this, "Source image", "Preview output");
         this.previews.largeViewButton().setToolTipText(
                 "Open source and preview images in a larger synced view");
+        this.previews.displayControlsButton().setToolTipText(
+                "Open temporary preview brightness and contrast controls");
         catalog.setAddRequestListener(new FilterCatalog.AddRequestListener() {
             @Override public void onAddRequested(FilterCatalog.Entry entry) {
                 SandboxModel.Line target = resolveTargetLine();
@@ -239,6 +241,8 @@ public final class SandboxDialog extends JDialog {
         gbc.fill = GridBagConstraints.NONE;
         footer.add(previews.largeViewButton(), gbc);
         gbc.gridx++;
+        footer.add(previews.displayControlsButton(), gbc);
+        gbc.gridx++;
         footer.add(startFromPreset, gbc);
         gbc.gridx++;
         footer.add(help, gbc);
@@ -336,6 +340,7 @@ public final class SandboxDialog extends JDialog {
                 }
                 previewImage = null;
                 sourceImage = null;
+                previews.disposeDisplayControlsDialog();
                 done.countDown();
                 if (loop != null) loop.exit();
             }

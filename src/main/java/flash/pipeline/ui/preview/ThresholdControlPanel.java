@@ -92,10 +92,12 @@ public final class ThresholdControlPanel extends JPanel {
         }
         configureSliderDomains();
         applyThreshold(resetLower, resetUpper, false, false);
+        refreshLayoutAndPaint();
     }
 
     public void setThreshold(double lower, double upper) {
         applyThreshold(lower, upper, false, false);
+        refreshLayoutAndPaint();
     }
 
     public double getLowerThreshold() {
@@ -257,6 +259,17 @@ public final class ThresholdControlPanel extends JPanel {
         if (fire && listener != null) {
             listener.thresholdChanged(lowerValue, upperValue, adjusting);
         }
+    }
+
+    private void refreshLayoutAndPaint() {
+        histogramPanel.revalidate();
+        histogramPanel.repaint();
+        lowerSlider.revalidate();
+        lowerSlider.repaint();
+        upperSlider.revalidate();
+        upperSlider.repaint();
+        revalidate();
+        repaint();
     }
 
     private double[] calculateAutoThreshold(String method, String background) {

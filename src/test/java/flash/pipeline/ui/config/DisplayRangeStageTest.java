@@ -8,6 +8,7 @@ import org.junit.Test;
 import java.util.Arrays;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
@@ -45,6 +46,15 @@ public class DisplayRangeStageTest {
 
         assertEquals("12-88", store.token);
         assertEquals("12-88", stage.currentRangeTokenForTest());
+    }
+
+    @Test
+    public void displayRangeStageDoesNotOfferPreviewDisplayAdjustment() {
+        DisplayRangeStage stage = new DisplayRangeStage(
+                new RecordingRangeStore("None"),
+                new RecordingPreviewAdapter());
+
+        assertFalse(stage.showPreviewDisplayControls());
     }
 
     private static ConfigQcContext context() {

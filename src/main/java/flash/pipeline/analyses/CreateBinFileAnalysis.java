@@ -374,8 +374,41 @@ public class CreateBinFileAnalysis implements Analysis {
 
     protected ConfigQcResult showEmbeddedConfigQcDialog(ConfigQcContext context,
                                                         List<ConfigQcStage> stages) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            final ConfigQcContext dialogContext = context;
+            final List<ConfigQcStage> dialogStages = stages;
+            final ConfigQcResult[] result = new ConfigQcResult[]{ConfigQcResult.CANCEL};
+            try {
+                SwingUtilities.invokeAndWait(new Runnable() {
+                    @Override public void run() {
+                        result[0] = showEmbeddedConfigQcDialogOnEventThread(dialogContext, dialogStages);
+                    }
+                });
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return ConfigQcResult.CANCEL;
+            } catch (java.lang.reflect.InvocationTargetException e) {
+                throw embeddedDialogFailure(e.getCause());
+            }
+            return result[0] == null ? ConfigQcResult.CANCEL : result[0];
+        }
+        return showEmbeddedConfigQcDialogOnEventThread(context, stages);
+    }
+
+    private ConfigQcResult showEmbeddedConfigQcDialogOnEventThread(ConfigQcContext context,
+                                                                   List<ConfigQcStage> stages) {
         ConfigQcDialog dialog = ConfigQcDialog.createModal(null, context, stages);
         return dialog.showDialog();
+    }
+
+    private static RuntimeException embeddedDialogFailure(Throwable cause) {
+        if (cause instanceof RuntimeException) {
+            return (RuntimeException) cause;
+        }
+        if (cause instanceof Error) {
+            throw (Error) cause;
+        }
+        return new IllegalStateException("Could not show configuration QC dialog.", cause);
     }
 
     protected boolean showFilteredChannelNamesPage(String directory, File binFolder,
@@ -2197,15 +2230,15 @@ public class CreateBinFileAnalysis implements Analysis {
 
         for (int i = 0; i < channelCount; i++) {
             names.add(textFromField(bindings == null ? null : bindings.nameFields[i],
-                    valueAt(existingUser.names, i, "Channel" + (i + 1))));
+                    valueAt(sourceForHiddenFields.names, i, "Channel" + (i + 1))));
             colors.add(comboText(bindings == null ? null : bindings.colorCombos[i],
-                    valueAt(existingUser.colors, i, "Grays")));
+                    valueAt(sourceForHiddenFields.colors, i, "Grays")));
             filterPresets.add(comboText(bindings == null ? null : bindings.filterCombos[i],
                     valueAt(sourceForHiddenFields.filterPresets, i, FILTER_PRESETS[0])));
-            objThresholds.add(valueAt(existingUser.objectThresholds, i, "default"));
-            sizes.add(valueAt(existingUser.sizes, i, "100-Infinity"));
-            minmax.add(valueAt(existingUser.minmax, i, "None"));
-            intThresholds.add(valueAt(existingUser.intensityThresholds, i, "default"));
+            objThresholds.add(valueAt(sourceForHiddenFields.objectThresholds, i, "default"));
+            sizes.add(valueAt(sourceForHiddenFields.sizes, i, "100-Infinity"));
+            minmax.add(valueAt(sourceForHiddenFields.minmax, i, "None"));
+            intThresholds.add(valueAt(sourceForHiddenFields.intensityThresholds, i, "default"));
         }
 
         BinUserConfig cfg = new BinUserConfig(names, colors, objThresholds, sizes,
@@ -5228,6 +5261,11 @@ public class CreateBinFileAnalysis implements Analysis {
                     }
                 },
                 new StarDistParameterStage.PreviewAdapter() {
+                    @Override public ImagePlus createRawSource(ConfigQcContext context) {
+                        return createRawAiSource(context, cfg, channelIndex,
+                                "StarDist raw input");
+                    }
+
                     @Override public ImagePlus createFilteredSource(ConfigQcContext context) {
                         return createFilteredAiSource(context, cfg, binFolder, channelIndex,
                                 "StarDist filtered input");
@@ -5320,6 +5358,11 @@ public class CreateBinFileAnalysis implements Analysis {
                     }
                 },
                 new CellposeParameterStage.PreviewAdapter() {
+                    @Override public ImagePlus createRawSource(ConfigQcContext context) {
+                        return createRawAiSource(context, cfg, channelIndex,
+                                "Cellpose raw input");
+                    }
+
                     @Override public ImagePlus createFilteredSource(ConfigQcContext context) {
                         return createFilteredAiSource(context, cfg, binFolder, channelIndex,
                                 "Cellpose filtered input");
@@ -5389,6 +5432,17 @@ public class CreateBinFileAnalysis implements Analysis {
                 cfg.names,
                 channelIndex,
                 defaultUseGpu);
+    }
+
+    private ImagePlus createRawAiSource(ConfigQcContext context, BinUserConfig cfg,
+                                        int channelIndex, String titlePrefix) {
+        int channelNum = channelIndex + 1;
+        String chLabel = "C" + channelNum + " (" + cfg.names.get(channelIndex) + ")";
+        ImagePlus source = duplicateCurrentChannel(context, channelNum);
+        if (source == null) return null;
+        source.setTitle(titlePrefix + " | " + chLabel + " | "
+                + (context == null ? "" : context.getCurrentImageDisplayName()));
+        return applyPreviewLut(source, channelColor(cfg, channelIndex));
     }
 
     private ImagePlus createFilteredAiSource(ConfigQcContext context, BinUserConfig cfg, File binFolder,

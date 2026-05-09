@@ -210,6 +210,8 @@ public final class ConfigQcDialog {
         footer.add(skipButton, gbc);
         gbc.gridx++;
         footer.add(previewPair.largeViewButton(), gbc);
+        gbc.gridx++;
+        footer.add(previewPair.displayControlsButton(), gbc);
 
         gbc.gridx++;
         gbc.weightx = 1.0;
@@ -272,12 +274,12 @@ public final class ConfigQcDialog {
         if (controls != null) {
             controlsPanel.add(controls, BorderLayout.CENTER);
         }
+        refreshStageLayout();
         stage.onEnter(context, previewPair);
         if (navigationStatus != null && !navigationStatus.trim().isEmpty()) {
             setStatus(navigationStatus);
         }
-        rootPanel.revalidate();
-        rootPanel.repaint();
+        refreshStageLayout();
     }
 
     private void refreshHeader() {
@@ -293,6 +295,23 @@ public final class ConfigQcDialog {
         lockInButton.setText(isLastApplicableStage() && isLastImage()
                 ? "Lock in & Done"
                 : "Lock in & Next");
+        previewPair.setDisplayControlsAvailable(currentStage() == null
+                || currentStage().showPreviewDisplayControls());
+    }
+
+    private void refreshStageLayout() {
+        controlsPanel.revalidate();
+        controlsPanel.repaint();
+        rootPanel.revalidate();
+        rootPanel.repaint();
+        SwingUtilities.invokeLater(new Runnable() {
+            @Override public void run() {
+                controlsPanel.revalidate();
+                controlsPanel.repaint();
+                rootPanel.revalidate();
+                rootPanel.repaint();
+            }
+        });
     }
 
     private void setStatus(String text) {
@@ -383,6 +402,7 @@ public final class ConfigQcDialog {
     private void closeWithResult(ConfigQcResult result) {
         this.result = result == null ? ConfigQcResult.CANCEL : result;
         leaveCurrentStage();
+        previewPair.disposeDisplayControlsDialog();
         if (dialog != null && dialog.isDisplayable()) {
             dialog.dispose();
         } else {
@@ -520,6 +540,10 @@ public final class ConfigQcDialog {
 
     JButton largeViewButtonForTest() {
         return previewPair.largeViewButton();
+    }
+
+    JButton displayControlsButtonForTest() {
+        return previewPair.displayControlsButton();
     }
 
     void lockInForTest() {

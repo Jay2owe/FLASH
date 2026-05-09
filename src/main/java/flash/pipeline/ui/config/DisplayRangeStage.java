@@ -52,6 +52,11 @@ public final class DisplayRangeStage implements ConfigQcStage {
     }
 
     @Override
+    public boolean showPreviewDisplayControls() {
+        return false;
+    }
+
+    @Override
     public JComponent buildControls(ConfigQcContext context, ConfigQcActions actions) {
         this.actions = actions;
         this.activeContext = context;

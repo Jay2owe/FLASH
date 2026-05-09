@@ -12,6 +12,10 @@ public interface ConfigQcStage {
         return true;
     }
 
+    default boolean showPreviewDisplayControls() {
+        return true;
+    }
+
     default void onEnter(ConfigQcContext context, PreviewPairPanel preview) {
     }
 
