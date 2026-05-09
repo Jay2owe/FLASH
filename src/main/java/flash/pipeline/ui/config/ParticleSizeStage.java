@@ -529,10 +529,7 @@ public final class ParticleSizeStage implements ConfigQcStage {
 
     private void refreshLargePreviewModel() {
         if (preview == null) return;
-        preview.setLargePreviewImages(
-                rawSource,
-                filteredSource,
-                labelDisplayPreview == null ? labelPreview : labelDisplayPreview);
+        preview.setLargePreviewImages(rawSource, filteredSource, labelPreview);
     }
 
     private ImagePlus currentSourceImage() {
