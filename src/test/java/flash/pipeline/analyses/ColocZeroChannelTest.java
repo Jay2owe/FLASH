@@ -1,5 +1,6 @@
 package flash.pipeline.analyses;
 
+import ij.IJ;
 import ij.ImagePlus;
 import ij.ImageStack;
 import ij.measure.ResultsTable;
@@ -7,6 +8,8 @@ import ij.process.ShortProcessor;
 import flash.pipeline.bin.BinConfig;
 import org.junit.Test;
 
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.LinkedHashMap;
@@ -19,6 +22,10 @@ import static org.junit.Assert.*;
  * must still receive real volumetric and CPC colocalisation values.
  */
 public class ColocZeroChannelTest {
+
+    private interface ThrowingRunnable {
+        void run() throws Exception;
+    }
 
     /** Build a 16-bit label image with exactly the given labels at the specified pixel indices. */
     private static ImagePlus makeLabels(int w, int h, int nSlices, int[][] labelsPerSlice) {
@@ -60,6 +67,41 @@ public class ColocZeroChannelTest {
             t.setValue("Label", r, i + 1);
             t.setValue("Volume (micron^3)", r, 100);
         }
+    }
+
+    private static void registerImage(ThreeDObjectAnalysis analysis, String title, ImagePlus image) throws Exception {
+        Field registryField = ThreeDObjectAnalysis.class.getDeclaredField("imageRegistry");
+        registryField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        Map<String, ImagePlus> registry = (Map<String, ImagePlus>) registryField.get(analysis);
+        registry.put(title, image);
+    }
+
+    private static void invokeAppendColoc(ThreeDObjectAnalysis analysis, BinConfig cfg,
+                                          boolean[] channelHasObjects,
+                                          Map<String, ResultsTable> tables) throws Exception {
+        Method m = ThreeDObjectAnalysis.class.getDeclaredMethod(
+                "appendColocColumns",
+                BinConfig.class, boolean[].class, Map.class, int.class,
+                String.class, String.class, String.class, String.class);
+        m.setAccessible(true);
+        m.invoke(analysis, cfg, channelHasObjects, tables, 1, "AnimalA", "LH", "SCN", "SCN1");
+    }
+
+    private static String captureImageJLogOutput(ThrowingRunnable action) throws Exception {
+        PrintStream originalOut = System.out;
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        System.setOut(new PrintStream(out, true, "UTF-8"));
+        String ijLog = null;
+        try {
+            if (IJ.getLog() != null) IJ.log("\\Clear");
+            action.run();
+            ijLog = IJ.getLog();
+        } finally {
+            System.out.flush();
+            System.setOut(originalOut);
+        }
+        return out.toString("UTF-8") + (ijLog == null ? "" : ijLog);
     }
 
     @Test
@@ -105,23 +147,14 @@ public class ColocZeroChannelTest {
 
         // Reflectively instantiate ThreeDObjectAnalysis and populate its registry.
         ThreeDObjectAnalysis analysis = new ThreeDObjectAnalysis();
-        Field registryField = ThreeDObjectAnalysis.class.getDeclaredField("imageRegistry");
-        registryField.setAccessible(true);
-        @SuppressWarnings("unchecked")
-        Map<String, ImagePlus> registry = (Map<String, ImagePlus>) registryField.get(analysis);
-        registry.put("CH1_objects", ch1Objects);
-        registry.put("CH2_objects", ch2Objects);
-        registry.put("CH3_objects", ch3Objects);
+        registerImage(analysis, "CH1_objects", ch1Objects);
+        registerImage(analysis, "CH2_objects", ch2Objects);
+        registerImage(analysis, "CH3_objects", ch3Objects);
 
         boolean[] channelHasObjects = new boolean[] { false, true, true };
 
         // Invoke appendColocColumns via reflection.
-        Method m = ThreeDObjectAnalysis.class.getDeclaredMethod(
-                "appendColocColumns",
-                BinConfig.class, boolean[].class, Map.class, int.class,
-                String.class, String.class, String.class, String.class);
-        m.setAccessible(true);
-        m.invoke(analysis, cfg, channelHasObjects, tables, 1, "AnimalA", "LH", "SCN", "SCN1");
+        invokeAppendColoc(analysis, cfg, channelHasObjects, tables);
 
         // The compute path should have written a positive overlap for CH2's objects vs CH3
         // (and vice versa). If the pair fell through to !aHas||!bHas, all values would be 0.
@@ -141,6 +174,87 @@ public class ColocZeroChannelTest {
         // Pairs involving CH1 should be zero
         assertEquals(0.0, ch2.getValue("Colocalisation with CH1", 0), 0.001);
         assertEquals(0.0, ch3.getValue("Colocalisation with CH1", 0), 0.001);
+    }
+
+    @Test
+    public void volumetricColocKeepsPartialOverlapValuesWithoutDebugLogs() throws Exception {
+        BinConfig cfg = new BinConfig();
+        cfg.channelNames.add("CH1");
+        cfg.channelNames.add("CH2");
+
+        Map<String, ResultsTable> tables = new LinkedHashMap<>();
+        tables.put("CH1", new ResultsTable());
+        tables.put("CH2", new ResultsTable());
+        addObjectRows(tables.get("CH1"), 2, 1, "AnimalA", "LH", "SCN", "SCN1");
+        addObjectRows(tables.get("CH2"), 2, 1, "AnimalA", "LH", "SCN", "SCN1");
+
+        int w = 4, h = 3;
+        int[] sliceCH1 = new int[w * h];
+        int[] sliceCH2 = new int[w * h];
+        // CH1 objects are 4 pixels each; CH2 objects are 2 pixels fully inside them.
+        sliceCH1[0] = 1; sliceCH1[1] = 1; sliceCH1[4] = 1; sliceCH1[5] = 1;
+        sliceCH1[2] = 2; sliceCH1[3] = 2; sliceCH1[6] = 2; sliceCH1[7] = 2;
+        sliceCH2[0] = 1; sliceCH2[1] = 1;
+        sliceCH2[2] = 2; sliceCH2[3] = 2;
+
+        ThreeDObjectAnalysis analysis = new ThreeDObjectAnalysis();
+        registerImage(analysis, "CH1_objects", makeLabels(w, h, 1, new int[][] { sliceCH1 }));
+        registerImage(analysis, "CH2_objects", makeLabels(w, h, 1, new int[][] { sliceCH2 }));
+
+        String log = captureImageJLogOutput(new ThrowingRunnable() {
+            @Override
+            public void run() throws Exception {
+                invokeAppendColoc(analysis, cfg, new boolean[] { true, true }, tables);
+            }
+        });
+
+        ResultsTable ch1 = tables.get("CH1");
+        ResultsTable ch2 = tables.get("CH2");
+        assertEquals(50.0, ch1.getValue("Colocalisation with CH2", 0), 0.001);
+        assertEquals(50.0, ch1.getValue("Colocalisation with CH2", 1), 0.001);
+        assertEquals(100.0, ch2.getValue("Colocalisation with CH1", 0), 0.001);
+        assertEquals(100.0, ch2.getValue("Colocalisation with CH1", 1), 0.001);
+        assertFalse(log.contains("[COLOC DEBUG]"));
+        assertFalse(log.contains("[COLOC] pixel overlap"));
+    }
+
+    @Test
+    public void emptyObjectPairSkipsIntensityMetricWorkAndWritesEmptyMetrics() throws Exception {
+        BinConfig cfg = new BinConfig();
+        cfg.channelNames.add("CH1");
+        cfg.channelNames.add("CH2");
+
+        Map<String, ResultsTable> tables = new LinkedHashMap<>();
+        tables.put("CH1", new ResultsTable());
+        tables.put("CH2", new ResultsTable());
+        addPlaceholderRow(tables.get("CH1"), 1, "AnimalA", "LH", "SCN", "SCN1");
+        addObjectRows(tables.get("CH2"), 1, 1, "AnimalA", "LH", "SCN", "SCN1");
+
+        int[] ch2Labels = new int[9];
+        ch2Labels[0] = 1;
+        ch2Labels[1] = 1;
+        ThreeDObjectAnalysis analysis = new ThreeDObjectAnalysis();
+        registerImage(analysis, "CH1_objects", makeLabels(3, 3, 1, new int[][] { new int[9] }));
+        registerImage(analysis, "CH2_objects", makeLabels(3, 3, 1, new int[][] { ch2Labels }));
+
+        // These mismatched raw images would log "channel dimensions differ" if intensity metrics ran.
+        registerImage(analysis, "CH1_unfiltered", makeLabels(3, 3, 1, new int[][] { new int[9] }));
+        registerImage(analysis, "CH2_unfiltered", makeLabels(4, 4, 1, new int[][] { new int[16] }));
+
+        String log = captureImageJLogOutput(new ThrowingRunnable() {
+            @Override
+            public void run() throws Exception {
+                invokeAppendColoc(analysis, cfg, new boolean[] { false, true }, tables);
+            }
+        });
+
+        ResultsTable ch1 = tables.get("CH1");
+        ResultsTable ch2 = tables.get("CH2");
+        assertEquals(0.0, ch1.getValue("Colocalisation with CH2", 0), 0.001);
+        assertEquals(0.0, ch2.getValue("Colocalisation with CH1", 0), 0.001);
+        assertEquals("NaN", ch1.getStringValue("CH1_Pearson_CH2", 0));
+        assertEquals("NaN", ch2.getStringValue("CH2_Pearson_CH1", 0));
+        assertFalse(log.contains("channel dimensions differ"));
     }
 
     @Test
@@ -174,13 +288,9 @@ public class ColocZeroChannelTest {
         ImagePlus ch3Objects = makeLabels(w, h, 1, new int[][] { sliceCH3 });
 
         ThreeDObjectAnalysis analysis = new ThreeDObjectAnalysis();
-        Field registryField = ThreeDObjectAnalysis.class.getDeclaredField("imageRegistry");
-        registryField.setAccessible(true);
-        @SuppressWarnings("unchecked")
-        Map<String, ImagePlus> registry = (Map<String, ImagePlus>) registryField.get(analysis);
-        registry.put("CH1_objects", ch1Objects);
-        registry.put("CH2_objects", ch2Objects);
-        registry.put("CH3_objects", ch3Objects);
+        registerImage(analysis, "CH1_objects", ch1Objects);
+        registerImage(analysis, "CH2_objects", ch2Objects);
+        registerImage(analysis, "CH3_objects", ch3Objects);
 
         boolean[] channelHasObjects = new boolean[] { false, true, true };
 

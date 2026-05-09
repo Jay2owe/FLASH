@@ -3638,7 +3638,31 @@ public class ThreeDObjectAnalysis implements Analysis {
                 String colocColAB = volColocCol(aChannel, bChannel);
                 String colocColBA = volColocCol(bChannel, aChannel);
 
-                ColocalizationMetrics.Result metrics = computeIntensityColocMetrics(aChannel, bChannel);
+                if (!aHas || !bHas) {
+                    // Zero-fill both directions
+                    if (aTable != null) {
+                        writeColocMetricsForThisImage(aTable, aChannel, bChannel, null, true,
+                                scnIndex, animalName, hemisphere, region, roiLabel);
+                        setColocZerosForThisImage(aTable, overlapColAB, scnIndex, animalName, hemisphere, region, roiLabel);
+                        setColocZerosForThisImage(aTable, colocColAB, scnIndex, animalName, hemisphere, region, roiLabel);
+                    }
+                    if (bTable != null) {
+                        writeColocMetricsForThisImage(bTable, bChannel, aChannel, null, false,
+                                scnIndex, animalName, hemisphere, region, roiLabel);
+                        setColocZerosForThisImage(bTable, overlapColBA, scnIndex, animalName, hemisphere, region, roiLabel);
+                        setColocZerosForThisImage(bTable, colocColBA, scnIndex, animalName, hemisphere, region, roiLabel);
+                    }
+                    String emptyChannel = !aHas
+                            ? (!bHas ? aChannel + "+" + bChannel : aChannel)
+                            : bChannel;
+                    appendColocLogEntry(logEntries, logFirst, a, bChannel, "no objects in " + emptyChannel);
+                    appendColocLogEntry(logEntries, logFirst, b, aChannel, "no objects in " + emptyChannel);
+                    continue;
+                }
+
+                ColocalizationMetrics.Result metrics = (aTable != null || bTable != null)
+                        ? computeIntensityColocMetrics(aChannel, bChannel)
+                        : null;
                 if (aTable != null) {
                     writeColocMetricsForThisImage(aTable, aChannel, bChannel, metrics, true,
                             scnIndex, animalName, hemisphere, region, roiLabel);
@@ -3649,24 +3673,6 @@ public class ThreeDObjectAnalysis implements Analysis {
                 }
                 if (metrics != null && metrics.randomizationSkipped) {
                     IJ.log("    " + metrics.note + " (" + aChannel + " vs " + bChannel + ")");
-                }
-
-                if (!aHas || !bHas) {
-                    // Zero-fill both directions
-                    if (aTable != null) {
-                        setColocZerosForThisImage(aTable, overlapColAB, scnIndex, animalName, hemisphere, region, roiLabel);
-                        setColocZerosForThisImage(aTable, colocColAB, scnIndex, animalName, hemisphere, region, roiLabel);
-                    }
-                    if (bTable != null) {
-                        setColocZerosForThisImage(bTable, overlapColBA, scnIndex, animalName, hemisphere, region, roiLabel);
-                        setColocZerosForThisImage(bTable, colocColBA, scnIndex, animalName, hemisphere, region, roiLabel);
-                    }
-                    String emptyChannel = !aHas
-                            ? (!bHas ? aChannel + "+" + bChannel : aChannel)
-                            : bChannel;
-                    appendColocLogEntry(logEntries, logFirst, a, bChannel, "no objects in " + emptyChannel);
-                    appendColocLogEntry(logEntries, logFirst, b, aChannel, "no objects in " + emptyChannel);
-                    continue;
                 }
 
                 try {
@@ -3916,10 +3922,9 @@ public class ThreeDObjectAnalysis implements Analysis {
             }
         }
 
-        // For each A-object: find max overlap percentage with any single B partner
-        java.util.Map<Integer, Double> aMaxPct = new java.util.LinkedHashMap<Integer, Double>();
-        // For each B-object: find max overlap percentage with any single A partner
-        java.util.Map<Integer, Double> bMaxPct = new java.util.LinkedHashMap<Integer, Double>();
+        // For each object, track the maximum overlap percentage with any single partner.
+        gnu.trove.map.hash.TIntFloatHashMap aMaxPct = new gnu.trove.map.hash.TIntFloatHashMap();
+        gnu.trove.map.hash.TIntFloatHashMap bMaxPct = new gnu.trove.map.hash.TIntFloatHashMap();
         gnu.trove.iterator.TLongIntIterator it = overlapCounts.iterator();
         while (it.hasNext()) {
             it.advance();
@@ -3929,15 +3934,13 @@ public class ThreeDObjectAnalysis implements Analysis {
             int bLabel = (int) (key & 0xFFFFFFFFL);
             int aSize = aSizes.get(aLabel);
             if (aSize > 0) {
-                double pct = (double) overlap / aSize * 100.0;
-                Double prev = aMaxPct.get(aLabel);
-                if (prev == null || pct > prev) aMaxPct.put(aLabel, pct);
+                float pct = (float) ((double) overlap / aSize * 100.0);
+                if (pct > aMaxPct.get(aLabel)) aMaxPct.put(aLabel, pct);
             }
             int bSize = bSizes.get(bLabel);
             if (bSize > 0) {
-                double pct = (double) overlap / bSize * 100.0;
-                Double prev = bMaxPct.get(bLabel);
-                if (prev == null || pct > prev) bMaxPct.put(bLabel, pct);
+                float pct = (float) ((double) overlap / bSize * 100.0);
+                if (pct > bMaxPct.get(bLabel)) bMaxPct.put(bLabel, pct);
             }
         }
 
@@ -3946,8 +3949,7 @@ public class ThreeDObjectAnalysis implements Analysis {
         float[] p1 = new float[objectsA.size()];
         for (int i = 0; i < objectsA.size(); i++) {
             int label = (int) objectsA.get(i).getLabel();
-            Double pct = aMaxPct.get(label);
-            p1[i] = (pct != null) ? pct.floatValue() : 0f;
+            p1[i] = aMaxPct.get(label);
         }
 
         // Build p2 in population iteration order
@@ -3955,20 +3957,7 @@ public class ThreeDObjectAnalysis implements Analysis {
         float[] p2 = new float[objectsB.size()];
         for (int i = 0; i < objectsB.size(); i++) {
             int label = (int) objectsB.get(i).getLabel();
-            Double pct = bMaxPct.get(label);
-            p2[i] = (pct != null) ? pct.floatValue() : 0f;
-        }
-
-        int aColoc = countNonZero(p1);
-        int bColoc = countNonZero(p2);
-        IJ.log("    [COLOC] pixel overlap: " + objectsA.size() + " A-objects (" + aColoc
-                + " colocalising), " + objectsB.size() + " B-objects (" + bColoc + " colocalising), "
-                + overlapCounts.size() + " unique pairs");
-        // Debug: first 5 A-object percentages
-        for (int i = 0; i < Math.min(5, objectsA.size()); i++) {
-            int label = (int) objectsA.get(i).getLabel();
-            IJ.log("    [COLOC DEBUG] p1[" + i + "]: label=" + label
-                    + " size=" + aSizes.get(label) + " → " + p1[i] + "%");
+            p2[i] = bMaxPct.get(label);
         }
 
         return new float[][] { p1, p2 };
