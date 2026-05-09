@@ -43,8 +43,14 @@ import ij.gui.Roi;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Container;
+import java.awt.Dimension;
+import java.awt.GraphicsConfiguration;
 import java.awt.GraphicsEnvironment;
+import java.awt.Insets;
 import java.awt.Point;
+import java.awt.Rectangle;
+import java.awt.Toolkit;
+import java.awt.Window;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -333,9 +339,11 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
             if ("Manual".equals(imageProcessing)) {
                 IJ.run(prep.maxProjection, "Brightness/Contrast...", "");
             }
+            Window imageJWindow = imageJMainWindow();
             prep.maxProjection.show();
+            placeRoiImageWindowNearImageJ(prep.maxProjection, imageJWindow);
             RoiOrientationPanel drawDialog =
-                    new RoiOrientationPanel(null, createOrientationTarget(prep),
+                    new RoiOrientationPanel(imageJWindow, createOrientationTarget(prep),
                             "Image " + (i + 1) + "/" + totalImages, imgTitle);
 
             try {
@@ -390,7 +398,7 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
 
                 Object[] options = {"Redo this image", "Skip and continue",
                                     "Save partial + abort"};
-                int choice = JOptionPane.showOptionDialog(null,
+                int choice = JOptionPane.showOptionDialog(imageJMainWindow(),
                         "Image " + (i + 1) + " is missing " + missing + " ROI(s).\n\n"
                         + "Redo: re-open this image to draw the ROI.\n"
                         + "Skip: pad with placeholder ROI(s) and continue.\n"
@@ -715,6 +723,65 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
         return image == null || image.getWindow() == null
                 ? null
                 : image.getWindow().getLocation();
+    }
+
+    private static Window imageJMainWindow() {
+        if (GraphicsEnvironment.isHeadless()) return null;
+        try {
+            return IJ.getInstance();
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private static void placeRoiImageWindowNearImageJ(ImagePlus image, Window imageJWindow) {
+        if (image == null || image.getWindow() == null || imageJWindow == null) return;
+        Dimension imageSize = image.getWindow().getSize();
+        Rectangle screenBounds = usableScreenBounds(imageJWindow.getGraphicsConfiguration());
+        Point target = roiImageWindowLocationNearAnchor(
+                imageJWindow.getBounds(), imageSize, screenBounds);
+        image.getWindow().setLocation(target);
+    }
+
+    static Point roiImageWindowLocationNearAnchor(Rectangle anchorBounds,
+                                                  Dimension imageSize,
+                                                  Rectangle screenBounds) {
+        Rectangle safeScreen = screenBounds == null
+                ? new Rectangle(Toolkit.getDefaultToolkit().getScreenSize())
+                : screenBounds;
+        Dimension safeSize = imageSize == null
+                ? new Dimension(1, 1)
+                : imageSize;
+        int gap = 12;
+        int x = anchorBounds == null ? safeScreen.x : anchorBounds.x;
+        int y = anchorBounds == null
+                ? safeScreen.y
+                : anchorBounds.y + anchorBounds.height + gap;
+        if (y + safeSize.height > safeScreen.y + safeScreen.height
+                && anchorBounds != null) {
+            y = anchorBounds.y - safeSize.height - gap;
+        }
+        return new Point(
+                clamp(x, safeScreen.x, safeScreen.x + safeScreen.width - safeSize.width),
+                clamp(y, safeScreen.y, safeScreen.y + safeScreen.height - safeSize.height));
+    }
+
+    private static Rectangle usableScreenBounds(GraphicsConfiguration gc) {
+        if (gc == null) {
+            return new Rectangle(Toolkit.getDefaultToolkit().getScreenSize());
+        }
+        Rectangle bounds = gc.getBounds();
+        Insets insets = Toolkit.getDefaultToolkit().getScreenInsets(gc);
+        return new Rectangle(
+                bounds.x + insets.left,
+                bounds.y + insets.top,
+                bounds.width - insets.left - insets.right,
+                bounds.height - insets.top - insets.bottom);
+    }
+
+    private static int clamp(int value, int min, int max) {
+        if (max < min) return min;
+        return Math.max(min, Math.min(max, value));
     }
 
     private static String orientationStatusText(OrientationTransformState state) {

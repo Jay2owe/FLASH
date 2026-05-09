@@ -18,6 +18,9 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
+import java.awt.Dimension;
+import java.awt.Point;
+import java.awt.Rectangle;
 import java.io.File;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
@@ -49,6 +52,26 @@ public class DrawAndSaveROIsAnalysisTest {
                 analysis.requiredBinFields());
         assertFalse(analysis.benefitsFromRois());
         assertTrue(analysis.requiresHeadedMode());
+    }
+
+    @Test
+    public void roiImageWindowLocationOpensBelowImageJBarOnSameScreen() {
+        Point location = DrawAndSaveROIsAnalysis.roiImageWindowLocationNearAnchor(
+                new Rectangle(1200, 40, 520, 90),
+                new Dimension(700, 500),
+                new Rectangle(1000, 0, 1200, 900));
+
+        assertEquals(new Point(1200, 142), location);
+    }
+
+    @Test
+    public void roiImageWindowLocationClampsToImageJScreenWhenSpaceIsTight() {
+        Point location = DrawAndSaveROIsAnalysis.roiImageWindowLocationNearAnchor(
+                new Rectangle(2100, 700, 150, 90),
+                new Dimension(500, 400),
+                new Rectangle(1000, 0, 1200, 900));
+
+        assertEquals(new Point(1700, 288), location);
     }
 
     @Test

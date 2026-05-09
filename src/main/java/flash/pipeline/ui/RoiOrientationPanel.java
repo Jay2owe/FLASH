@@ -18,7 +18,10 @@ import java.awt.Dialog;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Frame;
+import java.awt.GraphicsConfiguration;
 import java.awt.GraphicsEnvironment;
+import java.awt.Insets;
+import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.SecondaryLoop;
 import java.awt.Toolkit;
@@ -141,11 +144,19 @@ public final class RoiOrientationPanel {
     public void showNear(ImagePlus image) {
         if (dialog == null) return;
         dialog.pack();
-        dialog.setMinimumSize(new Dimension(560, dialog.getPreferredSize().height));
+        Dimension packedSize = dialog.getSize();
+        Dimension displaySize = new Dimension(
+                Math.max(560, packedSize.width),
+                packedSize.height);
+        dialog.setMinimumSize(displaySize);
+        dialog.setSize(displaySize);
         ImageWindow window = image == null ? null : image.getWindow();
         if (window != null) {
             Rectangle bounds = window.getBounds();
-            dialog.setLocation(bounds.x + bounds.width + 12, bounds.y);
+            Rectangle screenBounds = usableScreenBounds(window.getGraphicsConfiguration());
+            dialog.setLocation(dialogLocationNearImage(bounds, displaySize, screenBounds));
+        } else if (dialog.getOwner() != null) {
+            dialog.setLocationRelativeTo(dialog.getOwner());
         } else {
             dialog.setLocationByPlatform(true);
         }
@@ -342,5 +353,51 @@ public final class RoiOrientationPanel {
         return a.rotateDegrees == b.rotateDegrees
                 && a.flipHorizontal == b.flipHorizontal
                 && a.flipVertical == b.flipVertical;
+    }
+
+    static Point dialogLocationNearImage(Rectangle imageBounds,
+                                         Dimension dialogSize,
+                                         Rectangle screenBounds) {
+        Rectangle safeScreen = screenBounds == null
+                ? new Rectangle(Toolkit.getDefaultToolkit().getScreenSize())
+                : screenBounds;
+        Dimension safeSize = dialogSize == null
+                ? new Dimension(1, 1)
+                : dialogSize;
+        if (imageBounds == null) {
+            return new Point(safeScreen.x, safeScreen.y);
+        }
+
+        int gap = 12;
+        int x = imageBounds.x + imageBounds.width + gap;
+        if (x + safeSize.width > safeScreen.x + safeScreen.width) {
+            x = imageBounds.x - safeSize.width - gap;
+        }
+        if (x < safeScreen.x) {
+            x = imageBounds.x;
+        }
+
+        int y = imageBounds.y;
+        return new Point(
+                clamp(x, safeScreen.x, safeScreen.x + safeScreen.width - safeSize.width),
+                clamp(y, safeScreen.y, safeScreen.y + safeScreen.height - safeSize.height));
+    }
+
+    private static Rectangle usableScreenBounds(GraphicsConfiguration gc) {
+        if (gc == null) {
+            return new Rectangle(Toolkit.getDefaultToolkit().getScreenSize());
+        }
+        Rectangle bounds = gc.getBounds();
+        Insets insets = Toolkit.getDefaultToolkit().getScreenInsets(gc);
+        return new Rectangle(
+                bounds.x + insets.left,
+                bounds.y + insets.top,
+                bounds.width - insets.left - insets.right,
+                bounds.height - insets.top - insets.bottom);
+    }
+
+    private static int clamp(int value, int min, int max) {
+        if (max < min) return min;
+        return Math.max(min, Math.min(max, value));
     }
 }
