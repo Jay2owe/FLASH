@@ -21,6 +21,8 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
+import java.awt.Component;
+import java.awt.Container;
 import java.awt.GraphicsEnvironment;
 import java.io.File;
 import java.lang.reflect.Constructor;
@@ -32,6 +34,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 import static org.junit.Assert.assertEquals;
@@ -312,6 +315,60 @@ public class CreateBinFileAnalysisTest {
     }
 
     @Test
+    public void channelIdentityGridUsesIdentityRowsAndNoFilterControls() {
+        CreateBinFileAnalysis.BinUserConfig defaults = twoChannelConfig();
+        defaults.names.set(0, "DAPI");
+        defaults.names.set(1, "GFAP");
+        defaults.colors.set(1, "Red");
+        defaults.segmentationMethods.set(1, "stardist:0.5:0.4");
+
+        CreateBinFileAnalysis.ChannelIdentityGrid grid =
+                CreateBinFileAnalysis.buildChannelIdentityGrid(defaults, true, true, null);
+
+        assertEquals("Channel name", grid.rowLabels[0].getText());
+        assertEquals("LUT", grid.rowLabels[1].getText());
+        assertEquals("Segmentation", grid.rowLabels[2].getText());
+        assertEquals(2, grid.nameFields.length);
+        assertEquals("DAPI", grid.nameFields[0].getText());
+        assertEquals("GFAP", grid.nameFields[1].getText());
+        assertEquals("Blue", grid.lutCombos[0].getSelectedItem());
+        assertEquals("Red", grid.lutCombos[1].getSelectedItem());
+        assertEquals("Classical", grid.segmentationCombos[0].getSelectedItem());
+        assertEquals("StarDist 3D", grid.segmentationCombos[1].getSelectedItem());
+        assertFalse(containsComponentText(grid.panel, "Filter Preset"));
+        assertEquals(0, countComponentNamesContaining(grid.panel, "filter"));
+    }
+
+    @Test
+    public void buildConfigFromDialogReadsIdentityGridAndPreservesHiddenFilters() throws Exception {
+        CreateBinFileAnalysis analysis = new CreateBinFileAnalysis();
+        CreateBinFileAnalysis.BinUserConfig draft = twoChannelConfig();
+        draft.filterPresets.set(0, "Puncta Resolve");
+        draft.filterPresets.set(1, "Custom");
+        CreateBinFileAnalysis.ChannelIdentityGrid grid =
+                CreateBinFileAnalysis.buildChannelIdentityGrid(draft, true, true, null);
+        grid.nameFields[0].setText("NeuN");
+        grid.nameFields[1].setText("IBA1");
+        grid.lutCombos[0].setSelectedItem("Green");
+        grid.lutCombos[1].setSelectedItem("Magenta");
+        grid.segmentationCombos[1].setSelectedItem("StarDist 3D");
+
+        Object bindings = newBinSetupBindings(2);
+        copyBindingArray(bindings, "nameFields", grid.nameFields);
+        copyBindingArray(bindings, "colorCombos", grid.lutCombos);
+        copyBindingArray(bindings, "segmentationCombos", grid.segmentationCombos);
+
+        CreateBinFileAnalysis.BinUserConfig result =
+                invokeBuildBinUserConfigFromDialog(analysis, 2, draft, bindings);
+
+        assertEquals(Arrays.asList("NeuN", "IBA1"), result.names);
+        assertEquals(Arrays.asList("Green", "Magenta"), result.colors);
+        assertEquals(Arrays.asList("Puncta Resolve", "Custom"), result.filterPresets);
+        assertEquals("classical", result.segmentationMethods.get(0));
+        assertEquals("stardist:0.5:0.4", result.segmentationMethods.get(1));
+    }
+
+    @Test
     public void buildConfigFromDialogUsesDraftAndAppliedHiddenChannelMetadata() throws Exception {
         CreateBinFileAnalysis analysis = new CreateBinFileAnalysis();
         CreateBinFileAnalysis.BinUserConfig draft = twoChannelConfig();
@@ -565,6 +622,13 @@ public class CreateBinFileAnalysisTest {
         field.set(bindings, cfg);
     }
 
+    private static void copyBindingArray(Object bindings, String fieldName, Object[] values) throws Exception {
+        java.lang.reflect.Field field = bindings.getClass().getDeclaredField(fieldName);
+        field.setAccessible(true);
+        Object[] target = (Object[]) field.get(bindings);
+        System.arraycopy(values, 0, target, 0, Math.min(values.length, target.length));
+    }
+
     private static CreateBinFileAnalysis.BinUserConfig invokeBuildBinUserConfigFromDialog(
             CreateBinFileAnalysis analysis,
             int channelCount,
@@ -666,6 +730,39 @@ public class CreateBinFileAnalysisTest {
             if (expected.equals(value)) return true;
         }
         return false;
+    }
+
+    private static boolean containsComponentText(Component component, String expected) {
+        if (component instanceof javax.swing.JLabel) {
+            String text = ((javax.swing.JLabel) component).getText();
+            if (expected.equals(text)) return true;
+        }
+        if (component instanceof javax.swing.AbstractButton) {
+            String text = ((javax.swing.AbstractButton) component).getText();
+            if (expected.equals(text)) return true;
+        }
+        if (component instanceof Container) {
+            Component[] children = ((Container) component).getComponents();
+            for (Component child : children) {
+                if (containsComponentText(child, expected)) return true;
+            }
+        }
+        return false;
+    }
+
+    private static int countComponentNamesContaining(Component component, String needle) {
+        int count = 0;
+        String name = component == null ? null : component.getName();
+        if (name != null && name.toLowerCase(Locale.ROOT).contains(needle.toLowerCase(Locale.ROOT))) {
+            count++;
+        }
+        if (component instanceof Container) {
+            Component[] children = ((Container) component).getComponents();
+            for (Component child : children) {
+                count += countComponentNamesContaining(child, needle);
+            }
+        }
+        return count;
     }
 
     private static final class ReplacementThresholdPreviewAnalysis extends CreateBinFileAnalysis {

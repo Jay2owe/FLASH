@@ -70,17 +70,26 @@ import ij.plugin.ZProjector;
 import ij.process.ImageProcessor;
 
 import javax.swing.JButton;
+import javax.swing.BorderFactory;
+import javax.swing.Box;
+import javax.swing.BoxLayout;
 import javax.swing.JComboBox;
+import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
 
+import java.awt.Color;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
+import java.awt.Font;
 import java.awt.GraphicsEnvironment;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
+import java.awt.Insets;
 import java.awt.Toolkit;
 import java.io.File;
 import java.io.IOException;
@@ -158,6 +167,10 @@ public class CreateBinFileAnalysis implements Analysis {
     private static final String[] COLOR_OPTIONS = {
             "Grays", "Red", "Green", "Blue", "Cyan", "Magenta", "Yellow"
     };
+    private static final Color CHANNEL_IDENTITY_HELP_COLOR = new Color(117, 117, 117);
+    private static final int CHANNEL_IDENTITY_ROW_LABEL_WIDTH = 116;
+    private static final int CHANNEL_IDENTITY_CELL_WIDTH = 160;
+    private static final int CHANNEL_IDENTITY_NAME_WIDTH = 150;
     private static final String SEGMENTATION_CLASSICAL = "Classical";
     private static final String SEGMENTATION_STARDIST = "StarDist 3D";
     private static final String SEGMENTATION_CELLPOSE = "Cellpose";
@@ -1781,45 +1794,12 @@ public class CreateBinFileAnalysis implements Analysis {
                                     dialogDefaults, binBindings);
                         }
                     });
-            pd.addSubHeader("Antibody Names, Colors, Filters & Segmentation");
-            pd.addMessage("Assign a name, pseudocolor, filter preset, and segmentation method for each channel.");
-            pd.addHelpText("'Custom' will open the custom filter builder after QC image selection. Saved custom filters can be reused from this list on later runs.");
-            JComboBox<String>[] segmentationChoices = new JComboBox[n];
-            for (int i = 0; i < n; i++) {
-                pd.addSpacer(6);
-                pd.addHeader("Channel " + (i + 1));
-                String defName = existing == null && draftConfig == null
-                        ? "" : valueAt(dialogDefaults.names, i, "Channel" + (i + 1));
-                String defColor = toLutName(valueAt(dialogDefaults.colors, i, "Grays"));
-                String defPreset = valueAt(dialogDefaults.filterPresets, i, FILTER_PRESETS[0]);
-                final JTextField nameField = pd.addStringField("Name", defName, 20);
-                MarkerAutoComplete.attach(nameField, null);
-                final JComboBox<String> colorCombo = pd.addChoice("Color", COLOR_OPTIONS, defColor);
-                JComboBox<String> filterCombo = pd.addChoice("Filter Preset",
-                        filterPresetOptions(binFolder, defPreset), defPreset);
-                final JLabel filterDesc = pd.addHelpText(filterDescriptionFor(defPreset));
-                installFilterDescriptionUpdater(filterCombo, filterDesc);
-                String defSegmentation = i < dialogDefaults.segmentationMethods.size()
-                        ? segmentationChoiceForDialogDefault(
-                                dialogDefaults.segmentationMethods.get(i), starDistAvailable, cellposeReady)
-                        : SEGMENTATION_CLASSICAL;
-                JComboBox<String> segmentationCombo = pd.addChoice("Segmentation", SEGMENTATION_OPTIONS, defSegmentation);
-                final JLabel segmentationDesc = pd.addHelpText(
-                        segmentationDescriptionFor(defSegmentation, starDistAvailable, cellposeStatus));
-                segmentationCombo.addItemListener(new java.awt.event.ItemListener() {
-                    @Override public void itemStateChanged(java.awt.event.ItemEvent e) {
-                        if (e.getStateChange() == java.awt.event.ItemEvent.SELECTED) {
-                            segmentationDesc.setText(segmentationDescriptionFor(
-                                    (String) e.getItem(), starDistAvailable, cellposeStatus));
-                        }
-                    }
-                });
-                segmentationChoices[i] = segmentationCombo;
-                binBindings.nameFields[i] = nameField;
-                binBindings.colorCombos[i] = colorCombo;
-                binBindings.filterCombos[i] = filterCombo;
-                binBindings.segmentationCombos[i] = segmentationCombo;
-            }
+            pd.addSubHeader("Channel Identity");
+            pd.addMessage("Assign each channel's display name, LUT, and segmentation method.");
+            ChannelIdentityGrid identityGrid = buildChannelIdentityGrid(dialogDefaults,
+                    starDistAvailable, cellposeReady, cellposeStatus);
+            bindChannelIdentityGrid(binBindings, identityGrid);
+            pd.addComponent(identityGrid.panel);
             if (!pd.showDialog()) {
                 if (pd.wasBackPressed() && existing == null) {
                     draftConfig = buildBinUserConfigFromDialog(channelCount, existing,
@@ -1844,7 +1824,7 @@ public class CreateBinFileAnalysis implements Analysis {
 
             List<String> segmentationSelections = new ArrayList<String>();
             for (int i = 0; i < n; i++) {
-                segmentationSelections.add(comboText(segmentationChoices[i], SEGMENTATION_CLASSICAL));
+                segmentationSelections.add(comboText(binBindings.segmentationCombos[i], SEGMENTATION_CLASSICAL));
             }
 
             if (selectionsContain(segmentationSelections, SEGMENTATION_STARDIST)
@@ -1871,6 +1851,171 @@ public class CreateBinFileAnalysis implements Analysis {
     }
 
     // ── Image loading for QC ────────────────────────────────────────────
+
+    @SuppressWarnings("unchecked")
+    static ChannelIdentityGrid buildChannelIdentityGrid(BinUserConfig defaults,
+                                                        boolean starDistAvailable,
+                                                        boolean cellposeReady,
+                                                        CellposeRuntime.Status cellposeStatus) {
+        final int nCh = defaults == null ? 0 : defaults.names.size();
+        final JTextField[] nameFields = new JTextField[nCh];
+        final JComboBox<String>[] lutCombos = new JComboBox[nCh];
+        final JComboBox<String>[] segmentationCombos = new JComboBox[nCh];
+        final JLabel[] rowLabels = new JLabel[]{
+                createChannelIdentityGridRowLabel("Channel name"),
+                createChannelIdentityGridRowLabel("LUT"),
+                createChannelIdentityGridRowLabel("Segmentation")
+        };
+
+        JPanel panel = new JPanel(new GridBagLayout());
+        panel.setOpaque(false);
+        panel.setBorder(BorderFactory.createEmptyBorder(0, 4, 6, 4));
+
+        addChannelIdentityGridComponent(panel, Box.createHorizontalStrut(CHANNEL_IDENTITY_ROW_LABEL_WIDTH),
+                0, 0, 0.0, GridBagConstraints.NONE, new Insets(0, 0, 4, 8));
+        for (int ch = 0; ch < nCh; ch++) {
+            JLabel channelLabel = new JLabel("Channel " + (ch + 1));
+            channelLabel.setFont(channelLabel.getFont().deriveFont(Font.BOLD, 12f));
+            channelLabel.setForeground(Color.DARK_GRAY);
+            addChannelIdentityGridComponent(panel, channelLabel,
+                    ch + 1, 0, 1.0, GridBagConstraints.HORIZONTAL, new Insets(0, 0, 4, 10));
+        }
+
+        addChannelIdentityGridComponent(panel, rowLabels[0],
+                0, 1, 0.0, GridBagConstraints.NONE, new Insets(4, 0, 4, 8));
+        addChannelIdentityGridComponent(panel, rowLabels[1],
+                0, 2, 0.0, GridBagConstraints.NONE, new Insets(4, 0, 4, 8));
+        addChannelIdentityGridComponent(panel, rowLabels[2],
+                0, 3, 0.0, GridBagConstraints.NONE, new Insets(4, 0, 0, 8));
+
+        for (int ch = 0; ch < nCh; ch++) {
+            String defName = valueAt(defaults.names, ch, "Channel" + (ch + 1));
+            String defColor = toLutName(valueAt(defaults.colors, ch, "Grays"));
+            String defSegmentation = segmentationChoiceForDialogDefault(
+                    valueAt(defaults.segmentationMethods, ch, "classical"),
+                    starDistAvailable,
+                    cellposeReady);
+
+            nameFields[ch] = new JTextField(defName, 14);
+            nameFields[ch].setName("createBin.channel." + ch + ".name");
+            constrainChannelIdentityInput(nameFields[ch], CHANNEL_IDENTITY_NAME_WIDTH);
+            MarkerAutoComplete.attach(nameFields[ch], null);
+
+            lutCombos[ch] = new JComboBox<String>(COLOR_OPTIONS);
+            lutCombos[ch].setName("createBin.channel." + ch + ".lut");
+            selectComboItem(lutCombos[ch], defColor);
+            constrainChannelIdentityInput(lutCombos[ch], CHANNEL_IDENTITY_CELL_WIDTH);
+
+            segmentationCombos[ch] = new JComboBox<String>(SEGMENTATION_OPTIONS);
+            segmentationCombos[ch].setName("createBin.channel." + ch + ".segmentation");
+            selectComboItem(segmentationCombos[ch], defSegmentation);
+            constrainChannelIdentityInput(segmentationCombos[ch], CHANNEL_IDENTITY_CELL_WIDTH);
+            segmentationCombos[ch].setToolTipText(plainSegmentationHelp(
+                    defSegmentation, starDistAvailable, cellposeStatus));
+
+            final JComboBox<String> segmentationCombo = segmentationCombos[ch];
+            segmentationCombo.addItemListener(new java.awt.event.ItemListener() {
+                @Override public void itemStateChanged(java.awt.event.ItemEvent e) {
+                    if (e.getStateChange() == java.awt.event.ItemEvent.SELECTED) {
+                        segmentationCombo.setToolTipText(plainSegmentationHelp(
+                                (String) e.getItem(), starDistAvailable, cellposeStatus));
+                    }
+                }
+            });
+
+            addChannelIdentityGridComponent(panel,
+                    createChannelIdentityGridCell(nameFields[ch], null),
+                    ch + 1, 1, 1.0, GridBagConstraints.HORIZONTAL, new Insets(4, 0, 4, 10));
+            addChannelIdentityGridComponent(panel,
+                    createChannelIdentityGridCell(lutCombos[ch], "Display color"),
+                    ch + 1, 2, 1.0, GridBagConstraints.HORIZONTAL, new Insets(4, 0, 4, 10));
+            addChannelIdentityGridComponent(panel,
+                    createChannelIdentityGridCell(segmentationCombos[ch], "Object detection method"),
+                    ch + 1, 3, 1.0, GridBagConstraints.HORIZONTAL, new Insets(4, 0, 0, 10));
+        }
+
+        return new ChannelIdentityGrid(panel, nameFields, lutCombos, segmentationCombos, rowLabels);
+    }
+
+    private static void bindChannelIdentityGrid(BinSetupBindings bindings,
+                                                ChannelIdentityGrid grid) {
+        if (bindings == null || grid == null) {
+            return;
+        }
+        for (int i = 0; i < bindings.nameFields.length; i++) {
+            bindings.nameFields[i] = i < grid.nameFields.length ? grid.nameFields[i] : null;
+            bindings.colorCombos[i] = i < grid.lutCombos.length ? grid.lutCombos[i] : null;
+            bindings.segmentationCombos[i] = i < grid.segmentationCombos.length ? grid.segmentationCombos[i] : null;
+        }
+    }
+
+    private static JLabel createChannelIdentityGridRowLabel(String text) {
+        JLabel label = new JLabel(text);
+        label.setFont(label.getFont().deriveFont(Font.BOLD, 12f));
+        label.setForeground(Color.DARK_GRAY);
+        label.setPreferredSize(new Dimension(CHANNEL_IDENTITY_ROW_LABEL_WIDTH, 24));
+        return label;
+    }
+
+    private static JLabel createChannelIdentityGridHelperLabel(String text) {
+        JLabel label = new JLabel(text == null ? "" : text);
+        label.setFont(label.getFont().deriveFont(Font.PLAIN, 10f));
+        label.setForeground(CHANNEL_IDENTITY_HELP_COLOR);
+        label.setAlignmentX(Component.LEFT_ALIGNMENT);
+        label.setMaximumSize(new Dimension(CHANNEL_IDENTITY_CELL_WIDTH, 18));
+        return label;
+    }
+
+    private static JPanel createChannelIdentityGridCell(JComponent input, String helperText) {
+        JPanel cell = new JPanel();
+        cell.setLayout(new BoxLayout(cell, BoxLayout.Y_AXIS));
+        cell.setOpaque(false);
+        cell.setAlignmentX(Component.LEFT_ALIGNMENT);
+        input.setAlignmentX(Component.LEFT_ALIGNMENT);
+        cell.add(input);
+        if (helperText != null && !helperText.trim().isEmpty()) {
+            cell.add(Box.createVerticalStrut(2));
+            cell.add(createChannelIdentityGridHelperLabel(helperText));
+        }
+        return cell;
+    }
+
+    private static void constrainChannelIdentityInput(JComponent input, int width) {
+        Dimension size = new Dimension(width, 24);
+        input.setPreferredSize(size);
+        input.setMaximumSize(size);
+    }
+
+    private static void addChannelIdentityGridComponent(JPanel panel, Component component,
+                                                        int gridx, int gridy, double weightx,
+                                                        int fill, Insets insets) {
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.gridx = gridx;
+        gbc.gridy = gridy;
+        gbc.weightx = weightx;
+        gbc.fill = fill;
+        gbc.anchor = GridBagConstraints.NORTHWEST;
+        gbc.insets = insets;
+        panel.add(component, gbc);
+    }
+
+    private static String plainSegmentationHelp(String selection,
+                                                boolean starDistAvailable,
+                                                CellposeRuntime.Status cellposeStatus) {
+        String normalized = selection == null ? SEGMENTATION_CLASSICAL : selection.trim();
+        if (SEGMENTATION_STARDIST.equals(normalized)) {
+            return starDistAvailable
+                    ? "Best for compact touching nuclei or soma."
+                    : "Unavailable: " + StarDistDetector.getAvailabilityMessage();
+        }
+        if (SEGMENTATION_CELLPOSE.equals(normalized)) {
+            if (cellposeStatus != null && !cellposeStatus.summary().isEmpty()) {
+                return cellposeStatus.summary();
+            }
+            return "Flexible whole-cell or irregular object segmentation.";
+        }
+        return "Classical filter and threshold segmentation.";
+    }
 
     private void addCreateBinSetupControls(final PipelineDialog dialog,
                                            final String directory,
@@ -2046,6 +2191,9 @@ public class CreateBinFileAnalysis implements Analysis {
         List<String> minmax = new ArrayList<String>();
         List<String> filterPresets = new ArrayList<String>();
         List<String> intThresholds = new ArrayList<String>();
+        BinUserConfig sourceForHiddenFields = applied == null
+                ? existingUser
+                : normalizedConfigForChannelCount(null, applied, channelCount);
 
         for (int i = 0; i < channelCount; i++) {
             names.add(textFromField(bindings == null ? null : bindings.nameFields[i],
@@ -2053,7 +2201,7 @@ public class CreateBinFileAnalysis implements Analysis {
             colors.add(comboText(bindings == null ? null : bindings.colorCombos[i],
                     valueAt(existingUser.colors, i, "Grays")));
             filterPresets.add(comboText(bindings == null ? null : bindings.filterCombos[i],
-                    valueAt(existingUser.filterPresets, i, FILTER_PRESETS[0])));
+                    valueAt(sourceForHiddenFields.filterPresets, i, FILTER_PRESETS[0])));
             objThresholds.add(valueAt(existingUser.objectThresholds, i, "default"));
             sizes.add(valueAt(existingUser.sizes, i, "100-Infinity"));
             minmax.add(valueAt(existingUser.minmax, i, "None"));
@@ -2072,9 +2220,6 @@ public class CreateBinFileAnalysis implements Analysis {
                     preferCellposeGpu);
         }
 
-        BinUserConfig sourceForHiddenFields = applied == null
-                ? existingUser
-                : normalizedConfigForChannelCount(null, applied, channelCount);
         cfg.markerIds.clear();
         cfg.markerShapes.clear();
         cfg.markerCrowdingSensitive.clear();
@@ -2175,6 +2320,26 @@ public class CreateBinFileAnalysis implements Analysis {
             this.colorCombos = new JComboBox[count];
             this.filterCombos = new JComboBox[count];
             this.segmentationCombos = new JComboBox[count];
+        }
+    }
+
+    static final class ChannelIdentityGrid {
+        final JPanel panel;
+        final JTextField[] nameFields;
+        final JComboBox<String>[] lutCombos;
+        final JComboBox<String>[] segmentationCombos;
+        final JLabel[] rowLabels;
+
+        ChannelIdentityGrid(JPanel panel,
+                            JTextField[] nameFields,
+                            JComboBox<String>[] lutCombos,
+                            JComboBox<String>[] segmentationCombos,
+                            JLabel[] rowLabels) {
+            this.panel = panel;
+            this.nameFields = nameFields;
+            this.lutCombos = lutCombos;
+            this.segmentationCombos = segmentationCombos;
+            this.rowLabels = rowLabels;
         }
     }
 
