@@ -17,6 +17,7 @@ import java.util.HashSet;
 import java.util.Set;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class DagToIjmEmitterTest {
@@ -103,6 +104,59 @@ public class DagToIjmEmitterTest {
 
         assertTrue(macro.contains("executionTier=legacy"));
         assertTrue(macro.contains("run(\"Kuwahara Filter\", \"sampling=5 stack\");"));
+    }
+
+    @Test
+    public void unknownCommand_preservesCommandNameThroughRoundTrip() {
+        // "Despeckle" is a real ImageJ command but not enumerated by FilterCatalog /
+        // FilterMacroParser, so it serves as the canonical "unknown but legitimate
+        // run() target" the loader must preserve through emit -> reload.
+        String userMacro = "run(\"Despeckle...\");\n";
+
+        DagIR loaded = IjmToDagLoader.load(userMacro);
+        assertEquals("loader must extract the command name from unknown run() lines",
+                "Despeckle", loaded.lines.get(0).ops.get(0).commandName);
+
+        String emitted = DagToIjmEmitter.emit(loaded);
+        DagIR reloaded = IjmToDagLoader.load(emitted);
+
+        assertEquals("DAG round-trip must preserve unknown commands",
+                loaded, reloaded);
+        assertEquals("Despeckle", reloaded.lines.get(0).ops.get(0).commandName);
+        assertTrue("emitted macro must include the legacy run() so the IJM body is replayable",
+                emitted.contains("run(\"Despeckle\""));
+    }
+
+    @Test
+    public void disabledNode_omittedFromIjmButSurvivesRoundTrip() {
+        DagNode disabledMedian = new DagNode("n2", OpType.MEDIAN, "radius=3 stack");
+        disabledMedian.disabled = true;
+        DagIR dag = new DagIR(
+                1,
+                Arrays.asList(new DagLine("line_A", Arrays.asList(
+                        new DagNode("n1", OpType.GAUSSIAN_BLUR, "sigma=2 stack"),
+                        disabledMedian))),
+                Arrays.<Combiner>asList(),
+                "line_A",
+                "native");
+
+        String macro = DagToIjmEmitter.emit(dag);
+
+        // The IJM body must NOT execute the disabled node.
+        assertFalse("disabled MEDIAN must not appear as a run() in the IJM body",
+                macro.contains("run(\"Median...\""));
+        // The embedded JSON header must still record the disabled node so reload restores it.
+        assertTrue("embedded JSON header must mark the node as disabled",
+                macro.contains("\"disabled\":true"));
+        // Non-disabled neighbour still emits.
+        assertTrue("non-disabled node still emits",
+                macro.contains("run(\"Gaussian Blur...\", \"sigma=2 stack\");"));
+
+        DagIR reloaded = IjmToDagLoader.load(macro);
+        assertEquals("round-trip must preserve the full DAG including the disabled flag",
+                dag, reloaded);
+        assertTrue("disabled flag must be true after reload",
+                reloaded.lines.get(0).ops.get(1).disabled);
     }
 
     private static ImagePlus makeImage() {
