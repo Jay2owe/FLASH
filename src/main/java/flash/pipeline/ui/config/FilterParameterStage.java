@@ -1,7 +1,11 @@
 package flash.pipeline.ui.config;
 
 import flash.pipeline.image.FilterMacroEditorModel;
+import flash.pipeline.image.dag.DagIR;
+import flash.pipeline.image.dag.IjmToDagLoader;
 import flash.pipeline.ui.preview.PreviewPairPanel;
+import flash.pipeline.ui.sandbox.FilterBuilderPanel;
+import flash.pipeline.ui.sandbox.FilterCatalog;
 import ij.ImagePlus;
 
 import javax.swing.BorderFactory;
@@ -13,6 +17,7 @@ import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JList;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
 import javax.swing.SwingConstants;
@@ -23,6 +28,7 @@ import javax.swing.event.DocumentListener;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
+import java.awt.GraphicsEnvironment;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
@@ -36,6 +42,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public final class FilterParameterStage implements ConfigQcStage {
 
@@ -78,6 +86,11 @@ public final class FilterParameterStage implements ConfigQcStage {
     private static final String DEFAULT_PRESET = "Default";
     private static final String STALE_TEXT = "Preview is stale. Press Preview Filter.";
     private static final String EMPTY_TEXT = "Choose a filter preset or open the custom filter builder.";
+    private static final String BRANCHED_BANNER_TEXT =
+            "⚠ This pipeline has branches — open in canvas to edit structure.";
+
+    private static final Pattern RUN_LINE_PATTERN = Pattern.compile(
+            "run\\s*\\(\\s*\"[^\"]+\"\\s*,\\s*\"([^\"]*)\"\\s*\\)");
 
     /**
      * Curated map of "default-visible" parameters per ImageJ command. Anything
@@ -107,6 +120,8 @@ public final class FilterParameterStage implements ConfigQcStage {
 
     private final List<FilterFieldBinding> fieldBindings = new ArrayList<FilterFieldBinding>();
     private final List<CollapsibleSection> sectionPanels = new ArrayList<CollapsibleSection>();
+    /** Per-row metadata aligned to {@link #sectionPanels}. */
+    private final List<RowHandle> rowHandles = new ArrayList<RowHandle>();
 
     private ConfigQcActions actions;
     private PreviewPairPanel preview;
@@ -123,17 +138,42 @@ public final class FilterParameterStage implements ConfigQcStage {
     private JButton customBuilderButton;
     private JButton resetButton;
     private JButton saveAsButton;
+    private JButton addFilterButton;
+    private JLabel branchedBannerLabel;
 
     private String savedPreset;
     private String savedMacro;
     private String selectedPreset;
     private String currentMacro;
+    /**
+     * Stage 04: parallel "all-nodes" view. After a structural mutation, the
+     * accordion is built from this (so disabled rows still render greyed
+     * out). For pure parameter edits or fresh preset loads, equals
+     * {@code currentMacro}. Updated through {@link #syncDisplayMacroFromHidden()}.
+     */
+    private String currentDisplayMacro;
     private String baseMacro;
     private boolean dirty;
     private boolean readOnlyBase;
+    /** True when the loaded preset's DAG IR is non-linear (combiners or multi-line). */
+    private boolean linear = true;
     private FilterMacroEditorModel.MacroDefinition definition;
     private boolean previewStale;
     private boolean updatingControls;
+    /**
+     * Hidden host for the SandboxModel. Composed only for its DAG model;
+     * never added to the layout. Created lazily on first need so the
+     * stage 03 tests that don't call {@code onEnter} still pass.
+     */
+    private FilterBuilderPanel hiddenBuilder;
+    /**
+     * True once at least one structural mutation has happened. Some flows
+     * derive {@code currentMacro} from {@code hiddenBuilder.currentIjm()}
+     * after this point, which adds an embedded DAG JSON header.
+     */
+    private boolean structurallyMutated;
+    /** Cached fast-only catalog for the {@code + Add filter…} popover. */
+    private FilterCatalog popoverCatalog;
 
     public FilterParameterStage(List<String> presetOptions,
                                 MacroStore macroStore,
@@ -183,6 +223,7 @@ public final class FilterParameterStage implements ConfigQcStage {
         panel.add(buildParameterPanel(), BorderLayout.CENTER);
         panel.add(buildActionPanel(), BorderLayout.SOUTH);
         rebuildAccordion();
+        updateBranchedBannerVisibility();
         markPreviewStale(STALE_TEXT);
         return panel;
     }
@@ -330,6 +371,52 @@ public final class FilterParameterStage implements ConfigQcStage {
         saveAsWithName(presetName);
     }
 
+    void simulateAddFilterForTest(String catalogLabel) {
+        FilterCatalog.Entry entry = popoverCatalog().findEntryByLabel(catalogLabel);
+        if (entry == null) {
+            throw new IllegalArgumentException("No catalog entry named " + catalogLabel);
+        }
+        applyAddFilter(entry);
+    }
+
+    void simulateEyeToggleForTest(int sectionIndex) {
+        if (sectionIndex < 0 || sectionIndex >= rowHandles.size()) {
+            throw new IllegalArgumentException("Section index out of bounds: " + sectionIndex);
+        }
+        applyEyeToggle(rowHandles.get(sectionIndex).nodeId);
+    }
+
+    void simulateReorderForTest(int fromIndex, int toIndex) {
+        applyReorder(fromIndex, toIndex);
+    }
+
+    void simulateDeleteForTest(int sectionIndex) {
+        if (sectionIndex < 0 || sectionIndex >= rowHandles.size()) {
+            throw new IllegalArgumentException("Section index out of bounds: " + sectionIndex);
+        }
+        applyDelete(rowHandles.get(sectionIndex).nodeId, /*confirmIfModified=*/false);
+    }
+
+    boolean isBranchedBannerVisibleForTest() {
+        return branchedBannerLabel != null && branchedBannerLabel.isVisible();
+    }
+
+    boolean isAddFilterEnabledForTest() {
+        return addFilterButton != null && addFilterButton.isEnabled();
+    }
+
+    boolean isCustomBuilderButtonVisibleForTest() {
+        return customBuilderButton != null && customBuilderButton.isVisible();
+    }
+
+    boolean isLinearForTest() {
+        return linear;
+    }
+
+    void simulateOpenCustomFilterBuilderForTest() {
+        openCustomFilterBuilder();
+    }
+
     void runPreviewNowForTest() throws Exception {
         runPreviewNow();
     }
@@ -385,6 +472,19 @@ public final class FilterParameterStage implements ConfigQcStage {
         presetDescriptionLabel.setForeground(new Color(90, 90, 90));
         presetDescriptionLabel.setAlignmentX(JComponent.LEFT_ALIGNMENT);
         panel.add(presetDescriptionLabel);
+
+        // Branched-preset banner (visible only when DAG is non-linear).
+        branchedBannerLabel = new JLabel(BRANCHED_BANNER_TEXT);
+        branchedBannerLabel.setOpaque(true);
+        branchedBannerLabel.setBackground(new Color(255, 244, 204));
+        branchedBannerLabel.setForeground(new Color(90, 60, 0));
+        branchedBannerLabel.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(1, 1, 1, 1, new Color(220, 200, 130)),
+                BorderFactory.createEmptyBorder(4, 8, 4, 8)));
+        branchedBannerLabel.setAlignmentX(JComponent.LEFT_ALIGNMENT);
+        branchedBannerLabel.setVisible(false);
+        panel.add(Box.createVerticalStrut(4));
+        panel.add(branchedBannerLabel);
         return panel;
     }
 
@@ -467,8 +567,11 @@ public final class FilterParameterStage implements ConfigQcStage {
             setError("Could not load filter macro: " + e.getMessage());
         }
         baseMacro = currentMacro;
+        currentDisplayMacro = currentMacro;
         dirty = false;
         readOnlyBase = isBundledPreset(selectedPreset);
+        structurallyMutated = false;
+        refreshLinearityFlag();
     }
 
     private void presetChanged() {
@@ -481,6 +584,7 @@ public final class FilterParameterStage implements ConfigQcStage {
             loadPreset(name, macro);
         } catch (Exception e) {
             currentMacro = "";
+            currentDisplayMacro = "";
             rebuildAccordion();
             setError("Could not load preset '" + name + "': " + e.getMessage());
         }
@@ -491,11 +595,18 @@ public final class FilterParameterStage implements ConfigQcStage {
         selectedPreset = name;
         baseMacro = safe(macro);
         currentMacro = baseMacro;
+        currentDisplayMacro = currentMacro;
         dirty = false;
         readOnlyBase = isBundledPreset(name);
+        structurallyMutated = false;
         if (saveAsButton != null) saveAsButton.setEnabled(false);
-        definition = FilterMacroEditorModel.parse(currentMacro);
+        // Discard any prior hidden builder so it gets re-seeded from the new
+        // macro on demand; otherwise its SandboxModel is stale.
+        hiddenBuilder = null;
+        refreshLinearityFlag();
+        definition = FilterMacroEditorModel.parse(currentDisplayMacro);
         rebuildAccordion();
+        updateBranchedBannerVisibility();
         if (presetDescriptionLabel != null) {
             presetDescriptionLabel.setText(descriptionProvider.describe(name));
         }
@@ -510,8 +621,10 @@ public final class FilterParameterStage implements ConfigQcStage {
         try {
             fieldBindings.clear();
             sectionPanels.clear();
+            rowHandles.clear();
             parameterPanel.removeAll();
-            definition = FilterMacroEditorModel.parse(currentMacro);
+            String accordionMacro = currentDisplayMacro != null ? currentDisplayMacro : currentMacro;
+            definition = FilterMacroEditorModel.parse(accordionMacro);
             if (!hasMacro()) {
                 addParameterMessage("No filter macro is available for this preset.");
             } else if (definition == null || !definition.hasEditableParameters()) {
@@ -520,13 +633,23 @@ public final class FilterParameterStage implements ConfigQcStage {
                 parameterPanel.add(buildAccordionTopBar());
                 parameterPanel.add(Box.createVerticalStrut(2));
                 List<FilterMacroEditorModel.Section> sections = definition.getSections();
+                List<FilterBuilderPanel.NodeSummary> summaries = nodeSummariesIfLinear();
+                int rowCursor = 0;
                 for (int i = 0; i < sections.size(); i++) {
-                    addAccordionSection(sections.get(i), i);
+                    FilterMacroEditorModel.Section section = sections.get(i);
+                    for (int j = 0; j < section.entries.size(); j++) {
+                        FilterMacroEditorModel.Entry entry = section.entries.get(j);
+                        if (!shouldShowEntry(entry)) continue;
+                        rowCursor = addAccordionRow(entry,
+                                rowHandles.size(), summaries, rowCursor);
+                    }
                 }
+                parameterPanel.add(buildAddFilterRow());
             }
         } finally {
             updatingControls = false;
         }
+        finalizeRowControls();
         parameterPanel.revalidate();
         parameterPanel.repaint();
         refreshActionState();
@@ -556,6 +679,21 @@ public final class FilterParameterStage implements ConfigQcStage {
         return bar;
     }
 
+    private JComponent buildAddFilterRow() {
+        JPanel row = new JPanel();
+        row.setOpaque(false);
+        row.setLayout(new BoxLayout(row, BoxLayout.X_AXIS));
+        row.setAlignmentX(JComponent.LEFT_ALIGNMENT);
+        row.setBorder(BorderFactory.createEmptyBorder(4, 4, 0, 4));
+
+        addFilterButton = new JButton("+ Add filter…");
+        addFilterButton.addActionListener(e -> onAddFilterClicked());
+        addFilterButton.setEnabled(linear);
+        row.add(addFilterButton);
+        row.add(Box.createHorizontalGlue());
+        return row;
+    }
+
     private void setAllSectionsExpanded(boolean expanded) {
         for (int i = 0; i < sectionPanels.size(); i++) {
             sectionPanels.get(i).setExpanded(expanded);
@@ -566,23 +704,159 @@ public final class FilterParameterStage implements ConfigQcStage {
         }
     }
 
-    private void addAccordionSection(FilterMacroEditorModel.Section section, int index) {
-        String sectionLabel = (index + 1) + ". " + section.headerText();
-        boolean expanded = (index == 0);
-        CollapsibleSection collap = new CollapsibleSection(sectionLabel, expanded);
+    /**
+     * Stage 04: one collapsible row per {@link FilterMacroEditorModel.Entry}.
+     * Each entry that is run-style (a {@code run("...")} step) consumes one
+     * slot from {@code summaries}; assignment-only entries don't.
+     */
+    private int addAccordionRow(FilterMacroEditorModel.Entry entry,
+                                int rowOrdinal,
+                                List<FilterBuilderPanel.NodeSummary> summaries,
+                                int rowCursor) {
+        String header = (rowOrdinal + 1) + ". " + entry.label;
+        if (entry.summaryLabel != null && !entry.summaryLabel.isEmpty()
+                && !entry.summaryLabel.equalsIgnoreCase(entry.label)) {
+            header += " — " + entry.summaryLabel;
+        }
+        boolean expanded = (rowOrdinal == 0);
+        CollapsibleSection collap = new CollapsibleSection(header, expanded);
         collap.setAlignmentX(JComponent.LEFT_ALIGNMENT);
 
-        JComponent body = collap.getBody();
-        List<FilterMacroEditorModel.Entry> entries = section.entries;
-        for (int i = 0; i < entries.size(); i++) {
-            addEntryToBody(body, entries.get(i));
+        FilterBuilderPanel.NodeSummary summary = null;
+        boolean entryIsRun = entryIsRunStyle(entry);
+        if (entryIsRun && summaries != null && rowCursor < summaries.size()) {
+            summary = summaries.get(rowCursor);
+            rowCursor++;
         }
+        String headerNodeId = summary == null ? "" : summary.id;
+        boolean headerDisabled = summary != null && summary.disabled;
+
+        addEntryToBody(collap.getBody(), entry, headerNodeId);
+
         sectionPanels.add(collap);
+        RowHandle handle = new RowHandle(headerNodeId, rowOrdinal);
+        rowHandles.add(handle);
+        installRowHeaderControls(collap, rowOrdinal, headerNodeId, headerDisabled, handle);
+        if (headerDisabled) {
+            collap.setRowEnabled(false);
+            collap.setHeaderStrikethrough(true);
+        }
         parameterPanel.add(collap);
         parameterPanel.add(Box.createVerticalStrut(4));
+        return rowCursor;
     }
 
-    private void addEntryToBody(JComponent body, FilterMacroEditorModel.Entry entry) {
+    private void installRowHeaderControls(CollapsibleSection collap, int sectionIndex,
+                                           String nodeId, boolean disabled, RowHandle handle) {
+        JPanel controls = collap.getHeaderControls();
+        controls.removeAll();
+        if (nodeId == null || nodeId.isEmpty()) return;
+
+        JButton up = makeRowButton("▲", "Move step up");
+        up.addActionListener(e -> applyReorder(sectionIndex, sectionIndex - 1));
+        up.setEnabled(linear && sectionIndex > 0);
+
+        JButton down = makeRowButton("▼", "Move step down");
+        down.addActionListener(e -> applyReorder(sectionIndex, sectionIndex + 1));
+        // Final enabled state set in finalizeRowControls() once total row
+        // count is known.
+        down.setEnabled(linear);
+
+        JButton eye = makeRowButton(disabled ? "✕" : "◉",
+                disabled ? "Re-enable this step" : "Disable this step (skip in preview)");
+        eye.addActionListener(e -> applyEyeToggle(nodeId));
+        eye.setEnabled(linear);
+
+        JButton delete = makeRowButton("×", "Remove this step");
+        delete.addActionListener(e -> applyDelete(nodeId, /*confirmIfModified=*/true));
+        delete.setEnabled(linear);
+
+        controls.add(up);
+        controls.add(Box.createHorizontalStrut(2));
+        controls.add(down);
+        controls.add(Box.createHorizontalStrut(2));
+        controls.add(eye);
+        controls.add(Box.createHorizontalStrut(2));
+        controls.add(delete);
+
+        handle.upButton = up;
+        handle.downButton = down;
+        handle.eyeButton = eye;
+        handle.deleteButton = delete;
+    }
+
+    private void finalizeRowControls() {
+        int total = rowHandles.size();
+        for (int i = 0; i < total; i++) {
+            RowHandle h = rowHandles.get(i);
+            if (h.upButton != null) h.upButton.setEnabled(linear && i > 0);
+            if (h.downButton != null) h.downButton.setEnabled(linear && i < total - 1);
+        }
+    }
+
+    private static JButton makeRowButton(String glyph, String tooltip) {
+        JButton button = new JButton(glyph);
+        button.setMargin(new Insets(0, 4, 0, 4));
+        button.setFocusPainted(false);
+        button.setToolTipText(tooltip);
+        button.putClientProperty("JButton.buttonType", "toolBarButton");
+        return button;
+    }
+
+    /**
+     * Skip the {@code run("Duplicate...", ...)} setup line that
+     * {@link flash.pipeline.image.dag.DagToIjmEmitter} prepends per line and
+     * any other emit-only boilerplate. These entries are an implementation
+     * detail of how the DAG is serialized to IJM and shouldn't surface as
+     * user-visible accordion rows.
+     */
+    private static boolean shouldShowEntry(FilterMacroEditorModel.Entry entry) {
+        if (entry == null) return false;
+        String label = entry.label == null ? "" : entry.label.trim();
+        if (label.isEmpty()) return false;
+        if ("Duplicate".equalsIgnoreCase(label)) return false;
+        return true;
+    }
+
+    /**
+     * Run-style entries map 1:1 to SandboxModel nodes; assignment-only entries
+     * (rare in our bundled presets) do not. We approximate the distinction by
+     * checking that the entry has at least one parameter and isn't a one-token
+     * assignment whose label exactly humanizes its single parameter key — that
+     * is the signature {@link FilterMacroEditorModel#parseAssignmentEntry}
+     * produces. False positives just consume a node slot and may misalign the
+     * row controls; bundled presets contain only run() entries today.
+     */
+    private static boolean entryIsRunStyle(FilterMacroEditorModel.Entry entry) {
+        if (entry == null || entry.parameters == null || entry.parameters.isEmpty()) {
+            return false;
+        }
+        // Heuristic: assignment entries always have exactly one parameter and
+        // a label that humanizes that parameter's key.
+        if (entry.parameters.size() != 1) return true;
+        String key = entry.parameters.get(0).key;
+        return !humanizeIdentifierApprox(key).equalsIgnoreCase(entry.label == null ? "" : entry.label);
+    }
+
+    private static String humanizeIdentifierApprox(String token) {
+        if (token == null || token.trim().isEmpty()) return "";
+        String[] parts = token.trim().split("_+");
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < parts.length; i++) {
+            String part = parts[i];
+            if (part.isEmpty()) continue;
+            if (sb.length() > 0) sb.append(' ');
+            if (part.length() <= 2 && part.equals(part.toLowerCase(Locale.ROOT))) {
+                sb.append(part.toUpperCase(Locale.ROOT));
+            } else {
+                sb.append(Character.toUpperCase(part.charAt(0)));
+                if (part.length() > 1) sb.append(part.substring(1));
+            }
+        }
+        return sb.toString();
+    }
+
+    private void addEntryToBody(JComponent body, FilterMacroEditorModel.Entry entry, String nodeId) {
         JLabel name = new JLabel(entry.label);
         name.setFont(name.getFont().deriveFont(java.awt.Font.BOLD));
         name.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -600,7 +874,7 @@ public final class FilterParameterStage implements ConfigQcStage {
             }
         }
 
-        JPanel visiblePanel = buildParameterRows(visible);
+        JPanel visiblePanel = buildParameterRows(visible, nodeId);
         visiblePanel.setAlignmentX(Component.LEFT_ALIGNMENT);
         body.add(visiblePanel);
 
@@ -616,9 +890,10 @@ public final class FilterParameterStage implements ConfigQcStage {
             final boolean[] populated = new boolean[]{false};
             final JButton advancedLink = makeLinkButton("Advanced…");
             advancedLink.setAlignmentX(Component.LEFT_ALIGNMENT);
+            final String advancedNodeId = nodeId;
             advancedLink.addActionListener(e -> {
                 if (!populated[0]) {
-                    JPanel rows = buildParameterRows(hiddenParams);
+                    JPanel rows = buildParameterRows(hiddenParams, advancedNodeId);
                     rows.setAlignmentX(Component.LEFT_ALIGNMENT);
                     hiddenContainer.add(rows);
                     populated[0] = true;
@@ -635,7 +910,7 @@ public final class FilterParameterStage implements ConfigQcStage {
         body.add(Box.createVerticalStrut(6));
     }
 
-    private JPanel buildParameterRows(List<FilterMacroEditorModel.Parameter> parameters) {
+    private JPanel buildParameterRows(List<FilterMacroEditorModel.Parameter> parameters, String nodeId) {
         JPanel panel = new JPanel(new GridBagLayout());
         panel.setOpaque(false);
         GridBagConstraints gbc = new GridBagConstraints();
@@ -654,7 +929,7 @@ public final class FilterParameterStage implements ConfigQcStage {
             String value = parameter.getValue() == null ? "" : parameter.getValue();
             JTextField field = new JTextField(value, Math.max(5, Math.min(12, value.length() + 2)));
             installFieldListener(field);
-            fieldBindings.add(new FilterFieldBinding(parameter, field));
+            fieldBindings.add(new FilterFieldBinding(parameter, field, nodeId));
 
             gbc.gridx = 1;
             gbc.weightx = 1.0;
@@ -830,6 +1105,236 @@ public final class FilterParameterStage implements ConfigQcStage {
         loadPreset(name, macro);
     }
 
+    // ── Stage 04 structural-edit handlers ────────────────────────────────
+
+    private void onAddFilterClicked() {
+        if (!linear) return;
+        if (GraphicsEnvironment.isHeadless() || addFilterButton == null) return;
+        AddFilterPopover.show(addFilterButton, popoverCatalog(), new AddFilterPopover.Selection() {
+            @Override public void onSelected(FilterCatalog.Entry entry) {
+                applyAddFilter(entry);
+            }
+        });
+    }
+
+    private void applyAddFilter(FilterCatalog.Entry entry) {
+        if (entry == null || !linear) return;
+        ensureHiddenBuilderInSyncWithCurrentMacro();
+        try {
+            hiddenBuilder.appendNode(entry);
+        } catch (RuntimeException ex) {
+            setError("Could not add filter: " + ex.getMessage());
+            return;
+        }
+        afterStructuralMutation(/*expandLast=*/true);
+    }
+
+    private void applyEyeToggle(String nodeId) {
+        if (!linear || nodeId == null || nodeId.isEmpty()) return;
+        ensureHiddenBuilderInSyncWithCurrentMacro();
+        boolean currentlyDisabled = false;
+        List<FilterBuilderPanel.NodeSummary> summaries = hiddenBuilder.nodeSummaries();
+        for (int i = 0; i < summaries.size(); i++) {
+            if (nodeId.equals(summaries.get(i).id)) {
+                currentlyDisabled = summaries.get(i).disabled;
+                break;
+            }
+        }
+        try {
+            hiddenBuilder.setNodeDisabled(nodeId, !currentlyDisabled);
+        } catch (RuntimeException ex) {
+            setError("Could not toggle step: " + ex.getMessage());
+            return;
+        }
+        afterStructuralMutation(/*expandLast=*/false);
+    }
+
+    private void applyReorder(int fromIndex, int toIndex) {
+        if (!linear) return;
+        if (fromIndex == toIndex) return;
+        if (fromIndex < 0 || fromIndex >= rowHandles.size()) return;
+        ensureHiddenBuilderInSyncWithCurrentMacro();
+        try {
+            hiddenBuilder.reorder(fromIndex, toIndex);
+        } catch (RuntimeException ex) {
+            setError("Could not reorder steps: " + ex.getMessage());
+            return;
+        }
+        afterStructuralMutation(/*expandLast=*/false);
+    }
+
+    private void applyDelete(String nodeId, boolean confirmIfModified) {
+        if (!linear || nodeId == null || nodeId.isEmpty()) return;
+        ensureHiddenBuilderInSyncWithCurrentMacro();
+        if (confirmIfModified && rowIsModifiedFromBaseline(nodeId)) {
+            if (!confirmDeleteModified()) return;
+        }
+        try {
+            hiddenBuilder.removeNode(nodeId);
+        } catch (RuntimeException ex) {
+            setError("Could not delete step: " + ex.getMessage());
+            return;
+        }
+        afterStructuralMutation(/*expandLast=*/false);
+    }
+
+    private boolean confirmDeleteModified() {
+        if (GraphicsEnvironment.isHeadless()) return true;
+        Window owner = parameterPanel == null ? null : SwingUtilities.getWindowAncestor(parameterPanel);
+        int choice = JOptionPane.showConfirmDialog(owner,
+                "Delete this step? Your changes to it will be lost.",
+                "Delete step?",
+                JOptionPane.OK_CANCEL_OPTION,
+                JOptionPane.WARNING_MESSAGE);
+        return choice == JOptionPane.OK_OPTION;
+    }
+
+    private boolean rowIsModifiedFromBaseline(String nodeId) {
+        try {
+            DagIR baseDag = IjmToDagLoader.load(safe(baseMacro));
+            if (baseDag == null || baseDag.lines.isEmpty()) return false;
+            String baseArgs = null;
+            for (int i = 0; i < baseDag.lines.size(); i++) {
+                for (int j = 0; j < baseDag.lines.get(i).ops.size(); j++) {
+                    if (nodeId.equals(baseDag.lines.get(i).ops.get(j).id)) {
+                        baseArgs = baseDag.lines.get(i).ops.get(j).args;
+                        break;
+                    }
+                }
+                if (baseArgs != null) break;
+            }
+            if (baseArgs == null) {
+                // Node was added after baseline; treat as unmodified for delete confirm.
+                return false;
+            }
+            List<FilterBuilderPanel.NodeSummary> summaries = hiddenBuilder.nodeSummaries();
+            // We can't read SandboxModel.Node.args from outside the panel — but
+            // we synced args from currentMacro before this call, so the IJM
+            // reflects up-to-date values. Compare baseArgs to the matching
+            // run() args extracted from currentMacro / currentDisplayMacro.
+            String currentArgs = extractArgsForNodeIndex(safe(currentDisplayMacro != null ? currentDisplayMacro : currentMacro),
+                    summaries, nodeId);
+            return currentArgs != null && !currentArgs.equals(baseArgs);
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    private static String extractArgsForNodeIndex(String macro,
+                                                   List<FilterBuilderPanel.NodeSummary> summaries,
+                                                   String nodeId) {
+        if (macro == null || summaries == null) return null;
+        int targetIndex = -1;
+        for (int i = 0; i < summaries.size(); i++) {
+            if (nodeId.equals(summaries.get(i).id)) {
+                targetIndex = i;
+                break;
+            }
+        }
+        if (targetIndex < 0) return null;
+        Matcher m = RUN_LINE_PATTERN.matcher(macro);
+        int idx = 0;
+        while (m.find()) {
+            if (idx == targetIndex) return m.group(1);
+            idx++;
+        }
+        return null;
+    }
+
+    private void afterStructuralMutation(boolean expandLast) {
+        structurallyMutated = true;
+        currentMacro = hiddenBuilder.currentIjm();
+        currentDisplayMacro = hiddenBuilder.currentDisplayIjm();
+        definition = FilterMacroEditorModel.parse(currentDisplayMacro);
+        rebuildAccordion();
+        if (expandLast && !sectionPanels.isEmpty()) {
+            sectionPanels.get(sectionPanels.size() - 1).setExpanded(true);
+        }
+        recomputeDirty();
+        refreshLinearityFlag();
+        updateBranchedBannerVisibility();
+        markPreviewStale(STALE_TEXT);
+    }
+
+    private void ensureHiddenBuilderInSyncWithCurrentMacro() {
+        if (hiddenBuilder == null) {
+            DagIR seed = IjmToDagLoader.load(safe(currentDisplayMacro));
+            hiddenBuilder = new FilterBuilderPanel(seed, /*sharedPreview=*/null,
+                    /*runner=*/null, null);
+            return;
+        }
+        // Re-seed only when the macro text indicates parameter edits since
+        // the last sync. We can't byte-compare cheaply; just push current
+        // run-line args into the model so any field edits since the last
+        // structural op are preserved.
+        try {
+            List<FilterBuilderPanel.NodeSummary> summaries = hiddenBuilder.nodeSummaries();
+            String macroForArgs = currentDisplayMacro != null ? currentDisplayMacro : currentMacro;
+            Matcher m = RUN_LINE_PATTERN.matcher(safe(macroForArgs));
+            int idx = 0;
+            while (m.find() && idx < summaries.size()) {
+                hiddenBuilder.updateNodeArgs(summaries.get(idx).id, m.group(1));
+                idx++;
+            }
+        } catch (IllegalStateException nonLinear) {
+            // Branched DAG slipped through; rebuild from scratch on the
+            // current macro to keep going.
+            DagIR seed = IjmToDagLoader.load(safe(currentDisplayMacro));
+            hiddenBuilder = new FilterBuilderPanel(seed, null, null, null);
+        }
+    }
+
+    private void refreshLinearityFlag() {
+        try {
+            DagIR dag = IjmToDagLoader.load(safe(currentMacro));
+            linear = dag.isLinear();
+        } catch (RuntimeException e) {
+            linear = true;
+        }
+    }
+
+    private void updateBranchedBannerVisibility() {
+        boolean showBanner = !linear;
+        if (branchedBannerLabel != null) branchedBannerLabel.setVisible(showBanner);
+        // Per stage 04: hide the canvas button on linear presets and show it
+        // only when the DAG is branched. Reserved for branched pipelines —
+        // linear edits are inline.
+        if (customBuilderButton != null) customBuilderButton.setVisible(showBanner);
+        setStructuralControlsEnabled(linear);
+    }
+
+    private void setStructuralControlsEnabled(boolean enabled) {
+        if (addFilterButton != null) addFilterButton.setEnabled(enabled);
+        for (int i = 0; i < sectionPanels.size(); i++) {
+            CollapsibleSection section = sectionPanels.get(i);
+            JPanel controls = section.getHeaderControls();
+            if (controls == null) continue;
+            for (int j = 0; j < controls.getComponentCount(); j++) {
+                Component c = controls.getComponent(j);
+                if (c instanceof JButton) {
+                    c.setEnabled(enabled);
+                }
+            }
+        }
+    }
+
+    private List<FilterBuilderPanel.NodeSummary> nodeSummariesIfLinear() {
+        if (!linear) return null;
+        ensureHiddenBuilderInSyncWithCurrentMacro();
+        try {
+            return hiddenBuilder.nodeSummaries();
+        } catch (IllegalStateException nonLinear) {
+            return null;
+        }
+    }
+
+    private FilterCatalog popoverCatalog() {
+        if (popoverCatalog == null) {
+            popoverCatalog = new FilterCatalog();
+        }
+        return popoverCatalog;
+    }
+
     private void syncFieldBindings() {
         if (definition == null) {
             currentMacro = safe(currentMacro);
@@ -839,7 +1344,17 @@ public final class FilterParameterStage implements ConfigQcStage {
             FilterFieldBinding binding = fieldBindings.get(i);
             binding.parameter.setValue(binding.field.getText().trim());
         }
-        currentMacro = definition.render();
+        String rendered = definition.render();
+        currentDisplayMacro = rendered;
+        if (structurallyMutated && hiddenBuilder != null) {
+            // Push args back into the SandboxModel so the next structural op
+            // reflects these edits, then re-emit the filtered IJM.
+            ensureHiddenBuilderInSyncWithCurrentMacro();
+            currentMacro = hiddenBuilder.currentIjm();
+            currentDisplayMacro = hiddenBuilder.currentDisplayIjm();
+        } else {
+            currentMacro = rendered;
+        }
     }
 
     private void markPreviewStale(String text) {
@@ -896,6 +1411,7 @@ public final class FilterParameterStage implements ConfigQcStage {
         if (resetButton != null) resetButton.setEnabled(true);
         if (customBuilderButton != null) customBuilderButton.setEnabled(customFilterBuilder != null);
         if (saveAsButton != null) saveAsButton.setEnabled(dirty);
+        if (addFilterButton != null) addFilterButton.setEnabled(linear);
     }
 
     private void setButtonsEnabled(boolean enabled) {
@@ -904,6 +1420,7 @@ public final class FilterParameterStage implements ConfigQcStage {
         if (customBuilderButton != null) customBuilderButton.setEnabled(enabled && customFilterBuilder != null);
         if (saveAsButton != null) saveAsButton.setEnabled(enabled && dirty);
         if (presetCombo != null) presetCombo.setEnabled(enabled);
+        if (addFilterButton != null) addFilterButton.setEnabled(enabled && linear);
     }
 
     private boolean canPreview() {
@@ -1048,10 +1565,26 @@ public final class FilterParameterStage implements ConfigQcStage {
     private static final class FilterFieldBinding {
         final FilterMacroEditorModel.Parameter parameter;
         final JTextField field;
+        final String nodeId;
 
-        FilterFieldBinding(FilterMacroEditorModel.Parameter parameter, JTextField field) {
+        FilterFieldBinding(FilterMacroEditorModel.Parameter parameter, JTextField field, String nodeId) {
             this.parameter = parameter;
             this.field = field;
+            this.nodeId = nodeId == null ? "" : nodeId;
+        }
+    }
+
+    private static final class RowHandle {
+        final String nodeId;
+        final int sectionIndex;
+        JButton upButton;
+        JButton downButton;
+        JButton eyeButton;
+        JButton deleteButton;
+
+        RowHandle(String nodeId, int sectionIndex) {
+            this.nodeId = nodeId == null ? "" : nodeId;
+            this.sectionIndex = sectionIndex;
         }
     }
 }

@@ -1,5 +1,12 @@
 package flash.pipeline.ui.config;
 
+import flash.pipeline.image.FilterMacroParser.OpType;
+import flash.pipeline.image.dag.Combiner;
+import flash.pipeline.image.dag.CombinerOp;
+import flash.pipeline.image.dag.DagIR;
+import flash.pipeline.image.dag.DagLine;
+import flash.pipeline.image.dag.DagNode;
+import flash.pipeline.image.dag.DagToIjmEmitter;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import ij.ImagePlus;
 import ij.ImageStack;
@@ -7,6 +14,7 @@ import ij.process.ByteProcessor;
 import org.junit.Test;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -312,6 +320,183 @@ public class FilterParameterStageTest {
                 stage.hasFieldBindingForTest("parameter_1"));
         assertFalse("parameter_2 must be hidden behind Advanced…",
                 stage.hasFieldBindingForTest("parameter_2"));
+    }
+
+    // ── Stage 04 inline structural editing ───────────────────────────────
+
+    private static final String TWO_STEP_MACRO =
+            "run(\"Gaussian Blur...\", \"sigma=2 stack\");\n"
+            + "run(\"Median...\", \"radius=3 stack\");\n";
+
+    @Test
+    public void add_appendsToEndAndExpandsRow() {
+        RecordingMacroStore store = new RecordingMacroStore("Default", DEFAULT_MACRO);
+        FilterParameterStage stage = new FilterParameterStage(
+                Arrays.asList("Default", "Custom"), store, new RecordingPreviewAdapter(), null, null);
+
+        stage.buildControls(context(), new RecordingActions());
+        stage.onEnter(context(), new PreviewPairPanel("Original", "Adjusted"));
+
+        int sectionsBefore = stage.sectionCountForTest();
+        stage.simulateAddFilterForTest("Median");
+
+        int sectionsAfter = stage.sectionCountForTest();
+        assertEquals("appendNode must add exactly one new accordion section",
+                sectionsBefore + 1, sectionsAfter);
+        assertTrue("appended row must be auto-expanded",
+                stage.isSectionExpandedForTest(sectionsAfter - 1));
+        assertTrue("currentMacro must include the appended Median run() line",
+                stage.currentMacroForTest().contains("run(\"Median..."));
+    }
+
+    @Test
+    public void add_betweenSteps_dragReordersUnderlyingDag() {
+        RecordingMacroStore store = new RecordingMacroStore("Default", TWO_STEP_MACRO);
+        FilterParameterStage stage = new FilterParameterStage(
+                Arrays.asList("Default", "Custom"), store, new RecordingPreviewAdapter(), null, null);
+
+        stage.buildControls(context(), new RecordingActions());
+        stage.onEnter(context(), new PreviewPairPanel("Original", "Adjusted"));
+
+        String before = stage.currentMacroForTest();
+        assertTrue(before.indexOf("run(\"Gaussian Blur") < before.indexOf("run(\"Median"));
+
+        stage.simulateReorderForTest(0, 1);
+
+        String after = stage.currentMacroForTest();
+        assertTrue("Reorder must place Median before Gaussian Blur in emitted macro",
+                after.indexOf("run(\"Median") < after.indexOf("run(\"Gaussian Blur"));
+    }
+
+    @Test
+    public void eye_disablesNodeAndRemovesFromEmittedIjm() {
+        RecordingMacroStore store = new RecordingMacroStore("Default", TWO_STEP_MACRO);
+        FilterParameterStage stage = new FilterParameterStage(
+                Arrays.asList("Default", "Custom"), store, new RecordingPreviewAdapter(), null, null);
+
+        stage.buildControls(context(), new RecordingActions());
+        stage.onEnter(context(), new PreviewPairPanel("Original", "Adjusted"));
+
+        // Disable the Gaussian Blur step (section index 0).
+        stage.simulateEyeToggleForTest(0);
+
+        String currentMacro = stage.currentMacroForTest();
+        assertFalse("Disabled step's run() must be absent from currentMacro",
+                currentMacro.contains("run(\"Gaussian Blur..."));
+        assertTrue("Embedded DAG JSON must record the disabled flag for round-trip",
+                currentMacro.contains("\"disabled\":true"));
+        assertTrue("Median step must remain in currentMacro",
+                currentMacro.contains("run(\"Median..."));
+    }
+
+    @Test
+    public void delete_removesNodeAndRebuildsAccordion() {
+        RecordingMacroStore store = new RecordingMacroStore("Default", TWO_STEP_MACRO);
+        FilterParameterStage stage = new FilterParameterStage(
+                Arrays.asList("Default", "Custom"), store, new RecordingPreviewAdapter(), null, null);
+
+        stage.buildControls(context(), new RecordingActions());
+        stage.onEnter(context(), new PreviewPairPanel("Original", "Adjusted"));
+
+        int sectionsBefore = stage.sectionCountForTest();
+        assertEquals(2, sectionsBefore);
+
+        stage.simulateDeleteForTest(1);
+
+        int sectionsAfter = stage.sectionCountForTest();
+        assertEquals("Delete must remove exactly one accordion section",
+                sectionsBefore - 1, sectionsAfter);
+        String currentMacro = stage.currentMacroForTest();
+        assertFalse("Median run() must be absent after delete",
+                currentMacro.contains("run(\"Median..."));
+        assertTrue("Gaussian Blur run() must remain after deleting Median",
+                currentMacro.contains("run(\"Gaussian Blur..."));
+    }
+
+    @Test
+    public void branched_showsBannerAndDisablesStructuralControls() {
+        String branchedMacro = buildBranchedFixtureMacro();
+        Map<String, String> macros = new HashMap<String, String>();
+        macros.put("Default", DEFAULT_MACRO);
+        macros.put("Branched", branchedMacro);
+        MultiPresetMacroStore store = new MultiPresetMacroStore("Default", macros);
+
+        FilterParameterStage stage = new FilterParameterStage(
+                Arrays.asList("Default", "Branched", "Custom"),
+                store, new RecordingPreviewAdapter(), null, null);
+
+        stage.buildControls(context(), new RecordingActions());
+        stage.onEnter(context(), new PreviewPairPanel("Original", "Adjusted"));
+
+        // Sanity: Default preset is linear -> banner hidden.
+        assertFalse(stage.isBranchedBannerVisibleForTest());
+        assertTrue(stage.isAddFilterEnabledForTest());
+
+        stage.setPresetForTest("Branched");
+
+        assertFalse("Loaded preset must be detected as non-linear",
+                stage.isLinearForTest());
+        assertTrue("Branched-preset banner must be visible",
+                stage.isBranchedBannerVisibleForTest());
+        assertFalse("+ Add filter… must be disabled on branched DAGs",
+                stage.isAddFilterEnabledForTest());
+        assertTrue("Open in canvas… must be visible on branched DAGs",
+                stage.isCustomBuilderButtonVisibleForTest());
+    }
+
+    @Test
+    public void branched_clearsBannerAfterCanvasSaveReducesToLinear() {
+        String branchedMacro = buildBranchedFixtureMacro();
+        Map<String, String> macros = new HashMap<String, String>();
+        macros.put("Default", DEFAULT_MACRO);
+        macros.put("Branched", branchedMacro);
+        MultiPresetMacroStore store = new MultiPresetMacroStore("Default", macros);
+
+        FilterParameterStage.CustomFilterBuilder mock = new FilterParameterStage.CustomFilterBuilder() {
+            @Override
+            public FilterParameterStage.CustomFilterResult open(ConfigQcContext context,
+                                                                String currentPreset,
+                                                                String currentMacro) {
+                // Simulate the user opening the canvas, editing the combiner
+                // away, and saving — the resulting macro is linear.
+                return new FilterParameterStage.CustomFilterResult(true, "Default", DEFAULT_MACRO);
+            }
+        };
+
+        FilterParameterStage stage = new FilterParameterStage(
+                Arrays.asList("Default", "Branched", "Custom"),
+                store, new RecordingPreviewAdapter(), mock, null);
+
+        stage.buildControls(context(), new RecordingActions());
+        stage.onEnter(context(), new PreviewPairPanel("Original", "Adjusted"));
+        stage.setPresetForTest("Branched");
+
+        assertTrue("Banner must be visible before canvas save",
+                stage.isBranchedBannerVisibleForTest());
+
+        stage.simulateOpenCustomFilterBuilderForTest();
+
+        assertFalse("Banner must clear once canvas save reduces DAG to linear",
+                stage.isBranchedBannerVisibleForTest());
+        assertTrue("Linear DAG must re-enable + Add filter…",
+                stage.isAddFilterEnabledForTest());
+        assertFalse("Open in canvas… must be hidden on linear pipelines",
+                stage.isCustomBuilderButtonVisibleForTest());
+    }
+
+    private static String buildBranchedFixtureMacro() {
+        DagLine lineA = new DagLine("line_A",
+                Collections.singletonList(new DagNode("node_1", OpType.GAUSSIAN_BLUR, "sigma=2 stack")));
+        DagLine lineB = new DagLine("line_B",
+                Collections.singletonList(new DagNode("node_2", OpType.MEDIAN, "radius=2 stack")));
+        Combiner combiner = new Combiner("combiner_1", CombinerOp.AND,
+                Arrays.asList("line_A", "line_B"));
+        DagIR dag = new DagIR(1,
+                Arrays.asList(lineA, lineB),
+                Collections.singletonList(combiner),
+                "combiner_1",
+                "native");
+        return DagToIjmEmitter.emit(dag);
     }
 
     @Test
