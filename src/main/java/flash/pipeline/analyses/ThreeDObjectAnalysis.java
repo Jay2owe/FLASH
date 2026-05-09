@@ -71,6 +71,7 @@ import ij.text.TextWindow;
 
 import java.awt.Frame;
 import java.awt.Dimension;
+import java.awt.GraphicsEnvironment;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -108,6 +109,13 @@ import java.util.concurrent.locks.ReentrantLock;
  * Applies per-channel filter macro if present in that configuration folder.
  */
 public class ThreeDObjectAnalysis implements Analysis {
+    private static final String FULL_IMAGE_ROI_SET_NAME = "Full image";
+
+    private enum NoRoiDecision {
+        DRAW_ROIS,
+        ANALYSE_FULL_IMAGE,
+        CANCEL
+    }
 
     interface SpatialOptionsDialogLauncher {
         SpatialAnalysisWizard.DerivedConfig launch(String directory,
@@ -224,13 +232,24 @@ public class ThreeDObjectAnalysis implements Analysis {
     private static final class RoiSetData {
         final String name;
         final ij.gui.Roi[] rois;
+        final boolean fullImage;
 
         RoiSetData(String name, ij.gui.Roi[] rois) {
+            this(name, rois, false);
+        }
+
+        private RoiSetData(String name, ij.gui.Roi[] rois, boolean fullImage) {
             this.name = name == null ? "" : name;
             this.rois = rois == null ? new ij.gui.Roi[0] : rois;
+            this.fullImage = fullImage;
+        }
+
+        static RoiSetData fullImage() {
+            return new RoiSetData(FULL_IMAGE_ROI_SET_NAME, new ij.gui.Roi[0], true);
         }
 
         ij.gui.Roi cloneRoi(int index) {
+            if (fullImage) return null;
             if (index < 0 || index >= rois.length || rois[index] == null) return null;
             return (ij.gui.Roi) rois[index].clone();
         }
@@ -612,9 +631,19 @@ public class ThreeDObjectAnalysis implements Analysis {
         for (String roiSetName : roiSetNames) {
             IJ.log("  - " + roiSetName);
         }
+        boolean analyseFullImagesWithoutRois = false;
         if (roiZips.isEmpty()) {
-            IJ.error("3D Object Analysis", "No ROIs loaded. Run 'Draw and Save ROIs' first (must create 2 ROIs per image).");
-            return;
+            NoRoiDecision decision = promptForNoRoiDecision();
+            if (decision == NoRoiDecision.DRAW_ROIS) {
+                launchRoiDrawingWorkflow(directory);
+                return;
+            }
+            if (decision == NoRoiDecision.CANCEL) {
+                IJ.log("[FLASH] 3D Object Analysis cancelled because no ROI sets were found.");
+                return;
+            }
+            analyseFullImagesWithoutRois = true;
+            IJ.log("[FLASH] No ROI sets found. 3D Object Analysis will analyse each full image stack.");
         }
 
         ChannelIdentities channelIdentities = ChannelIdentitiesIO.read(new File(directory, ".bin"));
@@ -635,7 +664,8 @@ public class ThreeDObjectAnalysis implements Analysis {
         if (suppressDialogs) {
             if (extractProcessLength && processChannels == null) {
                 ThreeDObjectWizard.DerivedConfig derived = ThreeDObjectWizard.deriveConfig(
-                        cfg, channelIdentities, Collections.<String, Object>emptyMap(), Arrays.asList(roiSetNames));
+                        cfg, channelIdentities, Collections.<String, Object>emptyMap(),
+                        analyseFullImagesWithoutRois ? Collections.<String>emptyList() : Arrays.asList(roiSetNames));
                 nuclearMarkerIndex = derived.nuclearMarkerIndex;
                 processChannels = Arrays.copyOf(derived.processChannels, derived.processChannels.length);
             }
@@ -645,8 +675,11 @@ public class ThreeDObjectAnalysis implements Analysis {
                 PipelineDialog gdOpts = new PipelineDialog("3D Object Analysis Options", PipelineDialog.Phase.ANALYSE);
                 gdOpts.addAnalysisHelpHeader("3D Object Analysis", FLASH_Pipeline.IDX_3D_OBJECT);
                 final ThreeDObjectDialogBindings objectBindings = new ThreeDObjectDialogBindings();
+                List<String> setupRoiSetNames = analyseFullImagesWithoutRois
+                        ? Collections.<String>emptyList()
+                        : Arrays.asList(roiSetNames);
                 addThreeDObjectSetupControls(gdOpts, directory, cfg, channelIdentities,
-                        Arrays.asList(roiSetNames), objectBindings,
+                        setupRoiSetNames, objectBindings,
                         new ThreeDObjectConfigApplier() {
                             @Override
                             public void apply(String selectedPresetName,
@@ -675,10 +708,15 @@ public class ThreeDObjectAnalysis implements Analysis {
                             prev != null ? prev : 30.0, 0));
                 }
 
-                gdOpts.addHeader("ROI Sets");
-                gdOpts.addHelpText("Select which ROI sets will be used for this analysis run.");
-                for (int r = 0; r < roiSetNames.length; r++) {
-                    gdOpts.addToggle(roiSetNames[r], selectedRoiSets[r]);
+                if (analyseFullImagesWithoutRois) {
+                    gdOpts.addHeader("Analysis Region");
+                    gdOpts.addHelpText("No saved ROI sets were found. This run will analyse the full image stack for each image.");
+                } else {
+                    gdOpts.addHeader("ROI Sets");
+                    gdOpts.addHelpText("Select which ROI sets will be used for this analysis run.");
+                    for (int r = 0; r < roiSetNames.length; r++) {
+                        gdOpts.addToggle(roiSetNames[r], selectedRoiSets[r]);
+                    }
                 }
 
                 gdOpts.beginAdvancedSection("threeDObject");
@@ -724,7 +762,7 @@ public class ThreeDObjectAnalysis implements Analysis {
                 nuclearMarkerIndex = wizardNuclearMarkerIndex;
                 processChannels = wizardProcessChannels == null ? null : Arrays.copyOf(wizardProcessChannels, wizardProcessChannels.length);
 
-                if (!hasSelectedRoiSets(selectedRoiSets)) {
+                if (!analyseFullImagesWithoutRois && !hasSelectedRoiSets(selectedRoiSets)) {
                     IJ.error("3D Object Analysis", "Select at least one ROI set to analyse.");
                     continue;
                 }
@@ -738,7 +776,8 @@ public class ThreeDObjectAnalysis implements Analysis {
                 String[] names = cfg.channelNames.toArray(new String[0]);
                 if (processChannels == null) {
                     ThreeDObjectWizard.DerivedConfig derived = ThreeDObjectWizard.deriveConfig(
-                            cfg, channelIdentities, Collections.<String, Object>emptyMap(), Arrays.asList(roiSetNames));
+                            cfg, channelIdentities, Collections.<String, Object>emptyMap(),
+                            analyseFullImagesWithoutRois ? Collections.<String>emptyList() : Arrays.asList(roiSetNames));
                     nuclearMarkerIndex = derived.nuclearMarkerIndex;
                     processChannels = Arrays.copyOf(derived.processChannels, derived.processChannels.length);
                 }
@@ -792,17 +831,22 @@ public class ThreeDObjectAnalysis implements Analysis {
         // Preload all ROIs directly from zip files — no RoiManager needed
         IJ.log("ROI set selections:");
         List<RoiSetData> selectedRoiSetData = new ArrayList<RoiSetData>();
-        for (int r = 0; r < roiZips.size(); r++) {
-            IJ.log("  ROI set '" + roiSetNames[r] + "': " + (selectedRoiSets[r] ? "selected" : "skipped"));
-            if (!selectedRoiSets[r]) continue;
-            List<ij.gui.Roi> rois;
-            try {
-                rois = RoiIO.loadRoisFromZip(roiZips.get(r));
-            } catch (NoClassDefFoundError e) {
-                if (PluginInstallGuard.reportMissingInternalClass("3D Object Analysis", e)) return;
-                throw e;
+        if (analyseFullImagesWithoutRois) {
+            IJ.log("  ROI set '" + FULL_IMAGE_ROI_SET_NAME + "': selected (no ROI restriction)");
+            selectedRoiSetData.add(RoiSetData.fullImage());
+        } else {
+            for (int r = 0; r < roiZips.size(); r++) {
+                IJ.log("  ROI set '" + roiSetNames[r] + "': " + (selectedRoiSets[r] ? "selected" : "skipped"));
+                if (!selectedRoiSets[r]) continue;
+                List<ij.gui.Roi> rois;
+                try {
+                    rois = RoiIO.loadRoisFromZip(roiZips.get(r));
+                } catch (NoClassDefFoundError e) {
+                    if (PluginInstallGuard.reportMissingInternalClass("3D Object Analysis", e)) return;
+                    throw e;
+                }
+                selectedRoiSetData.add(new RoiSetData(roiSetNames[r], rois.toArray(new ij.gui.Roi[0])));
             }
-            selectedRoiSetData.add(new RoiSetData(roiSetNames[r], rois.toArray(new ij.gui.Roi[0])));
         }
         RoiSetData[] roiSets = selectedRoiSetData.toArray(new RoiSetData[0]);
 
@@ -813,7 +857,7 @@ public class ThreeDObjectAnalysis implements Analysis {
 
         IJ.log("ROI sets selected for analysis: " + roiSets.length);
         for (RoiSetData roiSet : roiSets) {
-            IJ.log("  - " + roiSet.name);
+            IJ.log("  - " + roiSetDisplayName(roiSet));
         }
 
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
@@ -1046,6 +1090,44 @@ public class ThreeDObjectAnalysis implements Analysis {
             if (selected) return true;
         }
         return false;
+    }
+
+    private NoRoiDecision promptForNoRoiDecision() {
+        if (suppressDialogs || headless || cliConfig != null || GraphicsEnvironment.isHeadless()) {
+            return NoRoiDecision.ANALYSE_FULL_IMAGE;
+        }
+
+        Object[] options = new Object[]{"Define ROI Sets", "Analyse Full Images"};
+        int choice = JOptionPane.showOptionDialog(
+                null,
+                "No saved ROI sets were found for this project.\n\n"
+                        + "3D Object Analysis can analyse the full image stack for each image, "
+                        + "but object counts and measurements will not be restricted to a drawn region.\n\n"
+                        + "To restrict analysis to regions of interest, define ROI sets before running this analysis.",
+                "3D Object Analysis - No ROI Sets Found",
+                JOptionPane.DEFAULT_OPTION,
+                JOptionPane.WARNING_MESSAGE,
+                null,
+                options,
+                options[0]);
+
+        if (choice == 0) return NoRoiDecision.DRAW_ROIS;
+        if (choice == 1) return NoRoiDecision.ANALYSE_FULL_IMAGE;
+        return NoRoiDecision.CANCEL;
+    }
+
+    private void launchRoiDrawingWorkflow(String directory) {
+        IJ.log("[FLASH] Opening Draw and Save ROIs before 3D Object Analysis.");
+        DrawAndSaveROIsAnalysis roiAnalysis = new DrawAndSaveROIsAnalysis();
+        roiAnalysis.setSuppressDialogs(false);
+        roiAnalysis.setHeadless(false);
+        roiAnalysis.setCliConfig(cliConfig);
+        roiAnalysis.execute(directory);
+    }
+
+    private static String roiSetDisplayName(RoiSetData roiSet) {
+        if (roiSet == null || roiSet.fullImage) return FULL_IMAGE_ROI_SET_NAME;
+        return roiSet.name;
     }
 
     private void addThreeDObjectSetupControls(final PipelineDialog dialog,
@@ -1431,6 +1513,10 @@ public class ThreeDObjectAnalysis implements Analysis {
         int expected = totalImages * 2;
         IJ.log("Validating ROI sets...");
         for (RoiSetData roiSet : roiSets) {
+            if (roiSet != null && roiSet.fullImage) {
+                IJ.log("  ROI set '" + FULL_IMAGE_ROI_SET_NAME + "': full-image analysis (no ROI pair validation)");
+                continue;
+            }
             int count = roiSet == null || roiSet.rois == null ? 0 : roiSet.rois.length;
             String roiSetName = roiSet == null ? "" : roiSet.name;
             IJ.log("  ROI set '" + roiSetName + "': " + count + " ROIs (expected " + expected + ")");
