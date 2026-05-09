@@ -5,9 +5,11 @@ import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinSetupChooser;
 import flash.pipeline.bin.BinSetupDispatcher;
 import flash.pipeline.bin.ChannelIdentities;
+import flash.pipeline.analyses.wizard.SpatialAnalysisWizard;
 import flash.pipeline.analyses.wizard.ThreeDObjectPreset;
 import flash.pipeline.analyses.wizard.ThreeDObjectPresetIO;
 import flash.pipeline.analyses.wizard.ThreeDObjectWizard;
+import flash.pipeline.cli.CLIConfig;
 import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.DependencyService;
 import flash.pipeline.runtime.DependencyStatus;
@@ -27,13 +29,17 @@ import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.EnumMap;
 import java.util.EnumSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 public class ThreeDObjectAnalysisTest {
@@ -175,6 +181,104 @@ public class ThreeDObjectAnalysisTest {
         assertFalse(classicalCentroidFilter(analysis));
     }
 
+    @Test
+    public void interactiveSpatialHandoffLaunchesSetupAndStoresConfig() throws Exception {
+        ThreeDObjectAnalysis analysis = new ThreeDObjectAnalysis();
+        final SpatialAnalysisWizard.DerivedConfig expected = new SpatialAnalysisWizard.DerivedConfig();
+        expected.doHeatmaps = true;
+        final AtomicInteger launches = new AtomicInteger(0);
+        final AtomicReference<Boolean> thresholdsConfigured = new AtomicReference<Boolean>();
+        setMarkerThresholds(analysis, singletonThresholds());
+        analysis.setSpatialSetupLauncherForTest(new ThreeDObjectAnalysis.SpatialSetupLauncher() {
+            @Override
+            public SpatialAnalysisWizard.DerivedConfig launch(String directory,
+                                                             ChannelIdentities identities,
+                                                             boolean thresholdsConfiguredUpstream) {
+                launches.incrementAndGet();
+                thresholdsConfigured.set(Boolean.valueOf(thresholdsConfiguredUpstream));
+                return expected;
+            }
+        });
+
+        assertTrue(analysis.prepareSpatialHandoffBeforeAnalysis(
+                temp.newFolder("spatial-handoff").getAbsolutePath(),
+                dapiIba1AbetaIdentities(),
+                true));
+
+        assertEquals(1, launches.get());
+        assertTrue(thresholdsConfigured.get().booleanValue());
+        assertSame(expected, fieldValue(analysis, "wizardSpatialConfig"));
+    }
+
+    @Test
+    public void cancelledSpatialHandoffCancelsObjectAnalysisBeforeProcessing() throws Exception {
+        ThreeDObjectAnalysis analysis = new ThreeDObjectAnalysis();
+        analysis.setHeadless(true);
+        final AtomicInteger launches = new AtomicInteger(0);
+        analysis.setSpatialSetupLauncherForTest(new ThreeDObjectAnalysis.SpatialSetupLauncher() {
+            @Override
+            public SpatialAnalysisWizard.DerivedConfig launch(String directory,
+                                                             ChannelIdentities identities,
+                                                             boolean thresholdsConfiguredUpstream) {
+                launches.incrementAndGet();
+                return null;
+            }
+        });
+
+        assertFalse(analysis.prepareSpatialHandoffBeforeAnalysis(
+                temp.newFolder("spatial-cancel").getAbsolutePath(),
+                dapiIba1AbetaIdentities(),
+                true));
+
+        assertEquals(1, launches.get());
+        assertNull(fieldValue(analysis, "wizardSpatialConfig"));
+    }
+
+    @Test
+    public void spatialHandoffSkipsLauncherForNoninteractiveRuns() throws Exception {
+        ThreeDObjectAnalysis suppressed = new ThreeDObjectAnalysis();
+        final AtomicInteger suppressedLaunches = new AtomicInteger(0);
+        suppressed.setSuppressDialogs(true);
+        suppressed.setSpatialSetupLauncherForTest(countingSpatialLauncher(suppressedLaunches));
+
+        assertTrue(suppressed.prepareSpatialHandoffBeforeAnalysis(
+                temp.newFolder("spatial-suppressed").getAbsolutePath(),
+                dapiIba1AbetaIdentities(),
+                true));
+        assertEquals(0, suppressedLaunches.get());
+
+        ThreeDObjectAnalysis cli = new ThreeDObjectAnalysis();
+        final AtomicInteger cliLaunches = new AtomicInteger(0);
+        cli.setCliConfig(new CLIConfig());
+        cli.setSpatialSetupLauncherForTest(countingSpatialLauncher(cliLaunches));
+
+        assertTrue(cli.prepareSpatialHandoffBeforeAnalysis(
+                temp.newFolder("spatial-cli").getAbsolutePath(),
+                dapiIba1AbetaIdentities(),
+                true));
+        assertEquals(0, cliLaunches.get());
+    }
+
+    @Test
+    public void chainedSpatialAnalysisReceivesStoredConfigAndNoninteractiveMode() throws Exception {
+        ThreeDObjectAnalysis analysis = new ThreeDObjectAnalysis();
+        analysis.setSuppressDialogs(true);
+        SpatialAnalysisWizard.DerivedConfig config = new SpatialAnalysisWizard.DerivedConfig();
+        config.doDistances = true;
+        setField(analysis, "wizardSpatialConfig", config);
+
+        SpatialAnalysis spatial = analysis.createSpatialAnalysisForRun();
+
+        assertSame(config, fieldValue(spatial, "configuredOptions"));
+        assertTrue(booleanField(spatial, "suppressDialogs"));
+
+        ThreeDObjectAnalysis cli = new ThreeDObjectAnalysis();
+        cli.setCliConfig(new CLIConfig());
+        SpatialAnalysis cliSpatial = cli.createSpatialAnalysisForRun();
+
+        assertTrue(booleanField(cliSpatial, "suppressDialogs"));
+    }
+
     private static void installDispatcherChoice(final BinSetupChooser.Choice choice,
                                                 final AtomicInteger chooserCalls) throws Exception {
         setDispatcherHook("setHeadlessProbeForTest",
@@ -275,6 +379,48 @@ public class ThreeDObjectAnalysisTest {
         ctor.setAccessible(true);
         FeatureDependencyGate.configure(ctor.newInstance(provider), null);
         FeatureDependencyGate.setUiMode(false);
+    }
+
+    private static ThreeDObjectAnalysis.SpatialSetupLauncher countingSpatialLauncher(
+            final AtomicInteger launches) {
+        return new ThreeDObjectAnalysis.SpatialSetupLauncher() {
+            @Override
+            public SpatialAnalysisWizard.DerivedConfig launch(String directory,
+                                                             ChannelIdentities identities,
+                                                             boolean thresholdsConfiguredUpstream) {
+                launches.incrementAndGet();
+                return new SpatialAnalysisWizard.DerivedConfig();
+            }
+        };
+    }
+
+    private static Map<String, Double> singletonThresholds() {
+        Map<String, Double> thresholds = new LinkedHashMap<String, Double>();
+        thresholds.put("DAPI", Double.valueOf(30.0));
+        return thresholds;
+    }
+
+    private static void setMarkerThresholds(ThreeDObjectAnalysis analysis,
+                                            Map<String, Double> thresholds) throws Exception {
+        setField(analysis, "markerThresholds", thresholds);
+    }
+
+    private static Object fieldValue(Object target, String name) throws Exception {
+        Field field = target.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        return field.get(target);
+    }
+
+    private static boolean booleanField(Object target, String name) throws Exception {
+        Field field = target.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        return field.getBoolean(target);
+    }
+
+    private static void setField(Object target, String name, Object value) throws Exception {
+        Field field = target.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        field.set(target, value);
     }
 
     private static boolean classicalCentroidFilter(ThreeDObjectAnalysis analysis) throws Exception {

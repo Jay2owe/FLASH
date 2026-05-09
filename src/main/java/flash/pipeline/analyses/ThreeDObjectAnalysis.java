@@ -109,6 +109,39 @@ import java.util.concurrent.locks.ReentrantLock;
  */
 public class ThreeDObjectAnalysis implements Analysis {
 
+    interface SpatialSetupLauncher {
+        SpatialAnalysisWizard.DerivedConfig launch(String directory,
+                                                   ChannelIdentities identities,
+                                                   boolean thresholdsConfiguredUpstream);
+    }
+
+    private static final SpatialSetupLauncher DEFAULT_SPATIAL_SETUP_LAUNCHER =
+            new SpatialSetupLauncher() {
+                @Override
+                public SpatialAnalysisWizard.DerivedConfig launch(String directory,
+                                                                  ChannelIdentities identities,
+                                                                  boolean thresholdsConfiguredUpstream) {
+                    try {
+                        IJ.log("Spatial Analysis setup requested by 3D Object Analysis.");
+                        SpatialAnalysisWizard spatialWizard = new SpatialAnalysisWizard(
+                                flash.pipeline.ui.wizard.WizardFlow.MainPanelBinding.NULL,
+                                identities,
+                                firstSeriesInfoOrNull(directory),
+                                calibrationIsAvailable(directory),
+                                thresholdsConfiguredUpstream,
+                                false);
+                        spatialWizard.run();
+                        if (!spatialWizard.wasFinished()) {
+                            return null;
+                        }
+                        return spatialWizard.deriveCurrentConfig();
+                    } catch (Exception e) {
+                        IJ.handleException(e);
+                        return null;
+                    }
+                }
+            };
+
     private boolean headless = false;
     private boolean suppressDialogs = false;
     private boolean aggressiveMemory = false;
@@ -131,6 +164,7 @@ public class ThreeDObjectAnalysis implements Analysis {
     private int wizardNuclearMarkerIndex = -1;
     private boolean[] wizardProcessChannels = null;
     private SpatialAnalysisWizard.DerivedConfig wizardSpatialConfig = null;
+    private SpatialSetupLauncher spatialSetupLauncher = DEFAULT_SPATIAL_SETUP_LAUNCHER;
     private static final String OBJECT_PRESET_PLACEHOLDER = "(choose preset)";
     private final AtomicBoolean calibrationWritten = new AtomicBoolean(false);
     private boolean useDeconvolvedInput = true;
@@ -302,6 +336,12 @@ public class ThreeDObjectAnalysis implements Analysis {
         if (config != null) {
             this.useDeconvolvedInput = config.isThreeDUseDeconv();
         }
+    }
+
+    void setSpatialSetupLauncherForTest(SpatialSetupLauncher launcher) {
+        this.spatialSetupLauncher = launcher == null
+                ? DEFAULT_SPATIAL_SETUP_LAUNCHER
+                : launcher;
     }
 
     private static boolean gateStarDistFeature(String featureDisplayName) {
@@ -756,6 +796,10 @@ public class ThreeDObjectAnalysis implements Analysis {
             }
         }
 
+        if (!prepareSpatialHandoffBeforeAnalysis(directory, channelIdentities, runSpatial)) {
+            return;
+        }
+
         // Preload all ROIs directly from zip files — no RoiManager needed
         IJ.log("ROI set selections:");
         List<RoiSetData> selectedRoiSetData = new ArrayList<RoiSetData>();
@@ -968,15 +1012,7 @@ public class ThreeDObjectAnalysis implements Analysis {
         // Run spatial distance analysis if requested
         if (runSpatial) {
             IJ.log("--- Running Spatial Distance Analysis ---");
-            SpatialAnalysis spatialAnalysis = new SpatialAnalysis();
-            spatialAnalysis.setMarkerThresholds(markerThresholds);
-            spatialAnalysis.setParallelThreads(parallelThreads);
-            spatialAnalysis.setAggressiveMemory(aggressiveMemory);
-            spatialAnalysis.setVerboseLogging(verboseLogging);
-            spatialAnalysis.setCliConfig(cliConfig);
-            if (wizardSpatialConfig != null) {
-                spatialAnalysis.setWizardConfig(wizardSpatialConfig);
-            }
+            SpatialAnalysis spatialAnalysis = createSpatialAnalysisForRun();
             spatialAnalysis.run(directory);
             IJ.log("Spatial distance analysis complete.");
         }
@@ -1245,6 +1281,48 @@ public class ThreeDObjectAnalysis implements Analysis {
             IJ.handleException(e);
             return null;
         }
+    }
+
+    boolean prepareSpatialHandoffBeforeAnalysis(String directory,
+                                                ChannelIdentities identities,
+                                                boolean runSpatial) {
+        if (!runSpatial) {
+            wizardSpatialConfig = null;
+            return true;
+        }
+        if (wizardSpatialConfig != null || suppressDialogs || cliConfig != null) {
+            return true;
+        }
+
+        SpatialAnalysisWizard.DerivedConfig spatialConfig = spatialSetupLauncher.launch(
+                directory,
+                identities,
+                !markerThresholds.isEmpty());
+        if (spatialConfig == null) {
+            IJ.log("[FLASH] 3D Object Analysis cancelled because Spatial Analysis setup was cancelled.");
+            if (!headless && !suppressDialogs) {
+                IJ.showMessage("3D Object Analysis",
+                        "Spatial Analysis setup was cancelled.\n3D Object Analysis has not started.");
+            }
+            return false;
+        }
+        wizardSpatialConfig = spatialConfig;
+        return true;
+    }
+
+    SpatialAnalysis createSpatialAnalysisForRun() {
+        SpatialAnalysis spatialAnalysis = new SpatialAnalysis();
+        spatialAnalysis.setHeadless(headless);
+        spatialAnalysis.setSuppressDialogs(suppressDialogs || cliConfig != null);
+        spatialAnalysis.setMarkerThresholds(markerThresholds);
+        spatialAnalysis.setParallelThreads(parallelThreads);
+        spatialAnalysis.setAggressiveMemory(aggressiveMemory);
+        spatialAnalysis.setVerboseLogging(verboseLogging);
+        spatialAnalysis.setCliConfig(cliConfig);
+        if (wizardSpatialConfig != null) {
+            spatialAnalysis.setWizardConfig(wizardSpatialConfig);
+        }
+        return spatialAnalysis;
     }
 
     private ThreeDObjectWizard.DerivedConfig loadThreeDObjectPresetConfig(String directory,
