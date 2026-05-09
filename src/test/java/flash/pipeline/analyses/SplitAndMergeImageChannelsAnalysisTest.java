@@ -8,6 +8,10 @@ import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.DependencyService;
 import flash.pipeline.runtime.DependencyStatus;
 import flash.pipeline.runtime.FeatureDependencyGate;
+import flash.pipeline.io.AsyncImageSaver;
+import flash.pipeline.naming.NameParts;
+import ij.ImagePlus;
+import ij.ImageStack;
 import org.junit.After;
 import org.junit.Rule;
 import org.junit.Test;
@@ -38,9 +42,26 @@ public class SplitAndMergeImageChannelsAnalysisTest {
 
     @After
     public void resetHooks() throws Exception {
+        AsyncImageSaver.waitForAll();
         invokeDispatcherReset();
         FeatureDependencyGate.configure(new DependencyService(), null);
         FeatureDependencyGate.setUiMode(false);
+    }
+
+    @Test
+    public void channelSettingsGridColorsChannelTitlesFromConfiguredLuts() {
+        SplitAndMergeImageChannelsAnalysis.ChannelSettingsGrid grid =
+                SplitAndMergeImageChannelsAnalysis.buildChannelSettingsGrid(
+                        new String[]{"DAPI", "GFAP", "Iba1"},
+                        new String[]{"None", "None", "None"},
+                        new String[]{"Blue", "Green", "Magenta"});
+
+        assertEquals(SplitAndMergeImageChannelsAnalysis.channelHeaderColorForLut("Blue"),
+                grid.channelLabels[0].getForeground());
+        assertEquals(SplitAndMergeImageChannelsAnalysis.channelHeaderColorForLut("Green"),
+                grid.channelLabels[1].getForeground());
+        assertEquals(SplitAndMergeImageChannelsAnalysis.channelHeaderColorForLut("Magenta"),
+                grid.channelLabels[2].getForeground());
     }
 
     @Test
@@ -214,7 +235,7 @@ public class SplitAndMergeImageChannelsAnalysisTest {
     @Test
     public void splitMergeOutputHelpersUseStageFolderLayout() throws Exception {
         File dir = temp.newFolder("layout");
-        File splitRoot = new File(new File(dir, "FLASH"), "Make Presentation-Ready Images");
+        File splitRoot = new File(new File(dir, "FLASH"), "Presentation-Ready Images");
 
         assertEquals(new File(splitRoot, "Images"),
                 SplitAndMergeImageChannelsAnalysis.splitMergeImageWriteRoot(dir.getAbsolutePath()));
@@ -222,6 +243,61 @@ public class SplitAndMergeImageChannelsAnalysisTest {
                 SplitAndMergeImageChannelsAnalysis.splitMergeOmeTiffWriteRoot(dir.getAbsolutePath()));
         assertEquals(new File(splitRoot, "Analysis Details"),
                 SplitAndMergeImageChannelsAnalysis.splitMergeDetailsWriteRoot(dir.getAbsolutePath()));
+    }
+
+    @Test
+    public void splitMergeSkipExistingFindsLegacyPresentationFolders() throws Exception {
+        File dir = temp.newFolder("legacySplitMerge");
+        NameParts parts = new NameParts("Experiment", "Animal1", "LH", "Cortex");
+        File primaryOutRoot = SplitAndMergeImageChannelsAnalysis.splitMergeImageWriteRoot(dir.getAbsolutePath());
+
+        File oldPresentationAnimalDir = new File(
+                new File(new File(new File(dir, "FLASH"), "Make Presentation-Ready Images"), "Images"),
+                "Animal1");
+        assertTrue(oldPresentationAnimalDir.mkdirs());
+        assertTrue(new File(oldPresentationAnimalDir, "DAPI_LH_Cortex.png").createNewFile());
+        assertTrue(SplitAndMergeImageChannelsAnalysis.splitMergePrimaryChannelOutputExists(
+                dir.getAbsolutePath(), primaryOutRoot, parts, "DAPI"));
+
+        File numberedAnimalDir = new File(
+                new File(new File(new File(dir, "FLASH"), "03 - Split and Merge"), "Images"),
+                "Animal1");
+        assertTrue(numberedAnimalDir.mkdirs());
+        assertTrue(new File(numberedAnimalDir, "GFAP_LH_Cortex.png").createNewFile());
+        assertTrue(SplitAndMergeImageChannelsAnalysis.splitMergePrimaryChannelOutputExists(
+                dir.getAbsolutePath(), primaryOutRoot, parts, "GFAP"));
+    }
+
+    @Test
+    public void processOneImageWritesOmeTiffWhenMergePngIsDisabled() throws Exception {
+        File dir = temp.newFolder("omeWithoutMerge");
+        File outDir = new File(dir, "Images/Animal1");
+        File tifDir = new File(dir, "OME-TIFF");
+        File detailsDir = new File(dir, "Analysis Details");
+        assertTrue(outDir.mkdirs());
+        assertTrue(detailsDir.mkdirs());
+
+        ImageStack stack = new ImageStack(2, 2);
+        stack.addSlice("DAPI", new byte[]{0, 64, 127, (byte) 255});
+        stack.addSlice("GFAP", new byte[]{5, 25, 125, (byte) 200});
+        ImagePlus imp = new ImagePlus("Experiment-Animal1_LH_Cortex", stack);
+        imp.setDimensions(2, 1, 1);
+        imp.setOpenAsHyperStack(true);
+
+        invokeProcessOneImage(new SplitAndMergeImageChannelsAnalysis(),
+                imp,
+                new String[]{"DAPI", "GFAP"},
+                new String[]{"Blue", "Green"},
+                outDir,
+                tifDir,
+                detailsDir,
+                false,
+                true,
+                new NameParts("Experiment", "Animal1", "LH", "Cortex"));
+
+        File omeFile = new File(tifDir, "Animal1_LH_Cortex.ome.tif");
+        assertTrue("OME-TIFF should be written when saveOmeTiff is true", omeFile.isFile());
+        assertTrue("OME-TIFF should not be empty", omeFile.length() > 0L);
     }
 
     @Test
@@ -261,6 +337,57 @@ public class SplitAndMergeImageChannelsAnalysisTest {
                 "saveSaturations", String.class, String[].class, String[].class, double[].class);
         method.setAccessible(true);
         method.invoke(analysis, dir.getAbsolutePath(), channelNames, processMethodPerCh, saturationsPerCh);
+    }
+
+    private static void invokeProcessOneImage(SplitAndMergeImageChannelsAnalysis analysis,
+                                              ImagePlus imp,
+                                              String[] channelNames,
+                                              String[] channelColors,
+                                              File outDir,
+                                              File tifDir,
+                                              File detailsDir,
+                                              boolean createMerge,
+                                              boolean saveOmeTiff,
+                                              NameParts parts) throws Exception {
+        Method method = SplitAndMergeImageChannelsAnalysis.class.getDeclaredMethod(
+                "processOneImage",
+                ImagePlus.class,
+                String[].class,
+                String[].class,
+                File.class,
+                File.class,
+                File.class,
+                boolean.class,
+                boolean.class,
+                boolean.class,
+                int.class,
+                boolean[].class,
+                String.class,
+                String[].class,
+                String[].class,
+                double[].class,
+                NameParts.class);
+        method.setAccessible(true);
+        method.invoke(analysis, imp, channelNames, channelColors, outDir, tifDir, detailsDir,
+                createMerge, saveOmeTiff, false, -1, new boolean[channelNames.length], "",
+                fill(channelNames.length, "None"), fill(channelNames.length, "None"),
+                fill(channelNames.length, 0.35), parts);
+    }
+
+    private static String[] fill(int length, String value) {
+        String[] out = new String[length];
+        for (int i = 0; i < length; i++) {
+            out[i] = value;
+        }
+        return out;
+    }
+
+    private static double[] fill(int length, double value) {
+        double[] out = new double[length];
+        for (int i = 0; i < length; i++) {
+            out[i] = value;
+        }
+        return out;
     }
 
     private static String[] comboItems(JComboBox<String> combo) {

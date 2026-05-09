@@ -29,6 +29,8 @@ public class FlashProjectLayoutTest {
                 layout.channelDataWriteFile());
         assertPath(new File(project, "FLASH/Draw and Save ROIs"),
                 layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.ROIS));
+        assertPath(new File(project, "FLASH/Presentation-Ready Images"),
+                layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.SPLIT_MERGE));
         assertPath(new File(project, "FLASH/Image Analysis/3D Objects/Objects"),
                 layout.objectDataWriteDir());
         assertPath(new File(project, "FLASH/Image Analysis/Image Intensities"),
@@ -127,6 +129,11 @@ public class FlashProjectLayoutTest {
                 new File(project, "FLASH/3D Deconvolution"),
                 new File(project, "FLASH/02 - 3D Deconvolution"),
                 new File(project, "Image Analysis/Deconvolved"));
+        assertPaths(layout.analysisReadDirs(FlashProjectLayout.AnalysisFolder.SPLIT_MERGE),
+                new File(project, "FLASH/Presentation-Ready Images"),
+                new File(project, "FLASH/Make Presentation-Ready Images"),
+                new File(project, "FLASH/03 - Split and Merge"),
+                new File(project, "Images"));
         assertPaths(layout.analysisReadDirs(FlashProjectLayout.AnalysisFolder.SPATIAL),
                 new File(project, "FLASH/Image Analysis/Spatial Analysis"),
                 new File(project, "FLASH/06 - Spatial Analysis"),

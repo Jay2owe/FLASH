@@ -239,9 +239,9 @@ public final class AnalysisHelpCatalog {
                         "Selected channels are combined into merged colour composites, with additional merge specifications used when provided.",
                         "FLASH saves the display outputs and split/merge run details under the Split and Merge analysis folder."),
                 list(
-                        "FLASH/Make Presentation-Ready Images/Images/<animal>/ contains split-channel images and merged composite images.",
-                        "FLASH/Make Presentation-Ready Images/OME-TIFF/ contains OME-TIFF exports when that option is enabled.",
-                        "FLASH/Make Presentation-Ready Images/Analysis Details/ records split/merge settings used for the run.",
+                        "FLASH/Presentation-Ready Images/Images/<animal>/ contains split-channel images and merged composite images.",
+                        "FLASH/Presentation-Ready Images/OME-TIFF/ contains OME-TIFF exports when that option is enabled.",
+                        "FLASH/Presentation-Ready Images/Analysis Details/ records split/merge settings used for the run.",
                         "Saved min-max display settings can also update the active configuration so later display exports use the same ranges."),
                 list(
                         "Contrast stretching, lookup-table colours, and merged composites are display choices, not quantitative fluorescence measurements.",
@@ -252,7 +252,7 @@ public final class AnalysisHelpCatalog {
                         "split-merge",
                         image("setup.png", "Split and merge setup", "Per-channel processing, merge, OME-TIFF, and background-subtraction options are reviewed before export."),
                         image("workflow.png", "Split and merge workflow", "Read configured channels, split images, apply display settings, create composites, then save display outputs."),
-                        image("example-output.png", "Split and merge outputs", "Split-channel images, merged composites, OME-TIFF files, and analysis details live under FLASH/Make Presentation-Ready Images.")));
+                        image("example-output.png", "Split and merge outputs", "Split-channel images, merged composites, OME-TIFF files, and analysis details live under FLASH/Presentation-Ready Images.")));
     }
 
     private static AnalysisHelpTopic intensityTopic() {

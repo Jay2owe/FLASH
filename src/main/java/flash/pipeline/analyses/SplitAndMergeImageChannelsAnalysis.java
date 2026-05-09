@@ -203,6 +203,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
         final JComboBox<String>[] methodBoxes;
         final JTextField[] displayRangeFields;
         final JTextField[] saturationFields;
+        final JLabel[] channelLabels;
         final JLabel[] rowLabels;
         final JLabel[][] helperLabels;
 
@@ -210,12 +211,14 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                                     JComboBox<String>[] methodBoxes,
                                     JTextField[] displayRangeFields,
                                     JTextField[] saturationFields,
+                                    JLabel[] channelLabels,
                                     JLabel[] rowLabels,
                                     JLabel[][] helperLabels) {
             this.panel = panel;
             this.methodBoxes = methodBoxes;
             this.displayRangeFields = displayRangeFields;
             this.saturationFields = saturationFields;
+            this.channelLabels = channelLabels;
             this.rowLabels = rowLabels;
             this.helperLabels = helperLabels;
         }
@@ -274,7 +277,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                     ? binMinMax[i] : NONE_OPTION;
         }
 
-        MainDialogResult mdr = showMainDialog(channelNames, defaultMinMax, new File(directory));
+        MainDialogResult mdr = showMainDialog(channelNames, channelColors, defaultMinMax, new File(directory));
         if (mdr == null) return;
         useDeconvolvedInput = mdr.useDeconvolvedInput;
 
@@ -825,7 +828,8 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
 
     // ── Main options dialog (PipelineDialog) ──
 
-    private MainDialogResult showMainDialog(final String[] channelNames, String[] defaultMinMax, File projectRoot) {
+    private MainDialogResult showMainDialog(final String[] channelNames, String[] channelColors,
+                                            String[] defaultMinMax, File projectRoot) {
         final int nCh = channelNames.length;
         final int autoBackgroundIndex = detectAutofluorescenceChannel(projectRoot, nCh);
         if (java.awt.GraphicsEnvironment.isHeadless()) {
@@ -848,7 +852,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
         // ── Section: Channel Processing ──
         pd.addHeader("Channel Processing");
 
-        final ChannelSettingsGrid channelGrid = buildChannelSettingsGrid(channelNames, defaultMinMax);
+        final ChannelSettingsGrid channelGrid = buildChannelSettingsGrid(channelNames, defaultMinMax, channelColors);
         pd.addComponent(channelGrid.panel);
 
         // ── Section: Merge Options ──
@@ -952,10 +956,17 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
 
     @SuppressWarnings("unchecked")
     static ChannelSettingsGrid buildChannelSettingsGrid(final String[] channelNames, String[] defaultMinMax) {
+        return buildChannelSettingsGrid(channelNames, defaultMinMax, null);
+    }
+
+    @SuppressWarnings("unchecked")
+    static ChannelSettingsGrid buildChannelSettingsGrid(final String[] channelNames, String[] defaultMinMax,
+                                                        String[] channelColors) {
         final int nCh = channelNames == null ? 0 : channelNames.length;
         final JComboBox<String>[] methodBoxes = new JComboBox[nCh];
         final JTextField[] displayRangeFields = new JTextField[nCh];
         final JTextField[] saturationFields = new JTextField[nCh];
+        final JLabel[] channelLabels = new JLabel[nCh];
         final JLabel[] rowLabels = new JLabel[]{
                 createChannelGridRowLabel("Processing Method"),
                 createChannelGridRowLabel("Display Ranges"),
@@ -972,7 +983,9 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
         for (int ch = 0; ch < nCh; ch++) {
             JLabel channelLabel = new JLabel(channelNames[ch]);
             channelLabel.setFont(channelLabel.getFont().deriveFont(Font.BOLD, 12f));
-            channelLabel.setForeground(Color.DARK_GRAY);
+            String lutColor = channelColors != null && ch < channelColors.length ? channelColors[ch] : null;
+            channelLabel.setForeground(channelHeaderColorForLut(lutColor));
+            channelLabels[ch] = channelLabel;
             addChannelGridComponent(panel, channelLabel,
                     ch + 1, 0, 1.0, GridBagConstraints.HORIZONTAL, new Insets(0, 0, 4, 10));
         }
@@ -1035,7 +1048,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
         }
 
         return new ChannelSettingsGrid(panel, methodBoxes, displayRangeFields,
-                saturationFields, rowLabels, helperLabels);
+                saturationFields, channelLabels, rowLabels, helperLabels);
     }
 
     static ChannelSettingsSelections readChannelSettingsGrid(ChannelSettingsGrid grid) {
@@ -1323,22 +1336,26 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                 mergedRgb.close();
                 mergedRgb.flush();
             }
+        }
 
-            if (saveOmeTiff) {
-                ImagePlus composite = buildCompositeHyperstack(maxProjs, channelNames);
-                if (composite != null) {
-                    try {
-                        File omeOut = new File(tifDir, omeName);
-                        OmeTiffIO.saveOmeTiff(composite, omeOut, channelNames, channelColors);
-                        if (!compactLog) IJ.log("    - Saved OME-TIFF: " + omeName);
-                    } catch (Exception e) {
-                        IJ.log("    - WARNING: failed to write OME-TIFF: " + e.getMessage());
-                    } finally {
-                        composite.changes = false;
-                        composite.close();
-                        composite.flush();
-                    }
+        if (saveOmeTiff) {
+            if (!compactLog) IJ.log("  > OME-TIFF");
+            ImagePlus composite = buildCompositeHyperstack(maxProjs, channelNames);
+            if (composite != null) {
+                try {
+                    IoUtils.mustMkdirs(tifDir);
+                    File omeOut = new File(tifDir, omeName);
+                    OmeTiffIO.saveOmeTiff(composite, omeOut, channelNames, channelColors);
+                    if (!compactLog) IJ.log("    - Saved OME-TIFF: " + omeOut.getAbsolutePath());
+                } catch (Exception e) {
+                    IJ.log("    - WARNING: failed to write OME-TIFF: " + e.getMessage());
+                } finally {
+                    composite.changes = false;
+                    composite.close();
+                    composite.flush();
                 }
+            } else {
+                IJ.log("    - WARNING: failed to build OME-TIFF composite for " + omeName);
             }
         }
 
@@ -1631,6 +1648,18 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
         imp.getProcessor().setLut(lut);
     }
 
+    static Color channelHeaderColorForLut(String colorName) {
+        if (colorName == null) return Color.DARK_GRAY;
+        String c = colorName.trim().toLowerCase(Locale.ROOT);
+        if ("red".equals(c)) return Color.RED;
+        if ("green".equals(c)) return new Color(0, 128, 0);
+        if ("blue".equals(c)) return Color.BLUE;
+        if ("cyan".equals(c)) return new Color(0, 128, 128);
+        if ("magenta".equals(c)) return Color.MAGENTA;
+        if ("yellow".equals(c)) return new Color(153, 119, 0);
+        return Color.DARK_GRAY;
+    }
+
     private static String formatDuration(long ms) {
         long seconds = ms / 1000;
         if (seconds < 60) return seconds + " Seconds";
@@ -1740,6 +1769,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
         addUniqueRoot(roots, new File(layout.analysisWriteDir(AnalysisFolder.SPLIT_MERGE), "Images"));
         List<File> legacyDirs = layout.analysisLegacyDirs(AnalysisFolder.SPLIT_MERGE);
         for (int i = 0; i < legacyDirs.size(); i++) {
+            addUniqueRoot(roots, new File(legacyDirs.get(i), "Images"));
             addUniqueRoot(roots, legacyDirs.get(i));
         }
         return roots;

@@ -254,9 +254,9 @@ public class AnalysisHelpCatalogTest {
     @Test
     public void coreAnalysisOutputPathsMatchCurrentLayout() {
         assertContains(AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_SPLIT_MERGE).outputs,
-                "FLASH/Make Presentation-Ready Images/Images/");
+                "FLASH/Presentation-Ready Images/Images/");
         assertContains(AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_SPLIT_MERGE).outputs,
-                "FLASH/Make Presentation-Ready Images/OME-TIFF/");
+                "FLASH/Presentation-Ready Images/OME-TIFF/");
         assertContains(AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_INTENSITY).outputs,
                 "FLASH/Image Analysis/Image Intensities/<channel>.csv");
         assertContains(AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_3D_OBJECT).outputs,
