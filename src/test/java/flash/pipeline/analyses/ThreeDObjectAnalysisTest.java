@@ -20,6 +20,7 @@ import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
 import java.io.File;
+import java.lang.reflect.Array;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -283,6 +284,13 @@ public class ThreeDObjectAnalysisTest {
         assertTrue(booleanField(cliSpatial, "suppressDialogs"));
     }
 
+    @Test
+    public void fullImageRoiSetDoesNotRequireSavedRoiPairs() throws Exception {
+        ThreeDObjectAnalysis analysis = new ThreeDObjectAnalysis();
+
+        assertTrue(validateRoiSets(analysis, fullImageRoiSets(), 3));
+    }
+
     private static void installDispatcherChoice(final BinSetupChooser.Choice choice,
                                                 final AtomicInteger chooserCalls) throws Exception {
         setDispatcherHook("setHeadlessProbeForTest",
@@ -442,6 +450,25 @@ public class ThreeDObjectAnalysisTest {
                 ThreeDObjectWizard.DerivedConfig.class);
         method.setAccessible(true);
         method.invoke(analysis, cfg, derived);
+    }
+
+    private static Object fullImageRoiSets() throws Exception {
+        Class<?> roiSetType = Class.forName("flash.pipeline.analyses.ThreeDObjectAnalysis$RoiSetData");
+        Method fullImage = roiSetType.getDeclaredMethod("fullImage");
+        fullImage.setAccessible(true);
+        Object roiSet = fullImage.invoke(null);
+        Object array = Array.newInstance(roiSetType, 1);
+        Array.set(array, 0, roiSet);
+        return array;
+    }
+
+    private static boolean validateRoiSets(ThreeDObjectAnalysis analysis,
+                                           Object roiSets,
+                                           int totalImages) throws Exception {
+        Method method = ThreeDObjectAnalysis.class.getDeclaredMethod(
+                "validateRoiSets", roiSets.getClass(), int.class);
+        method.setAccessible(true);
+        return ((Boolean) method.invoke(analysis, roiSets, totalImages)).booleanValue();
     }
 
     private static BinConfig dapiIba1AbetaConfig() {
