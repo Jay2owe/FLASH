@@ -5538,6 +5538,13 @@ public class CreateBinFileAnalysis implements Analysis {
                                 "C" + channelNum + "_Filters.ijm");
                         Files.write(filterPath, safe(macroContent).getBytes(StandardCharsets.UTF_8));
                     }
+
+                    @Override public void saveAsPreset(String presetName, String macroContent) throws Exception {
+                        if (presetName == null || presetName.trim().isEmpty()) {
+                            throw new IllegalArgumentException("Preset name must not be empty.");
+                        }
+                        saveCustomFilterPreset(binFolder, presetName.trim(), safe(macroContent));
+                    }
                 },
                 new FilterParameterStage.PreviewAdapter() {
                     @Override public ImagePlus createSource(ConfigQcContext context) {
