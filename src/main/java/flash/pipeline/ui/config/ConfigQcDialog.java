@@ -64,6 +64,7 @@ public final class ConfigQcDialog {
     private SecondaryLoop loop;
     private int stageIndex = -1;
     private boolean enteredStage;
+    private String pendingNavigationStatus;
     private ConfigQcResult result = ConfigQcResult.CANCEL;
 
     public ConfigQcDialog(Window owner, ConfigQcContext context, List<ConfigQcStage> stages, boolean modal) {
@@ -257,7 +258,11 @@ public final class ConfigQcDialog {
         stageLabel.setText(stage.title());
         refreshHeader();
         refreshButtons();
+        String navigationStatus = pendingNavigationStatus;
+        pendingNavigationStatus = null;
         setStatus(" ");
+        previewPair.setChannelLutName(context.getChannelLutName());
+        previewPair.resetZ();
         previewPair.setOriginal(context.getCurrentImagePlus());
         previewPair.setAdjusted(null);
         previewPair.setAdjustedState(PreviewPairPanel.PreviewState.EMPTY, null);
@@ -268,6 +273,9 @@ public final class ConfigQcDialog {
             controlsPanel.add(controls, BorderLayout.CENTER);
         }
         stage.onEnter(context, previewPair);
+        if (navigationStatus != null && !navigationStatus.trim().isEmpty()) {
+            setStatus(navigationStatus);
+        }
         rootPanel.revalidate();
         rootPanel.repaint();
     }
@@ -334,6 +342,7 @@ public final class ConfigQcDialog {
             int target = requestedNextImage.intValue();
             if (target >= 0 && target < context.getImageCount()) {
                 context.setCurrentImageIndex(target);
+                pendingNavigationStatus = context.getCurrentImageMovedStatusText();
                 rebuildCurrentStage();
                 return;
             }
@@ -341,6 +350,7 @@ public final class ConfigQcDialog {
         }
 
         if (!forceStageComplete && context.moveToNextImage()) {
+            pendingNavigationStatus = context.getCurrentImageMovedStatusText();
             rebuildCurrentStage();
             return;
         }
@@ -354,6 +364,7 @@ public final class ConfigQcDialog {
         }
         stageIndex = next;
         context.resetCurrentImage();
+        pendingNavigationStatus = context.getCurrentImageMovedStatusText();
         rebuildCurrentStage();
     }
 

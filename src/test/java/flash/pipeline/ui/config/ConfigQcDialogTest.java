@@ -44,6 +44,7 @@ public class ConfigQcDialogTest {
         RecordingStage second = new RecordingStage("Second");
         ConfigQcContext context = contextWithTwoImages();
         ConfigQcDialog dialog = ConfigQcDialog.createForTest(context, Arrays.asList(first, second));
+        dialog.previewForTest().setCurrentZ(3);
 
         dialog.lockInForTest();
 
@@ -51,6 +52,8 @@ public class ConfigQcDialogTest {
         assertEquals(1, context.getCurrentImageIndex());
         assertEquals(1, first.lockCount);
         assertEquals("Image B", dialog.imageTextForTest());
+        assertEquals(1, dialog.previewForTest().getCurrentZ());
+        assertEquals("Moved to image 2 / 2: Image B", dialog.statusTextForTest());
 
         dialog.lockInForTest();
 
@@ -67,11 +70,14 @@ public class ConfigQcDialogTest {
         RecordingStage stage = new RecordingStage("Particle size");
         ConfigQcContext context = contextWithTwoImages();
         ConfigQcDialog dialog = ConfigQcDialog.createForTest(context, Arrays.asList(stage));
+        dialog.previewForTest().setCurrentZ(3);
 
         dialog.skipForTest();
 
         assertEquals(1, stage.skipCount);
         assertEquals(1, context.getCurrentImageIndex());
+        assertEquals(1, dialog.previewForTest().getCurrentZ());
+        assertEquals("Moved to image 2 / 2: Image B", dialog.statusTextForTest());
 
         dialog.restartForTest();
 

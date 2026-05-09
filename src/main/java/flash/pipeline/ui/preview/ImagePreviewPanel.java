@@ -20,6 +20,8 @@ import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Image;
 import java.awt.RenderingHints;
+import java.awt.image.ColorModel;
+import java.awt.image.IndexColorModel;
 
 public final class ImagePreviewPanel extends JPanel {
 
@@ -40,6 +42,7 @@ public final class ImagePreviewPanel extends JPanel {
     private int currentT = 1;
     private boolean updatingSlider;
     private ZSliceChangeListener zSliceChangeListener;
+    private PreviewDisplaySettings displaySettings = PreviewDisplaySettings.defaultFor("Grays");
 
     public ImagePreviewPanel(String title) {
         super(new BorderLayout(6, 6));
@@ -134,6 +137,11 @@ public final class ImagePreviewPanel extends JPanel {
         canvas.repaint();
     }
 
+    public void setDisplaySettings(PreviewDisplaySettings settings) {
+        displaySettings = settings == null ? PreviewDisplaySettings.defaultFor("Grays") : settings;
+        canvas.repaint();
+    }
+
     public void setZSliceChangeListener(ZSliceChangeListener listener) {
         this.zSliceChangeListener = listener;
     }
@@ -185,6 +193,10 @@ public final class ImagePreviewPanel extends JPanel {
         return titleLabel.getText();
     }
 
+    ImageProcessor renderedProcessorForTest() {
+        return currentProcessor();
+    }
+
     private boolean hasUsableImage() {
         return image != null && image.getStack() != null && image.getStackSize() > 0;
     }
@@ -224,12 +236,52 @@ public final class ImagePreviewPanel extends JPanel {
         ImageProcessor processor = stack.getProcessor(stackIndex);
         if (processor == null) return null;
         ImageProcessor copy = processor.duplicate();
-        double min = imp.getDisplayRangeMin();
-        double max = imp.getDisplayRangeMax();
+        double min = displaySettings.hasDisplayRange()
+                ? displaySettings.getDisplayMin()
+                : imp.getDisplayRangeMin();
+        double max = displaySettings.hasDisplayRange()
+                ? displaySettings.getDisplayMax()
+                : imp.getDisplayRangeMax();
         if (max > min) {
             copy.setMinAndMax(min, max);
         }
+        ColorModel colorModel = colorModelFor(displaySettings.effectiveLutName());
+        if (colorModel != null) {
+            copy.setColorModel(colorModel);
+        }
         return copy;
+    }
+
+    private static ColorModel colorModelFor(String lutName) {
+        String normalized = PreviewDisplaySettings.normalizeLutName(lutName);
+        byte[] red = new byte[256];
+        byte[] green = new byte[256];
+        byte[] blue = new byte[256];
+        for (int i = 0; i < 256; i++) {
+            int r = i;
+            int g = i;
+            int b = i;
+            if ("Red".equals(normalized)) {
+                g = 0;
+                b = 0;
+            } else if ("Green".equals(normalized)) {
+                r = 0;
+                b = 0;
+            } else if ("Blue".equals(normalized)) {
+                r = 0;
+                g = 0;
+            } else if ("Cyan".equals(normalized)) {
+                r = 0;
+            } else if ("Magenta".equals(normalized)) {
+                g = 0;
+            } else if ("Yellow".equals(normalized)) {
+                b = 0;
+            }
+            red[i] = (byte) r;
+            green[i] = (byte) g;
+            blue[i] = (byte) b;
+        }
+        return new IndexColorModel(8, 256, red, green, blue);
     }
 
     static int clamp(int value, int minimum, int maximum) {

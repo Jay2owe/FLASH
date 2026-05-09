@@ -1,8 +1,11 @@
 package flash.pipeline.ui.config;
 
+import flash.pipeline.bin.BinConfig;
+
 import ij.ImagePlus;
 
 import java.io.File;
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -163,6 +166,14 @@ public final class ConfigQcContext {
         return "Image " + (currentImageIndex + 1) + " / " + images.size();
     }
 
+    public String getCurrentImageMovedStatusText() {
+        if (images.isEmpty()) {
+            return "No images remain.";
+        }
+        return "Moved to image " + (currentImageIndex + 1) + " / " + images.size()
+                + ": " + getCurrentImageDisplayName();
+    }
+
     public int getChannelIndex() {
         return channelIndex;
     }
@@ -192,6 +203,17 @@ public final class ConfigQcContext {
             return "C" + getChannelNumber();
         }
         return "C" + getChannelNumber() + " - " + name;
+    }
+
+    public String getChannelLutName() {
+        List<String> colors = channelColorsFromConfig();
+        if (channelIndex >= 0 && colors != null && channelIndex < colors.size()) {
+            String color = safe(colors.get(channelIndex)).trim();
+            if (!color.isEmpty()) {
+                return color;
+            }
+        }
+        return "Grays";
     }
 
     public void putAttribute(String key, Object value) {
@@ -243,5 +265,37 @@ public final class ConfigQcContext {
 
     private static String safe(String value) {
         return value == null ? "" : value;
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<String> channelColorsFromConfig() {
+        if (config instanceof BinConfig) {
+            return ((BinConfig) config).channelColors;
+        }
+        Object value = fieldValue(config, "colors");
+        if (!(value instanceof List<?>)) {
+            value = fieldValue(config, "channelColors");
+        }
+        if (value instanceof List<?>) {
+            return (List<String>) value;
+        }
+        return null;
+    }
+
+    private static Object fieldValue(Object target, String fieldName) {
+        if (target == null || fieldName == null) return null;
+        Class<?> type = target.getClass();
+        while (type != null) {
+            try {
+                Field field = type.getDeclaredField(fieldName);
+                field.setAccessible(true);
+                return field.get(target);
+            } catch (NoSuchFieldException e) {
+                type = type.getSuperclass();
+            } catch (Exception e) {
+                return null;
+            }
+        }
+        return null;
     }
 }

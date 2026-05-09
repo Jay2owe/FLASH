@@ -26,6 +26,7 @@ public final class MinMaxControlPanel extends JPanel {
     private final FijiStyleRangeSliderPanel maximumSlider = new FijiStyleRangeSliderPanel("Maximum");
     private final FijiStyleRangeSliderPanel brightnessSlider = new FijiStyleRangeSliderPanel("Brightness");
     private final FijiStyleRangeSliderPanel contrastSlider = new FijiStyleRangeSliderPanel("Contrast");
+    private final boolean includeSetButton;
 
     private double domainMin = 0.0;
     private double domainMax = 255.0;
@@ -37,7 +38,12 @@ public final class MinMaxControlPanel extends JPanel {
     private Listener listener;
 
     public MinMaxControlPanel() {
+        this(true);
+    }
+
+    public MinMaxControlPanel(boolean includeSetButton) {
         super(new BorderLayout(0, 6));
+        this.includeSetButton = includeSetButton;
         setBorder(BorderFactory.createTitledBorder("Brightness/Contrast"));
         add(histogramPanel, BorderLayout.NORTH);
         add(buildControls(), BorderLayout.CENTER);
@@ -105,7 +111,6 @@ public final class MinMaxControlPanel extends JPanel {
         actions.setOpaque(false);
         JButton auto = new JButton("Auto");
         JButton reset = new JButton("Reset");
-        JButton set = new JButton("Set");
         auto.addActionListener(e -> {
             double[] autoRange = calculateAutoDisplayRange();
             applyRange(autoRange[0], autoRange[1], true, false);
@@ -115,12 +120,15 @@ public final class MinMaxControlPanel extends JPanel {
             applyRange(resetMin, resetMax, true, false);
             if (listener != null) listener.resetRequested();
         });
-        set.addActionListener(e -> {
-            if (listener != null) listener.setRequested();
-        });
         actions.add(auto);
         actions.add(reset);
-        actions.add(set);
+        if (includeSetButton) {
+            JButton set = new JButton("Set");
+            set.addActionListener(e -> {
+                if (listener != null) listener.setRequested();
+            });
+            actions.add(set);
+        }
         actions.add(Box.createHorizontalGlue());
         return actions;
     }

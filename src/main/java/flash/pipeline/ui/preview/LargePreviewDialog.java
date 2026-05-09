@@ -26,6 +26,7 @@ public final class LargePreviewDialog extends JDialog {
     private final ImagePreviewPanel adjustedPreview = new ImagePreviewPanel("Adjusted preview");
     private SliceListener sliceListener;
     private boolean syncingSlices;
+    private PreviewDisplaySettings displaySettings = PreviewDisplaySettings.defaultFor("Grays");
 
     public LargePreviewDialog(Window owner) {
         super(owner, "Large preview", ModalityType.MODELESS);
@@ -53,6 +54,12 @@ public final class LargePreviewDialog extends JDialog {
         adjustedPreview.setStatusText(text);
     }
 
+    public void setDisplaySettings(PreviewDisplaySettings settings) {
+        displaySettings = settings == null ? PreviewDisplaySettings.defaultFor("Grays") : settings;
+        originalPreview.setDisplaySettings(displaySettings);
+        adjustedPreview.setDisplaySettings(displaySettings);
+    }
+
     public void setCurrentZ(int zSlice) {
         if (syncingSlices) return;
         syncingSlices = true;
@@ -68,6 +75,17 @@ public final class LargePreviewDialog extends JDialog {
 
     int getCurrentZForTest() {
         return originalPreview.getCurrentZ();
+    }
+
+    Window ownerForTest() {
+        return getOwner();
+    }
+
+    void raiseForUser() {
+        setVisible(true);
+        toFront();
+        requestFocus();
+        requestFocusInWindow();
     }
 
     private JPanel buildPreviews() {
