@@ -28,6 +28,11 @@ public final class DagToIjmEmitter {
             sb.append(lineId).append(" = getImageID();\n");
             for (int j = 0; j < line.ops.size(); j++) {
                 DagNode node = line.ops.get(j);
+                // Disabled nodes still appear in the embedded DAG JSON header
+                // (serialized above via DagIRSerializer.toJson), so a reload
+                // restores them. They are simply omitted from the IJM body so
+                // the macro skips them at execution time.
+                if (node.disabled) continue;
                 sb.append(emitRun(node));
             }
         }

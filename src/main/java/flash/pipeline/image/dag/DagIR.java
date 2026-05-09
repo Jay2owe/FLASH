@@ -29,6 +29,20 @@ public final class DagIR {
         this.executionTier = hasTierTwoNode(this.lines) ? "legacy" : requestedTier;
     }
 
+    /**
+     * True when the DAG has no combiners and a single line whose id matches
+     * {@code output}. Stages 03/04 use this to decide whether the inline
+     * accordion can edit the pipeline directly, or whether the user must drop
+     * into the canvas builder for branched / combined pipelines.
+     */
+    public boolean isLinear() {
+        return combiners.isEmpty()
+                && lines.size() == 1
+                && output != null
+                && output.length() > 0
+                && output.equals(lines.get(0).id);
+    }
+
     @Override
     public boolean equals(Object obj) {
         if (this == obj) return true;

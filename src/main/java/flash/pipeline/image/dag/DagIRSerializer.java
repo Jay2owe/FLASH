@@ -41,6 +41,10 @@ public final class DagIRSerializer {
                     sb.append(",");
                     appendField(sb, "menuPath", quote(node.menuPath));
                 }
+                if (node.disabled) {
+                    sb.append(",");
+                    appendField(sb, "disabled", "true");
+                }
                 sb.append("}");
             }
             sb.append("]}");
@@ -90,7 +94,13 @@ public final class DagIRSerializer {
                 String args = asString(optional(rawNode, "args", ""), "node.args");
                 String commandName = asString(optional(rawNode, "commandName", ""), "node.commandName");
                 String menuPath = asString(optional(rawNode, "menuPath", ""), "node.menuPath");
-                ops.add(new DagNode(nodeId, parseOpType(typeName), args, commandName, menuPath));
+                Object rawDisabled = optional(rawNode, "disabled", Boolean.FALSE);
+                boolean disabled = rawDisabled instanceof Boolean
+                        ? ((Boolean) rawDisabled).booleanValue()
+                        : false;
+                DagNode dagNode = new DagNode(nodeId, parseOpType(typeName), args, commandName, menuPath);
+                dagNode.disabled = disabled;
+                ops.add(dagNode);
             }
             lines.add(new DagLine(id, ops));
         }

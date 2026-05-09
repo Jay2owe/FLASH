@@ -9,6 +9,15 @@ public final class DagNode {
     public final String commandName;
     public final String menuPath;
 
+    /**
+     * Stage 04 toggles this through the inline eye control. Disabled nodes are
+     * omitted from the emitted IJM body but always serialized in the embedded
+     * DAG JSON header so a round-trip preserves the field. The field is mutable
+     * by design: the UI flips it in place, and equality/hash include it so two
+     * DAGs that differ only by disabled state are not considered equal.
+     */
+    public boolean disabled;
+
     public DagNode(OpType type, String args) {
         this("", type, args);
     }
@@ -23,6 +32,7 @@ public final class DagNode {
         this.args = args == null ? "" : args;
         this.commandName = commandName == null ? "" : commandName;
         this.menuPath = menuPath == null ? "" : menuPath;
+        this.disabled = false;
     }
 
     @Override
@@ -34,7 +44,8 @@ public final class DagNode {
                 && type == other.type
                 && args.equals(other.args)
                 && commandName.equals(other.commandName)
-                && menuPath.equals(other.menuPath);
+                && menuPath.equals(other.menuPath)
+                && disabled == other.disabled;
     }
 
     @Override
@@ -44,6 +55,7 @@ public final class DagNode {
         result = 31 * result + args.hashCode();
         result = 31 * result + commandName.hashCode();
         result = 31 * result + menuPath.hashCode();
+        result = 31 * result + (disabled ? 1 : 0);
         return result;
     }
 }
