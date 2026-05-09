@@ -83,6 +83,32 @@ public final class FilterCatalog extends JPanel {
         return list.getSelectedValue();
     }
 
+    /**
+     * Returns the first non-stub entry whose label equals {@code label}
+     * (case-insensitive), or {@code null} if none matches. Used by stage 04's
+     * inline {@code + Add filter…} popover to look up a catalog entry by name.
+     */
+    public Entry findEntryByLabel(String label) {
+        if (label == null) return null;
+        String needle = label.trim();
+        if (needle.isEmpty()) return null;
+        for (int i = 0; i < entries.size(); i++) {
+            Entry entry = entries.get(i);
+            if (!entry.stub && needle.equalsIgnoreCase(entry.label)) return entry;
+        }
+        return null;
+    }
+
+    /** Public ordered snapshot of all non-stub catalog entries. */
+    public List<Entry> getAllEntries() {
+        List<Entry> out = new ArrayList<Entry>(entries.size());
+        for (int i = 0; i < entries.size(); i++) {
+            Entry e = entries.get(i);
+            if (!e.stub) out.add(e);
+        }
+        return Collections.unmodifiableList(out);
+    }
+
     public void setAddRequestListener(AddRequestListener listener) {
         this.addListener = listener;
     }

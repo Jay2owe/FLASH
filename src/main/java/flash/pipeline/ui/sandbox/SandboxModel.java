@@ -29,8 +29,10 @@ final class SandboxModel {
                 Line line = new Line(dagLine.id);
                 for (int j = 0; j < dagLine.ops.size(); j++) {
                     DagNode node = dagLine.ops.get(j);
-                    line.nodes.add(new Node(node.id.length() == 0 ? "node_" + model.nextNode++ : node.id,
-                            node.type, node.args, node.commandName, node.menuPath));
+                    Node n = new Node(node.id.length() == 0 ? "node_" + model.nextNode++ : node.id,
+                            node.type, node.args, node.commandName, node.menuPath);
+                    n.disabled = node.disabled;
+                    line.nodes.add(n);
                 }
                 model.lines.add(line);
             }
@@ -54,7 +56,9 @@ final class SandboxModel {
             List<DagNode> nodes = new ArrayList<DagNode>();
             for (int j = 0; j < line.nodes.size(); j++) {
                 Node node = line.nodes.get(j);
-                nodes.add(new DagNode(node.id, node.type, node.args, node.commandName, node.menuPath));
+                DagNode dn = new DagNode(node.id, node.type, node.args, node.commandName, node.menuPath);
+                dn.disabled = node.disabled;
+                nodes.add(dn);
             }
             dagLines.add(new DagLine(line.id, nodes));
         }
@@ -201,6 +205,9 @@ final class SandboxModel {
         String args;
         String commandName;
         String menuPath;
+        // Stage 04: tracked here so the panel's structural API can flip the
+        // eye toggle. fromDag/toDag round-trip the value through DagNode.disabled.
+        boolean disabled;
 
         Node(String id, OpType type, String args) {
             this(id, type, args, "", "");
@@ -212,6 +219,7 @@ final class SandboxModel {
             this.args = args == null ? "" : args;
             this.commandName = commandName == null ? "" : commandName;
             this.menuPath = menuPath == null ? "" : menuPath;
+            this.disabled = false;
         }
 
         boolean isLegacy() {

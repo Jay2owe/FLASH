@@ -52,6 +52,23 @@ public final class FilterBuilderPanel extends JPanel {
         void close(ImagePlus imp);
     }
 
+    /**
+     * Public DTO returned by {@link #nodeSummaries()}. Lets callers see the
+     * order, identity, and disabled state of nodes in a linear pipeline
+     * without leaking the package-private {@link SandboxModel}.
+     */
+    public static final class NodeSummary {
+        public final String id;
+        public final String commandName;
+        public final boolean disabled;
+
+        public NodeSummary(String id, String commandName, boolean disabled) {
+            this.id = id == null ? "" : id;
+            this.commandName = commandName == null ? "" : commandName;
+            this.disabled = disabled;
+        }
+    }
+
     private final SandboxModel model;
     private final NodeEditorPanel nodeEditor;
     private final CombinerEditorPanel combinerEditor;
@@ -187,6 +204,139 @@ public final class FilterBuilderPanel extends JPanel {
     public void markSaved() {
         savedIjmSnapshot = currentIjm();
         savedNodeCount = countNodes(model);
+    }
+
+    // ── Stage 04 structural-mutation API ─────────────────────────────────
+    //
+    // Each method requires a single linear line — the wizard composes one
+    // hidden panel for the linear-edit case, and the branched-preset banner
+    // gates structural controls when the DAG isn't linear. Callers get a
+    // clear IllegalStateException if they reach for these methods on a
+    // branched DAG; they should consult isLinear() on a freshly loaded
+    // DagIR before structural ops.
+
+    public void appendNode(FilterCatalog.Entry entry) {
+        if (entry == null || entry.stub) return;
+        SandboxModel.Line line = singleLineOrThrow();
+        model.addNode(line, entry);
+        canvas.rebuild();
+        notifyListeners();
+    }
+
+    public void insertNodeAt(int index, FilterCatalog.Entry entry) {
+        if (entry == null || entry.stub) return;
+        SandboxModel.Line line = singleLineOrThrow();
+        model.addNode(line, entry);
+        SandboxModel.Node added = line.nodes.remove(line.nodes.size() - 1);
+        int target = index;
+        if (target < 0) target = 0;
+        if (target > line.nodes.size()) target = line.nodes.size();
+        line.nodes.add(target, added);
+        model.selected = added;
+        canvas.rebuild();
+        notifyListeners();
+    }
+
+    public void removeNode(String nodeId) {
+        SandboxModel.Line line = singleLineOrThrow();
+        SandboxModel.Node target = findNodeById(line, nodeId);
+        if (target == null) return;
+        model.removeNode(line, target);
+        canvas.rebuild();
+        notifyListeners();
+    }
+
+    public void reorder(int fromIndex, int toIndex) {
+        SandboxModel.Line line = singleLineOrThrow();
+        int n = line.nodes.size();
+        if (fromIndex < 0 || fromIndex >= n) return;
+        int target = toIndex;
+        if (target < 0) target = 0;
+        if (target >= n) target = n - 1;
+        if (fromIndex == target) return;
+        SandboxModel.Node node = line.nodes.remove(fromIndex);
+        line.nodes.add(target, node);
+        canvas.rebuild();
+        notifyListeners();
+    }
+
+    public void setNodeDisabled(String nodeId, boolean disabled) {
+        SandboxModel.Line line = singleLineOrThrow();
+        SandboxModel.Node target = findNodeById(line, nodeId);
+        if (target == null || target.disabled == disabled) return;
+        target.disabled = disabled;
+        canvas.rebuild();
+        notifyListeners();
+    }
+
+    /**
+     * Stage 04: pushes parameter-row text edits from the wizard accordion
+     * back into the hidden builder's SandboxModel so subsequent structural
+     * mutations don't lose those edits. The wizard is the single source of
+     * truth for parameter values; this method just keeps the model in sync.
+     */
+    public void updateNodeArgs(String nodeId, String args) {
+        SandboxModel.Line line = singleLineOrThrow();
+        SandboxModel.Node target = findNodeById(line, nodeId);
+        if (target == null) return;
+        target.args = args == null ? "" : args;
+    }
+
+    public List<NodeSummary> nodeSummaries() {
+        SandboxModel.Line line = singleLineOrThrow();
+        List<NodeSummary> out = new ArrayList<NodeSummary>(line.nodes.size());
+        for (int i = 0; i < line.nodes.size(); i++) {
+            SandboxModel.Node n = line.nodes.get(i);
+            out.add(new NodeSummary(n.id, summaryCommandFor(n), n.disabled));
+        }
+        return out;
+    }
+
+    /**
+     * Emits the IJM with every node included, even disabled ones. Used by
+     * the wizard accordion to keep disabled rows visible (greyed out) so
+     * the user can re-enable them without dropping into the canvas.
+     * {@link #currentIjm()} continues to filter disabled nodes for execution.
+     */
+    public String currentDisplayIjm() {
+        SandboxModel.Line line = singleLineOrThrow();
+        boolean[] saved = new boolean[line.nodes.size()];
+        for (int i = 0; i < line.nodes.size(); i++) {
+            saved[i] = line.nodes.get(i).disabled;
+            line.nodes.get(i).disabled = false;
+        }
+        try {
+            return DagToIjmEmitter.emit(model.toDag());
+        } finally {
+            for (int i = 0; i < line.nodes.size(); i++) {
+                line.nodes.get(i).disabled = saved[i];
+            }
+        }
+    }
+
+    private SandboxModel.Line singleLineOrThrow() {
+        if (model.lines.size() != 1 || !model.combiners.isEmpty()) {
+            throw new IllegalStateException(
+                    "Structural mutation requires a single linear DAG line; this builder has "
+                            + model.lines.size() + " line(s) and "
+                            + model.combiners.size() + " combiner(s).");
+        }
+        return model.lines.get(0);
+    }
+
+    private static SandboxModel.Node findNodeById(SandboxModel.Line line, String nodeId) {
+        if (nodeId == null) return null;
+        for (int i = 0; i < line.nodes.size(); i++) {
+            SandboxModel.Node n = line.nodes.get(i);
+            if (nodeId.equals(n.id)) return n;
+        }
+        return null;
+    }
+
+    private static String summaryCommandFor(SandboxModel.Node node) {
+        if (node.commandName != null && !node.commandName.isEmpty()) return node.commandName;
+        String cmd = DagToIjmEmitter.commandFor(node.type);
+        return cmd == null ? "" : cmd;
     }
 
     public void addChangeListener(Runnable r) {

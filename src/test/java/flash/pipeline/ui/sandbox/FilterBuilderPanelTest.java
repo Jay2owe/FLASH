@@ -7,8 +7,10 @@ import ij.ImageStack;
 import ij.process.ByteProcessor;
 import org.junit.Test;
 
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
@@ -86,6 +88,71 @@ public class FilterBuilderPanelTest {
         // not throw and both panels must independently report a non-null DAG.
         assertNotNull(first.currentDag());
         assertNotNull(second.currentDag());
+    }
+
+    // ── Stage 04 structural-mutation API ────────────────────────────────
+
+    @Test
+    public void appendNode_emitsExpectedIjm() {
+        DagIR seed = IjmToDagLoader.load(SEED_MACRO);
+        FilterBuilderPanel panel = new FilterBuilderPanel(seed, null, noopRunner(), null);
+        FilterCatalog catalog = new FilterCatalog();
+        FilterCatalog.Entry medianEntry = catalog.findEntryByLabel("Median");
+        assertNotNull("Median entry must be present in the catalog", medianEntry);
+
+        int nodeCountBefore = panel.nodeSummaries().size();
+        panel.appendNode(medianEntry);
+        List<FilterBuilderPanel.NodeSummary> after = panel.nodeSummaries();
+        assertEquals(nodeCountBefore + 1, after.size());
+        String ijm = panel.currentIjm();
+        assertTrue("Emitted IJM must contain the appended Median run() line",
+                ijm.contains("run(\"Median..."));
+        assertTrue("Original Gaussian Blur step must remain in emitted IJM",
+                ijm.contains("run(\"Gaussian Blur..."));
+        assertTrue("Median must be emitted after Gaussian Blur (appendNode == end)",
+                ijm.indexOf("run(\"Gaussian Blur") < ijm.indexOf("run(\"Median"));
+    }
+
+    @Test
+    public void setNodeDisabled_omitsFromIjmButPreservesInDagJson() {
+        DagIR seed = IjmToDagLoader.load(SEED_MACRO);
+        FilterBuilderPanel panel = new FilterBuilderPanel(seed, null, noopRunner(), null);
+
+        List<FilterBuilderPanel.NodeSummary> summaries = panel.nodeSummaries();
+        assertFalse(summaries.isEmpty());
+        String firstId = summaries.get(0).id;
+
+        panel.setNodeDisabled(firstId, true);
+        String ijm = panel.currentIjm();
+
+        assertFalse("Disabled node's run() must be absent from the IJM body",
+                ijm.contains("run(\"Gaussian Blur..."));
+        assertTrue("Embedded DAG JSON header must mark the node disabled",
+                ijm.contains("\"disabled\":true"));
+
+        DagIR reloaded = IjmToDagLoader.load(ijm);
+        assertNotNull(reloaded);
+        assertFalse(reloaded.lines.isEmpty());
+        assertFalse(reloaded.lines.get(0).ops.isEmpty());
+        assertTrue("Round-trip through embedded JSON must restore disabled=true",
+                reloaded.lines.get(0).ops.get(0).disabled);
+    }
+
+    @Test
+    public void reorder_changesEmittedOrder() {
+        String macro = "run(\"Gaussian Blur...\", \"sigma=2 stack\");\n"
+                + "run(\"Median...\", \"radius=2 stack\");\n";
+        DagIR seed = IjmToDagLoader.load(macro);
+        FilterBuilderPanel panel = new FilterBuilderPanel(seed, null, noopRunner(), null);
+
+        String before = panel.currentIjm();
+        assertTrue("Pre-reorder, Gaussian Blur must come before Median",
+                before.indexOf("run(\"Gaussian Blur") < before.indexOf("run(\"Median"));
+
+        panel.reorder(0, 1);
+        String after = panel.currentIjm();
+        assertTrue("Post-reorder, Median must come before Gaussian Blur",
+                after.indexOf("run(\"Median") < after.indexOf("run(\"Gaussian Blur"));
     }
 
     @Test
