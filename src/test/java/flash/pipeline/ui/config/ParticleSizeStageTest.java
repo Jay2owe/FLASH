@@ -77,6 +77,63 @@ public class ParticleSizeStageTest {
     }
 
     @Test
+    public void onEnterCreatesRawAndFilteredSourcesAndDefaultsToFiltered() {
+        RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
+        ParticleSizeStage stage = new ParticleSizeStage(
+                new RecordingStore("1-Infinity"), adapter);
+
+        stage.buildControls(context(), new RecordingActions());
+        stage.onEnter(context(), new PreviewPairPanel("Original", "Adjusted"));
+
+        assertEquals(1, adapter.rawSourceCreations);
+        assertEquals(1, adapter.filteredSourceCreations);
+        assertTrue(stage.currentSourceTitleForTest().startsWith("filtered"));
+        assertEquals(2, stage.largePreviewPaneCountForTest());
+    }
+
+    @Test
+    public void sourceSwitchingDoesNotRunObjectPreviewBeforeLabelsExist() {
+        RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
+        RecordingActions actions = new RecordingActions();
+        ParticleSizeStage stage = new ParticleSizeStage(
+                new RecordingStore("1-Infinity"), adapter);
+
+        stage.buildControls(context(), actions);
+        stage.onEnter(context(), new PreviewPairPanel("Original", "Adjusted"));
+        adapter.previewRuns = 0;
+
+        stage.selectRawSourceForTest();
+
+        assertTrue(stage.currentSourceTitleForTest().startsWith("raw"));
+        assertEquals(0, adapter.previewRuns);
+        assertEquals(null, actions.adjustedPreview);
+    }
+
+    @Test
+    public void overlayToggleRendersObjectsOverSelectedSource() throws Exception {
+        RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
+        RecordingActions actions = new RecordingActions();
+        ParticleSizeStage stage = new ParticleSizeStage(
+                new RecordingStore("1-Infinity"), adapter);
+
+        stage.buildControls(context(), actions);
+        stage.onEnter(context(), new PreviewPairPanel("Original", "Adjusted"));
+        stage.runPreviewNowForTest();
+
+        assertEquals("Object label preview", actions.adjustedPreview.getTitle());
+        assertEquals(3, stage.largePreviewPaneCountForTest());
+
+        stage.setShowOverlayForTest(true);
+
+        assertTrue(actions.adjustedPreview.getTitle().startsWith("Object overlay | filtered"));
+
+        stage.selectRawSourceForTest();
+
+        assertTrue(actions.adjustedPreview.getTitle().startsWith("Object overlay | raw"));
+        assertEquals("Objects detected: 2", actions.status);
+    }
+
+    @Test
     public void lockInWritesNormalizedSizeToken() {
         RecordingStore store = new RecordingStore("1-Infinity");
         ParticleSizeStage stage = new ParticleSizeStage(store, new RecordingPreviewAdapter());
@@ -128,11 +185,21 @@ public class ParticleSizeStageTest {
     }
 
     private static final class RecordingPreviewAdapter implements ParticleSizeStage.PreviewAdapter {
+        int rawSourceCreations;
+        int filteredSourceCreations;
         int previewRuns;
         int lastThreshold;
         int lastMinSize;
 
+        @Override public ImagePlus createRawSource(ConfigQcContext context) {
+            rawSourceCreations++;
+            ImagePlus source = context.getCurrentImagePlus().duplicate();
+            source.setTitle("raw");
+            return source;
+        }
+
         @Override public ImagePlus createFilteredSource(ConfigQcContext context) {
+            filteredSourceCreations++;
             ImagePlus source = context.getCurrentImagePlus().duplicate();
             source.setTitle("filtered");
             return source;

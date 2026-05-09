@@ -39,6 +39,10 @@ public final class PreviewPairPanel extends JPanel {
 
     private ImagePlus originalImage;
     private ImagePlus adjustedImage;
+    private boolean usingCustomLargePreviewImages;
+    private ImagePlus largePreviewFirstImage;
+    private ImagePlus largePreviewSecondImage;
+    private ImagePlus largePreviewThirdImage;
     private String channelLutName = "Grays";
     private PreviewDisplaySettings displaySettings = PreviewDisplaySettings.defaultFor(channelLutName);
     private PreviewState adjustedState = PreviewState.EMPTY;
@@ -117,6 +121,23 @@ public final class PreviewPairPanel extends JPanel {
         this.sharedZChangeListener = listener;
     }
 
+    public void setLargePreviewImages(ImagePlus firstImage, ImagePlus secondImage,
+                                      ImagePlus thirdImage) {
+        usingCustomLargePreviewImages = true;
+        largePreviewFirstImage = firstImage;
+        largePreviewSecondImage = secondImage;
+        largePreviewThirdImage = thirdImage;
+        updateLargeImages();
+    }
+
+    public void clearLargePreviewImages() {
+        usingCustomLargePreviewImages = false;
+        largePreviewFirstImage = null;
+        largePreviewSecondImage = null;
+        largePreviewThirdImage = null;
+        updateLargeImages();
+    }
+
     public JButton largeViewButton() {
         return largeViewButton;
     }
@@ -150,6 +171,11 @@ public final class PreviewPairPanel extends JPanel {
         return largePreviewDialog == null ? null : largePreviewDialog.ownerForTest();
     }
 
+    int largePreviewImageCountForTest() {
+        if (!usingCustomLargePreviewImages) return 2;
+        return largePreviewThirdImage == null ? 2 : 3;
+    }
+
     void disposeLargePreviewForTest() {
         if (largePreviewDialog != null) {
             largePreviewDialog.dispose();
@@ -158,9 +184,22 @@ public final class PreviewPairPanel extends JPanel {
     }
 
     static int clampSharedZ(int requestedZ, int originalSlices, int adjustedSlices) {
-        int originalCount = Math.max(1, originalSlices);
-        int adjustedCount = Math.max(1, adjustedSlices);
-        int sharedMax = Math.min(originalCount, adjustedCount);
+        return clampSharedZ(requestedZ, new int[]{originalSlices, adjustedSlices});
+    }
+
+    static int clampSharedZ(int requestedZ, int originalSlices, int adjustedSlices,
+                            int extraSlices) {
+        return clampSharedZ(requestedZ, new int[]{originalSlices, adjustedSlices, extraSlices});
+    }
+
+    private static int clampSharedZ(int requestedZ, int[] sliceCounts) {
+        int sharedMax = sliceCounts.length == 0 ? 1 : Math.max(1, sliceCounts[0]);
+        for (int i = 1; i < sliceCounts.length; i++) {
+            int count = sliceCounts[i] == Integer.MAX_VALUE
+                    ? Integer.MAX_VALUE
+                    : Math.max(1, sliceCounts[i]);
+            sharedMax = Math.min(sharedMax, count);
+        }
         return ImagePreviewPanel.clamp(requestedZ, 1, sharedMax);
     }
 
@@ -285,7 +324,15 @@ public final class PreviewPairPanel extends JPanel {
 
     private void updateLargeImages() {
         if (largePreviewDialog == null) return;
-        largePreviewDialog.setImages(originalImage, adjustedImage, currentZ);
+        if (usingCustomLargePreviewImages) {
+            largePreviewDialog.setImages(
+                    largePreviewFirstImage,
+                    largePreviewSecondImage,
+                    largePreviewThirdImage,
+                    currentZ);
+        } else {
+            largePreviewDialog.setImages(originalImage, adjustedImage, currentZ);
+        }
         largePreviewDialog.setAdjustedStatusText(adjustedPreview.statusTextForTest());
         largePreviewDialog.setDisplaySettings(displaySettings);
     }

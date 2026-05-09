@@ -24,8 +24,11 @@ public final class LargePreviewDialog extends JDialog {
 
     private final ImagePreviewPanel originalPreview = new ImagePreviewPanel("Original image");
     private final ImagePreviewPanel adjustedPreview = new ImagePreviewPanel("Adjusted preview");
+    private final ImagePreviewPanel extraPreview = new ImagePreviewPanel("Object map");
+    private final JPanel previewsPanel = new JPanel();
     private SliceListener sliceListener;
     private boolean syncingSlices;
+    private boolean extraPreviewVisible;
     private PreviewDisplaySettings displaySettings = PreviewDisplaySettings.defaultFor("Grays");
 
     public LargePreviewDialog(Window owner) {
@@ -45,19 +48,31 @@ public final class LargePreviewDialog extends JDialog {
     }
 
     public void setImages(ImagePlus originalImage, ImagePlus adjustedImage, int zSlice) {
+        setImages(originalImage, adjustedImage, null, zSlice);
+    }
+
+    public void setImages(ImagePlus originalImage, ImagePlus adjustedImage,
+                          ImagePlus extraImage, int zSlice) {
+        configurePreviewPanel(extraImage != null);
         originalPreview.setImage(originalImage);
         adjustedPreview.setImage(adjustedImage);
+        extraPreview.setImage(extraImage);
         setCurrentZ(zSlice);
     }
 
     public void setAdjustedStatusText(String text) {
-        adjustedPreview.setStatusText(text);
+        if (extraPreviewVisible) {
+            extraPreview.setStatusText(text);
+        } else {
+            adjustedPreview.setStatusText(text);
+        }
     }
 
     public void setDisplaySettings(PreviewDisplaySettings settings) {
         displaySettings = settings == null ? PreviewDisplaySettings.defaultFor("Grays") : settings;
         originalPreview.setDisplaySettings(displaySettings);
         adjustedPreview.setDisplaySettings(displaySettings);
+        extraPreview.setDisplaySettings(displaySettings);
     }
 
     public void setCurrentZ(int zSlice) {
@@ -65,9 +80,13 @@ public final class LargePreviewDialog extends JDialog {
         syncingSlices = true;
         try {
             int clamped = PreviewPairPanel.clampSharedZ(
-                    zSlice, originalPreview.getSliceCount(), adjustedPreview.getSliceCount());
+                    zSlice,
+                    originalPreview.getSliceCount(),
+                    adjustedPreview.getSliceCount(),
+                    extraPreviewVisible ? extraPreview.getSliceCount() : Integer.MAX_VALUE);
             originalPreview.setCurrentZ(clamped);
             adjustedPreview.setCurrentZ(clamped);
+            extraPreview.setCurrentZ(clamped);
         } finally {
             syncingSlices = false;
         }
@@ -81,6 +100,10 @@ public final class LargePreviewDialog extends JDialog {
         return getOwner();
     }
 
+    int visiblePreviewCountForTest() {
+        return extraPreviewVisible ? 3 : 2;
+    }
+
     void raiseForUser() {
         setVisible(true);
         toFront();
@@ -89,12 +112,29 @@ public final class LargePreviewDialog extends JDialog {
     }
 
     private JPanel buildPreviews() {
-        JPanel previews = new JPanel(new GridLayout(1, 2, 8, 0));
-        previews.setBorder(BorderFactory.createEmptyBorder(8, 8, 0, 8));
-        previews.setPreferredSize(new Dimension(1080, 620));
-        previews.add(originalPreview);
-        previews.add(adjustedPreview);
-        return previews;
+        previewsPanel.setBorder(BorderFactory.createEmptyBorder(8, 8, 0, 8));
+        configurePreviewPanel(false);
+        return previewsPanel;
+    }
+
+    private void configurePreviewPanel(boolean showExtraPreview) {
+        if (extraPreviewVisible == showExtraPreview && previewsPanel.getComponentCount() > 0) {
+            return;
+        }
+        extraPreviewVisible = showExtraPreview;
+        previewsPanel.removeAll();
+        previewsPanel.setLayout(new GridLayout(1, showExtraPreview ? 3 : 2, 8, 0));
+        previewsPanel.setPreferredSize(new Dimension(showExtraPreview ? 1320 : 1080, 620));
+        previewsPanel.add(originalPreview);
+        previewsPanel.add(adjustedPreview);
+        if (showExtraPreview) {
+            previewsPanel.add(extraPreview);
+        } else {
+            extraPreview.setImage(null);
+            extraPreview.setStatusText(null);
+        }
+        previewsPanel.revalidate();
+        previewsPanel.repaint();
     }
 
     private JPanel buildFooter() {
@@ -116,6 +156,7 @@ public final class LargePreviewDialog extends JDialog {
         };
         originalPreview.setZSliceChangeListener(listener);
         adjustedPreview.setZSliceChangeListener(listener);
+        extraPreview.setZSliceChangeListener(listener);
     }
 
     private void sizeNearDesktop() {

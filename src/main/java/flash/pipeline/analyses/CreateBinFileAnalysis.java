@@ -4740,6 +4740,14 @@ public class CreateBinFileAnalysis implements Analysis {
                     }
                 },
                 new ParticleSizeStage.PreviewAdapter() {
+                    @Override public ImagePlus createRawSource(ConfigQcContext context) {
+                        ImagePlus source = duplicateCurrentChannel(context, channelNum);
+                        if (source == null) return null;
+                        source.setTitle("Particle size raw input | " + chLabel + " | "
+                                + (context == null ? "" : context.getCurrentImageDisplayName()));
+                        return applyPreviewLut(source, channelColor(cfg, channelIndex));
+                    }
+
                     @Override public ImagePlus createFilteredSource(ConfigQcContext context) {
                         ImagePlus source = duplicateCurrentChannel(context, channelNum);
                         if (source == null) return null;

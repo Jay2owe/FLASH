@@ -21,6 +21,12 @@ public final class LabelMapStyler {
         return labelImage;
     }
 
+    public static int rgbForLabel(int label) {
+        if (label <= 0) return 0x000000;
+        Color color = colorForIndex(categoricalIndex(label));
+        return (color.getRed() << 16) | (color.getGreen() << 8) | color.getBlue();
+    }
+
     private static LUT createCategoricalLut() {
         byte[] red = new byte[256];
         byte[] green = new byte[256];
@@ -29,13 +35,21 @@ public final class LabelMapStyler {
         green[0] = 0;
         blue[0] = 0;
         for (int i = 1; i < 256; i++) {
-            float hue = (float) ((i * 0.61803398875) % 1.0);
-            Color color = Color.getHSBColor(hue, 0.85f, 1.0f);
+            Color color = colorForIndex(i);
             red[i] = (byte) color.getRed();
             green[i] = (byte) color.getGreen();
             blue[i] = (byte) color.getBlue();
         }
         return new LUT(red, green, blue);
+    }
+
+    private static int categoricalIndex(int label) {
+        return ((label - 1) % 255) + 1;
+    }
+
+    private static Color colorForIndex(int index) {
+        float hue = (float) ((index * 0.61803398875) % 1.0);
+        return Color.getHSBColor(hue, 0.85f, 1.0f);
     }
 
     private static int maxDisplayValue(ImagePlus image) {

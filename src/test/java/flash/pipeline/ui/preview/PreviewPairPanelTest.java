@@ -93,6 +93,22 @@ public class PreviewPairPanelTest {
     }
 
     @Test
+    public void customLargePreviewModelCanUseThreeImages() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
+
+        pair.setLargePreviewImages(
+                stack("raw", 4),
+                stack("filtered", 4),
+                stack("objects", 4));
+
+        assertEquals(3, pair.largePreviewImageCountForTest());
+
+        pair.clearLargePreviewImages();
+
+        assertEquals(2, pair.largePreviewImageCountForTest());
+    }
+
+    @Test
     public void largePreviewUsesCurrentWindowAsOwnerWhenAvailable() {
         assumeFalse(GraphicsEnvironment.isHeadless());
 
