@@ -13,6 +13,7 @@ Apply the rule from the scale of the change, not just from how much code moved.
 - `1.0.0` was the first full feature release.
 - The large feature wave previously labeled `1.1.0` is treated as `2.0.0` under this policy.
 - The pipeline-wide z-slice subset feature promoted the project to `3.0.0`.
+- `4.0.0` bundles the Configuration QC setup wizard, the inline filter builder (accordion editor with fork-on-edit and save-as-preset), the ROI orientation workflow, dependency autofix and Maven wrapper hardening, the ImageJ update-site publish workflow, and an output-layout migration with associated late-stage UX tweaks.
 
 ## When updating the version
 

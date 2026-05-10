@@ -20,7 +20,7 @@
 	  Second digit = major rework or large optimization.
 	  Third digit = bug fix or small tweak/optimization.
 	-->
-	<version>3.0.0</version>
+	<version>4.0.0</version>
 
 	<name>FLASH - The Pipeline for Fluorescence Automated Spatial Histology</name>
 	<description>FLASH (Fluorescence Automated Spatial Histology) - ImageJ2/Fiji plugin for automated immunofluorescence image analysis: fluorescence intensity measurement, 3D object analysis, spatial morphometry, and ROI management</description>
