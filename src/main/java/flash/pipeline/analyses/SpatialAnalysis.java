@@ -6,6 +6,13 @@ import ij.measure.Calibration;
 import ij.process.ImageProcessor;
 
 import flash.pipeline.FLASH_Pipeline;
+import flash.pipeline.analyses.spatial.DiskLabelImageProvider;
+import flash.pipeline.analyses.spatial.InMemoryLabelImageProvider;
+import flash.pipeline.analyses.spatial.LabelImageProvider;
+import flash.pipeline.analyses.spatial.SectionKey;
+import flash.pipeline.analyses.spatial.SpatialArtifactScanner;
+import flash.pipeline.analyses.spatial.SpatialArtifactStatus;
+import flash.pipeline.analyses.spatial.SubAnalysis;
 import flash.pipeline.analyses.wizard.SpatialAnalysisWizard;
 import flash.pipeline.analyses.wizard.SpatialPreset;
 import flash.pipeline.analyses.wizard.SpatialPresetIO;
@@ -136,10 +143,11 @@ public class SpatialAnalysis implements Analysis {
             new HashMap<String, ScnParityFallbackSummary>();
     private final Set<String> scnParityFallbackWarnings = new LinkedHashSet<String>();
     private final Set<String> scnParityFallbackInfoLogs = new LinkedHashSet<String>();
-    private final Map<String, Map<String, List<Integer>>> cpcSectionGroupsCache =
-            new HashMap<String, Map<String, List<Integer>>>();
+    private final Map<String, Map<SectionKey, List<Integer>>> cpcSectionGroupsCache =
+            new HashMap<String, Map<SectionKey, List<Integer>>>();
     private final Map<String, File> cpcLabelFileCache = new HashMap<String, File>();
     private final Map<String, File> imageAnalysisAnimalDirCache = new HashMap<String, File>();
+    private SpatialExecutionContext activeExecution = null;
     private boolean headless = false;
     private boolean suppressDialogs = false;
     private boolean aggressiveMemory = false;
@@ -147,11 +155,42 @@ public class SpatialAnalysis implements Analysis {
     private int parallelThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
     private CLIConfig cliConfig = null;
     private SpatialAnalysisWizard.DerivedConfig configuredOptions = null;
+    private SpatialArtifactStatus spatialArtifactStatus = null;
+    private boolean forceRerun = false;
 
     private enum RuntimeDependencyAction {
         PROCEED,
         RECONFIGURE,
         ABORT
+    }
+
+    private static final class SpatialExecutionContext {
+        private File objectsDir;
+        private LinkedHashMap<String, ChannelData> channels;
+        private List<String> channelNames;
+        private SpatialObjectDataAvailability existingObjectData;
+        private CalibrationIO.PixelCalibration calibration;
+        private File linesDir;
+        private List<String> availableLineSets;
+        private boolean hasLineRoiSets;
+        private boolean doDistances;
+        private boolean doLineDistance;
+        private boolean doSpatialStats;
+        private boolean doCpc;
+        private boolean doVolumetric;
+        private boolean doVoronoi;
+        private boolean doHeatmaps;
+        private boolean doPhenotyping;
+        private boolean doMorphology;
+        private boolean do3DShapeFeatures;
+        private boolean doCompositeIndices;
+        private boolean doPopMorphometrics;
+        private boolean doSpatialMorphometrics;
+        private boolean forceRerun;
+        private SpatialArtifactStatus artifactStatus;
+        private double heatmapBandwidth;
+        private String heatmapLut;
+        private int clusterK;
     }
 
     static final class SpatialObjectDataAvailability {
@@ -496,20 +535,53 @@ public class SpatialAnalysis implements Analysis {
     @Override
     public void execute(String directory) {
         IJ.log("=== Spatial Analysis ===");
+        if (!beginPhasedRun(directory)) {
+            return;
+        }
+
+        try {
+            computeInterMarkerDistancePhase(activeExecution);
+            LabelImageProvider provider = new DiskLabelImageProvider(this, directory);
+            runEarlyPhase(directory, provider);
+            runLatePhase(directory);
+            IJ.log("=== Spatial Analysis Complete ===");
+        } finally {
+            endPhasedRun();
+        }
+    }
+
+    boolean beginPhasedRun(String directory) {
         scnParityFallbackCache.clear();
         scnParityFallbackWarnings.clear();
         scnParityFallbackInfoLogs.clear();
         cpcSectionGroupsCache.clear();
         cpcLabelFileCache.clear();
         imageAnalysisAnimalDirCache.clear();
+        spatialArtifactStatus = null;
+        forceRerun = false;
+        activeExecution = null;
 
+        SpatialExecutionContext context = prepareExecutionContext(directory);
+        if (context == null) {
+            return false;
+        }
+
+        activeExecution = context;
+        return true;
+    }
+
+    void endPhasedRun() {
+        activeExecution = null;
+    }
+
+    private SpatialExecutionContext prepareExecutionContext(String directory) {
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
         File objectsDir = firstExistingDirectory(layout.objectDataReadDirs());
         if (objectsDir == null) {
             warnUser("Spatial Analysis",
                     "Objects directory not found:\n" + layout.objectDataWriteDir().getAbsolutePath()
                             + "\n\nRun 3D Object Analysis first.");
-            return;
+            return null;
         }
 
         CalibrationIO.PixelCalibration cal = CalibrationIO.read(objectsDir);
@@ -536,7 +608,7 @@ public class SpatialAnalysis implements Analysis {
             warnUser("Spatial Analysis",
                     "No object CSV files found in:\n" + objectsDir.getAbsolutePath()
                             + "\n\nRun 3D Object Analysis first.");
-            return;
+            return null;
         }
 
         Arrays.sort(csvFiles);
@@ -558,7 +630,7 @@ public class SpatialAnalysis implements Analysis {
         if (channels.isEmpty()) {
             warnUser("Spatial Analysis",
                     "No valid object CSV data could be loaded from:\n" + objectsDir.getAbsolutePath());
-            return;
+            return null;
         }
 
         // Normalize legacy volumetric overlap columns before any downstream analysis.
@@ -570,6 +642,10 @@ public class SpatialAnalysis implements Analysis {
         SpatialObjectDataAvailability existingObjectData =
                 SpatialObjectDataAvailability.detect(channels, channelNames);
         existingObjectData.logDetectedData();
+        List<SectionKey> artifactSections = collectArtifactSections(directory, channels, channelNames);
+        SpatialArtifactStatus artifactStatus =
+                new SpatialArtifactScanner().scan(directory, channelNames, artifactSections);
+        spatialArtifactStatus = artifactStatus;
         File linesDir = new File(directory, "Data Analysis" + File.separator + "Lines");
         List<String> availableLineSets = lineSetNames(linesDir);
         boolean hasLineRoiSets = !availableLineSets.isEmpty();
@@ -588,6 +664,7 @@ public class SpatialAnalysis implements Analysis {
         boolean doCompositeIndices = false;
         boolean doPopMorphometrics = false;
         boolean doSpatialMorphometrics = false;
+        boolean forceRerun = false;
         double heatmapBandwidth = 0; // 0 = auto (Scott's rule)
         String heatmapLut = DEFAULT_HEATMAP_LUT;
         int clusterK = 0; // 0 = auto-detect
@@ -599,9 +676,9 @@ public class SpatialAnalysis implements Analysis {
         }
         if (!suppressDialogs && effectiveOptions == null) {
             effectiveOptions = showSpatialOptionsDialog(directory, channelNames, existingObjectData,
-                    availableLineSets, null);
+                    availableLineSets, artifactStatus, null);
             if (effectiveOptions == null) {
-                return;
+                return null;
             }
         }
         if (effectiveOptions != null) {
@@ -620,18 +697,36 @@ public class SpatialAnalysis implements Analysis {
             doCompositeIndices = effectiveOptions.doCompositeIndices;
             doPopMorphometrics = effectiveOptions.doPopMorphometrics;
             doSpatialMorphometrics = effectiveOptions.doSpatialMorphometrics;
+            forceRerun = effectiveOptions.forceRerun;
             heatmapBandwidth = effectiveOptions.kdeBandwidth;
             heatmapLut = effectiveOptions.heatmapLut;
             clusterK = effectiveOptions.clusterK;
             applyConfiguredMarkerThresholds(effectiveOptions, channelNames);
         }
 
-        if (doPopMorphometrics
+        if (forceRerun) {
+            IJ.log("--- Force re-run enabled: existing spatial outputs will be ignored ---");
+            doDistances = true;
+            doLineDistance = hasLineRoiSets;
+            doSpatialStats = true;
+            doCpc = true;
+            doVoronoi = true;
+            doHeatmaps = true;
+            doPhenotyping = true;
+            doMorphology = true;
+            do3DShapeFeatures = true;
+            doCompositeIndices = true;
+            doPopMorphometrics = true;
+            doSpatialMorphometrics = true;
+        }
+        this.forceRerun = forceRerun;
+
+        if (!forceRerun && doPopMorphometrics
                 && existingObjectData.hasPopulationMorphometricsForAllChannels(channelNames)) {
             IJ.log("--- Reusing existing population morphometric columns; skipping population scoring ---");
             doPopMorphometrics = false;
         }
-        if (doSpatialMorphometrics
+        if (!forceRerun && doSpatialMorphometrics
                 && existingObjectData.hasSpatialMorphometricsForAllChannels(channelNames)) {
             IJ.log("--- Reusing existing spatial-morphometric columns; skipping spatial morphometrics ---");
             doSpatialMorphometrics = false;
@@ -642,11 +737,11 @@ public class SpatialAnalysis implements Analysis {
         if (doCompositeIndices || doSpatialMorphometrics) {
             do3DShapeFeatures = true;
         }
-        if (doMorphology && existingObjectData.has2DMorphologyForAllChannels(channelNames)) {
+        if (!forceRerun && doMorphology && existingObjectData.has2DMorphologyForAllChannels(channelNames)) {
             IJ.log("--- Reusing existing 2D morphology columns; skipping 2D morphology extraction ---");
             doMorphology = false;
         }
-        if (do3DShapeFeatures
+        if (!forceRerun && do3DShapeFeatures
                 && existingObjectData.has3DMorphologyForAllChannels(channelNames)
                 && (!doCompositeIndices
                 || existingObjectData.hasCompositeMorphologyForAllChannels(channelNames))) {
@@ -661,59 +756,319 @@ public class SpatialAnalysis implements Analysis {
         RuntimeDependencyAction dependencyAction =
                 checkRuntimeDependencies(doVoronoi, do3DShapeFeatures);
         if (dependencyAction != RuntimeDependencyAction.PROCEED) {
-            return;
+            return null;
         }
+
+        SpatialExecutionContext context = new SpatialExecutionContext();
+        context.objectsDir = objectsDir;
+        context.channels = channels;
+        context.channelNames = channelNames;
+        context.existingObjectData = existingObjectData;
+        context.calibration = cal;
+        context.linesDir = linesDir;
+        context.availableLineSets = availableLineSets;
+        context.hasLineRoiSets = hasLineRoiSets;
+        context.doDistances = doDistances;
+        context.doLineDistance = doLineDistance;
+        context.doSpatialStats = doSpatialStats;
+        context.doCpc = doCpc;
+        context.doVolumetric = doVolumetric;
+        context.doVoronoi = doVoronoi;
+        context.doHeatmaps = doHeatmaps;
+        context.doPhenotyping = doPhenotyping;
+        context.doMorphology = doMorphology;
+        context.do3DShapeFeatures = do3DShapeFeatures;
+        context.doCompositeIndices = doCompositeIndices;
+        context.doPopMorphometrics = doPopMorphometrics;
+        context.doSpatialMorphometrics = doSpatialMorphometrics;
+        context.forceRerun = forceRerun;
+        context.artifactStatus = artifactStatus;
+        context.heatmapBandwidth = heatmapBandwidth;
+        context.heatmapLut = heatmapLut;
+        context.clusterK = clusterK;
 
         if (doVolumetric) {
-            refreshVolumetricColocFlags(channels, channelNames, existingObjectData);
-            existingObjectData = SpatialObjectDataAvailability.detect(channels, channelNames);
+            refreshVolumetricColocFlags(channels, channelNames, context.existingObjectData);
+            context.existingObjectData = SpatialObjectDataAvailability.detect(channels, channelNames);
         }
 
-        if (doDistances || doVolumetric) {
+        return context;
+    }
+
+    private void computeInterMarkerDistancePhase(SpatialExecutionContext context) {
+        if (context.doDistances || context.doVolumetric) {
             IJ.log("--- Computing/reusing inter-marker nearest neighbor distances ---");
-            int totalPairs = (channelNames.size() * (channelNames.size() - 1)) / 2;
+            if (context.doDistances) {
+                logArtifactRunPlan("Nearest neighbor distances", SubAnalysis.INTER_MARKER_DISTANCES);
+            }
+            int totalPairs = (context.channelNames.size() * (context.channelNames.size() - 1)) / 2;
             int pairCount = 1;
-            for (int a = 0; a < channelNames.size(); a++) {
-                for (int b = a + 1; b < channelNames.size(); b++) {
-                    String nameA = channelNames.get(a);
-                    String nameB = channelNames.get(b);
+            for (int a = 0; a < context.channelNames.size(); a++) {
+                for (int b = a + 1; b < context.channelNames.size(); b++) {
+                    String nameA = context.channelNames.get(a);
+                    String nameB = context.channelNames.get(b);
                     int currentPair = pairCount++;
-                    boolean needsDistances = doDistances
-                            && !existingObjectData.hasDistancePair(nameA, nameB);
-                    boolean needsVolumetric = doVolumetric
-                            && !existingObjectData.hasVolumetricPair(nameA, nameB,
-                            (int) getThreshold(nameA), (int) getThreshold(nameB));
+                    boolean distancesAlreadyPresent = !context.forceRerun
+                            && (context.existingObjectData.hasDistancePair(nameA, nameB)
+                            || (isArtifactDoneForChannel(SubAnalysis.INTER_MARKER_DISTANCES, nameA)
+                            && isArtifactDoneForChannel(SubAnalysis.INTER_MARKER_DISTANCES, nameB)));
+                    boolean needsDistances = context.doDistances && !distancesAlreadyPresent;
+                    boolean needsVolumetric = context.doVolumetric
+                            && (context.forceRerun
+                            || !context.existingObjectData.hasVolumetricPair(nameA, nameB,
+                            (int) getThreshold(nameA), (int) getThreshold(nameB)));
                     if (!needsDistances && !needsVolumetric) {
-                        String reuseReason = doDistances && doVolumetric
+                        String reuseReason = context.doDistances && context.doVolumetric
                                 ? "reusing existing distance/volumetric columns"
-                                : (doDistances ? "reusing existing distance columns"
+                                : (context.doDistances ? "reusing existing distance columns"
                                 : "reusing existing volumetric columns");
                         IJ.log("  Pair [" + currentPair + "/" + totalPairs + "]: " + nameA + " <-> " + nameB
                                 + " (" + reuseReason + ")");
                         continue;
                     }
                     String reuseNote = "";
-                    if (doDistances && !needsDistances) {
+                    if (context.doDistances && !needsDistances) {
                         reuseNote += " (distance columns already present)";
                     }
-                    if (doVolumetric && !needsVolumetric) {
+                    if (context.doVolumetric && !needsVolumetric) {
                         reuseNote += " (volumetric columns already present)";
                     }
                     IJ.log("  Pair [" + currentPair + "/" + totalPairs + "]: " + nameA + " <-> " + nameB
                             + reuseNote);
-                    computeInterMarkerDistances(channels.get(nameA), channels.get(nameB), cal,
+                    computeInterMarkerDistances(context.channels.get(nameA), context.channels.get(nameB),
+                            context.calibration,
                             needsVolumetric);
                 }
             }
         }
+    }
 
-        if (doCpc) {
-            runCpcIfNeeded(directory, channels, channelNames, existingObjectData);
+    void runEarlyPhase(String directory, LabelImageProvider provider) {
+        SpatialExecutionContext context = requireActiveExecution();
+        logEarlyPhaseProviderPlan(directory, context, provider);
+
+        if (context.doCpc) {
+            runCpcIfNeeded(directory, context.channels, context.channelNames,
+                    context.existingObjectData, provider);
         }
 
-        reorderManagedSpatialColumns(channels, channelNames);
+        if (context.doHeatmaps) {
+            IJ.log("--- Density Heatmaps ---");
+            runDensityHeatmaps(directory, context.channels, context.calibration,
+                    context.heatmapBandwidth, context.heatmapLut, provider);
+        }
 
-        IJ.log("--- Writing updated CSVs ---");
+        if (context.doMorphology) {
+            IJ.log("--- Morphology Extraction ---");
+            runMorphologyExtraction(directory, context.channels, context.calibration, provider);
+        }
+
+        if (context.do3DShapeFeatures) {
+            IJ.log("--- 3D Shape Features ---");
+            run3DMorphometry(directory, context.channels, context.calibration,
+                    context.doCompositeIndices, provider);
+        }
+    }
+
+    private void logEarlyPhaseProviderPlan(String directory,
+                                           SpatialExecutionContext context,
+                                           LabelImageProvider provider) {
+        if (!context.doCpc && !context.doHeatmaps
+                && !context.doMorphology && !context.do3DShapeFeatures) {
+            IJ.log("--- Spatial early phase: no object-dependent work selected ---");
+            return;
+        }
+
+        if (!(provider instanceof InMemoryLabelImageProvider)) {
+            IJ.log("--- Spatial early phase label provider: disk-backed; labels will load on demand ---");
+            return;
+        }
+
+        int total = 0;
+        int inMemory = 0;
+        InMemoryLabelImageProvider inMemoryProvider = (InMemoryLabelImageProvider) provider;
+        for (Map.Entry<String, ChannelData> entry : context.channels.entrySet()) {
+            String channelName = entry.getKey();
+            Map<SectionKey, List<Integer>> sections =
+                    groupByCpcSection(directory, channelName, entry.getValue());
+            for (SectionKey section : sections.keySet()) {
+                total++;
+                if (inMemoryProvider != null && inMemoryProvider.hasCached(channelName, section)) {
+                    inMemory++;
+                }
+            }
+        }
+
+        IJ.log("--- Spatial early phase label provider: " + inMemory + "/" + total
+                + " section/channel labels available in memory; "
+                + (total - inMemory) + " will fall back to disk if needed ---");
+    }
+
+    void runLatePhase(String directory) {
+        SpatialExecutionContext context = requireActiveExecution();
+
+        reorderManagedSpatialColumns(context.channels, context.channelNames);
+        writeUpdatedCsvs(context.objectsDir, context.channels, "--- Writing updated CSVs ---");
+
+        if (context.doSpatialStats) writeSpatialStatisticsOutputs(directory, context.channels);
+        if (context.doCpc) writeCpcSummaries(directory, context.channels, context.channelNames);
+
+        if (context.doVoronoi) {
+            IJ.log("--- Voronoi Tessellation ---");
+            runVoronoiAnalysis(directory, context.channels, context.calibration);
+        }
+
+        if (context.doPhenotyping) {
+            IJ.log("--- Cell Phenotyping (k-means) ---");
+            runCellClustering(directory, context.channels, context.clusterK);
+        }
+
+        if (context.doPopMorphometrics) {
+            if (!context.do3DShapeFeatures && !hasColumn(context.channels, "Morph_RI")) {
+                IJ.log("WARNING: Population morphometric scoring requires 3D shape features. Skipping.");
+            } else {
+                IJ.log("--- Population Morphometric Scoring ---");
+                runPopulationMorphometrics(directory, context.channels);
+            }
+        }
+
+        if (context.doSpatialMorphometrics) {
+            if (!context.do3DShapeFeatures && !hasColumn(context.channels, "Morph_Feret3D_um")) {
+                IJ.log("WARNING: Spatial-morphometric analysis requires 3D shape features. Skipping.");
+            } else {
+                IJ.log("--- Spatial-Morphometric Analysis ---");
+                runSpatialMorphometrics(directory, context.channels, context.calibration);
+            }
+        }
+
+        // Write morphometry analysis details
+        if (context.do3DShapeFeatures || context.doPopMorphometrics || context.doSpatialMorphometrics) {
+            File morphDir = spatialMorphometryOutputDir(directory);
+            MorphometryDetailsWriter.write(morphDir, context.do3DShapeFeatures, context.doCompositeIndices,
+                    context.doPopMorphometrics, context.doSpatialMorphometrics);
+        }
+
+        // Write updated CSVs again if new columns were added
+        if (context.doVoronoi || context.doPhenotyping || context.doMorphology
+                || context.do3DShapeFeatures || context.doPopMorphometrics
+                || context.doSpatialMorphometrics) {
+            reorderManagedSpatialColumns(context.channels, context.channelNames);
+            writeUpdatedCsvs(context.objectsDir, context.channels, "--- Writing final updated CSVs ---");
+        }
+
+        if (context.doLineDistance && context.hasLineRoiSets) {
+            runLineDistanceIfNeeded(directory, context);
+        }
+    }
+
+    private void runLineDistanceIfNeeded(String directory, SpatialExecutionContext context) {
+        IJ.log("--- Computing line distances from Spatial Analysis ---");
+        logArtifactRunPlan("Line distance", SubAnalysis.LINE_DISTANCE);
+        SpatialArtifactStatus status = currentArtifactStatus();
+        if (!context.forceRerun
+                && status != null
+                && status.isFullyDone(SubAnalysis.LINE_DISTANCE)) {
+            IJ.log("    Skipping line distance - already present.");
+            return;
+        }
+        LineDistanceAnalysis lineAnalysis = new LineDistanceAnalysis();
+        lineAnalysis.setVerboseLogging(verboseLogging);
+        lineAnalysis.computeDistances(directory, context.linesDir, context.availableLineSets);
+    }
+
+    private SpatialExecutionContext requireActiveExecution() {
+        if (activeExecution == null) {
+            throw new IllegalStateException("SpatialAnalysis execution context has not been prepared");
+        }
+        return activeExecution;
+    }
+
+    private SpatialArtifactStatus currentArtifactStatus() {
+        if (activeExecution != null && activeExecution.artifactStatus != null) {
+            return activeExecution.artifactStatus;
+        }
+        return spatialArtifactStatus;
+    }
+
+    private boolean isForceRerunActive() {
+        return activeExecution != null ? activeExecution.forceRerun : forceRerun;
+    }
+
+    private void logArtifactRunPlan(String label, SubAnalysis subAnalysis) {
+        SpatialArtifactStatus status = currentArtifactStatus();
+        if (isForceRerunActive()) {
+            IJ.log("  " + label + ": force re-run enabled; existing outputs will be ignored.");
+            return;
+        }
+        if (status == null || status.totalPairs() == 0) {
+            IJ.log("  " + label + ": no artifact status available; all selected work will run.");
+            return;
+        }
+        int done = status.countDone(subAnalysis);
+        int total = status.totalPairs();
+        IJ.log("  " + label + ": " + done + "/" + total
+                + " section/channel pairs already present; "
+                + (total - done) + " pairs to run.");
+    }
+
+    private boolean shouldSkipPair(SubAnalysis subAnalysis,
+                                   SectionKey section,
+                                   String channelName,
+                                   String label) {
+        SpatialArtifactStatus status = currentArtifactStatus();
+        if (isForceRerunActive() || status == null) {
+            return false;
+        }
+        if (status.isDone(subAnalysis, section, channelName)) {
+            IJ.log("    Skipping " + label + " for " + channelName + " / " + section
+                    + " - already present.");
+            return true;
+        }
+        return false;
+    }
+
+    private boolean shouldSkipChannel(SubAnalysis subAnalysis,
+                                      String channelName,
+                                      String label) {
+        SpatialArtifactStatus status = currentArtifactStatus();
+        if (isForceRerunActive() || status == null) {
+            return false;
+        }
+        if (status.isFullyDoneForChannel(subAnalysis, channelName)) {
+            IJ.log("    Skipping " + label + " for " + channelName + " - already present.");
+            return true;
+        }
+        return false;
+    }
+
+    private boolean isArtifactDoneForChannel(SubAnalysis subAnalysis, String channelName) {
+        SpatialArtifactStatus status = currentArtifactStatus();
+        return !isForceRerunActive()
+                && status != null
+                && status.isFullyDoneForChannel(subAnalysis, channelName);
+    }
+
+    private boolean hasPairArtifactStatus() {
+        SpatialArtifactStatus status = currentArtifactStatus();
+        return status != null && status.totalPairs() > 0;
+    }
+
+    private boolean shouldSkipCpcTask(CpcSectionTask task, String nameA, String nameB) {
+        SpatialArtifactStatus status = currentArtifactStatus();
+        if (isForceRerunActive() || status == null || task == null) {
+            return false;
+        }
+        if (status.isDone(SubAnalysis.CPC, task.sectionKey, nameA)
+                && status.isDone(SubAnalysis.CPC, task.sectionKey, nameB)) {
+            IJ.log("    Skipping CPC for " + nameA + " <-> " + nameB
+                    + " / " + task.sectionKey + " - already present.");
+            return true;
+        }
+        return false;
+    }
+
+    private void writeUpdatedCsvs(File objectsDir, Map<String, ChannelData> channels, String title) {
+        IJ.log(title);
         int writeCount = 1;
         int totalToWrite = channels.size();
         for (Map.Entry<String, ChannelData> entry : channels.entrySet()) {
@@ -723,84 +1078,6 @@ public class SpatialAnalysis implements Analysis {
             CsvTableIO.writeChannelCsv(outFile, cd);
             IJ.log("  [" + (writeCount++) + "/" + totalToWrite + "] Updated: " + outFile.getName());
         }
-
-        if (doSpatialStats) writeSpatialStatisticsOutputs(directory, channels);
-        if (doCpc) writeCpcSummaries(directory, channels, channelNames);
-
-        if (doVoronoi) {
-            IJ.log("--- Voronoi Tessellation ---");
-            runVoronoiAnalysis(directory, channels, cal);
-        }
-
-        if (doPhenotyping) {
-            IJ.log("--- Cell Phenotyping (k-means) ---");
-            runCellClustering(directory, channels, clusterK);
-        }
-
-        if (doHeatmaps) {
-            IJ.log("--- Density Heatmaps ---");
-            runDensityHeatmaps(directory, channels, cal, heatmapBandwidth, heatmapLut);
-        }
-
-        if (doMorphology) {
-            IJ.log("--- Morphology Extraction ---");
-            runMorphologyExtraction(directory, channels, cal);
-        }
-
-        if (do3DShapeFeatures) {
-            IJ.log("--- 3D Shape Features ---");
-            run3DMorphometry(directory, channels, cal, doCompositeIndices);
-        }
-
-        if (doPopMorphometrics) {
-            if (!do3DShapeFeatures && !hasColumn(channels, "Morph_RI")) {
-                IJ.log("WARNING: Population morphometric scoring requires 3D shape features. Skipping.");
-            } else {
-                IJ.log("--- Population Morphometric Scoring ---");
-                runPopulationMorphometrics(directory, channels);
-            }
-        }
-
-        if (doSpatialMorphometrics) {
-            if (!do3DShapeFeatures && !hasColumn(channels, "Morph_Feret3D_um")) {
-                IJ.log("WARNING: Spatial-morphometric analysis requires 3D shape features. Skipping.");
-            } else {
-                IJ.log("--- Spatial-Morphometric Analysis ---");
-                runSpatialMorphometrics(directory, channels, cal);
-            }
-        }
-
-        // Write morphometry analysis details
-        if (do3DShapeFeatures || doPopMorphometrics || doSpatialMorphometrics) {
-            File morphDir = spatialMorphometryOutputDir(directory);
-            MorphometryDetailsWriter.write(morphDir, do3DShapeFeatures, doCompositeIndices,
-                    doPopMorphometrics, doSpatialMorphometrics);
-        }
-
-        // Write updated CSVs again if new columns were added
-        if (doVoronoi || doPhenotyping || doMorphology
-                || do3DShapeFeatures || doPopMorphometrics || doSpatialMorphometrics) {
-            reorderManagedSpatialColumns(channels, channelNames);
-            IJ.log("--- Writing final updated CSVs ---");
-            int finalWriteCount = 1;
-            int totalFinal = channels.size();
-            for (Map.Entry<String, ChannelData> entry : channels.entrySet()) {
-                String channelName = entry.getKey();
-                ChannelData cd = entry.getValue();
-                File outFile = new File(objectsDir, ChannelFilenameCodec.toSafe(channelName) + ".csv");
-                CsvTableIO.writeChannelCsv(outFile, cd);
-                IJ.log("  [" + (finalWriteCount++) + "/" + totalFinal + "] Updated: " + outFile.getName());
-            }
-        }
-
-        if (doLineDistance && hasLineRoiSets) {
-            IJ.log("--- Computing line distances from Spatial Analysis ---");
-            LineDistanceAnalysis lineAnalysis = new LineDistanceAnalysis();
-            lineAnalysis.setVerboseLogging(verboseLogging);
-            lineAnalysis.computeDistances(directory, linesDir, availableLineSets);
-        }
-
-        IJ.log("=== Spatial Analysis Complete ===");
     }
 
     /**
@@ -818,8 +1095,17 @@ public class SpatialAnalysis implements Analysis {
         File linesDir = new File(directory, "Data Analysis" + File.separator + "Lines");
         SpatialObjectDataAvailability existingObjectData =
                 SpatialObjectDataAvailability.detect(null, safeChannelNames);
+        LinkedHashMap<String, ChannelData> existingChannels =
+                loadExistingObjectDataForDialog(directory, safeChannelNames);
+        if (!existingChannels.isEmpty()) {
+            existingObjectData = SpatialObjectDataAvailability.detect(existingChannels, safeChannelNames);
+        }
+        List<SectionKey> artifactSections = collectArtifactSections(directory, existingChannels, safeChannelNames);
+        SpatialArtifactStatus artifactStatus =
+                new SpatialArtifactScanner().scan(directory, safeChannelNames, artifactSections);
+        spatialArtifactStatus = artifactStatus;
         return showSpatialOptionsDialog(directory, safeChannelNames, existingObjectData,
-                lineSetNames(linesDir), configuredOptions);
+                lineSetNames(linesDir), artifactStatus, configuredOptions);
     }
 
     private SpatialAnalysisWizard.DerivedConfig showSpatialOptionsDialog(
@@ -827,6 +1113,7 @@ public class SpatialAnalysis implements Analysis {
             final List<String> channelNames,
             SpatialObjectDataAvailability existingObjectData,
             List<String> availableLineSets,
+            SpatialArtifactStatus artifactStatus,
             SpatialAnalysisWizard.DerivedConfig initialOptions) {
         if (channelNames == null || channelNames.isEmpty()) {
             return null;
@@ -849,6 +1136,7 @@ public class SpatialAnalysis implements Analysis {
         boolean doCompositeIndices = initialOptions != null && initialOptions.doCompositeIndices;
         boolean doPopMorphometrics = initialOptions != null && initialOptions.doPopMorphometrics;
         boolean doSpatialMorphometrics = initialOptions != null && initialOptions.doSpatialMorphometrics;
+        boolean forceRerun = initialOptions != null && initialOptions.forceRerun;
         double heatmapBandwidth = initialOptions == null ? 0.0 : initialOptions.kdeBandwidth;
         String heatmapLut = initialOptions == null ? DEFAULT_HEATMAP_LUT : initialOptions.heatmapLut;
         int clusterK = initialOptions == null ? 0 : initialOptions.clusterK;
@@ -858,6 +1146,9 @@ public class SpatialAnalysis implements Analysis {
             PipelineDialog opts = new PipelineDialog("Spatial Analysis Options", PipelineDialog.Phase.ANALYSE);
             opts.addAnalysisHelpHeader("Spatial Analysis", FLASH_Pipeline.IDX_SPATIAL);
             final SpatialDialogBindings spatialBindings = new SpatialDialogBindings();
+            spatialBindings.forceRerunToggle = opts.addToggle(
+                    "Force re-run all sub-analyses (ignore existing outputs)", false);
+            opts.addHelpText("Recomputes selected spatial outputs even when matching files or columns already exist.");
             addSpatialSetupControls(opts, directory, spatialBindings,
                     new SpatialConfigApplier() {
                         @Override
@@ -868,11 +1159,17 @@ public class SpatialAnalysis implements Analysis {
                         }
                     });
             opts.addSubHeader("Spatial Distances");
-            spatialBindings.doDistancesToggle = opts.addToggle("Nearest neighbor distances", doDistances);
+            spatialBindings.doDistancesToggle = opts.addToggle(
+                    decorateArtifactLabel("Nearest neighbor distances", artifactStatus,
+                            SubAnalysis.INTER_MARKER_DISTANCES),
+                    defaultForArtifactStatus(artifactStatus, SubAnalysis.INTER_MARKER_DISTANCES, doDistances));
             opts.addHelpText("Computes 3D nearest neighbor distance between every channel pair.");
             opts.addHelpText(existingObjectData.distanceHelperText());
-            spatialBindings.lineDistanceToggle = opts.addToggle("Line distance to drawn line ROI sets",
-                    doLineDistance && hasLineRoiSets);
+            spatialBindings.lineDistanceToggle = opts.addToggle(
+                    decorateArtifactLabel("Line distance to drawn line ROI sets", artifactStatus,
+                            SubAnalysis.LINE_DISTANCE),
+                    defaultForArtifactStatus(artifactStatus, SubAnalysis.LINE_DISTANCE,
+                            doLineDistance && hasLineRoiSets));
             if (!hasLineRoiSets) {
                 spatialBindings.lineDistanceToggle.setEnabled(false);
                 opts.addHelpText("No line ROI set found in Data Analysis/Lines. Draw a line set first, "
@@ -882,7 +1179,10 @@ public class SpatialAnalysis implements Analysis {
                         + lineSetSummary(availableLineSets) + ".");
             }
             opts.beginAdvancedSection("spatial");
-            spatialBindings.doSpatialStatsToggle = opts.addToggle("Spatial statistics (Ripley's K/L/G)", doSpatialStats);
+            spatialBindings.doSpatialStatsToggle = opts.addToggle(
+                    decorateArtifactLabel("Spatial statistics (Ripley's K/L/G)", artifactStatus,
+                            SubAnalysis.RIPLEY),
+                    defaultForArtifactStatus(artifactStatus, SubAnalysis.RIPLEY, doSpatialStats));
             opts.addHelpText("Point pattern analysis per channel (requires calibrated centroids).");
             opts.endAdvancedSection();
 
@@ -905,24 +1205,32 @@ public class SpatialAnalysis implements Analysis {
                     updateVolumetricThresholdEnablement(spatialBindings);
                 }
             });
-            spatialBindings.doCpcToggle = opts.addToggle("CPC centroid coincidence", doCpc);
+            spatialBindings.doCpcToggle = opts.addToggle(
+                    decorateArtifactLabel("CPC centroid coincidence", artifactStatus, SubAnalysis.CPC),
+                    defaultForArtifactStatus(artifactStatus, SubAnalysis.CPC, doCpc));
             opts.addHelpText("Centroid-in-object colocalization from saved label images. "
                     + "Skips computation if CPC columns already exist from 3D Object Analysis.");
             opts.addHelpText(existingObjectData.colocalizationHelperText());
 
             opts.beginAdvancedSection("spatial");
             opts.addHeader("Voronoi Tessellation");
-            spatialBindings.doVoronoiToggle = opts.addToggle("Voronoi territory analysis", doVoronoi);
+            spatialBindings.doVoronoiToggle = opts.addToggle(
+                    decorateArtifactLabel("Voronoi territory analysis", artifactStatus, SubAnalysis.VORONOI),
+                    defaultForArtifactStatus(artifactStatus, SubAnalysis.VORONOI, doVoronoi));
             opts.addHelpText("Computes Voronoi territories per object: territory area, "
                     + "neighbor count, and inter-channel interaction matrix with permutation test.");
             opts.endAdvancedSection();
 
             addMorphometricControls(opts, spatialBindings, doMorphology, do3DShapeFeatures,
                     doCompositeIndices, doPopMorphometrics, doSpatialMorphometrics,
-                    existingObjectData);
+                    existingObjectData, artifactStatus);
 
             addAdvancedPhenotypingAndHeatmapControls(opts, spatialBindings,
-                    doPhenotyping, clusterK, doHeatmaps, heatmapBandwidth, heatmapLut);
+                    doPhenotyping, clusterK, doHeatmaps, heatmapBandwidth, heatmapLut,
+                    artifactStatus);
+
+            opts.addMessage("Toggles marked \"already present\" will be skipped. "
+                    + "Tick \"Force re-run\" to recompute everything.");
 
             updateVolumetricThresholdEnablement(spatialBindings);
             updateMorphometricDependencyControls(spatialBindings);
@@ -930,6 +1238,7 @@ public class SpatialAnalysis implements Analysis {
             if (!opts.showDialog()) {
                 return null;
             }
+            forceRerun = opts.getNextBoolean();
             doDistances = opts.getNextBoolean();
             doLineDistance = opts.getNextBoolean() && hasLineRoiSets;
             doSpatialStats = opts.getNextBoolean();
@@ -977,6 +1286,7 @@ public class SpatialAnalysis implements Analysis {
         config.doCompositeIndices = doCompositeIndices;
         config.doPopMorphometrics = doPopMorphometrics;
         config.doSpatialMorphometrics = doSpatialMorphometrics;
+        config.forceRerun = forceRerun;
         config.kdeBandwidth = heatmapBandwidth;
         config.heatmapLut = heatmapLut;
         config.clusterK = clusterK;
@@ -1008,6 +1318,32 @@ public class SpatialAnalysis implements Analysis {
             }
         }
         return DEFAULT_COLOC_THRESHOLD;
+    }
+
+    private static String decorateArtifactLabel(String base,
+                                                SpatialArtifactStatus status,
+                                                SubAnalysis subAnalysis) {
+        if (status == null || subAnalysis == null) {
+            return base;
+        }
+        if (status.isFullyDone(subAnalysis)) {
+            return base + " \u2014 already present";
+        }
+        if (status.isPartiallyDone(subAnalysis)) {
+            return base + " \u2014 partially present";
+        }
+        return base;
+    }
+
+    private static boolean defaultForArtifactStatus(SpatialArtifactStatus status,
+                                                    SubAnalysis subAnalysis,
+                                                    boolean originalDefault) {
+        if (status == null || subAnalysis == null) {
+            return originalDefault;
+        }
+        return status.isFullyDone(subAnalysis) || status.isPartiallyDone(subAnalysis)
+                ? false
+                : originalDefault;
     }
 
     private RuntimeDependencyAction checkRuntimeDependencies(boolean doVoronoi,
@@ -1053,6 +1389,90 @@ public class SpatialAnalysis implements Analysis {
             }
         }
         return null;
+    }
+
+    private LinkedHashMap<String, ChannelData> loadExistingObjectDataForDialog(String directory,
+                                                                               List<String> channelNames) {
+        LinkedHashMap<String, ChannelData> channels = new LinkedHashMap<String, ChannelData>();
+        if (channelNames == null || channelNames.isEmpty()) {
+            return channels;
+        }
+        FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
+        File objectsDir = firstExistingDirectory(layout.objectDataReadDirs());
+        if (objectsDir == null) {
+            return channels;
+        }
+        for (String channelName : channelNames) {
+            File csvFile = new File(objectsDir, ChannelFilenameCodec.toSafe(channelName) + ".csv");
+            if (!csvFile.isFile()) {
+                csvFile = new File(objectsDir, channelName + ".csv");
+            }
+            if (!csvFile.isFile()) {
+                continue;
+            }
+            ChannelData cd = CsvTableIO.loadChannelCsv(csvFile, channelName);
+            if (cd != null) {
+                channels.put(channelName, cd);
+            }
+        }
+        return channels;
+    }
+
+    private List<SectionKey> collectArtifactSections(String directory,
+                                                     Map<String, ChannelData> channels,
+                                                     List<String> channelNames) {
+        LinkedHashSet<SectionKey> sections = new LinkedHashSet<SectionKey>();
+        if (channels == null || channels.isEmpty()) {
+            return new ArrayList<SectionKey>(sections);
+        }
+
+        List<String> names = channelNames == null
+                ? new ArrayList<String>(channels.keySet())
+                : channelNames;
+        for (String channelName : names) {
+            ChannelData cd = channels.get(channelName);
+            if (cd == null) {
+                continue;
+            }
+            sections.addAll(groupByCpcSection(directory, channelName, cd).keySet());
+        }
+
+        if (sections.isEmpty()) {
+            for (ChannelData cd : channels.values()) {
+                for (int row = 0; row < cd.rows.size(); row++) {
+                    if (isPlaceholderRow(cd, row)) {
+                        continue;
+                    }
+                    sections.add(sectionKeyFromRow(cd, row));
+                }
+            }
+        }
+        return new ArrayList<SectionKey>(sections);
+    }
+
+    private SectionKey sectionKeyFromRow(ChannelData cd, int row) {
+        return SectionKey.of(safeValue(cd, row, "Animal Name"),
+                sectionLabelSuffix(safeValue(cd, row, "Hemisphere"),
+                        safeValue(cd, row, "Region")));
+    }
+
+    private static SectionKey sectionKeyFromSpatialGroup(SpatialGroupKey key) {
+        if (key == null) {
+            return null;
+        }
+        return SectionKey.of(key.animal, sectionLabelSuffix(key.hemisphere, key.region));
+    }
+
+    private static String sectionLabelSuffix(String hemisphere, String region) {
+        String safeHemisphere = hemisphere == null ? "" : hemisphere.trim();
+        String safeRegion = region == null ? "" : region.trim();
+        if (safeHemisphere.isEmpty()) {
+            return safeRegion;
+        }
+        if (safeRegion.isEmpty()) {
+            return safeHemisphere;
+        }
+        return safeHemisphere + "_" + safeRegion;
     }
 
     private static File objectImageOutputReadRoot(String directory) {
@@ -1516,6 +1936,7 @@ public class SpatialAnalysis implements Analysis {
     }
 
     private void writeSpatialStatisticsOutputs(String directory, Map<String, ChannelData> channels) {
+        logArtifactRunPlan("Spatial statistics", SubAnalysis.RIPLEY);
         File spatialDir = spatialDataOutputDir(directory);
         if (!spatialDir.exists() && !spatialDir.mkdirs()) {
             IJ.log("Warning: could not create spatial output directory: " + spatialDir.getAbsolutePath());
@@ -1528,6 +1949,9 @@ public class SpatialAnalysis implements Analysis {
             String channelName = entry.getKey();
             ChannelData cd = entry.getValue();
             IJ.log("  [" + (channelCounter++) + "/" + totalChannels + "] Spatial Statistics: " + channelName);
+            if (shouldSkipChannel(SubAnalysis.RIPLEY, channelName, "spatial statistics")) {
+                continue;
+            }
 
             if (!hasCalibrated2DCentroids(cd)) {
                 IJ.log("    Skipping spatial statistics for " + channelName
@@ -1814,6 +2238,20 @@ public class SpatialAnalysis implements Analysis {
         }
     }
 
+    private void closeLabelImage(ImagePlus image, LabelImageProvider provider,
+                                 String channelName, SectionKey section) {
+        if (image == null) {
+            return;
+        }
+        if (provider != null && section != null) {
+            provider.release(channelName, section, image);
+        } else {
+            image.changes = false;
+            image.close();
+            image.flush();
+        }
+    }
+
     // ── CPC retroactive colocalization ─────────────────────────────
 
     /**
@@ -1821,10 +2259,15 @@ public class SpatialAnalysis implements Analysis {
      * by loading saved label images from the object image-output folders and running CPC.
      */
     private void runCpcIfNeeded(String directory, Map<String, ChannelData> channels, List<String> channelNames,
-                                SpatialObjectDataAvailability detectedData) {
+                                SpatialObjectDataAvailability detectedData, LabelImageProvider provider) {
         if (channelNames.size() < 2) return;
 
-        if (detectedData != null && detectedData.hasCompleteCpcForAllChannels(channelNames)) {
+        logArtifactRunPlan("CPC centroid coincidence", SubAnalysis.CPC);
+
+        if (!isForceRerunActive()
+                && !hasPairArtifactStatus()
+                && detectedData != null
+                && detectedData.hasCompleteCpcForAllChannels(channelNames)) {
             IJ.log("--- Reusing existing CPC columns from 3D Object Analysis; skipping retroactive computation ---");
             return;
         }
@@ -1846,7 +2289,7 @@ public class SpatialAnalysis implements Analysis {
 
         // Process each channel pair — sections parallelized within each pair.
         // Each section writes to distinct ChannelData rows, so no contention.
-        Map<String, Map<String, List<Integer>>> sectionsByChannel =
+        Map<String, Map<SectionKey, List<Integer>>> sectionsByChannel =
                 buildCpcSectionGroups(directory, channels, channelNames, "CPC");
 
         int totalPairs = channelNames.size() * (channelNames.size() - 1) / 2;
@@ -1860,18 +2303,25 @@ public class SpatialAnalysis implements Analysis {
                 final ChannelData cdB = channels.get(nameB);
 
                 // Group rows by section (same label image)
-                Map<String, List<Integer>> sectionsA = sectionsByChannel.get(nameA);
-                Map<String, List<Integer>> sectionsB = sectionsByChannel.get(nameB);
+                Map<SectionKey, List<Integer>> sectionsA = sectionsByChannel.get(nameA);
+                Map<SectionKey, List<Integer>> sectionsB = sectionsByChannel.get(nameB);
 
-                Set<String> allSections = new LinkedHashSet<String>();
+                Set<SectionKey> allSections = new LinkedHashSet<SectionKey>();
                 allSections.addAll(sectionsA.keySet());
                 allSections.addAll(sectionsB.keySet());
 
                 List<CpcSectionTask> sectionTasks =
                         buildCpcSectionTasks(directory, nameA, nameB, cdA, cdB, sectionsA, sectionsB, allSections);
+                List<CpcSectionTask> runnableTasks = new ArrayList<CpcSectionTask>();
+                for (CpcSectionTask task : sectionTasks) {
+                    if (!shouldSkipCpcTask(task, nameA, nameB)) {
+                        runnableTasks.add(task);
+                    }
+                }
+                sectionTasks = runnableTasks;
                 if (sectionTasks.isEmpty()) {
                     IJ.log("  CPC pair [" + pairNum + "/" + totalPairs + "]: " + nameA + " <-> " + nameB
-                            + " (no shared sections to process)");
+                            + " (no sections needing processing)");
                     continue;
                 }
 
@@ -1895,7 +2345,7 @@ public class SpatialAnalysis implements Analysis {
                 final AtomicInteger sectionCounter = new AtomicInteger(0);
                 if (safeThreads <= 1) {
                     for (CpcSectionTask task : sectionTasks) {
-                        processCpcSection(task, nameA, nameB, cdA, cdB, sectionCounter, totalSections);
+                        processCpcSection(task, nameA, nameB, cdA, cdB, sectionCounter, totalSections, provider);
                     }
                 } else {
                     ExecutorService pool = Executors.newFixedThreadPool(safeThreads);
@@ -1906,7 +2356,7 @@ public class SpatialAnalysis implements Analysis {
                                 @Override
                                 public void run() {
                                     processCpcSection(task, nameA, nameB, cdA, cdB,
-                                            sectionCounter, totalSections);
+                                            sectionCounter, totalSections, provider);
                                 }
                             }));
                         }
@@ -1966,15 +2416,16 @@ public class SpatialAnalysis implements Analysis {
     private void processCpcSection(CpcSectionTask task,
                                    String nameA, String nameB,
                                    ChannelData cdA, ChannelData cdB,
-                                   AtomicInteger sectionCounter, int totalSections) {
+                                   AtomicInteger sectionCounter, int totalSections,
+                                   LabelImageProvider provider) {
         int sectionNum = sectionCounter.incrementAndGet();
-        ImagePlus aLabelImg = ij.IJ.openImage(task.aLabelFile.getAbsolutePath());
-        ImagePlus bLabelImg = ij.IJ.openImage(task.bLabelFile.getAbsolutePath());
+        ImagePlus aLabelImg = provider.get(nameA, task.sectionKey);
+        ImagePlus bLabelImg = provider.get(nameB, task.sectionKey);
 
         if (aLabelImg == null || bLabelImg == null) {
             IJ.log("    Warning: label image not found for section " + task.sectionKey);
-            if (aLabelImg != null) { aLabelImg.close(); aLabelImg.flush(); }
-            if (bLabelImg != null) { bLabelImg.close(); bLabelImg.flush(); }
+            closeLabelImage(aLabelImg, provider, nameA, task.sectionKey);
+            closeLabelImage(bLabelImg, provider, nameB, task.sectionKey);
             return;
         }
 
@@ -2039,10 +2490,8 @@ public class SpatialAnalysis implements Analysis {
         } catch (Exception e) {
             IJ.log("    Warning: CPC failed for " + task.sectionKey + ": " + e.getMessage());
         } finally {
-            aLabelImg.close();
-            aLabelImg.flush();
-            bLabelImg.close();
-            bLabelImg.flush();
+            closeLabelImage(aLabelImg, provider, nameA, task.sectionKey);
+            closeLabelImage(bLabelImg, provider, nameB, task.sectionKey);
         }
     }
 
@@ -2055,9 +2504,9 @@ public class SpatialAnalysis implements Analysis {
      * All rows sharing the same Animal Name + label image file suffix
      * (e.g. "NGF11|RH_SCN") are grouped together.
      */
-    private Map<String, List<Integer>> groupByCpcSection(String directory, String channelName, ChannelData cd) {
+    private Map<SectionKey, List<Integer>> groupByCpcSection(String directory, String channelName, ChannelData cd) {
         String cacheKey = directory + "|" + channelName;
-        Map<String, List<Integer>> cached = cpcSectionGroupsCache.get(cacheKey);
+        Map<SectionKey, List<Integer>> cached = cpcSectionGroupsCache.get(cacheKey);
         if (cached != null) {
             return cached;
         }
@@ -2065,7 +2514,7 @@ public class SpatialAnalysis implements Analysis {
         Map<String, List<Integer>> candidateGroups = new LinkedHashMap<String, List<Integer>>();
         Map<String, Integer> representativeRows = new LinkedHashMap<String, Integer>();
         Map<String, String> animals = new LinkedHashMap<String, String>();
-        Map<String, List<Integer>> groups = new LinkedHashMap<String, List<Integer>>();
+        Map<SectionKey, List<Integer>> groups = new LinkedHashMap<SectionKey, List<Integer>>();
         for (int i = 0; i < cd.rows.size(); i++) {
             if (isPlaceholderRow(cd, i)) continue;
             String metadataKey = cpcSectionMetadataKey(cd, i);
@@ -2085,7 +2534,8 @@ public class SpatialAnalysis implements Analysis {
             if (labelFile == null) {
                 continue;
             }
-            String key = animals.get(entry.getKey()) + "|" + extractResolvedLabelSuffix(channelName, labelFile);
+            SectionKey key = SectionKey.of(animals.get(entry.getKey()),
+                    extractResolvedLabelSuffix(channelName, labelFile));
             List<Integer> list = groups.get(key);
             if (list == null) {
                 list = new ArrayList<Integer>();
@@ -2098,15 +2548,15 @@ public class SpatialAnalysis implements Analysis {
         return groups;
     }
 
-    private Map<String, Map<String, List<Integer>>> buildCpcSectionGroups(String directory,
-                                                                          Map<String, ChannelData> channels,
-                                                                          List<String> channelNames,
-                                                                          String phaseLabel) {
-        Map<String, Map<String, List<Integer>>> grouped = new LinkedHashMap<String, Map<String, List<Integer>>>();
+    private Map<String, Map<SectionKey, List<Integer>>> buildCpcSectionGroups(String directory,
+                                                                              Map<String, ChannelData> channels,
+                                                                              List<String> channelNames,
+                                                                              String phaseLabel) {
+        Map<String, Map<SectionKey, List<Integer>>> grouped = new LinkedHashMap<String, Map<SectionKey, List<Integer>>>();
         for (String channelName : channelNames) {
             ChannelData cd = channels.get(channelName);
             if (cd == null) continue;
-            Map<String, List<Integer>> sections = groupByCpcSection(directory, channelName, cd);
+            Map<SectionKey, List<Integer>> sections = groupByCpcSection(directory, channelName, cd);
             grouped.put(channelName, sections);
             IJ.log("  " + phaseLabel + " sections: " + channelName + " -> " + sections.size());
         }
@@ -2126,18 +2576,18 @@ public class SpatialAnalysis implements Analysis {
                                                       String nameB,
                                                       ChannelData cdA,
                                                       ChannelData cdB,
-                                                      Map<String, List<Integer>> sectionsA,
-                                                      Map<String, List<Integer>> sectionsB,
-                                                      Set<String> allSections) {
+                                                      Map<SectionKey, List<Integer>> sectionsA,
+                                                      Map<SectionKey, List<Integer>> sectionsB,
+                                                      Set<SectionKey> allSections) {
         List<CpcSectionTask> tasks = new ArrayList<CpcSectionTask>();
-        for (String sectionKey : allSections) {
+        for (SectionKey sectionKey : allSections) {
             List<Integer> rowsA = sectionsA.get(sectionKey);
             List<Integer> rowsB = sectionsB.get(sectionKey);
             if (rowsA == null || rowsA.isEmpty() || rowsB == null || rowsB.isEmpty()) {
                 continue;
             }
-            File aLabelFile = resolveCpcLabelFile(directory, nameA, cdA, rowsA);
-            File bLabelFile = resolveCpcLabelFile(directory, nameB, cdB, rowsB);
+            File aLabelFile = resolveCpcLabelFile(directory, nameA, sectionKey);
+            File bLabelFile = resolveCpcLabelFile(directory, nameB, sectionKey);
             if (aLabelFile == null || bLabelFile == null) {
                 continue;
             }
@@ -2191,6 +2641,14 @@ public class SpatialAnalysis implements Analysis {
         }
         cpcLabelFileCache.put(cacheKey, null);
         return null;
+    }
+
+    public File resolveCpcLabelFile(String directory, String channelName, SectionKey section) {
+        if (section == null) return null;
+        File imgDir = resolveImageAnalysisAnimalDirCached(
+                objectImageOutputReadRoot(directory), section.animalName());
+        File candidate = new File(imgDir, section.labelFileName(channelName));
+        return candidate.isFile() ? candidate : null;
     }
 
     private File resolveImageAnalysisAnimalDirCached(File imageAnalysisRoot, String animalName) {
@@ -2616,13 +3074,13 @@ public class SpatialAnalysis implements Analysis {
     }
 
     private static final class CpcSectionTask {
-        private final String sectionKey;
+        private final SectionKey sectionKey;
         private final List<Integer> rowsA;
         private final List<Integer> rowsB;
         private final File aLabelFile;
         private final File bLabelFile;
 
-        private CpcSectionTask(String sectionKey, List<Integer> rowsA, List<Integer> rowsB,
+        private CpcSectionTask(SectionKey sectionKey, List<Integer> rowsA, List<Integer> rowsB,
                                File aLabelFile, File bLabelFile) {
             this.sectionKey = sectionKey;
             this.rowsA = rowsA;
@@ -2727,6 +3185,7 @@ public class SpatialAnalysis implements Analysis {
 
     private void runVoronoiAnalysis(String directory, Map<String, ChannelData> channels,
                                      CalibrationIO.PixelCalibration cal) {
+        logArtifactRunPlan("Voronoi territory analysis", SubAnalysis.VORONOI);
         File spatialDir = spatialDataOutputDir(directory);
         try {
             IoUtils.mustMkdirs(spatialDir);
@@ -2746,6 +3205,9 @@ public class SpatialAnalysis implements Analysis {
             String channelName = entry.getKey();
             ChannelData cd = entry.getValue();
             IJ.log("  [" + (channelCounter++) + "/" + totalChannels + "] Voronoi: " + channelName);
+            if (shouldSkipChannel(SubAnalysis.VORONOI, channelName, "Voronoi")) {
+                continue;
+            }
             if (!hasCalibrated2DCentroids(cd)) {
                 IJ.log("    Skipping Voronoi for " + channelName + ": no calibrated centroids.");
                 continue;
@@ -2885,6 +3347,7 @@ public class SpatialAnalysis implements Analysis {
 
     private void runCellClustering(String directory, Map<String, ChannelData> channels,
                                     int requestedK) {
+        logArtifactRunPlan("K-means clustering", SubAnalysis.PHENOTYPING);
         File phenotypeDir = new File(spatialDataOutputDir(directory), "Phenotyping");
         try {
             IoUtils.mustMkdirs(phenotypeDir);
@@ -2905,6 +3368,9 @@ public class SpatialAnalysis implements Analysis {
             String channelName = entry.getKey();
             IJ.log("  [" + (channelCounter++) + "/" + totalChannels + "] Phenotyping: " + channelName);
             ChannelData cd = entry.getValue();
+            if (shouldSkipChannel(SubAnalysis.PHENOTYPING, channelName, "phenotyping")) {
+                continue;
+            }
 
             // Identify usable feature columns in this channel
             List<String> usable = new ArrayList<String>();
@@ -2999,46 +3465,23 @@ public class SpatialAnalysis implements Analysis {
 
     private void runDensityHeatmaps(String directory, Map<String, ChannelData> channels,
                                      CalibrationIO.PixelCalibration cal,
-                                     double bandwidth, String lutName) {
+                                      double bandwidth, String lutName,
+                                      LabelImageProvider provider) {
+        logArtifactRunPlan("Density heatmaps", SubAnalysis.DENSITY_HEATMAPS);
         if (cal == null || !cal.isCalibrated()) {
             IJ.log("  Heatmaps require calibration metadata. Skipping.");
             return;
         }
 
         // Determine image dimensions from the first available label image
-        File imageAnalysisRoot = objectImageOutputReadRoot(directory);
         int imgWidth = 0;
         int imgHeight = 0;
         double pixelSize = cal.pixelWidth;
 
-        // Try to get dimensions from a label image
-        if (imageAnalysisRoot.isDirectory()) {
-            File[] animalDirs = JunkFileFilter.listCleanDirectories(imageAnalysisRoot);
-            if (animalDirs.length > 0) {
-                outer:
-                for (File ad : animalDirs) {
-                    if (!ad.isDirectory()) continue;
-                    File[] cleanTifs = JunkFileFilter.listCleanFiles(ad);
-                    File firstLabel = null;
-                    for (File tif : cleanTifs) {
-                        String name = tif.getName();
-                        if (name.endsWith("_objects.tif") || name.contains("_objects_")) {
-                            firstLabel = tif;
-                            break;
-                        }
-                    }
-                    if (firstLabel != null) {
-                        ImagePlus probe = IJ.openImage(firstLabel.getAbsolutePath());
-                        if (probe != null) {
-                            imgWidth = probe.getWidth();
-                            imgHeight = probe.getHeight();
-                            probe.close();
-                            probe.flush();
-                            break outer;
-                        }
-                    }
-                }
-            }
+        LabelImageDimensions dimensions = probeFirstLabelDimensions(directory, channels, provider);
+        if (dimensions != null) {
+            imgWidth = dimensions.width;
+            imgHeight = dimensions.height;
         }
 
         if (imgWidth == 0 || imgHeight == 0) {
@@ -3057,6 +3500,10 @@ public class SpatialAnalysis implements Analysis {
             Map<SpatialGroupKey, List<Integer>> groups = groupForSpatialStatistics(cd);
             for (Map.Entry<SpatialGroupKey, List<Integer>> ge : groups.entrySet()) {
                 SpatialGroupKey key = ge.getKey();
+                SectionKey section = sectionKeyFromSpatialGroup(key);
+                if (shouldSkipPair(SubAnalysis.DENSITY_HEATMAPS, section, channelName, "density heatmap")) {
+                    continue;
+                }
                 List<Integer> indices = ge.getValue();
                 double[][] points = extract2DPoints(cd, indices);
                 if (points.length < 2) continue;
@@ -3093,10 +3540,43 @@ public class SpatialAnalysis implements Analysis {
         }
     }
 
+    private LabelImageDimensions probeFirstLabelDimensions(String directory,
+                                                           Map<String, ChannelData> channels,
+                                                           LabelImageProvider provider) {
+        for (Map.Entry<String, ChannelData> entry : channels.entrySet()) {
+            String channelName = entry.getKey();
+            Map<SectionKey, List<Integer>> sections = groupByCpcSection(directory, channelName, entry.getValue());
+            for (SectionKey section : sections.keySet()) {
+                ImagePlus probe = provider.get(channelName, section);
+                if (probe == null) {
+                    continue;
+                }
+                try {
+                    return new LabelImageDimensions(probe.getWidth(), probe.getHeight());
+                } finally {
+                    closeLabelImage(probe, provider, channelName, section);
+                }
+            }
+        }
+        return null;
+    }
+
+    private static final class LabelImageDimensions {
+        private final int width;
+        private final int height;
+
+        private LabelImageDimensions(int width, int height) {
+            this.width = width;
+            this.height = height;
+        }
+    }
+
     // ── Morphology extraction ─────────────────────────────────────────
 
     private void runMorphologyExtraction(String directory, Map<String, ChannelData> channels,
-                                          CalibrationIO.PixelCalibration cal) {
+                                          CalibrationIO.PixelCalibration cal,
+                                          LabelImageProvider provider) {
+        logArtifactRunPlan("2D morphology extraction", SubAnalysis.MORPHOLOGY_2D);
         File imageAnalysisRoot = objectImageOutputReadRoot(directory);
         if (!imageAnalysisRoot.isDirectory()) {
             IJ.log("  Object image-output directory not found. Cannot extract morphology.");
@@ -3120,7 +3600,9 @@ public class SpatialAnalysis implements Analysis {
             String channelName = entry.getKey();
             IJ.log("  [" + (channelCounter++) + "/" + totalChannels + "] Morphology: " + channelName);
             ChannelData cd = entry.getValue();
-            if (hasUsableColumns(cd, MORPH_2D_COLUMNS)) {
+            if (!isForceRerunActive()
+                    && !hasPairArtifactStatus()
+                    && hasUsableColumns(cd, MORPH_2D_COLUMNS)) {
                 IJ.log("  " + channelName + ": reusing existing 2D morphology columns");
                 continue;
             }
@@ -3136,31 +3618,27 @@ public class SpatialAnalysis implements Analysis {
             List<List<String>> morphRows = new ArrayList<List<String>>();
 
             // Group by section (same as CPC) to match label images
-            Map<String, List<Integer>> sections = groupByCpcSection(directory, channelName, cd);
+            Map<SectionKey, List<Integer>> sections = groupByCpcSection(directory, channelName, cd);
 
-            for (Map.Entry<String, List<Integer>> se : sections.entrySet()) {
+            for (Map.Entry<SectionKey, List<Integer>> se : sections.entrySet()) {
+                SectionKey section = se.getKey();
                 List<Integer> rowIndices = se.getValue();
                 if (rowIndices.isEmpty()) continue;
+                if (shouldSkipPair(SubAnalysis.MORPHOLOGY_2D, section, channelName, "2D morphology")) {
+                    continue;
+                }
 
                 int firstRow = rowIndices.get(0);
                 String animalName = safeValue(cd, firstRow, "Animal Name");
                 String hemisphere = safeValue(cd, firstRow, "Hemisphere");
                 String roi = safeValue(cd, firstRow, "ROI");
                 String region = safeValue(cd, firstRow, "Region");
-                String scn = safeValue(cd, firstRow, "SCN");
 
-                File imgDir = resolveImageAnalysisAnimalDir(imageAnalysisRoot, animalName);
-                File labelFile = resolveCpcLabelFile(directory, channelName, cd, firstRow);
-                String labelFileName = labelFile != null ? labelFile.getName() : null;
+                String labelFileName = section.labelFileName(channelName);
 
-                if (labelFile == null || !labelFile.exists()) {
-                    IJ.log("    Label image not found: " + labelFileName);
-                    continue;
-                }
-
-                ImagePlus labelImg = IJ.openImage(labelFile.getAbsolutePath());
+                ImagePlus labelImg = provider.get(channelName, section);
                 if (labelImg == null) {
-                    IJ.log("    Could not open: " + labelFileName);
+                    IJ.log("    Label image not found: " + labelFileName);
                     continue;
                 }
 
@@ -3214,8 +3692,7 @@ public class SpatialAnalysis implements Analysis {
                     IJ.log("    Morphology extraction failed for " + labelFileName
                             + ": " + e.getClass().getSimpleName() + " - " + e.getMessage());
                 } finally {
-                    labelImg.close();
-                    labelImg.flush();
+                    closeLabelImage(labelImg, provider, channelName, section);
                 }
             }
 
@@ -3260,7 +3737,9 @@ public class SpatialAnalysis implements Analysis {
      * Follows the same label-image-loading pattern as {@link #runMorphologyExtraction}.
      */
     private void run3DMorphometry(String directory, Map<String, ChannelData> channels,
-                                  CalibrationIO.PixelCalibration cal, boolean doComposites) {
+                                  CalibrationIO.PixelCalibration cal, boolean doComposites,
+                                  LabelImageProvider provider) {
+        logArtifactRunPlan("3D shape features", SubAnalysis.SHAPE_FEATURES_3D);
         File imageAnalysisRoot = objectImageOutputReadRoot(directory);
         if (!imageAnalysisRoot.isDirectory()) {
             IJ.log("  Object image-output directory not found. Cannot extract 3D morphometry.");
@@ -3284,7 +3763,9 @@ public class SpatialAnalysis implements Analysis {
             ChannelData cd = entry.getValue();
             boolean hasRequired3DData = hasUsableColumns(cd, MORPH_3D_COLUMNS)
                     && (!doComposites || hasUsableColumns(cd, MORPH_COMPOSITE_COLUMNS));
-            if (hasRequired3DData) {
+            if (!isForceRerunActive()
+                    && !hasPairArtifactStatus()
+                    && hasRequired3DData) {
                 IJ.log("  " + channelName + ": reusing existing 3D morphometry columns");
                 continue;
             }
@@ -3297,25 +3778,26 @@ public class SpatialAnalysis implements Analysis {
             }
 
             // Group by section (same as CPC/2D morphology) to match label images
-            Map<String, List<Integer>> sections = groupByCpcSection(directory, channelName, cd);
+            Map<SectionKey, List<Integer>> sections = groupByCpcSection(directory, channelName, cd);
             int totalMeasured = 0;
 
-            for (Map.Entry<String, List<Integer>> se : sections.entrySet()) {
+            for (Map.Entry<SectionKey, List<Integer>> se : sections.entrySet()) {
+                SectionKey section = se.getKey();
                 List<Integer> rowIndices = se.getValue();
                 if (rowIndices.isEmpty()) continue;
+                if (hasRequired3DData
+                        && shouldSkipPair(SubAnalysis.SHAPE_FEATURES_3D, section, channelName,
+                        "3D shape features")) {
+                    continue;
+                }
 
                 int firstRow = rowIndices.get(0);
                 String animalName = safeValue(cd, firstRow, "Animal Name");
 
-                File labelFile = resolveCpcLabelFile(directory, channelName, cd, firstRow);
-                if (labelFile == null || !labelFile.exists()) {
-                    IJ.log("    Label image not found for " + animalName + "/" + channelName);
-                    continue;
-                }
-
-                ImagePlus labelImg = IJ.openImage(labelFile.getAbsolutePath());
+                String labelFileName = section.labelFileName(channelName);
+                ImagePlus labelImg = provider.get(channelName, section);
                 if (labelImg == null) {
-                    IJ.log("    Could not open: " + labelFile.getName());
+                    IJ.log("    Label image not found for " + animalName + "/" + channelName);
                     continue;
                 }
 
@@ -3427,14 +3909,13 @@ public class SpatialAnalysis implements Analysis {
                         totalMeasured++;
                     }
 
-                    IJ.log("    " + animalName + "/" + labelFile.getName() + ": "
+                    IJ.log("    " + animalName + "/" + labelFileName + ": "
                             + objMap.size() + " objects measured (3D morphometry)");
                 } catch (Exception e) {
-                    IJ.log("    3D morphometry failed for " + labelFile.getName()
+                    IJ.log("    3D morphometry failed for " + labelFileName
                             + ": " + e.getClass().getSimpleName() + " - " + e.getMessage());
                 } finally {
-                    labelImg.close();
-                    labelImg.flush();
+                    closeLabelImage(labelImg, provider, channelName, section);
                 }
             }
 
@@ -3496,6 +3977,7 @@ public class SpatialAnalysis implements Analysis {
      * IMDI (Intensity-Morphology Dissociation Index), and MDS (Morphological Diversity).
      */
     private void runPopulationMorphometrics(String directory, Map<String, ChannelData> channels) {
+        logArtifactRunPlan("Population morphometric scoring", SubAnalysis.POPULATION_MORPHO);
         File morphometryDir = spatialMorphometryOutputDir(directory);
         try {
             IoUtils.mustMkdirs(morphometryDir);
@@ -3511,6 +3993,10 @@ public class SpatialAnalysis implements Analysis {
             String channelName = entry.getKey();
             ChannelData cd = entry.getValue();
             IJ.log("  [" + (channelCounter++) + "/" + totalChannels + "] Population Morphometrics: " + channelName);
+            if (shouldSkipChannel(SubAnalysis.POPULATION_MORPHO, channelName,
+                    "population morphometrics")) {
+                continue;
+            }
 
             // Verify all prerequisite columns exist
             String[] popRequired = {"Morph_Sphericity", "Morph_PB", "Morph_SRI",
@@ -3624,6 +4110,7 @@ public class SpatialAnalysis implements Analysis {
      */
     private void runSpatialMorphometrics(String directory, Map<String, ChannelData> channels,
                                           CalibrationIO.PixelCalibration cal) {
+        logArtifactRunPlan("Spatial-morphometric analysis", SubAnalysis.SPATIAL_MORPHO);
         File morphometryDir = spatialMorphometryOutputDir(directory);
         try {
             IoUtils.mustMkdirs(morphometryDir);
@@ -3641,6 +4128,10 @@ public class SpatialAnalysis implements Analysis {
             String channelName = entry.getKey();
             ChannelData cd = entry.getValue();
             IJ.log("  [" + (channelCounter++) + "/" + totalChannels + "] Spatial Morphometrics: " + channelName);
+            if (shouldSkipChannel(SubAnalysis.SPATIAL_MORPHO, channelName,
+                    "spatial morphometrics")) {
+                continue;
+            }
             int n = cd.rows.size();
 
             // TDR: Territorial Dominance Ratio
@@ -3945,7 +4436,7 @@ public class SpatialAnalysis implements Analysis {
         if (!spatialDir.exists() && !spatialDir.mkdirs()) return;
 
         IJ.log("--- Writing CPC summary CSVs ---");
-        Map<String, Map<String, List<Integer>>> sectionsByChannel =
+        Map<String, Map<SectionKey, List<Integer>>> sectionsByChannel =
                 buildCpcSectionGroups(directory, channels, channelNames, "summary");
 
         // Pairwise summary
@@ -3965,8 +4456,8 @@ public class SpatialAnalysis implements Analysis {
                 if (!cd.colIdx.containsKey(colocCol)) continue;
 
                 // Group by section
-                Map<String, List<Integer>> sections = sectionsByChannel.get(nameA);
-                for (Map.Entry<String, List<Integer>> entry : sections.entrySet()) {
+                Map<SectionKey, List<Integer>> sections = sectionsByChannel.get(nameA);
+                for (Map.Entry<SectionKey, List<Integer>> entry : sections.entrySet()) {
                     List<Integer> rows = entry.getValue();
                     if (rows.isEmpty()) continue;
                     int firstRow = rows.get(0);
@@ -4012,8 +4503,8 @@ public class SpatialAnalysis implements Analysis {
             ChannelData cd = channels.get(ch);
             if (!cd.colIdx.containsKey(ch + "_CPCPattern")) continue;
 
-            Map<String, List<Integer>> sections = sectionsByChannel.get(ch);
-            for (Map.Entry<String, List<Integer>> entry : sections.entrySet()) {
+            Map<SectionKey, List<Integer>> sections = sectionsByChannel.get(ch);
+            for (Map.Entry<SectionKey, List<Integer>> entry : sections.entrySet()) {
                 List<Integer> rows = entry.getValue();
                 if (rows.isEmpty()) continue;
                 int firstRow = rows.get(0);
@@ -4063,6 +4554,7 @@ public class SpatialAnalysis implements Analysis {
                 bindings.presetCombo.setSelectedItem(
                         selectedPresetName == null ? SPATIAL_PRESET_PLACEHOLDER : selectedPresetName);
             }
+            setToggle(bindings.forceRerunToggle, config.forceRerun);
             setToggle(bindings.doDistancesToggle, config.doDistances);
             setToggle(bindings.lineDistanceToggle, config.doLineDistance);
             setToggle(bindings.doSpatialStatsToggle, config.doSpatialStats);
@@ -4133,7 +4625,7 @@ public class SpatialAnalysis implements Analysis {
                                          boolean doPopMorphometrics,
                                          boolean doSpatialMorphometrics) {
         addMorphometricControls(opts, spatialBindings, doMorphology, do3DShapeFeatures,
-                doCompositeIndices, doPopMorphometrics, doSpatialMorphometrics, null);
+                doCompositeIndices, doPopMorphometrics, doSpatialMorphometrics, null, null);
     }
 
     private void addMorphometricControls(PipelineDialog opts,
@@ -4143,15 +4635,21 @@ public class SpatialAnalysis implements Analysis {
                                          boolean doCompositeIndices,
                                          boolean doPopMorphometrics,
                                          boolean doSpatialMorphometrics,
-                                         SpatialObjectDataAvailability detectedData) {
+                                         SpatialObjectDataAvailability detectedData,
+                                         SpatialArtifactStatus artifactStatus) {
         opts.addHeader("Morphometric Analysis");
         if (detectedData != null) {
             opts.addHelpText(detectedData.morphometryHelperText());
         }
-        spatialBindings.do2DMorphologyToggle = opts.addToggle("Extract 2D morphology from label images", doMorphology);
+        spatialBindings.do2DMorphologyToggle = opts.addToggle(
+                decorateArtifactLabel("Extract 2D morphology from label images", artifactStatus,
+                        SubAnalysis.MORPHOLOGY_2D),
+                defaultForArtifactStatus(artifactStatus, SubAnalysis.MORPHOLOGY_2D, doMorphology));
         opts.addHelpText("Loads saved object label images and extracts 2D shape features "
                 + "(area, circularity, solidity, Feret diameter, etc.).");
-        final ToggleSwitch raw3DToggle = opts.addToggle("3D shape features", do3DShapeFeatures);
+        final ToggleSwitch raw3DToggle = opts.addToggle(
+                decorateArtifactLabel("3D shape features", artifactStatus, SubAnalysis.SHAPE_FEATURES_3D),
+                defaultForArtifactStatus(artifactStatus, SubAnalysis.SHAPE_FEATURES_3D, do3DShapeFeatures));
         spatialBindings.do3DMorphologyToggle = raw3DToggle;
         opts.addHelpText("Extracts per-object 3D shape descriptors from label images using "
                 + "mcib3d: sphericity, compactness, elongation, flatness, spareness, 3D Feret, "
@@ -4163,13 +4661,19 @@ public class SpatialAnalysis implements Analysis {
                 + "Process Burden (PB), Morphological Polarity (MP), "
                 + "Volume-Span Discrepancy (VSD). Requires 3D shape features.");
         opts.beginAdvancedSection("spatial");
-        final ToggleSwitch popToggle = opts.addToggle("Population morphometric scoring", doPopMorphometrics);
+        final ToggleSwitch popToggle = opts.addToggle(
+                decorateArtifactLabel("Population morphometric scoring", artifactStatus,
+                        SubAnalysis.POPULATION_MORPHO),
+                defaultForArtifactStatus(artifactStatus, SubAnalysis.POPULATION_MORPHO, doPopMorphometrics));
         spatialBindings.doPopMorphometricsToggle = popToggle;
         opts.addHelpText("Population-normalised composites: "
                 + "Composite Morphological Score (CMS), Shape Moment Signature Distance (SMSD), "
                 + "Intensity-Morphology Dissociation Index (IMDI), Morphological Diversity Score. "
                 + "Requires complex shape analysis.");
-        final ToggleSwitch spatialMorphToggle = opts.addToggle("Spatial-morphometric analysis", doSpatialMorphometrics);
+        final ToggleSwitch spatialMorphToggle = opts.addToggle(
+                decorateArtifactLabel("Spatial-morphometric analysis", artifactStatus,
+                        SubAnalysis.SPATIAL_MORPHO),
+                defaultForArtifactStatus(artifactStatus, SubAnalysis.SPATIAL_MORPHO, doSpatialMorphometrics));
         spatialBindings.doSpatialMorphometricsToggle = spatialMorphToggle;
         opts.addHelpText("Territorial Dominance Ratio (TDR), Feret Eccentricity Vector (FEV), "
                 + "Pathology Proximity Response Profile (PPRP). "
@@ -4198,16 +4702,33 @@ public class SpatialAnalysis implements Analysis {
                                                           boolean doHeatmaps,
                                                           double heatmapBandwidth,
                                                           String heatmapLut) {
+        addAdvancedPhenotypingAndHeatmapControls(opts, spatialBindings,
+                doPhenotyping, clusterK, doHeatmaps, heatmapBandwidth, heatmapLut, null);
+    }
+
+    private void addAdvancedPhenotypingAndHeatmapControls(PipelineDialog opts,
+                                                          SpatialDialogBindings spatialBindings,
+                                                          boolean doPhenotyping,
+                                                          int clusterK,
+                                                          boolean doHeatmaps,
+                                                          double heatmapBandwidth,
+                                                          String heatmapLut,
+                                                          SpatialArtifactStatus artifactStatus) {
         opts.beginAdvancedSection("spatial");
         opts.addHeader("Cell Phenotyping");
-        spatialBindings.doPhenotypingToggle = opts.addToggle("K-means clustering", doPhenotyping);
+        spatialBindings.doPhenotypingToggle = opts.addToggle(
+                decorateArtifactLabel("K-means clustering", artifactStatus, SubAnalysis.PHENOTYPING),
+                defaultForArtifactStatus(artifactStatus, SubAnalysis.PHENOTYPING, doPhenotyping));
         opts.addHelpText("Clusters objects by multi-channel feature profile "
                 + "(volume, intensity, colocalization). Auto-detects optimal k via silhouette score.");
         spatialBindings.clusterKField = opts.addNumericField("Clusters (k, 0=auto)", clusterK, 0);
         opts.addHelpText("Number of clusters. 0 auto-detects optimal k (2-10).");
 
         opts.addHeader("Density Heatmaps");
-        spatialBindings.doHeatmapsToggle = opts.addToggle("Generate density heatmaps", doHeatmaps);
+        spatialBindings.doHeatmapsToggle = opts.addToggle(
+                decorateArtifactLabel("Generate density heatmaps", artifactStatus,
+                        SubAnalysis.DENSITY_HEATMAPS),
+                defaultForArtifactStatus(artifactStatus, SubAnalysis.DENSITY_HEATMAPS, doHeatmaps));
         opts.addHelpText("Gaussian KDE density maps per channel. "
                 + "Saved as TIFF + PNG to FLASH/Image Analysis/Spatial Analysis/Image Outputs/<animal>/Heatmaps/.");
         spatialBindings.kdeBandwidthField = opts.addNumericField("KDE bandwidth (um, 0=auto)", heatmapBandwidth, 1);
@@ -4516,6 +5037,7 @@ public class SpatialAnalysis implements Analysis {
     private static final class SpatialDialogBindings {
         boolean programmaticChange;
         JComboBox<String> presetCombo;
+        ToggleSwitch forceRerunToggle;
         ToggleSwitch doDistancesToggle;
         ToggleSwitch lineDistanceToggle;
         ToggleSwitch doSpatialStatsToggle;

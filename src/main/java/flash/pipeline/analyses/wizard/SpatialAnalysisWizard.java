@@ -360,11 +360,16 @@ public class SpatialAnalysisWizard extends WizardFlow {
         public boolean doCompositeIndices;
         public boolean doPopMorphometrics;
         public boolean doSpatialMorphometrics;
+        public boolean forceRerun;
         public double kdeBandwidth = 0.0;
         public String heatmapLut = "Fire";
         public int clusterK = 0;
         public double colocThresholdPercent = 30.0;
         public final Map<String, Double> markerThresholds = new LinkedHashMap<String, Double>();
+
+        public boolean anyEarlyPhaseToggleOn() {
+            return forceRerun || doCpc || doHeatmaps || do2DMorphology || do3DMorphology;
+        }
     }
 
     private final class SpatialQuestionScreen extends Screen {

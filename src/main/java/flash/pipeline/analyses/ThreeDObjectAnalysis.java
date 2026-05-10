@@ -11,6 +11,10 @@ import flash.pipeline.analyses.wizard.ThreeDObjectPreset;
 import flash.pipeline.analyses.wizard.ThreeDObjectPresetIO;
 import flash.pipeline.analyses.wizard.ThreeDObjectWizard;
 import flash.pipeline.analyses.wizard.SpatialAnalysisWizard;
+import flash.pipeline.analyses.spatial.DiskLabelImageProvider;
+import flash.pipeline.analyses.spatial.InMemoryLabelImageProvider;
+import flash.pipeline.analyses.spatial.LabelImageProvider;
+import flash.pipeline.analyses.spatial.SectionKey;
 import flash.pipeline.cli.CLIConfig;
 import flash.pipeline.deconv.DeconvolvedInputResolver;
 import flash.pipeline.cellpose.Cellpose3DRunner;
@@ -160,6 +164,8 @@ public class ThreeDObjectAnalysis implements Analysis {
     private int wizardNuclearMarkerIndex = -1;
     private boolean[] wizardProcessChannels = null;
     private SpatialAnalysisWizard.DerivedConfig wizardSpatialConfig = null;
+    private final Map<SectionKey, Map<String, ImagePlus>> retainedLabels =
+            new LinkedHashMap<SectionKey, Map<String, ImagePlus>>();
     private SpatialOptionsDialogLauncher spatialOptionsDialogLauncher =
             DEFAULT_SPATIAL_OPTIONS_DIALOG_LAUNCHER;
     private static final String OBJECT_PRESET_PLACEHOLDER = "(choose preset)";
@@ -577,6 +583,8 @@ public class ThreeDObjectAnalysis implements Analysis {
 
     @Override
     public void execute(String directory) {
+        clearRetainedSpatialLabels();
+
         if (!FeatureDependencyGate.gate(DependencyId.BIO_FORMATS_RUNTIME,
                 "3D Object Analysis", "Bio-Formats image loading")) {
             return;
@@ -1039,15 +1047,37 @@ public class ThreeDObjectAnalysis implements Analysis {
             }
         }
 
-        // Close all remaining image windows, leaving only the Log visible
-        closeAllImagesOnly();
-
-        // Run spatial distance analysis if requested
         if (runSpatial) {
+            AsyncImageSaver.waitForAllWithProgress(parallelThreads);
             IJ.log("--- Running Spatial Distance Analysis ---");
-            SpatialAnalysis spatialAnalysis = createSpatialAnalysisForRun();
-            spatialAnalysis.run(directory);
-            IJ.log("Spatial distance analysis complete.");
+            SpatialAnalysis spatial = createSpatialAnalysisForRun();
+            boolean imagesClosed = false;
+            try {
+                if (spatial.beginPhasedRun(directory)) {
+                    LabelImageProvider provider = new InMemoryLabelImageProvider(
+                            retainedLabels,
+                            new DiskLabelImageProvider(spatial, directory));
+                    spatial.runEarlyPhase(directory, provider);
+                    closeAllImagesOnly();
+                    imagesClosed = true;
+                    clearRetainedSpatialLabels();
+                    spatial.runLatePhase(directory);
+                    IJ.log("Spatial distance analysis complete.");
+                } else {
+                    closeAllImagesOnly();
+                    imagesClosed = true;
+                    clearRetainedSpatialLabels();
+                }
+            } finally {
+                spatial.endPhasedRun();
+                clearRetainedSpatialLabels();
+                if (!imagesClosed) {
+                    closeAllImagesOnly();
+                }
+            }
+        } else {
+            closeAllImagesOnly();
+            clearRetainedSpatialLabels();
         }
 
         AsyncImageSaver.waitForAllWithProgress(parallelThreads);
@@ -2131,7 +2161,58 @@ public class ThreeDObjectAnalysis implements Analysis {
                 String safeChName = ChannelFilenameCodec.toSafe(chName);
                 String objFileName = safeChName + "_objects" + (hemiRegion.isEmpty() ? "" : "_" + hemiRegion) + ".tif";
                 AsyncImageSaver.saveAsTiffAsync(objImg, new File(perAnimal, objFileName).getAbsolutePath());
+                retainSpatialLabelIfNeeded(chName, SectionKey.of(animalName, hemiRegion), objImg);
             }
+        }
+    }
+
+    private void retainSpatialLabelIfNeeded(String channelName, SectionKey section, ImagePlus labelImage) {
+        if (!shouldRetainSpatialLabels() || labelImage == null || section == null) {
+            return;
+        }
+
+        ImagePlus retained = null;
+        try {
+            retained = ImageOps.duplicateThreadSafe(labelImage);
+            if (retained != null) {
+                retained.setTitle(labelImage.getTitle());
+            }
+        } catch (Exception e) {
+            IJ.log("  [Spatial] Could not retain in-memory label for "
+                    + channelName + " / " + section + ": " + e.getMessage());
+            return;
+        }
+
+        synchronized (retainedLabels) {
+            Map<String, ImagePlus> perChannel = retainedLabels.get(section);
+            if (perChannel == null) {
+                perChannel = new LinkedHashMap<String, ImagePlus>();
+                retainedLabels.put(section, perChannel);
+            }
+            ImagePlus previous = perChannel.put(channelName, retained);
+            if (previous != null && previous != retained) {
+                closeQuietly(previous);
+            }
+        }
+    }
+
+    private boolean shouldRetainSpatialLabels() {
+        return wizardRunSpatial
+                && wizardSpatialConfig != null
+                && wizardSpatialConfig.anyEarlyPhaseToggleOn();
+    }
+
+    private void clearRetainedSpatialLabels() {
+        synchronized (retainedLabels) {
+            for (Map<String, ImagePlus> perChannel : retainedLabels.values()) {
+                if (perChannel == null) {
+                    continue;
+                }
+                for (ImagePlus image : perChannel.values()) {
+                    closeQuietly(image);
+                }
+            }
+            retainedLabels.clear();
         }
     }
 
