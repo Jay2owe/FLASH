@@ -8,6 +8,7 @@ import ij.measure.ResultsTable;
 import ij.process.ByteProcessor;
 import org.junit.Test;
 
+import javax.swing.JButton;
 import java.util.Arrays;
 
 import static org.junit.Assert.assertEquals;
@@ -49,6 +50,8 @@ public class ParticleSizeStageTest {
 
         assertTrue(stage.isPreviewStaleForTest());
         assertTrue(actions.status.contains("Preview"));
+        assertTrue(actions.previewButtonStale);
+        assertEquals("\u25CF Run Preview", actions.previewButton.getText());
         assertEquals("Field edits must not execute the object preview",
                 0, adapter.previewRuns);
     }
@@ -65,6 +68,7 @@ public class ParticleSizeStageTest {
 
         assertEquals(0, adapter.previewRuns);
         assertEquals(42, stage.thresholdForTest());
+        assertEquals("\u25CF Run Preview", actions.previewButton.getText());
 
         stage.runPreviewNowForTest();
 
@@ -73,7 +77,9 @@ public class ParticleSizeStageTest {
         assertEquals(1, adapter.lastMinSize);
         assertFalse(stage.isPreviewStaleForTest());
         assertNotNull(actions.adjustedPreview);
-        assertEquals("Objects detected: 2", actions.status);
+        assertEquals("Objects: 2 ready", actions.status);
+        assertFalse(actions.previewButtonStale);
+        assertEquals("Run Preview", actions.previewButton.getText());
     }
 
     @Test
@@ -117,20 +123,22 @@ public class ParticleSizeStageTest {
                 new RecordingStore("1-Infinity"), adapter);
 
         stage.buildControls(context(), actions);
-        stage.onEnter(context(), new PreviewPairPanel("Original", "Adjusted"));
+        stage.onEnter(context(), new PreviewPairPanel("Original", "Adjusted",
+                PreviewPairPanel.PreviewLayout.HORIZONTAL_SLIM));
         stage.runPreviewNowForTest();
 
         assertEquals("Object label preview", actions.adjustedPreview.getTitle());
         assertEquals(3, stage.largePreviewPaneCountForTest());
+        assertFalse(stage.objectOverlaySelectedForTest());
 
         stage.setShowOverlayForTest(true);
 
-        assertTrue(actions.adjustedPreview.getTitle().startsWith("Object overlay | filtered"));
+        assertTrue(stage.objectOverlaySelectedForTest());
 
         stage.selectRawSourceForTest();
 
-        assertTrue(actions.adjustedPreview.getTitle().startsWith("Object overlay | raw"));
-        assertEquals("Objects detected: 2", actions.status);
+        assertTrue(stage.currentSourceTitleForTest().startsWith("raw"));
+        assertEquals("Objects: 2 ready", actions.status);
     }
 
     @Test
@@ -259,6 +267,8 @@ public class ParticleSizeStageTest {
     private static final class RecordingActions implements ConfigQcActions {
         String status = "";
         ImagePlus adjustedPreview;
+        JButton previewButton;
+        boolean previewButtonStale;
 
         @Override public void setStatus(String text) {
             status = text;
@@ -271,6 +281,18 @@ public class ParticleSizeStageTest {
         @Override public void setAdjustedPreview(ImagePlus image, String text) {
             adjustedPreview = image;
             status = text;
+        }
+
+        @Override public void registerPreviewButton(JButton button) {
+            previewButton = button;
+            setPreviewButtonStale(true);
+        }
+
+        @Override public void setPreviewButtonStale(boolean stale) {
+            previewButtonStale = stale;
+            if (previewButton != null) {
+                previewButton.setText(stale ? "\u25CF Run Preview" : "Run Preview");
+            }
         }
 
         @Override public void nextImage() {

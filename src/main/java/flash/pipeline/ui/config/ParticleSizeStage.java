@@ -2,8 +2,6 @@ package flash.pipeline.ui.config;
 
 import flash.pipeline.objects.ObjectsCounter3DWrapper;
 import flash.pipeline.ui.preview.LabelMapStyler;
-import flash.pipeline.ui.preview.ObjectOverlayRenderer;
-import flash.pipeline.ui.preview.PreviewDisplaySettings;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import ij.ImagePlus;
 import ij.ImageStack;
@@ -13,7 +11,6 @@ import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
-import javax.swing.JCheckBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
@@ -21,11 +18,8 @@ import javax.swing.JTextField;
 import javax.swing.SwingWorker;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
-import java.awt.BorderLayout;
 import java.awt.Color;
-import java.awt.GridBagConstraints;
-import java.awt.GridBagLayout;
-import java.awt.Insets;
+import java.awt.Font;
 import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.Set;
@@ -63,8 +57,8 @@ public final class ParticleSizeStage implements ConfigQcStage {
         }
     }
 
-    private static final String STALE_TEXT = "Preview is stale. Press Run Object Preview.";
-    private static final String EMPTY_TEXT = "Filtered input is ready. Press Run Object Preview.";
+    private static final String STALE_TEXT = "Preview is out of date. Press Run Preview.";
+    private static final String EMPTY_TEXT = "Filtered input is ready. Press Run Preview.";
 
     private final SizeStore sizeStore;
     private final PreviewAdapter previewAdapter;
@@ -77,8 +71,6 @@ public final class ParticleSizeStage implements ConfigQcStage {
     private ImagePlus rawSource;
     private ImagePlus filteredSource;
     private ImagePlus labelPreview;
-    private ImagePlus labelDisplayPreview;
-    private ImagePlus overlayPreview;
     private SwingWorker<ObjectsCounter3DWrapper.Result, Void> previewWorker;
     private boolean previewStale = true;
     private boolean updatingFields;
@@ -89,11 +81,7 @@ public final class ParticleSizeStage implements ConfigQcStage {
     private JTextField maxField;
     private JButton previewButton;
     private JButton resetButton;
-    private JButton sourceToggleButton;
-    private JCheckBox overlayCheck;
     private JLabel thresholdLabel;
-    private JLabel countLabel;
-    private JLabel feedbackLabel;
     private boolean showRawSource;
 
     public ParticleSizeStage(SizeStore sizeStore, PreviewAdapter previewAdapter) {
@@ -118,11 +106,13 @@ public final class ParticleSizeStage implements ConfigQcStage {
         this.activeContext = context;
         this.savedSize = restartSize == null ? parseSizeToken(sizeStore.get()) : restartSize;
 
-        JPanel panel = new JPanel(new BorderLayout(0, 10));
+        JPanel panel = new JPanel();
         panel.setOpaque(false);
-        panel.add(buildSummaryPanel(context), BorderLayout.NORTH);
-        panel.add(buildFieldsPanel(), BorderLayout.CENTER);
-        panel.add(buildActionPanel(), BorderLayout.SOUTH);
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setBorder(BorderFactory.createEmptyBorder(2, 0, 0, 0));
+        panel.add(buildSizeRow());
+        panel.add(Box.createVerticalStrut(4));
+        panel.add(buildActionRow());
         loadFields(savedSize);
         markPreviewStale(EMPTY_TEXT);
         return panel;
@@ -135,10 +125,19 @@ public final class ParticleSizeStage implements ConfigQcStage {
         this.activeContext = context;
         this.preview = preview;
         showRawSource = false;
-        refreshSourceToggleButton();
         if (preview != null) {
             preview.clearLargePreviewImages();
+            preview.setSourceToggleVisible(true);
+            preview.setSourceMode(PreviewPairPanel.SourceMode.FILTERED);
+            preview.setSourceModeEnabled(true);
+            preview.setSourceModeChangeListener(mode -> {
+                showRawSource = mode == PreviewPairPanel.SourceMode.RAW;
+                refreshSourceAndOutputPreview();
+            });
             preview.setDisplaySettingsChangeListener(settings -> refreshSourceAndOutputPreview());
+        }
+        if (actions != null) {
+            actions.registerPreviewButton(previewButton);
         }
         try {
             rawSource = previewAdapter.createRawSource(context);
@@ -200,6 +199,7 @@ public final class ParticleSizeStage implements ConfigQcStage {
     public void onLeave(ConfigQcContext context) {
         closePreviewWorker();
         if (preview != null) {
+            preview.setSourceModeChangeListener(null);
             preview.setDisplaySettingsChangeListener(null);
             preview.clearLargePreviewImages();
         }
@@ -241,8 +241,12 @@ public final class ParticleSizeStage implements ConfigQcStage {
     }
 
     void setShowOverlayForTest(boolean showOverlay) {
-        if (overlayCheck != null) overlayCheck.setSelected(showOverlay);
+        if (preview != null) preview.setObjectOverlaySelected(showOverlay);
         refreshSourceAndOutputPreview();
+    }
+
+    boolean objectOverlaySelectedForTest() {
+        return preview != null && preview.objectOverlaySelected();
     }
 
     String currentSourceTitleForTest() {
@@ -254,127 +258,50 @@ public final class ParticleSizeStage implements ConfigQcStage {
         return labelPreview == null ? 2 : 3;
     }
 
-    private JComponent buildSummaryPanel(ConfigQcContext context) {
-        JPanel panel = new JPanel();
-        panel.setOpaque(false);
-        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+    private JComponent buildSizeRow() {
+        JPanel row = new JPanel();
+        row.setOpaque(false);
+        row.setLayout(new BoxLayout(row, BoxLayout.X_AXIS));
+        row.setAlignmentX(JComponent.LEFT_ALIGNMENT);
 
-        JLabel channel = new JLabel(context == null ? "Channel" : context.getChannelLabel());
-        JLabel image = new JLabel(context == null ? "Image" : context.getImageProgressText()
-                + ": " + context.getCurrentImageDisplayName());
-        JLabel help = new JLabel("Edit size limits, then press Run Object Preview to update the label map.");
-        help.setForeground(new Color(90, 90, 90));
+        JLabel heading = new JLabel("Particle sizes (voxels)");
+        Font font = heading.getFont();
+        if (font != null) heading.setFont(font.deriveFont(Font.BOLD));
+        row.add(heading);
+        row.add(Box.createHorizontalStrut(16));
+        row.add(new JLabel("Min"));
+        row.add(Box.createHorizontalStrut(4));
+        minField = new JTextField(6);
+        installFieldListener(minField);
+        row.add(minField);
+        row.add(Box.createHorizontalStrut(12));
+        row.add(new JLabel("Max"));
+        row.add(Box.createHorizontalStrut(4));
+        maxField = new JTextField(8);
+        installFieldListener(maxField);
+        row.add(maxField);
+        row.add(Box.createHorizontalGlue());
         thresholdLabel = new JLabel("Threshold used: not resolved");
         thresholdLabel.setForeground(new Color(90, 90, 90));
-
-        channel.setAlignmentX(JComponent.LEFT_ALIGNMENT);
-        image.setAlignmentX(JComponent.LEFT_ALIGNMENT);
-        help.setAlignmentX(JComponent.LEFT_ALIGNMENT);
-        thresholdLabel.setAlignmentX(JComponent.LEFT_ALIGNMENT);
-        panel.add(channel);
-        panel.add(Box.createVerticalStrut(4));
-        panel.add(image);
-        panel.add(Box.createVerticalStrut(4));
-        panel.add(help);
-        panel.add(Box.createVerticalStrut(4));
-        panel.add(thresholdLabel);
-        return panel;
+        row.add(thresholdLabel);
+        return row;
     }
 
-    private JComponent buildFieldsPanel() {
-        JPanel panel = new JPanel();
-        panel.setOpaque(false);
-        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
-        panel.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createTitledBorder("Particle Sizes (n Voxels)"),
-                BorderFactory.createEmptyBorder(6, 6, 6, 6)));
-        minField = addSizeRow(panel, "Min Size", 8);
-        maxField = addSizeRow(panel, "Max Size", 10);
-        return panel;
-    }
-
-    private JTextField addSizeRow(JPanel parent, String labelText, int columns) {
-        JPanel row = new JPanel(new GridBagLayout());
-        row.setOpaque(false);
-        row.setAlignmentX(JComponent.LEFT_ALIGNMENT);
-        row.setBorder(BorderFactory.createEmptyBorder(2, 0, 2, 0));
-
-        GridBagConstraints gbc = new GridBagConstraints();
-        gbc.gridy = 0;
-        gbc.insets = new Insets(0, 0, 0, 6);
-        gbc.anchor = GridBagConstraints.WEST;
-        gbc.gridx = 0;
-        gbc.weightx = 1.0;
-        gbc.fill = GridBagConstraints.HORIZONTAL;
-        row.add(new JLabel(labelText), gbc);
-
-        JTextField field = new JTextField(columns);
-        installFieldListener(field);
-        gbc.gridx = 1;
-        gbc.weightx = 0.0;
-        gbc.fill = GridBagConstraints.NONE;
-        row.add(field, gbc);
-
-        parent.add(row);
-        return field;
-    }
-
-    private JComponent buildActionPanel() {
-        JPanel panel = new JPanel(new BorderLayout(0, 8));
-        panel.setOpaque(false);
-
-        JPanel controlsAndButtons = new JPanel();
-        controlsAndButtons.setOpaque(false);
-        controlsAndButtons.setLayout(new BoxLayout(controlsAndButtons, BoxLayout.Y_AXIS));
-
-        JPanel viewControls = new JPanel();
-        viewControls.setOpaque(false);
-        viewControls.setLayout(new BoxLayout(viewControls, BoxLayout.X_AXIS));
-        viewControls.setAlignmentX(JComponent.LEFT_ALIGNMENT);
-        sourceToggleButton = new JButton("Show Raw Image");
-        sourceToggleButton.addActionListener(e -> setRawSourceVisible(!showRawSource));
-        viewControls.add(sourceToggleButton);
-        viewControls.add(Box.createHorizontalStrut(10));
-        overlayCheck = new JCheckBox("Show overlay");
-        overlayCheck.setOpaque(false);
-        overlayCheck.addActionListener(e -> refreshSourceAndOutputPreview());
-        viewControls.add(overlayCheck);
-        viewControls.add(Box.createHorizontalGlue());
-
+    private JComponent buildActionRow() {
         JPanel buttons = new JPanel();
         buttons.setOpaque(false);
         buttons.setLayout(new BoxLayout(buttons, BoxLayout.X_AXIS));
         buttons.setAlignmentX(JComponent.LEFT_ALIGNMENT);
-        previewButton = new JButton("Run Object Preview");
+        buttons.add(Box.createHorizontalGlue());
+        previewButton = new JButton("Run Preview");
         previewButton.addActionListener(e -> runPreviewOnWorker());
         buttons.add(previewButton);
-        buttons.add(Box.createHorizontalStrut(6));
+        buttons.add(Box.createHorizontalStrut(8));
 
         resetButton = new JButton("Reset to saved");
         resetButton.addActionListener(e -> resetToSaved());
         buttons.add(resetButton);
-        buttons.add(Box.createHorizontalGlue());
-
-        controlsAndButtons.add(viewControls);
-        controlsAndButtons.add(Box.createVerticalStrut(6));
-        controlsAndButtons.add(buttons);
-
-        JPanel feedback = new JPanel();
-        feedback.setOpaque(false);
-        feedback.setLayout(new BoxLayout(feedback, BoxLayout.Y_AXIS));
-        countLabel = new JLabel("Objects detected: not previewed");
-        countLabel.setForeground(new Color(90, 90, 90));
-        feedbackLabel = new JLabel(" ");
-        feedbackLabel.setForeground(new Color(90, 90, 90));
-        countLabel.setAlignmentX(JComponent.LEFT_ALIGNMENT);
-        feedbackLabel.setAlignmentX(JComponent.LEFT_ALIGNMENT);
-        feedback.add(countLabel);
-        feedback.add(Box.createVerticalStrut(2));
-        feedback.add(feedbackLabel);
-
-        panel.add(controlsAndButtons, BorderLayout.NORTH);
-        panel.add(feedback, BorderLayout.CENTER);
-        return panel;
+        return buttons;
     }
 
     private void installFieldListener(JTextField field) {
@@ -481,23 +408,14 @@ public final class ParticleSizeStage implements ConfigQcStage {
         LabelMapStyler.apply(labelImage, count);
 
         ImagePlus old = labelPreview;
-        ImagePlus oldDisplay = labelDisplayPreview;
-        ImagePlus oldOverlay = overlayPreview;
         labelPreview = labelImage;
-        labelDisplayPreview = ObjectOverlayRenderer.renderLabelMap(labelImage, count);
-        if (labelDisplayPreview == null) {
-            labelDisplayPreview = labelImage;
-        }
-        overlayPreview = null;
         lastObjectCount = count;
         previewStale = false;
-        String text = "Objects detected: " + count;
-        if (countLabel != null) countLabel.setText(text);
+        String text = "Objects: " + count + " ready";
         refreshSourceAndOutputPreview();
         setStatus(text);
+        if (actions != null) actions.setPreviewButtonStale(false);
         closeOldPreviewImage(old);
-        closeOldPreviewImage(oldDisplay);
-        closeOldPreviewImage(oldOverlay);
     }
 
     private void refreshSourceAndOutputPreview() {
@@ -507,7 +425,7 @@ public final class ParticleSizeStage implements ConfigQcStage {
         refreshLargePreviewModel();
         if (labelPreview == null) return;
 
-        ImagePlus adjusted = adjustedPreviewImageForCurrentView();
+        ImagePlus adjusted = labelPreview;
         String text = objectCountText();
         if (previewStale) {
             if (preview != null) {
@@ -516,29 +434,18 @@ public final class ParticleSizeStage implements ConfigQcStage {
             }
             if (actions != null) {
                 actions.markPreviewStale(text);
+                actions.setPreviewButtonStale(true);
             }
-        } else if (actions != null) {
-            actions.setAdjustedPreview(adjusted, text);
-        } else if (preview != null) {
-            preview.setAdjusted(adjusted);
-            preview.setAdjustedState(PreviewPairPanel.PreviewState.READY, text);
+        } else {
+            if (preview != null) {
+                preview.setAdjusted(adjusted);
+                preview.setAdjustedState(PreviewPairPanel.PreviewState.READY, text);
+            }
+            if (actions != null) {
+                actions.setAdjustedPreview(adjusted, text);
+                actions.setPreviewButtonStale(false);
+            }
         }
-    }
-
-    private ImagePlus adjustedPreviewImageForCurrentView() {
-        if (overlaySelected()) {
-            ImagePlus source = currentSourceImage();
-            if (source == null || labelPreview == null) return labelDisplayPreview;
-            ImagePlus oldOverlay = overlayPreview;
-            PreviewDisplaySettings displaySettings = preview == null
-                    ? null
-                    : preview.getDisplaySettings();
-            overlayPreview = ObjectOverlayRenderer.renderOverlay(source, labelPreview,
-                    displaySettings);
-            closeOldPreviewImage(oldOverlay);
-            if (overlayPreview != null) return overlayPreview;
-        }
-        return labelDisplayPreview == null ? labelPreview : labelDisplayPreview;
     }
 
     private void refreshLargePreviewModel() {
@@ -556,24 +463,18 @@ public final class ParticleSizeStage implements ConfigQcStage {
 
     private void setRawSourceVisible(boolean showRaw) {
         showRawSource = showRaw;
-        refreshSourceToggleButton();
-        refreshSourceAndOutputPreview();
-    }
-
-    private void refreshSourceToggleButton() {
-        if (sourceToggleButton != null) {
-            sourceToggleButton.setText(showRawSource ? "Show Filtered Image" : "Show Raw Image");
+        if (preview != null) {
+            preview.setSourceMode(showRaw
+                    ? PreviewPairPanel.SourceMode.RAW
+                    : PreviewPairPanel.SourceMode.FILTERED);
         }
-    }
-
-    private boolean overlaySelected() {
-        return overlayCheck != null && overlayCheck.isSelected();
+        refreshSourceAndOutputPreview();
     }
 
     private String objectCountText() {
         return lastObjectCount >= 0
-                ? "Objects detected: " + lastObjectCount
-                : "Objects detected: not previewed";
+                ? "Objects: " + lastObjectCount + " ready"
+                : "Objects: not previewed";
     }
 
     private ImagePlus emptyLabelMapLike(ImagePlus source) {
@@ -601,6 +502,7 @@ public final class ParticleSizeStage implements ConfigQcStage {
     private void markPreviewStale(String text) {
         previewStale = true;
         setPreviewState(PreviewPairPanel.PreviewState.STALE, text);
+        if (actions != null) actions.setPreviewButtonStale(true);
     }
 
     private void setPreviewState(PreviewPairPanel.PreviewState state, String text) {
@@ -610,19 +512,14 @@ public final class ParticleSizeStage implements ConfigQcStage {
         if (actions != null) {
             if (state == PreviewPairPanel.PreviewState.STALE) {
                 actions.markPreviewStale(text);
+                actions.setPreviewButtonStale(true);
             } else {
                 actions.setStatus(text);
             }
         }
-        if (feedbackLabel != null) {
-            feedbackLabel.setText(text == null || text.trim().isEmpty() ? " " : text);
-        }
     }
 
     private void setStatus(String text) {
-        if (feedbackLabel != null) {
-            feedbackLabel.setText(text == null || text.trim().isEmpty() ? " " : text);
-        }
         if (actions != null) {
             actions.setStatus(text);
         }
@@ -638,8 +535,10 @@ public final class ParticleSizeStage implements ConfigQcStage {
         if (resetButton != null) resetButton.setEnabled(enabled);
         if (minField != null) minField.setEnabled(enabled);
         if (maxField != null) maxField.setEnabled(enabled);
-        if (sourceToggleButton != null) sourceToggleButton.setEnabled(enabled);
-        if (overlayCheck != null) overlayCheck.setEnabled(enabled);
+        if (preview != null) {
+            preview.setSourceModeEnabled(enabled);
+            preview.setObjectOverlayEnabled(enabled);
+        }
     }
 
     private void refreshThresholdLabel() {
@@ -661,17 +560,11 @@ public final class ParticleSizeStage implements ConfigQcStage {
         ImagePlus raw = rawSource;
         ImagePlus filtered = filteredSource;
         ImagePlus label = labelPreview;
-        ImagePlus display = labelDisplayPreview;
-        ImagePlus overlay = overlayPreview;
         rawSource = null;
         filteredSource = null;
         labelPreview = null;
-        labelDisplayPreview = null;
-        overlayPreview = null;
         lastObjectCount = -1;
         Set<ImagePlus> closed = Collections.newSetFromMap(new IdentityHashMap<ImagePlus, Boolean>());
-        closeUnique(overlay, closed);
-        closeUnique(display, closed);
         closeUnique(label, closed);
         closeUnique(filtered, closed);
         closeUnique(raw, closed);
@@ -681,9 +574,7 @@ public final class ParticleSizeStage implements ConfigQcStage {
         if (image == null
                 || image == rawSource
                 || image == filteredSource
-                || image == labelPreview
-                || image == labelDisplayPreview
-                || image == overlayPreview) {
+                || image == labelPreview) {
             return;
         }
         previewAdapter.close(image);

@@ -67,7 +67,7 @@ public final class PreviewPairPanel extends JPanel {
     private final JButton largeViewButton = new JButton("Large view");
     private final JButton displayControlsButton = new JButton("Adjust Brightness/Contrast");
     private final JPanel objectOverlayControls = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
-    private final JCheckBox objectOverlayCheck = new JCheckBox("Overlay objects");
+    private final JCheckBox objectOverlayCheck = new JCheckBox();
     private final JComboBox<String> objectOverlaySourceChoice = new JComboBox<String>();
     private final Window owner;
     private final JPanel displayControlsPanel;
@@ -109,6 +109,7 @@ public final class PreviewPairPanel extends JPanel {
     private boolean objectOverlayControlsBuilt;
     private boolean sourceToggleVisible;
     private boolean sourceModeEnabled = true;
+    private boolean objectOverlayEnabled = true;
     private SourceMode sourceMode = SourceMode.FILTERED;
 
     public PreviewPairPanel(String originalTitle, String adjustedTitle) {
@@ -340,8 +341,13 @@ public final class PreviewPairPanel extends JPanel {
     }
 
     public void setSourceMode(SourceMode mode) {
-        sourceMode = mode == SourceMode.RAW ? SourceMode.RAW : SourceMode.FILTERED;
+        SourceMode next = mode == SourceMode.RAW ? SourceMode.RAW : SourceMode.FILTERED;
+        boolean changed = sourceMode != next;
+        sourceMode = next;
         applySourceControlsState();
+        if (changed) {
+            updateAdjustedPreviewImage();
+        }
     }
 
     public void setSourceModeEnabled(boolean enabled) {
@@ -353,11 +359,27 @@ public final class PreviewPairPanel extends JPanel {
         sourceModeListener = listener;
     }
 
+    public boolean objectOverlaySelected() {
+        return isObjectOverlaySelected();
+    }
+
+    public void setObjectOverlaySelected(boolean selected) {
+        objectOverlayCheck.setSelected(selected);
+        updateObjectOverlayControls();
+        updateAdjustedPreviewImage();
+    }
+
+    public void setObjectOverlayEnabled(boolean enabled) {
+        objectOverlayEnabled = enabled;
+        updateObjectOverlayControls();
+    }
+
     public void resetStageToolstripState() {
         sourceModeListener = null;
         setSourceToggleVisible(false);
         setSourceMode(SourceMode.FILTERED);
         setSourceModeEnabled(true);
+        setObjectOverlayEnabled(true);
         // Overlay choice is intentionally preserved across related object-preview stages.
     }
 
@@ -490,9 +512,7 @@ public final class PreviewPairPanel extends JPanel {
     }
 
     void setObjectOverlaySelectedForTest(boolean selected) {
-        objectOverlayCheck.setSelected(selected);
-        updateObjectOverlayControls();
-        updateAdjustedPreviewImage();
+        setObjectOverlaySelected(selected);
     }
 
     void setObjectOverlaySourceForTest(String sourceLabel) {
@@ -569,10 +589,15 @@ public final class PreviewPairPanel extends JPanel {
         objectOverlaySourceChoice.addItem("Filtered image");
         objectOverlaySourceChoice.addItem("Raw image");
         objectOverlayControls.setOpaque(false);
+        objectOverlayCheck.setText(layout == PreviewLayout.HORIZONTAL_SLIM
+                ? "Overlay"
+                : "Overlay objects");
         objectOverlayCheck.setOpaque(false);
         objectOverlayControls.add(objectOverlayCheck);
-        objectOverlayControls.add(new JLabel("over"));
-        objectOverlayControls.add(objectOverlaySourceChoice);
+        if (layout != PreviewLayout.HORIZONTAL_SLIM) {
+            objectOverlayControls.add(new JLabel("over"));
+            objectOverlayControls.add(objectOverlaySourceChoice);
+        }
         objectOverlayControls.setVisible(false);
         objectOverlayControlsBuilt = true;
         return objectOverlayControls;
@@ -598,9 +623,9 @@ public final class PreviewPairPanel extends JPanel {
                 SourceMode selected = sourceRawRadio.isSelected()
                         ? SourceMode.RAW
                         : SourceMode.FILTERED;
-                sourceMode = selected;
+                setSourceMode(selected);
                 if (sourceModeListener != null) {
-                    sourceModeListener.sourceModeChanged(selected);
+                    sourceModeListener.sourceModeChanged(sourceMode);
                 }
             }
         };
@@ -895,7 +920,7 @@ public final class PreviewPairPanel extends JPanel {
         ImagePlus displayImage = adjustedImage;
         ImagePlus oldOverlay = generatedObjectOverlayImage;
         generatedObjectOverlayImage = null;
-        if (objectOverlaySelected()) {
+        if (isObjectOverlaySelected()) {
             ImagePlus sourceImage = selectedObjectOverlaySourceImage();
             ImagePlus overlay = ObjectOverlayRenderer.renderOverlay(
                     sourceImage, largePreviewThirdImage, displaySettingsForImage(sourceImage));
@@ -914,8 +939,9 @@ public final class PreviewPairPanel extends JPanel {
         boolean available = objectOverlayAvailable();
         boolean hasSource = largePreviewFirstImage != null || largePreviewSecondImage != null;
         objectOverlayControls.setVisible(available);
-        objectOverlayCheck.setEnabled(available && hasSource);
-        objectOverlaySourceChoice.setEnabled(available && hasSource && objectOverlayCheck.isSelected());
+        objectOverlayCheck.setEnabled(available && hasSource && objectOverlayEnabled);
+        objectOverlaySourceChoice.setEnabled(available && hasSource && objectOverlayEnabled
+                && objectOverlayCheck.isSelected());
         if (!available) {
             closeGeneratedObjectOverlayImage();
         }
@@ -929,7 +955,7 @@ public final class PreviewPairPanel extends JPanel {
                 && adjustedImage == largePreviewThirdImage;
     }
 
-    private boolean objectOverlaySelected() {
+    private boolean isObjectOverlaySelected() {
         return objectOverlayAvailable()
                 && objectOverlayCheck.isSelected()
                 && (largePreviewFirstImage != null || largePreviewSecondImage != null);
@@ -937,7 +963,9 @@ public final class PreviewPairPanel extends JPanel {
 
     private ImagePlus selectedObjectOverlaySourceImage() {
         Object selected = objectOverlaySourceChoice.getSelectedItem();
-        boolean raw = selected != null && "Raw image".equals(selected.toString());
+        boolean raw = sourceToggleVisible
+                ? sourceMode == SourceMode.RAW
+                : selected != null && "Raw image".equals(selected.toString());
         ImagePlus preferred = raw ? largePreviewFirstImage : largePreviewSecondImage;
         if (preferred != null) return preferred;
         return raw ? largePreviewSecondImage : largePreviewFirstImage;
@@ -1040,7 +1068,7 @@ public final class PreviewPairPanel extends JPanel {
         adjustedPreview.setDisplaySettingsEnabled(!adjustedIsObjectPreview);
         originalPreview.setDisplaySettings(displaySettingsForImage(originalImage));
         adjustedPreview.setDisplaySettings(displaySettingsForImage(adjustedImage));
-        if (objectOverlaySelected()) {
+        if (isObjectOverlaySelected()) {
             updateAdjustedPreviewImage();
         }
         if (largePreviewDialog != null) {
