@@ -100,6 +100,75 @@ public class ConfigQcDialogTest {
     }
 
     @Test
+    public void previewButton_afterRegister_hasSoftBlueBgAndLeadingDot() {
+        RecordingStage stage = new RecordingStage("Filter");
+        ConfigQcDialog dialog = ConfigQcDialog.createForTest(contextWithTwoImages(), Arrays.asList(stage));
+        JButton button = new JButton("Preview Filter");
+
+        dialog.registerPreviewButton(button);
+
+        assertEquals("\u25CF Run Preview", button.getText());
+        assertEquals(new Color(232, 245, 253), button.getBackground());
+        assertEquals(new Color(15, 87, 140), button.getForeground());
+        assertTrue(button.isOpaque());
+        assertTrue(button.isContentAreaFilled());
+    }
+
+    @Test
+    public void setPreviewButtonStale_false_removesLeadingDot() {
+        RecordingStage stage = new RecordingStage("Filter");
+        ConfigQcDialog dialog = ConfigQcDialog.createForTest(contextWithTwoImages(), Arrays.asList(stage));
+        JButton button = new JButton("Run Object Preview");
+
+        dialog.registerPreviewButton(button);
+        dialog.setPreviewButtonStale(false);
+
+        assertEquals("Run Preview", button.getText());
+        assertEquals(new Color(232, 245, 253), button.getBackground());
+        assertEquals(new Color(15, 87, 140), button.getForeground());
+    }
+
+    @Test
+    public void setPreviewButtonRunning_disablesButton_keepsStyling() {
+        RecordingStage stage = new RecordingStage("Filter");
+        ConfigQcDialog dialog = ConfigQcDialog.createForTest(contextWithTwoImages(), Arrays.asList(stage));
+        JButton button = new JButton("Preview Filter");
+
+        dialog.registerPreviewButton(button);
+        dialog.setPreviewButtonRunning(true);
+
+        assertFalse(button.isEnabled());
+        assertEquals(new Color(232, 245, 253), button.getBackground());
+        assertEquals(new Color(15, 87, 140), button.getForeground());
+
+        dialog.setPreviewButtonRunning(false);
+
+        assertTrue(button.isEnabled());
+        assertEquals(new Color(232, 245, 253), button.getBackground());
+    }
+
+    @Test
+    public void f5KeyboardShortcut_firesActivePreviewButton() {
+        RecordingStage stage = new RecordingStage("Filter");
+        ConfigQcDialog dialog = ConfigQcDialog.createForTest(contextWithTwoImages(), Arrays.asList(stage));
+        RecordingButton button = new RecordingButton("Preview Filter");
+        JComponent content = dialog.getContent();
+
+        dialog.registerPreviewButton(button);
+
+        Object actionKey = content.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW)
+                .get(KeyStroke.getKeyStroke(KeyEvent.VK_F5, 0));
+        Action action = content.getActionMap().get(actionKey);
+
+        assertNotNull(actionKey);
+        assertNotNull(action);
+
+        action.actionPerformed(new ActionEvent(content, ActionEvent.ACTION_PERFORMED, "qc-run-preview"));
+
+        assertEquals(1, button.clickCount);
+    }
+
+    @Test
     public void escapeKey_firesCancel() {
         RecordingStage stage = new RecordingStage("Display range");
         ConfigQcDialog dialog = ConfigQcDialog.createForTest(contextWithTwoImages(), Arrays.asList(stage));
@@ -550,6 +619,22 @@ public class ConfigQcDialogTest {
 
         String currentValueForTest() {
             return field == null ? "" : field.getText();
+        }
+    }
+
+    private static final class RecordingButton extends JButton {
+        private int clickCount;
+
+        RecordingButton(String text) {
+            super(text);
+        }
+
+        @Override public boolean isShowing() {
+            return true;
+        }
+
+        @Override public void doClick() {
+            clickCount++;
         }
     }
 }

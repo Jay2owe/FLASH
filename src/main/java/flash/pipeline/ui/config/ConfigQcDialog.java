@@ -49,6 +49,11 @@ public final class ConfigQcDialog {
     private static final Color CANCEL_ACTION_BG = new Color(252, 240, 240);
     private static final Color CANCEL_ACTION_FG = new Color(137, 44, 44);
     private static final Color CANCEL_ACTION_BORDER = new Color(196, 108, 108);
+    private static final Color PREVIEW_ACTION_BG = new Color(232, 245, 253);
+    private static final Color PREVIEW_ACTION_FG = new Color(15, 87, 140);
+    private static final Color PREVIEW_ACTION_BORDER = new Color(71, 145, 196);
+    private static final String PREVIEW_BUTTON_LABEL = "Run Preview";
+    private static final String STALE_PREFIX = "\u25CF ";
     private static final Dimension MINIMUM_DIALOG_SIZE = new Dimension(1080, 720);
 
     private final Window owner;
@@ -74,6 +79,8 @@ public final class ConfigQcDialog {
     private SecondaryLoop loop;
     private int stageIndex = -1;
     private boolean enteredStage;
+    private JButton activePreviewButton;
+    private boolean activePreviewButtonStale = true;
     private String currentImageDisplayName = " ";
     private String pendingNavigationStatus;
     private ConfigQcResult result = ConfigQcResult.CANCEL;
@@ -257,6 +264,15 @@ public final class ConfigQcDialog {
                 cancelButton.doClick();
             }
         });
+        inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_F5, 0), "qc-run-preview");
+        actionMap.put("qc-run-preview", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) {
+                JButton button = activePreviewButton;
+                if (button != null && button.isEnabled() && button.isShowing()) {
+                    button.doClick();
+                }
+            }
+        });
     }
 
     private void enterFirstApplicableStage() {
@@ -293,6 +309,7 @@ public final class ConfigQcDialog {
         refreshButtons();
 
         controlsPanel.removeAll();
+        clearPreviewButtonRegistration();
         JComponent controls = stage.buildControls(context, actions);
         if (controls != null) {
             controlsPanel.add(controls, BorderLayout.CENTER);
@@ -350,13 +367,49 @@ public final class ConfigQcDialog {
 
     private void markPreviewStale(String text) {
         previewPair.setAdjustedState(PreviewPairPanel.PreviewState.STALE, text);
+        setPreviewButtonStale(true);
         setStatus(text);
     }
 
     private void setAdjustedPreview(ImagePlus image, String text) {
         previewPair.setAdjusted(image);
         previewPair.setAdjustedState(PreviewPairPanel.PreviewState.READY, text);
+        setPreviewButtonStale(false);
         setStatus(text);
+    }
+
+    public void registerPreviewButton(JButton button) {
+        activePreviewButton = button;
+        activePreviewButtonStale = true;
+        if (button == null) return;
+        button.setText(PREVIEW_BUTTON_LABEL);
+        applyPreviewButtonStaleStyle();
+    }
+
+    public void setPreviewButtonStale(boolean stale) {
+        activePreviewButtonStale = stale;
+        applyPreviewButtonStaleStyle();
+    }
+
+    public void setPreviewButtonRunning(boolean running) {
+        JButton button = activePreviewButton;
+        if (button == null) return;
+        button.setEnabled(!running);
+        styleActionButton(button, PREVIEW_ACTION_BG, PREVIEW_ACTION_FG, PREVIEW_ACTION_BORDER);
+    }
+
+    private void applyPreviewButtonStaleStyle() {
+        JButton button = activePreviewButton;
+        if (button == null) return;
+        button.setText(activePreviewButtonStale
+                ? STALE_PREFIX + PREVIEW_BUTTON_LABEL
+                : PREVIEW_BUTTON_LABEL);
+        styleActionButton(button, PREVIEW_ACTION_BG, PREVIEW_ACTION_FG, PREVIEW_ACTION_BORDER);
+    }
+
+    private void clearPreviewButtonRegistration() {
+        activePreviewButton = null;
+        activePreviewButtonStale = true;
     }
 
     private void lockInAndAdvance() {
@@ -713,6 +766,18 @@ public final class ConfigQcDialog {
 
         @Override public void jumpToStage(String stageKey) {
             ConfigQcDialog.this.jumpToStage(stageKey);
+        }
+
+        @Override public void registerPreviewButton(JButton button) {
+            ConfigQcDialog.this.registerPreviewButton(button);
+        }
+
+        @Override public void setPreviewButtonStale(boolean stale) {
+            ConfigQcDialog.this.setPreviewButtonStale(stale);
+        }
+
+        @Override public void setPreviewButtonRunning(boolean running) {
+            ConfigQcDialog.this.setPreviewButtonRunning(running);
         }
     }
 }
