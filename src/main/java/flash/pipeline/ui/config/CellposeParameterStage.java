@@ -17,14 +17,12 @@ import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
-import javax.swing.JTextArea;
-import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
-import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Container;
+import java.awt.Font;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
@@ -103,8 +101,8 @@ public final class CellposeParameterStage implements ConfigQcStage {
         }
     }
 
-    private static final String STALE_TEXT = "Preview is stale. Press Run Cellpose Preview.";
-    private static final String EMPTY_TEXT = "Filtered input is ready. Press Run Cellpose Preview.";
+    private static final String STALE_TEXT = "Preview is out of date. Press Run Preview.";
+    private static final String EMPTY_TEXT = "Filtered input is ready. Press Run Preview.";
 
     private final ParameterStore parameterStore;
     private final PreviewAdapter previewAdapter;
@@ -135,15 +133,12 @@ public final class CellposeParameterStage implements ConfigQcStage {
     private JTextField flowField;
     private JTextField cellprobField;
     private JCheckBox gpuCheckBox;
-    private JButton sourceToggleButton;
     private JButton previewButton;
     private JButton installGpuButton;
     private JButton resetButton;
     private JLabel modelDescriptionLabel;
-    private JComponent companionHelpLabel;
+    private JLabel companionHelpLabel;
     private JLabel runtimeLabel;
-    private JLabel countLabel;
-    private JLabel feedbackLabel;
 
     public CellposeParameterStage(ParameterStore parameterStore,
                                   PreviewAdapter previewAdapter,
@@ -187,11 +182,17 @@ public final class CellposeParameterStage implements ConfigQcStage {
                 primaryChannelIndex)
                 : restartParameters;
 
-        JPanel panel = new JPanel(new BorderLayout(0, 10));
+        JPanel panel = new JPanel();
         panel.setOpaque(false);
-        panel.add(buildSummaryPanel(context), BorderLayout.NORTH);
-        panel.add(buildFieldsPanel(), BorderLayout.CENTER);
-        panel.add(buildActionPanel(), BorderLayout.SOUTH);
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setBorder(BorderFactory.createEmptyBorder(2, 0, 0, 0));
+        panel.add(buildModelRow());
+        panel.add(Box.createVerticalStrut(4));
+        panel.add(buildDetectionRow());
+        panel.add(Box.createVerticalStrut(4));
+        panel.add(buildHintRow());
+        panel.add(Box.createVerticalStrut(4));
+        panel.add(buildActionRow());
         loadFields(savedParameters);
         refreshCompanionState();
         markPreviewStale(EMPTY_TEXT);
@@ -205,9 +206,19 @@ public final class CellposeParameterStage implements ConfigQcStage {
         this.activeContext = context;
         this.preview = preview;
         showRawSource = false;
-        refreshSourceToggleButton();
         if (preview != null) {
             preview.clearLargePreviewImages();
+            preview.setSourceToggleVisible(true);
+            preview.setSourceMode(PreviewPairPanel.SourceMode.FILTERED);
+            preview.setSourceModeEnabled(true);
+            preview.setSourceModeChangeListener(mode -> {
+                showRawSource = mode == PreviewPairPanel.SourceMode.RAW;
+                refreshSourceAndOutputPreview();
+            });
+            preview.setDisplaySettingsChangeListener(settings -> refreshSourceAndOutputPreview());
+        }
+        if (actions != null) {
+            actions.registerPreviewButton(previewButton);
         }
         try {
             rawSource = previewAdapter.createRawSource(context);
@@ -257,6 +268,8 @@ public final class CellposeParameterStage implements ConfigQcStage {
         closePreviewWorker();
         closeInstallWorker();
         if (preview != null) {
+            preview.setSourceModeChangeListener(null);
+            preview.setDisplaySettingsChangeListener(null);
             preview.clearLargePreviewImages();
         }
         closeImages();
@@ -276,12 +289,27 @@ public final class CellposeParameterStage implements ConfigQcStage {
         if (diameterField != null) diameterField.setText(value);
     }
 
+    void setFlowForTest(String value) {
+        if (flowField != null) flowField.setText(value);
+    }
+
+    void setCellprobForTest(String value) {
+        if (cellprobField != null) cellprobField.setText(value);
+    }
+
     void setModelForTest(String model) {
         if (modelCombo != null) modelCombo.setSelectedItem(CellposeModel.fromToken(model).displayName());
     }
 
     void setCompanionForTest(String label) {
         if (companionCombo != null) companionCombo.setSelectedItem(label);
+    }
+
+    void setUseGpuForTest(boolean useGpu) {
+        if (gpuCheckBox != null) {
+            gpuCheckBox.setSelected(useGpu);
+            fieldChanged();
+        }
     }
 
     void runPreviewNowForTest() throws Exception {
@@ -296,6 +324,15 @@ public final class CellposeParameterStage implements ConfigQcStage {
         setRawSourceVisible(false);
     }
 
+    void setShowOverlayForTest(boolean showOverlay) {
+        if (preview != null) preview.setObjectOverlaySelected(showOverlay);
+        refreshSourceAndOutputPreview();
+    }
+
+    boolean objectOverlaySelectedForTest() {
+        return preview != null && preview.objectOverlaySelected();
+    }
+
     String currentSourceTitleForTest() {
         ImagePlus source = currentSourceImage();
         return source == null ? null : source.getTitle();
@@ -305,186 +342,173 @@ public final class CellposeParameterStage implements ConfigQcStage {
         return labelPreview == null ? 2 : 3;
     }
 
-    private JComponent buildSummaryPanel(ConfigQcContext context) {
-        JPanel panel = new JPanel();
-        panel.setOpaque(false);
-        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
-
-        JLabel channel = new JLabel(context == null ? "Channel" : context.getChannelLabel());
-        JLabel image = new JLabel(context == null ? "Image" : context.getImageProgressText()
-                + ": " + context.getCurrentImageDisplayName());
-        JLabel help = new JLabel("Edit parameters, then press Run Cellpose Preview to update the label map.");
-        help.setForeground(HELP_COLOR);
-
-        runtimeLabel = new JLabel(runtimeAdapter.runtimeSummary());
-        runtimeLabel.setForeground(HELP_COLOR);
-
-        channel.setAlignmentX(JComponent.LEFT_ALIGNMENT);
-        image.setAlignmentX(JComponent.LEFT_ALIGNMENT);
-        help.setAlignmentX(JComponent.LEFT_ALIGNMENT);
-        runtimeLabel.setAlignmentX(JComponent.LEFT_ALIGNMENT);
-        panel.add(channel);
-        panel.add(Box.createVerticalStrut(4));
-        panel.add(image);
-        panel.add(Box.createVerticalStrut(4));
-        panel.add(help);
-        panel.add(Box.createVerticalStrut(4));
-        panel.add(runtimeLabel);
-        return panel;
+    String modelHintTextForTest() {
+        return modelDescriptionLabel == null ? "" : modelDescriptionLabel.getText();
     }
 
-    private JComponent buildFieldsPanel() {
-        JPanel panel = new JPanel();
-        panel.setOpaque(false);
-        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+    String companionHintTextForTest() {
+        return companionHelpLabel == null ? "" : companionHelpLabel.getText();
+    }
 
-        panel.add(section("Built-in Model"));
+    String runtimeHintTextForTest() {
+        return runtimeLabel == null ? "" : runtimeLabel.getText();
+    }
+
+    boolean installGpuButtonReachableForTest() {
+        return installGpuButton != null && installGpuButton.isEnabled();
+    }
+
+    private JComponent buildModelRow() {
+        JPanel row = new JPanel(new GridBagLayout());
+        row.setOpaque(false);
+        row.setAlignmentX(JComponent.LEFT_ALIGNMENT);
+        row.setBorder(BorderFactory.createEmptyBorder(2, 0, 2, 0));
+
         modelCombo = new JComboBox<String>(CellposeModel.displayNames());
         modelCombo.addActionListener(e -> modelChanged());
-        panel.add(comboRow("Model", modelCombo));
-        panel.add(helperText("Select the trained Cellpose model. Start with cyto3 for cell bodies, or nuclei for rounded nuclear objects."));
-        modelDescriptionLabel = new JLabel(" ");
-        modelDescriptionLabel.setForeground(HELP_COLOR);
-        modelDescriptionLabel.setAlignmentX(JComponent.LEFT_ALIGNMENT);
-        panel.add(modelDescriptionLabel);
-        panel.add(Box.createVerticalStrut(4));
-
         companionCombo = new JComboBox<String>(
                 companionChoices.keySet().toArray(new String[0]));
-        companionCombo.addActionListener(e -> fieldChanged());
-        panel.add(comboRow("Companion Channel", companionCombo));
-        companionHelpLabel = helperText("Optional second channel used by cyto models for guidance, usually a nuclear marker. Leave blank if unsure.");
-        panel.add(companionHelpLabel);
-        panel.add(Box.createVerticalStrut(8));
-
-        panel.add(section("Detection"));
-        diameterField = addNumberRow(panel, "Expected Diameter", 8,
-                "Approximate object diameter in image units. Use 0 to let Cellpose estimate it automatically.");
-        flowField = addNumberRow(panel, "Flow Threshold", 8,
-                "Controls how consistent object shapes must be. Higher values are stricter and can remove poor masks.");
-        cellprobField = addNumberRow(panel, "Cell Probability", 8,
-                "Minimum Cellpose object probability. Higher values reduce false positives but may miss weak objects.");
+        companionCombo.addActionListener(e -> companionChanged());
         gpuCheckBox = new JCheckBox("Use GPU");
         gpuCheckBox.setOpaque(false);
         gpuCheckBox.addActionListener(e -> fieldChanged());
-        gpuCheckBox.setAlignmentX(JComponent.LEFT_ALIGNMENT);
-        panel.add(gpuCheckBox);
-        panel.add(helperText("Runs Cellpose on the GPU when available. Faster for large images, but requires working GPU support."));
-        return panel;
-    }
+        installGpuButton = new JButton("Install GPU Support");
+        installGpuButton.addActionListener(e -> installGpuSupport());
 
-    private JLabel section(String text) {
-        JLabel label = new JLabel(text);
-        label.setAlignmentX(JComponent.LEFT_ALIGNMENT);
-        label.setFont(label.getFont().deriveFont(java.awt.Font.BOLD));
-        return label;
-    }
-
-    private JComponent comboRow(String labelText, JComboBox<String> combo) {
-        JPanel row = new JPanel(new GridBagLayout());
-        row.setOpaque(false);
-        row.setAlignmentX(JComponent.LEFT_ALIGNMENT);
-        row.setBorder(BorderFactory.createEmptyBorder(2, 0, 2, 0));
-        GridBagConstraints gbc = new GridBagConstraints();
-        gbc.gridy = 0;
-        gbc.insets = new Insets(0, 0, 0, 6);
-        gbc.anchor = GridBagConstraints.WEST;
-        gbc.gridx = 0;
+        GridBagConstraints gbc = rowConstraints();
+        row.add(new JLabel("Model"), gbc);
+        gbc.gridx++;
+        gbc.weightx = 0.25;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        row.add(modelCombo, gbc);
+        gbc.gridx++;
+        gbc.weightx = 0.0;
+        gbc.fill = GridBagConstraints.NONE;
+        row.add(new JLabel("Companion"), gbc);
+        gbc.gridx++;
         gbc.weightx = 0.35;
         gbc.fill = GridBagConstraints.HORIZONTAL;
-        row.add(new JLabel(labelText), gbc);
-        gbc.gridx = 1;
-        gbc.weightx = 0.65;
-        row.add(combo, gbc);
+        row.add(companionCombo, gbc);
+        gbc.gridx++;
+        gbc.weightx = 0.0;
+        gbc.fill = GridBagConstraints.NONE;
+        row.add(gpuCheckBox, gbc);
+        gbc.gridx++;
+        row.add(installGpuButton, gbc);
+        gbc.gridx++;
+        gbc.weightx = 1.0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        row.add(Box.createHorizontalGlue(), gbc);
         return row;
     }
 
-    private JTextField addNumberRow(JPanel parent, String labelText, int columns, String helpText) {
+    private JComponent buildDetectionRow() {
         JPanel row = new JPanel(new GridBagLayout());
         row.setOpaque(false);
         row.setAlignmentX(JComponent.LEFT_ALIGNMENT);
         row.setBorder(BorderFactory.createEmptyBorder(2, 0, 2, 0));
 
-        GridBagConstraints gbc = new GridBagConstraints();
-        gbc.gridy = 0;
-        gbc.insets = new Insets(0, 0, 0, 6);
-        gbc.anchor = GridBagConstraints.WEST;
-        gbc.gridx = 0;
+        JLabel heading = new JLabel("Detection:");
+        Font font = heading.getFont();
+        if (font != null) heading.setFont(font.deriveFont(Font.BOLD));
+        diameterField = createNumberField(6);
+        flowField = createNumberField(5);
+        cellprobField = createNumberField(5);
+
+        GridBagConstraints gbc = rowConstraints();
+        row.add(heading, gbc);
+        gbc.gridx++;
+        row.add(new JLabel("Diameter"), gbc);
+        gbc.gridx++;
+        row.add(diameterField, gbc);
+        gbc.gridx++;
+        row.add(new JLabel("Flow threshold"), gbc);
+        gbc.gridx++;
+        row.add(flowField, gbc);
+        gbc.gridx++;
+        row.add(new JLabel("Cell probability"), gbc);
+        gbc.gridx++;
+        row.add(cellprobField, gbc);
+        gbc.gridx++;
         gbc.weightx = 1.0;
         gbc.fill = GridBagConstraints.HORIZONTAL;
-        row.add(new JLabel(labelText), gbc);
+        row.add(Box.createHorizontalGlue(), gbc);
+        return row;
+    }
 
-        JTextField field = new JTextField(columns);
-        installFieldListener(field);
-        gbc.gridx = 1;
+    private JComponent buildHintRow() {
+        JPanel row = new JPanel(new GridBagLayout());
+        row.setOpaque(false);
+        row.setAlignmentX(JComponent.LEFT_ALIGNMENT);
+        row.setBorder(BorderFactory.createEmptyBorder(2, 0, 2, 0));
+
+        modelDescriptionLabel = hintLabel(" ");
+        companionHelpLabel = hintLabel(" ");
+        runtimeLabel = hintLabel(" ");
+        refreshRuntimeLabel();
+
+        GridBagConstraints gbc = rowConstraints();
+        row.add(modelDescriptionLabel, gbc);
+        gbc.gridx++;
+        row.add(hintLabel("|"), gbc);
+        gbc.gridx++;
+        row.add(companionHelpLabel, gbc);
+        gbc.gridx++;
+        row.add(hintLabel("|"), gbc);
+        gbc.gridx++;
+        row.add(runtimeLabel, gbc);
+        gbc.gridx++;
+        gbc.weightx = 1.0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        row.add(Box.createHorizontalGlue(), gbc);
+        return row;
+    }
+
+    private JComponent buildActionRow() {
+        JPanel row = new JPanel(new GridBagLayout());
+        row.setOpaque(false);
+        row.setAlignmentX(JComponent.LEFT_ALIGNMENT);
+
+        previewButton = new JButton("Run Preview");
+        previewButton.addActionListener(e -> runPreviewOnWorker());
+        resetButton = new JButton("Reset to saved");
+        resetButton.addActionListener(e -> resetToSaved());
+
+        GridBagConstraints gbc = rowConstraints();
+        gbc.weightx = 1.0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        row.add(Box.createHorizontalGlue(), gbc);
+        gbc.gridx++;
         gbc.weightx = 0.0;
         gbc.fill = GridBagConstraints.NONE;
-        row.add(field, gbc);
+        row.add(previewButton, gbc);
+        gbc.gridx++;
+        gbc.insets = new Insets(0, 2, 0, 0);
+        row.add(resetButton, gbc);
+        return row;
+    }
 
-        parent.add(row);
-        parent.add(helperText(helpText));
+    private JTextField createNumberField(int columns) {
+        JTextField field = new JTextField(columns);
+        installFieldListener(field);
         return field;
     }
 
-    private JComponent helperText(String text) {
-        JTextArea helper = new JTextArea(text == null ? "" : text);
-        helper.setOpaque(false);
-        helper.setEditable(false);
-        helper.setFocusable(false);
-        helper.setLineWrap(true);
-        helper.setWrapStyleWord(true);
-        helper.setColumns(36);
-        helper.setForeground(HELP_COLOR);
-        helper.setFont(new JLabel().getFont());
-        helper.setAlignmentX(JComponent.LEFT_ALIGNMENT);
-        helper.setBorder(BorderFactory.createEmptyBorder(0, 0, 6, 0));
-        return helper;
+    private JLabel hintLabel(String text) {
+        JLabel label = new JLabel(text == null ? "" : text);
+        label.setForeground(HELP_COLOR);
+        return label;
     }
 
-    private JComponent buildActionPanel() {
-        JPanel panel = new JPanel(new BorderLayout(0, 8));
-        panel.setOpaque(false);
-
-        JPanel buttons = new JPanel();
-        buttons.setOpaque(false);
-        buttons.setLayout(new BoxLayout(buttons, BoxLayout.X_AXIS));
-
-        sourceToggleButton = new JButton("Show Raw Image");
-        sourceToggleButton.addActionListener(e -> setRawSourceVisible(!showRawSource));
-        buttons.add(sourceToggleButton);
-        buttons.add(Box.createHorizontalStrut(6));
-
-        installGpuButton = new JButton("Install GPU Support");
-        installGpuButton.addActionListener(e -> installGpuSupport());
-        buttons.add(installGpuButton);
-        buttons.add(Box.createHorizontalStrut(6));
-
-        previewButton = new JButton("Run Cellpose Preview");
-        previewButton.addActionListener(e -> runPreviewOnWorker());
-        buttons.add(previewButton);
-        buttons.add(Box.createHorizontalStrut(6));
-
-        resetButton = new JButton("Reset to saved");
-        resetButton.addActionListener(e -> resetToSaved());
-        buttons.add(resetButton);
-        buttons.add(Box.createHorizontalGlue());
-
-        JPanel feedback = new JPanel();
-        feedback.setOpaque(false);
-        feedback.setLayout(new BoxLayout(feedback, BoxLayout.Y_AXIS));
-        countLabel = new JLabel("Objects detected: not previewed");
-        countLabel.setForeground(new Color(90, 90, 90));
-        feedbackLabel = new JLabel(" ");
-        feedbackLabel.setForeground(new Color(90, 90, 90));
-        countLabel.setAlignmentX(JComponent.LEFT_ALIGNMENT);
-        feedbackLabel.setAlignmentX(JComponent.LEFT_ALIGNMENT);
-        feedback.add(countLabel);
-        feedback.add(Box.createVerticalStrut(2));
-        feedback.add(feedbackLabel);
-
-        panel.add(buttons, BorderLayout.NORTH);
-        panel.add(feedback, BorderLayout.CENTER);
-        return panel;
+    private GridBagConstraints rowConstraints() {
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.gridy = 0;
+        gbc.gridx = 0;
+        gbc.insets = new Insets(0, 0, 0, 6);
+        gbc.anchor = GridBagConstraints.WEST;
+        gbc.weightx = 0.0;
+        gbc.fill = GridBagConstraints.NONE;
+        return gbc;
     }
 
     private void installFieldListener(JTextField field) {
@@ -512,18 +536,21 @@ public final class CellposeParameterStage implements ConfigQcStage {
             flowField.setText(String.valueOf(parameters.flowThreshold));
             cellprobField.setText(String.valueOf(parameters.cellprobThreshold));
             gpuCheckBox.setSelected(parameters.useGpu);
-            modelDescriptionLabel.setText(CellposeModel.fromToken(parameters.modelToken).description());
+            refreshModelDescriptionLabel();
+            refreshCompanionHelpLabel();
         } finally {
             updatingControls = false;
         }
     }
 
     private void modelChanged() {
-        CellposeModel model = currentModel();
-        if (modelDescriptionLabel != null) {
-            modelDescriptionLabel.setText(model.description());
-        }
+        refreshModelDescriptionLabel();
         refreshCompanionState();
+        fieldChanged();
+    }
+
+    private void companionChanged() {
+        refreshCompanionHelpLabel();
         fieldChanged();
     }
 
@@ -539,13 +566,46 @@ public final class CellposeParameterStage implements ConfigQcStage {
                 updatingControls = false;
             }
         }
-        if (companionHelpLabel != null) {
-            companionHelpLabel.setVisible(enabled);
-        }
+        refreshCompanionHelpLabel();
         Container parent = companionCombo.getParent();
         if (parent != null) {
             parent.revalidate();
             parent.repaint();
+        }
+    }
+
+    private void refreshModelDescriptionLabel() {
+        if (modelDescriptionLabel != null) {
+            CellposeModel model = currentModel();
+            modelDescriptionLabel.setText(model.displayName() + ": " + model.description());
+        }
+    }
+
+    private void refreshCompanionHelpLabel() {
+        if (companionHelpLabel == null) return;
+        CellposeModel model = currentModel();
+        boolean enabled = model.supportsSecondChannel()
+                && companionCombo != null
+                && companionCombo.getItemCount() > 1;
+        if (!enabled) {
+            companionHelpLabel.setText("Companion: not used by selected model.");
+            return;
+        }
+        Object selected = companionCombo == null ? null : companionCombo.getSelectedItem();
+        String label = selected == null ? "None" : String.valueOf(selected);
+        if ("None".equals(label)) {
+            companionHelpLabel.setText("Companion: optional second channel; leave None if unsure.");
+        } else {
+            companionHelpLabel.setText("Companion: using " + label + " as channel 2.");
+        }
+    }
+
+    private void refreshRuntimeLabel() {
+        if (runtimeLabel != null) {
+            String summary = runtimeAdapter.runtimeSummary();
+            runtimeLabel.setText(summary == null || summary.trim().isEmpty()
+                    ? "Runtime: not checked."
+                    : "Runtime: " + summary);
         }
     }
 
@@ -621,10 +681,10 @@ public final class CellposeParameterStage implements ConfigQcStage {
         labelPreview = labelImage;
         previewStale = false;
         lastObjectCount = count;
-        String text = "Objects detected: " + count;
-        if (countLabel != null) countLabel.setText(text);
+        String text = "Objects: " + count + " ready";
         refreshSourceAndOutputPreview();
         setStatus(text);
+        if (actions != null) actions.setPreviewButtonStale(false);
         if (old != null && old != labelImage) {
             previewAdapter.close(old);
         }
@@ -645,12 +705,17 @@ public final class CellposeParameterStage implements ConfigQcStage {
             }
             if (actions != null) {
                 actions.markPreviewStale(text);
+                actions.setPreviewButtonStale(true);
             }
-        } else if (actions != null) {
-            actions.setAdjustedPreview(labelPreview, text);
-        } else if (preview != null) {
-            preview.setAdjusted(labelPreview);
-            preview.setAdjustedState(PreviewPairPanel.PreviewState.READY, text);
+        } else {
+            if (preview != null) {
+                preview.setAdjusted(labelPreview);
+                preview.setAdjustedState(PreviewPairPanel.PreviewState.READY, text);
+            }
+            if (actions != null) {
+                actions.setAdjustedPreview(labelPreview, text);
+                actions.setPreviewButtonStale(false);
+            }
         }
     }
 
@@ -660,25 +725,27 @@ public final class CellposeParameterStage implements ConfigQcStage {
     }
 
     private ImagePlus currentSourceImage() {
-        return showRawSource && rawSource != null ? rawSource : filteredSource;
+        return rawSourceSelected() && rawSource != null ? rawSource : filteredSource;
+    }
+
+    private boolean rawSourceSelected() {
+        return showRawSource;
     }
 
     private void setRawSourceVisible(boolean showRaw) {
         showRawSource = showRaw;
-        refreshSourceToggleButton();
-        refreshSourceAndOutputPreview();
-    }
-
-    private void refreshSourceToggleButton() {
-        if (sourceToggleButton != null) {
-            sourceToggleButton.setText(showRawSource ? "Show Filtered Image" : "Show Raw Image");
+        if (preview != null) {
+            preview.setSourceMode(showRaw
+                    ? PreviewPairPanel.SourceMode.RAW
+                    : PreviewPairPanel.SourceMode.FILTERED);
         }
+        refreshSourceAndOutputPreview();
     }
 
     private String objectCountText() {
         return lastObjectCount >= 0
-                ? "Objects detected: " + lastObjectCount
-                : "Objects detected: not previewed";
+                ? "Objects: " + lastObjectCount + " ready"
+                : "Objects: not previewed";
     }
 
     private void installGpuSupport() {
@@ -724,9 +791,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
                     setError("GPU install failed: " + e.getMessage());
                 } finally {
                     installGpuButton.setEnabled(true);
-                    if (runtimeLabel != null) {
-                        runtimeLabel.setText(runtimeAdapter.runtimeSummary());
-                    }
+                    refreshRuntimeLabel();
                 }
             }
         };
@@ -756,6 +821,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
     private void markPreviewStale(String text) {
         previewStale = true;
         setPreviewState(PreviewPairPanel.PreviewState.STALE, text);
+        if (actions != null) actions.setPreviewButtonStale(true);
     }
 
     private void setPreviewState(PreviewPairPanel.PreviewState state, String text) {
@@ -765,19 +831,14 @@ public final class CellposeParameterStage implements ConfigQcStage {
         if (actions != null) {
             if (state == PreviewPairPanel.PreviewState.STALE) {
                 actions.markPreviewStale(text);
+                actions.setPreviewButtonStale(true);
             } else {
                 actions.setStatus(text);
             }
         }
-        if (feedbackLabel != null) {
-            feedbackLabel.setText(text == null || text.trim().isEmpty() ? " " : text);
-        }
     }
 
     private void setStatus(String text) {
-        if (feedbackLabel != null) {
-            feedbackLabel.setText(text == null || text.trim().isEmpty() ? " " : text);
-        }
         if (actions != null) {
             actions.setStatus(text);
         }
@@ -786,19 +847,27 @@ public final class CellposeParameterStage implements ConfigQcStage {
     private void setError(String text) {
         setPreviewState(PreviewPairPanel.PreviewState.ERROR, text);
         setStatus(text);
+        if (actions != null) actions.setPreviewButtonStale(true);
     }
 
     private void setButtonsEnabled(boolean enabled) {
-        if (sourceToggleButton != null) sourceToggleButton.setEnabled(enabled);
         if (previewButton != null) previewButton.setEnabled(enabled);
         if (installGpuButton != null) installGpuButton.setEnabled(enabled);
         if (resetButton != null) resetButton.setEnabled(enabled);
         if (modelCombo != null) modelCombo.setEnabled(enabled);
-        if (companionCombo != null) companionCombo.setEnabled(enabled && currentModel().supportsSecondChannel());
+        if (companionCombo != null) {
+            companionCombo.setEnabled(enabled
+                    && currentModel().supportsSecondChannel()
+                    && companionCombo.getItemCount() > 1);
+        }
         if (diameterField != null) diameterField.setEnabled(enabled);
         if (flowField != null) flowField.setEnabled(enabled);
         if (cellprobField != null) cellprobField.setEnabled(enabled);
         if (gpuCheckBox != null) gpuCheckBox.setEnabled(enabled);
+        if (preview != null) {
+            preview.setSourceModeEnabled(enabled);
+            preview.setObjectOverlayEnabled(enabled);
+        }
     }
 
     private void closePreviewWorker() {

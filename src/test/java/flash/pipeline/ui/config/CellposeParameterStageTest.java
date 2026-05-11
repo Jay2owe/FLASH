@@ -6,6 +6,8 @@ import ij.ImageStack;
 import ij.process.ByteProcessor;
 import org.junit.Test;
 
+import javax.swing.AbstractButton;
+import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.text.JTextComponent;
@@ -58,22 +60,73 @@ public class CellposeParameterStageTest {
 
         assertTrue(stage.isPreviewStaleForTest());
         assertTrue(actions.status.contains("Preview"));
+        assertTrue(actions.previewButtonStale);
+        assertEquals("\u25CF Run Preview", actions.previewButton.getText());
         assertEquals("Field edits must not execute Cellpose preview",
                 0, adapter.previewRuns);
     }
 
     @Test
-    public void controlsIncludeParameterHelperText() {
+    public void controlsUseCompactRowsWithRuntimeHints() {
         CellposeParameterStage stage = stage(
                 new RecordingStore("cellpose:30.0:cyto3:0.4:0.0:gpu=false"),
                 new RecordingPreviewAdapter());
 
         JComponent controls = stage.buildControls(context(), new RecordingActions());
 
-        assertContainsText(controls, "Select the trained Cellpose model.");
-        assertContainsText(controls, "Optional second channel used by cyto models for guidance");
-        assertContainsText(controls, "Use 0 to let Cellpose estimate it automatically.");
-        assertContainsText(controls, "Runs Cellpose on the GPU when available.");
+        assertContainsText(controls, "Model");
+        assertContainsText(controls, "Companion");
+        assertContainsText(controls, "Use GPU");
+        assertContainsText(controls, "Install GPU Support");
+        assertContainsText(controls, "Detection:");
+        assertContainsText(controls, "Diameter");
+        assertContainsText(controls, "Flow threshold");
+        assertContainsText(controls, "Cell probability");
+        assertContainsText(controls, "cyto3: Recommended first-pass model");
+        assertContainsText(controls, "Companion: optional second channel");
+        assertContainsText(controls, "Runtime: Cellpose test runtime.");
+        assertContainsText(controls, "Run Preview");
+        assertFalse("Old duplicate help text should be removed",
+                containsText(controls, "Edit parameters, then press"));
+        assertTrue(stage.installGpuButtonReachableForTest());
+    }
+
+    @Test
+    public void allParameterFieldsContributeToMethodToken() {
+        CellposeParameterStage stage = stage(
+                new RecordingStore("cellpose:30.0:cyto3:0.4:0.0:gpu=false"),
+                new RecordingPreviewAdapter());
+
+        stage.buildControls(context(), new RecordingActions());
+        stage.setModelForTest("cyto2");
+        stage.setCompanionForTest("C2 (Companion)");
+        stage.setDiameterForTest("44");
+        stage.setFlowForTest("0.6");
+        stage.setCellprobForTest("0.2");
+        stage.setUseGpuForTest(true);
+
+        assertEquals("cellpose:44.0:cyto2:0.6:0.2:gpu=true:chan2=1",
+                stage.currentMethodForTest());
+    }
+
+    @Test
+    public void hintsUpdateWhenModelAndCompanionChange() {
+        CellposeParameterStage stage = stage(
+                new RecordingStore("cellpose:30.0:cyto3:0.4:0.0:gpu=false"),
+                new RecordingPreviewAdapter());
+
+        stage.buildControls(context(), new RecordingActions());
+
+        assertTrue(stage.modelHintTextForTest().contains("cyto3"));
+        assertTrue(stage.companionHintTextForTest().contains("optional second channel"));
+        assertEquals("Runtime: Cellpose test runtime.", stage.runtimeHintTextForTest());
+
+        stage.setCompanionForTest("C2 (Companion)");
+        assertTrue(stage.companionHintTextForTest().contains("using C2 (Companion)"));
+
+        stage.setModelForTest("nuclei");
+        assertTrue(stage.modelHintTextForTest().contains("nuclei"));
+        assertTrue(stage.companionHintTextForTest().contains("not used"));
     }
 
     @Test
@@ -94,7 +147,9 @@ public class CellposeParameterStageTest {
         assertEquals(1, adapter.lastCompanionIndex);
         assertFalse(stage.isPreviewStaleForTest());
         assertNotNull(actions.adjustedPreview);
-        assertEquals("Objects detected: 2", actions.status);
+        assertEquals("Objects: 2 ready", actions.status);
+        assertFalse(actions.previewButtonStale);
+        assertEquals("Run Preview", actions.previewButton.getText());
         assertEquals(3, stage.largePreviewPaneCountForTest());
     }
 
@@ -117,6 +172,24 @@ public class CellposeParameterStageTest {
 
         assertTrue(stage.currentSourceTitleForTest().startsWith("raw"));
         assertEquals(0, adapter.previewRuns);
+    }
+
+    @Test
+    public void overlayToggleUsesSharedPreviewControls() throws Exception {
+        RecordingStore store = new RecordingStore("cellpose:30.0:cyto3:0.4:0.0:gpu=false");
+        RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
+        CellposeParameterStage stage = stage(store, adapter);
+
+        stage.buildControls(context(), new RecordingActions());
+        stage.onEnter(context(), new PreviewPairPanel("Original", "Adjusted",
+                PreviewPairPanel.PreviewLayout.HORIZONTAL_SLIM));
+        stage.runPreviewNowForTest();
+
+        assertFalse(stage.objectOverlaySelectedForTest());
+
+        stage.setShowOverlayForTest(true);
+
+        assertTrue(stage.objectOverlaySelectedForTest());
     }
 
     @Test
@@ -174,6 +247,8 @@ public class CellposeParameterStageTest {
         String text = null;
         if (component instanceof JLabel) {
             text = ((JLabel) component).getText();
+        } else if (component instanceof AbstractButton) {
+            text = ((AbstractButton) component).getText();
         } else if (component instanceof JTextComponent) {
             text = ((JTextComponent) component).getText();
         }
@@ -270,6 +345,8 @@ public class CellposeParameterStageTest {
     private static final class RecordingActions implements ConfigQcActions {
         String status = "";
         ImagePlus adjustedPreview;
+        JButton previewButton;
+        boolean previewButtonStale;
 
         @Override public void setStatus(String text) {
             status = text;
@@ -282,6 +359,18 @@ public class CellposeParameterStageTest {
         @Override public void setAdjustedPreview(ImagePlus image, String text) {
             adjustedPreview = image;
             status = text;
+        }
+
+        @Override public void registerPreviewButton(JButton button) {
+            previewButton = button;
+            setPreviewButtonStale(true);
+        }
+
+        @Override public void setPreviewButtonStale(boolean stale) {
+            previewButtonStale = stale;
+            if (previewButton != null) {
+                previewButton.setText(stale ? "\u25CF Run Preview" : "Run Preview");
+            }
         }
 
         @Override public void nextImage() {
