@@ -43,6 +43,12 @@ public final class ConfigQcDialog {
     private static final Color BG_COLOR = new Color(245, 245, 245);
     private static final Color HEADER_COLOR = new Color(55, 71, 79);
     private static final Color HELP_COLOR = new Color(90, 90, 90);
+    private static final Color PRIMARY_ACTION_BG = new Color(235, 248, 239);
+    private static final Color PRIMARY_ACTION_FG = new Color(37, 103, 62);
+    private static final Color PRIMARY_ACTION_BORDER = new Color(111, 173, 130);
+    private static final Color CANCEL_ACTION_BG = new Color(252, 240, 240);
+    private static final Color CANCEL_ACTION_FG = new Color(137, 44, 44);
+    private static final Color CANCEL_ACTION_BORDER = new Color(196, 108, 108);
     private static final Dimension MINIMUM_DIALOG_SIZE = new Dimension(1080, 720);
 
     private final Window owner;
@@ -235,6 +241,8 @@ public final class ConfigQcDialog {
         skipButton.addActionListener(e -> skipCurrentImage());
         cancelButton.addActionListener(e -> closeWithResult(ConfigQcResult.CANCEL));
         lockInButton.addActionListener(e -> lockInAndAdvance());
+        styleActionButton(lockInButton, PRIMARY_ACTION_BG, PRIMARY_ACTION_FG, PRIMARY_ACTION_BORDER);
+        styleActionButton(cancelButton, CANCEL_ACTION_BG, CANCEL_ACTION_FG, CANCEL_ACTION_BORDER);
     }
 
     private void installKeyboardShortcuts() {
@@ -579,6 +587,17 @@ public final class ConfigQcDialog {
         return copy;
     }
 
+    private static void styleActionButton(JButton button, Color background, Color foreground, Color border) {
+        button.setBackground(background);
+        button.setForeground(foreground);
+        button.setOpaque(true);
+        button.setContentAreaFilled(true);
+        button.setFocusPainted(false);
+        button.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(border),
+                BorderFactory.createEmptyBorder(3, 10, 3, 10)));
+    }
+
     ConfigQcResult resultForTest() {
         return result;
     }
@@ -629,6 +648,10 @@ public final class ConfigQcDialog {
 
     JButton lockInButtonForTest() {
         return lockInButton;
+    }
+
+    JButton cancelButtonForTest() {
+        return cancelButton;
     }
 
     JButton previousImageButtonForTest() {

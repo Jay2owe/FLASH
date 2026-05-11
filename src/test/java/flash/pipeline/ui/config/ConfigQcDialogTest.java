@@ -7,6 +7,7 @@ import ij.process.ByteProcessor;
 import org.junit.Test;
 
 import javax.swing.Action;
+import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
@@ -16,6 +17,7 @@ import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import javax.swing.JTextField;
 import java.awt.BorderLayout;
+import java.awt.Color;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
@@ -80,6 +82,21 @@ public class ConfigQcDialogTest {
         ConfigQcDialog dialog = ConfigQcDialog.createForTest(contextWithTwoImages(), Arrays.asList(stage));
 
         assertFalse(dialog.displayControlsButtonForTest().isVisible());
+    }
+
+    @Test
+    public void lockInButton_isSoftGreen_cancelButton_isSoftRed() {
+        RecordingStage stage = new RecordingStage("Display range");
+        ConfigQcDialog dialog = ConfigQcDialog.createForTest(contextWithTwoImages(), Arrays.asList(stage));
+        JButton lock = dialog.lockInButtonForTest();
+        JButton cancel = dialog.cancelButtonForTest();
+
+        assertEquals(new Color(235, 248, 239), lock.getBackground());
+        assertEquals(new Color(37, 103, 62), lock.getForeground());
+        assertEquals(new Color(252, 240, 240), cancel.getBackground());
+        assertEquals(new Color(137, 44, 44), cancel.getForeground());
+        assertTrue(lock.isOpaque());
+        assertTrue(cancel.isOpaque());
     }
 
     @Test
