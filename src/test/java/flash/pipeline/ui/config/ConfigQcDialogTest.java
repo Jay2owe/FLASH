@@ -6,13 +6,22 @@ import ij.ImageStack;
 import ij.process.ByteProcessor;
 import org.junit.Test;
 
+import javax.swing.Action;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.JRadioButton;
+import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import javax.swing.JTextField;
+import java.awt.BorderLayout;
+import java.awt.Component;
+import java.awt.Container;
+import java.awt.Dimension;
 import java.awt.GraphicsEnvironment;
+import java.awt.event.ActionEvent;
+import java.awt.event.KeyEvent;
 import java.util.Arrays;
 
 import static org.junit.Assert.assertEquals;
@@ -33,13 +42,34 @@ public class ConfigQcDialogTest {
 
         assertEquals("Display range", dialog.stageTextForTest());
         assertEquals("C2 - IBA1", dialog.channelTextForTest());
-        assertEquals("Stage 1 / 1    Image 1 / 2", dialog.progressTextForTest());
+        assertEquals("Stage 1 / 1    Image 1 / 2    - Image A", dialog.progressTextForTest());
         assertEquals("Image A", dialog.imageTextForTest());
         assertEquals(1, stage.enterCount);
         assertNotNull(stage.actions);
         assertSame(dialog.previewForTest().largeViewButton(), dialog.largeViewButtonForTest());
         assertSame(dialog.previewForTest().displayControlsButton(), dialog.displayControlsButtonForTest());
         assertTrue(dialog.displayControlsButtonForTest().isVisible());
+    }
+
+    @Test
+    public void headerText_includesFilename() {
+        RecordingStage stage = new RecordingStage("Display range");
+        ConfigQcDialog dialog = ConfigQcDialog.createForTest(contextWithTwoImages(), Arrays.asList(stage));
+
+        assertTrue(dialog.progressTextForTest().contains("Image 1 / 2"));
+        assertTrue(dialog.progressTextForTest().contains("Image A"));
+    }
+
+    @Test
+    public void footer_doesNotContainLargeView_orAdjustBcButtons() {
+        RecordingStage stage = new RecordingStage("Display range");
+        ConfigQcDialog dialog = ConfigQcDialog.createForTest(contextWithTwoImages(), Arrays.asList(stage));
+        JComponent footer = footerFrom(dialog);
+
+        assertFalse(containsComponent(footer, dialog.largeViewButtonForTest()));
+        assertFalse(containsComponent(footer, dialog.displayControlsButtonForTest()));
+        assertTrue(containsComponent(dialog.getContent(), dialog.largeViewButtonForTest()));
+        assertTrue(containsComponent(dialog.getContent(), dialog.displayControlsButtonForTest()));
     }
 
     @Test
@@ -50,6 +80,68 @@ public class ConfigQcDialogTest {
         ConfigQcDialog dialog = ConfigQcDialog.createForTest(contextWithTwoImages(), Arrays.asList(stage));
 
         assertFalse(dialog.displayControlsButtonForTest().isVisible());
+    }
+
+    @Test
+    public void escapeKey_firesCancel() {
+        RecordingStage stage = new RecordingStage("Display range");
+        ConfigQcDialog dialog = ConfigQcDialog.createForTest(contextWithTwoImages(), Arrays.asList(stage));
+        JComponent content = dialog.getContent();
+        Object actionKey = content.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW)
+                .get(KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0));
+        Action action = content.getActionMap().get(actionKey);
+
+        assertNotNull(actionKey);
+        assertNotNull(action);
+
+        action.actionPerformed(new ActionEvent(content, ActionEvent.ACTION_PERFORMED, "qc-cancel"));
+
+        assertEquals(ConfigQcResult.CANCEL, dialog.resultForTest());
+        assertEquals(1, stage.leaveCount);
+    }
+
+    @Test
+    public void defaultButton_isLockIn() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless());
+
+        SwingUtilities.invokeAndWait(new Runnable() {
+            @Override public void run() {
+                RecordingStage stage = new RecordingStage("Display range");
+                ConfigQcDialog dialog = ConfigQcDialog.createModeless(
+                        null, contextWithTwoImages(), Arrays.asList(stage));
+
+                assertSame(dialog.lockInButtonForTest(), dialog.defaultButtonForTest());
+                dialog.actionsForTest().cancel();
+            }
+        });
+    }
+
+    @Test
+    public void rebuildCurrentStage_callsResetStageToolstripState() {
+        RecordingStage first = new RecordingStage("First") {
+            @Override public void onEnter(ConfigQcContext context, PreviewPairPanel preview) {
+                super.onEnter(context, preview);
+                preview.setSourceToggleVisible(true);
+            }
+        };
+        RecordingStage second = new RecordingStage("Second");
+        ConfigQcDialog dialog = ConfigQcDialog.createForTest(
+                contextWithOneImage(), Arrays.asList(first, second));
+
+        assertTrue(visibleRadioButtonWithText(dialog.getContent(), "Raw"));
+
+        dialog.lockInForTest();
+
+        assertEquals("Second", dialog.stageTextForTest());
+        assertFalse(visibleRadioButtonWithText(dialog.getContent(), "Raw"));
+    }
+
+    @Test
+    public void dialogMinimumSize_is1080x720() {
+        Dimension minimum = ConfigQcDialog.minimumDialogSizeForTest();
+
+        assertEquals(1080, minimum.width);
+        assertEquals(720, minimum.height);
     }
 
     @Test
@@ -250,7 +342,44 @@ public class ConfigQcDialogTest {
         return new ImagePlus(title, stack);
     }
 
-    private static final class RecordingStage implements ConfigQcStage {
+    private static JComponent footerFrom(ConfigQcDialog dialog) {
+        BorderLayout layout = (BorderLayout) dialog.getContent().getLayout();
+        return (JComponent) layout.getLayoutComponent(BorderLayout.SOUTH);
+    }
+
+    private static boolean containsComponent(Component root, Component target) {
+        if (root == target) {
+            return true;
+        }
+        if (root instanceof Container) {
+            Component[] children = ((Container) root).getComponents();
+            for (int i = 0; i < children.length; i++) {
+                if (containsComponent(children[i], target)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean visibleRadioButtonWithText(Component root, String text) {
+        if (root instanceof JRadioButton
+                && text.equals(((JRadioButton) root).getText())
+                && root.isVisible()) {
+            return true;
+        }
+        if (root instanceof Container) {
+            Component[] children = ((Container) root).getComponents();
+            for (int i = 0; i < children.length; i++) {
+                if (visibleRadioButtonWithText(children[i], text)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static class RecordingStage implements ConfigQcStage {
         private final String title;
         private int enterCount;
         private int leaveCount;

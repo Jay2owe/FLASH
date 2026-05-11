@@ -3,15 +3,17 @@ package flash.pipeline.ui.config;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import ij.ImagePlus;
 
+import javax.swing.AbstractAction;
+import javax.swing.ActionMap;
 import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
+import javax.swing.InputMap;
 import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
-import javax.swing.JScrollPane;
-import javax.swing.JSplitPane;
+import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 import javax.swing.WindowConstants;
 import java.awt.BorderLayout;
@@ -23,9 +25,12 @@ import java.awt.GraphicsEnvironment;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
+import java.awt.Rectangle;
 import java.awt.SecondaryLoop;
 import java.awt.Toolkit;
 import java.awt.Window;
+import java.awt.event.ActionEvent;
+import java.awt.event.KeyEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.util.ArrayList;
@@ -38,7 +43,7 @@ public final class ConfigQcDialog {
     private static final Color BG_COLOR = new Color(245, 245, 245);
     private static final Color HEADER_COLOR = new Color(55, 71, 79);
     private static final Color HELP_COLOR = new Color(90, 90, 90);
-    private static final Dimension MINIMUM_DIALOG_SIZE = new Dimension(980, 680);
+    private static final Dimension MINIMUM_DIALOG_SIZE = new Dimension(1080, 720);
 
     private final Window owner;
     private final ConfigQcContext context;
@@ -52,8 +57,8 @@ public final class ConfigQcDialog {
     private final JLabel statusLabel = new JLabel(" ");
     private final JButton backButton = new JButton("Back");
     private final JButton previousImageButton = new JButton("Previous image");
-    private final JButton restartButton = new JButton("Restart stage");
-    private final JButton skipButton = new JButton("Skip image");
+    private final JButton restartButton = new JButton("Restart");
+    private final JButton skipButton = new JButton("Skip");
     private final JButton cancelButton = new JButton("Cancel");
     private final JButton lockInButton = new JButton("Lock in & Next");
     private final JDialog dialog;
@@ -71,8 +76,8 @@ public final class ConfigQcDialog {
         this.owner = owner;
         this.context = context;
         this.stages = Collections.unmodifiableList(copyStages(stages));
-        this.previewPair = new PreviewPairPanel(owner, "Original Image", "Adjusted / output preview");
-        this.previewPair.setCompactPreviewHeaders(true);
+        this.previewPair = new PreviewPairPanel(owner, "Original Image", "Adjusted / output preview",
+                PreviewPairPanel.PreviewLayout.HORIZONTAL_SLIM);
         this.dialog = GraphicsEnvironment.isHeadless() ? null : createDialog(owner, modal);
         buildContent();
         wireButtons();
@@ -93,6 +98,7 @@ public final class ConfigQcDialog {
                 }
             });
         }
+        installKeyboardShortcuts();
         enterFirstApplicableStage();
     }
 
@@ -113,6 +119,7 @@ public final class ConfigQcDialog {
             return result;
         }
         dialog.pack();
+        capDialogToScreenBounds();
         dialog.setLocationRelativeTo(owner);
         dialog.setVisible(true);
         if (!dialog.isModal()) {
@@ -170,22 +177,19 @@ public final class ConfigQcDialog {
     }
 
     private JComponent buildMain() {
-        JPanel previewColumn = new JPanel(new BorderLayout());
-        previewColumn.setOpaque(false);
-        previewColumn.setMinimumSize(new Dimension(330, 1));
-        previewColumn.add(previewPair, BorderLayout.CENTER);
+        JPanel main = new JPanel(new BorderLayout(8, 8));
+        main.setOpaque(false);
+        main.add(previewPair.previewToolstrip(), BorderLayout.NORTH);
+        main.add(previewPair, BorderLayout.CENTER);
 
+        JPanel south = new JPanel(new BorderLayout(0, 6));
+        south.setOpaque(false);
+        south.add(previewPair.sharedZRow(), BorderLayout.NORTH);
         controlsPanel.setOpaque(false);
-        controlsPanel.setBorder(BorderFactory.createEmptyBorder(0, 8, 0, 0));
-        JScrollPane controlsScroll = new JScrollPane(controlsPanel);
-        controlsScroll.setBorder(BorderFactory.createEmptyBorder());
-        controlsScroll.getViewport().setBackground(BG_COLOR);
-
-        JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, previewColumn, controlsScroll);
-        split.setResizeWeight(0.42);
-        split.setDividerLocation(390);
-        split.setBorder(BorderFactory.createEmptyBorder());
-        return split;
+        controlsPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
+        south.add(controlsPanel, BorderLayout.CENTER);
+        main.add(south, BorderLayout.SOUTH);
+        return main;
     }
 
     private JComponent buildFooter() {
@@ -205,10 +209,6 @@ public final class ConfigQcDialog {
         footer.add(restartButton, gbc);
         gbc.gridx++;
         footer.add(skipButton, gbc);
-        gbc.gridx++;
-        footer.add(previewPair.largeViewButton(), gbc);
-        gbc.gridx++;
-        footer.add(previewPair.displayControlsButton(), gbc);
 
         gbc.gridx++;
         gbc.weightx = 1.0;
@@ -237,6 +237,20 @@ public final class ConfigQcDialog {
         lockInButton.addActionListener(e -> lockInAndAdvance());
     }
 
+    private void installKeyboardShortcuts() {
+        if (dialog != null) {
+            dialog.getRootPane().setDefaultButton(lockInButton);
+        }
+        InputMap inputMap = rootPanel.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
+        ActionMap actionMap = rootPanel.getActionMap();
+        inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), "qc-cancel");
+        actionMap.put("qc-cancel", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) {
+                cancelButton.doClick();
+            }
+        });
+    }
+
     private void enterFirstApplicableStage() {
         int first = findNextApplicable(0);
         if (first < 0) {
@@ -263,6 +277,7 @@ public final class ConfigQcDialog {
         setStatus(" ");
         previewPair.setChannelLutName(context.getChannelLutName());
         previewPair.setDisplayControlsAvailable(stage.showPreviewDisplayControls());
+        previewPair.resetStageToolstripState();
         previewPair.resetZ();
         previewPair.setOriginal(context.getCurrentImagePlus());
         previewPair.setAdjusted(null);
@@ -284,9 +299,10 @@ public final class ConfigQcDialog {
 
     private void refreshHeader() {
         channelLabel.setText(context.getChannelLabel());
-        progressLabel.setText(stageProgressText() + "    " + context.getImageProgressText());
         currentImageDisplayName = context.getCurrentImageDisplayName();
         String imageName = context.getCurrentImageShortDisplayName();
+        progressLabel.setText(stageProgressText() + "    " + context.getImageProgressText()
+                + "    - " + imageName);
         previewPair.setOriginalPreviewTitle("Original Image - " + imageName);
         previewPair.setAdjustedPreviewTitle("Adjusted / output preview");
     }
@@ -537,6 +553,19 @@ public final class ConfigQcDialog {
         }
     }
 
+    private void capDialogToScreenBounds() {
+        if (dialog == null) return;
+        Rectangle screen = GraphicsEnvironment
+                .getLocalGraphicsEnvironment()
+                .getMaximumWindowBounds();
+        Dimension size = dialog.getSize();
+        int width = Math.min(size.width, screen.width);
+        int height = Math.min(size.height, screen.height);
+        if (width != size.width || height != size.height) {
+            dialog.setSize(width, height);
+        }
+    }
+
     private static List<ConfigQcStage> copyStages(List<ConfigQcStage> source) {
         List<ConfigQcStage> copy = new ArrayList<ConfigQcStage>();
         if (source != null) {
@@ -578,6 +607,14 @@ public final class ConfigQcDialog {
         return statusLabel.getText();
     }
 
+    JButton defaultButtonForTest() {
+        return dialog == null ? null : dialog.getRootPane().getDefaultButton();
+    }
+
+    static Dimension minimumDialogSizeForTest() {
+        return new Dimension(MINIMUM_DIALOG_SIZE);
+    }
+
     PreviewPairPanel previewForTest() {
         return previewPair;
     }
@@ -588,6 +625,10 @@ public final class ConfigQcDialog {
 
     JButton displayControlsButtonForTest() {
         return previewPair.displayControlsButton();
+    }
+
+    JButton lockInButtonForTest() {
+        return lockInButton;
     }
 
     JButton previousImageButtonForTest() {
