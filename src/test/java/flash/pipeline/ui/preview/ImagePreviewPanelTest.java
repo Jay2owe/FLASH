@@ -7,10 +7,19 @@ import ij.process.ColorProcessor;
 import ij.process.ImageProcessor;
 import org.junit.Test;
 
+import javax.swing.JLabel;
+import javax.swing.JSlider;
+import javax.swing.border.Border;
+import javax.swing.border.CompoundBorder;
+import javax.swing.border.EmptyBorder;
+import javax.swing.border.TitledBorder;
+import java.awt.Component;
+import java.awt.Container;
 import java.awt.image.IndexColorModel;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
@@ -150,6 +159,65 @@ public class ImagePreviewPanelTest {
         assertNull(panel.renderedProcessorForTest());
     }
 
+    @Test
+    public void setZRowVisible_hidesOnlyZControls_keepsSliceSyncState() {
+        ImagePreviewPanel panel = new ImagePreviewPanel("Preview");
+        panel.setImage(stack("source", 4));
+        final int[] observedZ = {0};
+        panel.setZSliceChangeListener(new ImagePreviewPanel.ZSliceChangeListener() {
+            @Override public void zSliceChanged(ImagePreviewPanel source, int zSlice) {
+                observedZ[0] = zSlice;
+            }
+        });
+
+        panel.setZRowVisible(false);
+        JSlider slider = findDescendant(panel, JSlider.class);
+        assertNotNull(slider);
+        slider.setValue(3);
+
+        assertFalse(panel.zRowVisibleForTest());
+        assertTrue(slider.isEnabled());
+        assertEquals(3, panel.getCurrentZ());
+        assertEquals(3, observedZ[0]);
+        assertEquals(4, panel.getSliceCount());
+    }
+
+    @Test
+    public void setSlim_hidesMetadataHeader_hidesZRow_replacesTitledBorder() {
+        ImagePreviewPanel panel = new ImagePreviewPanel("Original");
+
+        panel.setSlim(true);
+
+        JLabel slimTitle = panel.slimTitleLabelForTest();
+        assertFalse(panel.metadataHeaderVisibleForTest());
+        assertFalse(panel.zRowVisibleForTest());
+        assertTrue(panel.getBorder() instanceof EmptyBorder);
+        assertFalse(containsTitledBorder(panel.getBorder()));
+        assertNotNull(slimTitle);
+        assertEquals("Original", slimTitle.getText());
+        assertTrue(slimTitle.getFont().isBold());
+        assertEquals(panel, slimTitle.getParent());
+
+        panel.setPreviewTitle("Raw source");
+
+        assertEquals("Raw source", slimTitle.getText());
+        assertTrue(panel.getBorder() instanceof EmptyBorder);
+    }
+
+    @Test
+    public void setSlim_thenSetSlimFalse_restoresChrome() {
+        ImagePreviewPanel panel = new ImagePreviewPanel("Adjusted");
+
+        panel.setSlim(true);
+        panel.setSlim(false);
+
+        JLabel slimTitle = panel.slimTitleLabelForTest();
+        assertTrue(panel.metadataHeaderVisibleForTest());
+        assertTrue(panel.zRowVisibleForTest());
+        assertTrue(containsTitledBorder(panel.getBorder()));
+        assertTrue(slimTitle == null || slimTitle.getParent() != panel);
+    }
+
     private static ImagePlus stack(String title, int slices) {
         ImageStack stack = new ImageStack(3, 3);
         for (int i = 0; i < slices; i++) {
@@ -171,6 +239,33 @@ public class ImagePreviewPanelTest {
         processor.set(0, 0, 0);
         processor.set(1, 0, label);
         return new ImagePlus(title, processor);
+    }
+
+    private static <T> T findDescendant(Component component, Class<T> type) {
+        if (type.isInstance(component)) {
+            return type.cast(component);
+        }
+        if (!(component instanceof Container)) {
+            return null;
+        }
+        Component[] children = ((Container) component).getComponents();
+        for (int i = 0; i < children.length; i++) {
+            T match = findDescendant(children[i], type);
+            if (match != null) return match;
+        }
+        return null;
+    }
+
+    private static boolean containsTitledBorder(Border border) {
+        if (border instanceof TitledBorder) {
+            return true;
+        }
+        if (border instanceof CompoundBorder) {
+            CompoundBorder compound = (CompoundBorder) border;
+            return containsTitledBorder(compound.getOutsideBorder())
+                    || containsTitledBorder(compound.getInsideBorder());
+        }
+        return false;
     }
 
     private static final class ClosedImagePlus extends ImagePlus {

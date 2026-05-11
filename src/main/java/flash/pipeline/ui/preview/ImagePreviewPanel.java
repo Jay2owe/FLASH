@@ -17,6 +17,7 @@ import javax.swing.event.ChangeListener;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Dimension;
+import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Image;
@@ -37,6 +38,7 @@ public final class ImagePreviewPanel extends JPanel {
     private final JSlider zSlider = new JSlider(1, 1, 1);
     private final CanvasPanel canvas = new CanvasPanel();
     private final JPanel labels = new JPanel();
+    private final JPanel zRow = new JPanel(new BorderLayout(6, 0));
 
     private ImagePlus image;
     private String previewTitle;
@@ -45,6 +47,8 @@ public final class ImagePreviewPanel extends JPanel {
     private int currentT = 1;
     private boolean updatingSlider;
     private boolean metadataHeaderVisible = true;
+    private boolean slim;
+    private JLabel slimTitleLabel;
     private ZSliceChangeListener zSliceChangeListener;
     private PreviewDisplaySettings displaySettings = PreviewDisplaySettings.defaultFor("Grays");
     private boolean displaySettingsEnabled = true;
@@ -71,7 +75,6 @@ public final class ImagePreviewPanel extends JPanel {
         canvas.setPreferredSize(new Dimension(260, 220));
         add(canvas, BorderLayout.CENTER);
 
-        JPanel zRow = new JPanel(new BorderLayout(6, 0));
         zRow.setOpaque(false);
         sliceLabel.setHorizontalAlignment(SwingConstants.RIGHT);
         zRow.add(new JLabel("Z:"), BorderLayout.WEST);
@@ -95,6 +98,9 @@ public final class ImagePreviewPanel extends JPanel {
 
     public void setPreviewTitle(String title) {
         this.previewTitle = normalizePreviewTitle(title);
+        if (slimTitleLabel != null) {
+            slimTitleLabel.setText(previewTitle);
+        }
         refreshBorder();
     }
 
@@ -108,6 +114,27 @@ public final class ImagePreviewPanel extends JPanel {
         }
         revalidate();
         repaint();
+    }
+
+    public void setZRowVisible(boolean visible) {
+        zRow.setVisible(visible);
+        revalidate();
+        repaint();
+    }
+
+    public void setSlim(boolean slim) {
+        if (this.slim == slim) return;
+        this.slim = slim;
+        if (slim) {
+            setMetadataHeaderVisible(false);
+            setZRowVisible(false);
+            installSlimTitleLabel();
+        } else {
+            removeSlimTitleLabel();
+            setMetadataHeaderVisible(true);
+            setZRowVisible(true);
+        }
+        refreshBorder();
     }
 
     public void setImage(ImagePlus image) {
@@ -229,6 +256,14 @@ public final class ImagePreviewPanel extends JPanel {
         return metadataHeaderVisible;
     }
 
+    boolean zRowVisibleForTest() {
+        return zRow.isVisible();
+    }
+
+    JLabel slimTitleLabelForTest() {
+        return slimTitleLabel;
+    }
+
     ImageProcessor renderedProcessorForTest() {
         return currentProcessor();
     }
@@ -248,11 +283,37 @@ public final class ImagePreviewPanel extends JPanel {
     }
 
     private void refreshBorder() {
-        setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createTitledBorder(previewTitle),
-                BorderFactory.createEmptyBorder(6, 6, 6, 6)));
+        if (slim) {
+            setBorder(BorderFactory.createEmptyBorder(2, 2, 2, 2));
+        } else {
+            setBorder(BorderFactory.createCompoundBorder(
+                    BorderFactory.createTitledBorder(previewTitle),
+                    BorderFactory.createEmptyBorder(6, 6, 6, 6)));
+        }
         revalidate();
         repaint();
+    }
+
+    private void installSlimTitleLabel() {
+        if (slimTitleLabel == null) {
+            slimTitleLabel = new JLabel(previewTitle);
+            Font font = slimTitleLabel.getFont();
+            if (font != null) {
+                slimTitleLabel.setFont(font.deriveFont(Font.BOLD));
+            }
+            slimTitleLabel.setBorder(BorderFactory.createEmptyBorder(0, 4, 2, 4));
+        } else {
+            slimTitleLabel.setText(previewTitle);
+        }
+        if (slimTitleLabel.getParent() != this) {
+            add(slimTitleLabel, BorderLayout.NORTH);
+        }
+    }
+
+    private void removeSlimTitleLabel() {
+        if (slimTitleLabel != null && slimTitleLabel.getParent() == this) {
+            remove(slimTitleLabel);
+        }
     }
 
     private static String normalizePreviewTitle(String title) {
