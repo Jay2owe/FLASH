@@ -4,18 +4,23 @@ import ij.ImagePlus;
 
 import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
+import javax.swing.ButtonGroup;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
+import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.JRadioButton;
+import javax.swing.JSlider;
 import javax.swing.SwingUtilities;
 import java.awt.BorderLayout;
 import java.awt.Dialog;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.GraphicsEnvironment;
+import java.awt.GridLayout;
 import java.awt.Rectangle;
 import java.awt.Window;
 import java.awt.event.ActionEvent;
@@ -31,6 +36,20 @@ public final class PreviewPairPanel extends JPanel {
 
     public interface DisplaySettingsChangeListener {
         void displaySettingsChanged(PreviewDisplaySettings settings);
+    }
+
+    public interface SourceModeChangeListener {
+        void sourceModeChanged(SourceMode mode);
+    }
+
+    public enum PreviewLayout {
+        STACKED_LEGACY,
+        HORIZONTAL_SLIM
+    }
+
+    public enum SourceMode {
+        FILTERED,
+        RAW
     }
 
     public enum PreviewState {
@@ -52,6 +71,7 @@ public final class PreviewPairPanel extends JPanel {
     private final JComboBox<String> objectOverlaySourceChoice = new JComboBox<String>();
     private final Window owner;
     private final JPanel displayControlsPanel;
+    private final PreviewLayout layout;
 
     private ImagePlus originalImage;
     private ImagePlus adjustedImage;
@@ -76,19 +96,48 @@ public final class PreviewPairPanel extends JPanel {
     private JDialog displayControlsDialog;
     private SharedZChangeListener sharedZChangeListener;
     private DisplaySettingsChangeListener displaySettingsChangeListener;
+    private SourceModeChangeListener sourceModeListener;
+    private JPanel previewPairContainer;
+    private JPanel previewToolstripComponent;
+    private JLabel sourceLabel;
+    private JRadioButton sourceFilteredRadio;
+    private JRadioButton sourceRawRadio;
+    private JComponent sharedZRowComponent;
+    private JSlider sharedZSlider;
+    private JLabel sharedZCountLabel;
+    private boolean updatingSharedZSlider;
+    private boolean objectOverlayControlsBuilt;
+    private boolean sourceToggleVisible;
+    private boolean sourceModeEnabled = true;
+    private SourceMode sourceMode = SourceMode.FILTERED;
 
     public PreviewPairPanel(String originalTitle, String adjustedTitle) {
         this(null, originalTitle, adjustedTitle);
     }
 
+    public PreviewPairPanel(String originalTitle, String adjustedTitle, PreviewLayout layout) {
+        this(null, originalTitle, adjustedTitle, layout);
+    }
+
     public PreviewPairPanel(Window owner, String originalTitle, String adjustedTitle) {
+        this(owner, originalTitle, adjustedTitle, PreviewLayout.STACKED_LEGACY);
+    }
+
+    public PreviewPairPanel(Window owner, String originalTitle, String adjustedTitle,
+                            PreviewLayout layout) {
         super(new BorderLayout(0, 6));
         this.owner = owner;
+        this.layout = layout == null ? PreviewLayout.STACKED_LEGACY : layout;
         this.originalPreview = new ImagePreviewPanel(originalTitle);
         this.adjustedPreview = new ImagePreviewPanel(adjustedTitle);
         this.displayControlsPanel = buildDisplayControls();
+        buildObjectOverlayControls();
         setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
         add(buildPreviewArea(), BorderLayout.CENTER);
+        if (this.layout == PreviewLayout.HORIZONTAL_SLIM) {
+            originalPreview.setSlim(true);
+            adjustedPreview.setSlim(true);
+        }
         wireLargeViewButton();
         wireDisplayControlsButton();
         wireObjectOverlayControls();
@@ -148,6 +197,7 @@ public final class PreviewPairPanel extends JPanel {
         displaySettings = PreviewDisplaySettings.defaultFor(channelLutName);
         applyDisplaySettings();
         updateLargeImages();
+        refreshSharedZRow();
     }
 
     public void setAdjustedState(PreviewState state, String message) {
@@ -198,6 +248,7 @@ public final class PreviewPairPanel extends JPanel {
         updateObjectOverlayControls();
         updateAdjustedPreviewImage();
         applyDisplaySettings();
+        applyCurrentZ(currentZ);
         updateLargeImages();
     }
 
@@ -212,6 +263,7 @@ public final class PreviewPairPanel extends JPanel {
         updateObjectOverlayControls();
         updateAdjustedPreviewImage();
         applyDisplaySettings();
+        applyCurrentZ(currentZ);
         updateLargeImages();
     }
 
@@ -241,6 +293,72 @@ public final class PreviewPairPanel extends JPanel {
     public void setCompactPreviewHeaders(boolean compact) {
         originalPreview.setMetadataHeaderVisible(!compact);
         adjustedPreview.setMetadataHeaderVisible(!compact);
+    }
+
+    public JComponent sharedZRow() {
+        if (sharedZRowComponent != null) return sharedZRowComponent;
+        sharedZSlider = new JSlider(1, 1, 1);
+        sharedZCountLabel = new JLabel("1 / 1");
+        JPanel row = new JPanel(new BorderLayout(6, 0));
+        row.setOpaque(false);
+        sharedZCountLabel.setHorizontalAlignment(JLabel.RIGHT);
+        row.add(new JLabel("Z:"), BorderLayout.WEST);
+        row.add(sharedZSlider, BorderLayout.CENTER);
+        row.add(sharedZCountLabel, BorderLayout.EAST);
+        sharedZSlider.addChangeListener(e -> {
+            if (updatingSharedZSlider) return;
+            applyCurrentZ(sharedZSlider.getValue());
+        });
+        sharedZRowComponent = row;
+        refreshSharedZRow();
+        return sharedZRowComponent;
+    }
+
+    public JPanel previewToolstrip() {
+        if (previewToolstripComponent != null) return previewToolstripComponent;
+        JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        left.setOpaque(false);
+        left.add(buildSourceControls());
+        left.add(buildObjectOverlayControls());
+
+        JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        right.setOpaque(false);
+        right.add(largeViewButton);
+        right.add(displayControlsButton);
+
+        previewToolstripComponent = new JPanel(new BorderLayout(8, 0));
+        previewToolstripComponent.setOpaque(false);
+        previewToolstripComponent.add(left, BorderLayout.WEST);
+        previewToolstripComponent.add(right, BorderLayout.EAST);
+        applySourceControlsState();
+        return previewToolstripComponent;
+    }
+
+    public void setSourceToggleVisible(boolean visible) {
+        sourceToggleVisible = visible;
+        applySourceControlsState();
+    }
+
+    public void setSourceMode(SourceMode mode) {
+        sourceMode = mode == SourceMode.RAW ? SourceMode.RAW : SourceMode.FILTERED;
+        applySourceControlsState();
+    }
+
+    public void setSourceModeEnabled(boolean enabled) {
+        sourceModeEnabled = enabled;
+        applySourceControlsState();
+    }
+
+    public void setSourceModeChangeListener(SourceModeChangeListener listener) {
+        sourceModeListener = listener;
+    }
+
+    public void resetStageToolstripState() {
+        sourceModeListener = null;
+        setSourceToggleVisible(false);
+        setSourceMode(SourceMode.FILTERED);
+        setSourceModeEnabled(true);
+        // Overlay choice is intentionally preserved across related object-preview stages.
     }
 
     public void setOriginalPreviewTitle(String title) {
@@ -320,6 +438,41 @@ public final class PreviewPairPanel extends JPanel {
         return adjustedPreview;
     }
 
+    JPanel previewPairContainerForTest() {
+        return previewPairContainer;
+    }
+
+    JSlider sharedZSliderForTest() {
+        sharedZRow();
+        return sharedZSlider;
+    }
+
+    String sharedZTextForTest() {
+        sharedZRow();
+        return sharedZCountLabel.getText();
+    }
+
+    JRadioButton sourceRawRadioForTest() {
+        previewToolstrip();
+        return sourceRawRadio;
+    }
+
+    boolean sourceToggleVisibleForTest() {
+        previewToolstrip();
+        return sourceLabel.isVisible()
+                && sourceFilteredRadio.isVisible()
+                && sourceRawRadio.isVisible();
+    }
+
+    boolean sourceModeEnabledForTest() {
+        previewToolstrip();
+        return sourceFilteredRadio.isEnabled() && sourceRawRadio.isEnabled();
+    }
+
+    SourceMode sourceModeForTest() {
+        return sourceMode;
+    }
+
     String originalPreviewTitleForTest() {
         return originalPreview.previewTitleForTest();
     }
@@ -386,23 +539,33 @@ public final class PreviewPairPanel extends JPanel {
         return ImagePreviewPanel.clamp(requestedZ, 1, sharedMax);
     }
 
-    private JPanel buildStackedPreviews() {
-        JPanel previews = new JPanel();
-        previews.setLayout(new BoxLayout(previews, BoxLayout.Y_AXIS));
+    private JPanel buildPreviewPair(boolean horizontal) {
+        JPanel previews = horizontal
+                ? new JPanel(new GridLayout(1, 2, 8, 0))
+                : new JPanel();
+        if (!horizontal) {
+            previews.setLayout(new BoxLayout(previews, BoxLayout.Y_AXIS));
+        }
+        previews.setOpaque(false);
         previews.add(originalPreview);
         previews.add(adjustedPreview);
+        previewPairContainer = previews;
         return previews;
     }
 
     private JPanel buildPreviewArea() {
         JPanel panel = new JPanel(new BorderLayout(0, 4));
         panel.setOpaque(false);
-        panel.add(buildStackedPreviews(), BorderLayout.CENTER);
-        panel.add(buildObjectOverlayControls(), BorderLayout.SOUTH);
+        boolean horizontal = layout == PreviewLayout.HORIZONTAL_SLIM;
+        panel.add(buildPreviewPair(horizontal), BorderLayout.CENTER);
+        if (!horizontal) {
+            panel.add(buildObjectOverlayControls(), BorderLayout.SOUTH);
+        }
         return panel;
     }
 
     private JPanel buildObjectOverlayControls() {
+        if (objectOverlayControlsBuilt) return objectOverlayControls;
         objectOverlaySourceChoice.addItem("Filtered image");
         objectOverlaySourceChoice.addItem("Raw image");
         objectOverlayControls.setOpaque(false);
@@ -411,7 +574,61 @@ public final class PreviewPairPanel extends JPanel {
         objectOverlayControls.add(new JLabel("over"));
         objectOverlayControls.add(objectOverlaySourceChoice);
         objectOverlayControls.setVisible(false);
+        objectOverlayControlsBuilt = true;
         return objectOverlayControls;
+    }
+
+    private JPanel buildSourceControls() {
+        JPanel sourceControls = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+        sourceControls.setOpaque(false);
+        sourceLabel = new JLabel("Source:");
+        sourceFilteredRadio = new JRadioButton("Filtered", true);
+        sourceRawRadio = new JRadioButton("Raw");
+        sourceFilteredRadio.setOpaque(false);
+        sourceRawRadio.setOpaque(false);
+        ButtonGroup group = new ButtonGroup();
+        group.add(sourceFilteredRadio);
+        group.add(sourceRawRadio);
+        ActionListener listener = new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                if (!sourceModeEnabled) {
+                    applySourceControlsState();
+                    return;
+                }
+                SourceMode selected = sourceRawRadio.isSelected()
+                        ? SourceMode.RAW
+                        : SourceMode.FILTERED;
+                sourceMode = selected;
+                if (sourceModeListener != null) {
+                    sourceModeListener.sourceModeChanged(selected);
+                }
+            }
+        };
+        sourceFilteredRadio.addActionListener(listener);
+        sourceRawRadio.addActionListener(listener);
+        sourceControls.add(sourceLabel);
+        sourceControls.add(sourceFilteredRadio);
+        sourceControls.add(sourceRawRadio);
+        return sourceControls;
+    }
+
+    private void applySourceControlsState() {
+        if (sourceLabel == null) return;
+        sourceLabel.setVisible(sourceToggleVisible);
+        sourceFilteredRadio.setVisible(sourceToggleVisible);
+        sourceRawRadio.setVisible(sourceToggleVisible);
+        sourceLabel.setEnabled(sourceModeEnabled);
+        sourceFilteredRadio.setEnabled(sourceModeEnabled);
+        sourceRawRadio.setEnabled(sourceModeEnabled);
+        if (sourceMode == SourceMode.RAW) {
+            sourceRawRadio.setSelected(true);
+        } else {
+            sourceFilteredRadio.setSelected(true);
+        }
+        if (previewToolstripComponent != null) {
+            previewToolstripComponent.revalidate();
+            previewToolstripComponent.repaint();
+        }
     }
 
     private JPanel buildDisplayControls() {
@@ -578,9 +795,7 @@ public final class PreviewPairPanel extends JPanel {
         syncingSlices = true;
         try {
             int previousZ = currentZ;
-            int originalSlices = originalImage == null ? adjustedPreview.getSliceCount() : originalPreview.getSliceCount();
-            int adjustedSlices = adjustedImage == null ? originalPreview.getSliceCount() : adjustedPreview.getSliceCount();
-            currentZ = clampSharedZ(requestedZ, originalSlices, adjustedSlices);
+            currentZ = ImagePreviewPanel.clamp(requestedZ, 1, effectiveSharedSliceCount());
             originalPreview.setCurrentZ(currentZ);
             adjustedPreview.setCurrentZ(currentZ);
             if (largePreviewDialog != null) {
@@ -589,8 +804,74 @@ public final class PreviewPairPanel extends JPanel {
             if (sharedZChangeListener != null && currentZ != previousZ) {
                 sharedZChangeListener.zSliceChanged(currentZ);
             }
+            refreshSharedZRow();
         } finally {
             syncingSlices = false;
+        }
+    }
+
+    private void refreshSharedZRow() {
+        if (sharedZSlider == null) return;
+        int maxZ = effectiveSharedSliceCount();
+        int value = ImagePreviewPanel.clamp(currentZ, 1, maxZ);
+        updatingSharedZSlider = true;
+        try {
+            sharedZSlider.setMinimum(1);
+            sharedZSlider.setMaximum(maxZ);
+            sharedZSlider.setValue(value);
+            sharedZSlider.setEnabled(maxZ > 1);
+            sharedZCountLabel.setText(value + " / " + maxZ);
+        } finally {
+            updatingSharedZSlider = false;
+        }
+    }
+
+    private int effectiveSharedSliceCount() {
+        int sharedMax = 1;
+        boolean hasImage = false;
+        if (originalImage != null) {
+            sharedMax = originalPreview.getSliceCount();
+            hasImage = true;
+        }
+        if (adjustedImage != null) {
+            int count = adjustedPreview.getSliceCount();
+            sharedMax = hasImage ? Math.min(sharedMax, count) : count;
+            hasImage = true;
+        }
+        if (usingCustomLargePreviewImages) {
+            if (largePreviewFirstImage != null) {
+                int count = effectiveSliceCount(largePreviewFirstImage);
+                sharedMax = hasImage ? Math.min(sharedMax, count) : count;
+                hasImage = true;
+            }
+            if (largePreviewSecondImage != null) {
+                int count = effectiveSliceCount(largePreviewSecondImage);
+                sharedMax = hasImage ? Math.min(sharedMax, count) : count;
+                hasImage = true;
+            }
+            if (largePreviewThirdImage != null) {
+                int count = effectiveSliceCount(largePreviewThirdImage);
+                sharedMax = hasImage ? Math.min(sharedMax, count) : count;
+                hasImage = true;
+            }
+        }
+        return Math.max(1, sharedMax);
+    }
+
+    private static int effectiveSliceCount(ImagePlus image) {
+        if (image == null) return 1;
+        try {
+            int channels = Math.max(1, image.getNChannels());
+            int slices = Math.max(1, image.getNSlices());
+            int frames = Math.max(1, image.getNFrames());
+            int stackSize = Math.max(1, image.getStackSize());
+            if (channels == 1 && slices == 1 && frames > 1
+                    && stackSize == channels * frames) {
+                return frames;
+            }
+            return slices;
+        } catch (RuntimeException e) {
+            return 1;
         }
     }
 

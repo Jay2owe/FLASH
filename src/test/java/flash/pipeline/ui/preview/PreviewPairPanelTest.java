@@ -9,15 +9,125 @@ import org.junit.Test;
 
 import java.awt.Frame;
 import java.awt.GraphicsEnvironment;
+import java.awt.GridLayout;
 import java.awt.image.IndexColorModel;
+import java.util.concurrent.atomic.AtomicReference;
+import javax.swing.JPanel;
+import javax.swing.JSlider;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assume.assumeFalse;
 
 public class PreviewPairPanelTest {
+
+    @Test
+    public void horizontalSlim_arrangesPreviewsOneByTwo_andHidesPerPanelChrome() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted",
+                PreviewPairPanel.PreviewLayout.HORIZONTAL_SLIM);
+
+        assertTrue(pair.previewPairContainerForTest().getLayout() instanceof GridLayout);
+        GridLayout layout = (GridLayout) pair.previewPairContainerForTest().getLayout();
+        assertEquals(1, layout.getRows());
+        assertEquals(2, layout.getColumns());
+        assertFalse(pair.originalPreviewForTest().metadataHeaderVisibleForTest());
+        assertFalse(pair.adjustedPreviewForTest().metadataHeaderVisibleForTest());
+        assertFalse(pair.originalPreviewForTest().zRowVisibleForTest());
+        assertFalse(pair.adjustedPreviewForTest().zRowVisibleForTest());
+        assertNotNull(pair.originalPreviewForTest().slimTitleLabelForTest());
+        assertNotNull(pair.adjustedPreviewForTest().slimTitleLabelForTest());
+    }
+
+    @Test
+    public void sharedZRowSlider_drivesBothPreviews_andLargePreview() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted",
+                PreviewPairPanel.PreviewLayout.HORIZONTAL_SLIM);
+        pair.setOriginal(stack("original", 5));
+        pair.setAdjusted(stack("adjusted", 5));
+
+        JSlider slider = pair.sharedZSliderForTest();
+        slider.setValue(4);
+
+        assertEquals(4, pair.getCurrentZ());
+        assertEquals(4, pair.originalZForTest());
+        assertEquals(4, pair.adjustedZForTest());
+        assertEquals("4 / 5", pair.sharedZTextForTest());
+
+        if (!GraphicsEnvironment.isHeadless()) {
+            LargePreviewDialog dialog = new LargePreviewDialog(null);
+            try {
+                pair.setLargePreviewDialogForTest(dialog);
+                slider.setValue(2);
+
+                assertEquals(2, dialog.getCurrentZForTest());
+            } finally {
+                dialog.dispose();
+            }
+        }
+    }
+
+    @Test
+    public void sharedZRow_updatesRangeWhenAdjustedImageSliceCountChanges() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted",
+                PreviewPairPanel.PreviewLayout.HORIZONTAL_SLIM);
+        pair.setOriginal(stack("original", 6));
+        pair.setAdjusted(stack("first", 6));
+
+        JSlider slider = pair.sharedZSliderForTest();
+        pair.setCurrentZ(5);
+        assertEquals(6, slider.getMaximum());
+        assertEquals("5 / 6", pair.sharedZTextForTest());
+
+        pair.setAdjusted(stack("second", 3));
+
+        assertEquals(3, pair.getCurrentZ());
+        assertEquals(3, slider.getMaximum());
+        assertEquals(3, slider.getValue());
+        assertEquals("3 / 3", pair.sharedZTextForTest());
+    }
+
+    @Test
+    public void previewToolstrip_containsLargeAndBcButtons() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted",
+                PreviewPairPanel.PreviewLayout.HORIZONTAL_SLIM);
+
+        JPanel toolstrip = pair.previewToolstrip();
+
+        assertTrue(toolstrip.isAncestorOf(pair.largeViewButton()));
+        assertTrue(toolstrip.isAncestorOf(pair.displayControlsButton()));
+    }
+
+    @Test
+    public void sourceToggle_notVisibleByDefault_andNotifiesListenerWhenEnabled() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted",
+                PreviewPairPanel.PreviewLayout.HORIZONTAL_SLIM);
+        pair.previewToolstrip();
+        final AtomicReference<PreviewPairPanel.SourceMode> changed =
+                new AtomicReference<PreviewPairPanel.SourceMode>();
+
+        assertFalse(pair.sourceToggleVisibleForTest());
+
+        pair.setSourceToggleVisible(true);
+        pair.setSourceModeChangeListener(new PreviewPairPanel.SourceModeChangeListener() {
+            @Override public void sourceModeChanged(PreviewPairPanel.SourceMode mode) {
+                changed.set(mode);
+            }
+        });
+        pair.sourceRawRadioForTest().doClick();
+
+        assertTrue(pair.sourceToggleVisibleForTest());
+        assertEquals(PreviewPairPanel.SourceMode.RAW, pair.sourceModeForTest());
+        assertEquals(PreviewPairPanel.SourceMode.RAW, changed.get());
+
+        pair.resetStageToolstripState();
+
+        assertFalse(pair.sourceToggleVisibleForTest());
+        assertTrue(pair.sourceModeEnabledForTest());
+        assertEquals(PreviewPairPanel.SourceMode.FILTERED, pair.sourceModeForTest());
+    }
 
     @Test
     public void mainPreviewClampsToSharedSliceRange() {
