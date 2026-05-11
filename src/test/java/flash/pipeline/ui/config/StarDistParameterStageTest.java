@@ -6,6 +6,8 @@ import ij.ImageStack;
 import ij.process.ByteProcessor;
 import org.junit.Test;
 
+import javax.swing.AbstractButton;
+import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.text.JTextComponent;
@@ -31,6 +33,28 @@ public class StarDistParameterStageTest {
     }
 
     @Test
+    public void allParameterFieldsContributeToMethodToken() {
+        StarDistParameterStage stage = new StarDistParameterStage(
+                new RecordingStore("stardist:0.5:0.4"),
+                new RecordingPreviewAdapter());
+
+        stage.buildControls(context(), new RecordingActions());
+        stage.setProbabilityForTest("0.7");
+        stage.setNmsForTest("0.2");
+        stage.setLinkingForTest("15");
+        stage.setGapClosingForTest("16");
+        stage.setFrameGapForTest("2");
+        stage.setAreaMinForTest("3");
+        stage.setAreaMaxForTest("99");
+        stage.setQualityMinForTest("0.8");
+        stage.setIntensityMinForTest("22");
+
+        assertEquals("stardist:0.7:0.2:linking=15.0:gapClosing=16.0:"
+                        + "frameGap=2:area=3.0-99.0:quality=0.8:intensity=22.0",
+                stage.currentMethodForTest());
+    }
+
+    @Test
     public void textFieldEditMarksPreviewStaleWithoutRunningPreview() {
         RecordingStore store = new RecordingStore("stardist:0.5:0.4");
         RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
@@ -45,21 +69,30 @@ public class StarDistParameterStageTest {
 
         assertTrue(stage.isPreviewStaleForTest());
         assertTrue(actions.status.contains("Preview"));
+        assertTrue(actions.previewButtonStale);
+        assertEquals("\u25CF Run Preview", actions.previewButton.getText());
         assertEquals("Field edits must not execute StarDist preview",
                 0, adapter.previewRuns);
     }
 
     @Test
-    public void controlsIncludeParameterHelperText() {
+    public void controlsUseCompactGroupedRowsWithoutHelperText() {
         StarDistParameterStage stage = new StarDistParameterStage(
                 new RecordingStore("stardist:0.5:0.4"),
                 new RecordingPreviewAdapter());
 
         JComponent controls = stage.buildControls(context(), new RecordingActions());
 
-        assertContainsText(controls, "Minimum confidence required for StarDist to accept a detection.");
-        assertContainsText(controls, "Number of missing z planes that can be bridged during 3D linking.");
-        assertContainsText(controls, "Use 0 to disable the upper size limit.");
+        assertContainsText(controls, "Detection:");
+        assertContainsText(controls, "Probability");
+        assertContainsText(controls, "Area max");
+        assertContainsText(controls, "Linking:");
+        assertContainsText(controls, "Gap distance");
+        assertContainsText(controls, "Filters:");
+        assertContainsText(controls, "Quality min");
+        assertContainsText(controls, "Run Preview");
+        assertNotContainsText(controls, "Minimum confidence required for StarDist");
+        assertNotContainsText(controls, "Edit parameters, then press");
     }
 
     @Test
@@ -73,13 +106,16 @@ public class StarDistParameterStageTest {
         stage.onEnter(context(), new PreviewPairPanel("Original", "Adjusted"));
 
         assertEquals(0, adapter.previewRuns);
+        assertEquals("\u25CF Run Preview", actions.previewButton.getText());
 
         stage.runPreviewNowForTest();
 
         assertEquals(1, adapter.previewRuns);
         assertFalse(stage.isPreviewStaleForTest());
         assertNotNull(actions.adjustedPreview);
-        assertEquals("Objects detected: 3", actions.status);
+        assertEquals("Objects: 3 ready", actions.status);
+        assertFalse(actions.previewButtonStale);
+        assertEquals("Run Preview", actions.previewButton.getText());
         assertEquals(3, stage.largePreviewPaneCountForTest());
     }
 
@@ -105,6 +141,8 @@ public class StarDistParameterStageTest {
 
         assertEquals(13, pair.getCurrentZ());
         assertTrue(stage.isPreviewStaleForTest());
+        assertEquals(2, stage.largePreviewPaneCountForTest());
+        assertTrue(actions.previewButtonStale);
         assertEquals("StarDist returned no label map.", actions.status);
     }
 
@@ -115,7 +153,8 @@ public class StarDistParameterStageTest {
                 new RecordingStore("stardist:0.5:0.4"), adapter);
 
         stage.buildControls(context(), new RecordingActions());
-        stage.onEnter(context(), new PreviewPairPanel("Original", "Adjusted"));
+        stage.onEnter(context(), new PreviewPairPanel("Original", "Adjusted",
+                PreviewPairPanel.PreviewLayout.HORIZONTAL_SLIM));
         adapter.previewRuns = 0;
 
         assertEquals(1, adapter.rawSourceCreations);
@@ -127,6 +166,24 @@ public class StarDistParameterStageTest {
 
         assertTrue(stage.currentSourceTitleForTest().startsWith("raw"));
         assertEquals(0, adapter.previewRuns);
+    }
+
+    @Test
+    public void overlayToggleUsesSharedPreviewControls() throws Exception {
+        RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
+        StarDistParameterStage stage = new StarDistParameterStage(
+                new RecordingStore("stardist:0.5:0.4"), adapter);
+
+        stage.buildControls(context(), new RecordingActions());
+        stage.onEnter(context(), new PreviewPairPanel("Original", "Adjusted",
+                PreviewPairPanel.PreviewLayout.HORIZONTAL_SLIM));
+        stage.runPreviewNowForTest();
+
+        assertFalse(stage.objectOverlaySelectedForTest());
+
+        stage.setShowOverlayForTest(true);
+
+        assertTrue(stage.objectOverlaySelectedForTest());
     }
 
     @Test
@@ -180,10 +237,16 @@ public class StarDistParameterStageTest {
         assertTrue("Missing helper text: " + expected, containsText(root, expected));
     }
 
+    private static void assertNotContainsText(Component root, String unexpected) {
+        assertFalse("Unexpected text: " + unexpected, containsText(root, unexpected));
+    }
+
     private static boolean containsText(Component component, String expected) {
         String text = null;
         if (component instanceof JLabel) {
             text = ((JLabel) component).getText();
+        } else if (component instanceof AbstractButton) {
+            text = ((AbstractButton) component).getText();
         } else if (component instanceof JTextComponent) {
             text = ((JTextComponent) component).getText();
         }
@@ -262,6 +325,8 @@ public class StarDistParameterStageTest {
         String status = "";
         ImagePlus adjustedPreview;
         PreviewPairPanel pair;
+        JButton previewButton;
+        boolean previewButtonStale;
 
         RecordingActions() {
         }
@@ -284,6 +349,18 @@ public class StarDistParameterStageTest {
             if (pair != null) {
                 pair.setAdjusted(image);
                 pair.setAdjustedState(PreviewPairPanel.PreviewState.READY, text);
+            }
+        }
+
+        @Override public void registerPreviewButton(JButton button) {
+            previewButton = button;
+            setPreviewButtonStale(true);
+        }
+
+        @Override public void setPreviewButtonStale(boolean stale) {
+            previewButtonStale = stale;
+            if (previewButton != null) {
+                previewButton.setText(stale ? "\u25CF Run Preview" : "Run Preview");
             }
         }
 
