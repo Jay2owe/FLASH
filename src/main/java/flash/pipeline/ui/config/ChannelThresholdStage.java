@@ -6,15 +6,19 @@ import flash.pipeline.ui.preview.ThresholdOverlayRenderer;
 import ij.ImagePlus;
 import ij.process.ImageProcessor;
 
-import javax.swing.Box;
-import javax.swing.BoxLayout;
+import javax.swing.BorderFactory;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.ScrollPaneConstants;
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Dimension;
 
 public final class ChannelThresholdStage implements ConfigQcStage {
+
+    private static final int CONTROL_PANEL_MAX_HEIGHT = 130;
 
     public interface ThresholdStore {
         String get();
@@ -57,13 +61,21 @@ public final class ChannelThresholdStage implements ConfigQcStage {
     }
 
     @Override
+    public boolean showPreviewDisplayControls() {
+        return false;
+    }
+
+    @Override
     public JComponent buildControls(ConfigQcContext context, ConfigQcActions actions) {
         this.actions = actions;
         this.activeContext = context;
 
-        JPanel panel = new JPanel(new BorderLayout(0, 10));
+        JPanel panel = new JPanel(new BorderLayout(0, 4));
         panel.setOpaque(false);
-        panel.add(buildSummaryPanel(context), BorderLayout.NORTH);
+
+        JLabel help = new JLabel("Adjust threshold to isolate the channel of interest.");
+        help.setForeground(new Color(90, 90, 90));
+        panel.add(help, BorderLayout.NORTH);
 
         control = new ThresholdControlPanel();
         control.setMethod("Default");
@@ -88,7 +100,7 @@ public final class ChannelThresholdStage implements ConfigQcStage {
                 }
             }
         });
-        panel.add(control, BorderLayout.CENTER);
+        panel.add(buildBoundedControlPanel(control), BorderLayout.CENTER);
 
         feedbackLabel = new JLabel(" ");
         feedbackLabel.setForeground(new Color(90, 90, 90));
@@ -175,26 +187,25 @@ public final class ChannelThresholdStage implements ConfigQcStage {
         return control == null ? "" : formatThreshold(control.getLowerThreshold());
     }
 
-    private JComponent buildSummaryPanel(ConfigQcContext context) {
-        JPanel panel = new JPanel();
-        panel.setOpaque(false);
-        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+    private JComponent buildBoundedControlPanel(ThresholdControlPanel control) {
+        JPanel bounded = new JPanel(new BorderLayout());
+        bounded.setOpaque(false);
+        bounded.setBorder(BorderFactory.createEmptyBorder(2, 0, 0, 0));
 
-        JLabel channel = new JLabel(context == null ? "Channel" : context.getChannelLabel());
-        JLabel image = new JLabel(context == null ? "Image" : context.getImageProgressText()
-                + ": " + context.getCurrentImageDisplayName());
-        JLabel help = new JLabel("Adjust the lower threshold; FLASH saves that value for object and intensity measurements.");
-        help.setForeground(new Color(90, 90, 90));
-
-        channel.setAlignmentX(JComponent.LEFT_ALIGNMENT);
-        image.setAlignmentX(JComponent.LEFT_ALIGNMENT);
-        help.setAlignmentX(JComponent.LEFT_ALIGNMENT);
-        panel.add(channel);
-        panel.add(Box.createVerticalStrut(4));
-        panel.add(image);
-        panel.add(Box.createVerticalStrut(4));
-        panel.add(help);
-        return panel;
+        Dimension preferred = control.getPreferredSize();
+        if (preferred.height > CONTROL_PANEL_MAX_HEIGHT) {
+            JScrollPane scroll = new JScrollPane(control,
+                    ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
+                    ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+            scroll.setBorder(BorderFactory.createEmptyBorder());
+            scroll.setOpaque(false);
+            scroll.getViewport().setOpaque(false);
+            scroll.setPreferredSize(new Dimension(preferred.width, CONTROL_PANEL_MAX_HEIGHT));
+            bounded.add(scroll, BorderLayout.CENTER);
+        } else {
+            bounded.add(control, BorderLayout.CENTER);
+        }
+        return bounded;
     }
 
     private void applySavedOrAutoThreshold() {
