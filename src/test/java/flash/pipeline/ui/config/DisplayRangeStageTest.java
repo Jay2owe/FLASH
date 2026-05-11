@@ -5,6 +5,12 @@ import ij.ImagePlus;
 import ij.process.ByteProcessor;
 import org.junit.Test;
 
+import javax.swing.JComponent;
+import javax.swing.JLabel;
+import javax.swing.JScrollPane;
+import javax.swing.ScrollPaneConstants;
+import java.awt.Component;
+import java.awt.Container;
 import java.util.Arrays;
 
 import static org.junit.Assert.assertEquals;
@@ -75,6 +81,25 @@ public class DisplayRangeStageTest {
         assertFalse(stage.showPreviewDisplayControls());
     }
 
+    @Test
+    public void controlsUseBoundedRangeEditorWithoutDuplicatedSummary() {
+        DisplayRangeStage stage = new DisplayRangeStage(
+                new RecordingRangeStore("None"),
+                new RecordingPreviewAdapter());
+
+        JComponent controls = stage.buildControls(context(), new RecordingActions());
+        JScrollPane scroll = findFirst(controls, JScrollPane.class);
+
+        assertTrue(hasLabel(controls, "Adjust min/max on the channel projection."));
+        assertFalse(hasLabel(controls, "C1 - IBA1"));
+        assertFalse(hasLabel(controls, "Image 1 / 1: QC image"));
+        assertFalse(hasLabel(controls, "Adjust the displayed min/max range on the channel projection."));
+        assertNotNull(scroll);
+        assertEquals(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER, scroll.getHorizontalScrollBarPolicy());
+        assertTrue("bounded editor preferred height was " + scroll.getPreferredSize().height,
+                scroll.getPreferredSize().height <= 130);
+    }
+
     private static ConfigQcContext context() {
         return ConfigQcContext.fromImages(
                 null,
@@ -92,6 +117,39 @@ public class DisplayRangeStageTest {
         processor.set(2, 0, 75);
         processor.set(3, 0, 100);
         return new ImagePlus(title, processor);
+    }
+
+    private static boolean hasLabel(Component component, String text) {
+        JLabel label = findLabel(component, text);
+        return label != null;
+    }
+
+    private static JLabel findLabel(Component component, String text) {
+        if (component instanceof JLabel && text.equals(((JLabel) component).getText())) {
+            return (JLabel) component;
+        }
+        if (component instanceof Container) {
+            Component[] children = ((Container) component).getComponents();
+            for (int i = 0; i < children.length; i++) {
+                JLabel found = findLabel(children[i], text);
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    private static <T extends Component> T findFirst(Component component, Class<T> type) {
+        if (type.isInstance(component)) {
+            return type.cast(component);
+        }
+        if (component instanceof Container) {
+            Component[] children = ((Container) component).getComponents();
+            for (int i = 0; i < children.length; i++) {
+                T found = findFirst(children[i], type);
+                if (found != null) return found;
+            }
+        }
+        return null;
     }
 
     private static final class RecordingRangeStore implements DisplayRangeStage.RangeStore {
