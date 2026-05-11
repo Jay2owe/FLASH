@@ -19,7 +19,9 @@ import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JScrollPane;
 import javax.swing.JTextField;
+import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
@@ -28,6 +30,7 @@ import javax.swing.event.DocumentListener;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
+import java.awt.Dimension;
 import java.awt.GraphicsEnvironment;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
@@ -84,13 +87,14 @@ public final class FilterParameterStage implements ConfigQcStage {
 
     private static final String CUSTOM_PRESET = "Custom";
     private static final String DEFAULT_PRESET = "Default";
-    private static final String STALE_TEXT = "Preview is stale. Press Preview Filter.";
+    private static final String STALE_TEXT = "Preview is stale. Press Run Preview.";
     private static final String EMPTY_TEXT = "Choose a filter preset or open the custom filter builder.";
     private static final String BRANCHED_BANNER_TEXT =
             "⚠ This pipeline has branches — open in canvas to edit structure.";
 
     private static final Pattern RUN_LINE_PATTERN = Pattern.compile(
             "run\\s*\\(\\s*\"[^\"]+\"\\s*,\\s*\"([^\"]*)\"\\s*\\)");
+    private static final int ACCORDION_SCROLL_HEIGHT = 130;
 
     /**
      * Curated map of "default-visible" parameters per ImageJ command. Anything
@@ -131,8 +135,8 @@ public final class FilterParameterStage implements ConfigQcStage {
     private SwingWorker<ImagePlus, Void> previewWorker;
 
     private JPanel parameterPanel;
+    private JScrollPane parameterScrollPane;
     private JLabel presetDescriptionLabel;
-    private JLabel feedbackLabel;
     private JComboBox<String> presetCombo;
     private JButton previewButton;
     private JButton customBuilderButton;
@@ -221,11 +225,10 @@ public final class FilterParameterStage implements ConfigQcStage {
         this.activeContext = context;
         loadSavedState();
 
-        JPanel panel = new JPanel(new BorderLayout(0, 10));
+        JPanel panel = new JPanel(new BorderLayout(0, 6));
         panel.setOpaque(false);
-        panel.add(buildPresetPanel(), BorderLayout.NORTH);
-        panel.add(buildParameterPanel(), BorderLayout.CENTER);
-        panel.add(buildActionPanel(), BorderLayout.SOUTH);
+        panel.add(buildTopPanel(), BorderLayout.NORTH);
+        panel.add(buildParameterScrollPane(), BorderLayout.CENTER);
         rebuildAccordion();
         updateBranchedBannerVisibility();
         markPreviewStale(STALE_TEXT);
@@ -238,6 +241,10 @@ public final class FilterParameterStage implements ConfigQcStage {
         closeImages();
         this.activeContext = context;
         this.preview = preview;
+        if (actions != null) {
+            actions.registerPreviewButton(previewButton);
+            actions.setPreviewButtonStale(previewStale);
+        }
         try {
             sourceImage = previewAdapter.createSource(context);
             if (preview != null) {
@@ -438,7 +445,24 @@ public final class FilterParameterStage implements ConfigQcStage {
         return previewButton != null && previewButton.isEnabled();
     }
 
-    private JComponent buildPresetPanel() {
+    String previewButtonTextForTest() {
+        return previewButton == null ? "" : previewButton.getText();
+    }
+
+    JScrollPane parameterScrollPaneForTest() {
+        return parameterScrollPane;
+    }
+
+    boolean parameterScrollWrapsParameterPanelForTest() {
+        return parameterScrollPane != null
+                && parameterScrollPane.getViewport().getView() == parameterPanel;
+    }
+
+    boolean parameterPanelHasBorderForTest() {
+        return parameterPanel != null && parameterPanel.getBorder() != null;
+    }
+
+    private JComponent buildTopPanel() {
         JPanel panel = new JPanel();
         panel.setOpaque(false);
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
@@ -447,7 +471,7 @@ public final class FilterParameterStage implements ConfigQcStage {
         row.setOpaque(false);
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.gridy = 0;
-        gbc.insets = new Insets(0, 0, 4, 6);
+        gbc.insets = new Insets(0, 0, 0, 6);
         gbc.anchor = GridBagConstraints.WEST;
 
         gbc.gridx = 0;
@@ -480,10 +504,34 @@ public final class FilterParameterStage implements ConfigQcStage {
         gbc.fill = GridBagConstraints.NONE;
         row.add(customBuilderButton, gbc);
 
+        addFilterButton = new JButton("+ Add filter...");
+        addFilterButton.addActionListener(e -> onAddFilterClicked());
+        addFilterButton.setEnabled(linear);
+        gbc.gridx = 3;
+        row.add(addFilterButton, gbc);
+
+        previewButton = new JButton("Run Preview");
+        previewButton.addActionListener(e -> runPreviewOnWorker());
+        gbc.gridx = 4;
+        row.add(previewButton, gbc);
+
+        resetButton = new JButton("Reset");
+        resetButton.addActionListener(e -> resetToSaved());
+        gbc.gridx = 5;
+        row.add(resetButton, gbc);
+
+        saveAsButton = new JButton("Save preset...");
+        saveAsButton.setEnabled(false);
+        saveAsButton.addActionListener(e -> onSaveAsClicked());
+        gbc.gridx = 6;
+        row.add(saveAsButton, gbc);
+
         panel.add(row);
         presetDescriptionLabel = new JLabel(descriptionProvider.describe(selectedPreset));
         presetDescriptionLabel.setForeground(new Color(90, 90, 90));
         presetDescriptionLabel.setAlignmentX(JComponent.LEFT_ALIGNMENT);
+        updatePresetDescriptionVisibility();
+        panel.add(Box.createVerticalStrut(2));
         panel.add(presetDescriptionLabel);
 
         // Branched-preset banner (visible only when DAG is non-linear).
@@ -498,6 +546,7 @@ public final class FilterParameterStage implements ConfigQcStage {
         branchedBannerLabel.setVisible(false);
         panel.add(Box.createVerticalStrut(4));
         panel.add(branchedBannerLabel);
+        refreshActionState();
         return panel;
     }
 
@@ -505,43 +554,24 @@ public final class FilterParameterStage implements ConfigQcStage {
         parameterPanel = new JPanel();
         parameterPanel.setOpaque(false);
         parameterPanel.setLayout(new BoxLayout(parameterPanel, BoxLayout.Y_AXIS));
-        parameterPanel.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createTitledBorder("Editable parameters"),
-                BorderFactory.createEmptyBorder(6, 6, 6, 6)));
+        parameterPanel.setBorder(null);
         return parameterPanel;
     }
 
-    private JComponent buildActionPanel() {
-        JPanel panel = new JPanel(new BorderLayout(0, 8));
-        panel.setOpaque(false);
-
-        JPanel buttons = new JPanel();
-        buttons.setOpaque(false);
-        buttons.setLayout(new BoxLayout(buttons, BoxLayout.X_AXIS));
-
-        previewButton = new JButton("Preview Filter");
-        previewButton.addActionListener(e -> runPreviewOnWorker());
-        buttons.add(previewButton);
-        buttons.add(Box.createHorizontalStrut(6));
-
-        resetButton = new JButton("Reset to saved");
-        resetButton.addActionListener(e -> resetToSaved());
-        buttons.add(resetButton);
-        buttons.add(Box.createHorizontalStrut(6));
-
-        saveAsButton = new JButton("Save as preset…");
-        saveAsButton.setEnabled(false);
-        saveAsButton.addActionListener(e -> onSaveAsClicked());
-        buttons.add(saveAsButton);
-        buttons.add(Box.createHorizontalGlue());
-
-        feedbackLabel = new JLabel(" ");
-        feedbackLabel.setForeground(new Color(90, 90, 90));
-
-        panel.add(buttons, BorderLayout.NORTH);
-        panel.add(feedbackLabel, BorderLayout.CENTER);
-        refreshActionState();
-        return panel;
+    private JComponent buildParameterScrollPane() {
+        JScrollPane scroll = new JScrollPane(buildParameterPanel(),
+                ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
+                ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+        scroll.setOpaque(false);
+        scroll.getViewport().setOpaque(false);
+        scroll.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createTitledBorder("Filters"),
+                BorderFactory.createEmptyBorder(2, 2, 2, 2)));
+        scroll.setPreferredSize(new Dimension(0, ACCORDION_SCROLL_HEIGHT));
+        scroll.setMinimumSize(new Dimension(0, 90));
+        scroll.getVerticalScrollBar().setUnitIncrement(12);
+        parameterScrollPane = scroll;
+        return scroll;
     }
 
     private void installComboRenderer() {
@@ -560,6 +590,12 @@ public final class FilterParameterStage implements ConfigQcStage {
                 return super.getListCellRendererComponent(list, label, index, selected, focused);
             }
         });
+    }
+
+    private void updatePresetDescriptionVisibility() {
+        if (presetDescriptionLabel == null) return;
+        String text = presetDescriptionLabel.getText();
+        presetDescriptionLabel.setVisible(text != null && text.trim().length() > 0);
     }
 
     private void loadSavedState() {
@@ -636,6 +672,7 @@ public final class FilterParameterStage implements ConfigQcStage {
         updateBranchedBannerVisibility();
         if (presetDescriptionLabel != null) {
             presetDescriptionLabel.setText(descriptionProvider.describe(name));
+            updatePresetDescriptionVisibility();
         }
         clearAdjustedPreview();
         markPreviewStale(hasMacro() ? STALE_TEXT : EMPTY_TEXT);
@@ -671,7 +708,6 @@ public final class FilterParameterStage implements ConfigQcStage {
                                 rowHandles.size(), summaries, rowCursor);
                     }
                 }
-                parameterPanel.add(buildAddFilterRow());
             }
         } finally {
             updatingControls = false;
@@ -704,21 +740,6 @@ public final class FilterParameterStage implements ConfigQcStage {
 
         bar.add(right, BorderLayout.EAST);
         return bar;
-    }
-
-    private JComponent buildAddFilterRow() {
-        JPanel row = new JPanel();
-        row.setOpaque(false);
-        row.setLayout(new BoxLayout(row, BoxLayout.X_AXIS));
-        row.setAlignmentX(JComponent.LEFT_ALIGNMENT);
-        row.setBorder(BorderFactory.createEmptyBorder(4, 4, 0, 4));
-
-        addFilterButton = new JButton("+ Add filter…");
-        addFilterButton.addActionListener(e -> onAddFilterClicked());
-        addFilterButton.setEnabled(linear);
-        row.add(addFilterButton);
-        row.add(Box.createHorizontalGlue());
-        return row;
     }
 
     private void setAllSectionsExpanded(boolean expanded) {
@@ -1049,6 +1070,7 @@ public final class FilterParameterStage implements ConfigQcStage {
         previewStale = false;
         if (actions != null) {
             actions.setAdjustedPreview(image, "Filter preview complete.");
+            actions.setPreviewButtonStale(false);
         } else if (preview != null) {
             preview.setAdjusted(image);
             preview.setAdjustedState(PreviewPairPanel.PreviewState.READY, "Filter preview complete.");
@@ -1083,7 +1105,7 @@ public final class FilterParameterStage implements ConfigQcStage {
                 updatingControls = false;
             }
             loadPreset(newName, newMacro);
-            markPreviewStale(hasMacro() ? "Custom filter saved. Press Preview Filter." : EMPTY_TEXT);
+            markPreviewStale(hasMacro() ? "Custom filter saved. Press Run Preview." : EMPTY_TEXT);
         } catch (Exception e) {
             setError("Custom filter builder failed: " + e.getMessage());
         }
@@ -1399,12 +1421,10 @@ public final class FilterParameterStage implements ConfigQcStage {
         if (actions != null) {
             if (state == PreviewPairPanel.PreviewState.STALE) {
                 actions.markPreviewStale(text);
+                actions.setPreviewButtonStale(true);
             } else {
                 actions.setStatus(text);
             }
-        }
-        if (feedbackLabel != null) {
-            feedbackLabel.setText(text == null || text.trim().isEmpty() ? " " : text);
         }
     }
 
@@ -1420,9 +1440,6 @@ public final class FilterParameterStage implements ConfigQcStage {
     }
 
     private void setStatus(String text) {
-        if (feedbackLabel != null) {
-            feedbackLabel.setText(text == null || text.trim().isEmpty() ? " " : text);
-        }
         if (actions != null) {
             actions.setStatus(text);
         }

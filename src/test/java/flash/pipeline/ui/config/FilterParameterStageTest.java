@@ -13,6 +13,10 @@ import ij.ImageStack;
 import ij.process.ByteProcessor;
 import org.junit.Test;
 
+import javax.swing.JButton;
+import javax.swing.JScrollPane;
+import javax.swing.ScrollPaneConstants;
+import java.awt.Dimension;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -147,6 +151,57 @@ public class FilterParameterStageTest {
     }
 
     @Test
+    public void controlsUseBoundedScrollableAccordion() {
+        RecordingMacroStore store = new RecordingMacroStore("Default", TWO_STEP_MACRO);
+        FilterParameterStage stage = new FilterParameterStage(
+                Arrays.asList("Default", "Custom"), store, new RecordingPreviewAdapter(), null, null);
+
+        stage.buildControls(context(), new RecordingActions());
+
+        JScrollPane scroll = stage.parameterScrollPaneForTest();
+        assertNotNull("accordion must be wrapped in a scroll pane", scroll);
+        assertTrue("scroll pane must wrap the accordion panel",
+                stage.parameterScrollWrapsParameterPanelForTest());
+        assertFalse("accordion panel must not keep its old titled border",
+                stage.parameterPanelHasBorderForTest());
+        assertEquals(ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
+                scroll.getVerticalScrollBarPolicy());
+        assertEquals(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER,
+                scroll.getHorizontalScrollBarPolicy());
+        Dimension preferred = scroll.getPreferredSize();
+        assertTrue("accordion preferred height should stay compact",
+                preferred.height >= 100 && preferred.height <= 150);
+    }
+
+    @Test
+    public void previewButtonRegistersAndTracksStaleCycle() throws Exception {
+        RecordingMacroStore store = new RecordingMacroStore("Default", DEFAULT_MACRO);
+        RecordingPreviewAdapter previewAdapter = new RecordingPreviewAdapter();
+        RecordingActions actions = new RecordingActions();
+        FilterParameterStage stage = new FilterParameterStage(
+                Arrays.asList("Default", "Custom"), store, previewAdapter, null, null);
+
+        stage.buildControls(context(), actions);
+        stage.onEnter(context(), new PreviewPairPanel("Original", "Adjusted"));
+
+        assertNotNull("preview button must be registered with dialog actions",
+                actions.registeredPreviewButton);
+        assertEquals("Run Preview", stage.previewButtonTextForTest());
+        assertTrue("newly entered filter previews are stale",
+                actions.previewButtonStale);
+
+        stage.runPreviewNowForTest();
+
+        assertFalse("successful preview clears the stale flag",
+                actions.previewButtonStale);
+
+        stage.setParameterForTest("sigma", "4");
+
+        assertTrue("editing parameters marks the preview stale again",
+                actions.previewButtonStale);
+    }
+
+    @Test
     public void savedCustomPresetRemainsSelectedAndUsesInitialMacro() {
         RecordingMacroStore store = new RecordingMacroStore(
                 "IBA1 cleanup filter", CUSTOM_MACRO, DEFAULT_MACRO);
@@ -263,6 +318,27 @@ public class FilterParameterStageTest {
         assertEquals("Custom", stage.selectedPresetForTest());
         assertEquals(CUSTOM_MACRO, stage.currentMacroForTest());
         assertEquals("Custom", stage.renderedComboLabelForTest());
+    }
+
+    @Test
+    public void presetChangeRebuildsAccordionForNewMacro() {
+        Map<String, String> macros = new HashMap<String, String>();
+        macros.put("Default", DEFAULT_MACRO);
+        macros.put("Two step", TWO_STEP_MACRO);
+        MultiPresetMacroStore store = new MultiPresetMacroStore("Default", macros);
+        FilterParameterStage stage = new FilterParameterStage(
+                Arrays.asList("Default", "Two step", "Custom"),
+                store, new RecordingPreviewAdapter(), null, null);
+
+        stage.buildControls(context(), new RecordingActions());
+
+        assertEquals(1, stage.sectionCountForTest());
+
+        stage.setPresetForTest("Two step");
+
+        assertEquals("Two step", stage.selectedPresetForTest());
+        assertEquals(2, stage.sectionCountForTest());
+        assertTrue(stage.currentMacroForTest().contains("run(\"Median..."));
     }
 
     @Test
@@ -657,6 +733,8 @@ public class FilterParameterStageTest {
     private static final class RecordingActions implements ConfigQcActions {
         String status = "";
         boolean adjustedPreviewSet;
+        JButton registeredPreviewButton;
+        boolean previewButtonStale;
 
         @Override public void setStatus(String text) {
             status = text;
@@ -669,6 +747,14 @@ public class FilterParameterStageTest {
         @Override public void setAdjustedPreview(ImagePlus image, String text) {
             adjustedPreviewSet = image != null;
             status = text;
+        }
+
+        @Override public void registerPreviewButton(JButton button) {
+            registeredPreviewButton = button;
+        }
+
+        @Override public void setPreviewButtonStale(boolean stale) {
+            previewButtonStale = stale;
         }
 
         @Override public void nextImage() {
