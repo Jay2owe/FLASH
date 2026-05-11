@@ -9,6 +9,8 @@ import ij.ImageStack;
 import ij.process.ByteProcessor;
 import org.junit.Test;
 
+import java.awt.Component;
+import java.awt.Container;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -54,6 +56,23 @@ public class ZSliceSelectionStageTest {
 
         preview.setCurrentZ(5);
         assertTrue(stage.feedbackTextForTest().contains("outside"));
+    }
+
+    @Test
+    public void controlsUseCompactRowsWithoutDuplicatedImageSummary() {
+        RecordingStore store = new RecordingStore();
+        ZSliceSelectionStage stage = stage(metas(30), store, null);
+        ConfigQcContext context = contextFor(metas(30));
+
+        Component controls = stage.buildControls(context, new RecordingActions());
+        List<String> labels = new ArrayList<String>();
+        collectLabels(controls, labels);
+
+        assertTrue(labels.contains("Total z-slices: 30"));
+        assertTrue(labels.contains("Start"));
+        assertTrue(labels.contains("End"));
+        assertTrue(labels.contains("Action"));
+        assertFalse(labels.contains("Image 1 / 1: Series 1"));
     }
 
     @Test
@@ -159,6 +178,18 @@ public class ZSliceSelectionStageTest {
             stack.addSlice(processor);
         }
         return new ImagePlus(title, stack);
+    }
+
+    private static void collectLabels(Component component, List<String> labels) {
+        if (component instanceof javax.swing.JLabel) {
+            labels.add(((javax.swing.JLabel) component).getText());
+        }
+        if (component instanceof Container) {
+            Component[] children = ((Container) component).getComponents();
+            for (int i = 0; i < children.length; i++) {
+                collectLabels(children[i], labels);
+            }
+        }
     }
 
     private static final class RecordingStore implements ZSliceSelectionStage.SelectionStore {

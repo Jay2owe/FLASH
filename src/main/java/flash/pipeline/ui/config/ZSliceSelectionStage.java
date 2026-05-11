@@ -20,6 +20,7 @@ import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.FlowLayout;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
@@ -68,7 +69,6 @@ public final class ZSliceSelectionStage implements ConfigQcStage {
     private ZSliceRange lastAcceptedRange;
     private ZSliceRange restartRange;
 
-    private JLabel imageLabel;
     private JLabel totalSlicesLabel;
     private JLabel suggestionLabel;
     private JLabel feedbackLabel;
@@ -116,9 +116,9 @@ public final class ZSliceSelectionStage implements ConfigQcStage {
     public JComponent buildControls(final ConfigQcContext context, ConfigQcActions actions) {
         this.actions = actions;
 
-        JPanel panel = new JPanel(new BorderLayout(0, 10));
+        JPanel panel = new JPanel(new BorderLayout(0, 6));
         panel.setOpaque(false);
-        panel.add(buildSummaryPanel(context), BorderLayout.NORTH);
+        panel.add(buildInfoPanel(), BorderLayout.NORTH);
         panel.add(buildRangePanel(), BorderLayout.CENTER);
         panel.add(buildFeedbackPanel(), BorderLayout.SOUTH);
         installRangeListeners();
@@ -274,21 +274,13 @@ public final class ZSliceSelectionStage implements ConfigQcStage {
                 compatiblePositions, compatibleMetas, incompatibleMetas, firstIncompatible);
     }
 
-    private JComponent buildSummaryPanel(ConfigQcContext context) {
-        JPanel panel = new JPanel();
+    private JComponent buildInfoPanel() {
+        JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
         panel.setOpaque(false);
-        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
-        imageLabel = new JLabel("Image");
-        imageLabel.setAlignmentX(JComponent.LEFT_ALIGNMENT);
         totalSlicesLabel = new JLabel("Total z-slices: ");
-        totalSlicesLabel.setAlignmentX(JComponent.LEFT_ALIGNMENT);
-        JLabel help = new JLabel("Choose a contiguous inclusive range such as 11-30.");
+        JLabel help = new JLabel("Choose a contiguous inclusive range (e.g. 11-30).");
         help.setForeground(new Color(90, 90, 90));
-        help.setAlignmentX(JComponent.LEFT_ALIGNMENT);
-        panel.add(imageLabel);
-        panel.add(Box.createVerticalStrut(4));
         panel.add(totalSlicesLabel);
-        panel.add(Box.createVerticalStrut(4));
         panel.add(help);
         return panel;
     }
@@ -296,31 +288,30 @@ public final class ZSliceSelectionStage implements ConfigQcStage {
     private JComponent buildRangePanel() {
         JPanel panel = new JPanel(new GridBagLayout());
         panel.setOpaque(false);
-        panel.setBorder(BorderFactory.createEmptyBorder(4, 0, 4, 0));
+        panel.setBorder(BorderFactory.createEmptyBorder(2, 0, 2, 0));
 
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.gridy = 0;
-        gbc.insets = new Insets(4, 0, 4, 6);
+        gbc.gridx = 0;
+        gbc.insets = new Insets(2, 0, 2, 6);
         gbc.anchor = GridBagConstraints.WEST;
 
-        startField = new JTextField(8);
+        startField = new JTextField(6);
         JButton useStart = new JButton("Use current Z as start");
         useStart.addActionListener(e -> useCurrentZ(startField));
-        addRow(panel, gbc, "Start slice", startField, useStart);
+        addRow(panel, gbc, "Start", startField, useStart);
 
-        endField = new JTextField(8);
+        endField = new JTextField(6);
         JButton useEnd = new JButton("Use current Z as end");
         useEnd.addActionListener(e -> useCurrentZ(endField));
-        addRow(panel, gbc, "End slice", endField, useEnd);
+        addRow(panel, gbc, "End", endField, useEnd);
 
         actionChoice = new JComboBox<String>();
-        gbc.gridx = 0;
-        gbc.gridy++;
         gbc.weightx = 0.0;
         gbc.fill = GridBagConstraints.NONE;
         panel.add(new JLabel("Action"), gbc);
-        gbc.gridx = 1;
-        gbc.gridwidth = 2;
+        gbc.gridx++;
+        gbc.gridwidth = GridBagConstraints.REMAINDER;
         gbc.weightx = 1.0;
         gbc.fill = GridBagConstraints.HORIZONTAL;
         panel.add(actionChoice, gbc);
@@ -334,16 +325,16 @@ public final class ZSliceSelectionStage implements ConfigQcStage {
         gbc.fill = GridBagConstraints.NONE;
         panel.add(new JLabel(label), gbc);
 
-        gbc.gridx = 1;
-        gbc.weightx = 0.35;
+        gbc.gridx++;
+        gbc.weightx = 0.0;
         gbc.fill = GridBagConstraints.HORIZONTAL;
         panel.add(field, gbc);
 
-        gbc.gridx = 2;
+        gbc.gridx++;
         gbc.weightx = 0.0;
         gbc.fill = GridBagConstraints.NONE;
         panel.add(button, gbc);
-        gbc.gridy++;
+        gbc.gridx++;
     }
 
     private JComponent buildFeedbackPanel() {
@@ -393,10 +384,6 @@ public final class ZSliceSelectionStage implements ConfigQcStage {
 
     private void updateForContext(ConfigQcContext context) {
         SeriesMeta meta = currentMeta(context);
-        if (imageLabel != null) {
-            String name = context == null ? displayName(meta) : context.getCurrentImageDisplayName();
-            imageLabel.setText((context == null ? "Image" : context.getImageProgressText()) + ": " + name);
-        }
         if (totalSlicesLabel != null) {
             totalSlicesLabel.setText("Total z-slices: " + totalSlices(meta));
         }
