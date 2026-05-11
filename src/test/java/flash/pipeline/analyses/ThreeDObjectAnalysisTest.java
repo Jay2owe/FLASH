@@ -238,6 +238,24 @@ public class ThreeDObjectAnalysisTest {
     }
 
     @Test
+    public void hideImageWindowsStillLaunchesInteractiveSpatialHandoffBeforeProcessing() throws Exception {
+        ThreeDObjectAnalysis analysis = new ThreeDObjectAnalysis();
+        analysis.setHeadless(true);
+        final AtomicInteger launches = new AtomicInteger(0);
+        analysis.setSpatialOptionsDialogLauncherForTest(countingSpatialOptionsLauncher(launches));
+
+        assertTrue(analysis.prepareSpatialHandoffBeforeAnalysis(
+                temp.newFolder("spatial-image-headless").getAbsolutePath(),
+                dapiIba1AbetaConfig().channelNames,
+                true));
+
+        assertEquals(1, launches.get());
+        SpatialAnalysis spatial = analysis.createSpatialAnalysisForRun();
+        assertTrue(booleanField(spatial, "headless"));
+        assertFalse(booleanField(spatial, "suppressDialogs"));
+    }
+
+    @Test
     public void spatialHandoffKeepsNoninteractiveRunsNoninteractive() throws Exception {
         ThreeDObjectAnalysis suppressed = new ThreeDObjectAnalysis();
         final AtomicInteger suppressedLaunches = new AtomicInteger(0);

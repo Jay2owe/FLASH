@@ -4,6 +4,7 @@ import ij.ImagePlus;
 import ij.ImageStack;
 import ij.process.ByteProcessor;
 import ij.process.ImageProcessor;
+import ij.process.ShortProcessor;
 import org.junit.Test;
 
 import java.awt.Frame;
@@ -13,6 +14,7 @@ import java.awt.image.IndexColorModel;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertTrue;
 import static org.junit.Assume.assumeFalse;
 
 public class PreviewPairPanelTest {
@@ -106,6 +108,95 @@ public class PreviewPairPanelTest {
     }
 
     @Test
+    public void objectPreviewKeepsSeparateRawAndFilteredDisplayRanges() {
+        PreviewPairPanel pair = new PreviewPairPanel("Filtered", "Objects");
+        ImagePlus raw = shortSingleSlice("raw 16-bit", 0, 4096);
+        ImagePlus filtered = singleSlice("filtered 8-bit", 0, 255);
+        ImagePlus labels = singleSlice("objects", 0, 3);
+        LabelMapStyler.apply(labels, 3);
+
+        pair.setOriginal(filtered);
+        pair.setLargePreviewImages(raw, filtered, labels);
+        pair.setAdjusted(labels);
+        pair.setDisplayRangeForTest(0.0, 255.0);
+
+        assertEquals(255.0, pair.displaySettingsForImageForTest(filtered).getDisplayMax(), 0.0001);
+        assertFalse(pair.displaySettingsForImageForTest(raw).hasDisplayRange());
+
+        pair.setOriginal(raw);
+
+        assertEquals(4096.0, pair.displaySettingsForTest().getDisplayMax(), 0.0001);
+        ImageProcessor rawRendered = pair.originalPreviewForTest().renderedProcessorForTest();
+        assertEquals(4096.0, rawRendered.getMax(), 0.0001);
+    }
+
+    @Test
+    public void displayControlsResetWhenSourceBitDepthChanges() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
+        ImagePlus filtered = singleSlice("filtered 8-bit", 0, 255);
+        ImagePlus raw = shortSingleSlice("raw 16-bit", 0, 4096);
+
+        pair.setOriginal(filtered);
+        pair.setDisplayRangeForTest(0.0, 255.0);
+
+        pair.setOriginal(raw);
+
+        assertEquals(4096.0, pair.displaySettingsForTest().getDisplayMax(), 0.0001);
+    }
+
+    @Test
+    public void normalObjectPreviewCanShowRawOrFilteredOverlay() {
+        PreviewPairPanel pair = new PreviewPairPanel("Filtered", "Objects");
+        ImagePlus raw = singleSlice("raw", 0, 100);
+        ImagePlus filtered = singleSlice("filtered", 0, 100);
+        ImagePlus labels = singleSlice("Object labels", 0, 1);
+        LabelMapStyler.apply(labels, 1);
+
+        pair.setLargePreviewImages(raw, filtered, labels);
+        pair.setAdjusted(labels);
+
+        assertTrue(pair.objectOverlayControlsVisibleForTest());
+        assertEquals("Object labels", pair.adjustedImageTitleForTest());
+
+        pair.setObjectOverlaySelectedForTest(true);
+
+        assertEquals("Object overlay | filtered", pair.adjustedImageTitleForTest());
+
+        pair.setObjectOverlaySourceForTest("Raw image");
+
+        assertEquals("Object overlay | raw", pair.adjustedImageTitleForTest());
+    }
+
+    @Test
+    public void normalObjectOverlayRerendersBackgroundWithDisplayRange() {
+        PreviewPairPanel pair = new PreviewPairPanel("Filtered", "Objects");
+        ByteProcessor sourceProcessor = new ByteProcessor(3, 1);
+        sourceProcessor.set(0, 0, 100);
+        sourceProcessor.set(1, 0, 100);
+        sourceProcessor.set(2, 0, 200);
+        ImagePlus raw = new ImagePlus("raw", sourceProcessor.duplicate());
+        ImagePlus filtered = new ImagePlus("filtered", sourceProcessor);
+
+        ByteProcessor labelProcessor = new ByteProcessor(3, 1);
+        labelProcessor.set(0, 0, 1);
+        labelProcessor.set(1, 0, 0);
+        labelProcessor.set(2, 0, 0);
+        ImagePlus labels = new ImagePlus("Object labels", labelProcessor);
+        LabelMapStyler.apply(labels, 1);
+
+        pair.setLargePreviewImages(raw, filtered, labels);
+        pair.setOriginal(filtered);
+        pair.setAdjusted(labels);
+        pair.setObjectOverlaySelectedForTest(true);
+        pair.setDisplayRangeForTest(100.0, 200.0);
+
+        ImageProcessor rendered = pair.adjustedPreviewForTest().renderedProcessorForTest();
+        assertEquals(blend(0x000000, LabelMapStyler.rgbForLabel(1), 0.35),
+                rendered.getPixel(0, 0) & 0xffffff);
+        assertEquals(0x000000, rendered.getPixel(1, 0) & 0xffffff);
+    }
+
+    @Test
     public void hiddenDisplayControlsPreserveSeparateImageDisplayRanges() {
         PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
         ImagePlus original = stack("original", 1);
@@ -181,6 +272,19 @@ public class PreviewPairPanelTest {
     }
 
     @Test
+    public void compactHeadersHidePerImageMetadataRowsAndUsePanelTitles() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
+
+        pair.setCompactPreviewHeaders(true);
+        pair.setOriginalPreviewTitle("Original Image - Mouse1_LH_SCN");
+        pair.setAdjustedPreviewTitle("Adjusted / output preview");
+
+        assertFalse(pair.originalPreviewMetadataHeaderVisibleForTest());
+        assertEquals("Original Image - Mouse1_LH_SCN", pair.originalPreviewTitleForTest());
+        assertEquals("Adjusted / output preview", pair.adjustedPreviewTitleForTest());
+    }
+
+    @Test
     public void largePreviewUsesCurrentWindowAsOwnerWhenAvailable() {
         assumeFalse(GraphicsEnvironment.isHeadless());
 
@@ -233,5 +337,25 @@ public class PreviewPairPanelTest {
         processor.set(0, 0, lowValue);
         processor.set(1, 0, highValue);
         return new ImagePlus(title, processor);
+    }
+
+    private static ImagePlus shortSingleSlice(String title, int lowValue, int highValue) {
+        ShortProcessor processor = new ShortProcessor(2, 1);
+        processor.set(0, 0, lowValue);
+        processor.set(1, 0, highValue);
+        return new ImagePlus(title, processor);
+    }
+
+    private static int blend(int base, int overlay, double alpha) {
+        int br = (base >> 16) & 0xff;
+        int bg = (base >> 8) & 0xff;
+        int bb = base & 0xff;
+        int or = (overlay >> 16) & 0xff;
+        int og = (overlay >> 8) & 0xff;
+        int ob = overlay & 0xff;
+        int r = (int) Math.round(br * (1.0 - alpha) + or * alpha);
+        int g = (int) Math.round(bg * (1.0 - alpha) + og * alpha);
+        int b = (int) Math.round(bb * (1.0 - alpha) + ob * alpha);
+        return (r << 16) | (g << 8) | b;
     }
 }

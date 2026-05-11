@@ -6,6 +6,10 @@ import javax.swing.JComponent;
 
 public interface ConfigQcStage {
 
+    default String key() {
+        return getClass().getName();
+    }
+
     String title();
 
     default boolean isApplicable(ConfigQcContext context) {
@@ -27,6 +31,10 @@ public interface ConfigQcStage {
     }
 
     default void restartStage(ConfigQcContext context) {
+    }
+
+    default void previousImage(ConfigQcContext context) {
+        restartStage(context);
     }
 
     default void onLeave(ConfigQcContext context) {

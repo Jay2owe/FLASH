@@ -268,15 +268,34 @@ public final class MinMaxControlPanel extends JPanel {
     }
 
     private static double displayRangeMin(ImagePlus image, double fallback) {
-        if (image == null) return fallback;
-        double value = image.getDisplayRangeMin();
+        if (!hasUsableImage(image)) return fallback;
+        double value;
+        try {
+            value = image.getDisplayRangeMin();
+        } catch (RuntimeException e) {
+            return fallback;
+        }
+        if (!Double.isFinite(value)) return fallback;
         return FijiStyleRangeSliderPanel.clamp(value, fallback, displayRangeMax(image, fallback));
     }
 
     private static double displayRangeMax(ImagePlus image, double fallback) {
-        if (image == null) return fallback;
-        double value = image.getDisplayRangeMax();
+        if (!hasUsableImage(image)) return fallback;
+        double value;
+        try {
+            value = image.getDisplayRangeMax();
+        } catch (RuntimeException e) {
+            return fallback;
+        }
         if (!Double.isFinite(value)) return fallback;
         return Math.max(fallback, value);
+    }
+
+    private static boolean hasUsableImage(ImagePlus image) {
+        try {
+            return image != null && image.getStack() != null && image.getStackSize() > 0;
+        } catch (RuntimeException e) {
+            return false;
+        }
     }
 }

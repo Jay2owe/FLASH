@@ -6,6 +6,11 @@ import ij.ImageStack;
 import ij.process.ByteProcessor;
 import org.junit.Test;
 
+import javax.swing.JComponent;
+import javax.swing.JLabel;
+import javax.swing.text.JTextComponent;
+import java.awt.Component;
+import java.awt.Container;
 import java.util.Arrays;
 
 import static org.junit.Assert.assertEquals;
@@ -45,6 +50,19 @@ public class StarDistParameterStageTest {
     }
 
     @Test
+    public void controlsIncludeParameterHelperText() {
+        StarDistParameterStage stage = new StarDistParameterStage(
+                new RecordingStore("stardist:0.5:0.4"),
+                new RecordingPreviewAdapter());
+
+        JComponent controls = stage.buildControls(context(), new RecordingActions());
+
+        assertContainsText(controls, "Minimum confidence required for StarDist to accept a detection.");
+        assertContainsText(controls, "Number of missing z planes that can be bridged during 3D linking.");
+        assertContainsText(controls, "Use 0 to disable the upper size limit.");
+    }
+
+    @Test
     public void previewRunsOnlyWhenExplicitlyRequested() throws Exception {
         RecordingStore store = new RecordingStore("stardist:0.5:0.4");
         RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
@@ -63,6 +81,31 @@ public class StarDistParameterStageTest {
         assertNotNull(actions.adjustedPreview);
         assertEquals("Objects detected: 3", actions.status);
         assertEquals(3, stage.largePreviewPaneCountForTest());
+    }
+
+    @Test
+    public void failedPreviewClearsOldOutputSoSourceStackStaysBrowsable() throws Exception {
+        RecordingStore store = new RecordingStore("stardist:0.5:0.4");
+        RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
+        ConfigQcContext context = context(13);
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
+        RecordingActions actions = new RecordingActions(pair);
+        StarDistParameterStage stage = new StarDistParameterStage(store, adapter);
+
+        stage.buildControls(context, actions);
+        stage.onEnter(context, pair);
+        stage.runPreviewNowForTest();
+        pair.setCurrentZ(13);
+        assertEquals("The one-slice object map constrains the paired preview while it is installed.",
+                1, pair.getCurrentZ());
+
+        adapter.returnNullPreview = true;
+        stage.runPreviewNowForTest();
+        pair.setCurrentZ(13);
+
+        assertEquals(13, pair.getCurrentZ());
+        assertTrue(stage.isPreviewStaleForTest());
+        assertEquals("StarDist returned no label map.", actions.status);
     }
 
     @Test
@@ -86,22 +129,76 @@ public class StarDistParameterStageTest {
         assertEquals(0, adapter.previewRuns);
     }
 
+    @Test
+    public void restartKeepsCurrentEditedParametersAfterStageRebuild() {
+        RecordingStore store = new RecordingStore("stardist:0.5:0.4");
+        StarDistParameterStage stage = new StarDistParameterStage(
+                store, new RecordingPreviewAdapter());
+        ConfigQcContext context = context();
+
+        stage.buildControls(context, new RecordingActions());
+        stage.onEnter(context, new PreviewPairPanel("Original", "Adjusted"));
+        stage.setProbabilityForTest("0.92");
+
+        stage.restartStage(context);
+        stage.buildControls(context, new RecordingActions());
+        stage.onEnter(context, new PreviewPairPanel("Original", "Adjusted"));
+
+        assertTrue(stage.currentMethodForTest().startsWith("stardist:0.92:0.4"));
+        assertEquals("stardist:0.5:0.4", store.token);
+    }
+
     private static ConfigQcContext context() {
+        return context(1);
+    }
+
+    private static ConfigQcContext context(int slices) {
         return ConfigQcContext.fromImages(
                 null,
                 null,
                 null,
-                Arrays.asList(image("QC image")),
+                Arrays.asList(image("QC image", slices)),
                 Arrays.asList("IBA1"),
                 0);
     }
 
     private static ImagePlus image(String title) {
+        return image(title, 1);
+    }
+
+    private static ImagePlus image(String title, int slices) {
         ImageStack stack = new ImageStack(3, 3);
-        ByteProcessor processor = new ByteProcessor(3, 3);
-        processor.set(1, 1, 12);
-        stack.addSlice(processor);
+        for (int i = 0; i < Math.max(1, slices); i++) {
+            ByteProcessor processor = new ByteProcessor(3, 3);
+            processor.set(1, 1, 12 + i);
+            stack.addSlice(processor);
+        }
         return new ImagePlus(title, stack);
+    }
+
+    private static void assertContainsText(Component root, String expected) {
+        assertTrue("Missing helper text: " + expected, containsText(root, expected));
+    }
+
+    private static boolean containsText(Component component, String expected) {
+        String text = null;
+        if (component instanceof JLabel) {
+            text = ((JLabel) component).getText();
+        } else if (component instanceof JTextComponent) {
+            text = ((JTextComponent) component).getText();
+        }
+        if (text != null && text.contains(expected)) {
+            return true;
+        }
+        if (component instanceof Container) {
+            Component[] children = ((Container) component).getComponents();
+            for (int i = 0; i < children.length; i++) {
+                if (containsText(children[i], expected)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private static final class RecordingStore implements StarDistParameterStage.ParameterStore {
@@ -124,6 +221,7 @@ public class StarDistParameterStageTest {
         int rawSourceCreations;
         int filteredSourceCreations;
         int previewRuns;
+        boolean returnNullPreview;
 
         @Override public ImagePlus createRawSource(ConfigQcContext context) {
             rawSourceCreations++;
@@ -142,6 +240,9 @@ public class StarDistParameterStageTest {
         @Override public ImagePlus runPreview(ImagePlus filteredSource,
                                               StarDistParameterStage.Parameters parameters) {
             previewRuns++;
+            if (returnNullPreview) {
+                return null;
+            }
             ByteProcessor processor = new ByteProcessor(2, 1);
             processor.set(0, 0, 1);
             processor.set(1, 0, 3);
@@ -160,6 +261,14 @@ public class StarDistParameterStageTest {
     private static final class RecordingActions implements ConfigQcActions {
         String status = "";
         ImagePlus adjustedPreview;
+        PreviewPairPanel pair;
+
+        RecordingActions() {
+        }
+
+        RecordingActions(PreviewPairPanel pair) {
+            this.pair = pair;
+        }
 
         @Override public void setStatus(String text) {
             status = text;
@@ -172,6 +281,10 @@ public class StarDistParameterStageTest {
         @Override public void setAdjustedPreview(ImagePlus image, String text) {
             adjustedPreview = image;
             status = text;
+            if (pair != null) {
+                pair.setAdjusted(image);
+                pair.setAdjustedState(PreviewPairPanel.PreviewState.READY, text);
+            }
         }
 
         @Override public void nextImage() {

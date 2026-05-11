@@ -36,23 +36,24 @@ public final class ImagePreviewPanel extends JPanel {
     private final JLabel sliceLabel = new JLabel(" ");
     private final JSlider zSlider = new JSlider(1, 1, 1);
     private final CanvasPanel canvas = new CanvasPanel();
+    private final JPanel labels = new JPanel();
 
     private ImagePlus image;
+    private String previewTitle;
     private int currentC = 1;
     private int currentZ = 1;
     private int currentT = 1;
     private boolean updatingSlider;
+    private boolean metadataHeaderVisible = true;
     private ZSliceChangeListener zSliceChangeListener;
     private PreviewDisplaySettings displaySettings = PreviewDisplaySettings.defaultFor("Grays");
     private boolean displaySettingsEnabled = true;
 
     public ImagePreviewPanel(String title) {
         super(new BorderLayout(6, 6));
-        setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createTitledBorder(title == null ? "Image preview" : title),
-                BorderFactory.createEmptyBorder(6, 6, 6, 6)));
+        this.previewTitle = normalizePreviewTitle(title);
+        refreshBorder();
 
-        JPanel labels = new JPanel();
         labels.setLayout(new BoxLayout(labels, BoxLayout.Y_AXIS));
         labels.setOpaque(false);
         titleLabel.setAlignmentX(LEFT_ALIGNMENT);
@@ -92,12 +93,29 @@ public final class ImagePreviewPanel extends JPanel {
         refresh();
     }
 
+    public void setPreviewTitle(String title) {
+        this.previewTitle = normalizePreviewTitle(title);
+        refreshBorder();
+    }
+
+    public void setMetadataHeaderVisible(boolean visible) {
+        if (metadataHeaderVisible == visible) return;
+        metadataHeaderVisible = visible;
+        if (visible) {
+            add(labels, BorderLayout.NORTH);
+        } else {
+            remove(labels);
+        }
+        revalidate();
+        repaint();
+    }
+
     public void setImage(ImagePlus image) {
         int previousZ = currentZ;
         this.image = image;
         if (hasUsableImage()) {
             currentC = clamp(image.getC(), 1, Math.max(1, image.getNChannels()));
-            currentZ = clamp(previousZ, 1, Math.max(1, image.getNSlices()));
+            currentZ = clamp(previousZ, 1, effectiveZCount(image));
             currentT = clamp(image.getT(), 1, Math.max(1, image.getNFrames()));
         } else {
             currentC = 1;
@@ -117,7 +135,7 @@ public final class ImagePreviewPanel extends JPanel {
             return;
         }
 
-        int slices = Math.max(1, image.getNSlices());
+        int slices = effectiveZCount(image);
         currentZ = clamp(zSlice, 1, slices);
         setSliderState(1, slices, currentZ);
         zSlider.setEnabled(slices > 1);
@@ -131,7 +149,7 @@ public final class ImagePreviewPanel extends JPanel {
 
     public int getSliceCount() {
         if (!hasUsableImage()) return 1;
-        return Math.max(1, image.getNSlices());
+        return effectiveZCount(image);
     }
 
     public void setStatusText(String text) {
@@ -165,19 +183,22 @@ public final class ImagePreviewPanel extends JPanel {
         }
 
         currentC = clamp(currentC, 1, Math.max(1, image.getNChannels()));
-        currentZ = clamp(currentZ, 1, Math.max(1, image.getNSlices()));
+        currentZ = clamp(currentZ, 1, effectiveZCount(image));
         currentT = clamp(currentT, 1, Math.max(1, image.getNFrames()));
 
         String title = image.getTitle() == null || image.getTitle().trim().isEmpty()
                 ? "Untitled"
                 : image.getTitle();
+        int effectiveZ = effectiveZCount(image);
+        boolean framesAsZ = usesFramesAsZ(image);
         titleLabel.setText(title);
         detailLabel.setText(image.getWidth() + " x " + image.getHeight()
                 + ", C=" + Math.max(1, image.getNChannels())
-                + ", Z=" + Math.max(1, image.getNSlices())
-                + ", T=" + Math.max(1, image.getNFrames()));
+                + ", Z=" + effectiveZ
+                + (framesAsZ ? " (from T)" : "")
+                + ", T=" + (framesAsZ ? 1 : Math.max(1, image.getNFrames())));
 
-        int slices = Math.max(1, image.getNSlices());
+        int slices = effectiveZ;
         setSliderState(1, slices, currentZ);
         zSlider.setEnabled(slices > 1);
         updateSliceLabel();
@@ -200,12 +221,43 @@ public final class ImagePreviewPanel extends JPanel {
         return titleLabel.getText();
     }
 
+    String previewTitleForTest() {
+        return previewTitle;
+    }
+
+    boolean metadataHeaderVisibleForTest() {
+        return metadataHeaderVisible;
+    }
+
     ImageProcessor renderedProcessorForTest() {
         return currentProcessor();
     }
 
     private boolean hasUsableImage() {
-        return image != null && image.getStack() != null && image.getStackSize() > 0;
+        return hasUsableImage(image);
+    }
+
+    private static boolean hasUsableImage(ImagePlus candidate) {
+        try {
+            return candidate != null
+                    && candidate.getStack() != null
+                    && candidate.getStackSize() > 0;
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    private void refreshBorder() {
+        setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createTitledBorder(previewTitle),
+                BorderFactory.createEmptyBorder(6, 6, 6, 6)));
+        revalidate();
+        repaint();
+    }
+
+    private static String normalizePreviewTitle(String title) {
+        String text = title == null ? "" : title.trim();
+        return text.isEmpty() ? "Image preview" : text;
     }
 
     private void setSliderState(int minimum, int maximum, int value) {
@@ -224,30 +276,43 @@ public final class ImagePreviewPanel extends JPanel {
             sliceLabel.setText(" ");
             return;
         }
-        int slices = Math.max(1, image.getNSlices());
+        int slices = effectiveZCount(image);
         sliceLabel.setText(currentZ + "/" + slices);
     }
 
     private ImageProcessor currentProcessor() {
         ImagePlus imp = image;
-        if (!hasUsableImage()) return null;
-        ImageStack stack = imp.getStack();
-        int stackSize = stack.getSize();
-        int stackIndex = imp.getStackIndex(
-                clamp(currentC, 1, Math.max(1, imp.getNChannels())),
-                clamp(currentZ, 1, Math.max(1, imp.getNSlices())),
-                clamp(currentT, 1, Math.max(1, imp.getNFrames())));
-        if (stackIndex < 1 || stackIndex > stackSize) {
-            stackIndex = clamp(currentZ, 1, stackSize);
+        if (!hasUsableImage(imp)) return null;
+        ImageProcessor processor;
+        try {
+            ImageStack stack = imp.getStack();
+            int stackSize = stack == null ? 0 : stack.getSize();
+            if (stackSize < 1) return null;
+            boolean framesAsZ = usesFramesAsZ(imp);
+            int stackIndex = imp.getStackIndex(
+                    clamp(currentC, 1, Math.max(1, imp.getNChannels())),
+                    framesAsZ ? 1 : clamp(currentZ, 1, Math.max(1, imp.getNSlices())),
+                    framesAsZ ? clamp(currentZ, 1, Math.max(1, imp.getNFrames()))
+                            : clamp(currentT, 1, Math.max(1, imp.getNFrames())));
+            if (stackIndex < 1 || stackIndex > stackSize) {
+                stackIndex = clamp(currentZ, 1, stackSize);
+            }
+            processor = stack.getProcessor(stackIndex);
+        } catch (RuntimeException e) {
+            return null;
         }
-        ImageProcessor processor = stack.getProcessor(stackIndex);
         if (processor == null) return null;
-        ImageProcessor copy = processor.duplicate();
+        ImageProcessor copy;
+        try {
+            copy = processor.duplicate();
+        } catch (RuntimeException e) {
+            return null;
+        }
         boolean colorProcessor = copy instanceof ColorProcessor;
         if (!displaySettingsEnabled) {
             if (!colorProcessor) {
-                double min = imp.getDisplayRangeMin();
-                double max = imp.getDisplayRangeMax();
+                double min = safeDisplayRangeMin(imp, copy.getMin());
+                double max = safeDisplayRangeMax(imp, copy.getMax());
                 if (max > min) {
                     copy.setMinAndMax(min, max);
                 }
@@ -256,10 +321,10 @@ public final class ImagePreviewPanel extends JPanel {
         }
         double min = displaySettings.hasDisplayRange()
                 ? displaySettings.getDisplayMin()
-                : imp.getDisplayRangeMin();
+                : safeDisplayRangeMin(imp, copy.getMin());
         double max = displaySettings.hasDisplayRange()
                 ? displaySettings.getDisplayMax()
-                : imp.getDisplayRangeMax();
+                : safeDisplayRangeMax(imp, copy.getMax());
         if (!colorProcessor && max > min) {
             copy.setMinAndMax(min, max);
         }
@@ -270,6 +335,54 @@ public final class ImagePreviewPanel extends JPanel {
             copy.setColorModel(colorModel);
         }
         return copy;
+    }
+
+    private static int effectiveZCount(ImagePlus image) {
+        if (image == null) return 1;
+        try {
+            if (usesFramesAsZ(image)) {
+                return Math.max(1, image.getNFrames());
+            }
+            return Math.max(1, image.getNSlices());
+        } catch (RuntimeException e) {
+            return 1;
+        }
+    }
+
+    private static boolean usesFramesAsZ(ImagePlus image) {
+        if (image == null) return false;
+        try {
+            int channels = Math.max(1, image.getNChannels());
+            int slices = Math.max(1, image.getNSlices());
+            int frames = Math.max(1, image.getNFrames());
+            int stackSize = Math.max(1, image.getStackSize());
+            return channels == 1
+                    && slices == 1
+                    && frames > 1
+                    && stackSize == channels * frames;
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    private static double safeDisplayRangeMin(ImagePlus image, double fallback) {
+        if (!hasUsableImage(image)) return fallback;
+        try {
+            double value = image.getDisplayRangeMin();
+            return Double.isFinite(value) ? value : fallback;
+        } catch (RuntimeException e) {
+            return fallback;
+        }
+    }
+
+    private static double safeDisplayRangeMax(ImagePlus image, double fallback) {
+        if (!hasUsableImage(image)) return fallback;
+        try {
+            double value = image.getDisplayRangeMax();
+            return Double.isFinite(value) ? value : fallback;
+        } catch (RuntimeException e) {
+            return fallback;
+        }
     }
 
     private static ColorModel colorModelFor(String lutName) {

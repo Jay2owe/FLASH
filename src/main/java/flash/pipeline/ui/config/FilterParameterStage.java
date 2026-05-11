@@ -145,6 +145,10 @@ public final class FilterParameterStage implements ConfigQcStage {
     private String savedMacro;
     private String selectedPreset;
     private String currentMacro;
+    private String restartPreset;
+    private String restartMacro;
+    private String restartDisplayMacro;
+    private boolean restartStructurallyMutated;
     /**
      * Stage 04: parallel "all-nodes" view. After a structural mutation, the
      * accordion is built from this (so disabled rows still render greyed
@@ -263,6 +267,10 @@ public final class FilterParameterStage implements ConfigQcStage {
             macroStore.save(selectedPreset, currentMacro);
             savedPreset = selectedPreset;
             savedMacro = currentMacro;
+            restartPreset = null;
+            restartMacro = null;
+            restartDisplayMacro = null;
+            restartStructurallyMutated = false;
             previewStale = false;
             setStatus(lockInSummary());
             return true;
@@ -279,6 +287,11 @@ public final class FilterParameterStage implements ConfigQcStage {
 
     @Override
     public void restartStage(ConfigQcContext context) {
+        syncFieldBindings();
+        restartPreset = selectedPreset;
+        restartMacro = currentMacro;
+        restartDisplayMacro = currentDisplayMacro;
+        restartStructurallyMutated = structurallyMutated;
         setStatus("Restarting filter review from the first image.");
     }
 
@@ -550,6 +563,20 @@ public final class FilterParameterStage implements ConfigQcStage {
     }
 
     private void loadSavedState() {
+        if (restartMacro != null) {
+            savedPreset = firstNonBlank(restartPreset, preferredPresetWithoutSavedState());
+            selectedPreset = savedPreset;
+            savedMacro = safe(restartMacro);
+            currentMacro = savedMacro;
+            currentDisplayMacro = hasMacro(restartDisplayMacro) ? restartDisplayMacro : currentMacro;
+            baseMacro = currentMacro;
+            dirty = false;
+            readOnlyBase = isBundledPreset(selectedPreset);
+            structurallyMutated = restartStructurallyMutated;
+            hiddenBuilder = null;
+            refreshLinearityFlag();
+            return;
+        }
         String initialPreset = trimToNull(macroStore.getInitialPreset());
         savedPreset = initialPreset == null ? preferredPresetWithoutSavedState() : initialPreset;
         selectedPreset = savedPreset;

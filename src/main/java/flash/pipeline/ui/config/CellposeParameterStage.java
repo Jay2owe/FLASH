@@ -17,6 +17,7 @@ import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
+import javax.swing.JTextArea;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.event.DocumentEvent;
@@ -32,6 +33,8 @@ import java.util.List;
 import java.util.Map;
 
 public final class CellposeParameterStage implements ConfigQcStage {
+
+    private static final Color HELP_COLOR = new Color(90, 90, 90);
 
     public interface ParameterStore {
         String getMethodToken();
@@ -115,6 +118,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
     private PreviewPairPanel preview;
     private ConfigQcContext activeContext;
     private Parameters savedParameters;
+    private Parameters restartParameters;
     private ImagePlus rawSource;
     private ImagePlus filteredSource;
     private ImagePlus labelPreview;
@@ -136,7 +140,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
     private JButton installGpuButton;
     private JButton resetButton;
     private JLabel modelDescriptionLabel;
-    private JLabel companionHelpLabel;
+    private JComponent companionHelpLabel;
     private JLabel runtimeLabel;
     private JLabel countLabel;
     private JLabel feedbackLabel;
@@ -176,11 +180,12 @@ public final class CellposeParameterStage implements ConfigQcStage {
     public JComponent buildControls(ConfigQcContext context, ConfigQcActions actions) {
         this.actions = actions;
         this.activeContext = context;
-        this.savedParameters = parseMethod(
-                parameterStore.getMethodToken(),
+        this.savedParameters = restartParameters == null
+                ? parseMethod(parameterStore.getMethodToken(),
                 defaultUseGpu,
                 channelCount,
-                primaryChannelIndex);
+                primaryChannelIndex)
+                : restartParameters;
 
         JPanel panel = new JPanel(new BorderLayout(0, 10));
         panel.setOpaque(false);
@@ -231,6 +236,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
         Parameters parameters = collectParameters();
         parameterStore.save(formatMethod(parameters));
         savedParameters = parameters;
+        restartParameters = null;
         setStatus("Locked Cellpose parameters.");
         return true;
     }
@@ -242,6 +248,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
 
     @Override
     public void restartStage(ConfigQcContext context) {
+        restartParameters = collectParameters();
         setStatus("Restarting Cellpose review from the first image.");
     }
 
@@ -307,10 +314,10 @@ public final class CellposeParameterStage implements ConfigQcStage {
         JLabel image = new JLabel(context == null ? "Image" : context.getImageProgressText()
                 + ": " + context.getCurrentImageDisplayName());
         JLabel help = new JLabel("Edit parameters, then press Run Cellpose Preview to update the label map.");
-        help.setForeground(new Color(90, 90, 90));
+        help.setForeground(HELP_COLOR);
 
         runtimeLabel = new JLabel(runtimeAdapter.runtimeSummary());
-        runtimeLabel.setForeground(new Color(90, 90, 90));
+        runtimeLabel.setForeground(HELP_COLOR);
 
         channel.setAlignmentX(JComponent.LEFT_ALIGNMENT);
         image.setAlignmentX(JComponent.LEFT_ALIGNMENT);
@@ -335,8 +342,9 @@ public final class CellposeParameterStage implements ConfigQcStage {
         modelCombo = new JComboBox<String>(CellposeModel.displayNames());
         modelCombo.addActionListener(e -> modelChanged());
         panel.add(comboRow("Model", modelCombo));
+        panel.add(helperText("Select the trained Cellpose model. Start with cyto3 for cell bodies, or nuclei for rounded nuclear objects."));
         modelDescriptionLabel = new JLabel(" ");
-        modelDescriptionLabel.setForeground(new Color(90, 90, 90));
+        modelDescriptionLabel.setForeground(HELP_COLOR);
         modelDescriptionLabel.setAlignmentX(JComponent.LEFT_ALIGNMENT);
         panel.add(modelDescriptionLabel);
         panel.add(Box.createVerticalStrut(4));
@@ -345,21 +353,23 @@ public final class CellposeParameterStage implements ConfigQcStage {
                 companionChoices.keySet().toArray(new String[0]));
         companionCombo.addActionListener(e -> fieldChanged());
         panel.add(comboRow("Companion Channel", companionCombo));
-        companionHelpLabel = new JLabel("Optional nuclei guidance for cyto models.");
-        companionHelpLabel.setForeground(new Color(90, 90, 90));
-        companionHelpLabel.setAlignmentX(JComponent.LEFT_ALIGNMENT);
+        companionHelpLabel = helperText("Optional second channel used by cyto models for guidance, usually a nuclear marker. Leave blank if unsure.");
         panel.add(companionHelpLabel);
         panel.add(Box.createVerticalStrut(8));
 
         panel.add(section("Detection"));
-        diameterField = addNumberRow(panel, "Expected Diameter", 8);
-        flowField = addNumberRow(panel, "Flow Threshold", 8);
-        cellprobField = addNumberRow(panel, "Cell Probability", 8);
+        diameterField = addNumberRow(panel, "Expected Diameter", 8,
+                "Approximate object diameter in image units. Use 0 to let Cellpose estimate it automatically.");
+        flowField = addNumberRow(panel, "Flow Threshold", 8,
+                "Controls how consistent object shapes must be. Higher values are stricter and can remove poor masks.");
+        cellprobField = addNumberRow(panel, "Cell Probability", 8,
+                "Minimum Cellpose object probability. Higher values reduce false positives but may miss weak objects.");
         gpuCheckBox = new JCheckBox("Use GPU");
         gpuCheckBox.setOpaque(false);
         gpuCheckBox.addActionListener(e -> fieldChanged());
         gpuCheckBox.setAlignmentX(JComponent.LEFT_ALIGNMENT);
         panel.add(gpuCheckBox);
+        panel.add(helperText("Runs Cellpose on the GPU when available. Faster for large images, but requires working GPU support."));
         return panel;
     }
 
@@ -389,7 +399,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
         return row;
     }
 
-    private JTextField addNumberRow(JPanel parent, String labelText, int columns) {
+    private JTextField addNumberRow(JPanel parent, String labelText, int columns, String helpText) {
         JPanel row = new JPanel(new GridBagLayout());
         row.setOpaque(false);
         row.setAlignmentX(JComponent.LEFT_ALIGNMENT);
@@ -412,7 +422,23 @@ public final class CellposeParameterStage implements ConfigQcStage {
         row.add(field, gbc);
 
         parent.add(row);
+        parent.add(helperText(helpText));
         return field;
+    }
+
+    private JComponent helperText(String text) {
+        JTextArea helper = new JTextArea(text == null ? "" : text);
+        helper.setOpaque(false);
+        helper.setEditable(false);
+        helper.setFocusable(false);
+        helper.setLineWrap(true);
+        helper.setWrapStyleWord(true);
+        helper.setColumns(36);
+        helper.setForeground(HELP_COLOR);
+        helper.setFont(new JLabel().getFont());
+        helper.setAlignmentX(JComponent.LEFT_ALIGNMENT);
+        helper.setBorder(BorderFactory.createEmptyBorder(0, 0, 6, 0));
+        return helper;
     }
 
     private JComponent buildActionPanel() {

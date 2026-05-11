@@ -6,6 +6,11 @@ import ij.ImageStack;
 import ij.process.ByteProcessor;
 import org.junit.Test;
 
+import javax.swing.JComponent;
+import javax.swing.JLabel;
+import javax.swing.text.JTextComponent;
+import java.awt.Component;
+import java.awt.Container;
 import java.util.Arrays;
 
 import static org.junit.Assert.assertEquals;
@@ -58,6 +63,20 @@ public class CellposeParameterStageTest {
     }
 
     @Test
+    public void controlsIncludeParameterHelperText() {
+        CellposeParameterStage stage = stage(
+                new RecordingStore("cellpose:30.0:cyto3:0.4:0.0:gpu=false"),
+                new RecordingPreviewAdapter());
+
+        JComponent controls = stage.buildControls(context(), new RecordingActions());
+
+        assertContainsText(controls, "Select the trained Cellpose model.");
+        assertContainsText(controls, "Optional second channel used by cyto models for guidance");
+        assertContainsText(controls, "Use 0 to let Cellpose estimate it automatically.");
+        assertContainsText(controls, "Runs Cellpose on the GPU when available.");
+    }
+
+    @Test
     public void previewUsesSelectedCompanionChannelOnlyWhenRequested() throws Exception {
         RecordingStore store = new RecordingStore("cellpose:30.0:cyto3:0.4:0.0:gpu=false:chan2=1");
         RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
@@ -100,6 +119,24 @@ public class CellposeParameterStageTest {
         assertEquals(0, adapter.previewRuns);
     }
 
+    @Test
+    public void restartKeepsCurrentEditedParametersAfterStageRebuild() {
+        RecordingStore store = new RecordingStore("cellpose:30.0:cyto3:0.4:0.0:gpu=false");
+        CellposeParameterStage stage = stage(store, new RecordingPreviewAdapter());
+        ConfigQcContext context = context();
+
+        stage.buildControls(context, new RecordingActions());
+        stage.onEnter(context, new PreviewPairPanel("Original", "Adjusted"));
+        stage.setDiameterForTest("44.0");
+
+        stage.restartStage(context);
+        stage.buildControls(context, new RecordingActions());
+        stage.onEnter(context, new PreviewPairPanel("Original", "Adjusted"));
+
+        assertTrue(stage.currentMethodForTest().startsWith("cellpose:44.0:cyto3"));
+        assertEquals("cellpose:30.0:cyto3:0.4:0.0:gpu=false", store.token);
+    }
+
     private static CellposeParameterStage stage(RecordingStore store,
                                                 RecordingPreviewAdapter adapter) {
         return new CellposeParameterStage(
@@ -127,6 +164,31 @@ public class CellposeParameterStageTest {
         processor.set(1, 1, 12);
         stack.addSlice(processor);
         return new ImagePlus(title, stack);
+    }
+
+    private static void assertContainsText(Component root, String expected) {
+        assertTrue("Missing helper text: " + expected, containsText(root, expected));
+    }
+
+    private static boolean containsText(Component component, String expected) {
+        String text = null;
+        if (component instanceof JLabel) {
+            text = ((JLabel) component).getText();
+        } else if (component instanceof JTextComponent) {
+            text = ((JTextComponent) component).getText();
+        }
+        if (text != null && text.contains(expected)) {
+            return true;
+        }
+        if (component instanceof Container) {
+            Component[] children = ((Container) component).getComponents();
+            for (int i = 0; i < children.length; i++) {
+                if (containsText(children[i], expected)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private static final class RecordingStore implements CellposeParameterStage.ParameterStore {

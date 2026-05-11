@@ -49,6 +49,24 @@ public class DisplayRangeStageTest {
     }
 
     @Test
+    public void restartKeepsCurrentEditedRangeAfterStageRebuild() {
+        RecordingRangeStore store = new RecordingRangeStore("10-90");
+        DisplayRangeStage stage = new DisplayRangeStage(store, new RecordingPreviewAdapter());
+        ConfigQcContext context = context();
+
+        stage.buildControls(context, new RecordingActions());
+        stage.onEnter(context, new PreviewPairPanel("Original", "Adjusted"));
+        stage.setRangeForTest(22.0, 77.0);
+
+        stage.restartStage(context);
+        stage.buildControls(context, new RecordingActions());
+        stage.onEnter(context, new PreviewPairPanel("Original", "Adjusted"));
+
+        assertEquals("22-77", stage.currentRangeTokenForTest());
+        assertEquals("10-90", store.token);
+    }
+
+    @Test
     public void displayRangeStageDoesNotOfferPreviewDisplayAdjustment() {
         DisplayRangeStage stage = new DisplayRangeStage(
                 new RecordingRangeStore("None"),

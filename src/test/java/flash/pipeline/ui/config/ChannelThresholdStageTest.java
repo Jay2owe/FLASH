@@ -54,6 +54,24 @@ public class ChannelThresholdStageTest {
         assertEquals(255.0, actions.adjustedPreview.getProcessor().getMax(), 0.0001);
     }
 
+    @Test
+    public void restartKeepsCurrentEditedThresholdAfterStageRebuild() {
+        RecordingThresholdStore store = new RecordingThresholdStore("20");
+        ChannelThresholdStage stage = new ChannelThresholdStage(store, new RecordingPreviewAdapter());
+        ConfigQcContext context = context();
+
+        stage.buildControls(context, new RecordingActions());
+        stage.onEnter(context, new PreviewPairPanel("Original", "Adjusted"));
+        stage.setThresholdForTest(55.0, 100.0);
+
+        stage.restartStage(context);
+        stage.buildControls(context, new RecordingActions());
+        stage.onEnter(context, new PreviewPairPanel("Original", "Adjusted"));
+
+        assertEquals("55", stage.currentThresholdTokenForTest());
+        assertEquals("20", store.objectToken);
+    }
+
     private static ConfigQcContext context() {
         return ConfigQcContext.fromImages(
                 null,

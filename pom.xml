@@ -26,6 +26,10 @@
 	<description>FLASH (Fluorescence Automated Spatial Histology) - ImageJ2/Fiji plugin for automated immunofluorescence image analysis: fluorescence intensity measurement, 3D object analysis, spatial morphometry, and ROI management</description>
 	<url>https://github.com/Jay2owe/FLASH</url>
 	<inceptionYear>2026</inceptionYear>
+	<organization>
+		<name>UK Dementia Research Institute</name>
+		<url>https://ukdri.ac.uk/</url>
+	</organization>
 	<licenses>
 		<license>
 			<name>CC0</name>
@@ -125,6 +129,12 @@
 			<artifactId>formats-gpl</artifactId>
 			<version>8.1.1</version>
 			<scope>provided</scope>
+			<exclusions>
+				<exclusion>
+					<groupId>commons-math</groupId>
+					<artifactId>commons-math</artifactId>
+				</exclusion>
+			</exclusions>
 		</dependency>
 		<dependency>
 			<groupId>org.openmicroscopy</groupId>
@@ -234,6 +244,10 @@
 				<exclusion>
 					<groupId>org.bytedeco</groupId>
 					<artifactId>javacpp</artifactId>
+				</exclusion>
+				<exclusion>
+					<groupId>org.apache.commons</groupId>
+					<artifactId>commons-math</artifactId>
 				</exclusion>
 			</exclusions>
 		</dependency>

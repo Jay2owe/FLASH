@@ -38,6 +38,7 @@ public final class ChannelThresholdStage implements ConfigQcStage {
     private ImagePlus rawSource;
     private ImagePlus thresholdSource;
     private ImagePlus adjustedPreview;
+    private Double restartLowerThreshold;
 
     public ChannelThresholdStage(ThresholdStore thresholdStore, PreviewAdapter previewAdapter) {
         if (thresholdStore == null) {
@@ -131,6 +132,7 @@ public final class ChannelThresholdStage implements ConfigQcStage {
         }
         String token = formatThreshold(control.getLowerThreshold());
         thresholdStore.set(token);
+        restartLowerThreshold = null;
         setStatus("Locked threshold: " + token + ".");
         return true;
     }
@@ -142,6 +144,9 @@ public final class ChannelThresholdStage implements ConfigQcStage {
 
     @Override
     public void restartStage(ConfigQcContext context) {
+        if (control != null) {
+            restartLowerThreshold = Double.valueOf(control.getLowerThreshold());
+        }
         setStatus("Restarting threshold review from the first image.");
     }
 
@@ -196,6 +201,10 @@ public final class ChannelThresholdStage implements ConfigQcStage {
         if (control == null || thresholdSource == null) return;
         String token = normalizeThresholdToken(thresholdStore.get());
         double upper = imageMaximum(thresholdSource);
+        if (restartLowerThreshold != null && Double.isFinite(restartLowerThreshold.doubleValue())) {
+            control.setThreshold(restartLowerThreshold.doubleValue(), upper);
+            return;
+        }
         if (isNumericThresholdToken(token)) {
             try {
                 control.setThreshold(Double.parseDouble(token), upper);

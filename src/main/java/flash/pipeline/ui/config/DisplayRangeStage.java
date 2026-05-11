@@ -34,6 +34,7 @@ public final class DisplayRangeStage implements ConfigQcStage {
     private JLabel feedbackLabel;
     private ImagePlus sourceImage;
     private ImagePlus adjustedPreview;
+    private double[] restartRange;
 
     public DisplayRangeStage(RangeStore rangeStore, PreviewAdapter previewAdapter) {
         if (rangeStore == null) {
@@ -110,7 +111,7 @@ public final class DisplayRangeStage implements ConfigQcStage {
             }
             if (control != null) {
                 control.setImage(sourceImage);
-                double[] persisted = parseRange(rangeStore.get());
+                double[] persisted = restartRange != null ? restartRange : parseRange(rangeStore.get());
                 if (persisted != null) {
                     control.setRange(persisted[0], persisted[1]);
                 }
@@ -129,6 +130,7 @@ public final class DisplayRangeStage implements ConfigQcStage {
         }
         String token = formatRange(control.getMinValue(), control.getMaxValue());
         rangeStore.set(token);
+        restartRange = null;
         setStatus("Locked display range: " + token + ".");
         return true;
     }
@@ -140,6 +142,9 @@ public final class DisplayRangeStage implements ConfigQcStage {
 
     @Override
     public void restartStage(ConfigQcContext context) {
+        if (control != null) {
+            restartRange = new double[]{control.getMinValue(), control.getMaxValue()};
+        }
         setStatus("Restarting display range review from the first image.");
     }
 

@@ -1372,14 +1372,17 @@ public class ThreeDObjectAnalysis implements Analysis {
             wizardSpatialConfig = null;
             return true;
         }
-        if (wizardSpatialConfig != null || suppressDialogs || headless || cliConfig != null) {
+        // The analysis-level headless flag means "hide image windows", not "skip setup UI".
+        // Only suppress the pre-run Spatial options dialog for genuinely non-interactive runs.
+        if (wizardSpatialConfig != null || suppressDialogs || cliConfig != null
+                || GraphicsEnvironment.isHeadless()) {
             return true;
         }
         SpatialAnalysisWizard.DerivedConfig spatialConfig =
                 spatialOptionsDialogLauncher.launch(directory, channelNames, markerThresholds);
         if (spatialConfig == null) {
             IJ.log("[FLASH] 3D Object Analysis cancelled because Spatial Analysis options were cancelled.");
-            if (!headless && !suppressDialogs) {
+            if (!suppressDialogs && cliConfig == null && !GraphicsEnvironment.isHeadless()) {
                 IJ.showMessage("3D Object Analysis",
                         "Spatial Analysis options were cancelled.\n3D Object Analysis has not started.");
             }

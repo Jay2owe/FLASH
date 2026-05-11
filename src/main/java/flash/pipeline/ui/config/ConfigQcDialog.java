@@ -46,13 +46,12 @@ public final class ConfigQcDialog {
     private final PreviewPairPanel previewPair;
     private final JPanel rootPanel = new JPanel(new BorderLayout(8, 8));
     private final JPanel controlsPanel = new JPanel(new BorderLayout());
-    private final JLabel titleLabel = new JLabel("Set Up Configuration QC");
     private final JLabel stageLabel = new JLabel(" ");
     private final JLabel channelLabel = new JLabel(" ");
     private final JLabel progressLabel = new JLabel(" ");
-    private final JLabel imageLabel = new JLabel(" ");
     private final JLabel statusLabel = new JLabel(" ");
     private final JButton backButton = new JButton("Back");
+    private final JButton previousImageButton = new JButton("Previous image");
     private final JButton restartButton = new JButton("Restart stage");
     private final JButton skipButton = new JButton("Skip image");
     private final JButton cancelButton = new JButton("Cancel");
@@ -64,6 +63,7 @@ public final class ConfigQcDialog {
     private SecondaryLoop loop;
     private int stageIndex = -1;
     private boolean enteredStage;
+    private String currentImageDisplayName = " ";
     private String pendingNavigationStatus;
     private ConfigQcResult result = ConfigQcResult.CANCEL;
 
@@ -71,7 +71,8 @@ public final class ConfigQcDialog {
         this.owner = owner;
         this.context = context;
         this.stages = Collections.unmodifiableList(copyStages(stages));
-        this.previewPair = new PreviewPairPanel(owner, "Original image", "Adjusted / output preview");
+        this.previewPair = new PreviewPairPanel(owner, "Original Image", "Adjusted / output preview");
+        this.previewPair.setCompactPreviewHeaders(true);
         this.dialog = GraphicsEnvironment.isHeadless() ? null : createDialog(owner, modal);
         buildContent();
         wireButtons();
@@ -145,18 +146,14 @@ public final class ConfigQcDialog {
     private JComponent buildHeader() {
         JPanel header = new JPanel(new BorderLayout(8, 4));
         header.setOpaque(false);
-        titleLabel.setForeground(HEADER_COLOR);
-        titleLabel.setFont(titleLabel.getFont().deriveFont(java.awt.Font.BOLD, 18f));
         stageLabel.setForeground(HEADER_COLOR);
-        stageLabel.setFont(stageLabel.getFont().deriveFont(java.awt.Font.BOLD, 14f));
+        stageLabel.setFont(stageLabel.getFont().deriveFont(java.awt.Font.BOLD, 18f));
         channelLabel.setForeground(HEADER_COLOR);
         progressLabel.setForeground(HELP_COLOR);
-        imageLabel.setForeground(HELP_COLOR);
 
         JPanel left = new JPanel();
         left.setOpaque(false);
         left.setLayout(new BoxLayout(left, BoxLayout.Y_AXIS));
-        left.add(titleLabel);
         left.add(stageLabel);
 
         JPanel right = new JPanel();
@@ -164,10 +161,8 @@ public final class ConfigQcDialog {
         right.setLayout(new BoxLayout(right, BoxLayout.Y_AXIS));
         channelLabel.setAlignmentX(JComponent.RIGHT_ALIGNMENT);
         progressLabel.setAlignmentX(JComponent.RIGHT_ALIGNMENT);
-        imageLabel.setAlignmentX(JComponent.RIGHT_ALIGNMENT);
         right.add(channelLabel);
         right.add(progressLabel);
-        right.add(imageLabel);
 
         header.add(left, BorderLayout.WEST);
         header.add(right, BorderLayout.EAST);
@@ -205,6 +200,8 @@ public final class ConfigQcDialog {
         gbc.gridx = 0;
         footer.add(backButton, gbc);
         gbc.gridx++;
+        footer.add(previousImageButton, gbc);
+        gbc.gridx++;
         footer.add(restartButton, gbc);
         gbc.gridx++;
         footer.add(skipButton, gbc);
@@ -233,6 +230,7 @@ public final class ConfigQcDialog {
 
     private void wireButtons() {
         backButton.addActionListener(e -> goBack());
+        previousImageButton.addActionListener(e -> previousImage());
         restartButton.addActionListener(e -> restartCurrentStage());
         skipButton.addActionListener(e -> skipCurrentImage());
         cancelButton.addActionListener(e -> closeWithResult(ConfigQcResult.CANCEL));
@@ -256,18 +254,20 @@ public final class ConfigQcDialog {
             closeWithResult(ConfigQcResult.DONE);
             return;
         }
+        detachPreviewImages();
         enteredStage = true;
         stageLabel.setText(stage.title());
         refreshHeader();
-        refreshButtons();
         String navigationStatus = pendingNavigationStatus;
         pendingNavigationStatus = null;
         setStatus(" ");
         previewPair.setChannelLutName(context.getChannelLutName());
+        previewPair.setDisplayControlsAvailable(stage.showPreviewDisplayControls());
         previewPair.resetZ();
         previewPair.setOriginal(context.getCurrentImagePlus());
         previewPair.setAdjusted(null);
         previewPair.setAdjustedState(PreviewPairPanel.PreviewState.EMPTY, null);
+        refreshButtons();
 
         controlsPanel.removeAll();
         JComponent controls = stage.buildControls(context, actions);
@@ -285,11 +285,17 @@ public final class ConfigQcDialog {
     private void refreshHeader() {
         channelLabel.setText(context.getChannelLabel());
         progressLabel.setText(stageProgressText() + "    " + context.getImageProgressText());
-        imageLabel.setText(context.getCurrentImageDisplayName());
+        currentImageDisplayName = context.getCurrentImageDisplayName();
+        String imageName = context.getCurrentImageShortDisplayName();
+        previewPair.setOriginalPreviewTitle("Original Image - " + imageName);
+        previewPair.setAdjustedPreviewTitle("Adjusted / output preview");
     }
 
     private void refreshButtons() {
         backButton.setEnabled(findPreviousApplicable(stageIndex - 1) >= 0 || stageIndex == firstApplicableIndex());
+        previousImageButton.setEnabled(currentStage() != null
+                && context.hasImages()
+                && context.getCurrentImageIndex() > 0);
         restartButton.setEnabled(currentStage() != null);
         skipButton.setEnabled(context.hasImages());
         lockInButton.setText(isLastApplicableStage() && isLastImage()
@@ -351,6 +357,32 @@ public final class ConfigQcDialog {
         if (stage == null) return;
         stage.restartStage(context);
         context.resetCurrentImage();
+        rebuildCurrentStage();
+    }
+
+    private void jumpToStage(String stageKey) {
+        int target = findApplicableStageByKey(stageKey);
+        if (target < 0) {
+            setStatus("The selected segmentation method has no available settings screen.");
+            return;
+        }
+        leaveCurrentStage();
+        stageIndex = target;
+        pendingNavigationStatus = "Segmentation method changed.";
+        rebuildCurrentStage();
+    }
+
+    private void previousImage() {
+        ConfigQcStage stage = currentStage();
+        if (stage == null) return;
+        if (!context.hasImages() || context.getCurrentImageIndex() <= 0) {
+            setStatus("Already on the first image.");
+            refreshButtons();
+            return;
+        }
+        stage.previousImage(context);
+        context.moveToPreviousImage();
+        pendingNavigationStatus = context.getCurrentImageMovedBackStatusText();
         rebuildCurrentStage();
     }
 
@@ -417,9 +449,14 @@ public final class ConfigQcDialog {
         if (!enteredStage) return;
         ConfigQcStage stage = currentStage();
         enteredStage = false;
+        detachPreviewImages();
         if (stage != null) {
             stage.onLeave(context);
         }
+    }
+
+    private void detachPreviewImages() {
+        previewPair.clearImages();
     }
 
     private ConfigQcStage currentStage() {
@@ -441,6 +478,17 @@ public final class ConfigQcDialog {
     private int findPreviousApplicable(int start) {
         for (int i = Math.min(start, stages.size() - 1); i >= 0; i--) {
             if (stages.get(i).isApplicable(context)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private int findApplicableStageByKey(String stageKey) {
+        if (stageKey == null || stageKey.trim().isEmpty()) return -1;
+        for (int i = 0; i < stages.size(); i++) {
+            ConfigQcStage stage = stages.get(i);
+            if (stage != null && stageKey.equals(stage.key()) && stage.isApplicable(context)) {
                 return i;
             }
         }
@@ -510,10 +558,6 @@ public final class ConfigQcDialog {
         return stageIndex;
     }
 
-    String titleTextForTest() {
-        return titleLabel.getText();
-    }
-
     String stageTextForTest() {
         return stageLabel.getText();
     }
@@ -527,7 +571,7 @@ public final class ConfigQcDialog {
     }
 
     String imageTextForTest() {
-        return imageLabel.getText();
+        return currentImageDisplayName;
     }
 
     String statusTextForTest() {
@@ -546,6 +590,10 @@ public final class ConfigQcDialog {
         return previewPair.displayControlsButton();
     }
 
+    JButton previousImageButtonForTest() {
+        return previousImageButton;
+    }
+
     void lockInForTest() {
         lockInAndAdvance();
     }
@@ -556,6 +604,10 @@ public final class ConfigQcDialog {
 
     void restartForTest() {
         restartCurrentStage();
+    }
+
+    void previousImageForTest() {
+        previousImage();
     }
 
     void backForTest() {
@@ -593,6 +645,10 @@ public final class ConfigQcDialog {
 
         @Override public void cancel() {
             ConfigQcDialog.this.closeWithResult(ConfigQcResult.CANCEL);
+        }
+
+        @Override public void jumpToStage(String stageKey) {
+            ConfigQcDialog.this.jumpToStage(stageKey);
         }
     }
 }

@@ -11,6 +11,7 @@ import java.awt.image.IndexColorModel;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 public class ImagePreviewPanelTest {
@@ -51,6 +52,19 @@ public class ImagePreviewPanelTest {
         assertEquals(1, panel.getCurrentZ());
         assertEquals(1, panel.getSliceCount());
         assertFalse(panel.isZSliderEnabledForTest());
+    }
+
+    @Test
+    public void singleChannelFramesAreBrowsableAsZPlanes() {
+        ImagePreviewPanel panel = new ImagePreviewPanel("Preview");
+        panel.setImage(timeStack("time-coded z", 4));
+
+        panel.setCurrentZ(4);
+
+        assertEquals(4, panel.getCurrentZ());
+        assertEquals(4, panel.getSliceCount());
+        assertTrue(panel.isZSliderEnabledForTest());
+        assertEquals(4, panel.renderedProcessorForTest().get(1, 1));
     }
 
     @Test
@@ -124,6 +138,18 @@ public class ImagePreviewPanelTest {
         assertEquals(expected & 0xff, model.getBlue(5));
     }
 
+    @Test
+    public void closedImageDoesNotThrowDuringRender() {
+        ImagePlus image = new ClosedImagePlus();
+        ImagePreviewPanel panel = new ImagePreviewPanel("Preview");
+
+        panel.setImage(image);
+
+        assertFalse(panel.hasImageForTest());
+        assertEquals(1, panel.getSliceCount());
+        assertNull(panel.renderedProcessorForTest());
+    }
+
     private static ImagePlus stack(String title, int slices) {
         ImageStack stack = new ImageStack(3, 3);
         for (int i = 0; i < slices; i++) {
@@ -134,10 +160,26 @@ public class ImagePreviewPanelTest {
         return new ImagePlus(title, stack);
     }
 
+    private static ImagePlus timeStack(String title, int frames) {
+        ImagePlus image = stack(title, frames);
+        image.setDimensions(1, 1, frames);
+        return image;
+    }
+
     private static ImagePlus labelImage(String title, int label) {
         ByteProcessor processor = new ByteProcessor(2, 1);
         processor.set(0, 0, 0);
         processor.set(1, 0, label);
         return new ImagePlus(title, processor);
+    }
+
+    private static final class ClosedImagePlus extends ImagePlus {
+        @Override public ImageStack getStack() {
+            throw new IllegalArgumentException("closed");
+        }
+
+        @Override public int getStackSize() {
+            throw new IllegalArgumentException("closed");
+        }
     }
 }

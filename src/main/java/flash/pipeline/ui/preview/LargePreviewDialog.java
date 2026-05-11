@@ -37,7 +37,8 @@ public final class LargePreviewDialog extends JDialog {
     private SliceListener sliceListener;
     private boolean syncingSlices;
     private boolean extraPreviewVisible;
-    private PreviewDisplaySettings displaySettings = PreviewDisplaySettings.defaultFor("Grays");
+    private PreviewDisplaySettings originalDisplaySettings = PreviewDisplaySettings.defaultFor("Grays");
+    private PreviewDisplaySettings adjustedDisplaySettings = PreviewDisplaySettings.defaultFor("Grays");
     private ImagePlus originalImage;
     private ImagePlus adjustedImage;
     private ImagePlus objectLabelImage;
@@ -87,13 +88,21 @@ public final class LargePreviewDialog extends JDialog {
     }
 
     public void setDisplaySettings(PreviewDisplaySettings settings) {
-        displaySettings = settings == null ? PreviewDisplaySettings.defaultFor("Grays") : settings;
+        PreviewDisplaySettings safe = safeDisplaySettings(settings);
+        setDisplaySettings(safe, safe);
+    }
+
+    public void setDisplaySettings(PreviewDisplaySettings originalSettings,
+                                   PreviewDisplaySettings adjustedSettings) {
+        originalDisplaySettings = safeDisplaySettings(originalSettings);
+        adjustedDisplaySettings = safeDisplaySettings(adjustedSettings);
         originalPreview.setDisplaySettingsEnabled(true);
         adjustedPreview.setDisplaySettingsEnabled(true);
         extraPreview.setDisplaySettingsEnabled(!extraPreviewVisible);
-        originalPreview.setDisplaySettings(displaySettings);
-        adjustedPreview.setDisplaySettings(displaySettings);
-        extraPreview.setDisplaySettings(displaySettings);
+        originalPreview.setDisplaySettings(originalDisplaySettings);
+        adjustedPreview.setDisplaySettings(adjustedDisplaySettings);
+        extraPreview.setDisplaySettings(adjustedDisplaySettings);
+        refreshObjectPreviewImage();
     }
 
     public void setCurrentZ(int zSlice) {
@@ -142,6 +151,10 @@ public final class LargePreviewDialog extends JDialog {
 
     String extraPreviewTitleForTest() {
         return extraPreview.titleTextForTest();
+    }
+
+    ij.process.ImageProcessor extraPreviewRenderedProcessorForTest() {
+        return extraPreview.renderedProcessorForTest();
     }
 
     void raiseForUser() {
@@ -245,7 +258,8 @@ public final class LargePreviewDialog extends JDialog {
         generatedOverlayImage = null;
         if (overlayCheck.isSelected()) {
             ImagePlus source = selectedOverlaySourceImage();
-            ImagePlus overlay = ObjectOverlayRenderer.renderOverlay(source, objectLabelImage);
+            ImagePlus overlay = ObjectOverlayRenderer.renderOverlay(source, objectLabelImage,
+                    selectedOverlaySourceDisplaySettings());
             if (overlay != null) {
                 displayImage = overlay;
                 generatedOverlayImage = overlay;
@@ -263,6 +277,19 @@ public final class LargePreviewDialog extends JDialog {
         ImagePlus preferred = raw ? originalImage : adjustedImage;
         if (preferred != null) return preferred;
         return raw ? adjustedImage : originalImage;
+    }
+
+    private PreviewDisplaySettings selectedOverlaySourceDisplaySettings() {
+        Object selected = overlaySourceChoice.getSelectedItem();
+        boolean raw = selected != null && "Raw image".equals(selected.toString());
+        if (raw) {
+            return originalImage != null ? originalDisplaySettings : adjustedDisplaySettings;
+        }
+        return adjustedImage != null ? adjustedDisplaySettings : originalDisplaySettings;
+    }
+
+    private static PreviewDisplaySettings safeDisplaySettings(PreviewDisplaySettings settings) {
+        return settings == null ? PreviewDisplaySettings.defaultFor("Grays") : settings;
     }
 
     private void updateOverlayControls() {

@@ -81,6 +81,18 @@ public class ThresholdControlPanelTest {
         assertEquals(20.0, minMax.getMaxValue(), 0.0001);
     }
 
+    @Test
+    public void minMaxFallsBackSafelyWhenImageHasBeenClosed() {
+        ImagePlus temporary = image(0, 10, 20);
+        MinMaxControlPanel minMax = new MinMaxControlPanel();
+
+        temporary.flush();
+        minMax.setImage(temporary);
+
+        assertEquals(0.0, minMax.getMinValue(), 0.0001);
+        assertEquals(255.0, minMax.getMaxValue(), 0.0001);
+    }
+
     private static ImagePlus image(int... values) {
         ByteProcessor processor = new ByteProcessor(values.length, 1);
         for (int i = 0; i < values.length; i++) {

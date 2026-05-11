@@ -3,6 +3,7 @@ package flash.pipeline.ui.config;
 import flash.pipeline.objects.ObjectsCounter3DWrapper;
 import flash.pipeline.ui.preview.LabelMapStyler;
 import flash.pipeline.ui.preview.ObjectOverlayRenderer;
+import flash.pipeline.ui.preview.PreviewDisplaySettings;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import ij.ImagePlus;
 import ij.ImageStack;
@@ -72,6 +73,7 @@ public final class ParticleSizeStage implements ConfigQcStage {
     private PreviewPairPanel preview;
     private ConfigQcContext activeContext;
     private SizeToken savedSize = new SizeToken("100", "Infinity");
+    private SizeToken restartSize;
     private ImagePlus rawSource;
     private ImagePlus filteredSource;
     private ImagePlus labelPreview;
@@ -114,7 +116,7 @@ public final class ParticleSizeStage implements ConfigQcStage {
     public JComponent buildControls(ConfigQcContext context, ConfigQcActions actions) {
         this.actions = actions;
         this.activeContext = context;
-        this.savedSize = parseSizeToken(sizeStore.get());
+        this.savedSize = restartSize == null ? parseSizeToken(sizeStore.get()) : restartSize;
 
         JPanel panel = new JPanel(new BorderLayout(0, 10));
         panel.setOpaque(false);
@@ -136,6 +138,7 @@ public final class ParticleSizeStage implements ConfigQcStage {
         refreshSourceToggleButton();
         if (preview != null) {
             preview.clearLargePreviewImages();
+            preview.setDisplaySettingsChangeListener(settings -> refreshSourceAndOutputPreview());
         }
         try {
             rawSource = previewAdapter.createRawSource(context);
@@ -169,6 +172,7 @@ public final class ParticleSizeStage implements ConfigQcStage {
             SizeToken token = collectSizeToken();
             sizeStore.set(token.toToken());
             savedSize = token;
+            restartSize = null;
             setStatus("Locked particle sizes: " + token.toToken() + ".");
             return true;
         } catch (RuntimeException e) {
@@ -184,6 +188,11 @@ public final class ParticleSizeStage implements ConfigQcStage {
 
     @Override
     public void restartStage(ConfigQcContext context) {
+        try {
+            restartSize = collectSizeToken();
+        } catch (RuntimeException ignored) {
+            // Keep the prior restart value if the current fields are invalid.
+        }
         setStatus("Restarting particle-size review from the first image.");
     }
 
@@ -191,6 +200,7 @@ public final class ParticleSizeStage implements ConfigQcStage {
     public void onLeave(ConfigQcContext context) {
         closePreviewWorker();
         if (preview != null) {
+            preview.setDisplaySettingsChangeListener(null);
             preview.clearLargePreviewImages();
         }
         closeImages();
@@ -520,7 +530,11 @@ public final class ParticleSizeStage implements ConfigQcStage {
             ImagePlus source = currentSourceImage();
             if (source == null || labelPreview == null) return labelDisplayPreview;
             ImagePlus oldOverlay = overlayPreview;
-            overlayPreview = ObjectOverlayRenderer.renderOverlay(source, labelPreview);
+            PreviewDisplaySettings displaySettings = preview == null
+                    ? null
+                    : preview.getDisplaySettings();
+            overlayPreview = ObjectOverlayRenderer.renderOverlay(source, labelPreview,
+                    displaySettings);
             closeOldPreviewImage(oldOverlay);
             if (overlayPreview != null) return overlayPreview;
         }

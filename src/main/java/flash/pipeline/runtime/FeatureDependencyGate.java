@@ -205,8 +205,17 @@ public final class FeatureDependencyGate {
 
     private static boolean isHeadless() {
         synchronized (LOCK) {
-            return headlessMode || uiHooks.isHeadless();
+            UiHooks hooks = uiHooks;
+            return headlessMode
+                    || hooks.isHeadless()
+                    || (hooks == DEFAULT_UI_HOOKS && isAutomatedTestRun());
         }
+    }
+
+    private static boolean isAutomatedTestRun() {
+        return System.getProperty("surefire.test.class.path") != null
+                || System.getProperty("failsafe.test.class.path") != null
+                || System.getProperty("org.gradle.test.worker") != null;
     }
 
     private static List<GateAction> buildGateActions(DependencySpec spec) {

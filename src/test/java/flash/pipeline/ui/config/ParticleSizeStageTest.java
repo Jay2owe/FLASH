@@ -150,6 +150,25 @@ public class ParticleSizeStageTest {
         assertEquals("5-20", stage.currentSizeTokenForTest());
     }
 
+    @Test
+    public void restartKeepsCurrentEditedSizeAfterStageRebuild() {
+        RecordingStore store = new RecordingStore("1-Infinity");
+        ParticleSizeStage stage = new ParticleSizeStage(store, new RecordingPreviewAdapter());
+        ConfigQcContext context = context();
+
+        stage.buildControls(context, new RecordingActions());
+        stage.onEnter(context, new PreviewPairPanel("Original", "Adjusted"));
+        stage.setMinSizeForTest("8");
+        stage.setMaxSizeForTest("30");
+
+        stage.restartStage(context);
+        stage.buildControls(context, new RecordingActions());
+        stage.onEnter(context, new PreviewPairPanel("Original", "Adjusted"));
+
+        assertEquals("8-30", stage.currentSizeTokenForTest());
+        assertEquals("1-Infinity", store.token);
+    }
+
     private static ConfigQcContext context() {
         return ConfigQcContext.fromImages(
                 null,

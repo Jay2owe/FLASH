@@ -103,6 +103,31 @@ public class FilterParameterStageTest {
     }
 
     @Test
+    public void restartKeepsCurrentEditedMacroAfterStageRebuild() {
+        RecordingMacroStore store = new RecordingMacroStore(
+                "Default",
+                DEFAULT_MACRO);
+        FilterParameterStage stage = new FilterParameterStage(
+                Arrays.asList("Default", "Custom"),
+                store,
+                new RecordingPreviewAdapter(),
+                null,
+                null);
+        ConfigQcContext context = context();
+
+        stage.buildControls(context, new RecordingActions());
+        stage.onEnter(context, new PreviewPairPanel("Original", "Adjusted"));
+        stage.setParameterForTest("sigma", "6");
+
+        stage.restartStage(context);
+        stage.buildControls(context, new RecordingActions());
+        stage.onEnter(context, new PreviewPairPanel("Original", "Adjusted"));
+
+        assertTrue(stage.currentMacroForTest().contains("sigma=6"));
+        assertEquals("", store.savedMacro);
+    }
+
+    @Test
     public void noSavedPresetDefaultsToDefaultFilterAndLoadsItsMacro() {
         RecordingMacroStore store = new RecordingMacroStore("", "", DEFAULT_MACRO);
         FilterParameterStage stage = new FilterParameterStage(

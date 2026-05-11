@@ -38,6 +38,7 @@ import flash.pipeline.ui.CustomFilterEntryDialog;
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.ToggleSwitch;
 import flash.pipeline.ui.config.ConfigQcContext;
+import flash.pipeline.ui.config.ConfigQcActions;
 import flash.pipeline.ui.config.ConfigQcDialog;
 import flash.pipeline.ui.config.ConfigQcResult;
 import flash.pipeline.ui.config.ConfigQcStage;
@@ -46,6 +47,7 @@ import flash.pipeline.ui.config.CellposeParameterStage;
 import flash.pipeline.ui.config.DisplayRangeStage;
 import flash.pipeline.ui.config.FilterParameterStage;
 import flash.pipeline.ui.config.ParticleSizeStage;
+import flash.pipeline.ui.config.SegmentationMethodStage;
 import flash.pipeline.ui.config.StarDistParameterStage;
 import flash.pipeline.ui.config.ZSliceSelectionStage;
 import flash.pipeline.ui.sandbox.SandboxDialog;
@@ -75,12 +77,15 @@ import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
+import javax.swing.Icon;
+import javax.swing.ImageIcon;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
 
+import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Container;
@@ -93,6 +98,7 @@ import java.awt.Insets;
 import java.awt.Toolkit;
 import java.io.File;
 import java.io.IOException;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -192,7 +198,8 @@ public class CreateBinFileAnalysis implements Analysis {
     private static final int SETTINGS_ROI_INTENSITY_THRESHOLD = 2;
     private static final int SETTINGS_OBJECT_THRESHOLD = 3;
     private static final int SETTINGS_OBJECT_SIZE_FILTER = 4;
-    private static final int SETTINGS_SLOT_COUNT = 5;
+    private static final int SETTINGS_SEGMENTATION_METHOD = 5;
+    private static final int SETTINGS_SLOT_COUNT = 6;
 
     /** Tracks whether the last dialog dismissal was via Back (for inter-method signaling). */
     private boolean lastWasBack = false;
@@ -204,6 +211,7 @@ public class CreateBinFileAnalysis implements Analysis {
     private int loaderPercent = 0;
     private final Set<String> customFilterPromptsHandled = new HashSet<String>();
     private final Map<String, String> customFilterDemotions = new HashMap<String, String>();
+    private BinConfig settingsStatusReference = null;
 
     private static boolean gateStarDistFeature(String featureDisplayName) {
         return FeatureDependencyGate.gate(DependencyId.STARDIST_RUNTIME,
@@ -325,17 +333,20 @@ public class CreateBinFileAnalysis implements Analysis {
                 writeDefaultFilter(binFolder);
                 writeChannelFilters(binFolder, cfg);
             }
-            if (fields.contains(BinField.SEGMENTATION_METHODS)
-                    && !showFilteredSegmentationMethodsPage(directory, binFolder, cfg)) {
-                return;
-            }
             if (fields.contains(BinField.Z_SLICE)
                     && !showFilteredZSlicePage(directory, binFolder, cfg)) {
                 return;
             }
-            if (requiresQcPages(fields)
-                    && !showFilteredQcPages(directory, binFolder, cfg, fields)) {
-                return;
+            if (requiresQcPages(fields)) {
+                BinConfig previousStatusReference = settingsStatusReference;
+                settingsStatusReference = existing;
+                try {
+                    if (!showFilteredQcPages(directory, binFolder, cfg, fields)) {
+                        return;
+                    }
+                } finally {
+                    settingsStatusReference = previousStatusReference;
+                }
             }
 
             restoreExcludedFields(cfg, original, fields);
@@ -358,7 +369,8 @@ public class CreateBinFileAnalysis implements Analysis {
                 && (fields.contains(BinField.DISPLAY_MIN_MAX)
                 || fields.contains(BinField.OBJECT_THRESHOLDS)
                 || fields.contains(BinField.INTENSITY_THRESHOLDS)
-                || fields.contains(BinField.PARTICLE_SIZES));
+                || fields.contains(BinField.PARTICLE_SIZES)
+                || fields.contains(BinField.SEGMENTATION_METHODS));
     }
 
     protected boolean canShowFilteredDialogs() {
@@ -561,8 +573,9 @@ public class CreateBinFileAnalysis implements Analysis {
         boolean doThreshold = fields.contains(BinField.OBJECT_THRESHOLDS)
                 || fields.contains(BinField.INTENSITY_THRESHOLDS);
         boolean doParticleSize = fields.contains(BinField.PARTICLE_SIZES);
-        boolean[][] customSettings = showGranularCustomFork(cfg.names, cfg.segmentationMethods,
-                false, doMinMax, doThreshold, doParticleSize);
+        boolean doSegmentationMethod = fields.contains(BinField.SEGMENTATION_METHODS);
+        boolean[][] customSettings = showGranularCustomFork(cfg,
+                false, doMinMax, doThreshold, doParticleSize, doSegmentationMethod, null);
         if (customSettings == null) return false;
 
         if (anyTrue(customSettings) || hasPendingCustomFilters(cfg)) {
@@ -606,10 +619,11 @@ public class CreateBinFileAnalysis implements Analysis {
         if (cfg == null || original == null || fields == null) return;
         if (!fields.contains(BinField.CHANNEL_NAMES)) replaceListIfPresent(cfg.names, original.names);
         if (!fields.contains(BinField.CHANNEL_COLORS)) replaceListIfPresent(cfg.colors, original.colors);
-        if (!fields.contains(BinField.OBJECT_THRESHOLDS)) replaceListIfPresent(cfg.objectThresholds, original.objectThresholds);
-        if (!fields.contains(BinField.PARTICLE_SIZES)) replaceListIfPresent(cfg.sizes, original.sizes);
+        boolean preserveObjectQcDependencies = fields.contains(BinField.SEGMENTATION_METHODS);
+        if (!fields.contains(BinField.OBJECT_THRESHOLDS) && !preserveObjectQcDependencies) replaceListIfPresent(cfg.objectThresholds, original.objectThresholds);
+        if (!fields.contains(BinField.PARTICLE_SIZES) && !preserveObjectQcDependencies) replaceListIfPresent(cfg.sizes, original.sizes);
         if (!fields.contains(BinField.DISPLAY_MIN_MAX)) replaceListIfPresent(cfg.minmax, original.minmax);
-        if (!fields.contains(BinField.INTENSITY_THRESHOLDS)) replaceListIfPresent(cfg.intensityThresholds, original.intensityThresholds);
+        if (!fields.contains(BinField.INTENSITY_THRESHOLDS) && !preserveObjectQcDependencies) replaceListIfPresent(cfg.intensityThresholds, original.intensityThresholds);
         if (!fields.contains(BinField.SEGMENTATION_METHODS)) replaceListIfPresent(cfg.segmentationMethods, original.segmentationMethods);
         if (!fields.contains(BinField.FILTER_PRESETS)) replaceListIfPresent(cfg.filterPresets, original.filterPresets);
         if (!fields.contains(BinField.Z_SLICE)) {
@@ -713,6 +727,7 @@ public class CreateBinFileAnalysis implements Analysis {
         boolean overrideMinMax = false;
         boolean overrideThresholds = false;
         boolean overrideParticleSize = false;
+        boolean overrideSegmentationMethod = false;
         boolean overrideFilterPresets = false;
         boolean overrideFilterParameters = false;
         boolean overrideZSliceSelection = false;
@@ -774,6 +789,8 @@ public class CreateBinFileAnalysis implements Analysis {
             ToggleSwitch thToggle = ovr.addToggle("Override Channel Thresholds", false);
 
             ovr.addHeader("Object Analysis");
+            ovr.addSubHeader("Segmentation Method");
+            ToggleSwitch segToggle = ovr.addToggle("Override Segmentation Method", false);
             ovr.addSubHeader("Classical Object Size Filter");
             ToggleSwitch szToggle = ovr.addToggle("Override Particle Sizes (n Voxels)", false);
 
@@ -787,6 +804,7 @@ public class CreateBinFileAnalysis implements Analysis {
                     mmToggle.setEnabled(!on);
                     thToggle.setEnabled(!on);
                     szToggle.setEnabled(!on);
+                    segToggle.setEnabled(!on);
                     fpToggle.setEnabled(!on);
                     fhToggle.setEnabled(!on);
                     zSliceToggle.setEnabled(!on);
@@ -794,6 +812,7 @@ public class CreateBinFileAnalysis implements Analysis {
                         mmToggle.setSelected(false);
                         thToggle.setSelected(false);
                         szToggle.setSelected(false);
+                        segToggle.setSelected(false);
                         fpToggle.setSelected(false);
                         fhToggle.setSelected(false);
                         zSliceToggle.setSelected(false);
@@ -810,11 +829,12 @@ public class CreateBinFileAnalysis implements Analysis {
             overrideFilterParameters = ovr.getNextBoolean();
             overrideMinMax = ovr.getNextBoolean();
             overrideThresholds = ovr.getNextBoolean();
+            overrideSegmentationMethod = ovr.getNextBoolean();
             overrideParticleSize = ovr.getNextBoolean();
             overrideZSliceSelection = ovr.getNextBoolean();
 
             if (!overrideAll && !overrideMinMax && !overrideThresholds
-                    && !overrideParticleSize && !overrideFilterPresets
+                    && !overrideParticleSize && !overrideSegmentationMethod && !overrideFilterPresets
                     && !overrideFilterParameters && !overrideZSliceSelection) {
                 IJ.showMessage("Set Up Configuration", "No override selected. Nothing to do.");
                 return;
@@ -839,7 +859,8 @@ public class CreateBinFileAnalysis implements Analysis {
             if (overrideMode && !overrideAll) {
                 handleSelectiveOverride(directory, binFolder, existingCfg,
                         overrideMinMax, overrideThresholds, overrideParticleSize,
-                        overrideFilterPresets, overrideFilterParameters, overrideZSliceSelection);
+                        overrideSegmentationMethod, overrideFilterPresets,
+                        overrideFilterParameters, overrideZSliceSelection);
             } else {
                 handleFullCreation(directory, binFolder, overrideAll ? existingCfg : null);
             }
@@ -949,8 +970,15 @@ public class CreateBinFileAnalysis implements Analysis {
                 }
                 case 3: {
                     customSettings = settingsMatrixForChannelCount(customSettings, cfg.names.size());
-                    boolean[][] selectedSettings = showGranularCustomFork(
-                            cfg.names, cfg.segmentationMethods, true, true, true, true, customSettings);
+                    BinConfig previousStatusReference = settingsStatusReference;
+                    settingsStatusReference = existing;
+                    boolean[][] selectedSettings;
+                    try {
+                        selectedSettings = showGranularCustomFork(
+                                cfg, true, true, true, true, true, customSettings);
+                    } finally {
+                        settingsStatusReference = previousStatusReference;
+                    }
                     if (selectedSettings == null) {
                         if (lastWasBack) { step = 2; break; }
                         if (!hasFiles(binFolder)) deleteRecursively(binFolder);
@@ -1021,7 +1049,8 @@ public class CreateBinFileAnalysis implements Analysis {
 
     private void handleSelectiveOverride(String directory, File binFolder, BinConfig existing,
                                          boolean doMinMax, boolean doThresholds,
-                                         boolean doParticleSize, boolean doFilterPresets,
+                                         boolean doParticleSize, boolean doSegmentationMethod,
+                                         boolean doFilterPresets,
                                          boolean doFilterParameters,
                                          boolean doZSliceSelection) throws IOException {
         if (existing == null) {
@@ -1052,7 +1081,8 @@ public class CreateBinFileAnalysis implements Analysis {
         }
         cfg.zSliceMode = existing.zSliceMode == null ? ZSliceMode.FULL : existing.zSliceMode;
         cfg.zSliceSelections.putAll(existing.zSliceSelections);
-        boolean needsQC = doFilterParameters || doMinMax || doThresholds || doParticleSize;
+        boolean needsQC = doFilterParameters || doMinMax || doThresholds
+                || doParticleSize || doSegmentationMethod;
 
         int step = doFilterPresets ? 1 : (doZSliceSelection ? 2 : (needsQC ? 3 : 4));
         boolean[][] customSettings = null;
@@ -1064,9 +1094,6 @@ public class CreateBinFileAnalysis implements Analysis {
                     pd.setModal(false);
                     pd.addHeader("Filter Preset Per Channel");
                     pd.addHelpText("'Custom' will open the custom filter builder after QC image selection. Saved custom filters can be reused from this list on later runs.");
-                    boolean ovrStarDistAvail = StarDistDetector.isAvailable();
-                    CellposeRuntime.Status cellposeStatus = CellposeRuntime.probeConfigured();
-                    boolean ovrCellposeReady = cellposeStatus != null && cellposeStatus.ready;
                     for (int i = 0; i < n; i++) {
                         String defaultPreset = cfg.filterPresets.get(i);
                         JComboBox<String> filterCombo = pd.addChoice(
@@ -1074,41 +1101,10 @@ public class CreateBinFileAnalysis implements Analysis {
                                 filterPresetOptions(binFolder, defaultPreset), defaultPreset);
                         final JLabel filterDesc = pd.addHelpText(filterDescriptionFor(defaultPreset));
                         installFilterDescriptionUpdater(filterCombo, filterDesc);
-                        String defaultSegmentation = segmentationChoiceForDialogDefault(
-                                cfg.segmentationMethods.get(i), ovrStarDistAvail, ovrCellposeReady);
-                        JComboBox<String> segmentationCombo = pd.addChoice("Segmentation", SEGMENTATION_OPTIONS, defaultSegmentation);
-                        final JLabel segmentationDesc = pd.addHelpText(
-                                segmentationDescriptionFor(defaultSegmentation, ovrStarDistAvail, cellposeStatus));
-                        segmentationCombo.addItemListener(new java.awt.event.ItemListener() {
-                            @Override public void itemStateChanged(java.awt.event.ItemEvent e) {
-                                if (e.getStateChange() == java.awt.event.ItemEvent.SELECTED) {
-                                    segmentationDesc.setText(segmentationDescriptionFor(
-                                            (String) e.getItem(), ovrStarDistAvail, cellposeStatus));
-                                }
-                            }
-                        });
                     }
                     if (!pd.showDialog()) return;
-                    List<String> segmentationSelections = new ArrayList<String>();
                     for (int i = 0; i < n; i++) {
                         cfg.filterPresets.set(i, pd.getNextChoice());
-                        segmentationSelections.add(pd.getNextChoice());
-                    }
-                    if (selectionsContain(segmentationSelections, SEGMENTATION_STARDIST)
-                            && !gateStarDistFeature("StarDist 3D segmentation")) {
-                        break;
-                    }
-                    boolean preferCellposeGpu = BinConfig.DEFAULT_CELLPOSE_USE_GPU;
-                    if (selectionsContain(segmentationSelections, SEGMENTATION_CELLPOSE)) {
-                        if (!gateCellposeFeature("Cellpose segmentation")) {
-                            break;
-                        }
-                        CellposeRuntime.Status readyStatus = CellposeRuntime.probeConfigured();
-                        preferCellposeGpu = readyStatus.ready ? readyStatus.gpuAvailable : BinConfig.DEFAULT_CELLPOSE_USE_GPU;
-                    }
-                    for (int i = 0; i < n; i++) {
-                        applySegmentationSelection(cfg.segmentationMethods, i,
-                                segmentationSelections.get(i), cfg.segmentationMethods.get(i), preferCellposeGpu);
                     }
                     applyHandledCustomDemotions(binFolder, cfg);
                     writeChannelFilters(binFolder, cfg);
@@ -1136,9 +1132,19 @@ public class CreateBinFileAnalysis implements Analysis {
                 case 3: { // Granular fork + QC
                     if (needsQC) {
                         customSettings = settingsMatrixForChannelCount(customSettings, cfg.names.size());
-                        boolean[][] selectedSettings = showGranularCustomFork(names, cfg.segmentationMethods,
-                                doFilterParameters, doMinMax, doThresholds, doParticleSize,
-                                customSettings);
+                        BinConfig previousStatusReference = settingsStatusReference;
+                        settingsStatusReference = existing;
+                        boolean[][] selectedSettings;
+                        try {
+                            selectedSettings = showGranularCustomFork(cfg,
+                                    doFilterParameters, doMinMax,
+                                    doThresholds,
+                                    doParticleSize,
+                                    doSegmentationMethod,
+                                    customSettings);
+                        } finally {
+                            settingsStatusReference = previousStatusReference;
+                        }
                         if (selectedSettings == null) {
                             if (lastWasBack) {
                                 if (doZSliceSelection) { step = 2; break; }
@@ -1222,112 +1228,212 @@ public class CreateBinFileAnalysis implements Analysis {
                                                boolean showFilterParameters, boolean showMinMax,
                                                boolean showThreshold, boolean showParticleSize) {
         return showGranularCustomFork(channelNames, segmentationMethods,
-                showFilterParameters, showMinMax, showThreshold, showParticleSize, null);
+                showFilterParameters, showMinMax, showThreshold, showParticleSize, false, null,
+                settingsStatusReference);
+    }
+
+    private boolean[][] showGranularCustomFork(BinUserConfig cfg,
+                                               boolean showFilterParameters, boolean showMinMax,
+                                               boolean showThreshold, boolean showParticleSize,
+                                               boolean[][] initialSettings) {
+        return showGranularCustomFork(cfg, showFilterParameters, showMinMax, showThreshold,
+                showParticleSize, false, initialSettings);
+    }
+
+    private boolean[][] showGranularCustomFork(BinUserConfig cfg,
+                                               boolean showFilterParameters, boolean showMinMax,
+                                               boolean showThreshold, boolean showParticleSize,
+                                               boolean showSegmentationMethod,
+                                               boolean[][] initialSettings) {
+        BinUserConfig safe = cfg == null
+                ? new BinUserConfig(new ArrayList<String>(), new ArrayList<String>(),
+                new ArrayList<String>(), new ArrayList<String>(), new ArrayList<String>(),
+                new ArrayList<String>(), new ArrayList<String>())
+                : cfg;
+        return showGranularCustomFork(safe.names, safe.segmentationMethods,
+                showFilterParameters, showMinMax, showThreshold, showParticleSize,
+                showSegmentationMethod,
+                initialSettings, settingsStatusReference);
     }
 
     private boolean[][] showGranularCustomFork(List<String> channelNames, List<String> segmentationMethods,
                                                boolean showFilterParameters, boolean showMinMax,
                                                boolean showThreshold, boolean showParticleSize,
                                                boolean[][] initialSettings) {
+        return showGranularCustomFork(channelNames, segmentationMethods,
+                showFilterParameters, showMinMax, showThreshold, showParticleSize, false,
+                initialSettings, settingsStatusReference);
+    }
+
+    private boolean[][] showGranularCustomFork(List<String> channelNames, List<String> segmentationMethods,
+                                               boolean showFilterParameters, boolean showMinMax,
+                                               boolean showThreshold, boolean showParticleSize,
+                                               boolean showSegmentationMethod,
+                                               boolean[][] initialSettings,
+                                               BinConfig statusConfig) {
         PipelineDialog fork = new PipelineDialog("Settings Mode");
         fork.enableBackButton();
         fork.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
         fork.addSubHeader("Settings Mode");
         fork.addMessage("Toggle ON the settings you want to adjust interactively per channel.");
-        SettingsModeTickAllGroup allSettingsGroup = new SettingsModeTickAllGroup(
-                fork.addHeaderToggle("All Settings Mode Options", false));
 
-        int n = channelNames.size();
+        int n = channelNames == null ? 0 : channelNames.size();
         boolean[] isStarDist = new boolean[n];
         boolean[] isCellpose = new boolean[n];
         boolean anyClassical = false;
         boolean anyStarDist = false;
         boolean anyCellpose = false;
         for (int i = 0; i < n; i++) {
-            isStarDist[i] = segmentationMethods.get(i).startsWith("stardist");
-            isCellpose[i] = segmentationMethods.get(i).startsWith("cellpose");
+            String method = segmentationMethods != null && i < segmentationMethods.size()
+                    ? safe(segmentationMethods.get(i))
+                    : "classical";
+            isStarDist[i] = method.startsWith("stardist");
+            isCellpose[i] = method.startsWith("cellpose");
             if (isStarDist[i]) anyStarDist = true;
             else if (isCellpose[i]) anyCellpose = true;
             else anyClassical = true;
         }
+        int[] allChannels = channelIndexes(n);
+        int[] classicalChannels = matchingChannelIndexes(isStarDist, isCellpose, false, false);
+        int[] starDistChannels = matchingChannelIndexes(isStarDist, isCellpose, true, false);
+        int[] cellposeChannels = matchingChannelIndexes(isStarDist, isCellpose, false, true);
+
+        SettingsDataStatus filterStatus = settingsDataStatusForFields(statusConfig,
+                allChannels, BinField.FILTER_PRESETS);
+        SettingsDataStatus minMaxStatus = settingsDataStatusForFields(statusConfig,
+                allChannels, BinField.DISPLAY_MIN_MAX);
+        SettingsDataStatus thresholdStatus = settingsDataStatusForFields(statusConfig,
+                allChannels, BinField.OBJECT_THRESHOLDS, BinField.INTENSITY_THRESHOLDS);
+        SettingsDataStatus objectSizeStatus = settingsDataStatusForFields(statusConfig,
+                classicalChannels, BinField.PARTICLE_SIZES);
+        SettingsDataStatus segmentationMethodStatus = settingsDataStatusForFields(statusConfig,
+                allChannels, BinField.SEGMENTATION_METHODS);
+        SettingsDataStatus starDistStatus = settingsDataStatusForEngine(statusConfig,
+                starDistChannels, "stardist");
+        SettingsDataStatus cellposeStatus = settingsDataStatusForEngine(statusConfig,
+                cellposeChannels, "cellpose");
+        SettingsDataStatus aiAssistedStatus = combineDisplayedSettingsDataStatuses(
+                anyStarDist ? starDistStatus : null,
+                anyCellpose ? cellposeStatus : null);
+        SettingsDataStatus allStatus = combineDisplayedSettingsDataStatuses(
+                showFilterParameters ? filterStatus : null,
+                showMinMax ? minMaxStatus : null,
+                showThreshold ? thresholdStatus : null,
+                showSegmentationMethod ? segmentationMethodStatus : null,
+                showParticleSize && anyClassical ? objectSizeStatus : null,
+                showThreshold && anyStarDist ? starDistStatus : null,
+                showThreshold && anyCellpose ? cellposeStatus : null);
+
+        SettingsModeTickAllGroup allSettingsGroup = new SettingsModeTickAllGroup(
+                fork.addHeaderToggleWithStatus("All Settings Mode Options", false,
+                        settingsDataStatusLabel(allStatus, "All settings mode options")));
+        fork.addHelpText("Status icons match the main screen: tick = full saved data, ! = partial saved data, blank = none saved.");
 
         if (showFilterParameters) {
             fork.addHeader("Channel Identity & Processing");
-            SettingsModeTickAllGroup filterGroup = addSettingsModeTickAllGroup(fork, "Set Filter and Parameters");
+            SettingsModeTickAllGroup filterGroup = addSettingsModeTickAllGroup(fork,
+                    "Set Filter and Parameters", filterStatus);
             fork.addHelpText("Choose a filter preset, preview it on the current Z-stack, and adjust detected key=value parameters per channel.");
             for (int i = 0; i < n; i++) {
-                addSettingsModeToggle(fork, "C" + (i + 1) + " (" + channelNames.get(i) + ")",
+                addSettingsModeToggle(fork, "C" + (i + 1) + " (" + channelName(channelNames, i) + ")",
                         settingSelected(initialSettings, SETTINGS_FILTER_PARAMETERS, i),
+                        settingsDataStatusForFields(statusConfig, channelIndex(i), BinField.FILTER_PRESETS),
                         filterGroup, allSettingsGroup);
             }
         }
         if (showMinMax) {
             fork.addHeader("Image Display");
-            SettingsModeTickAllGroup minMaxGroup = addSettingsModeTickAllGroup(fork, "Display Ranges");
+            SettingsModeTickAllGroup minMaxGroup = addSettingsModeTickAllGroup(fork,
+                    "Display Ranges", minMaxStatus);
             fork.addHelpText("Min-Max display ranges via B&C on a max projection.");
             for (int i = 0; i < n; i++) {
-                addSettingsModeToggle(fork, "C" + (i + 1) + " (" + channelNames.get(i) + ")",
+                addSettingsModeToggle(fork, "C" + (i + 1) + " (" + channelName(channelNames, i) + ")",
                         settingSelected(initialSettings, SETTINGS_MIN_MAX, i),
+                        settingsDataStatusForFields(statusConfig, channelIndex(i), BinField.DISPLAY_MIN_MAX),
                         minMaxGroup, allSettingsGroup);
             }
         }
         if (showThreshold) {
             fork.addHeader("ROI / Intensity Analysis");
-            SettingsModeTickAllGroup thresholdGroup = addSettingsModeTickAllGroup(fork, "Channel Thresholds");
+            SettingsModeTickAllGroup thresholdGroup = addSettingsModeTickAllGroup(fork,
+                    "Channel Thresholds", thresholdStatus);
             fork.addHelpText("Set the channel threshold (after the per-channel filter). The same value feeds both classical object detection and ROI intensity measurements.");
             for (int i = 0; i < n; i++) {
                 boolean selected = settingSelected(initialSettings, SETTINGS_ROI_INTENSITY_THRESHOLD, i)
                         || (!isStarDist[i] && !isCellpose[i]
                         && settingSelected(initialSettings, SETTINGS_OBJECT_THRESHOLD, i));
-                addSettingsModeToggle(fork, "C" + (i + 1) + " (" + channelNames.get(i) + ")",
-                        selected, thresholdGroup, allSettingsGroup);
+                addSettingsModeToggle(fork, "C" + (i + 1) + " (" + channelName(channelNames, i) + ")",
+                        selected,
+                        settingsDataStatusForFields(statusConfig, channelIndex(i),
+                                BinField.OBJECT_THRESHOLDS, BinField.INTENSITY_THRESHOLDS),
+                        thresholdGroup, allSettingsGroup);
             }
         }
-        if (((showThreshold || showParticleSize) && anyClassical)
+        if (showSegmentationMethod
+                || ((showThreshold || showParticleSize) && anyClassical)
                 || (showThreshold && (anyStarDist || anyCellpose))) {
             fork.addHeader("Object Analysis");
+        }
+        if (showSegmentationMethod) {
+            SettingsModeTickAllGroup segmentationMethodGroup = addSettingsModeTickAllGroup(fork,
+                    "Segmentation Method", segmentationMethodStatus);
+            fork.addHelpText("Choose Classical, StarDist, or Cellpose during object QC. Selecting this opens the required method-specific preview screens.");
+            for (int i = 0; i < n; i++) {
+                addSettingsModeToggle(fork, "C" + (i + 1) + " (" + channelName(channelNames, i) + ")",
+                        settingSelected(initialSettings, SETTINGS_SEGMENTATION_METHOD, i),
+                        settingsDataStatusForFields(statusConfig, channelIndex(i), BinField.SEGMENTATION_METHODS),
+                        segmentationMethodGroup, allSettingsGroup);
+            }
         }
         SettingsModeTickAllGroup classicalGroup = null;
         if ((showThreshold || showParticleSize) && anyClassical) {
             if (showParticleSize) {
-                classicalGroup = addSettingsModeTickAllGroup(fork, "Classical Object Analysis");
+                classicalGroup = addSettingsModeTickAllGroup(fork,
+                        "Classical Object Analysis", objectSizeStatus);
             } else {
                 fork.addSubHeader("Classical Object Analysis");
             }
         }
         if (showParticleSize && anyClassical) {
-            SettingsModeTickAllGroup objectSizeGroup = addSettingsModeTickAllGroup(fork, "Object Size Filter");
+            SettingsModeTickAllGroup objectSizeGroup = addSettingsModeTickAllGroup(fork,
+                    "Object Size Filter", objectSizeStatus);
             fork.addHelpText("Preview 3D Objects Counter results and adjust the object size range.");
             for (int i = 0; i < n; i++) {
                 if (!isStarDist[i] && !isCellpose[i]) {
-                    addSettingsModeToggle(fork, "C" + (i + 1) + " (" + channelNames.get(i) + ")",
+                    addSettingsModeToggle(fork, "C" + (i + 1) + " (" + channelName(channelNames, i) + ")",
                             settingSelected(initialSettings, SETTINGS_OBJECT_SIZE_FILTER, i),
+                            settingsDataStatusForFields(statusConfig, channelIndex(i), BinField.PARTICLE_SIZES),
                             objectSizeGroup, classicalGroup, allSettingsGroup);
                 }
             }
         }
         if (showThreshold && (anyStarDist || anyCellpose)) {
-            SettingsModeTickAllGroup aiAssistedGroup = addSettingsModeTickAllGroup(fork, "AI-Assisted Object Analysis");
+            SettingsModeTickAllGroup aiAssistedGroup = addSettingsModeTickAllGroup(fork,
+                    "AI-Assisted Object Analysis", aiAssistedStatus);
             if (anyStarDist) {
-                SettingsModeTickAllGroup starDistGroup = addSettingsModeTickAllGroup(fork, "TrackMate-StarDist Parameters");
+                SettingsModeTickAllGroup starDistGroup = addSettingsModeTickAllGroup(fork,
+                        "TrackMate-StarDist Parameters", starDistStatus);
                 fork.addHelpText("Adjust detection thresholds and post-detection filters (area, quality, intensity).");
                 for (int i = 0; i < n; i++) {
                     if (isStarDist[i]) {
-                        addSettingsModeToggle(fork, "C" + (i + 1) + " (" + channelNames.get(i) + ")",
+                        addSettingsModeToggle(fork, "C" + (i + 1) + " (" + channelName(channelNames, i) + ")",
                                 settingSelected(initialSettings, SETTINGS_OBJECT_THRESHOLD, i)
                                         || settingSelected(initialSettings, SETTINGS_OBJECT_SIZE_FILTER, i),
+                                settingsDataStatusForEngine(statusConfig, channelIndex(i), "stardist"),
                                 starDistGroup, aiAssistedGroup, allSettingsGroup);
                     }
                 }
             }
             if (anyCellpose) {
-                SettingsModeTickAllGroup cellposeGroup = addSettingsModeTickAllGroup(fork, "Cellpose 3D Parameters");
+                SettingsModeTickAllGroup cellposeGroup = addSettingsModeTickAllGroup(fork,
+                        "Cellpose 3D Parameters", cellposeStatus);
                 fork.addHelpText("Adjust model choice and Cellpose thresholds for irregular, whole-cell, or companion-channel segmentation.");
                 for (int i = 0; i < n; i++) {
                     if (isCellpose[i]) {
-                        addSettingsModeToggle(fork, "C" + (i + 1) + " (" + channelNames.get(i) + ")",
+                        addSettingsModeToggle(fork, "C" + (i + 1) + " (" + channelName(channelNames, i) + ")",
                                 settingSelected(initialSettings, SETTINGS_OBJECT_THRESHOLD, i)
                                         || settingSelected(initialSettings, SETTINGS_OBJECT_SIZE_FILTER, i),
+                                settingsDataStatusForEngine(statusConfig, channelIndex(i), "cellpose"),
                                 cellposeGroup, aiAssistedGroup, allSettingsGroup);
                     }
                 }
@@ -1338,7 +1444,7 @@ public class CreateBinFileAnalysis implements Analysis {
             lastWasBack = fork.wasBackPressed();
             if (lastWasBack && initialSettings != null) {
                 copySettings(readGranularCustomForkSelections(fork, n, showFilterParameters, showMinMax,
-                        showThreshold, showParticleSize, isStarDist, isCellpose,
+                        showThreshold, showParticleSize, showSegmentationMethod, isStarDist, isCellpose,
                         anyClassical, anyStarDist, anyCellpose), initialSettings);
             }
             return null;
@@ -1346,7 +1452,7 @@ public class CreateBinFileAnalysis implements Analysis {
         lastWasBack = false;
 
         return readGranularCustomForkSelections(fork, n, showFilterParameters, showMinMax,
-                showThreshold, showParticleSize, isStarDist, isCellpose,
+                showThreshold, showParticleSize, showSegmentationMethod, isStarDist, isCellpose,
                 anyClassical, anyStarDist, anyCellpose);
     }
 
@@ -1356,6 +1462,7 @@ public class CreateBinFileAnalysis implements Analysis {
                                                          boolean showMinMax,
                                                          boolean showThreshold,
                                                          boolean showParticleSize,
+                                                         boolean showSegmentationMethod,
                                                          boolean[] isStarDist,
                                                          boolean[] isCellpose,
                                                          boolean anyClassical,
@@ -1381,10 +1488,21 @@ public class CreateBinFileAnalysis implements Analysis {
                 }
             }
         }
+        if (showSegmentationMethod) {
+            for (int i = 0; i < n; i++) {
+                boolean on = fork.getNextBoolean();
+                result[SETTINGS_SEGMENTATION_METHOD][i] = on;
+                if (on) {
+                    result[SETTINGS_OBJECT_THRESHOLD][i] = true;
+                    result[SETTINGS_OBJECT_SIZE_FILTER][i] = true;
+                }
+            }
+        }
         if (showParticleSize && anyClassical) {
             for (int i = 0; i < n; i++) {
                 if (!isStarDist[i] && !isCellpose[i]) {
-                    result[SETTINGS_OBJECT_SIZE_FILTER][i] = fork.getNextBoolean();
+                    result[SETTINGS_OBJECT_SIZE_FILTER][i] =
+                            result[SETTINGS_OBJECT_SIZE_FILTER][i] || fork.getNextBoolean();
                 }
             }
         }
@@ -1394,8 +1512,10 @@ public class CreateBinFileAnalysis implements Analysis {
                 for (int i = 0; i < n; i++) {
                     if (isStarDist[i]) {
                         boolean on = fork.getNextBoolean();
-                        result[SETTINGS_OBJECT_THRESHOLD][i] = on;
-                        result[SETTINGS_OBJECT_SIZE_FILTER][i] = on;
+                        result[SETTINGS_OBJECT_THRESHOLD][i] =
+                                result[SETTINGS_OBJECT_THRESHOLD][i] || on;
+                        result[SETTINGS_OBJECT_SIZE_FILTER][i] =
+                                result[SETTINGS_OBJECT_SIZE_FILTER][i] || on;
                     }
                 }
             }
@@ -1403,8 +1523,10 @@ public class CreateBinFileAnalysis implements Analysis {
                 for (int i = 0; i < n; i++) {
                     if (isCellpose[i]) {
                         boolean on = fork.getNextBoolean();
-                        result[SETTINGS_OBJECT_THRESHOLD][i] = on;
-                        result[SETTINGS_OBJECT_SIZE_FILTER][i] = on;
+                        result[SETTINGS_OBJECT_THRESHOLD][i] =
+                                result[SETTINGS_OBJECT_THRESHOLD][i] || on;
+                        result[SETTINGS_OBJECT_SIZE_FILTER][i] =
+                                result[SETTINGS_OBJECT_SIZE_FILTER][i] || on;
                     }
                 }
             }
@@ -1432,13 +1554,40 @@ public class CreateBinFileAnalysis implements Analysis {
         }
     }
 
-    private static SettingsModeTickAllGroup addSettingsModeTickAllGroup(PipelineDialog dialog, String label) {
+    enum SettingsDataStatus {
+        NONE,
+        PARTIAL,
+        FULL
+    }
+
+    private SettingsModeTickAllGroup addSettingsModeTickAllGroup(PipelineDialog dialog, String label) {
         return new SettingsModeTickAllGroup(dialog.addSubHeaderToggle(label, false));
     }
 
-    private static ToggleSwitch addSettingsModeToggle(PipelineDialog dialog, String label, boolean selected,
-                                                      SettingsModeTickAllGroup... groups) {
+    private SettingsModeTickAllGroup addSettingsModeTickAllGroup(PipelineDialog dialog, String label,
+                                                                 SettingsDataStatus status) {
+        return new SettingsModeTickAllGroup(dialog.addSubHeaderToggleWithStatus(label, false,
+                settingsDataStatusLabel(status, label)));
+    }
+
+    private ToggleSwitch addSettingsModeToggle(PipelineDialog dialog, String label, boolean selected,
+                                               SettingsModeTickAllGroup... groups) {
         ToggleSwitch toggle = dialog.addToggle(label, selected);
+        attachSettingsModeGroups(toggle, groups);
+        return toggle;
+    }
+
+    private ToggleSwitch addSettingsModeToggle(PipelineDialog dialog, String label, boolean selected,
+                                               SettingsDataStatus status,
+                                               SettingsModeTickAllGroup... groups) {
+        ToggleSwitch toggle = dialog.addToggleWithStatus(label, selected,
+                settingsDataStatusLabel(status, label));
+        attachSettingsModeGroups(toggle, groups);
+        return toggle;
+    }
+
+    private static void attachSettingsModeGroups(ToggleSwitch toggle,
+                                                 SettingsModeTickAllGroup... groups) {
         if (groups != null) {
             for (int i = 0; i < groups.length; i++) {
                 if (groups[i] != null) {
@@ -1446,7 +1595,177 @@ public class CreateBinFileAnalysis implements Analysis {
                 }
             }
         }
-        return toggle;
+    }
+
+    private JLabel settingsDataStatusLabel(SettingsDataStatus status, String label) {
+        JLabel statusLabel = new JLabel(settingsDataStatusIcon(status));
+        statusLabel.setToolTipText(settingsDataTooltip(status, label));
+        return statusLabel;
+    }
+
+    private Icon settingsDataStatusIcon(SettingsDataStatus status) {
+        if (status == SettingsDataStatus.FULL) return loadStatusIcon("status_done.png");
+        if (status == SettingsDataStatus.PARTIAL) return loadStatusIcon("status_stale.png");
+        return loadStatusIcon("status_pending.png");
+    }
+
+    private Icon loadStatusIcon(String resourceName) {
+        if (GraphicsEnvironment.isHeadless()) return null;
+        URL url = getClass().getResource("/icons/" + resourceName);
+        return url == null ? null : new ImageIcon(url);
+    }
+
+    private static String settingsDataTooltip(SettingsDataStatus status, String label) {
+        String target = hasText(label) ? label : "This step";
+        if (status == SettingsDataStatus.FULL) {
+            return target + ": full saved data for all relevant channels";
+        }
+        if (status == SettingsDataStatus.PARTIAL) {
+            return target + ": partial saved data; some values are missing";
+        }
+        return target + ": no saved data found";
+    }
+
+    static SettingsDataStatus settingsDataStatusForFields(BinConfig cfg,
+                                                          int[] channelIndexes,
+                                                          BinField... fields) {
+        if (fields == null || fields.length == 0) return SettingsDataStatus.NONE;
+        int expected = 0;
+        int present = 0;
+        int[] channels = channelIndexes == null ? new int[0] : channelIndexes;
+        for (int f = 0; f < fields.length; f++) {
+            BinField field = fields[f];
+            if (field == null) continue;
+            if (field == BinField.Z_SLICE) {
+                expected++;
+                if (cfg != null && cfg.hasZSliceConfig()) present++;
+                continue;
+            }
+            List<String> values = fieldValues(cfg, field);
+            expected += channels.length;
+            present += presentValueCount(values, channels);
+        }
+        return dataStatusFromCounts(present, expected);
+    }
+
+    private static SettingsDataStatus settingsDataStatusForEngine(BinConfig cfg,
+                                                                  int[] channelIndexes,
+                                                                  String enginePrefix) {
+        int[] channels = channelIndexes == null ? new int[0] : channelIndexes;
+        int expected = channels.length;
+        int present = 0;
+        if (cfg != null && enginePrefix != null) {
+            for (int i = 0; i < channels.length; i++) {
+                int channel = channels[i];
+                if (channel >= 0 && channel < cfg.segmentationMethods.size()
+                        && safe(cfg.segmentationMethods.get(channel)).startsWith(enginePrefix)) {
+                    present++;
+                }
+            }
+        }
+        return dataStatusFromCounts(present, expected);
+    }
+
+    static SettingsDataStatus combineSettingsDataStatuses(SettingsDataStatus... statuses) {
+        boolean sawStatus = false;
+        boolean sawFull = false;
+        boolean sawPartial = false;
+        boolean sawNone = false;
+        if (statuses != null) {
+            for (int i = 0; i < statuses.length; i++) {
+                SettingsDataStatus status = statuses[i];
+                if (status == null) continue;
+                sawStatus = true;
+                if (status == SettingsDataStatus.FULL) sawFull = true;
+                else if (status == SettingsDataStatus.PARTIAL) sawPartial = true;
+                else sawNone = true;
+            }
+        }
+        if (!sawStatus) return SettingsDataStatus.NONE;
+        if (sawPartial) return SettingsDataStatus.PARTIAL;
+        if (sawFull && sawNone) return SettingsDataStatus.PARTIAL;
+        return sawFull ? SettingsDataStatus.FULL : SettingsDataStatus.NONE;
+    }
+
+    private static SettingsDataStatus combineDisplayedSettingsDataStatuses(SettingsDataStatus... statuses) {
+        return combineSettingsDataStatuses(statuses);
+    }
+
+    private static SettingsDataStatus dataStatusFromCounts(int present, int expected) {
+        if (expected <= 0 || present <= 0) return SettingsDataStatus.NONE;
+        if (present >= expected) return SettingsDataStatus.FULL;
+        return SettingsDataStatus.PARTIAL;
+    }
+
+    private static int presentValueCount(List<String> values, int[] channelIndexes) {
+        if (values == null || channelIndexes == null) return 0;
+        int present = 0;
+        for (int i = 0; i < channelIndexes.length; i++) {
+            int channel = channelIndexes[i];
+            if (channel >= 0 && channel < values.size() && hasText(values.get(channel))) {
+                present++;
+            }
+        }
+        return present;
+    }
+
+    private static List<String> fieldValues(BinConfig cfg, BinField field) {
+        if (cfg == null || field == null) return Collections.emptyList();
+        switch (field) {
+            case CHANNEL_NAMES:
+                return cfg.channelNames;
+            case CHANNEL_COLORS:
+                return cfg.channelColors;
+            case OBJECT_THRESHOLDS:
+                return cfg.channelThresholds;
+            case PARTICLE_SIZES:
+                return cfg.channelSizes;
+            case DISPLAY_MIN_MAX:
+                return cfg.channelMinMax;
+            case INTENSITY_THRESHOLDS:
+                return cfg.channelIntensityThresholds;
+            case SEGMENTATION_METHODS:
+                return cfg.segmentationMethods;
+            case FILTER_PRESETS:
+                return cfg.channelFilterPresets;
+            default:
+                return Collections.emptyList();
+        }
+    }
+
+    private static int[] channelIndexes(int count) {
+        int safeCount = Math.max(0, count);
+        int[] out = new int[safeCount];
+        for (int i = 0; i < safeCount; i++) out[i] = i;
+        return out;
+    }
+
+    private static int[] channelIndex(int index) {
+        return index < 0 ? new int[0] : new int[]{index};
+    }
+
+    private static int[] matchingChannelIndexes(boolean[] isStarDist, boolean[] isCellpose,
+                                                boolean wantStarDist, boolean wantCellpose) {
+        int n = isStarDist == null ? 0 : isStarDist.length;
+        List<Integer> indexes = new ArrayList<Integer>();
+        for (int i = 0; i < n; i++) {
+            boolean starDist = isStarDist[i];
+            boolean cellpose = isCellpose != null && i < isCellpose.length && isCellpose[i];
+            boolean match = wantStarDist ? starDist
+                    : (wantCellpose ? cellpose : (!starDist && !cellpose));
+            if (match) indexes.add(Integer.valueOf(i));
+        }
+        int[] out = new int[indexes.size()];
+        for (int i = 0; i < indexes.size(); i++) out[i] = indexes.get(i).intValue();
+        return out;
+    }
+
+    private static String channelName(List<String> channelNames, int channelIndex) {
+        if (channelNames != null && channelIndex >= 0 && channelIndex < channelNames.size()
+                && hasText(channelNames.get(channelIndex))) {
+            return channelNames.get(channelIndex);
+        }
+        return "Channel" + (channelIndex + 1);
     }
 
     static final class SettingsModeTickAllGroup {
@@ -1808,9 +2127,6 @@ public class CreateBinFileAnalysis implements Analysis {
             pd.setModal(false);
             if (existing == null) pd.enableBackButton();
             pd.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
-            boolean starDistAvailable = StarDistDetector.isAvailable();
-            CellposeRuntime.Status cellposeStatus = CellposeRuntime.probeConfigured();
-            boolean cellposeReady = cellposeStatus != null && cellposeStatus.ready;
             final int channelCount = n;
             final BinSetupBindings binBindings = new BinSetupBindings(channelCount);
             addCreateBinSetupControls(pd, directory, binBindings,
@@ -1828,9 +2144,9 @@ public class CreateBinFileAnalysis implements Analysis {
                         }
                     });
             pd.addSubHeader("Channel Identity");
-            pd.addMessage("Assign each channel's display name, LUT, and segmentation method.");
+            pd.addMessage("Assign each channel's display name and LUT.");
             ChannelIdentityGrid identityGrid = buildChannelIdentityGrid(dialogDefaults,
-                    starDistAvailable, cellposeReady, cellposeStatus);
+                    false, false, null);
             bindChannelIdentityGrid(binBindings, identityGrid);
             pd.addComponent(identityGrid.panel);
             if (!pd.showDialog()) {
@@ -1855,29 +2171,8 @@ public class CreateBinFileAnalysis implements Analysis {
                 return null;
             }
 
-            List<String> segmentationSelections = new ArrayList<String>();
-            for (int i = 0; i < n; i++) {
-                segmentationSelections.add(comboText(binBindings.segmentationCombos[i], SEGMENTATION_CLASSICAL));
-            }
-
-            if (selectionsContain(segmentationSelections, SEGMENTATION_STARDIST)
-                    && !gateStarDistFeature("StarDist 3D segmentation")) {
-                draftConfig = buildBinUserConfigFromDialog(n, existing, dialogDefaults, binBindings);
-                continue;
-            }
-
-            boolean preferCellposeGpu = BinConfig.DEFAULT_CELLPOSE_USE_GPU;
-            if (selectionsContain(segmentationSelections, SEGMENTATION_CELLPOSE)) {
-                if (!gateCellposeFeature("Cellpose segmentation")) {
-                    draftConfig = buildBinUserConfigFromDialog(n, existing, dialogDefaults, binBindings);
-                    continue;
-                }
-                CellposeRuntime.Status readyStatus = CellposeRuntime.probeConfigured();
-                preferCellposeGpu = readyStatus.ready ? readyStatus.gpuAvailable : BinConfig.DEFAULT_CELLPOSE_USE_GPU;
-            }
-
             BinUserConfig userCfg = buildBinUserConfigFromDialog(n, existing,
-                    dialogDefaults, binBindings, preferCellposeGpu);
+                    dialogDefaults, binBindings);
             applyHandledCustomDemotions(binFolder, userCfg);
             return userCfg;
         }
@@ -1896,8 +2191,7 @@ public class CreateBinFileAnalysis implements Analysis {
         final JComboBox<String>[] segmentationCombos = new JComboBox[nCh];
         final JLabel[] rowLabels = new JLabel[]{
                 createChannelIdentityGridRowLabel("Channel name"),
-                createChannelIdentityGridRowLabel("LUT"),
-                createChannelIdentityGridRowLabel("Segmentation")
+                createChannelIdentityGridRowLabel("LUT")
         };
 
         JPanel panel = new JPanel(new GridBagLayout());
@@ -1918,16 +2212,10 @@ public class CreateBinFileAnalysis implements Analysis {
                 0, 1, 0.0, GridBagConstraints.NONE, new Insets(4, 0, 4, 8));
         addChannelIdentityGridComponent(panel, rowLabels[1],
                 0, 2, 0.0, GridBagConstraints.NONE, new Insets(4, 0, 4, 8));
-        addChannelIdentityGridComponent(panel, rowLabels[2],
-                0, 3, 0.0, GridBagConstraints.NONE, new Insets(4, 0, 0, 8));
 
         for (int ch = 0; ch < nCh; ch++) {
             String defName = valueAt(defaults.names, ch, "Channel" + (ch + 1));
             String defColor = toLutName(valueAt(defaults.colors, ch, "Grays"));
-            String defSegmentation = segmentationChoiceForDialogDefault(
-                    valueAt(defaults.segmentationMethods, ch, "classical"),
-                    starDistAvailable,
-                    cellposeReady);
 
             nameFields[ch] = new JTextField(defName, 14);
             nameFields[ch].setName("createBin.channel." + ch + ".name");
@@ -1939,32 +2227,12 @@ public class CreateBinFileAnalysis implements Analysis {
             selectComboItem(lutCombos[ch], defColor);
             constrainChannelIdentityInput(lutCombos[ch], CHANNEL_IDENTITY_CELL_WIDTH);
 
-            segmentationCombos[ch] = new JComboBox<String>(SEGMENTATION_OPTIONS);
-            segmentationCombos[ch].setName("createBin.channel." + ch + ".segmentation");
-            selectComboItem(segmentationCombos[ch], defSegmentation);
-            constrainChannelIdentityInput(segmentationCombos[ch], CHANNEL_IDENTITY_CELL_WIDTH);
-            segmentationCombos[ch].setToolTipText(plainSegmentationHelp(
-                    defSegmentation, starDistAvailable, cellposeStatus));
-
-            final JComboBox<String> segmentationCombo = segmentationCombos[ch];
-            segmentationCombo.addItemListener(new java.awt.event.ItemListener() {
-                @Override public void itemStateChanged(java.awt.event.ItemEvent e) {
-                    if (e.getStateChange() == java.awt.event.ItemEvent.SELECTED) {
-                        segmentationCombo.setToolTipText(plainSegmentationHelp(
-                                (String) e.getItem(), starDistAvailable, cellposeStatus));
-                    }
-                }
-            });
-
             addChannelIdentityGridComponent(panel,
                     createChannelIdentityGridCell(nameFields[ch], null),
                     ch + 1, 1, 1.0, GridBagConstraints.HORIZONTAL, new Insets(4, 0, 4, 10));
             addChannelIdentityGridComponent(panel,
                     createChannelIdentityGridCell(lutCombos[ch], "Display color"),
                     ch + 1, 2, 1.0, GridBagConstraints.HORIZONTAL, new Insets(4, 0, 4, 10));
-            addChannelIdentityGridComponent(panel,
-                    createChannelIdentityGridCell(segmentationCombos[ch], "Object detection method"),
-                    ch + 1, 3, 1.0, GridBagConstraints.HORIZONTAL, new Insets(4, 0, 0, 10));
         }
 
         return new ChannelIdentityGrid(panel, nameFields, lutCombos, segmentationCombos, rowLabels);
@@ -3024,6 +3292,12 @@ public class CreateBinFileAnalysis implements Analysis {
                     && customSettings[SETTINGS_OBJECT_THRESHOLD][ch]);
             boolean useParticleSize = ch < customSettings[SETTINGS_OBJECT_SIZE_FILTER].length
                     && customSettings[SETTINGS_OBJECT_SIZE_FILTER][ch];
+            boolean useSegmentationMethod = ch < customSettings[SETTINGS_SEGMENTATION_METHOD].length
+                    && customSettings[SETTINGS_SEGMENTATION_METHOD][ch];
+            if (useSegmentationMethod) {
+                useThreshold = true;
+                useParticleSize = true;
+            }
             if (!useFilterParameters && !useMinMax && !useThreshold && !useParticleSize) continue;
 
             qcChannels.add(new QcSelectionChannel(
@@ -3041,7 +3315,8 @@ public class CreateBinFileAnalysis implements Analysis {
     /**
      * Interactive QC. Each setting is independently toggled per channel.
      * customSettings[0] = filter params, [1] = min-max,
-     * [2] = ROI intensity thresholds, [3] = object thresholds, [4] = object size filter.
+     * [2] = ROI intensity thresholds, [3] = object thresholds,
+     * [4] = object size filter, [5] = segmentation method.
      * All values persist between images within a channel (including across restarts).
      *
      * @return "done", "cancel", "back", or "skip"
@@ -3894,6 +4169,10 @@ public class CreateBinFileAnalysis implements Analysis {
 
     private String interactiveQC(List<QcImageSelection> images, BinUserConfig cfg, File binFolder,
                                   boolean[][] customSettings) {
+        if (useSequentialEmbeddedQcWorkflow()) {
+            return interactiveSequentialEmbeddedQC(images, cfg, binFolder, customSettings);
+        }
+
         int nChannels = cfg.names.size();
         boolean[] customFilterParameters = customSettings[SETTINGS_FILTER_PARAMETERS];
         boolean[] customMinMax = customSettings[SETTINGS_MIN_MAX];
@@ -3926,6 +4205,24 @@ public class CreateBinFileAnalysis implements Analysis {
             }
 
             // ── StarDist 3D branch: replaces threshold + particle size steps ──
+            if (doObjTh || doSz) {
+                String objectQcResult = interactiveSegmentationObjectQC(images, cfg, binFolder, ch, false);
+                if ("cancel".equals(objectQcResult)) return "cancel";
+                if ("back".equals(objectQcResult)) return "back";
+
+                String currentMethod = ch < cfg.segmentationMethods.size()
+                        ? safe(cfg.segmentationMethods.get(ch))
+                        : "classical";
+                boolean currentAi = currentMethod.startsWith("stardist")
+                        || currentMethod.startsWith("cellpose");
+                if (doRoiIntensityTh && currentAi) {
+                    String thresholdResult = interactiveChannelThresholdQC(images, cfg, binFolder, ch);
+                    if ("cancel".equals(thresholdResult)) return "cancel";
+                    if ("back".equals(thresholdResult)) return "back";
+                }
+                continue;
+            }
+
             boolean isStarDist = cfg.segmentationMethods.get(ch).startsWith("stardist");
             boolean isCellpose = cfg.segmentationMethods.get(ch).startsWith("cellpose");
             if (isStarDist && (doObjTh || doSz)) {
@@ -4724,6 +5021,113 @@ public class CreateBinFileAnalysis implements Analysis {
         return "done";
     }
 
+    private boolean useSequentialEmbeddedQcWorkflow() {
+        return true;
+    }
+
+    private String interactiveSequentialEmbeddedQC(List<QcImageSelection> images, BinUserConfig cfg,
+                                                   File binFolder, boolean[][] customSettings) {
+        List<InteractiveQcStep> steps = buildInteractiveQcSteps(cfg, customSettings);
+        int stepIndex = 0;
+        while (stepIndex < steps.size()) {
+            String result = runInteractiveQcStep(images, cfg, binFolder, steps.get(stepIndex));
+            if ("cancel".equals(result)) {
+                return "cancel";
+            }
+            if ("back".equals(result)) {
+                if (stepIndex <= 0) {
+                    return "back";
+                }
+                stepIndex--;
+                continue;
+            }
+            stepIndex++;
+        }
+        return "done";
+    }
+
+    private List<InteractiveQcStep> buildInteractiveQcSteps(BinUserConfig cfg,
+                                                            boolean[][] customSettings) {
+        List<InteractiveQcStep> steps = new ArrayList<InteractiveQcStep>();
+        if (cfg == null || customSettings == null) {
+            return steps;
+        }
+        int nChannels = cfg.names.size();
+        for (int ch = 0; ch < nChannels; ch++) {
+            boolean doMM = settingSelected(customSettings, SETTINGS_MIN_MAX, ch);
+            if (doMM) {
+                steps.add(new InteractiveQcStep(InteractiveQcStage.DISPLAY_RANGE, ch));
+            }
+            boolean doFilter = settingSelected(customSettings, SETTINGS_FILTER_PARAMETERS, ch);
+            if (doFilter) {
+                steps.add(new InteractiveQcStep(InteractiveQcStage.FILTER_PARAMETERS, ch));
+            }
+            boolean doRoiIntensityTh = settingSelected(customSettings, SETTINGS_ROI_INTENSITY_THRESHOLD, ch);
+            boolean doObjTh = settingSelected(customSettings, SETTINGS_OBJECT_THRESHOLD, ch);
+            boolean doSz = settingSelected(customSettings, SETTINGS_OBJECT_SIZE_FILTER, ch);
+            boolean doSegmentationMethod = settingSelected(customSettings, SETTINGS_SEGMENTATION_METHOD, ch);
+            if (doSegmentationMethod || doObjTh || doSz) {
+                steps.add(new InteractiveQcStep(
+                        InteractiveQcStage.SEGMENTATION_OBJECT,
+                        ch,
+                        doRoiIntensityTh));
+            } else if (doRoiIntensityTh) {
+                steps.add(new InteractiveQcStep(InteractiveQcStage.CHANNEL_THRESHOLD, ch));
+            }
+        }
+        return steps;
+    }
+
+    private String runInteractiveQcStep(List<QcImageSelection> images, BinUserConfig cfg,
+                                        File binFolder, InteractiveQcStep step) {
+        switch (step.stage) {
+            case FILTER_PARAMETERS:
+                return interactiveFilterParameterQC(images, cfg, binFolder, step.channelIndex);
+            case DISPLAY_RANGE:
+                return interactiveDisplayRangeQC(images, cfg, binFolder, step.channelIndex);
+            case SEGMENTATION_OBJECT:
+                return interactiveSegmentationObjectQC(
+                        images, cfg, binFolder, step.channelIndex, step.includeAiChannelThreshold);
+            case STARDIST_PARAMETERS:
+                return runEmbeddedStarDistParameterQC(images, cfg, binFolder, step.channelIndex);
+            case CELLPOSE_PARAMETERS:
+                return runEmbeddedCellposeParameterQC(images, cfg, binFolder, step.channelIndex);
+            case CHANNEL_THRESHOLD:
+                return interactiveChannelThresholdQC(images, cfg, binFolder, step.channelIndex);
+            case PARTICLE_SIZE:
+                return interactiveParticleSizeQC(images, cfg, binFolder, step.channelIndex);
+            default:
+                return "cancel";
+        }
+    }
+
+    private enum InteractiveQcStage {
+        FILTER_PARAMETERS,
+        DISPLAY_RANGE,
+        SEGMENTATION_OBJECT,
+        STARDIST_PARAMETERS,
+        CELLPOSE_PARAMETERS,
+        CHANNEL_THRESHOLD,
+        PARTICLE_SIZE
+    }
+
+    private static final class InteractiveQcStep {
+        private final InteractiveQcStage stage;
+        private final int channelIndex;
+        private final boolean includeAiChannelThreshold;
+
+        private InteractiveQcStep(InteractiveQcStage stage, int channelIndex) {
+            this(stage, channelIndex, false);
+        }
+
+        private InteractiveQcStep(InteractiveQcStage stage, int channelIndex,
+                                  boolean includeAiChannelThreshold) {
+            this.stage = stage;
+            this.channelIndex = channelIndex;
+            this.includeAiChannelThreshold = includeAiChannelThreshold;
+        }
+    }
+
     private String interactiveParticleSizeQC(List<QcImageSelection> images, BinUserConfig cfg,
                                              File binFolder, int channelIndex) {
         if (!gateObjectsCounterFeature("3D Objects Counter preview")) {
@@ -5214,6 +5618,91 @@ public class CreateBinFileAnalysis implements Analysis {
         // Config QC stays in the owned embedded widget; legacy label-image
         // windows must not be selected by normal setup routing.
         return true;
+    }
+
+    private String interactiveSegmentationObjectQC(List<QcImageSelection> images,
+                                                   BinUserConfig cfg,
+                                                   File binFolder,
+                                                   int channelIndex,
+                                                   boolean includeAiChannelThreshold) {
+        if (!embeddedConfigQcUiAvailable()) {
+            return "cancel";
+        }
+        ensureConfigHasChannels(cfg);
+        final SegmentationMethodStore methodStore =
+                new SegmentationMethodStore(cfg, channelIndex);
+        ConfigQcContext context = new ConfigQcContext(
+                projectRootForConfigurationDir(binFolder),
+                binFolder,
+                cfg,
+                filterParameterContextImages(images),
+                cfg.names,
+                channelIndex);
+        List<ConfigQcStage> stages = new ArrayList<ConfigQcStage>();
+        stages.add(new SegmentationMethodStage(methodStore));
+        stages.add(new ConditionalConfigQcStage(
+                withSegmentationMethodSwitcher(createChannelThresholdStage(cfg, binFolder, channelIndex),
+                        methodStore),
+                new StagePredicate() {
+                    @Override public boolean isApplicable() {
+                        return isClassicalSegmentation(cfg, channelIndex);
+                    }
+                }));
+        stages.add(new ConditionalConfigQcStage(
+                withSegmentationMethodSwitcher(createParticleSizeStage(cfg, binFolder, channelIndex),
+                        methodStore),
+                new StagePredicate() {
+                    @Override public boolean isApplicable() {
+                        return isClassicalSegmentation(cfg, channelIndex);
+                    }
+                }));
+        stages.add(new ConditionalConfigQcStage(
+                withSegmentationMethodSwitcher(createStarDistParameterStage(cfg, binFolder, channelIndex),
+                        methodStore),
+                new StagePredicate() {
+                    @Override public boolean isApplicable() {
+                        return isStarDistSegmentation(cfg, channelIndex);
+                    }
+                }));
+        stages.add(new ConditionalConfigQcStage(
+                withSegmentationMethodSwitcher(createCellposeParameterStage(cfg, binFolder, channelIndex),
+                        methodStore),
+                new StagePredicate() {
+                    @Override public boolean isApplicable() {
+                        return isCellposeSegmentation(cfg, channelIndex);
+                    }
+                }));
+        if (includeAiChannelThreshold) {
+            stages.add(new ConditionalConfigQcStage(
+                    withSegmentationMethodSwitcher(createChannelThresholdStage(cfg, binFolder, channelIndex),
+                            methodStore),
+                    new StagePredicate() {
+                        @Override public boolean isApplicable() {
+                            return isStarDistSegmentation(cfg, channelIndex)
+                                    || isCellposeSegmentation(cfg, channelIndex);
+                        }
+                    }));
+        }
+
+        ConfigQcResult result = showEmbeddedConfigQcDialog(context, stages);
+        if (result == ConfigQcResult.DONE || result == ConfigQcResult.SKIP_CURRENT_IMAGE) {
+            if (isStarDistSegmentation(cfg, channelIndex) || isCellposeSegmentation(cfg, channelIndex)) {
+                cfg.sizes.set(channelIndex, "100-Infinity");
+                if (!includeAiChannelThreshold) {
+                    cfg.objectThresholds.set(channelIndex, "default");
+                }
+            }
+            return "continue";
+        }
+        if (result == ConfigQcResult.BACK) {
+            return "back";
+        }
+        return "cancel";
+    }
+
+    private ConfigQcStage withSegmentationMethodSwitcher(ConfigQcStage delegate,
+                                                         SegmentationMethodStage.MethodStore methodStore) {
+        return new SegmentationMethodSwitchingStage(delegate, methodStore);
     }
 
     private String runEmbeddedStarDistParameterQC(List<QcImageSelection> images, BinUserConfig cfg,
@@ -7014,6 +7503,204 @@ public class CreateBinFileAnalysis implements Analysis {
             return;
         }
         segmentationMethods.set(channelIndex, "classical");
+    }
+
+    private static boolean isClassicalSegmentation(BinUserConfig cfg, int channelIndex) {
+        return !isStarDistSegmentation(cfg, channelIndex)
+                && !isCellposeSegmentation(cfg, channelIndex);
+    }
+
+    private static boolean isStarDistSegmentation(BinUserConfig cfg, int channelIndex) {
+        if (cfg == null || channelIndex < 0 || channelIndex >= cfg.segmentationMethods.size()) return false;
+        return safe(cfg.segmentationMethods.get(channelIndex)).startsWith("stardist");
+    }
+
+    private static boolean isCellposeSegmentation(BinUserConfig cfg, int channelIndex) {
+        if (cfg == null || channelIndex < 0 || channelIndex >= cfg.segmentationMethods.size()) return false;
+        return safe(cfg.segmentationMethods.get(channelIndex)).startsWith("cellpose");
+    }
+
+    private interface StagePredicate {
+        boolean isApplicable();
+    }
+
+    private static final class ConditionalConfigQcStage implements ConfigQcStage {
+        private final ConfigQcStage delegate;
+        private final StagePredicate predicate;
+
+        ConditionalConfigQcStage(ConfigQcStage delegate, StagePredicate predicate) {
+            this.delegate = delegate;
+            this.predicate = predicate;
+        }
+
+        @Override public String key() {
+            return delegate == null ? ConfigQcStage.super.key() : delegate.key();
+        }
+
+        @Override public String title() {
+            return delegate == null ? "" : delegate.title();
+        }
+
+        @Override public boolean isApplicable(ConfigQcContext context) {
+            return (predicate == null || predicate.isApplicable())
+                    && delegate != null
+                    && delegate.isApplicable(context);
+        }
+
+        @Override public boolean showPreviewDisplayControls() {
+            return delegate == null || delegate.showPreviewDisplayControls();
+        }
+
+        @Override public void onEnter(ConfigQcContext context, flash.pipeline.ui.preview.PreviewPairPanel preview) {
+            if (delegate != null) delegate.onEnter(context, preview);
+        }
+
+        @Override public JComponent buildControls(ConfigQcContext context, ConfigQcActions actions) {
+            return delegate == null ? null : delegate.buildControls(context, actions);
+        }
+
+        @Override public boolean lockIn(ConfigQcContext context) {
+            return delegate != null && delegate.lockIn(context);
+        }
+
+        @Override public void skipCurrentImage(ConfigQcContext context) {
+            if (delegate != null) delegate.skipCurrentImage(context);
+        }
+
+        @Override public void restartStage(ConfigQcContext context) {
+            if (delegate != null) delegate.restartStage(context);
+        }
+
+        @Override public void previousImage(ConfigQcContext context) {
+            if (delegate != null) delegate.previousImage(context);
+        }
+
+        @Override public void onLeave(ConfigQcContext context) {
+            if (delegate != null) delegate.onLeave(context);
+        }
+    }
+
+    private static final class SegmentationMethodSwitchingStage implements ConfigQcStage {
+        private final ConfigQcStage delegate;
+        private final SegmentationMethodStage.MethodStore methodStore;
+
+        SegmentationMethodSwitchingStage(ConfigQcStage delegate,
+                                         SegmentationMethodStage.MethodStore methodStore) {
+            this.delegate = delegate;
+            this.methodStore = methodStore;
+        }
+
+        @Override public String key() {
+            return delegate == null ? ConfigQcStage.super.key() : delegate.key();
+        }
+
+        @Override public String title() {
+            return delegate == null ? "" : delegate.title();
+        }
+
+        @Override public boolean isApplicable(ConfigQcContext context) {
+            return delegate != null && delegate.isApplicable(context);
+        }
+
+        @Override public boolean showPreviewDisplayControls() {
+            return delegate == null || delegate.showPreviewDisplayControls();
+        }
+
+        @Override public void onEnter(ConfigQcContext context, flash.pipeline.ui.preview.PreviewPairPanel preview) {
+            if (delegate != null) delegate.onEnter(context, preview);
+        }
+
+        @Override public JComponent buildControls(ConfigQcContext context, ConfigQcActions actions) {
+            JPanel panel = new JPanel(new BorderLayout(0, 8));
+            panel.setOpaque(false);
+            panel.add(SegmentationMethodStage.buildChangeMethodPanel(methodStore, actions),
+                    BorderLayout.NORTH);
+            JComponent controls = delegate == null ? null : delegate.buildControls(context, actions);
+            if (controls != null) {
+                panel.add(controls, BorderLayout.CENTER);
+            }
+            return panel;
+        }
+
+        @Override public boolean lockIn(ConfigQcContext context) {
+            return delegate != null && delegate.lockIn(context);
+        }
+
+        @Override public void skipCurrentImage(ConfigQcContext context) {
+            if (delegate != null) delegate.skipCurrentImage(context);
+        }
+
+        @Override public void restartStage(ConfigQcContext context) {
+            if (delegate != null) delegate.restartStage(context);
+        }
+
+        @Override public void previousImage(ConfigQcContext context) {
+            if (delegate != null) delegate.previousImage(context);
+        }
+
+        @Override public void onLeave(ConfigQcContext context) {
+            if (delegate != null) delegate.onLeave(context);
+        }
+    }
+
+    private final class SegmentationMethodStore implements SegmentationMethodStage.MethodStore {
+        private final BinUserConfig cfg;
+        private final int channelIndex;
+        private final Map<String, String> rememberedTokens = new LinkedHashMap<String, String>();
+
+        SegmentationMethodStore(BinUserConfig cfg, int channelIndex) {
+            this.cfg = cfg;
+            this.channelIndex = channelIndex;
+            rememberCurrentToken();
+        }
+
+        @Override public String getChoice() {
+            return segmentationChoiceForMethod(currentToken());
+        }
+
+        @Override public boolean selectChoice(String choice) {
+            String normalized = choice == null ? SEGMENTATION_CLASSICAL : choice.trim();
+            rememberCurrentToken();
+            boolean preferCellposeGpu = BinConfig.DEFAULT_CELLPOSE_USE_GPU;
+            if (SEGMENTATION_STARDIST.equals(normalized)
+                    && !gateStarDistFeature("StarDist 3D segmentation")) {
+                return false;
+            }
+            if (SEGMENTATION_CELLPOSE.equals(normalized)) {
+                if (!gateCellposeFeature("Cellpose segmentation")) {
+                    return false;
+                }
+                CellposeRuntime.Status readyStatus = CellposeRuntime.probeConfigured();
+                preferCellposeGpu = readyStatus.ready
+                        ? readyStatus.gpuAvailable
+                        : BinConfig.DEFAULT_CELLPOSE_USE_GPU;
+            }
+
+            String remembered = rememberedTokens.get(normalized);
+            if (remembered != null && remembered.trim().length() > 0) {
+                cfg.segmentationMethods.set(channelIndex, remembered);
+            } else {
+                String existingMethod = currentToken();
+                applySegmentationSelection(cfg.segmentationMethods, channelIndex,
+                        normalized, existingMethod, preferCellposeGpu);
+            }
+            rememberCurrentToken();
+            return true;
+        }
+
+        private void rememberCurrentToken() {
+            String token = currentToken();
+            rememberedTokens.put(segmentationChoiceForMethod(token), token);
+        }
+
+        private String currentToken() {
+            if (cfg == null || channelIndex < 0) return "classical";
+            while (cfg.segmentationMethods.size() <= channelIndex) {
+                cfg.segmentationMethods.add("classical");
+            }
+            String token = cfg.segmentationMethods.get(channelIndex);
+            return token == null || token.trim().isEmpty() ? "classical" : token;
+        }
     }
 
     private static boolean selectionsContain(List<String> selections, String selection) {

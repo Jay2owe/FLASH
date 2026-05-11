@@ -327,6 +327,38 @@ public class PipelineDialog {
         return toggle;
     }
 
+    /**
+     * Adds a section header with a leading status icon and controlling toggle.
+     * The returned toggle is not part of the sequential getNextBoolean() list.
+     */
+    public ToggleSwitch addHeaderToggleWithStatus(String text, boolean defaultValue,
+                                                  JComponent leadingIcon) {
+        addToBody(Box.createVerticalStrut(10));
+
+        JPanel row = createRow();
+        JLabel statusLabel = normalizeStatusIcon(leadingIcon);
+        row.add(statusLabel);
+        row.add(Box.createHorizontalStrut(6));
+
+        JLabel label = new JLabel(text);
+        label.setFont(label.getFont().deriveFont(Font.BOLD, 13f));
+        label.setForeground(HEADER_COLOR);
+        row.add(label);
+        row.add(Box.createHorizontalStrut(8));
+        ToggleSwitch toggle = new ToggleSwitch(defaultValue);
+        row.add(toggle);
+        row.add(Box.createHorizontalGlue());
+        addToBody(row);
+        addToBody(Box.createVerticalStrut(4));
+
+        JSeparator sep = new JSeparator(SwingConstants.HORIZONTAL);
+        sep.setMaximumSize(new Dimension(Integer.MAX_VALUE, 1));
+        sep.setAlignmentX(Component.LEFT_ALIGNMENT);
+        addToBody(sep);
+        addToBody(Box.createVerticalStrut(6));
+        return toggle;
+    }
+
     /** Adds a smaller subsection label under the current section header. */
     public void addSubHeader(String text) {
         addToBody(Box.createVerticalStrut(6));
@@ -348,6 +380,34 @@ public class PipelineDialog {
 
         JPanel row = createRow();
         row.setBorder(new EmptyBorder(0, 20, 0, 4));
+        JLabel label = new JLabel(text);
+        label.setFont(label.getFont().deriveFont(Font.BOLD, 12f));
+        label.setForeground(SUBHEADER_COLOR);
+        row.add(label);
+        row.add(Box.createHorizontalStrut(8));
+        ToggleSwitch toggle = new ToggleSwitch(defaultValue);
+        row.add(toggle);
+        row.add(Box.createHorizontalGlue());
+
+        addToBody(row);
+        addToBody(Box.createVerticalStrut(3));
+        return toggle;
+    }
+
+    /**
+     * Adds a subsection label with a leading status icon and controlling toggle.
+     * The returned toggle is not part of the sequential getNextBoolean() list.
+     */
+    public ToggleSwitch addSubHeaderToggleWithStatus(String text, boolean defaultValue,
+                                                     JComponent leadingIcon) {
+        addToBody(Box.createVerticalStrut(6));
+
+        JPanel row = createRow();
+        row.setBorder(new EmptyBorder(0, 20, 0, 4));
+        JLabel statusLabel = normalizeStatusIcon(leadingIcon);
+        row.add(statusLabel);
+        row.add(Box.createHorizontalStrut(6));
+
         JLabel label = new JLabel(text);
         label.setFont(label.getFont().deriveFont(Font.BOLD, 12f));
         label.setForeground(SUBHEADER_COLOR);

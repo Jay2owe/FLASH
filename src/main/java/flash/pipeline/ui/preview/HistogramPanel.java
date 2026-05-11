@@ -55,10 +55,15 @@ public final class HistogramPanel extends JPanel {
     }
 
     public static Histogram calculateHistogram(ImagePlus image, int binCount) {
-        if (image == null || image.getStack() == null || image.getStackSize() < 1) {
-            return Histogram.empty(binCount);
+        int safeBinCount = Math.max(1, binCount);
+        try {
+            if (image == null || image.getStack() == null || image.getStackSize() < 1) {
+                return Histogram.empty(safeBinCount);
+            }
+            return calculateHistogram(image.getProcessor(), safeBinCount);
+        } catch (RuntimeException e) {
+            return Histogram.empty(safeBinCount);
         }
-        return calculateHistogram(image.getProcessor(), binCount);
     }
 
     public static Histogram calculateHistogram(ImageProcessor processor, int binCount) {

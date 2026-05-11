@@ -66,6 +66,7 @@ public final class ZSliceSelectionStage implements ConfigQcStage {
     private ImagePlus activeImage;
     private SeriesMeta activeMeta;
     private ZSliceRange lastAcceptedRange;
+    private ZSliceRange restartRange;
 
     private JLabel imageLabel;
     private JLabel totalSlicesLabel;
@@ -210,7 +211,11 @@ public final class ZSliceSelectionStage implements ConfigQcStage {
 
     @Override
     public void restartStage(ConfigQcContext context) {
-        lastAcceptedRange = null;
+        ZSliceRange range = currentRange();
+        if (range != null) {
+            restartRange = range;
+            lastAcceptedRange = range;
+        }
         setStatus("Restarting z-slice selection from the first image.");
     }
 
@@ -222,6 +227,7 @@ public final class ZSliceSelectionStage implements ConfigQcStage {
         closeActiveImage();
         preview = null;
         activeMeta = null;
+        restartRange = null;
     }
 
     ZSliceRange currentRangeForTest() {
@@ -430,6 +436,9 @@ public final class ZSliceSelectionStage implements ConfigQcStage {
 
     private DefaultSelection defaultSelection(SeriesMeta meta, ZSliceRange lastAcceptedRange, ImagePlus image) {
         int total = totalSlices(meta);
+        if (restartRange != null && restartRange.isValidFor(total)) {
+            return new DefaultSelection(restartRange, "Restart range", "");
+        }
         ZSliceSelection existing = selectionStore.get(meta.index);
         if (existing != null && existing.range != null && !existing.isFullStack()) {
             return new DefaultSelection(existing.range, "Saved range", "");

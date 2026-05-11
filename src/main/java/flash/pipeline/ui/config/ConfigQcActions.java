@@ -17,4 +17,7 @@ public interface ConfigQcActions {
     void restartStage();
 
     void cancel();
+
+    default void jumpToStage(String stageKey) {
+    }
 }

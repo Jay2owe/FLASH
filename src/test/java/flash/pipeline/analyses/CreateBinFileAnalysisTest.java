@@ -4,6 +4,8 @@ import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinField;
 import flash.pipeline.image.NamedFilterLoader;
 import flash.pipeline.io.SeriesMeta;
+import flash.pipeline.runtime.DependencyService;
+import flash.pipeline.runtime.FeatureDependencyGate;
 import flash.pipeline.ui.ToggleSwitch;
 import flash.pipeline.ui.config.ChannelThresholdStage;
 import flash.pipeline.ui.config.ConfigQcActions;
@@ -12,11 +14,14 @@ import flash.pipeline.ui.config.ConfigQcResult;
 import flash.pipeline.ui.config.ConfigQcStage;
 import flash.pipeline.ui.config.DisplayRangeStage;
 import flash.pipeline.ui.config.FilterParameterStage;
+import flash.pipeline.ui.config.SegmentationMethodStage;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import flash.pipeline.zslice.ZSliceMode;
 import ij.ImagePlus;
 import ij.process.ByteProcessor;
 import ij.process.ImageProcessor;
+import org.junit.After;
+import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -26,6 +31,7 @@ import java.awt.Container;
 import java.awt.GraphicsEnvironment;
 import java.io.File;
 import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -39,6 +45,7 @@ import java.util.Set;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assume.assumeFalse;
 
@@ -46,6 +53,17 @@ public class CreateBinFileAnalysisTest {
 
     @Rule
     public TemporaryFolder temp = new TemporaryFolder();
+
+    @Before
+    public void blockDependencyGateDialogs() {
+        FeatureDependencyGate.setUiMode(true);
+    }
+
+    @After
+    public void resetDependencyGateDialogs() {
+        FeatureDependencyGate.configure(new DependencyService(), null);
+        FeatureDependencyGate.setUiMode(false);
+    }
 
     @Test
     public void escapeHtmlText_escapesHtmlSensitiveCharacters() {
@@ -299,6 +317,31 @@ public class CreateBinFileAnalysisTest {
     }
 
     @Test
+    public void executeFiltered_segmentationMethodRoutesThroughObjectQcNotStandalonePage() throws Exception {
+        File dir = temp.newFolder("filtered-segmentation-method");
+        File bin = new File(dir, ".bin");
+        assertTrue(bin.mkdirs());
+        Files.write(new File(bin, "Channel_Data.txt").toPath(), Arrays.asList(
+                "IBA1",
+                "Green",
+                "100",
+                "50-Infinity",
+                "10-100",
+                "30",
+                "classical",
+                "default",
+                "zslice:full"
+        ), StandardCharsets.UTF_8);
+        RecordingFilteredAnalysis analysis = new RecordingFilteredAnalysis();
+
+        analysis.executeFiltered(dir.getAbsolutePath(),
+                EnumSet.of(BinField.SEGMENTATION_METHODS));
+
+        assertEquals(Collections.singletonList("qc"), analysis.visited);
+        assertEquals(EnumSet.of(BinField.SEGMENTATION_METHODS), analysis.qcFields);
+    }
+
+    @Test
     public void segmentationDialogDefaultDemotesUnavailableLegacyAiSegmentation() {
         assertEquals("Classical",
                 CreateBinFileAnalysis.segmentationChoiceForDialogDefault(
@@ -327,15 +370,16 @@ public class CreateBinFileAnalysisTest {
 
         assertEquals("Channel name", grid.rowLabels[0].getText());
         assertEquals("LUT", grid.rowLabels[1].getText());
-        assertEquals("Segmentation", grid.rowLabels[2].getText());
+        assertEquals(2, grid.rowLabels.length);
         assertEquals(2, grid.nameFields.length);
         assertEquals("DAPI", grid.nameFields[0].getText());
         assertEquals("GFAP", grid.nameFields[1].getText());
         assertEquals("Blue", grid.lutCombos[0].getSelectedItem());
         assertEquals("Red", grid.lutCombos[1].getSelectedItem());
-        assertEquals("Classical", grid.segmentationCombos[0].getSelectedItem());
-        assertEquals("StarDist 3D", grid.segmentationCombos[1].getSelectedItem());
+        assertNull(grid.segmentationCombos[0]);
+        assertNull(grid.segmentationCombos[1]);
         assertFalse(containsComponentText(grid.panel, "Filter Preset"));
+        assertFalse(containsComponentText(grid.panel, "Segmentation"));
         assertEquals(0, countComponentNamesContaining(grid.panel, "filter"));
     }
 
@@ -345,18 +389,17 @@ public class CreateBinFileAnalysisTest {
         CreateBinFileAnalysis.BinUserConfig draft = twoChannelConfig();
         draft.filterPresets.set(0, "Puncta Resolve");
         draft.filterPresets.set(1, "Custom");
+        draft.segmentationMethods.set(1, "stardist:0.5:0.4");
         CreateBinFileAnalysis.ChannelIdentityGrid grid =
                 CreateBinFileAnalysis.buildChannelIdentityGrid(draft, true, true, null);
         grid.nameFields[0].setText("NeuN");
         grid.nameFields[1].setText("IBA1");
         grid.lutCombos[0].setSelectedItem("Green");
         grid.lutCombos[1].setSelectedItem("Magenta");
-        grid.segmentationCombos[1].setSelectedItem("StarDist 3D");
 
         Object bindings = newBinSetupBindings(2);
         copyBindingArray(bindings, "nameFields", grid.nameFields);
         copyBindingArray(bindings, "colorCombos", grid.lutCombos);
-        copyBindingArray(bindings, "segmentationCombos", grid.segmentationCombos);
 
         CreateBinFileAnalysis.BinUserConfig result =
                 invokeBuildBinUserConfigFromDialog(analysis, 2, draft, bindings);
@@ -482,6 +525,69 @@ public class CreateBinFileAnalysisTest {
     }
 
     @Test
+    public void settingsDataStatusForFields_reportsNonePartialAndFullChannelData() {
+        BinConfig cfg = new BinConfig();
+        int[] channels = new int[]{0, 1};
+
+        assertEquals(CreateBinFileAnalysis.SettingsDataStatus.NONE,
+                CreateBinFileAnalysis.settingsDataStatusForFields(
+                        cfg, channels, BinField.DISPLAY_MIN_MAX));
+
+        cfg.channelMinMax.add("None");
+        assertEquals(CreateBinFileAnalysis.SettingsDataStatus.PARTIAL,
+                CreateBinFileAnalysis.settingsDataStatusForFields(
+                        cfg, channels, BinField.DISPLAY_MIN_MAX));
+
+        cfg.channelMinMax.add("0-4095");
+        assertEquals(CreateBinFileAnalysis.SettingsDataStatus.FULL,
+                CreateBinFileAnalysis.settingsDataStatusForFields(
+                        cfg, channels, BinField.DISPLAY_MIN_MAX));
+    }
+
+    @Test
+    public void settingsDataStatusForFields_reportsNoneWithoutSavedConfig() {
+        assertEquals(CreateBinFileAnalysis.SettingsDataStatus.NONE,
+                CreateBinFileAnalysis.settingsDataStatusForFields(
+                        null, new int[]{0, 1}, BinField.FILTER_PRESETS));
+    }
+
+    @Test
+    public void settingsDataStatusForFields_combinesObjectAndIntensityThresholdCompleteness() {
+        BinConfig cfg = new BinConfig();
+        int[] channels = new int[]{0, 1};
+        cfg.channelThresholds.add("default");
+        cfg.channelThresholds.add("250");
+        cfg.channelIntensityThresholds.add("default");
+
+        assertEquals(CreateBinFileAnalysis.SettingsDataStatus.PARTIAL,
+                CreateBinFileAnalysis.settingsDataStatusForFields(
+                        cfg, channels, BinField.OBJECT_THRESHOLDS,
+                        BinField.INTENSITY_THRESHOLDS));
+
+        cfg.channelIntensityThresholds.add("250");
+        assertEquals(CreateBinFileAnalysis.SettingsDataStatus.FULL,
+                CreateBinFileAnalysis.settingsDataStatusForFields(
+                        cfg, channels, BinField.OBJECT_THRESHOLDS,
+                        BinField.INTENSITY_THRESHOLDS));
+    }
+
+    @Test
+    public void combineSettingsDataStatuses_marksMixedFullAndNoneAsPartial() {
+        assertEquals(CreateBinFileAnalysis.SettingsDataStatus.PARTIAL,
+                CreateBinFileAnalysis.combineSettingsDataStatuses(
+                        CreateBinFileAnalysis.SettingsDataStatus.FULL,
+                        CreateBinFileAnalysis.SettingsDataStatus.NONE));
+        assertEquals(CreateBinFileAnalysis.SettingsDataStatus.FULL,
+                CreateBinFileAnalysis.combineSettingsDataStatuses(
+                        CreateBinFileAnalysis.SettingsDataStatus.FULL,
+                        CreateBinFileAnalysis.SettingsDataStatus.FULL));
+        assertEquals(CreateBinFileAnalysis.SettingsDataStatus.NONE,
+                CreateBinFileAnalysis.combineSettingsDataStatuses(
+                        CreateBinFileAnalysis.SettingsDataStatus.NONE,
+                        CreateBinFileAnalysis.SettingsDataStatus.NONE));
+    }
+
+    @Test
     public void readThresholdFromImage_returnsLeftMinThreshold() throws Exception {
         CreateBinFileAnalysis analysis = new CreateBinFileAnalysis();
         ByteProcessor processor = new ByteProcessor(2, 2, new byte[]{0, 40, 80, (byte) 200}, null);
@@ -534,6 +640,63 @@ public class CreateBinFileAnalysisTest {
         assertEquals("continue", invokePrivateQcStep(
                 analysis, "interactiveFilterParameterQC", images, cfg, binFolder, 0));
         assertEquals(Collections.<Class<?>>singletonList(FilterParameterStage.class), analysis.stageTypes);
+    }
+
+    @Test
+    public void interactiveQcBackReturnsToPreviousEmbeddedStage() throws Exception {
+        File binFolder = temp.newFolder("embedded-qc-back-history");
+        CreateBinFileAnalysis.BinUserConfig cfg = oneChannelConfig("Default");
+        List<?> images = privateQcSelections(byteImage("embedded back route"));
+        boolean[][] customSettings = new boolean[5][1];
+        customSettings[1][0] = true; // display range
+        customSettings[2][0] = true; // unified threshold
+        customSettings[3][0] = true; // classical object threshold mirror
+        SequencedEmbeddedDialogAnalysis analysis = new SequencedEmbeddedDialogAnalysis(
+                ConfigQcResult.DONE,
+                ConfigQcResult.BACK,
+                ConfigQcResult.DONE,
+                ConfigQcResult.DONE);
+
+        String result = invokeInteractiveQc(analysis, images, cfg, binFolder, customSettings);
+
+        assertEquals("done", result);
+        assertEquals(Arrays.<Class<?>>asList(
+                DisplayRangeStage.class,
+                SegmentationMethodStage.class,
+                DisplayRangeStage.class,
+                SegmentationMethodStage.class), analysis.firstStageByDialog);
+        assertTrue(analysis.stageTitles.contains("Channel Threshold"));
+    }
+
+    @Test
+    public void interactiveQcStepPlanRunsEachChannelThroughAllSelectedStagesBeforeNextChannel() throws Exception {
+        CreateBinFileAnalysis.BinUserConfig cfg = twoChannelConfig();
+        boolean[][] customSettings = new boolean[6][2];
+        customSettings[0][0] = true; // filter parameters C1
+        customSettings[0][1] = true; // filter parameters C2
+        customSettings[1][0] = true; // display range C1
+        customSettings[1][1] = true; // display range C2
+        customSettings[2][0] = true; // unified threshold C1
+        customSettings[3][0] = true; // classical object threshold mirror C1
+        customSettings[4][0] = true; // object size C1
+
+        assertEquals(Arrays.asList(
+                "DISPLAY_RANGE:0",
+                "FILTER_PARAMETERS:0",
+                "SEGMENTATION_OBJECT:0",
+                "DISPLAY_RANGE:1",
+                "FILTER_PARAMETERS:1"),
+                invokeInteractiveQcStepPlan(new CreateBinFileAnalysis(), cfg, customSettings));
+    }
+
+    @Test
+    public void interactiveQcStepPlanRunsSegmentationObjectQcWhenOnlySegmentationMethodSelected() throws Exception {
+        CreateBinFileAnalysis.BinUserConfig cfg = twoChannelConfig();
+        boolean[][] customSettings = new boolean[6][2];
+        customSettings[5][1] = true; // segmentation method C2
+
+        assertEquals(Collections.singletonList("SEGMENTATION_OBJECT:1"),
+                invokeInteractiveQcStepPlan(new CreateBinFileAnalysis(), cfg, customSettings));
     }
 
     @Test
@@ -731,6 +894,38 @@ public class CreateBinFileAnalysisTest {
                 analysis, images, cfg, binFolder, Integer.valueOf(channelIndex));
     }
 
+    private static String invokeInteractiveQc(CreateBinFileAnalysis analysis,
+                                              List<?> images,
+                                              CreateBinFileAnalysis.BinUserConfig cfg,
+                                              File binFolder,
+                                              boolean[][] customSettings) throws Exception {
+        Method method = CreateBinFileAnalysis.class.getDeclaredMethod(
+                "interactiveQC", List.class, CreateBinFileAnalysis.BinUserConfig.class,
+                File.class, boolean[][].class);
+        method.setAccessible(true);
+        return (String) method.invoke(analysis, images, cfg, binFolder, customSettings);
+    }
+
+    private static List<String> invokeInteractiveQcStepPlan(CreateBinFileAnalysis analysis,
+                                                            CreateBinFileAnalysis.BinUserConfig cfg,
+                                                            boolean[][] customSettings) throws Exception {
+        Method method = CreateBinFileAnalysis.class.getDeclaredMethod(
+                "buildInteractiveQcSteps", CreateBinFileAnalysis.BinUserConfig.class,
+                boolean[][].class);
+        method.setAccessible(true);
+        List<?> steps = (List<?>) method.invoke(analysis, cfg, customSettings);
+        List<String> names = new ArrayList<String>();
+        for (Object step : steps) {
+            Field stageField = step.getClass().getDeclaredField("stage");
+            Field channelField = step.getClass().getDeclaredField("channelIndex");
+            stageField.setAccessible(true);
+            channelField.setAccessible(true);
+            names.add(String.valueOf(stageField.get(step)) + ":"
+                    + String.valueOf(channelField.get(step)));
+        }
+        return names;
+    }
+
     private static void invokeStageTestMethod(Object target,
                                               String methodName,
                                               Class<?>[] parameterTypes,
@@ -833,6 +1028,41 @@ public class CreateBinFileAnalysisTest {
         }
     }
 
+    private static final class SequencedEmbeddedDialogAnalysis extends CreateBinFileAnalysis {
+        final List<Class<?>> stageTypes = new ArrayList<Class<?>>();
+        final List<Class<?>> firstStageByDialog = new ArrayList<Class<?>>();
+        final List<String> stageTitles = new ArrayList<String>();
+        private final List<ConfigQcResult> results;
+        private int nextResultIndex;
+
+        SequencedEmbeddedDialogAnalysis(ConfigQcResult... results) {
+            this.results = Arrays.asList(results);
+        }
+
+        @Override
+        protected boolean embeddedConfigQcUiAvailable() {
+            return true;
+        }
+
+        @Override
+        protected ConfigQcResult showEmbeddedConfigQcDialog(ConfigQcContext context,
+                                                            List<ConfigQcStage> stages) {
+            if (stages != null) {
+                if (!stages.isEmpty()) {
+                    firstStageByDialog.add(stages.get(0) == null ? null : stages.get(0).getClass());
+                }
+                for (ConfigQcStage stage : stages) {
+                    stageTypes.add(stage == null ? null : stage.getClass());
+                    stageTitles.add(stage == null ? null : stage.title());
+                }
+            }
+            if (nextResultIndex < results.size()) {
+                return results.get(nextResultIndex++);
+            }
+            return ConfigQcResult.DONE;
+        }
+    }
+
     private static final class ExposedEmbeddedDialogAnalysis extends CreateBinFileAnalysis {
         ConfigQcResult showForTest(ConfigQcContext context, List<ConfigQcStage> stages) {
             return super.showEmbeddedConfigQcDialog(context, stages);
@@ -896,6 +1126,7 @@ public class CreateBinFileAnalysisTest {
 
     private static final class RecordingFilteredAnalysis extends CreateBinFileAnalysis {
         final List<String> visited = new ArrayList<String>();
+        Set<BinField> qcFields = Collections.emptySet();
 
         @Override
         protected boolean showFilteredChannelNamesPage(String directory, File binFolder,
@@ -941,6 +1172,7 @@ public class CreateBinFileAnalysisTest {
         protected boolean showFilteredQcPages(String directory, File binFolder,
                                               BinUserConfig cfg, Set<BinField> fields) {
             visited.add("qc");
+            qcFields = fields == null ? Collections.<BinField>emptySet() : EnumSet.copyOf(fields);
             return true;
         }
     }

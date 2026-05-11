@@ -1,6 +1,7 @@
 package flash.pipeline.ui.config;
 
 import flash.pipeline.bin.BinConfig;
+import flash.pipeline.naming.ImageNameParser;
 
 import ij.ImagePlus;
 
@@ -132,6 +133,14 @@ public final class ConfigQcContext {
         return true;
     }
 
+    public boolean moveToPreviousImage() {
+        if (images.isEmpty() || currentImageIndex <= 0) {
+            return false;
+        }
+        currentImageIndex--;
+        return true;
+    }
+
     public void requestNextImageIndex(int index) {
         requestedNextImageIndex = Integer.valueOf(index);
     }
@@ -159,6 +168,10 @@ public final class ConfigQcContext {
         return current == null ? "No image selected" : current.getDisplayName();
     }
 
+    public String getCurrentImageShortDisplayName() {
+        return shortDisplayName(getCurrentImageDisplayName());
+    }
+
     public String getImageProgressText() {
         if (images.isEmpty()) {
             return "No images";
@@ -171,6 +184,14 @@ public final class ConfigQcContext {
             return "No images remain.";
         }
         return "Moved to image " + (currentImageIndex + 1) + " / " + images.size()
+                + ": " + getCurrentImageDisplayName();
+    }
+
+    public String getCurrentImageMovedBackStatusText() {
+        if (images.isEmpty()) {
+            return "No images remain.";
+        }
+        return "Moved back to image " + (currentImageIndex + 1) + " / " + images.size()
                 + ": " + getCurrentImageDisplayName();
     }
 
@@ -265,6 +286,19 @@ public final class ConfigQcContext {
 
     private static String safe(String value) {
         return value == null ? "" : value;
+    }
+
+    static String shortDisplayName(String displayName) {
+        String text = safe(displayName).trim();
+        int doubleColon = text.lastIndexOf(" :: ");
+        if (doubleColon >= 0 && doubleColon + 4 < text.length()) {
+            text = text.substring(doubleColon + 4).trim();
+        }
+        String series = ImageNameParser.extractBioFormatsSeriesName(text);
+        if (series != null && !series.trim().isEmpty()) {
+            text = series.trim();
+        }
+        return text.isEmpty() ? "Untitled image" : text;
     }
 
     @SuppressWarnings("unchecked")

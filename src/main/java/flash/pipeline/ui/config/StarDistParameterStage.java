@@ -13,6 +13,7 @@ import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
+import javax.swing.JTextArea;
 import javax.swing.SwingWorker;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
@@ -23,6 +24,8 @@ import java.awt.GridBagLayout;
 import java.awt.Insets;
 
 public final class StarDistParameterStage implements ConfigQcStage {
+
+    private static final Color HELP_COLOR = new Color(90, 90, 90);
 
     public interface ParameterStore {
         String getMethodToken();
@@ -92,6 +95,7 @@ public final class StarDistParameterStage implements ConfigQcStage {
     private PreviewPairPanel preview;
     private ConfigQcContext activeContext;
     private Parameters savedParameters = Parameters.defaults();
+    private Parameters restartParameters;
     private ImagePlus rawSource;
     private ImagePlus filteredSource;
     private ImagePlus labelPreview;
@@ -136,7 +140,9 @@ public final class StarDistParameterStage implements ConfigQcStage {
     public JComponent buildControls(ConfigQcContext context, ConfigQcActions actions) {
         this.actions = actions;
         this.activeContext = context;
-        this.savedParameters = parseMethod(parameterStore.getMethodToken());
+        this.savedParameters = restartParameters == null
+                ? parseMethod(parameterStore.getMethodToken())
+                : restartParameters;
 
         JPanel panel = new JPanel(new BorderLayout(0, 10));
         panel.setOpaque(false);
@@ -186,6 +192,7 @@ public final class StarDistParameterStage implements ConfigQcStage {
         Parameters parameters = collectParameters();
         parameterStore.save(formatMethod(parameters));
         savedParameters = parameters;
+        restartParameters = null;
         setStatus("Locked StarDist parameters.");
         return true;
     }
@@ -197,6 +204,7 @@ public final class StarDistParameterStage implements ConfigQcStage {
 
     @Override
     public void restartStage(ConfigQcContext context) {
+        restartParameters = collectParameters();
         setStatus("Restarting StarDist review from the first image.");
     }
 
@@ -253,7 +261,7 @@ public final class StarDistParameterStage implements ConfigQcStage {
         JLabel image = new JLabel(context == null ? "Image" : context.getImageProgressText()
                 + ": " + context.getCurrentImageDisplayName());
         JLabel help = new JLabel("Edit parameters, then press Run StarDist Preview to update the label map.");
-        help.setForeground(new Color(90, 90, 90));
+        help.setForeground(HELP_COLOR);
 
         channel.setAlignmentX(JComponent.LEFT_ALIGNMENT);
         image.setAlignmentX(JComponent.LEFT_ALIGNMENT);
@@ -272,21 +280,30 @@ public final class StarDistParameterStage implements ConfigQcStage {
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
 
         panel.add(section("Detection"));
-        probabilityField = addNumberRow(panel, "Probability Threshold", 8);
-        nmsField = addNumberRow(panel, "NMS Threshold", 8);
+        probabilityField = addNumberRow(panel, "Probability Threshold", 8,
+                "Minimum confidence required for StarDist to accept a detection. Higher values are stricter and may miss dim objects.");
+        nmsField = addNumberRow(panel, "NMS Threshold", 8,
+                "Controls how much overlapping detections are allowed. Lower values remove more overlaps; higher values allow closer objects.");
         panel.add(Box.createVerticalStrut(8));
 
         panel.add(section("3D Linking"));
-        linkingField = addNumberRow(panel, "Linking Max Distance", 8);
-        gapClosingField = addNumberRow(panel, "Gap-Closing Max Distance", 8);
-        frameGapField = addNumberRow(panel, "Max Frame Gap", 8);
+        linkingField = addNumberRow(panel, "Linking Max Distance", 8,
+                "Maximum distance used to link detections between adjacent z planes into one 3D object.");
+        gapClosingField = addNumberRow(panel, "Gap-Closing Max Distance", 8,
+                "Maximum distance used when bridging across a missing z plane. Increase if objects break between slices.");
+        frameGapField = addNumberRow(panel, "Max Frame Gap", 8,
+                "Number of missing z planes that can be bridged during 3D linking. 0 disables gap closing.");
         panel.add(Box.createVerticalStrut(8));
 
         panel.add(section("Post-Detection Filters"));
-        areaMinField = addNumberRow(panel, "Min Area", 8);
-        areaMaxField = addNumberRow(panel, "Max Area (0 = none)", 8);
-        qualityMinField = addNumberRow(panel, "Min Quality", 8);
-        intensityMinField = addNumberRow(panel, "Min Mean Intensity", 8);
+        areaMinField = addNumberRow(panel, "Min Area", 8,
+                "Removes detections smaller than this estimated spot area. Raise this to remove small speckles.");
+        areaMaxField = addNumberRow(panel, "Max Area (0 = none)", 8,
+                "Removes detections larger than this estimated spot area. Use 0 to disable the upper size limit.");
+        qualityMinField = addNumberRow(panel, "Min Quality", 8,
+                "Removes detections with low StarDist/TrackMate quality scores. Higher values are stricter.");
+        intensityMinField = addNumberRow(panel, "Min Mean Intensity", 8,
+                "Removes detections with low average signal intensity. Raise this to reject dim background detections.");
         return panel;
     }
 
@@ -297,7 +314,7 @@ public final class StarDistParameterStage implements ConfigQcStage {
         return label;
     }
 
-    private JTextField addNumberRow(JPanel parent, String labelText, int columns) {
+    private JTextField addNumberRow(JPanel parent, String labelText, int columns, String helpText) {
         JPanel row = new JPanel(new GridBagLayout());
         row.setOpaque(false);
         row.setAlignmentX(JComponent.LEFT_ALIGNMENT);
@@ -321,7 +338,23 @@ public final class StarDistParameterStage implements ConfigQcStage {
         row.add(field, gbc);
 
         parent.add(row);
+        parent.add(helperText(helpText));
         return field;
+    }
+
+    private JComponent helperText(String text) {
+        JTextArea helper = new JTextArea(text == null ? "" : text);
+        helper.setOpaque(false);
+        helper.setEditable(false);
+        helper.setFocusable(false);
+        helper.setLineWrap(true);
+        helper.setWrapStyleWord(true);
+        helper.setColumns(36);
+        helper.setForeground(HELP_COLOR);
+        helper.setFont(new JLabel().getFont());
+        helper.setAlignmentX(JComponent.LEFT_ALIGNMENT);
+        helper.setBorder(BorderFactory.createEmptyBorder(0, 0, 6, 0));
+        return helper;
     }
 
     private JComponent buildActionPanel() {
@@ -427,7 +460,7 @@ public final class StarDistParameterStage implements ConfigQcStage {
                 try {
                     installLabelPreview(get());
                 } catch (Exception e) {
-                    setError("StarDist preview failed: " + e.getMessage());
+                    setPreviewError("StarDist preview failed: " + e.getMessage());
                 } finally {
                     setButtonsEnabled(true);
                 }
@@ -446,8 +479,7 @@ public final class StarDistParameterStage implements ConfigQcStage {
 
     private void installLabelPreview(ImagePlus labelImage) {
         if (labelImage == null) {
-            setPreviewState(PreviewPairPanel.PreviewState.ERROR, "StarDist returned no label map.");
-            setStatus("StarDist returned no label map.");
+            setPreviewError("StarDist returned no label map.");
             return;
         }
         int count = previewAdapter.countLabels(labelImage);
@@ -565,6 +597,25 @@ public final class StarDistParameterStage implements ConfigQcStage {
     private void setError(String text) {
         setPreviewState(PreviewPairPanel.PreviewState.ERROR, text);
         setStatus(text);
+    }
+
+    private void setPreviewError(String text) {
+        ImagePlus old = labelPreview;
+        labelPreview = null;
+        previewStale = true;
+        lastObjectCount = -1;
+        if (countLabel != null) {
+            countLabel.setText("Objects detected: not previewed");
+        }
+        if (preview != null) {
+            preview.setOriginal(currentSourceImage());
+            preview.setAdjusted(null);
+            refreshLargePreviewModel();
+        }
+        if (old != null) {
+            previewAdapter.close(old);
+        }
+        setError(text);
     }
 
     private void setButtonsEnabled(boolean enabled) {
