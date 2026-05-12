@@ -21,11 +21,20 @@ import java.util.Map;
  */
 public final class IntensitySpatialRunner {
     private final List<IntensitySpatialAnalysis> analyses;
+    private final List<IntensitySpatialPairAnalysis> pairAnalyses;
 
     public IntensitySpatialRunner(List<IntensitySpatialAnalysis> analyses) {
+        this(analyses, Collections.<IntensitySpatialPairAnalysis>emptyList());
+    }
+
+    public IntensitySpatialRunner(List<IntensitySpatialAnalysis> analyses,
+                                  List<IntensitySpatialPairAnalysis> pairAnalyses) {
         this.analyses = analyses == null
                 ? Collections.<IntensitySpatialAnalysis>emptyList()
                 : Collections.unmodifiableList(new ArrayList<IntensitySpatialAnalysis>(analyses));
+        this.pairAnalyses = pairAnalyses == null
+                ? Collections.<IntensitySpatialPairAnalysis>emptyList()
+                : Collections.unmodifiableList(new ArrayList<IntensitySpatialPairAnalysis>(pairAnalyses));
     }
 
     public static IntensitySpatialRunner standard() {
@@ -39,7 +48,11 @@ public final class IntensitySpatialRunner {
                 new PeriodicityAnalysis(),
                 new GlcmTextureAnalysis(),
                 new TextureClassAnalysis(),
-                new ScaleDivergenceAnalysis()));
+                new ScaleDivergenceAnalysis()),
+                Arrays.<IntensitySpatialPairAnalysis>asList(
+                        new CrossMark2DAnalysis(),
+                        new EntropyMiAnalysis(),
+                        new DistanceShell2DAnalysis()));
     }
 
     public IntensitySpatialResult measure(IntensitySpatialContext context) {
@@ -76,6 +89,53 @@ public final class IntensitySpatialRunner {
                         + ": " + safeMessage(ex));
                 values.putAll(IntensitySpatialResult
                         .nanFor(analysis.columns(context.config(), binarizedPartner))
+                        .values());
+            }
+        }
+        return new IntensitySpatialResult(values);
+    }
+
+    public IntensitySpatialResult measurePair(IntensitySpatialPairContext context) {
+        if (context == null || !context.config().isEnabled()
+                || context.config().getEnabledAnalyses().isEmpty()
+                || context.sourceChannelName().equals(context.partnerChannelName())) {
+            return IntensitySpatialResult.empty();
+        }
+
+        LinkedHashMap<String, Double> values = new LinkedHashMap<String, Double>();
+        for (IntensitySpatialPairAnalysis analysis : pairAnalyses) {
+            if (analysis == null
+                    || !context.config().getEnabledAnalyses().contains(analysis.key())
+                    || !analysis.outputModes().contains(context.outputMode())) {
+                continue;
+            }
+            if (analysis.key() == IntensitySpatialConfig.AnalysisKey.DISTANCE_SHELL
+                    && !context.hasPartnerMaskImage()) {
+                IJ.log("[FLASH] Intensity-spatial " + analysis.key().token()
+                        + " skipped for " + context.imageId()
+                        + " source " + context.sourceChannelName()
+                        + " partner " + context.partnerChannelName()
+                        + ": partner channel is not binarized");
+                continue;
+            }
+
+            boolean sourceBinarized = context.hasSourceBinarizedImage();
+            boolean partnerBinarized = context.hasPartnerBinarizedImage();
+            try {
+                IntensitySpatialResult result = analysis.measure(context);
+                if (result != null) {
+                    values.putAll(result.values());
+                }
+            } catch (Exception ex) {
+                IJ.log("[FLASH] Intensity-spatial " + analysis.key().token()
+                        + " skipped for " + context.imageId()
+                        + " source " + context.sourceChannelName()
+                        + " partner " + context.partnerChannelName()
+                        + ": " + safeMessage(ex));
+                values.putAll(IntensitySpatialResult
+                        .nanFor(analysis.columns(context.config(),
+                                context.sourceChannelName(), context.partnerChannelName(),
+                                sourceBinarized, partnerBinarized))
                         .values());
             }
         }
