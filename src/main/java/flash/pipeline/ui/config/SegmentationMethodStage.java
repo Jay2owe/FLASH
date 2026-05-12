@@ -1,5 +1,7 @@
 package flash.pipeline.ui.config;
 
+import flash.pipeline.help.SetupHelpCatalog;
+import flash.pipeline.help.SetupHelpTopic;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import ij.ImagePlus;
 import ij.plugin.Duplicator;
@@ -51,6 +53,11 @@ public final class SegmentationMethodStage implements ConfigQcStage {
     @Override
     public String title() {
         return "Segmentation Method";
+    }
+
+    @Override
+    public SetupHelpTopic helpTopic() {
+        return SetupHelpCatalog.SEGMENTATION_METHOD;
     }
 
     @Override

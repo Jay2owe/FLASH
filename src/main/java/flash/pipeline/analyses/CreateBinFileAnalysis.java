@@ -25,6 +25,8 @@ import flash.pipeline.io.DeferredImageSupplier;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.LifIO;
 import flash.pipeline.io.SeriesMeta;
+import flash.pipeline.help.SetupHelpCatalog;
+import flash.pipeline.help.SetupHelpTopic;
 import flash.pipeline.naming.ImageNameParser;
 import flash.pipeline.objects.ObjectsCounter3DWrapper;
 import flash.pipeline.qc.QcMinMaxPerConditionSelector;
@@ -471,7 +473,7 @@ public class CreateBinFileAnalysis implements Analysis {
         while (true) {
             PipelineDialog count = new PipelineDialog("Set Up Configuration - Channel Names");
             count.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
-            count.addSubHeader("Channel Names");
+            count.addSetupHelpSubHeader("Channel Names", SetupHelpCatalog.CHANNEL_IDENTITY);
             count.addNumericField("Number of channels", n, 0);
             if (!count.showDialog()) return false;
             n = (int) count.getNextNumber();
@@ -484,7 +486,7 @@ public class CreateBinFileAnalysis implements Analysis {
             trimConfigToChannelCount(cfg, n);
             PipelineDialog names = new PipelineDialog("Set Up Configuration - Channel Names");
             names.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
-            names.addSubHeader("Channel Names");
+            names.addSetupHelpSubHeader("Channel Names", SetupHelpCatalog.CHANNEL_IDENTITY);
             names.addMessage("Name each image channel.");
             for (int i = 0; i < n; i++) {
                 names.addStringField("C" + (i + 1), cfg.names.get(i), 20);
@@ -504,7 +506,7 @@ public class CreateBinFileAnalysis implements Analysis {
         ensureConfigHasChannels(cfg);
         PipelineDialog dialog = new PipelineDialog("Set Up Configuration - Channel Colours");
         dialog.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
-        dialog.addSubHeader("Channel Colours");
+        dialog.addSetupHelpSubHeader("Channel Colours", SetupHelpCatalog.CHANNEL_IDENTITY);
         for (int i = 0; i < cfg.names.size(); i++) {
             String defColor = i < cfg.colors.size() ? toLutName(cfg.colors.get(i)) : "Grays";
             dialog.addChoice("C" + (i + 1) + " (" + cfg.names.get(i) + ")", COLOR_OPTIONS, defColor);
@@ -523,7 +525,7 @@ public class CreateBinFileAnalysis implements Analysis {
         PipelineDialog dialog = new PipelineDialog("Set Up Configuration - Filter Presets");
         dialog.setModal(false);
         dialog.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
-        dialog.addSubHeader("Filter Presets");
+        dialog.addSetupHelpSubHeader("Filter Presets", SetupHelpCatalog.FILTER_PARAMETERS);
         dialog.addHelpText("'Custom' will open the custom filter builder after QC image selection. Saved custom filters can be reused from this list on later runs.");
         for (int i = 0; i < cfg.names.size(); i++) {
             String defPreset = i < cfg.filterPresets.size() ? cfg.filterPresets.get(i) : FILTER_PRESETS[0];
@@ -547,7 +549,7 @@ public class CreateBinFileAnalysis implements Analysis {
         ensureConfigHasChannels(cfg);
         PipelineDialog dialog = new PipelineDialog("Set Up Configuration - Segmentation Methods");
         dialog.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
-        dialog.addSubHeader("Segmentation Methods");
+        dialog.addSetupHelpSubHeader("Segmentation Methods", SetupHelpCatalog.SEGMENTATION_METHOD);
         boolean starDistAvailable = StarDistDetector.isAvailable();
         CellposeRuntime.Status cellposeStatus = CellposeRuntime.probeConfigured();
         boolean cellposeReady = cellposeStatus != null && cellposeStatus.ready;
@@ -816,27 +818,28 @@ public class CreateBinFileAnalysis implements Analysis {
             ToggleSwitch allToggle = ovr.addToggle("Override ALL settings (start from scratch)", false);
 
             ovr.addHeader("Channel Identity & Processing");
-            ovr.addSubHeader("Filter Presets");
+            ovr.addSetupHelpSubHeader("Filter Presets", SetupHelpCatalog.FILTER_PARAMETERS);
             ToggleSwitch fpToggle = ovr.addToggle("Override Filter Presets", false);
-            ovr.addSubHeader("Set Filter and Parameters");
+            ovr.addSetupHelpSubHeader("Set Filter and Parameters", SetupHelpCatalog.FILTER_PARAMETERS);
             ToggleSwitch fhToggle = ovr.addToggle("Set Filter and Parameters", false);
 
             ovr.addHeader("Image Display");
-            ovr.addSubHeader("Display Ranges");
+            ovr.addSetupHelpSubHeader("Display Ranges", SetupHelpCatalog.DISPLAY_RANGE);
             ToggleSwitch mmToggle = ovr.addToggle("Override Custom Min-Max Display Ranges", false);
 
             ovr.addHeader("ROI / Intensity Analysis");
-            ovr.addSubHeader("Channel Thresholds");
+            ovr.addSetupHelpSubHeader("Channel Thresholds", SetupHelpCatalog.CHANNEL_THRESHOLD);
             ToggleSwitch thToggle = ovr.addToggle("Override Channel Thresholds", false);
 
             ovr.addHeader("Object Analysis");
-            ovr.addSubHeader("Segmentation Method");
+            ovr.addSetupHelpSubHeader("Segmentation Method", SetupHelpCatalog.SEGMENTATION_METHOD);
             ToggleSwitch segToggle = ovr.addToggle("Override Segmentation Method", false);
-            ovr.addSubHeader("Classical Object Size Filter");
+            ovr.addSetupHelpSubHeader("Classical Object Size Filter",
+                    SetupHelpCatalog.CLASSICAL_OBJECT_SEGMENTATION);
             ToggleSwitch szToggle = ovr.addToggle("Override Particle Sizes (n Voxels)", false);
 
             ovr.addHeader("Z-Stack Scope");
-            ovr.addSubHeader("Z-Slice Subset");
+            ovr.addSetupHelpSubHeader("Z-Slice Subset", SetupHelpCatalog.Z_SLICE_SUBSET);
             ToggleSwitch zSliceToggle = ovr.addToggle("Override z-slice subset selection", false);
 
             allToggle.addChangeListener(new Runnable() {
@@ -1315,7 +1318,7 @@ public class CreateBinFileAnalysis implements Analysis {
         PipelineDialog fork = new PipelineDialog("Settings Mode");
         fork.enableBackButton();
         fork.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
-        fork.addSubHeader("Settings Mode");
+        fork.addSetupHelpSubHeader("Settings Mode", SetupHelpCatalog.SETTINGS_MODE);
         fork.addMessage("Toggle ON the settings you want to adjust interactively per channel.");
 
         int n = channelNames == null ? 0 : channelNames.size();
@@ -1432,7 +1435,8 @@ public class CreateBinFileAnalysis implements Analysis {
                 classicalGroup = addSettingsModeTickAllGroup(fork,
                         "Classical Object Analysis", objectSizeStatus);
             } else {
-                fork.addSubHeader("Classical Object Analysis");
+                fork.addSetupHelpSubHeader("Classical Object Analysis",
+                        SetupHelpCatalog.CLASSICAL_OBJECT_SEGMENTATION);
             }
         }
         if (showParticleSize && anyClassical) {
@@ -2147,7 +2151,7 @@ public class CreateBinFileAnalysis implements Analysis {
         } else {
             PipelineDialog gdCount = new PipelineDialog("Set Up Configuration", PipelineDialog.Phase.SETUP);
             gdCount.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
-            gdCount.addSubHeader("Channel Setup");
+            gdCount.addSetupHelpSubHeader("Channel Setup", SetupHelpCatalog.CHANNEL_IDENTITY);
             gdCount.addNumericField("Number of channels", 3, 0);
             if (!gdCount.showDialog()) return null;
             n = (int) gdCount.getNextNumber();
@@ -2184,7 +2188,7 @@ public class CreateBinFileAnalysis implements Analysis {
                                     dialogDefaults, binBindings);
                         }
                     });
-            pd.addSubHeader("Channel Identity");
+            pd.addSetupHelpSubHeader("Channel Identity", SetupHelpCatalog.CHANNEL_IDENTITY);
             pd.addMessage("Assign each channel's display name and LUT.");
             ChannelIdentityGrid identityGrid = buildChannelIdentityGrid(dialogDefaults,
                     false, false, null);
@@ -2197,7 +2201,7 @@ public class CreateBinFileAnalysis implements Analysis {
                     // Go back to channel count
                     PipelineDialog gdCount2 = new PipelineDialog("Set Up Configuration");
                     gdCount2.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
-                    gdCount2.addSubHeader("Channel Setup");
+                    gdCount2.addSetupHelpSubHeader("Channel Setup", SetupHelpCatalog.CHANNEL_IDENTITY);
                     gdCount2.addNumericField("Number of channels", n, 0);
                     if (!gdCount2.showDialog()) return null;
                     n = (int) gdCount2.getNextNumber();
@@ -2983,7 +2987,7 @@ public class CreateBinFileAnalysis implements Analysis {
         PipelineDialog pd = new PipelineDialog("Set Up Configuration - Analysis Scope", PipelineDialog.Phase.SETUP);
         if (allowBack) pd.enableBackButton();
         pd.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
-        pd.addSubHeader("Analysis Scope");
+        pd.addSetupHelpSubHeader("Analysis Scope", SetupHelpCatalog.ANALYSIS_SCOPE);
         pd.addMessage("Choose whether the analysis should use the full z-stack or a contiguous z-slice subset.");
         pd.addToggle(Z_SLICE_SCOPE_LABEL, cfg != null && cfg.usesZSliceSubset());
         pd.addHelpText("Default OFF analyses the full stack. When ON, every image series will be reviewed before the other QC stages.");
@@ -3072,7 +3076,7 @@ public class CreateBinFileAnalysis implements Analysis {
         int totalSeries = qcSeriesMetas.size();
 
         PipelineDialog pd = new PipelineDialog("Quality Check - Image Selection");
-        pd.addHeader("Select Images for Quality Check");
+        pd.addSetupHelpHeader("Select Images for Quality Check", SetupHelpCatalog.QC_IMAGE_SELECTION);
         pd.addMessage("File: " + lifFile.getName() + "  (" + totalSeries + " image series found)");
         JComboBox<String> modeChoice = pd.addChoice("Selection mode",
                 new String[]{QC_SELECTION_MODE_MANUAL, QC_SELECTION_MODE_RANDOM, QC_SELECTION_MODE_MIN_MAX_CONDITION},
@@ -3574,7 +3578,7 @@ public class CreateBinFileAnalysis implements Analysis {
                     pd.setPrimaryButtonText("Lock in");
                     pd.setModal(false);
                     pd.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
-                    pd.addSubHeader("Z-Slice Subset");
+                    pd.addSetupHelpSubHeader("Z-Slice Subset", SetupHelpCatalog.Z_SLICE_SUBSET);
                     pd.addMessage("Image " + (idx + 1) + "/" + totalSeries + ": "
                             + seriesDisplayLabel(lifFile, meta));
                     pd.addMessage("Total z-slices: " + meta.nSlices);
@@ -3766,7 +3770,8 @@ public class CreateBinFileAnalysis implements Analysis {
         String manualLabel = "Continue manually on all " + remainingCount + " remaining images";
 
         PipelineDialog dlg = new PipelineDialog("Set Up Configuration - Range Does Not Fit All Remaining");
-        dlg.addHeader("Range Does Not Fit Every Remaining Image");
+        dlg.addSetupHelpHeader("Range Does Not Fit Every Remaining Image",
+                SetupHelpCatalog.Z_SLICE_PARTIAL_APPLY);
         dlg.addMessage("The range " + range.toToken() + " fits " + compatibleCount
                 + " of " + remainingCount + " remaining image" + (remainingCount == 1 ? "" : "s") + ".");
         dlg.addMessage("These remaining images cannot accept the range:");
@@ -3996,7 +4001,7 @@ public class CreateBinFileAnalysis implements Analysis {
         boolean absoluteAvailable = suggestedAbsoluteRange != null && canApplyAbsoluteRangeToAll(cfg, suggestedAbsoluteRange);
 
         PipelineDialog pd = new PipelineDialog("Set Up Configuration - Finalise Z-Slice Subset");
-        pd.addHeader("Finalise Z-Slice Subset");
+        pd.addSetupHelpHeader("Finalise Z-Slice Subset", SetupHelpCatalog.Z_SLICE_FINALISE);
         pd.addMessage("Review how the saved z-slice selections should be applied across the dataset.");
         pd.addMessage("Suggested shared slice count: " + targetCount);
         if (suggestedAbsoluteRange != null) {
@@ -4037,7 +4042,7 @@ public class CreateBinFileAnalysis implements Analysis {
         }
 
         PipelineDialog sameCountDialog = new PipelineDialog("Set Up Configuration - Same Slice Count");
-        sameCountDialog.addHeader("Same Slice Count");
+        sameCountDialog.addSetupHelpHeader("Same Slice Count", SetupHelpCatalog.Z_SLICE_SAME_COUNT);
         sameCountDialog.addMessage("Each image will keep " + targetCount
                 + " slices, based on the smallest selected range.");
         sameCountDialog.addChoice("Positioning strategy",
@@ -4353,7 +4358,7 @@ public class CreateBinFileAnalysis implements Analysis {
                     sdDialog.enableBackButton();
                     sdDialog.setPrimaryButtonText("Lock in");
                     sdDialog.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
-                    sdDialog.addSubHeader("Detection");
+                    sdDialog.addSetupHelpSubHeader("Detection", SetupHelpCatalog.STARDIST);
                     sdDialog.addMessage("Image " + (imgIdx + 1) + "/" + images.size() + ": " + imp.getTitle());
                     sdDialog.addMessage("The filtered channel is shown on the left (" + cfg.filterPresets.get(ch) + " filter).");
                     final JTextField probField = sdDialog.addNumericField("Probability Threshold", sdParams[0], 2);
@@ -4644,7 +4649,7 @@ public class CreateBinFileAnalysis implements Analysis {
                     cpDialog.enableBackButton();
                     cpDialog.setPrimaryButtonText("Lock in");
                     cpDialog.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
-                    cpDialog.addSubHeader("Built-in Model");
+                    cpDialog.addSetupHelpSubHeader("Built-in Model", SetupHelpCatalog.CELLPOSE);
                     cpDialog.addMessage("Image " + (imgIdx + 1) + "/" + images.size() + ": " + imp.getTitle());
                     cpDialog.addMessage("The filtered channel is shown on the left (" + cfg.filterPresets.get(ch) + " filter).");
                     JComboBox<String> modelChoice = cpDialog.addChoice(
@@ -5017,7 +5022,8 @@ public class CreateBinFileAnalysis implements Analysis {
                         gdSize.enableBackButton();
                         gdSize.setPrimaryButtonText("Lock in");
                         gdSize.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
-                        gdSize.addSubHeader("Particle Sizes (n Voxels)");
+                        gdSize.addSetupHelpSubHeader("Particle Sizes (n Voxels)",
+                                SetupHelpCatalog.CLASSICAL_OBJECT_SEGMENTATION);
                         gdSize.addNumericField("Min Size (n Voxels)", minSize, 0);
                         String maxStr = maxSize >= 99999999 ? "Infinity" : String.valueOf(maxSize);
                         gdSize.addStringField("Max Size (n Voxels)", maxStr, 15);
@@ -6674,7 +6680,7 @@ public class CreateBinFileAnalysis implements Analysis {
             PipelineDialog dialog = new PipelineDialog(dialogTitle);
             dialog.enableBackButton();
             dialog.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
-            dialog.addSubHeader(header);
+            dialog.addSetupHelpSubHeader(header, SetupHelpCatalog.CHANNEL_THRESHOLD);
             dialog.addMessage("Current saved threshold: " + thresholdTokenDisplay(persistedToken));
             if (readThreshold != null) {
                 dialog.addMessage("Read from image left/min slider: " + formatThresholdValue(readThreshold));
@@ -7671,6 +7677,10 @@ public class CreateBinFileAnalysis implements Analysis {
             return delegate == null ? "" : delegate.title();
         }
 
+        @Override public SetupHelpTopic helpTopic() {
+            return delegate == null ? null : delegate.helpTopic();
+        }
+
         @Override public boolean isApplicable(ConfigQcContext context) {
             return (predicate == null || predicate.isApplicable())
                     && delegate != null
@@ -7730,6 +7740,26 @@ public class CreateBinFileAnalysis implements Analysis {
 
         @Override public String title() {
             return delegate == null ? "" : delegate.title();
+        }
+
+        @Override public SetupHelpTopic helpTopic() {
+            if (delegate instanceof ChannelThresholdStage) {
+                String choice = methodStore == null ? "" : methodStore.getChoice();
+                if (SegmentationMethodStage.CLASSICAL.equals(choice)) {
+                    return SetupHelpCatalog.CLASSICAL_OBJECT_SEGMENTATION;
+                }
+                return SetupHelpCatalog.CHANNEL_THRESHOLD;
+            }
+            if (delegate instanceof ParticleSizeStage) {
+                return SetupHelpCatalog.CLASSICAL_OBJECT_SEGMENTATION;
+            }
+            if (delegate instanceof StarDistParameterStage) {
+                return SetupHelpCatalog.STARDIST;
+            }
+            if (delegate instanceof CellposeParameterStage) {
+                return SetupHelpCatalog.CELLPOSE;
+            }
+            return delegate == null ? null : delegate.helpTopic();
         }
 
         @Override public boolean isApplicable(ConfigQcContext context) {

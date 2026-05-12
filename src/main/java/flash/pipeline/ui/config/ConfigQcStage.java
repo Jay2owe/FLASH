@@ -1,5 +1,6 @@
 package flash.pipeline.ui.config;
 
+import flash.pipeline.help.SetupHelpTopic;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 
 import javax.swing.JComponent;
@@ -11,6 +12,10 @@ public interface ConfigQcStage {
     }
 
     String title();
+
+    default SetupHelpTopic helpTopic() {
+        return null;
+    }
 
     default boolean isApplicable(ConfigQcContext context) {
         return true;

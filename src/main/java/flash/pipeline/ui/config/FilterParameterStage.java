@@ -1,5 +1,7 @@
 package flash.pipeline.ui.config;
 
+import flash.pipeline.help.SetupHelpCatalog;
+import flash.pipeline.help.SetupHelpTopic;
 import flash.pipeline.image.FilterMacroEditorModel;
 import flash.pipeline.image.dag.DagIR;
 import flash.pipeline.image.dag.IjmToDagLoader;
@@ -218,6 +220,11 @@ public final class FilterParameterStage implements ConfigQcStage {
     @Override
     public String title() {
         return "Set Filter and Parameters";
+    }
+
+    @Override
+    public SetupHelpTopic helpTopic() {
+        return SetupHelpCatalog.FILTER_PARAMETERS;
     }
 
     @Override

@@ -1,5 +1,7 @@
 package flash.pipeline.ui.config;
 
+import flash.pipeline.help.SetupHelpCatalog;
+import flash.pipeline.help.SetupHelpTopic;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import ij.ImagePlus;
 import ij.ImageStack;
@@ -66,6 +68,27 @@ public class ConfigQcDialogTest {
         assertEquals("Display > Filter > Object Segmentation", dialog.stagePathTextForTest());
         assertEquals("Filter", dialog.activeStagePathTextForTest());
         assertTrue(dialog.activeStagePathHighlightedForTest());
+    }
+
+    @Test
+    public void headerHelpButtonTracksCurrentStageTopic() {
+        RecordingStage stage = new RecordingStage("Display Range");
+        stage.helpTopic = SetupHelpCatalog.DISPLAY_RANGE;
+        ConfigQcDialog dialog = ConfigQcDialog.createForTest(contextWithTwoImages(), Arrays.asList(stage));
+
+        assertSame(SetupHelpCatalog.DISPLAY_RANGE, dialog.currentHelpTopicForTest());
+        assertTrue(dialog.stageHelpButtonForTest().isVisible());
+        assertTrue(dialog.stageHelpButtonForTest().isEnabled());
+        assertEquals("About Display Range", dialog.stageHelpButtonForTest().getToolTipText());
+    }
+
+    @Test
+    public void headerHelpButtonHidesWhenStageHasNoTopic() {
+        RecordingStage stage = new RecordingStage("Untitled");
+        ConfigQcDialog dialog = ConfigQcDialog.createForTest(contextWithTwoImages(), Arrays.asList(stage));
+
+        assertTrue(dialog.currentHelpTopicForTest() == null);
+        assertFalse(dialog.stageHelpButtonForTest().isVisible());
     }
 
     @Test
@@ -520,6 +543,7 @@ public class ConfigQcDialogTest {
         private boolean previewDisplayControls = true;
         private boolean controlsCanExpand;
         private int preferredControlHeight;
+        private SetupHelpTopic helpTopic;
 
         RecordingStage(String title) {
             this.title = title;
@@ -531,6 +555,10 @@ public class ConfigQcDialogTest {
 
         @Override public boolean showPreviewDisplayControls() {
             return previewDisplayControls;
+        }
+
+        @Override public SetupHelpTopic helpTopic() {
+            return helpTopic;
         }
 
         @Override public boolean controlsCanExpand() {
