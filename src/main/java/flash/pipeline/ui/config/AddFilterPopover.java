@@ -29,11 +29,10 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Stage 04 inline filter-add popover. Anchors a small search-as-you-type
- * picker under the {@code + Add filter…} row so the user can append a new
- * step to the linear pipeline without leaving the wizard. Tier-two (legacy)
- * entries are filtered out — those need a real ImagePlus for the Recorder
- * probe, which the wizard's hidden builder doesn't provide.
+ * Inline filter-add popover. Anchors a small search-as-you-type
+ * picker under the {@code + Add filter...} row so the user can append a new
+ * step to the linear pipeline without leaving the wizard. The default setup
+ * picker remains fast-only until Recorder probing is wired in.
  */
 public final class AddFilterPopover {
 
@@ -44,10 +43,15 @@ public final class AddFilterPopover {
     private AddFilterPopover() {}
 
     public static void show(JComponent anchor, FilterCatalog catalog, Selection callback) {
+        show(anchor, catalog, callback, false);
+    }
+
+    public static void show(JComponent anchor, FilterCatalog catalog,
+                            Selection callback, boolean includeLegacy) {
         if (anchor == null || catalog == null || callback == null) return;
         if (GraphicsEnvironment.isHeadless()) return;
 
-        final List<FilterCatalog.Entry> all = filterFastEntries(catalog.getAllEntries());
+        final List<FilterCatalog.Entry> all = pickerEntries(catalog.getAllEntries(), includeLegacy);
 
         final JPopupMenu popup = new JPopupMenu("Add filter");
         popup.setBorder(BorderFactory.createEmptyBorder(6, 6, 6, 6));
@@ -126,20 +130,32 @@ public final class AddFilterPopover {
         });
     }
 
-    private static boolean matches(FilterCatalog.Entry e, String q) {
+    static boolean matches(FilterCatalog.Entry e, String q) {
+        if (e == null || q == null) return false;
         if (e.label.toLowerCase(Locale.ROOT).contains(q)) return true;
         if (e.category.toLowerCase(Locale.ROOT).contains(q)) return true;
         if (e.menuPath.toLowerCase(Locale.ROOT).contains(q)) return true;
+        if (e.badge().toLowerCase(Locale.ROOT).contains(q)) return true;
         return false;
     }
 
-    private static List<FilterCatalog.Entry> filterFastEntries(List<FilterCatalog.Entry> in) {
-        List<FilterCatalog.Entry> out = new ArrayList<FilterCatalog.Entry>(in.size());
+    static List<FilterCatalog.Entry> pickerEntries(List<FilterCatalog.Entry> in,
+                                                   boolean includeLegacy) {
+        List<FilterCatalog.Entry> out = new ArrayList<FilterCatalog.Entry>();
+        if (in == null) return out;
         for (int i = 0; i < in.size(); i++) {
             FilterCatalog.Entry e = in.get(i);
-            if (!e.legacy) out.add(e);
+            if (e == null || e.stub) continue;
+            if (!includeLegacy && e.legacy) continue;
+            out.add(e);
         }
         return out;
+    }
+
+    static String renderText(FilterCatalog.Entry e) {
+        if (e == null) return "";
+        String source = e.menuPath.length() > 0 ? e.menuPath : e.category;
+        return e.label + " " + e.badge() + "   (" + source + ")";
     }
 
     private static final class EntryRenderer extends DefaultListCellRenderer {
@@ -149,8 +165,7 @@ public final class AddFilterPopover {
             JLabel label = (JLabel) super.getListCellRendererComponent(
                     list, value, index, isSelected, cellHasFocus);
             if (value instanceof FilterCatalog.Entry) {
-                FilterCatalog.Entry e = (FilterCatalog.Entry) value;
-                label.setText(e.label + "   (" + e.category + ")");
+                label.setText(renderText((FilterCatalog.Entry) value));
             }
             return label;
         }
