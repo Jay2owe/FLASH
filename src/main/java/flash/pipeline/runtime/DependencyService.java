@@ -302,6 +302,11 @@ public final class DependencyService {
         fixers.put(DependencyId.TENSORFLOW_NATIVE_RUNTIME, new TensorFlowNativeRuntimeFixer());
         fixers.put(DependencyId.APACHE_POI_RUNTIME, new ExcelRuntimeFixer());
         fixers.put(DependencyId.JTS_CORE, new JtsCoreFixer());
+        fixers.put(DependencyId.COLOC2_RUNTIME, new FijiPluginRuntimeFixer(14));
+        fixers.put(DependencyId.IMGLIB2_ALGORITHM_RUNTIME, new FijiPluginRuntimeFixer(15));
+        fixers.put(DependencyId.IMGLIB2_FFT_RUNTIME, new FijiPluginRuntimeFixer(16));
+        fixers.put(DependencyId.JTRANSFORMS_RUNTIME, new FijiPluginRuntimeFixer(17));
+        fixers.put(DependencyId.ORIENTATIONJ_RUNTIME, new FijiPluginRuntimeFixer(18));
         fixers.put(DependencyId.CELLPOSE_RUNTIME, new CellposeRuntimeFixer());
         return Collections.unmodifiableMap(fixers);
     }

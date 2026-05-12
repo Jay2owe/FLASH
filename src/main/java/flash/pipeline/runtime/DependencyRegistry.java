@@ -59,6 +59,11 @@ public final class DependencyRegistry {
     public static final long CELLPOSE_CPU_RUNTIME_BYTES = 524288000L;
     public static final long CELLPOSE_GPU_RUNTIME_BYTES = 2684354560L;
     public static final long JTS_CORE_BYTES = 1103721L;
+    public static final long COLOC2_RUNTIME_BYTES = 153303L;
+    public static final long IMGLIB2_ALGORITHM_RUNTIME_BYTES = 1145386L;
+    public static final long IMGLIB2_FFT_RUNTIME_BYTES = 20656L;
+    public static final long JTRANSFORMS_RUNTIME_BYTES = 498954L;
+    public static final long ORIENTATIONJ_RUNTIME_BYTES = 448691L;
 
     private static final List<String> STARDIST_IGNORE_PREFIXES =
             Collections.unmodifiableList(Arrays.asList("protobuf-java-util-", "proto-google-"));
@@ -245,6 +250,72 @@ public final class DependencyRegistry {
                             "jars",
                             "https://repo1.maven.org/maven2/org/locationtech/jts/jts-core/1.19.0/jts-core-1.19.0.jar",
                             "3ff3baa0074445384f9e0068df81fbd0a168395a",
+                            false)
+            ));
+
+    private static final List<DependencySpec.JarRequirement> COLOC2_JARS =
+            Collections.unmodifiableList(Arrays.asList(
+                    new DependencySpec.JarRequirement(
+                            "Coloc 2",
+                            "Colocalisation_Analysis-3.1.0.jar",
+                            "Colocalisation_Analysis-",
+                            "plugins",
+                            "https://sites.imagej.net/Fiji/plugins/Colocalisation_Analysis-3.1.0.jar-20240827125235",
+                            "2755df5292d88d6f02e5828b28f4a48568178d5f",
+                            false)
+            ));
+
+    private static final List<DependencySpec.JarRequirement> IMGLIB2_ALGORITHM_JARS =
+            Collections.unmodifiableList(Arrays.asList(
+                    new DependencySpec.JarRequirement(
+                            "ImgLib2 Algorithm",
+                            "imglib2-algorithm-0.18.1.jar",
+                            "imglib2-algorithm-",
+                            "jars",
+                            "https://sites.imagej.net/Fiji/jars/imglib2-algorithm-0.18.1.jar-20260216133515",
+                            "9fc27fe8d6fff3562db3402a25eebb6f7c9e0757",
+                            false)
+            ));
+
+    private static final List<DependencySpec.JarRequirement> IMGLIB2_FFT_JARS =
+            Collections.unmodifiableList(Arrays.asList(
+                    new DependencySpec.JarRequirement(
+                            "ImgLib2 FFT algorithms",
+                            "imglib2-algorithm-fft-0.2.1.jar",
+                            "imglib2-algorithm-fft-",
+                            "jars",
+                            "https://sites.imagej.net/Fiji/jars/imglib2-algorithm-fft-0.2.1.jar-20220912165414",
+                            "2d7ec54a368401a1ae7a0ff622e294aa282d2f60",
+                            false)
+            ));
+
+    private static final List<DependencySpec.JarRequirement> JTRANSFORMS_JARS =
+            Collections.unmodifiableList(Arrays.asList(
+                    new DependencySpec.JarRequirement(
+                            "JTransforms",
+                            "jtransforms-2.4.jar",
+                            "jtransforms-",
+                            "jars",
+                            "https://sites.imagej.net/Fiji/jars/jtransforms-2.4.jar-20160121045452",
+                            "9e52124b670340d47844a734e36765c3bc11b7f3",
+                            false)
+            ));
+
+    /*
+     * OrientationJ 2.0.7 embeds Maven metadata for ch.epfl.big:OrientationJ_:2.0.7,
+     * but that coordinate is not published in the configured SciJava/Maven Central
+     * repositories. Keep compile-time use behind a bridge/reflection until a resolvable
+     * repository is available. Runtime install still uses the BIG-EPFL update-site jar.
+     */
+    private static final List<DependencySpec.JarRequirement> ORIENTATIONJ_JARS =
+            Collections.unmodifiableList(Arrays.asList(
+                    new DependencySpec.JarRequirement(
+                            "OrientationJ",
+                            "OrientationJ_-2.0.7.jar",
+                            "OrientationJ_-",
+                            "plugins",
+                            "https://sites.imagej.net/BIG-EPFL/plugins/OrientationJ_-2.0.7.jar-20241021151847",
+                            "a0662056fce60207ec4708e99d5413a6f820d054",
                             false)
             ));
 
@@ -611,6 +682,116 @@ public final class DependencyRegistry {
                                 "cellpose_gpu",
                                 "Install Cellpose GPU%s",
                                 CELLPOSE_GPU_RUNTIME_BYTES)))
+                .build());
+
+        specs.put(DependencyId.COLOC2_RUNTIME, DependencySpec.builder(
+                        DependencyId.COLOC2_RUNTIME,
+                        "Coloc 2 runtime")
+                .description("Fiji Coloc 2 algorithm classes used for selected intensity-spatial cross-channel analyses.")
+                .affectedFeatures("intensity-spatial Pearson correlation", "intensity-spatial Manders coefficients", "intensity-spatial Costes significance")
+                .criticality(DependencySpec.Criticality.OPTIONAL_FEATURE)
+                .detectionStrategyLabel("Composite class probe + jar presence / version probe")
+                .probe(composite(
+                        classProbe(
+                                "sc.fiji.coloc.algorithms.PearsonsCorrelation",
+                                "sc.fiji.coloc.algorithms.MandersColocalization",
+                                "sc.fiji.coloc.algorithms.CostesSignificanceTest"),
+                        jarProbe(COLOC2_JARS, Collections.<String>emptyList())))
+                .fixerStrategy(DependencySpec.FixerStrategy.DIRECT_JAR_DOWNLOAD)
+                .approxDownloadSizeBytes(COLOC2_RUNTIME_BYTES)
+                .restartRequired(true)
+                .fixableInApp(true)
+                .fixButtonLabelTemplate("Install Coloc 2%s")
+                .presentButtonLabel("Verify Coloc 2 Runtime")
+                .visibleInDependenciesDialog(true)
+                .dialogSectionLabel("Intensity Spatial")
+                .jarRequirements(COLOC2_JARS)
+                .build());
+
+        specs.put(DependencyId.IMGLIB2_ALGORITHM_RUNTIME, DependencySpec.builder(
+                        DependencyId.IMGLIB2_ALGORITHM_RUNTIME,
+                        "ImgLib2 Algorithm runtime")
+                .description("ImgLib2 algorithms used for selected intensity-spatial smoothing, distance, morphology, and structure-tensor paths.")
+                .affectedFeatures("intensity-spatial smoothing", "intensity-spatial distance transforms", "intensity-spatial granularity", "2D intensity anisotropy")
+                .criticality(DependencySpec.Criticality.OPTIONAL_FEATURE)
+                .detectionStrategyLabel("Composite class probe + jar presence / version probe")
+                .probe(composite(
+                        classProbe(
+                                "net.imglib2.algorithm.gauss3.Gauss3",
+                                "net.imglib2.algorithm.morphology.distance.DistanceTransform"),
+                        jarProbe(IMGLIB2_ALGORITHM_JARS, Collections.<String>emptyList())))
+                .fixerStrategy(DependencySpec.FixerStrategy.DIRECT_JAR_DOWNLOAD)
+                .approxDownloadSizeBytes(IMGLIB2_ALGORITHM_RUNTIME_BYTES)
+                .restartRequired(true)
+                .fixableInApp(true)
+                .fixButtonLabelTemplate("Install ImgLib2 Algorithm%s")
+                .presentButtonLabel("Verify ImgLib2 Algorithm Runtime")
+                .visibleInDependenciesDialog(true)
+                .dialogSectionLabel("Intensity Spatial")
+                .jarRequirements(IMGLIB2_ALGORITHM_JARS)
+                .build());
+
+        specs.put(DependencyId.IMGLIB2_FFT_RUNTIME, DependencySpec.builder(
+                        DependencyId.IMGLIB2_FFT_RUNTIME,
+                        "ImgLib2 FFT runtime")
+                .description("ImgLib2 FFT algorithms used for selected intensity-spatial frequency and autocorrelation analyses.")
+                .affectedFeatures("FFT-accelerated Moran's I", "variogram analysis", "periodicity analysis")
+                .criticality(DependencySpec.Criticality.OPTIONAL_FEATURE)
+                .detectionStrategyLabel("Composite class probe + jar presence / version probe")
+                .probe(composite(
+                        classProbe("net.imglib2.algorithm.fft2.FFT", "net.imglib2.algorithm.fft2.FFTMethods"),
+                        jarProbe(IMGLIB2_FFT_JARS, Collections.<String>emptyList())))
+                .fixerStrategy(DependencySpec.FixerStrategy.DIRECT_JAR_DOWNLOAD)
+                .approxDownloadSizeBytes(IMGLIB2_FFT_RUNTIME_BYTES)
+                .restartRequired(true)
+                .fixableInApp(true)
+                .fixButtonLabelTemplate("Install ImgLib2 FFT%s")
+                .presentButtonLabel("Verify ImgLib2 FFT Runtime")
+                .visibleInDependenciesDialog(true)
+                .dialogSectionLabel("Intensity Spatial")
+                .jarRequirements(IMGLIB2_FFT_JARS)
+                .build());
+
+        specs.put(DependencyId.JTRANSFORMS_RUNTIME, DependencySpec.builder(
+                        DependencyId.JTRANSFORMS_RUNTIME,
+                        "JTransforms runtime")
+                .description("Pure Java FFT runtime used for selected intensity-spatial cross-correlation and periodicity analyses.")
+                .affectedFeatures("cross-correlation functions", "periodicity analysis", "FFT-based Moran's I")
+                .criticality(DependencySpec.Criticality.OPTIONAL_FEATURE)
+                .detectionStrategyLabel("Composite class probe + jar presence / version probe")
+                .probe(composite(
+                        classProbe("edu.emory.mathcs.jtransforms.fft.DoubleFFT_2D"),
+                        jarProbe(JTRANSFORMS_JARS, Collections.<String>emptyList())))
+                .fixerStrategy(DependencySpec.FixerStrategy.DIRECT_JAR_DOWNLOAD)
+                .approxDownloadSizeBytes(JTRANSFORMS_RUNTIME_BYTES)
+                .restartRequired(true)
+                .fixableInApp(true)
+                .fixButtonLabelTemplate("Install JTransforms%s")
+                .presentButtonLabel("Verify JTransforms Runtime")
+                .visibleInDependenciesDialog(true)
+                .dialogSectionLabel("Intensity Spatial")
+                .jarRequirements(JTRANSFORMS_JARS)
+                .build());
+
+        specs.put(DependencyId.ORIENTATIONJ_RUNTIME, DependencySpec.builder(
+                        DependencyId.ORIENTATIONJ_RUNTIME,
+                        "OrientationJ runtime")
+                .description("BIG-EPFL OrientationJ structure-tensor classes used only by optional native-3D intensity anisotropy.")
+                .affectedFeatures("native-3D intensity anisotropy")
+                .criticality(DependencySpec.Criticality.OPTIONAL_FEATURE)
+                .detectionStrategyLabel("Composite class probe + jar presence / version probe")
+                .probe(composite(
+                        classProbe("orientation.StructureTensor"),
+                        jarProbe(ORIENTATIONJ_JARS, Collections.<String>emptyList())))
+                .fixerStrategy(DependencySpec.FixerStrategy.DIRECT_JAR_DOWNLOAD)
+                .approxDownloadSizeBytes(ORIENTATIONJ_RUNTIME_BYTES)
+                .restartRequired(true)
+                .fixableInApp(true)
+                .fixButtonLabelTemplate("Install OrientationJ%s")
+                .presentButtonLabel("Verify OrientationJ Runtime")
+                .visibleInDependenciesDialog(true)
+                .dialogSectionLabel("Intensity Spatial")
+                .jarRequirements(ORIENTATIONJ_JARS)
                 .build());
 
         specs.put(DependencyId.JTS_CORE, DependencySpec.builder(

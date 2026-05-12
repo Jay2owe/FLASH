@@ -129,6 +129,11 @@ public class DependencyServiceTest {
         assertEquals(DependencyId.TENSORFLOW_NATIVE_RUNTIME, ordered.get(3));
         assertEquals(DependencyId.APACHE_POI_RUNTIME, ordered.get(4));
         assertEquals(DependencyId.JTS_CORE, ordered.get(5));
+        assertEquals(DependencyId.COLOC2_RUNTIME, ordered.get(6));
+        assertEquals(DependencyId.IMGLIB2_ALGORITHM_RUNTIME, ordered.get(7));
+        assertEquals(DependencyId.IMGLIB2_FFT_RUNTIME, ordered.get(8));
+        assertEquals(DependencyId.JTRANSFORMS_RUNTIME, ordered.get(9));
+        assertEquals(DependencyId.ORIENTATIONJ_RUNTIME, ordered.get(10));
         assertEquals(DependencyId.CELLPOSE_RUNTIME, ordered.get(ordered.size() - 1));
     }
 
@@ -145,6 +150,30 @@ public class DependencyServiceTest {
 
         assertEquals("Auto-Fix Bio-Formats (~245 KB)", labels.get(DependencyId.BIO_FORMATS_RUNTIME));
         assertEquals("Auto-Fix 3D Objects Counter (~22 KB)", labels.get(DependencyId.OBJECTS_COUNTER_3D));
+    }
+
+    @Test
+    public void missingIntensitySpatialRowsOfferInstallButtons() {
+        DependencyService service = DependencyRuntimeTestSupport.serviceWith(
+                DependencyRuntimeTestSupport.withStatuses(
+                        DependencyId.COLOC2_RUNTIME,
+                        DependencyStatus.missing("Coloc 2 missing"),
+                        DependencyId.IMGLIB2_ALGORITHM_RUNTIME,
+                        DependencyStatus.missing("ImgLib2 Algorithm missing"),
+                        DependencyId.IMGLIB2_FFT_RUNTIME,
+                        DependencyStatus.missing("ImgLib2 FFT missing"),
+                        DependencyId.JTRANSFORMS_RUNTIME,
+                        DependencyStatus.missing("JTransforms missing"),
+                        DependencyId.ORIENTATIONJ_RUNTIME,
+                        DependencyStatus.missing("OrientationJ missing")));
+
+        Map<DependencyId, String> labels = firstActionLabels(service.getDialogRows());
+
+        assertEquals("Install Coloc 2 (~150 KB)", labels.get(DependencyId.COLOC2_RUNTIME));
+        assertEquals("Install ImgLib2 Algorithm (~1.1 MB)", labels.get(DependencyId.IMGLIB2_ALGORITHM_RUNTIME));
+        assertEquals("Install ImgLib2 FFT (~20 KB)", labels.get(DependencyId.IMGLIB2_FFT_RUNTIME));
+        assertEquals("Install JTransforms (~487 KB)", labels.get(DependencyId.JTRANSFORMS_RUNTIME));
+        assertEquals("Install OrientationJ (~438 KB)", labels.get(DependencyId.ORIENTATIONJ_RUNTIME));
     }
 
     @Test
