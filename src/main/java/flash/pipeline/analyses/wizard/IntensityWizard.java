@@ -90,6 +90,8 @@ public class IntensityWizard extends WizardFlow {
         for (int r = 0; r < safeRoiSets.size(); r++) {
             out.roiSetSelected[r] = booleanAnswer(safeAnswers, "roi." + r, true);
         }
+        out.spatialConfig = spatialConfigFromAnswers(safeAnswers)
+                .validateForChannelSetup(safeCfg.numChannels(), out.binarization);
         return out;
     }
 
@@ -131,6 +133,8 @@ public class IntensityWizard extends WizardFlow {
         if (hasRoiHint && !anySelected) {
             Arrays.fill(out.roiSetSelected, true);
         }
+        out.spatialConfig = safePreset.getSpatial()
+                .validateForChannelSetup(safeCfg.numChannels(), out.binarization);
         return out;
     }
 
@@ -291,6 +295,20 @@ public class IntensityWizard extends WizardFlow {
         return Boolean.parseBoolean(String.valueOf(value));
     }
 
+    private static IntensitySpatialConfig spatialConfigFromAnswers(Map<String, Object> answers) {
+        if (answers == null) return IntensitySpatialConfig.disabled();
+        Object value = answers.get("spatial.config");
+        if (value == null) value = answers.get("intensity.spatial.config");
+        if (value instanceof IntensitySpatialConfig) {
+            return (IntensitySpatialConfig) value;
+        }
+        try {
+            return IntensitySpatialConfig.fromJsonObject(value);
+        } catch (Exception e) {
+            return IntensitySpatialConfig.disabled();
+        }
+    }
+
     private static String safe(String value) {
         return value == null ? "" : value;
     }
@@ -302,6 +320,7 @@ public class IntensityWizard extends WizardFlow {
         public int maskChannelIndex = -1;
         public String maskChannelChoice = MASK_NONE;
         public final boolean[] roiSetSelected;
+        public IntensitySpatialConfig spatialConfig = IntensitySpatialConfig.disabled();
 
         private DerivedConfig(int channels, int roiSets) {
             this.measurementModes = new String[Math.max(0, channels)];

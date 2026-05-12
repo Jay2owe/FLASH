@@ -7,6 +7,7 @@ import flash.pipeline.bin.ChannelIdentities;
 import flash.pipeline.bin.ChannelIdentitiesIO;
 import flash.pipeline.analyses.wizard.IntensityPreset;
 import flash.pipeline.analyses.wizard.IntensityPresetIO;
+import flash.pipeline.analyses.wizard.IntensitySpatialConfig;
 import flash.pipeline.analyses.wizard.IntensityWizard;
 import flash.pipeline.bin.BinField;
 import flash.pipeline.bin.BinSetupDispatcher;
@@ -91,6 +92,7 @@ public class IntensityAnalysisV2 implements Analysis {
     private boolean useDeconvolvedInput = true;
     private CLIConfig cliConfig = null;
     private int cliConfiguredMaskIndex1Based = -1;
+    private IntensitySpatialConfig intensitySpatialConfig = IntensitySpatialConfig.disabled();
 
     @Override
     public Set<BinField> requiredBinFields() {
@@ -103,6 +105,10 @@ public class IntensityAnalysisV2 implements Analysis {
     @Override
     public boolean benefitsFromRois() {
         return true;
+    }
+
+    IntensitySpatialConfig getIntensitySpatialConfigForTest() {
+        return intensitySpatialConfig;
     }
 
     @Override
@@ -1501,6 +1507,7 @@ public class IntensityAnalysisV2 implements Analysis {
                                                 boolean[] roiZipSelected,
                                                 String[] channelNames) {
         cliConfiguredMaskIndex1Based = -1;
+        intensitySpatialConfig = IntensitySpatialConfig.disabled();
         if (cliConfig == null || cliConfig.getIntensity() == null || !cliConfig.getIntensity().hasConfiguration()) {
             return;
         }
@@ -1514,6 +1521,14 @@ public class IntensityAnalysisV2 implements Analysis {
                     Collections.<String, Object>emptyMap(), roiSetNames);
         }
         applyCliIntensityOverrides(derived, intensity);
+        derived.spatialConfig = intensity.mergeSpatialConfig(derived.spatialConfig,
+                derived.binarization.length, derived.binarization,
+                new IntensitySpatialConfig.LockLogger() {
+                    public void log(String message) {
+                        IJ.log("[CLI] " + message);
+                    }
+                });
+        intensitySpatialConfig = derived.spatialConfig;
         applyIntensityDerivedConfig(derived, binarization,
                 thresholds, roiZipSelected, channelNames);
         cliConfiguredMaskIndex1Based = derived.maskChannelIndex + 1;

@@ -3,6 +3,7 @@ package flash.pipeline.cli;
 import flash.pipeline.analyses.StatisticsConfig;
 import flash.pipeline.bin.BinField;
 import flash.pipeline.analyses.wizard.AggregationConfig;
+import flash.pipeline.analyses.wizard.IntensitySpatialConfig;
 import flash.pipeline.deconv.wizard.DeconvPreset;
 import flash.pipeline.deconv.wizard.DeconvPresetIO;
 import flash.pipeline.deconv.engine.Algorithm;
@@ -246,6 +247,18 @@ public final class CLIArgumentParser {
                 + "  spatial.heatmaps=true\n"
                 + "  intensity.preset=threshold_puncta\n"
                 + "  intensity.threshold_channel2=45\n"
+                + "  intensity.spatial=true|false\n"
+                + "  intensity.spatial.analyses=patchiness,hotspots,depth,anisotropy,crossmark,mi,distance_shell\n"
+                + "  intensity.spatial.mip=true|false\n"
+                + "  intensity.spatial.native3d=true|false\n"
+                + "  intensity.spatial.overlays=true|false\n"
+                + "  intensity.spatial.shell_width_um=10\n"
+                + "  intensity.spatial.shell_count=5\n"
+                + "  intensity.spatial.tile_um=50,100,250\n"
+                + "  intensity.spatial.granularity_um=2,4,8,16,32,64\n"
+                + "  intensity.spatial.texture_k=4\n"
+                + "  intensity.spatial.permutations=199\n"
+                + "  intensity.spatial.seed=1\n"
                 + "  spectral.preset=patchy_autofluorescence\n"
                 + "  spectral.goal=cleaned_image|cleaned_mask|score_objects|measure_only\n"
                 + "  spectral.target=0\n"
@@ -597,6 +610,113 @@ public final class CLIArgumentParser {
             putIfPresent(intensity.thresholds, channel,
                     getValue(options, "intensity.channel" + channel + "_threshold"));
         }
+
+        String spatialEnabled = getValue(options, "intensity.spatial");
+        if (spatialEnabled != null) {
+            intensity.spatialEnabled = Boolean.valueOf(parseBooleanValue(
+                    "intensity.spatial", spatialEnabled, false));
+        }
+
+        String analyses = getValue(options, "intensity.spatial.analyses");
+        if (analyses != null) {
+            intensity.spatialAnalyses = IntensitySpatialConfig.parseAnalysisList(analyses);
+        }
+
+        intensity.spatialMipEnabled = parseNullableBoolean(
+                options, "intensity.spatial.mip", intensity.spatialMipEnabled);
+        intensity.spatialNative3dEnabled = parseNullableBoolean(
+                options, "intensity.spatial.native3d", intensity.spatialNative3dEnabled);
+        intensity.spatialOverlaysEnabled = parseNullableBoolean(
+                options, "intensity.spatial.overlays", intensity.spatialOverlaysEnabled);
+
+        String shellWidth = getValue(options, "intensity.spatial.shell_width_um");
+        if (shellWidth == null) {
+            shellWidth = getValue(options, "intensity.spatial.shellWidthUm");
+        }
+        if (shellWidth != null) {
+            intensity.spatialShellWidthUm = Double.valueOf(parseDoubleValue(
+                    "intensity.spatial.shell_width_um", shellWidth,
+                    IntensitySpatialConfig.DEFAULT_SHELL_WIDTH_UM, 0.000001, Double.MAX_VALUE));
+        }
+
+        String shellCount = getValue(options, "intensity.spatial.shell_count");
+        if (shellCount == null) {
+            shellCount = getValue(options, "intensity.spatial.shellCount");
+        }
+        if (shellCount != null) {
+            intensity.spatialShellCount = Integer.valueOf(parseIntValue(
+                    "intensity.spatial.shell_count", shellCount,
+                    IntensitySpatialConfig.DEFAULT_SHELL_COUNT, 1, Integer.MAX_VALUE));
+        }
+
+        String tileUm = getValue(options, "intensity.spatial.tile_um");
+        if (tileUm == null) {
+            tileUm = getValue(options, "intensity.spatial.tileScalesUm");
+        }
+        if (tileUm != null) {
+            intensity.spatialTileScalesUm = IntensitySpatialConfig.parseDoubleList(
+                    tileUm, IntensitySpatialConfig.DEFAULT_TILE_SCALES_UM);
+        }
+
+        String granularity = getValue(options, "intensity.spatial.granularity_um");
+        if (granularity == null) {
+            granularity = getValue(options, "intensity.spatial.granularityScalesUm");
+        }
+        if (granularity != null) {
+            intensity.spatialGranularityScalesUm = IntensitySpatialConfig.parseDoubleList(
+                    granularity, IntensitySpatialConfig.DEFAULT_GRANULARITY_SCALES_UM);
+        }
+
+        String depthBin = getValue(options, "intensity.spatial.depth_bin_um");
+        if (depthBin == null) {
+            depthBin = getValue(options, "intensity.spatial.depthBinWidthUm");
+        }
+        if (depthBin != null) {
+            intensity.spatialDepthBinWidthUm = Double.valueOf(parseDoubleValue(
+                    "intensity.spatial.depth_bin_um", depthBin,
+                    IntensitySpatialConfig.DEFAULT_DEPTH_BIN_WIDTH_UM, 0.000001, Double.MAX_VALUE));
+        }
+
+        String rimDepth = getValue(options, "intensity.spatial.rim_depth_um");
+        if (rimDepth == null) {
+            rimDepth = getValue(options, "intensity.spatial.rimDepthUm");
+        }
+        if (rimDepth != null) {
+            intensity.spatialRimDepthUm = Double.valueOf(parseDoubleValue(
+                    "intensity.spatial.rim_depth_um", rimDepth,
+                    IntensitySpatialConfig.DEFAULT_RIM_DEPTH_UM, 0.000001, Double.MAX_VALUE));
+        }
+
+        String textureK = getValue(options, "intensity.spatial.texture_k");
+        if (textureK == null) {
+            textureK = getValue(options, "intensity.spatial.textureClassCount");
+        }
+        if (textureK != null) {
+            intensity.spatialTextureClassCount = Integer.valueOf(parseIntValue(
+                    "intensity.spatial.texture_k", textureK,
+                    IntensitySpatialConfig.DEFAULT_TEXTURE_CLASS_COUNT, 1, Integer.MAX_VALUE));
+        }
+
+        String permutations = getValue(options, "intensity.spatial.permutations");
+        if (permutations != null) {
+            intensity.spatialPermutations = Integer.valueOf(parseIntValue(
+                    "intensity.spatial.permutations", permutations,
+                    IntensitySpatialConfig.DEFAULT_PERMUTATIONS, 0, Integer.MAX_VALUE));
+        }
+
+        String seed = getValue(options, "intensity.spatial.seed");
+        if (seed != null) {
+            intensity.spatialSeed = Long.valueOf(parseLongValue(
+                    "intensity.spatial.seed", seed, IntensitySpatialConfig.DEFAULT_SEED));
+        }
+
+        String failurePolicy = getValue(options, "intensity.spatial.failure_policy");
+        if (failurePolicy == null) {
+            failurePolicy = getValue(options, "intensity.spatial.failurePolicy");
+        }
+        if (failurePolicy != null) {
+            intensity.spatialFailurePolicy = IntensitySpatialConfig.FailurePolicy.parse(failurePolicy);
+        }
     }
 
     private static void parseSpectralOptions(String options, CLIConfig cfg) {
@@ -882,6 +1002,15 @@ public final class CLIArgumentParser {
             if (parsed < min) return min;
             if (parsed > max) return max;
             return parsed;
+        } catch (NumberFormatException e) {
+            IJ.log("[CLI] Warning: Invalid " + key + " value: " + raw);
+            return defaultValue;
+        }
+    }
+
+    private static long parseLongValue(String key, String raw, long defaultValue) {
+        try {
+            return Long.parseLong(raw.trim());
         } catch (NumberFormatException e) {
             IJ.log("[CLI] Warning: Invalid " + key + " value: " + raw);
             return defaultValue;
