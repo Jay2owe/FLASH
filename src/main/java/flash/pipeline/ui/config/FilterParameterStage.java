@@ -8,6 +8,7 @@ import flash.pipeline.image.dag.IjmToDagLoader;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import flash.pipeline.ui.sandbox.FilterBuilderPanel;
 import flash.pipeline.ui.sandbox.FilterCatalog;
+import flash.pipeline.ui.sandbox.RecorderParameterProbe;
 import ij.ImagePlus;
 
 import javax.swing.BorderFactory;
@@ -410,6 +411,10 @@ public final class FilterParameterStage implements ConfigQcStage {
         if (entry == null) {
             throw new IllegalArgumentException("No catalog entry named " + catalogLabel);
         }
+        applyAddFilter(entry);
+    }
+
+    void simulateAddFilterForTest(FilterCatalog.Entry entry) {
         applyAddFilter(entry);
     }
 
@@ -1202,19 +1207,67 @@ public final class FilterParameterStage implements ConfigQcStage {
             @Override public void onSelected(FilterCatalog.Entry entry) {
                 applyAddFilter(entry);
             }
-        });
+        }, true);
     }
 
     private void applyAddFilter(FilterCatalog.Entry entry) {
         if (entry == null || !linear) return;
         ensureHiddenBuilderInSyncWithCurrentMacro();
         try {
-            hiddenBuilder.appendNode(entry);
+            if (entry.legacy) {
+                if (!appendLegacyFilter(entry)) return;
+            } else {
+                hiddenBuilder.appendNode(entry);
+            }
         } catch (RuntimeException ex) {
             setError("Could not add filter: " + ex.getMessage());
             return;
         }
         afterStructuralMutation(/*expandLast=*/true);
+    }
+
+    private boolean appendLegacyFilter(FilterCatalog.Entry entry) {
+        if (GraphicsEnvironment.isHeadless()) {
+            setError("Fiji command parameter capture is not available in headless mode.");
+            return false;
+        }
+        if (sourceImage == null) {
+            setError("No preview image is available for Fiji's parameter dialog.");
+            return false;
+        }
+
+        ImagePlus probeSource = null;
+        try {
+            probeSource = sourceImage.duplicate();
+            if (probeSource == null) {
+                setError("No preview image is available for Fiji's parameter dialog.");
+                return false;
+            }
+            RecorderParameterProbe.ProbeResult probe =
+                    RecorderParameterProbe.probe(probeSource, entry.commandName);
+            if (probe.userCancelled) {
+                if (probe.errorMessage.length() > 0) {
+                    setError("Command was not added: " + probe.errorMessage);
+                } else {
+                    setStatus("Command was not added.");
+                }
+                return false;
+            }
+            hiddenBuilder.appendNode(entry, probe.optionsString);
+            return true;
+        } catch (RuntimeException ex) {
+            setError("Command was not added: " + ex.getMessage());
+            return false;
+        } finally {
+            if (probeSource != null) {
+                try {
+                    previewAdapter.close(probeSource);
+                } catch (RuntimeException ignored) {
+                    // The probe image is disposable; close failures must not
+                    // turn a captured command into a half-applied structural edit.
+                }
+            }
+        }
     }
 
     private void applyEyeToggle(String nodeId) {

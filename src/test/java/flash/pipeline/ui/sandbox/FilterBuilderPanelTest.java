@@ -114,6 +114,22 @@ public class FilterBuilderPanelTest {
     }
 
     @Test
+    public void appendNodeWithArgs_emitsLegacyIjm() {
+        DagIR seed = IjmToDagLoader.load(SEED_MACRO);
+        FilterBuilderPanel panel = new FilterBuilderPanel(seed, null, noopRunner(), null);
+        FilterCatalog.Entry pluginEntry = FilterCatalog.Entry.legacy(
+                "Fiji commands", "Plugin Filter", "Fiji commands > Plugin Filter");
+
+        panel.appendNode(pluginEntry, "radius=5 stack");
+
+        String ijm = panel.currentIjm();
+        assertTrue("Legacy append must switch the emitted DAG tier",
+                ijm.contains("executionTier=legacy"));
+        assertTrue("Legacy append must emit the captured options string",
+                ijm.contains("run(\"Plugin Filter\", \"radius=5 stack\");"));
+    }
+
+    @Test
     public void setNodeDisabled_omitsFromIjmButPreservesInDagJson() {
         DagIR seed = IjmToDagLoader.load(SEED_MACRO);
         FilterBuilderPanel panel = new FilterBuilderPanel(seed, null, noopRunner(), null);

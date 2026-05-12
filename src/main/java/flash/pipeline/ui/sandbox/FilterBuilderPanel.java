@@ -223,6 +223,14 @@ public final class FilterBuilderPanel extends JPanel {
         notifyListeners();
     }
 
+    public void appendNode(FilterCatalog.Entry entry, String args) {
+        if (entry == null || entry.stub) return;
+        SandboxModel.Line line = singleLineOrThrow();
+        model.addNode(line, entry, args);
+        canvas.rebuild();
+        notifyListeners();
+    }
+
     public void insertNodeAt(int index, FilterCatalog.Entry entry) {
         if (entry == null || entry.stub) return;
         SandboxModel.Line line = singleLineOrThrow();
