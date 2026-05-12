@@ -1,5 +1,6 @@
 package flash.pipeline.results;
 
+import flash.pipeline.analyses.wizard.IntensitySpatialConfig;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -48,5 +49,52 @@ public class IntensityDetailsWriterTest {
         assertTrue(text.contains("<Filter Macro>\n" + macro + "</Filter Macro>"));
         assertTrue(text.contains("setThreshold(125, 65535);"));
         assertTrue(text.contains("<In ROI>\nDAPI\n</In ROI>"));
+    }
+
+    @Test
+    public void writePerChannelRecordsSpatialDetails() throws Exception {
+        File root = tempFolder.newFolder("intensity-spatial-details");
+        File analysisDetailsDir = IntensityDetailsWriter.analysisDetailsWriteDir(root);
+        File binDir = new File(root, ".bin");
+        assertTrue(binDir.mkdirs());
+
+        IntensitySpatialConfig spatialConfig = IntensitySpatialConfig.builder()
+                .enabled(true)
+                .addAnalysis(IntensitySpatialConfig.AnalysisKey.PATCHINESS)
+                .addAnalysis(IntensitySpatialConfig.AnalysisKey.CROSSMARK)
+                .mipEnabled(true)
+                .native3dEnabled(true)
+                .overlaysEnabled(true)
+                .build();
+
+        IntensityDetailsWriter.writePerChannel(
+                analysisDetailsDir,
+                binDir,
+                "DAPI",
+                1,
+                true,
+                "Basic background and noise removal",
+                "run(\"Median...\", \"radius=2 stack\");\n",
+                true,
+                "100",
+                "GFAP",
+                spatialConfig,
+                "Full stack",
+                "FLASH/Image Analysis/Image Intensities/Spatial Overlays",
+                "Coloc 2 checked at run time",
+                "No partial failures"
+        );
+
+        File out = new File(analysisDetailsDir, "DAPI.txt");
+        String text = new String(Files.readAllBytes(out.toPath()), StandardCharsets.UTF_8);
+
+        assertTrue(text.contains("<Intensity Spatial Analysis>"));
+        assertTrue(text.contains("Selected analyses: patchiness,crossmark"));
+        assertTrue(text.contains("MIP output: true"));
+        assertTrue(text.contains("Native 3D output: true"));
+        assertTrue(text.contains("Overlays: true"));
+        assertTrue(text.contains("Dependency gates: Coloc 2 checked at run time"));
+        assertTrue(text.contains("Partial failures: No partial failures"));
+        assertTrue(text.contains("Partner mask usage: GFAP"));
     }
 }

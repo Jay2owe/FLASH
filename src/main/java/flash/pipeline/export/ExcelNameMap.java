@@ -304,6 +304,17 @@ public final class ExcelNameMap {
                 return new String[]{label, desc};
             }
         }
+        String[] dynamicIntensity = convertDynamicIntensity(matchName);
+        if (dynamicIntensity != null) {
+            if (perMm3) {
+                dynamicIntensity[0] = dynamicIntensity[0] + " per mm\u00B3";
+                dynamicIntensity[1] = dynamicIntensity[1] + " Values are normalized per mm\u00B3 of tissue volume.";
+            }
+            if (dynamicIntensity[0].length() > EXCEL_MAX_SHEET) {
+                dynamicIntensity[0] = dynamicIntensity[0].substring(0, EXCEL_MAX_SHEET);
+            }
+            return dynamicIntensity;
+        }
         return null;
     }
 
@@ -323,7 +334,68 @@ public final class ExcelNameMap {
                 } catch (IllegalArgumentException ignored) {}
             }
         }
+        Matcher intensity = Pattern.compile("^(.+)_ROI_(Intensity_.+)Mean$").matcher(matchName);
+        if (intensity.matches()) {
+            return intensity.group(1);
+        }
+        Matcher pair = Pattern.compile("^(.+)_ROI_(.+_.+_.+)Mean$").matcher(matchName);
+        if (pair.matches()) {
+            return pair.group(1);
+        }
         return null;
+    }
+
+    private static String[] convertDynamicIntensity(String colName) {
+        Matcher sameChannel = Pattern.compile("^(.+)_ROI_(Intensity_.+)Mean$").matcher(colName);
+        if (sameChannel.matches()) {
+            String marker = sameChannel.group(1);
+            String metric = humanizeIntensityMetric(sameChannel.group(2));
+            return new String[] {
+                    marker + " ROI " + metric,
+                    "Pixel-level spatial-intensity metric " + sameChannel.group(2)
+                            + " was averaged for " + marker + " within each ROI."
+            };
+        }
+
+        Matcher pair = Pattern.compile("^(.+)_ROI_(.+_.+_.+)Mean$").matcher(colName);
+        if (pair.matches()) {
+            String marker = pair.group(1);
+            String metric = pair.group(2);
+            return new String[] {
+                    marker + " ROI Pair " + humanizePairMetric(metric),
+                    "Cross-channel pixel-level spatial-intensity metric " + metric
+                            + " was averaged within each ROI."
+            };
+        }
+        return null;
+    }
+
+    private static String humanizeIntensityMetric(String metric) {
+        String text = metric == null ? "" : metric;
+        if (text.startsWith("Intensity_")) {
+            text = text.substring("Intensity_".length());
+        }
+        if (text.endsWith("_binarized")) {
+            text = text.substring(0, text.length() - "_binarized".length()) + " Binarized";
+        }
+        return splitCamelAndUnderscore(text);
+    }
+
+    private static String humanizePairMetric(String metric) {
+        String text = metric == null ? "" : metric;
+        if (text.endsWith("_binarized")) {
+            text = text.substring(0, text.length() - "_binarized".length()) + " Binarized";
+        }
+        return splitCamelAndUnderscore(text);
+    }
+
+    private static String splitCamelAndUnderscore(String text) {
+        String spaced = text.replace('_', ' ')
+                .replaceAll("([a-z])([A-Z])", "$1 $2")
+                .replaceAll("([A-Za-z])([0-9])", "$1 $2")
+                .replaceAll("([0-9])([A-Za-z])", "$1 $2")
+                .trim();
+        return spaced.isEmpty() ? "Intensity Metric" : spaced;
     }
 
     /**

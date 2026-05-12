@@ -5,8 +5,11 @@ import ij.IJ;
 import flash.pipeline.analyses.wizard.AggregationConfig;
 import flash.pipeline.analyses.wizard.AggregationPreset;
 import flash.pipeline.analyses.wizard.AggregationPresetIO;
+import flash.pipeline.bin.BinConfig;
+import flash.pipeline.bin.BinConfigIO;
 import flash.pipeline.cli.CLIConfig;
 import flash.pipeline.intelligence.AnalysisStatusScanner;
+import flash.pipeline.intensity.spatial.IntensitySpatialOutputMode;
 import flash.pipeline.io.CalibrationIO;
 import flash.pipeline.io.ConditionManifestIO;
 import flash.pipeline.io.CsvSupport;
@@ -65,6 +68,8 @@ public class MasterAggregationAnalysis implements Analysis {
     private boolean headless = false;
     private boolean suppressDialogs = false;
     private static final double COLOC_THRESHOLD = 30.0;
+    private static final String MASTER_INTENSITIES_MIP_FILENAME = "Image Intensities_MIP.csv";
+    private static final String MASTER_INTENSITIES_3D_FILENAME = "Image Intensities_3D.csv";
 
     /**
      * Channel-agnostic Morph_* columns emitted by SpatialAnalysis. These names
@@ -1733,18 +1738,30 @@ public class MasterAggregationAnalysis implements Analysis {
             return false;
         }
 
-        Set<String> allAnimals = new LinkedHashSet<String>();
-        LinkedHashMap<String, Map<String, LinkedHashMap<String, Double>>> channelData =
-                new LinkedHashMap<String, Map<String, LinkedHashMap<String, Double>>>();
+        Set<String> knownChannelNames = knownIntensityChannels(directory);
+        List<ClassifiedIntensityCsv> classifiedFiles = new ArrayList<ClassifiedIntensityCsv>();
+        for (File csvFile : csvFiles) {
+            ClassifiedIntensityCsv classified = classifyIntensityCsv(csvFile, knownChannelNames);
+            classifiedFiles.add(classified);
+            if (!classified.channelRoiMask) {
+                knownChannelNames.add(classified.channelName);
+            }
+        }
+
+        LinkedHashMap<IntensitySpatialOutputMode, IntensityAggregationBucket> buckets =
+                new LinkedHashMap<IntensitySpatialOutputMode, IntensityAggregationBucket>();
+        buckets.put(IntensitySpatialOutputMode.BASE, new IntensityAggregationBucket());
+        buckets.put(IntensitySpatialOutputMode.MIP, new IntensityAggregationBucket());
+        buckets.put(IntensitySpatialOutputMode.NATIVE_3D, new IntensityAggregationBucket());
+
         boolean loggedLegacyRawIntDen = false;
 
-        for (File csvFile : csvFiles) {
-            String safeName = csvFile.getName();
-            if (safeName.toLowerCase(Locale.ROOT).endsWith(".csv")) {
-                safeName = safeName.substring(0, safeName.length() - 4);
-            }
-            String channelName = ChannelFilenameCodec.toRaw(safeName);
-            IJ.log("Processing intensities channel: " + channelName);
+        for (ClassifiedIntensityCsv classified : classifiedFiles) {
+            File csvFile = classified.file;
+            String channelName = classified.channelName;
+            IJ.log("Processing intensities channel: " + channelName
+                    + intensityModeLogSuffix(classified.mode)
+                    + (classified.channelRoiMask ? " (Channel ROI Mask)" : ""));
 
             List<String[]> rows = new ArrayList<String[]>();
             String[] header;
@@ -1780,6 +1797,8 @@ public class MasterAggregationAnalysis implements Analysis {
             for (int i = 0; i < header.length; i++) {
                 colIdx.put(header[i].trim(), i);
             }
+            List<DynamicIntensityColumn> dynamicColumns = dynamicIntensityColumns(
+                    header, colIdx, channelName, knownChannelNames, classified.channelRoiMask);
 
             Integer animalCol = colIdx.get("Animal Name");
             Integer roiCol = colIdx.get("ROI");
@@ -1814,9 +1833,9 @@ public class MasterAggregationAnalysis implements Analysis {
                 String groupKey = entry.getKey();
                 String parentAnimal = groupKeyToAnimal.containsKey(groupKey)
                         ? groupKeyToAnimal.get(groupKey) : groupKey;
-                allAnimals.add(groupKey);
+                IntensityAggregationBucket bucket = buckets.get(classified.mode);
+                bucket.allAnimals.add(groupKey);
                 List<String[]> animalRows = entry.getValue();
-                int count = animalRows.size();
 
                 double intDenSum = 0, intDenBinarizedSum = 0, areaSum = 0,
                         areaBinarizedSum = 0, intDenUnfilteredSum = 0;
@@ -1860,14 +1879,18 @@ public class MasterAggregationAnalysis implements Analysis {
 
                 String prefix = channelName + "_";
                 LinkedHashMap<String, Double> metrics = new LinkedHashMap<String, Double>();
-                metrics.put(prefix + "ROI_IntDenMean",
-                        intDenN > 0 ? intDenSum / intDenN : Double.NaN);
+                if (intDenCol >= 0) {
+                    metrics.put(prefix + "ROI_IntDenMean",
+                            intDenN > 0 ? intDenSum / intDenN : Double.NaN);
+                }
                 if (intDenBinarizedCol >= 0) {
                     metrics.put(prefix + "ROI_IntDen_binarizedMean",
                             intDenBinarizedN > 0 ? intDenBinarizedSum / intDenBinarizedN : Double.NaN);
                 }
-                metrics.put(prefix + "ROI_%AreaMean",
-                        areaN > 0 ? areaSum / areaN : Double.NaN);
+                if (areaCol >= 0) {
+                    metrics.put(prefix + "ROI_%AreaMean",
+                            areaN > 0 ? areaSum / areaN : Double.NaN);
+                }
                 if (areaBinarizedCol >= 0) {
                     metrics.put(prefix + "ROI_%Area_binarizedMean",
                             areaBinarizedN > 0 ? areaBinarizedSum / areaBinarizedN : Double.NaN);
@@ -1875,6 +1898,10 @@ public class MasterAggregationAnalysis implements Analysis {
                 if (intDenUnfilteredCol >= 0) {
                     metrics.put(prefix + "ROI_IntDen_UnfilteredMean",
                             intDenUnfilteredN > 0 ? intDenUnfilteredSum / intDenUnfilteredN : Double.NaN);
+                }
+                for (DynamicIntensityColumn dynamicColumn : dynamicColumns) {
+                    metrics.put(dynamicColumn.outputName,
+                            meanColumn(animalRows, dynamicColumn.index));
                 }
 
                 int numSections = numSectionsPerAnimal.containsKey(parentAnimal)
@@ -1884,42 +1911,230 @@ public class MasterAggregationAnalysis implements Analysis {
                 animalMetrics.put(groupKey, metrics);
             }
 
-            channelData.put(channelName, animalMetrics);
+            mergeChannelMetrics(buckets.get(classified.mode).channelData, channelName, animalMetrics);
         }
 
-        if (allAnimals.isEmpty()) {
+        boolean wroteAny = false;
+        for (Map.Entry<IntensitySpatialOutputMode, IntensityAggregationBucket> entry : buckets.entrySet()) {
+            IntensityAggregationBucket bucket = entry.getValue();
+            if (bucket.allAnimals.isEmpty()) {
+                continue;
+            }
+
+            List<String> columns = new ArrayList<String>();
+            columns.add("AnimalName");
+            columns.add("numSections");
+            for (Map.Entry<String, Map<String, LinkedHashMap<String, Double>>> chEntry : bucket.channelData.entrySet()) {
+                for (LinkedHashMap<String, Double> metrics : chEntry.getValue().values()) {
+                    for (String key : metrics.keySet()) {
+                        if (!columns.contains(key) && !"numSections".equals(key)) {
+                            columns.add(key);
+                        }
+                    }
+                }
+            }
+
+            LinkedHashMap<String, LinkedHashMap<String, Double>> table =
+                    new LinkedHashMap<String, LinkedHashMap<String, Double>>();
+            for (String groupKey : bucket.allAnimals) {
+                LinkedHashMap<String, Double> row = new LinkedHashMap<String, Double>();
+                for (Map<String, LinkedHashMap<String, Double>> animalMap : bucket.channelData.values()) {
+                    LinkedHashMap<String, Double> m = animalMap.get(groupKey);
+                    if (m != null) row.putAll(m);
+                }
+                table.put(groupKey, row);
+            }
+
+            File outFile = new File(exportDir, intensityMasterFilename(entry.getKey()));
+            writeMasterCsv(outFile, columns, bucket.allAnimals, table);
+            wroteAny = true;
+        }
+
+        if (!wroteAny) {
             IJ.log("No animal data found across intensity CSVs.");
             return false;
         }
 
-        List<String> columns = new ArrayList<String>();
-        columns.add("AnimalName");
-        columns.add("numSections");
-        for (Map.Entry<String, Map<String, LinkedHashMap<String, Double>>> chEntry : channelData.entrySet()) {
-            for (LinkedHashMap<String, Double> metrics : chEntry.getValue().values()) {
-                for (String key : metrics.keySet()) {
-                    if (!columns.contains(key) && !"numSections".equals(key)) {
-                        columns.add(key);
-                    }
+        return true;
+    }
+
+    private static Set<String> knownIntensityChannels(String directory) {
+        Set<String> out = new LinkedHashSet<String>();
+        BinConfig cfg = BinConfigIO.readPartialFromDirectory(directory);
+        if (cfg != null && cfg.channelNames != null) {
+            for (String channelName : cfg.channelNames) {
+                if (channelName != null && !channelName.trim().isEmpty()) {
+                    out.add(channelName.trim());
                 }
             }
         }
+        return out;
+    }
 
-        LinkedHashMap<String, LinkedHashMap<String, Double>> table =
-                new LinkedHashMap<String, LinkedHashMap<String, Double>>();
-        for (String groupKey : allAnimals) {
-            LinkedHashMap<String, Double> row = new LinkedHashMap<String, Double>();
-            for (Map<String, LinkedHashMap<String, Double>> animalMap : channelData.values()) {
-                LinkedHashMap<String, Double> m = animalMap.get(groupKey);
-                if (m != null) row.putAll(m);
-            }
-            table.put(groupKey, row);
+    private static ClassifiedIntensityCsv classifyIntensityCsv(File csvFile,
+                                                              Set<String> knownChannelNames) {
+        String stem = csvStem(csvFile);
+        if (isChannelRoiMaskStem(stem)) {
+            return new ClassifiedIntensityCsv(csvFile, ChannelFilenameCodec.toRaw(stem),
+                    IntensitySpatialOutputMode.BASE, true);
         }
 
-        File outFile = new File(exportDir, FlashProjectLayout.MASTER_INTENSITIES_FILENAME);
-        writeMasterCsv(outFile, columns, allAnimals, table);
+        String lower = stem.toLowerCase(Locale.ROOT);
+        if (lower.endsWith("_mip")) {
+            String channelStem = stem.substring(0, stem.length() - "_MIP".length());
+            String fullRaw = ChannelFilenameCodec.toRaw(stem);
+            String channelRaw = ChannelFilenameCodec.toRaw(channelStem);
+            if (shouldTreatModeSuffixAsMode(fullRaw, channelRaw, knownChannelNames)) {
+                return new ClassifiedIntensityCsv(csvFile, channelRaw,
+                        IntensitySpatialOutputMode.MIP, false);
+            }
+        }
+        if (lower.endsWith("_3d")) {
+            String channelStem = stem.substring(0, stem.length() - "_3D".length());
+            String fullRaw = ChannelFilenameCodec.toRaw(stem);
+            String channelRaw = ChannelFilenameCodec.toRaw(channelStem);
+            if (shouldTreatModeSuffixAsMode(fullRaw, channelRaw, knownChannelNames)) {
+                return new ClassifiedIntensityCsv(csvFile, channelRaw,
+                        IntensitySpatialOutputMode.NATIVE_3D, false);
+            }
+        }
+        return new ClassifiedIntensityCsv(csvFile, ChannelFilenameCodec.toRaw(stem),
+                IntensitySpatialOutputMode.BASE, false);
+    }
 
-        return true;
+    private static boolean shouldTreatModeSuffixAsMode(String fullRaw,
+                                                       String channelRaw,
+                                                       Set<String> knownChannelNames) {
+        if (knownChannelNames == null || knownChannelNames.isEmpty()) {
+            return true;
+        }
+        if (knownChannelNames.contains(channelRaw)) {
+            return true;
+        }
+        return !knownChannelNames.contains(fullRaw);
+    }
+
+    private static String csvStem(File csvFile) {
+        String stem = csvFile == null ? "" : csvFile.getName();
+        if (stem.toLowerCase(Locale.ROOT).endsWith(".csv")) {
+            stem = stem.substring(0, stem.length() - 4);
+        }
+        return stem;
+    }
+
+    private static boolean isChannelRoiMaskStem(String stem) {
+        if (stem == null) return false;
+        return stem.contains(" in ") && stem.endsWith(" ROI");
+    }
+
+    private static String intensityModeLogSuffix(IntensitySpatialOutputMode mode) {
+        if (mode == IntensitySpatialOutputMode.MIP) return " (MIP)";
+        if (mode == IntensitySpatialOutputMode.NATIVE_3D) return " (native 3D)";
+        return "";
+    }
+
+    private static String intensityMasterFilename(IntensitySpatialOutputMode mode) {
+        if (mode == IntensitySpatialOutputMode.MIP) return MASTER_INTENSITIES_MIP_FILENAME;
+        if (mode == IntensitySpatialOutputMode.NATIVE_3D) return MASTER_INTENSITIES_3D_FILENAME;
+        return FlashProjectLayout.MASTER_INTENSITIES_FILENAME;
+    }
+
+    private static List<DynamicIntensityColumn> dynamicIntensityColumns(
+            String[] header,
+            Map<String, Integer> colIdx,
+            String channelName,
+            Set<String> knownChannelNames,
+            boolean skipSpatialColumns) {
+        List<DynamicIntensityColumn> out = new ArrayList<DynamicIntensityColumn>();
+        if (skipSpatialColumns || header == null || channelName == null) {
+            return out;
+        }
+        Set<String> seen = new LinkedHashSet<String>();
+        for (String rawHeader : header) {
+            String column = rawHeader == null ? "" : rawHeader.trim();
+            if (column.isEmpty() || seen.contains(column)) continue;
+            boolean sameChannelSpatial = column.startsWith("Intensity_");
+            boolean pairSpatial = isPairIntensityColumn(column, channelName, knownChannelNames);
+            if (!sameChannelSpatial && !pairSpatial) continue;
+
+            Integer index = colIdx.get(column);
+            if (index == null) continue;
+            out.add(new DynamicIntensityColumn(index.intValue(),
+                    channelName + "_ROI_" + column + "Mean"));
+            seen.add(column);
+        }
+        return out;
+    }
+
+    private static boolean isPairIntensityColumn(String column,
+                                                 String sourceChannel,
+                                                 Set<String> knownChannelNames) {
+        if (column == null || sourceChannel == null
+                || knownChannelNames == null || knownChannelNames.isEmpty()) {
+            return false;
+        }
+        String base = column.endsWith("_binarized")
+                ? column.substring(0, column.length() - "_binarized".length())
+                : column;
+        String prefix = sourceChannel + "_";
+        if (!base.startsWith(prefix)) {
+            return false;
+        }
+        for (String partner : knownChannelNames) {
+            if (partner == null || partner.equals(sourceChannel)) continue;
+            String suffix = "_" + partner;
+            if (base.endsWith(suffix)
+                    && base.length() > prefix.length() + suffix.length()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static double meanColumn(List<String[]> rows, int columnIndex) {
+        double sum = 0.0;
+        int n = 0;
+        for (String[] row : rows) {
+            double value = parseDouble(safeGet(row, columnIndex));
+            if (!Double.isNaN(value)) {
+                sum += value;
+                n++;
+            }
+        }
+        return n > 0 ? sum / n : Double.NaN;
+    }
+
+    private static final class ClassifiedIntensityCsv {
+        final File file;
+        final String channelName;
+        final IntensitySpatialOutputMode mode;
+        final boolean channelRoiMask;
+
+        ClassifiedIntensityCsv(File file,
+                               String channelName,
+                               IntensitySpatialOutputMode mode,
+                               boolean channelRoiMask) {
+            this.file = file;
+            this.channelName = channelName;
+            this.mode = mode == null ? IntensitySpatialOutputMode.BASE : mode;
+            this.channelRoiMask = channelRoiMask;
+        }
+    }
+
+    private static final class IntensityAggregationBucket {
+        final Set<String> allAnimals = new LinkedHashSet<String>();
+        final LinkedHashMap<String, Map<String, LinkedHashMap<String, Double>>> channelData =
+                new LinkedHashMap<String, Map<String, LinkedHashMap<String, Double>>>();
+    }
+
+    private static final class DynamicIntensityColumn {
+        final int index;
+        final String outputName;
+
+        DynamicIntensityColumn(int index, String outputName) {
+            this.index = index;
+            this.outputName = outputName;
+        }
     }
 
     // ------------------------------------------------------------ CSV writing

@@ -1,5 +1,6 @@
 package flash.pipeline.report;
 
+import flash.pipeline.analyses.wizard.IntensitySpatialConfig;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -117,5 +118,41 @@ public class QualityReportTest {
         assertTrue(new File(tmp.getRoot(),
                 "FLASH/Reports/Quality Report/QC_Report.html").isFile());
         assertFalse(new File(tmp.getRoot(), "Quality_Report/QC_Report.html").exists());
+    }
+
+    @Test
+    public void addIntensityParams_recordsSpatialSummary() {
+        QualityReport report = new QualityReport();
+        report.setEnabled(true);
+        report.setDirectory(tmp.getRoot().getAbsolutePath());
+
+        IntensitySpatialConfig spatialConfig = IntensitySpatialConfig.builder()
+                .enabled(true)
+                .addAnalysis(IntensitySpatialConfig.AnalysisKey.HOTSPOTSCAN)
+                .addAnalysis(IntensitySpatialConfig.AnalysisKey.ANISOTROPY_3D)
+                .mipEnabled(true)
+                .native3dEnabled(true)
+                .overlaysEnabled(true)
+                .build();
+
+        report.addIntensityParams(
+                new String[]{"DAPI"},
+                new boolean[]{true},
+                new String[]{"100"},
+                true,
+                "GFAP",
+                "DAPI: Basic background and noise removal",
+                "Full stack",
+                spatialConfig,
+                "OrientationJ missing");
+
+        assertEquals(1, report.getSections().size());
+        Map<String, String> params = report.getSections().get(0).params;
+        assertEquals("true", params.get("Intensity Spatial"));
+        assertEquals("hotspots,anisotropy_3d", params.get("Spatial Families"));
+        assertEquals("true", params.get("Spatial MIP"));
+        assertEquals("true", params.get("Spatial Native 3D"));
+        assertEquals("true", params.get("Spatial Overlays"));
+        assertEquals("OrientationJ missing", params.get("Spatial Dependency Warnings"));
     }
 }

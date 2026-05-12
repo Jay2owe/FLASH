@@ -1,5 +1,6 @@
 package flash.pipeline.results;
 
+import flash.pipeline.analyses.wizard.IntensitySpatialConfig;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.FlashProjectLayout.AnalysisFolder;
 import flash.pipeline.naming.ChannelFilenameCodec;
@@ -57,6 +58,28 @@ public final class IntensityDetailsWriter {
             boolean binarized,
             String thresholdValue,
             String inRoi
+    ) throws Exception {
+        writePerChannel(analysisDetailsDir, binDir, channelName, channelIndex1Based,
+                filterEnabled, filterSourceLabel, actualMacroText, binarized,
+                thresholdValue, inRoi, null, null, null, null, null);
+    }
+
+    public static void writePerChannel(
+            File analysisDetailsDir,
+            File binDir,
+            String channelName,
+            int channelIndex1Based,
+            boolean filterEnabled,
+            String filterSourceLabel,
+            String actualMacroText,
+            boolean binarized,
+            String thresholdValue,
+            String inRoi,
+            IntensitySpatialConfig spatialConfig,
+            String zSliceSummary,
+            String overlayPath,
+            String dependencySummary,
+            String partialFailureSummary
     ) throws Exception {
         flash.pipeline.io.IoUtils.mustMkdirs(analysisDetailsDir);
 
@@ -120,6 +143,50 @@ public final class IntensityDetailsWriter {
                 w.write(inRoi);
                 w.write("\n</In ROI>\n");
             }
+
+            writeSpatialDetails(w, spatialConfig, zSliceSummary, binarized, inRoi,
+                    overlayPath, dependencySummary, partialFailureSummary);
         }
+    }
+
+    private static void writeSpatialDetails(Writer w,
+                                            IntensitySpatialConfig spatialConfig,
+                                            String zSliceSummary,
+                                            boolean binarized,
+                                            String inRoi,
+                                            String overlayPath,
+                                            String dependencySummary,
+                                            String partialFailureSummary) throws Exception {
+        IntensitySpatialConfig safeConfig = spatialConfig == null
+                ? IntensitySpatialConfig.disabled()
+                : spatialConfig;
+        w.write("\n");
+        w.write("<Intensity Spatial Analysis>\n");
+        w.write("Enabled: " + safeConfig.isEnabled() + "\n");
+        if (safeConfig.isEnabled()) {
+            w.write("Selected analyses: "
+                    + IntensitySpatialConfig.joinAnalysisTokens(safeConfig.getEnabledAnalyses()) + "\n");
+            w.write("MIP output: " + safeConfig.isMipEnabled() + "\n");
+            w.write("Native 3D output: " + safeConfig.isNative3dEnabled() + "\n");
+            w.write("Overlays: " + safeConfig.isOverlaysEnabled() + "\n");
+            w.write("Overlay path: " + emptyFallback(overlayPath, "Not written") + "\n");
+        } else {
+            w.write("Selected analyses: none\n");
+            w.write("MIP output: false\n");
+            w.write("Native 3D output: false\n");
+            w.write("Overlays: false\n");
+        }
+        w.write("Z-slice mode: " + emptyFallback(zSliceSummary, "Full stack") + "\n");
+        w.write("Binarized partner columns: " + binarized + "\n");
+        w.write("Partner mask usage: " + emptyFallback(inRoi, "None") + "\n");
+        w.write("Dependency gates: " + emptyFallback(dependencySummary,
+                "Optional spatial dependencies are checked at run time; missing analyses write NaN and log warnings.") + "\n");
+        w.write("Partial failures: " + emptyFallback(partialFailureSummary,
+                "Per-image/channel/ROI analysis failures are logged and their metric columns are written as NaN.") + "\n");
+        w.write("</Intensity Spatial Analysis>\n");
+    }
+
+    private static String emptyFallback(String value, String fallback) {
+        return value == null || value.trim().isEmpty() ? fallback : value.trim();
     }
 }

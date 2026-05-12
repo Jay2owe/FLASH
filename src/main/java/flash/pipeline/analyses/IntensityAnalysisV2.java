@@ -563,7 +563,12 @@ public class IntensityAnalysisV2 implements Analysis {
                         binDir, basicFilterMacro);
                 IntensityDetailsWriter.writePerChannel(analysisDetailsDir, binDir, channelNames[c], c + 1,
                         true, filterSourceLabel, actualMacroText, binarization[c], thresholds[c],
-                        roiAnalysis ? roiChannelChoice : null);
+                        roiAnalysis ? roiChannelChoice : null,
+                        intensitySpatialConfig,
+                        cfg.getZSliceConfig().summary(),
+                        new File(saveRoot, "Spatial Overlays").getAbsolutePath(),
+                        "Optional intensity-spatial dependencies are checked per family at run time.",
+                        "Failures are logged with image/channel/ROI/analysis context and written as NaN columns.");
                 IJ.log("  Analysis details written for: " + channelNames[c]);
             } catch (Exception e) {
                 IJ.log("  WARNING: failed writing intensity details for " + channelNames[c] + ": " + e.getMessage());
@@ -583,7 +588,9 @@ public class IntensityAnalysisV2 implements Analysis {
             qualityReport.addIntensityParams(channelNames, binarization, thresholds,
                     roiAnalysis, roiChannelChoice,
                     filterSummary.toString(),
-                    cfg.getZSliceConfig().summary());
+                    cfg.getZSliceConfig().summary(),
+                    intensitySpatialConfig,
+                    "Missing optional dependencies are logged and affected spatial metrics are written as NaN.");
         }
 
         // Preload all ROI sets directly from zip files — no RoiManager needed
