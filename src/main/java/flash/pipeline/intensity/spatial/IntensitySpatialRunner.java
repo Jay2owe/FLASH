@@ -48,16 +48,27 @@ public final class IntensitySpatialRunner {
                 new PeriodicityAnalysis(),
                 new GlcmTextureAnalysis(),
                 new TextureClassAnalysis(),
-                new ScaleDivergenceAnalysis()),
+                new ScaleDivergenceAnalysis(),
+                new Anisotropy3DAnalysis()),
                 Arrays.<IntensitySpatialPairAnalysis>asList(
                         new CrossMark2DAnalysis(),
                         new EntropyMiAnalysis(),
-                        new DistanceShell2DAnalysis()));
+                        new DistanceShell2DAnalysis(),
+                        new CrossMark3DAnalysis(),
+                        new DistanceShell3DAnalysis()));
     }
 
     public IntensitySpatialResult measure(IntensitySpatialContext context) {
         if (context == null || !context.config().isEnabled()
                 || context.config().getEnabledAnalyses().isEmpty()) {
+            return IntensitySpatialResult.empty();
+        }
+        if (context.outputMode() == IntensitySpatialOutputMode.NATIVE_3D
+                && !native3dAllowed(context.config(), stackDepth(context.image()))) {
+            IJ.log("[FLASH] Intensity-spatial native 3D skipped for " + context.imageId()
+                    + " channel " + context.channelName()
+                    + ": native 3D output is not selected or stack has fewer than "
+                    + IntensitySpatialConfig.MIN_NATIVE_3D_SLICES + " slices");
             return IntensitySpatialResult.empty();
         }
 
@@ -101,6 +112,15 @@ public final class IntensitySpatialRunner {
                 || context.sourceChannelName().equals(context.partnerChannelName())) {
             return IntensitySpatialResult.empty();
         }
+        if (context.outputMode() == IntensitySpatialOutputMode.NATIVE_3D
+                && !native3dAllowed(context.config(), pairStackDepth(context))) {
+            IJ.log("[FLASH] Intensity-spatial native 3D skipped for " + context.imageId()
+                    + " source " + context.sourceChannelName()
+                    + " partner " + context.partnerChannelName()
+                    + ": native 3D output is not selected or stack has fewer than "
+                    + IntensitySpatialConfig.MIN_NATIVE_3D_SLICES + " slices");
+            return IntensitySpatialResult.empty();
+        }
 
         LinkedHashMap<String, Double> values = new LinkedHashMap<String, Double>();
         for (IntensitySpatialPairAnalysis analysis : pairAnalyses) {
@@ -109,7 +129,8 @@ public final class IntensitySpatialRunner {
                     || !analysis.outputModes().contains(context.outputMode())) {
                 continue;
             }
-            if (analysis.key() == IntensitySpatialConfig.AnalysisKey.DISTANCE_SHELL
+            if ((analysis.key() == IntensitySpatialConfig.AnalysisKey.DISTANCE_SHELL
+                    || analysis.key() == IntensitySpatialConfig.AnalysisKey.DISTANCE_SHELL_3D)
                     && !context.hasPartnerMaskImage()) {
                 IJ.log("[FLASH] Intensity-spatial " + analysis.key().token()
                         + " skipped for " + context.imageId()
@@ -159,6 +180,20 @@ public final class IntensitySpatialRunner {
             }
         }
         return true;
+    }
+
+    private static boolean native3dAllowed(IntensitySpatialConfig config, int stackDepth) {
+        return config != null
+                && config.isNative3dEnabled()
+                && stackDepth >= IntensitySpatialConfig.MIN_NATIVE_3D_SLICES;
+    }
+
+    private static int stackDepth(ImagePlus image) {
+        return image == null ? 0 : Math.max(1, image.getStackSize());
+    }
+
+    private static int pairStackDepth(IntensitySpatialPairContext context) {
+        return Math.min(stackDepth(context.sourceImage()), stackDepth(context.partnerImage()));
     }
 
     public static ImagePlus maxIntensityProjection(ImagePlus source, String title) {

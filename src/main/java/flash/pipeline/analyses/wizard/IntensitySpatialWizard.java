@@ -210,7 +210,7 @@ public class IntensitySpatialWizard extends WizardFlow {
             case DISTANCE_SHELL_3D:
                 return DependencyId.MCIB3D_CORE;
             case ANISOTROPY_3D:
-                return DependencyId.ORIENTATIONJ_RUNTIME;
+                return null;
             default:
                 return null;
         }

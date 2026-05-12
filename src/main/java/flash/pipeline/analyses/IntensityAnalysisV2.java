@@ -1135,6 +1135,7 @@ public class IntensityAnalysisV2 implements Analysis {
         final double[][] allAreaFractionBinarized = new double[channelCount][];
         final IntensitySpatialResult[][] allBaseSpatialResults = new IntensitySpatialResult[channelCount][];
         final IntensitySpatialResult[] allMipSpatialResults = new IntensitySpatialResult[channelCount];
+        final IntensitySpatialResult[] allNativeSpatialResults = new IntensitySpatialResult[channelCount];
         final ImagePlus[] allRawSpatialImages = new ImagePlus[channelCount];
         final ImagePlus[] allBinarizedSpatialImages = new ImagePlus[channelCount];
         final ImagePlus[] allBinarySpatialMasks = new ImagePlus[channelCount];
@@ -1170,7 +1171,7 @@ public class IntensityAnalysisV2 implements Analysis {
                                 allIntDenFilteredFullRoi, allAreaFractionFilteredFullRoi,
                                 allIntDenUnfilteredFullRoi, allIntDenBinarizedRawInMask,
                                 allAreaFractionBinarized,
-                                allBaseSpatialResults, allMipSpatialResults,
+                                allBaseSpatialResults, allMipSpatialResults, allNativeSpatialResults,
                                 allRawSpatialImages, allBinarizedSpatialImages,
                                 allBinarySpatialMasks);
                     }
@@ -1197,7 +1198,7 @@ public class IntensityAnalysisV2 implements Analysis {
                         allIntDenFilteredFullRoi, allAreaFractionFilteredFullRoi,
                         allIntDenUnfilteredFullRoi, allIntDenBinarizedRawInMask,
                         allAreaFractionBinarized,
-                        allBaseSpatialResults, allMipSpatialResults,
+                        allBaseSpatialResults, allMipSpatialResults, allNativeSpatialResults,
                         allRawSpatialImages, allBinarizedSpatialImages,
                         allBinarySpatialMasks);
             }
@@ -1207,7 +1208,7 @@ public class IntensityAnalysisV2 implements Analysis {
             measureCrossChannelSpatial(channelNames, channelCount, finalRoi, finalRoiLabel,
                     finalParts, outputPlan, intensitySpatialConfig,
                     allRawSpatialImages, allBinarizedSpatialImages, allBinarySpatialMasks,
-                    allBaseSpatialResults, allMipSpatialResults);
+                    allBaseSpatialResults, allMipSpatialResults, allNativeSpatialResults);
         } finally {
             closeImages(allRawSpatialImages);
             closeImages(allBinarizedSpatialImages);
@@ -1243,7 +1244,7 @@ public class IntensityAnalysisV2 implements Analysis {
                     intensitySpatialConfig, allMipSpatialResults[c]);
             appendSpatialModeRow(outputPlan, totalTables, parts, roiLabel, channelNames[c],
                     IntensitySpatialOutputMode.NATIVE_3D, channelNames, binarization,
-                    intensitySpatialConfig, null);
+                    intensitySpatialConfig, allNativeSpatialResults[c]);
             if (!compactLog) IJ.log("    - Channel " + channelNames[c] + ": " + len + " rows merged to results table");
         }
 
@@ -1277,6 +1278,7 @@ public class IntensityAnalysisV2 implements Analysis {
             double[][] outAreaFractionBinarized,
             IntensitySpatialResult[][] outBaseSpatialResults,
             IntensitySpatialResult[] outMipSpatialResults,
+            IntensitySpatialResult[] outNativeSpatialResults,
             ImagePlus[] outRawSpatialImages,
             ImagePlus[] outBinarizedSpatialImages,
             ImagePlus[] outBinarySpatialMasks
@@ -1402,6 +1404,7 @@ public class IntensityAnalysisV2 implements Analysis {
                 parts, outputPlan, spatialConfig);
         outBaseSpatialResults[c] = spatialResults.baseResults;
         outMipSpatialResults[c] = spatialResults.mipResult;
+        outNativeSpatialResults[c] = spatialResults.nativeResult;
 
         if (verbose) {
             IJ.log("    [DEBUG] Channel " + channelNames[c] + " processing time: "
@@ -1429,8 +1432,11 @@ public class IntensityAnalysisV2 implements Analysis {
                                             ImagePlus[] binarizedImages,
                                             ImagePlus[] binaryMasks,
                                             IntensitySpatialResult[][] baseResults,
-                                            IntensitySpatialResult[] mipResults) {
-        if (!hasSelected2dCrossChannelAnalysis(spatialConfig)
+                                            IntensitySpatialResult[] mipResults,
+                                            IntensitySpatialResult[] nativeResults) {
+        boolean has2d = hasSelected2dCrossChannelAnalysis(spatialConfig);
+        boolean hasNative3d = hasSelectedNative3dCrossChannelAnalysis(spatialConfig);
+        if ((!has2d && !hasNative3d)
                 || channelNames == null || channelCount < 2
                 || rawImages == null) {
             return;
@@ -1447,7 +1453,7 @@ public class IntensityAnalysisV2 implements Analysis {
             boolean baseAllowed = outputPlan.shouldPopulate(baseKey)
                     && baseKey != null
                     && !baseKey.isChannelRoiMaskOutput();
-            if (baseAllowed) {
+            if (has2d && baseAllowed) {
                 int slices = Math.max(1, sourceRaw.getStackSize());
                 baseResults[c] = ensureResultArray(baseResults[c], slices);
                 for (int p = 0; p < channelCount; p++) {
@@ -1467,7 +1473,7 @@ public class IntensityAnalysisV2 implements Analysis {
 
             IntensitySpatialOutputKey mipKey = outputPlan.keyForChannelMode(sourceName,
                     IntensitySpatialOutputMode.MIP);
-            if (outputPlan.shouldPopulate(mipKey)) {
+            if (has2d && outputPlan.shouldPopulate(mipKey)) {
                 for (int p = 0; p < channelCount; p++) {
                     if (p == c || rawImages[p] == null) continue;
                     ImagePlus sourceMip = null;
@@ -1510,13 +1516,47 @@ public class IntensityAnalysisV2 implements Analysis {
                     }
                 }
             }
+
+            IntensitySpatialOutputKey nativeKey = outputPlan.keyForChannelMode(sourceName,
+                    IntensitySpatialOutputMode.NATIVE_3D);
+            if (hasNative3d && outputPlan.shouldPopulate(nativeKey)) {
+                int sourceDepth = Math.max(1, sourceRaw.getStackSize());
+                if (sourceDepth < IntensitySpatialConfig.MIN_NATIVE_3D_SLICES) {
+                    IJ.log("[FLASH] Intensity-spatial native 3D skipped for "
+                            + imageId + " source " + sourceName
+                            + ": stack has fewer than "
+                            + IntensitySpatialConfig.MIN_NATIVE_3D_SLICES + " slices");
+                    continue;
+                }
+                for (int p = 0; p < channelCount; p++) {
+                    if (p == c || rawImages[p] == null) continue;
+                    int pairDepth = Math.min(sourceDepth, Math.max(1, rawImages[p].getStackSize()));
+                    if (pairDepth < IntensitySpatialConfig.MIN_NATIVE_3D_SLICES) {
+                        IJ.log("[FLASH] Intensity-spatial native 3D skipped for "
+                                + imageId + " source " + sourceName
+                                + " partner " + channelNames[p]
+                                + ": stack has fewer than "
+                                + IntensitySpatialConfig.MIN_NATIVE_3D_SLICES + " slices");
+                        continue;
+                    }
+                    IntensitySpatialResult result = runner.measurePair(new IntensitySpatialPairContext(
+                            spatialConfig,
+                            sourceRaw, imageAt(binarizedImages, c), imageAt(binaryMasks, c),
+                            rawImages[p], imageAt(binarizedImages, p), imageAt(binaryMasks, p),
+                            1, roi, IntensitySpatialOutputMode.NATIVE_3D, imageId,
+                            sourceName, channelNames[p], roiLabel, null));
+                    nativeResults[c] = mergeSpatialResults(nativeResults[c], result);
+                }
+            }
         }
     }
 
     private static boolean shouldRetainCrossChannelSpatialImages(IntensityOutputPlan outputPlan,
                                                                  IntensitySpatialConfig spatialConfig,
                                                                  String channelName) {
-        if (!hasSelected2dCrossChannelAnalysis(spatialConfig) || outputPlan == null) {
+        boolean needs2d = hasSelected2dCrossChannelAnalysis(spatialConfig);
+        boolean needsNative3d = hasSelectedNative3dCrossChannelAnalysis(spatialConfig);
+        if ((!needs2d && !needsNative3d) || outputPlan == null) {
             return false;
         }
         IntensitySpatialOutputKey baseKey = outputPlan.baseKeyForChannel(channelName);
@@ -1525,8 +1565,14 @@ public class IntensityAnalysisV2 implements Analysis {
         }
         for (IntensitySpatialOutputKey selected : outputPlan.selectedKeys()) {
             if (selected == null || selected.isChannelRoiMaskOutput()) continue;
-            if ((selected.mode() == IntensitySpatialOutputMode.BASE
+            if (needs2d
+                    && (selected.mode() == IntensitySpatialOutputMode.BASE
                     || selected.mode() == IntensitySpatialOutputMode.MIP)
+                    && outputPlan.shouldPopulate(selected)) {
+                return true;
+            }
+            if (needsNative3d
+                    && selected.mode() == IntensitySpatialOutputMode.NATIVE_3D
                     && outputPlan.shouldPopulate(selected)) {
                 return true;
             }
@@ -1541,6 +1587,14 @@ public class IntensityAnalysisV2 implements Analysis {
                 && (analyses.contains(IntensitySpatialConfig.AnalysisKey.CROSSMARK)
                 || analyses.contains(IntensitySpatialConfig.AnalysisKey.ENTROPY_MI)
                 || analyses.contains(IntensitySpatialConfig.AnalysisKey.DISTANCE_SHELL));
+    }
+
+    private static boolean hasSelectedNative3dCrossChannelAnalysis(IntensitySpatialConfig spatialConfig) {
+        if (spatialConfig == null || !spatialConfig.isEnabled()) return false;
+        Set<IntensitySpatialConfig.AnalysisKey> analyses = spatialConfig.getEnabledAnalyses();
+        return analyses != null
+                && (analyses.contains(IntensitySpatialConfig.AnalysisKey.CROSSMARK_3D)
+                || analyses.contains(IntensitySpatialConfig.AnalysisKey.DISTANCE_SHELL_3D));
     }
 
     private static IntensitySpatialResult[] ensureResultArray(IntensitySpatialResult[] results,
@@ -1577,6 +1631,7 @@ public class IntensityAnalysisV2 implements Analysis {
         String imageId = parts == null ? "unknown" : parts.displayLabel();
         IntensitySpatialResult[] baseResults = null;
         IntensitySpatialResult mipResult = null;
+        IntensitySpatialResult nativeResult = null;
 
         IntensitySpatialOutputKey baseKey = outputPlan.baseKeyForChannel(channelName);
         boolean baseAllowed = outputPlan.shouldPopulate(baseKey)
@@ -1616,7 +1671,22 @@ public class IntensityAnalysisV2 implements Analysis {
             }
         }
 
-        return new ChannelSpatialResults(baseResults, mipResult);
+        IntensitySpatialOutputKey nativeKey = outputPlan.keyForChannelMode(channelName,
+                IntensitySpatialOutputMode.NATIVE_3D);
+        if (outputPlan.shouldPopulate(nativeKey)) {
+            int stackDepth = Math.max(1, raw.getStackSize());
+            if (stackDepth < IntensitySpatialConfig.MIN_NATIVE_3D_SLICES) {
+                IJ.log("[FLASH] Intensity-spatial native 3D skipped for " + imageId
+                        + " channel " + channelName + ": stack has fewer than "
+                        + IntensitySpatialConfig.MIN_NATIVE_3D_SLICES + " slices");
+            } else {
+                nativeResult = runner.measure(new IntensitySpatialContext(
+                        spatialConfig, raw, binarizedRawInMask, 1, roi,
+                        IntensitySpatialOutputMode.NATIVE_3D, imageId, channelName, roiLabel, null));
+            }
+        }
+
+        return new ChannelSpatialResults(baseResults, mipResult, nativeResult);
     }
 
     /**
@@ -1709,6 +1779,7 @@ public class IntensityAnalysisV2 implements Analysis {
                                       IntensitySpatialResult spatialResult) {
         IntensitySpatialOutputKey key = outputPlan.keyForChannelMode(channelName, mode);
         if (!outputPlan.shouldPopulate(key)) return;
+        if (mode == IntensitySpatialOutputMode.NATIVE_3D && spatialResult == null) return;
         ResultsTable table = totalTables.table(key);
         table.incrementCounter();
         int row = table.size() - 1;
@@ -2036,12 +2107,12 @@ public class IntensityAnalysisV2 implements Analysis {
         if (key.mode() == IntensitySpatialOutputMode.NATIVE_3D) {
             if (analyses.contains(IntensitySpatialConfig.AnalysisKey.CROSSMARK_3D)) {
                 addCrossChannel3dColumns(columns, IntensitySpatialConfig.AnalysisKey.CROSSMARK_3D,
-                        source, partner, spatialConfig);
+                        source, partner, sourceBinarized, partnerBinarized, spatialConfig);
             }
             if (analyses.contains(IntensitySpatialConfig.AnalysisKey.DISTANCE_SHELL_3D)
                     && partnerBinarized) {
                 addCrossChannel3dColumns(columns, IntensitySpatialConfig.AnalysisKey.DISTANCE_SHELL_3D,
-                        source, partner, spatialConfig);
+                        source, partner, sourceBinarized, partnerBinarized, spatialConfig);
             }
             return;
         }
@@ -2103,15 +2174,28 @@ public class IntensityAnalysisV2 implements Analysis {
     }
 
     private static void addCrossChannel3dColumns(LinkedHashSet<String> columns,
-                                                 IntensitySpatialConfig.AnalysisKey analysis,
-                                                 String source,
-                                                 String partner,
-                                                 IntensitySpatialConfig spatialConfig) {
+                                                  IntensitySpatialConfig.AnalysisKey analysis,
+                                                  String source,
+                                                  String partner,
+                                                  boolean sourceBinarized,
+                                                  boolean partnerBinarized,
+                                                  IntensitySpatialConfig spatialConfig) {
         String suffix = "_" + partner;
         switch (analysis) {
             case CROSSMARK_3D:
-                columns.add(source + "_CrossMark3DRadius_um" + suffix);
-                columns.add(source + "_CrossMark3DStrength" + suffix);
+                columns.add(source + "_Pearson3D" + suffix);
+                columns.add(source + "_CostesP3D" + suffix);
+                columns.add(source + "_CostesTa3D" + suffix);
+                columns.add(source + "_CostesTb3D" + suffix);
+                if (sourceBinarized && partnerBinarized) {
+                    columns.add(source + "_CostesP3D" + suffix + "_binarized");
+                }
+                columns.add(source + "_MandersM13D" + suffix);
+                columns.add(source + "_MandersM23D" + suffix);
+                if (sourceBinarized && partnerBinarized) {
+                    columns.add(source + "_MandersM13D" + suffix + "_binarized");
+                    columns.add(source + "_MandersM23D" + suffix + "_binarized");
+                }
                 break;
             case DISTANCE_SHELL_3D:
                 addDistanceShellColumns(columns, source, partner, "DistShell3D",
@@ -2216,15 +2300,18 @@ public class IntensityAnalysisV2 implements Analysis {
     private static final class ChannelSpatialResults {
         final IntensitySpatialResult[] baseResults;
         final IntensitySpatialResult mipResult;
+        final IntensitySpatialResult nativeResult;
 
         ChannelSpatialResults(IntensitySpatialResult[] baseResults,
-                              IntensitySpatialResult mipResult) {
+                              IntensitySpatialResult mipResult,
+                              IntensitySpatialResult nativeResult) {
             this.baseResults = baseResults;
             this.mipResult = mipResult;
+            this.nativeResult = nativeResult;
         }
 
         static ChannelSpatialResults empty() {
-            return new ChannelSpatialResults(null, null);
+            return new ChannelSpatialResults(null, null, null);
         }
     }
 
