@@ -25,8 +25,10 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 public final class FilterCatalog extends JPanel {
 
@@ -169,7 +171,26 @@ public final class FilterCatalog extends JPanel {
     }
 
     private void addTierTwoEntries(List<Entry> tierTwoEntries) {
-        entries.addAll(tierTwoEntries == null ? getCachedTierTwoEntries() : tierTwoEntries);
+        List<Entry> source = tierTwoEntries == null ? getCachedTierTwoEntries() : tierTwoEntries;
+        for (int i = 0; i < source.size(); i++) {
+            addIfAbsent(source.get(i));
+        }
+    }
+
+    private void addIfAbsent(Entry candidate) {
+        if (candidate == null || candidate.stub) return;
+        String key = commandKey(candidate.commandName.length() > 0
+                ? candidate.commandName
+                : candidate.label);
+        if (key.length() == 0) return;
+        for (int i = 0; i < entries.size(); i++) {
+            Entry existing = entries.get(i);
+            String existingKey = commandKey(existing.commandName.length() > 0
+                    ? existing.commandName
+                    : existing.label);
+            if (key.equals(existingKey)) return;
+        }
+        entries.add(candidate);
     }
 
     private void add(String category, String label, OpType type, String args) {
@@ -192,14 +213,45 @@ public final class FilterCatalog extends JPanel {
     }
 
     private static List<Entry> loadTierTwoEntries() {
-        if (GraphicsEnvironment.isHeadless()) {
-            return Collections.emptyList();
+        List<Entry> menuEntries = Collections.emptyList();
+        if (!GraphicsEnvironment.isHeadless()) {
+            try {
+                menuEntries = collectTierTwoFromMenuBar(Menus.getMenuBar());
+            } catch (Throwable t) {
+                menuEntries = Collections.emptyList();
+            }
         }
-        try {
-            return collectTierTwoFromMenuBar(Menus.getMenuBar());
-        } catch (Throwable t) {
-            return Collections.emptyList();
+        return mergeRegistryCommands(menuEntries, FijiCommandRegistry.allCommands());
+    }
+
+    static List<Entry> mergeRegistryCommands(List<Entry> menuEntries,
+                                             List<FijiCommandRegistry.Command> registryCommands) {
+        List<Entry> out = new ArrayList<Entry>();
+        Set<String> seen = new HashSet<String>();
+
+        if (menuEntries != null) {
+            for (int i = 0; i < menuEntries.size(); i++) {
+                Entry entry = menuEntries.get(i);
+                if (entry == null || entry.stub) continue;
+                String key = commandKey(entry.commandName.length() > 0 ? entry.commandName : entry.label);
+                if (key.length() == 0 || seen.contains(key)) continue;
+                seen.add(key);
+                out.add(entry);
+            }
         }
+
+        if (registryCommands != null) {
+            for (int i = 0; i < registryCommands.size(); i++) {
+                FijiCommandRegistry.Command command = registryCommands.get(i);
+                if (command == null) continue;
+                String label = normalizeLabel(command.name);
+                String key = commandKey(label);
+                if (key.length() == 0 || seen.contains(key) || shouldSkipCommand(label)) continue;
+                seen.add(key);
+                out.add(Entry.legacy("Fiji commands", label, "Fiji commands > " + label));
+            }
+        }
+        return out;
     }
 
     static List<Entry> collectTierTwoFromMenuBar(MenuBar menuBar) {
@@ -266,6 +318,10 @@ public final class FilterCatalog extends JPanel {
             normalized = normalized.substring(0, normalized.length() - 1).trim();
         }
         return normalized;
+    }
+
+    private static String commandKey(String raw) {
+        return normalizeLabel(raw).toLowerCase(Locale.ROOT);
     }
 
     private static String normalizePathLabel(String label) {
