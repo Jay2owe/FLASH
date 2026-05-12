@@ -8,6 +8,7 @@ import flash.pipeline.bin.ChannelIdentitiesIO;
 import flash.pipeline.analyses.wizard.IntensityPreset;
 import flash.pipeline.analyses.wizard.IntensityPresetIO;
 import flash.pipeline.analyses.wizard.IntensitySpatialConfig;
+import flash.pipeline.analyses.wizard.IntensitySpatialWizard;
 import flash.pipeline.analyses.wizard.IntensityWizard;
 import flash.pipeline.bin.BinField;
 import flash.pipeline.bin.BinSetupDispatcher;
@@ -471,6 +472,30 @@ public class IntensityAnalysisV2 implements Analysis {
         if (suppressDialogs) {
             roiAnalysis = anyRois;
             anyBinarize = anyTrue(binarization);
+            int likelyStackDepth = likelyStackDepthForSpatialWizard(directory, cfg);
+            intensitySpatialConfig = intensitySpatialConfig.validateForChannelSetup(
+                    channelNames.length,
+                    binarization,
+                    likelyStackDepth > 0 ? Integer.valueOf(likelyStackDepth) : null,
+                    new IntensitySpatialConfig.LockLogger() {
+                        public void log(String message) {
+                            IJ.log("[FLASH] " + message);
+                        }
+                    });
+        } else {
+            IntensitySpatialWizard spatialWizard = new IntensitySpatialWizard(
+                    flash.pipeline.ui.wizard.WizardFlow.MainPanelBinding.NULL,
+                    channelNames,
+                    binarization,
+                    likelyStackDepthForSpatialWizard(directory, cfg),
+                    intensitySpatialConfig,
+                    false);
+            spatialWizard.run();
+            if (spatialWizard.wasCancelled()) {
+                IJ.log("[FLASH] Intensity-spatial setup cancelled by user.");
+                return;
+            }
+            intensitySpatialConfig = spatialWizard.deriveCurrentConfig();
         }
 
         // Log user selections
@@ -492,6 +517,13 @@ public class IntensityAnalysisV2 implements Analysis {
             for (int r = 0; r < roiZipNames.length; r++) {
                 IJ.log("  ROI set '" + roiZipNames[r] + "': " + (roiZipSelected[r] ? "selected" : "skipped"));
             }
+        }
+        IJ.log("  Intensity-spatial: " + intensitySpatialConfig.isEnabled());
+        if (intensitySpatialConfig.isEnabled()) {
+            IJ.log("  Intensity-spatial analyses: "
+                    + IntensitySpatialConfig.joinAnalysisTokens(intensitySpatialConfig.getEnabledAnalyses()));
+            IJ.log("  Intensity-spatial MIP: " + intensitySpatialConfig.isMipEnabled());
+            IJ.log("  Intensity-spatial native 3D: " + intensitySpatialConfig.isNative3dEnabled());
         }
 
         // Output directories
@@ -1482,6 +1514,35 @@ public class IntensityAnalysisV2 implements Analysis {
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
         File existing = layout.existingConfigurationDir();
         return existing == null ? layout.configurationWriteDir() : existing;
+    }
+
+    private static int likelyStackDepthForSpatialWizard(String directory, BinConfig cfg) {
+        int configuredDepth = configuredZSliceDepth(cfg);
+        if (configuredDepth > 0) {
+            return configuredDepth;
+        }
+        try {
+            List<SeriesMeta> metas = ImageSourceDispatcher.readAllMetadata(directory);
+            if (metas != null && !metas.isEmpty()) {
+                return Math.max(1, metas.get(0).nSlices);
+            }
+        } catch (Exception e) {
+            IJ.log("[FLASH] Could not inspect z-stack depth for intensity-spatial setup: " + e.getMessage());
+        }
+        return -1;
+    }
+
+    private static int configuredZSliceDepth(BinConfig cfg) {
+        if (cfg == null || !cfg.usesZSliceSubset() || cfg.zSliceSelections.isEmpty()) {
+            return -1;
+        }
+        int minDepth = Integer.MAX_VALUE;
+        for (flash.pipeline.zslice.ZSliceSelection selection : cfg.zSliceSelections.values()) {
+            if (selection != null && selection.range != null) {
+                minDepth = Math.min(minDepth, selection.range.count());
+            }
+        }
+        return minDepth == Integer.MAX_VALUE ? -1 : minDepth;
     }
 
     private IntensityWizard.DerivedConfig loadIntensityPresetConfig(String directory,

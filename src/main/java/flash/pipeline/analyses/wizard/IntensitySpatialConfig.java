@@ -216,8 +216,12 @@ public final class IntensitySpatialConfig implements Serializable {
         }
 
         boolean native3d = native3dEnabled;
+        if (!native3d && removeNative3d(adjusted)) {
+            log(logger, "Intensity-spatial native 3D analyses require native 3D output to be selected; selections were cleared.");
+        }
         if (actualSliceCount != null && actualSliceCount.intValue() < MIN_NATIVE_3D_SLICES) {
-            if (native3d || removeNative3d(adjusted)) {
+            boolean removedNative3dAnalyses = removeNative3d(adjusted);
+            if (native3d || removedNative3dAnalyses) {
                 log(logger, "Intensity-spatial native 3D analyses require at least "
                         + MIN_NATIVE_3D_SLICES + " slices; selections were cleared.");
             }

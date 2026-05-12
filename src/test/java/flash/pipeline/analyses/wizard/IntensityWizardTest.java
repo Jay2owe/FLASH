@@ -5,6 +5,7 @@ import flash.pipeline.bin.ChannelIdentities;
 import org.junit.Test;
 
 import java.util.Arrays;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -54,6 +55,30 @@ public class IntensityWizardTest {
 
         assertEquals(2, derived.maskChannelIndex);
         assertEquals("NeuN", derived.maskChannelChoice);
+    }
+
+    @Test
+    public void spatialConfigAnswersAreValidatedAgainstIntensityBinarization() {
+        Map<String, Object> answers = new LinkedHashMap<String, Object>();
+        answers.put("mode.1", IntensityWizard.MODE_WHOLE_ROI_MEAN);
+        answers.put("mode.2", IntensityWizard.MODE_WHOLE_ROI_MEAN);
+        answers.put("mode.3", IntensityWizard.MODE_WHOLE_ROI_MEAN);
+        answers.put("mode.4", IntensityWizard.MODE_WHOLE_ROI_MEAN);
+        answers.put("intensity.spatial.config", IntensitySpatialConfig.builder()
+                .enabled(true)
+                .enabledAnalyses(EnumSet.of(
+                        IntensitySpatialConfig.AnalysisKey.PATCHINESS,
+                        IntensitySpatialConfig.AnalysisKey.DISTANCE_SHELL))
+                .build());
+
+        IntensityWizard.DerivedConfig derived = IntensityWizard.deriveConfig(
+                config(), identities(), answers, Arrays.asList("LH ROIs"));
+
+        assertTrue(derived.spatialConfig.getEnabledAnalyses()
+                .contains(IntensitySpatialConfig.AnalysisKey.PATCHINESS));
+        assertFalse(derived.spatialConfig.getEnabledAnalyses()
+                .contains(IntensitySpatialConfig.AnalysisKey.DISTANCE_SHELL));
+        assertFalse("Validation must not auto-enable binarisation", derived.binarization[0]);
     }
 
     private static BinConfig config() {
