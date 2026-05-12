@@ -66,6 +66,13 @@ public class SetupHelpCatalogTest {
                 "signal threshold");
         assertContains(SetupHelpCatalog.CLASSICAL_OBJECT_SEGMENTATION.summary,
                 "voxel-size range");
+        String classicalText = topicText(SetupHelpCatalog.CLASSICAL_OBJECT_SEGMENTATION);
+        assertContains(classicalText, "left Threshold preview");
+        assertContains(classicalText, "right Object preview");
+        assertContains(classicalText, "Large view");
+        assertFalse(classicalText.contains("Raw: preview"));
+        assertFalse(classicalText.contains("Filtered: preview"));
+        assertFalse(classicalText.contains("Overlay objects"));
         assertContains(SetupHelpCatalog.STARDIST.summary,
                 "star-convex objects");
         assertContains(SetupHelpCatalog.CELLPOSE.summary,
@@ -98,5 +105,17 @@ public class SetupHelpCatalogTest {
     private static void assertContains(String value, String expected) {
         assertNotNull(value);
         assertTrue("expected text to contain: " + expected, value.contains(expected));
+    }
+
+    private static String topicText(SetupHelpTopic topic) {
+        StringBuilder text = new StringBuilder();
+        text.append(topic.title).append('\n').append(topic.summary);
+        for (SetupHelpTopic.Section section : topic.sections) {
+            text.append('\n').append(section.heading);
+            for (String item : section.items) {
+                text.append('\n').append(item);
+            }
+        }
+        return text.toString();
     }
 }

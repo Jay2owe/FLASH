@@ -325,6 +325,28 @@ public class ConfigQcDialogTest {
     }
 
     @Test
+    public void classicalMethodSelectionAdvancesToMergedClassicalStageOnly() {
+        RecordingMethodStore store = new RecordingMethodStore(SegmentationMethodStage.CLASSICAL);
+        SegmentationMethodStage methodStage = new SegmentationMethodStage(store);
+        RecordingStage classical = new MethodSpecificRecordingStage(
+                "Classical Segmentation", store, SegmentationMethodStage.CLASSICAL);
+        RecordingStage starDist = new MethodSpecificRecordingStage(
+                "StarDist", store, SegmentationMethodStage.STARDIST);
+        RecordingStage cellpose = new MethodSpecificRecordingStage(
+                "Cellpose", store, SegmentationMethodStage.CELLPOSE);
+        ConfigQcDialog dialog = ConfigQcDialog.createForTest(
+                contextWithTwoImages(),
+                Arrays.<ConfigQcStage>asList(methodStage, classical, starDist, cellpose));
+
+        dialog.lockInForTest();
+
+        assertEquals("Classical Segmentation", dialog.stageTextForTest());
+        assertEquals(1, classical.enterCount);
+        assertEquals(0, starDist.enterCount);
+        assertEquals(0, cellpose.enterCount);
+    }
+
+    @Test
     public void skipAndRestartDelegateToCurrentStage() {
         RecordingStage stage = new RecordingStage("Particle size");
         ConfigQcContext context = contextWithTwoImages();
@@ -594,6 +616,38 @@ public class ConfigQcDialogTest {
 
         @Override public void onLeave(ConfigQcContext context) {
             leaveCount++;
+        }
+    }
+
+    private static final class MethodSpecificRecordingStage extends RecordingStage {
+        private final RecordingMethodStore store;
+        private final String choice;
+
+        MethodSpecificRecordingStage(String title, RecordingMethodStore store, String choice) {
+            super(title);
+            this.store = store;
+            this.choice = choice;
+        }
+
+        @Override public boolean isApplicable(ConfigQcContext context) {
+            return choice.equals(store.getChoice());
+        }
+    }
+
+    private static final class RecordingMethodStore implements SegmentationMethodStage.MethodStore {
+        private String choice;
+
+        RecordingMethodStore(String choice) {
+            this.choice = choice;
+        }
+
+        @Override public String getChoice() {
+            return choice;
+        }
+
+        @Override public boolean selectChoice(String choice) {
+            this.choice = choice;
+            return true;
         }
     }
 

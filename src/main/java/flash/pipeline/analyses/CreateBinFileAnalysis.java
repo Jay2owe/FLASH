@@ -45,6 +45,7 @@ import flash.pipeline.ui.config.ConfigQcDialog;
 import flash.pipeline.ui.config.ConfigQcResult;
 import flash.pipeline.ui.config.ConfigQcStage;
 import flash.pipeline.ui.config.ChannelThresholdStage;
+import flash.pipeline.ui.config.ClassicalSegmentationStage;
 import flash.pipeline.ui.config.CellposeParameterStage;
 import flash.pipeline.ui.config.DisplayRangeStage;
 import flash.pipeline.ui.config.FilterParameterStage;
@@ -5335,49 +5336,13 @@ public class CreateBinFileAnalysis implements Analysis {
                                                                                int threshold,
                                                                                int minSize,
                                                                                int maxSize) {
-                        if (filteredSource == null) return null;
-                        ImagePlus input = filteredSource.duplicate();
-                        input.setTitle("Particle size preview input | " + chLabel);
-                        try {
-                            ObjectsCounter3DWrapper wrapper = new ObjectsCounter3DWrapper();
-                            ObjectsCounter3DWrapper.Result result;
-                            if (ObjectsCounter3DWrapper.isMcib3dAvailable()) {
-                                result = wrapper.runNative(
-                                        input,
-                                        threshold,
-                                        minSize,
-                                        maxSize,
-                                        false,
-                                        null,
-                                        true,
-                                        false);
-                            } else {
-                                WindowManagerLock.LOCK.lock();
-                                try {
-                                    result = wrapper.run(
-                                            input,
-                                            threshold,
-                                            minSize,
-                                            maxSize,
-                                            false,
-                                            false,
-                                            true,
-                                            false);
-                                    result = detachVisibleCounterPreview(result);
-                                    closeResultsWindows();
-                                } finally {
-                                    closeResultsWindows();
-                                    WindowManagerLock.LOCK.unlock();
-                                }
-                            }
-                            ImagePlus map = result == null ? null : result.getObjectsMap();
-                            if (map != null) {
-                                map.setTitle("Object label preview | " + chLabel);
-                            }
-                            return result;
-                        } finally {
-                            closeImageQuietly(input);
-                        }
+                        return runObjectsCounterPreview(
+                                filteredSource,
+                                threshold,
+                                minSize,
+                                maxSize,
+                                "Particle size preview input | " + chLabel,
+                                "Object label preview | " + chLabel);
                     }
 
                     @Override public int countObjects(ObjectsCounter3DWrapper.Result result) {
@@ -5389,6 +5354,124 @@ public class CreateBinFileAnalysis implements Analysis {
                         closeImageQuietly(image);
                     }
                 });
+    }
+
+    ClassicalSegmentationStage createClassicalSegmentationStage(final BinUserConfig cfg,
+                                                                final File binFolder,
+                                                                final int channelIndex) {
+        final int channelNum = channelIndex + 1;
+        final String chLabel = "C" + channelNum + " (" + cfg.names.get(channelIndex) + ")";
+        return new ClassicalSegmentationStage(
+                new ClassicalSegmentationStage.ThresholdStore() {
+                    @Override public String get() {
+                        return cfg.objectThresholds.get(channelIndex);
+                    }
+
+                    @Override public void set(String token) {
+                        cfg.objectThresholds.set(channelIndex, token);
+                        cfg.intensityThresholds.set(channelIndex, token);
+                    }
+                },
+                new ClassicalSegmentationStage.SizeStore() {
+                    @Override public String get() {
+                        return cfg.sizes.get(channelIndex);
+                    }
+
+                    @Override public void set(String token) {
+                        cfg.sizes.set(channelIndex, token);
+                    }
+                },
+                new ClassicalSegmentationStage.PreviewAdapter() {
+                    @Override public ImagePlus createRawSource(ConfigQcContext context) {
+                        ImagePlus source = duplicateCurrentChannel(context, channelNum);
+                        if (source == null) return null;
+                        source.setTitle("Classical segmentation raw input | " + chLabel + " | "
+                                + (context == null ? "" : context.getCurrentImageDisplayName()));
+                        return applyPreviewLut(source, channelColor(cfg, channelIndex));
+                    }
+
+                    @Override public ImagePlus createFilteredSource(ConfigQcContext context) {
+                        return createFilteredSetupSource(context, cfg, binFolder, channelIndex,
+                                "Classical segmentation filtered input");
+                    }
+
+                    @Override public ObjectsCounter3DWrapper.Result runPreview(ImagePlus filteredSource,
+                                                                               int threshold,
+                                                                               int minSize,
+                                                                               int maxSize) {
+                        return runObjectsCounterPreview(
+                                filteredSource,
+                                threshold,
+                                minSize,
+                                maxSize,
+                                "Classical object preview input | " + chLabel,
+                                "Object label preview | " + chLabel);
+                    }
+
+                    @Override public int countObjects(ObjectsCounter3DWrapper.Result result) {
+                        return countObjectsInPreview(result);
+                    }
+
+                    @Override public void close(ImagePlus image) {
+                        closeImageQuietly(image);
+                    }
+                });
+    }
+
+    private ObjectsCounter3DWrapper.Result runObjectsCounterPreview(ImagePlus filteredSource,
+                                                                    int threshold,
+                                                                    int minSize,
+                                                                    int maxSize,
+                                                                    String inputTitle,
+                                                                    String mapTitle) {
+        if (filteredSource == null) return null;
+        ImagePlus input = filteredSource.duplicate();
+        input.setTitle(inputTitle);
+        try {
+            ObjectsCounter3DWrapper wrapper = new ObjectsCounter3DWrapper();
+            ObjectsCounter3DWrapper.Result result;
+            if (ObjectsCounter3DWrapper.isMcib3dAvailable()) {
+                result = wrapper.runNative(
+                        input,
+                        threshold,
+                        minSize,
+                        maxSize,
+                        false,
+                        null,
+                        true,
+                        false);
+            } else {
+                WindowManagerLock.LOCK.lock();
+                try {
+                    result = wrapper.run(
+                            input,
+                            threshold,
+                            minSize,
+                            maxSize,
+                            false,
+                            false,
+                            true,
+                            false);
+                    result = detachVisibleCounterPreview(result);
+                    closeResultsWindows();
+                } finally {
+                    closeResultsWindows();
+                    WindowManagerLock.LOCK.unlock();
+                }
+            }
+            ImagePlus map = result == null ? null : result.getObjectsMap();
+            if (map != null) {
+                map.setTitle(mapTitle);
+            }
+            return result;
+        } finally {
+            closeImageQuietly(input);
+        }
+    }
+
+    private static int countObjectsInPreview(ObjectsCounter3DWrapper.Result result) {
+        if (result == null || result.getStatistics() == null) return 0;
+        return result.getStatistics().size();
     }
 
     private ObjectsCounter3DWrapper.Result detachVisibleCounterPreview(
@@ -5758,15 +5841,7 @@ public class CreateBinFileAnalysis implements Analysis {
         List<ConfigQcStage> stages = new ArrayList<ConfigQcStage>();
         stages.add(new SegmentationMethodStage(methodStore));
         stages.add(new ConditionalConfigQcStage(
-                withSegmentationMethodSwitcher(createChannelThresholdStage(cfg, binFolder, channelIndex),
-                        methodStore),
-                new StagePredicate() {
-                    @Override public boolean isApplicable() {
-                        return isClassicalSegmentation(cfg, channelIndex);
-                    }
-                }));
-        stages.add(new ConditionalConfigQcStage(
-                withSegmentationMethodSwitcher(createParticleSizeStage(cfg, binFolder, channelIndex),
+                withSegmentationMethodSwitcher(createClassicalSegmentationStage(cfg, binFolder, channelIndex),
                         methodStore),
                 new StagePredicate() {
                     @Override public boolean isApplicable() {
@@ -7743,6 +7818,9 @@ public class CreateBinFileAnalysis implements Analysis {
         }
 
         @Override public SetupHelpTopic helpTopic() {
+            if (delegate instanceof ClassicalSegmentationStage) {
+                return SetupHelpCatalog.CLASSICAL_OBJECT_SEGMENTATION;
+            }
             if (delegate instanceof ChannelThresholdStage) {
                 String choice = methodStore == null ? "" : methodStore.getChoice();
                 if (SegmentationMethodStage.CLASSICAL.equals(choice)) {
