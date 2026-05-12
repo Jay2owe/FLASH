@@ -9,7 +9,11 @@ import ij.measure.ResultsTable;
 import ij.process.ByteProcessor;
 import org.junit.Test;
 
+import javax.swing.AbstractButton;
 import javax.swing.JButton;
+import javax.swing.JLabel;
+import java.awt.Component;
+import java.awt.Container;
 import java.util.Arrays;
 
 import static org.junit.Assert.assertEquals;
@@ -55,6 +59,42 @@ public class ClassicalSegmentationStageTest {
     }
 
     @Test
+    public void normalPreviewHidesSourceModeControls() {
+        RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
+        ClassicalSegmentationStage stage = stage(
+                new RecordingThresholdStore("20"),
+                new RecordingSizeStore("1-Infinity"),
+                adapter);
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Objects");
+
+        stage.buildControls(context(), new RecordingActions());
+        stage.onEnter(context(), pair);
+
+        assertEquals("Threshold preview", stage.currentNormalLeftPreviewTitleForTest());
+        assertFalse(hasVisibleText(pair.previewToolstrip(), "Source:"));
+        assertFalse(hasVisibleText(pair.previewToolstrip(), "Raw"));
+        assertFalse(hasVisibleText(pair.previewToolstrip(), "Filtered"));
+    }
+
+    @Test
+    public void largePreviewAddsObjectPaneAfterLabelsExist() throws Exception {
+        RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
+        ClassicalSegmentationStage stage = stage(
+                new RecordingThresholdStore("20"),
+                new RecordingSizeStore("1-Infinity"),
+                adapter);
+
+        stage.buildControls(context(), new RecordingActions());
+        stage.onEnter(context(), new PreviewPairPanel("Original", "Objects"));
+
+        assertEquals(2, stage.largePreviewPaneCountForTest());
+
+        stage.runPreviewNowForTest();
+
+        assertEquals(3, stage.largePreviewPaneCountForTest());
+    }
+
+    @Test
     public void thresholdEditRerendersWithoutRunningObjectPreview() {
         RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
         RecordingActions actions = new RecordingActions();
@@ -73,6 +113,33 @@ public class ClassicalSegmentationStageTest {
         assertTrue(firstPreview != stage.thresholdPreviewForTest());
         assertEquals(0, adapter.previewRuns);
         assertTrue(stage.isObjectPreviewStaleForTest());
+        assertTrue(actions.status.contains("Object preview is out of date"));
+    }
+
+    @Test
+    public void staleObjectStateDoesNotReplaceLiveThresholdPreview() throws Exception {
+        RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
+        ClassicalSegmentationStage stage = stage(
+                new RecordingThresholdStore("20"),
+                new RecordingSizeStore("1-Infinity"),
+                adapter);
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Objects");
+        RecordingActions actions = new RecordingActions();
+
+        stage.buildControls(context(), actions);
+        stage.onEnter(context(), pair);
+        stage.runPreviewNowForTest();
+
+        ImagePlus firstThresholdPreview = stage.thresholdPreviewForTest();
+        assertEquals("Threshold preview", stage.currentNormalLeftPreviewTitleForTest());
+        assertEquals("Object label preview", actions.adjustedPreview.getTitle());
+
+        stage.setThresholdForTest(80.0, 100.0);
+
+        assertTrue(stage.isObjectPreviewStaleForTest());
+        assertTrue(firstThresholdPreview != stage.thresholdPreviewForTest());
+        assertEquals("Threshold preview", stage.currentNormalLeftPreviewTitleForTest());
+        assertEquals("Object label preview", actions.adjustedPreview.getTitle());
         assertTrue(actions.status.contains("Object preview is out of date"));
     }
 
@@ -201,6 +268,26 @@ public class ClassicalSegmentationStageTest {
         processor.set(3, 0, 100);
         stack.addSlice(processor);
         return new ImagePlus(title, stack);
+    }
+
+    private static boolean hasVisibleText(Container root, String text) {
+        if (root == null || text == null) return false;
+        for (Component component : root.getComponents()) {
+            if (!component.isVisible()) continue;
+            String componentText = null;
+            if (component instanceof AbstractButton) {
+                componentText = ((AbstractButton) component).getText();
+            } else if (component instanceof JLabel) {
+                componentText = ((JLabel) component).getText();
+            }
+            if (text.equals(componentText)) {
+                return true;
+            }
+            if (component instanceof Container && hasVisibleText((Container) component, text)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static final class RecordingThresholdStore

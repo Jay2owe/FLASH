@@ -27,21 +27,36 @@ public final class LargePreviewDialog extends JDialog {
         void zSliceChanged(int zSlice);
     }
 
+    interface SourceChoiceListener {
+        void sourceChoiceChanged(PreviewPairPanel.SourceMode mode);
+    }
+
     private final ImagePreviewPanel originalPreview = new ImagePreviewPanel("Original image");
     private final ImagePreviewPanel adjustedPreview = new ImagePreviewPanel("Adjusted preview");
     private final ImagePreviewPanel extraPreview = new ImagePreviewPanel("Object map");
     private final JPanel previewsPanel = new JPanel();
+    private final JPanel sourceControls = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+    private final JComboBox<String> sourceChoice = new JComboBox<String>();
     private final JPanel overlayControls = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
     private final JCheckBox overlayCheck = new JCheckBox("Overlay objects");
     private final JComboBox<String> overlaySourceChoice = new JComboBox<String>();
     private SliceListener sliceListener;
+    private SourceChoiceListener sourceChoiceListener;
     private boolean syncingSlices;
+    private boolean updatingSourceChoice;
     private boolean extraPreviewVisible;
     private PreviewDisplaySettings originalDisplaySettings = PreviewDisplaySettings.defaultFor("Grays");
     private PreviewDisplaySettings adjustedDisplaySettings = PreviewDisplaySettings.defaultFor("Grays");
+    private PreviewDisplaySettings sourceChoiceOriginalDisplaySettings =
+            PreviewDisplaySettings.defaultFor("Grays");
+    private PreviewDisplaySettings sourceChoiceFilteredDisplaySettings =
+            PreviewDisplaySettings.defaultFor("Grays");
+    private PreviewPairPanel.SourceMode sourceChoiceMode = PreviewPairPanel.SourceMode.RAW;
     private ImagePlus originalImage;
     private ImagePlus adjustedImage;
     private ImagePlus objectLabelImage;
+    private ImagePlus sourceChoiceOriginalImage;
+    private ImagePlus sourceChoiceFilteredImage;
     private ImagePlus generatedOverlayImage;
 
     public LargePreviewDialog(Window owner) {
@@ -52,6 +67,7 @@ public final class LargePreviewDialog extends JDialog {
         add(buildPreviews(), BorderLayout.CENTER);
         add(buildFooter(), BorderLayout.SOUTH);
         wireSliceSync();
+        wireSourceControls();
         wireOverlayControls();
         pack();
         setMinimumSize(new Dimension(820, 520));
@@ -60,6 +76,36 @@ public final class LargePreviewDialog extends JDialog {
 
     void setSliceListener(SliceListener sliceListener) {
         this.sliceListener = sliceListener;
+    }
+
+    void setSourceChoiceListener(SourceChoiceListener sourceChoiceListener) {
+        this.sourceChoiceListener = sourceChoiceListener;
+    }
+
+    void setSourceChoices(ImagePlus originalSource,
+                          PreviewDisplaySettings originalSettings,
+                          ImagePlus filteredSource,
+                          PreviewDisplaySettings filteredSettings,
+                          PreviewPairPanel.SourceMode selectedMode) {
+        sourceChoiceOriginalImage = originalSource;
+        sourceChoiceFilteredImage = filteredSource;
+        sourceChoiceOriginalDisplaySettings = safeDisplaySettings(originalSettings);
+        sourceChoiceFilteredDisplaySettings = safeDisplaySettings(filteredSettings);
+        sourceChoiceMode = availableSourceChoiceMode(selectedMode);
+        updateSourceControls();
+        refreshObjectPreviewImage();
+        updateOverlayControls();
+    }
+
+    void clearSourceChoices() {
+        sourceChoiceOriginalImage = null;
+        sourceChoiceFilteredImage = null;
+        sourceChoiceOriginalDisplaySettings = PreviewDisplaySettings.defaultFor("Grays");
+        sourceChoiceFilteredDisplaySettings = PreviewDisplaySettings.defaultFor("Grays");
+        sourceChoiceMode = PreviewPairPanel.SourceMode.RAW;
+        updateSourceControls();
+        refreshObjectPreviewImage();
+        updateOverlayControls();
     }
 
     public void setImages(ImagePlus originalImage, ImagePlus adjustedImage, int zSlice) {
@@ -138,6 +184,19 @@ public final class LargePreviewDialog extends JDialog {
         return overlayControls.isVisible();
     }
 
+    boolean sourceControlsVisibleForTest() {
+        return sourceControls.isVisible();
+    }
+
+    String selectedSourceChoiceForTest() {
+        Object selected = sourceChoice.getSelectedItem();
+        return selected == null ? "" : selected.toString();
+    }
+
+    void setSourceChoiceForTest(String label) {
+        sourceChoice.setSelectedItem(label);
+    }
+
     void setOverlaySelectedForTest(boolean selected) {
         overlayCheck.setSelected(selected);
         refreshObjectPreviewImage();
@@ -205,6 +264,17 @@ public final class LargePreviewDialog extends JDialog {
         JPanel footer = new JPanel(new BorderLayout(8, 8));
         footer.setBorder(BorderFactory.createEmptyBorder(0, 8, 8, 8));
 
+        JPanel leftControls = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        leftControls.setOpaque(false);
+
+        sourceChoice.addItem("Original");
+        sourceChoice.addItem("Filtered");
+        sourceControls.setOpaque(false);
+        sourceControls.add(new JLabel("Source:"));
+        sourceControls.add(sourceChoice);
+        sourceControls.setVisible(false);
+        leftControls.add(sourceControls);
+
         overlaySourceChoice.addItem("Filtered image");
         overlaySourceChoice.addItem("Raw image");
         overlayControls.setOpaque(false);
@@ -213,7 +283,8 @@ public final class LargePreviewDialog extends JDialog {
         overlayControls.add(new JLabel("over"));
         overlayControls.add(overlaySourceChoice);
         overlayControls.setVisible(false);
-        footer.add(overlayControls, BorderLayout.WEST);
+        leftControls.add(overlayControls);
+        footer.add(leftControls, BorderLayout.WEST);
 
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
         buttons.setOpaque(false);
@@ -236,6 +307,22 @@ public final class LargePreviewDialog extends JDialog {
         originalPreview.setZSliceChangeListener(listener);
         adjustedPreview.setZSliceChangeListener(listener);
         extraPreview.setZSliceChangeListener(listener);
+    }
+
+    private void wireSourceControls() {
+        sourceChoice.addActionListener(e -> {
+            if (updatingSourceChoice) return;
+            PreviewPairPanel.SourceMode selected = sourceChoice.getSelectedIndex() == 1
+                    ? PreviewPairPanel.SourceMode.FILTERED
+                    : PreviewPairPanel.SourceMode.RAW;
+            sourceChoiceMode = availableSourceChoiceMode(selected);
+            updateSourceControls();
+            refreshObjectPreviewImage();
+            updateOverlayControls();
+            if (sourceChoiceListener != null) {
+                sourceChoiceListener.sourceChoiceChanged(sourceChoiceMode);
+            }
+        });
     }
 
     private void wireOverlayControls() {
@@ -274,6 +361,11 @@ public final class LargePreviewDialog extends JDialog {
     private ImagePlus selectedOverlaySourceImage() {
         Object selected = overlaySourceChoice.getSelectedItem();
         boolean raw = selected != null && "Raw image".equals(selected.toString());
+        if (hasSourceChoiceImages()) {
+            ImagePlus source = raw ? sourceChoiceOriginalImage : sourceChoiceFilteredImage;
+            if (source != null) return source;
+            return raw ? sourceChoiceFilteredImage : sourceChoiceOriginalImage;
+        }
         ImagePlus preferred = raw ? originalImage : adjustedImage;
         if (preferred != null) return preferred;
         return raw ? adjustedImage : originalImage;
@@ -282,10 +374,59 @@ public final class LargePreviewDialog extends JDialog {
     private PreviewDisplaySettings selectedOverlaySourceDisplaySettings() {
         Object selected = overlaySourceChoice.getSelectedItem();
         boolean raw = selected != null && "Raw image".equals(selected.toString());
+        if (hasSourceChoiceImages()) {
+            if (raw) {
+                return sourceChoiceOriginalImage != null
+                        ? sourceChoiceOriginalDisplaySettings
+                        : sourceChoiceFilteredDisplaySettings;
+            }
+            return sourceChoiceFilteredImage != null
+                    ? sourceChoiceFilteredDisplaySettings
+                    : sourceChoiceOriginalDisplaySettings;
+        }
         if (raw) {
             return originalImage != null ? originalDisplaySettings : adjustedDisplaySettings;
         }
         return adjustedImage != null ? adjustedDisplaySettings : originalDisplaySettings;
+    }
+
+    private void updateSourceControls() {
+        boolean visible = sourceChoiceOriginalImage != null && sourceChoiceFilteredImage != null;
+        sourceControls.setVisible(visible);
+        sourceChoice.setEnabled(visible);
+        updatingSourceChoice = true;
+        try {
+            sourceChoice.setSelectedIndex(sourceChoiceMode == PreviewPairPanel.SourceMode.FILTERED
+                    ? 1
+                    : 0);
+        } finally {
+            updatingSourceChoice = false;
+        }
+        sourceControls.revalidate();
+        sourceControls.repaint();
+    }
+
+    private PreviewPairPanel.SourceMode availableSourceChoiceMode(
+            PreviewPairPanel.SourceMode requestedMode) {
+        PreviewPairPanel.SourceMode safeMode =
+                requestedMode == PreviewPairPanel.SourceMode.FILTERED
+                        ? PreviewPairPanel.SourceMode.FILTERED
+                        : PreviewPairPanel.SourceMode.RAW;
+        if (safeMode == PreviewPairPanel.SourceMode.FILTERED
+                && sourceChoiceFilteredImage != null) {
+            return PreviewPairPanel.SourceMode.FILTERED;
+        }
+        if (safeMode == PreviewPairPanel.SourceMode.RAW
+                && sourceChoiceOriginalImage != null) {
+            return PreviewPairPanel.SourceMode.RAW;
+        }
+        if (sourceChoiceOriginalImage != null) return PreviewPairPanel.SourceMode.RAW;
+        if (sourceChoiceFilteredImage != null) return PreviewPairPanel.SourceMode.FILTERED;
+        return safeMode;
+    }
+
+    private boolean hasSourceChoiceImages() {
+        return sourceChoiceOriginalImage != null || sourceChoiceFilteredImage != null;
     }
 
     private static PreviewDisplaySettings safeDisplaySettings(PreviewDisplaySettings settings) {
@@ -294,7 +435,8 @@ public final class LargePreviewDialog extends JDialog {
 
     private void updateOverlayControls() {
         boolean hasObjectMap = extraPreviewVisible && objectLabelImage != null;
-        boolean hasSource = originalImage != null || adjustedImage != null;
+        boolean hasSource = originalImage != null || adjustedImage != null
+                || hasSourceChoiceImages();
         overlayControls.setVisible(hasObjectMap);
         overlayCheck.setEnabled(hasObjectMap && hasSource);
         overlaySourceChoice.setEnabled(hasObjectMap && hasSource && overlayCheck.isSelected());

@@ -175,9 +175,12 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
         if (preview != null) {
             preview.clearLargePreviewImages();
             preview.setSourceModeChangeListener(null);
+            preview.setOriginalPreviewTitle("Threshold preview");
+            preview.setAdjustedPreviewTitle("Object preview");
             preview.setSourceToggleVisible(false);
             preview.setSourceMode(PreviewPairPanel.SourceMode.FILTERED);
             preview.setSourceModeEnabled(true);
+            preview.setObjectOverlaySelected(false);
             preview.setObjectOverlayEnabled(true);
         }
         if (actions != null) {
@@ -191,6 +194,9 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
             filteredSource = previewAdapter.createFilteredSource(context);
             if (filteredSource == null) {
                 throw new IllegalStateException("No filtered Classical input image is available.");
+            }
+            if (preview != null) {
+                preview.setLargePreviewSourceChoices(rawSource, filteredSource);
             }
             if (thresholdControl != null) {
                 thresholdControl.setImage(filteredSource);
@@ -574,6 +580,7 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
 
     private void refreshLargePreviewModel() {
         if (preview == null) return;
+        preview.setLargePreviewSourceChoices(rawSource, filteredSource);
         preview.setLargePreviewImages(rawSource, thresholdPreview, labelPreview);
     }
 
