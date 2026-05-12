@@ -7,17 +7,26 @@ import flash.pipeline.bin.BinSetupDispatcher;
 import flash.pipeline.analyses.wizard.IntensitySpatialConfig;
 import flash.pipeline.intensity.spatial.IntensitySpatialOutputKey;
 import flash.pipeline.intensity.spatial.IntensitySpatialOutputMode;
+import flash.pipeline.io.CsvTableIO;
+import flash.pipeline.naming.NameParts;
+import ij.IJ;
+import ij.ImagePlus;
+import ij.gui.Roi;
+import ij.measure.Calibration;
 import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.DependencyService;
 import flash.pipeline.runtime.DependencyStatus;
 import flash.pipeline.runtime.FeatureDependencyGate;
 import ij.measure.ResultsTable;
+import ij.process.FloatProcessor;
 import org.junit.After;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.PrintStream;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
@@ -118,6 +127,38 @@ public class IntensityAnalysisV2Test {
         assertTrue(plan.selectedKeys().contains(mip));
         assertTrue(plan.isSkipped(base));
         assertFalse(plan.isSkipped(mip));
+        assertFalse(plan.allSelectedOutputsSkipped());
+        assertEquals(new File(writeRoot, "DAPI_MIP.csv").getAbsolutePath(),
+                plan.fileFor(mip).getAbsolutePath());
+    }
+
+    @Test
+    public void skipExistingTracksBaseMipAndNative3dFilesIndependently() throws Exception {
+        File writeRoot = temp.newFolder("skip-matrix");
+        assertTrue(new File(writeRoot, "DAPI.csv").createNewFile());
+        assertTrue(new File(writeRoot, "DAPI_3D.csv").createNewFile());
+        IntensitySpatialConfig spatial = IntensitySpatialConfig.builder()
+                .enabled(true)
+                .mipEnabled(true)
+                .native3dEnabled(true)
+                .addAnalysis(IntensitySpatialConfig.AnalysisKey.PATCHINESS)
+                .addAnalysis(IntensitySpatialConfig.AnalysisKey.ANISOTROPY_3D)
+                .build();
+
+        IntensityAnalysisV2.IntensityOutputPlan plan = IntensityAnalysisV2.buildOutputPlan(
+                writeRoot, new String[]{"DAPI"}, false, -1, spatial, 6, true);
+
+        IntensitySpatialOutputKey base = IntensitySpatialOutputKey.base("DAPI");
+        IntensitySpatialOutputKey mip = IntensitySpatialOutputKey.of("DAPI",
+                IntensitySpatialOutputMode.MIP);
+        IntensitySpatialOutputKey native3d = IntensitySpatialOutputKey.of("DAPI",
+                IntensitySpatialOutputMode.NATIVE_3D);
+        assertTrue(plan.selectedKeys().contains(base));
+        assertTrue(plan.selectedKeys().contains(mip));
+        assertTrue(plan.selectedKeys().contains(native3d));
+        assertTrue(plan.isSkipped(base));
+        assertFalse(plan.isSkipped(mip));
+        assertTrue(plan.isSkipped(native3d));
         assertFalse(plan.allSelectedOutputsSkipped());
         assertEquals(new File(writeRoot, "DAPI_MIP.csv").getAbsolutePath(),
                 plan.fileFor(mip).getAbsolutePath());
@@ -272,6 +313,70 @@ public class IntensityAnalysisV2Test {
         assertFalse(summary.contains("not needed"));
     }
 
+    @Test
+    public void headlessSpatialMeasurementSkipsMissingOptionalDependencyAndStillWritesBaseCsv() throws Exception {
+        installDependencyStatusesForGate(DependencyId.IMGLIB2_ALGORITHM_RUNTIME);
+        File dir = temp.newFolder("headless-spatial-missing-dependency");
+        File binDir = new File(dir, ".bin");
+        assertTrue(binDir.mkdirs());
+        File outputRoot = IntensityAnalysisV2.intensityWriteRoot(dir.getAbsolutePath());
+        assertTrue(outputRoot.mkdirs());
+        String[] channelNames = {"DAPI"};
+        boolean[] binarization = {false};
+        String[] thresholds = {"0"};
+        String[] filterSources = {"Basic background and noise removal"};
+        IntensitySpatialConfig spatial = IntensitySpatialConfig.builder()
+                .enabled(true)
+                .addAnalysis(IntensitySpatialConfig.AnalysisKey.GRANULARITY)
+                .build();
+        IntensityAnalysisV2.IntensityOutputPlan plan = IntensityAnalysisV2.buildOutputPlan(
+                outputRoot, channelNames, false, -1, spatial, 1, false);
+        Object totalTables = newOutputTables(plan);
+
+        IntensityAnalysisV2 analysis = new IntensityAnalysisV2();
+        analysis.setHeadless(true);
+        analysis.setSuppressDialogs(true);
+        setIntensitySpatialConfigForTest(analysis, spatial);
+
+        String log = captureImageJLogOutput(new ThrowingRunnable() {
+            @Override
+            public void run() throws Exception {
+                invokeRunIntensityMeasurementsForThisImage(
+                        analysis,
+                        new NameParts("", "SyntheticMouse", "LH", "SCN"),
+                        new ImagePlus[]{syntheticImage(24, 24)},
+                        1,
+                        binarization,
+                        thresholds,
+                        channelNames,
+                        -1,
+                        plan,
+                        totalTables,
+                        1,
+                        null,
+                        intensityConfig("DAPI", "default"),
+                        filterSources,
+                        binDir,
+                        "",
+                        null);
+            }
+        });
+
+        IntensitySpatialOutputKey baseKey = IntensitySpatialOutputKey.base("DAPI");
+        ResultsTable table = tableFor(totalTables, baseKey);
+        File out = IntensityAnalysisV2.intensityOutputCsv(outputRoot, baseKey);
+        CsvTableIO.writeResultsTableCsv(out, table,
+                IntensityAnalysisV2.buildOrderedIntensityColumns(baseKey, table,
+                        channelNames, spatial, binarization));
+        assertTrue(out.isFile());
+        String csv = new String(Files.readAllBytes(out.toPath()), StandardCharsets.UTF_8);
+        assertTrue(csv.startsWith("Region,Hemisphere,ROI,Animal Name,IntDen,%Area,IntDen_Unfiltered"));
+        assertTrue(csv.contains("Intensity_GranularityPeak_um"));
+        assertTrue(csv.contains("NaN"));
+        assertTrue(log.contains("granularity skipped"));
+        assertTrue(log.contains("missing dependency IMGLIB2_ALGORITHM_RUNTIME"));
+    }
+
     private static void installDispatcherChoice(final BinSetupChooser.Choice choice,
                                                 final AtomicInteger chooserCalls) throws Exception {
         installDispatcherChoice(choice, chooserCalls, null);
@@ -339,10 +444,16 @@ public class IntensityAnalysisV2Test {
     }
 
     private static void installAllDependenciesPresentForGate() throws Exception {
+        installDependencyStatusesForGate(null);
+    }
+
+    private static void installDependencyStatusesForGate(final DependencyId missing) throws Exception {
         final EnumMap<DependencyId, DependencyStatus> statuses =
                 new EnumMap<DependencyId, DependencyStatus>(DependencyId.class);
         for (DependencyId id : DependencyId.values()) {
-            statuses.put(id, DependencyStatus.present(id.name() + " present"));
+            statuses.put(id, id == missing
+                    ? DependencyStatus.missing(id.name() + " missing")
+                    : DependencyStatus.present(id.name() + " present"));
         }
 
         Class<?> providerType = Class.forName(
@@ -371,6 +482,104 @@ public class IntensityAnalysisV2Test {
         FeatureDependencyGate.setUiMode(false);
     }
 
+    private static ImagePlus syntheticImage(int width, int height) {
+        float[] pixels = new float[width * height];
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                pixels[y * width + x] = (float) (25.0 + x + y);
+            }
+        }
+        ImagePlus image = new ImagePlus("synthetic", new FloatProcessor(width, height, pixels, null));
+        Calibration calibration = new Calibration();
+        calibration.pixelWidth = 1.0;
+        calibration.pixelHeight = 1.0;
+        calibration.setUnit("um");
+        image.setCalibration(calibration);
+        return image;
+    }
+
+    private static String captureImageJLogOutput(ThrowingRunnable action) throws Exception {
+        PrintStream originalOut = System.out;
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        System.setOut(new PrintStream(out, true, "UTF-8"));
+        String ijLog = null;
+        try {
+            if (IJ.getLog() != null) IJ.log("\\Clear");
+            action.run();
+            ijLog = IJ.getLog();
+        } finally {
+            System.out.flush();
+            System.setOut(originalOut);
+        }
+        return out.toString("UTF-8") + (ijLog == null ? "" : ijLog);
+    }
+
+    private static Object newOutputTables(IntensityAnalysisV2.IntensityOutputPlan plan) throws Exception {
+        Method method = plan.getClass().getDeclaredMethod("newTables");
+        method.setAccessible(true);
+        return method.invoke(plan);
+    }
+
+    private static ResultsTable tableFor(Object totalTables,
+                                         IntensitySpatialOutputKey key) throws Exception {
+        Method method = totalTables.getClass().getDeclaredMethod("table",
+                IntensitySpatialOutputKey.class);
+        method.setAccessible(true);
+        return (ResultsTable) method.invoke(totalTables, key);
+    }
+
+    private static void setIntensitySpatialConfigForTest(IntensityAnalysisV2 analysis,
+                                                         IntensitySpatialConfig spatial) throws Exception {
+        java.lang.reflect.Field field = IntensityAnalysisV2.class.getDeclaredField("intensitySpatialConfig");
+        field.setAccessible(true);
+        field.set(analysis, spatial);
+    }
+
+    private static void invokeRunIntensityMeasurementsForThisImage(
+            IntensityAnalysisV2 analysis,
+            NameParts parts,
+            ImagePlus[] chans,
+            int n,
+            boolean[] binarization,
+            String[] thresholds,
+            String[] channelNames,
+            int roiChannelIndex1Based,
+            IntensityAnalysisV2.IntensityOutputPlan outputPlan,
+            Object totalTables,
+            int scnIndex1Based,
+            String roiSetName,
+            BinConfig cfg,
+            String[] filterSources,
+            File binDir,
+            String basicFilterMacro,
+            Roi roi) throws Exception {
+        Class<?> outputTablesType = Class.forName(
+                "flash.pipeline.analyses.IntensityAnalysisV2$IntensityOutputTables");
+        Method method = IntensityAnalysisV2.class.getDeclaredMethod(
+                "runIntensityMeasurementsForThisImage",
+                NameParts.class,
+                ImagePlus[].class,
+                int.class,
+                boolean[].class,
+                String[].class,
+                String[].class,
+                int.class,
+                IntensityAnalysisV2.IntensityOutputPlan.class,
+                outputTablesType,
+                int.class,
+                String.class,
+                BinConfig.class,
+                String[].class,
+                File.class,
+                String.class,
+                Roi.class);
+        method.setAccessible(true);
+        method.invoke(analysis, parts, chans, Integer.valueOf(n), binarization,
+                thresholds, channelNames, Integer.valueOf(roiChannelIndex1Based),
+                outputPlan, totalTables, Integer.valueOf(scnIndex1Based), roiSetName,
+                cfg, filterSources, binDir, basicFilterMacro, roi);
+    }
+
     private static void writeChannelData(File dir, String... lines) throws Exception {
         File bin = new File(dir, ".bin");
         assertTrue(bin.mkdirs());
@@ -384,5 +593,9 @@ public class IntensityAnalysisV2Test {
 
     private interface InvocationResult {
         Object invoke(Method method, Object[] args);
+    }
+
+    private interface ThrowingRunnable {
+        void run() throws Exception;
     }
 }

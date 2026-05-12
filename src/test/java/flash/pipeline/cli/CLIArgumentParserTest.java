@@ -4,6 +4,9 @@ import flash.pipeline.bin.BinField;
 import flash.pipeline.analyses.wizard.IntensitySpatialConfig;
 import org.junit.Test;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import static org.junit.Assert.*;
 
 public class CLIArgumentParserTest {
@@ -366,6 +369,75 @@ public class CLIArgumentParserTest {
         assertSpatialCliFields(reparsed);
     }
 
+    @Test
+    public void intensitySpatialCliMergeEnforcesChannelAndBinarizationLocks() {
+        CLIConfig crossChannelParsed = CLIArgumentParser.parse("dir=[/tmp/data] "
+                + "intensity.spatial=true "
+                + "intensity.spatial.analyses=crossmark,patchiness");
+        final List<String> crossChannelLogs = new ArrayList<String>();
+
+        IntensitySpatialConfig crossChannelMerged = crossChannelParsed.getIntensity().mergeSpatialConfig(
+                IntensitySpatialConfig.disabled(),
+                1,
+                new boolean[]{false},
+                new IntensitySpatialConfig.LockLogger() {
+                    @Override
+                    public void log(String message) {
+                        crossChannelLogs.add(message);
+                    }
+                });
+
+        assertTrue(crossChannelMerged.isEnabled());
+        assertTrue(crossChannelMerged.getEnabledAnalyses().contains(IntensitySpatialConfig.AnalysisKey.PATCHINESS));
+        assertFalse(crossChannelMerged.getEnabledAnalyses().contains(IntensitySpatialConfig.AnalysisKey.CROSSMARK));
+        assertTrue(join(crossChannelLogs).contains("at least two channels"));
+
+        CLIConfig distanceShellParsed = CLIArgumentParser.parse("dir=[/tmp/data] "
+                + "intensity.spatial=true "
+                + "intensity.spatial.analyses=distance_shell,patchiness");
+        final List<String> distanceShellLogs = new ArrayList<String>();
+
+        IntensitySpatialConfig distanceShellMerged = distanceShellParsed.getIntensity().mergeSpatialConfig(
+                IntensitySpatialConfig.disabled(),
+                2,
+                new boolean[]{false, false},
+                new IntensitySpatialConfig.LockLogger() {
+                    @Override
+                    public void log(String message) {
+                        distanceShellLogs.add(message);
+                    }
+                });
+
+        assertTrue(distanceShellMerged.getEnabledAnalyses().contains(IntensitySpatialConfig.AnalysisKey.PATCHINESS));
+        assertFalse(distanceShellMerged.getEnabledAnalyses().contains(IntensitySpatialConfig.AnalysisKey.DISTANCE_SHELL));
+        assertTrue(join(distanceShellLogs).contains("binarized partner channel"));
+    }
+
+    @Test
+    public void intensitySpatialDerivedConfigEnforcesNative3dSliceLock() {
+        IntensitySpatialConfig requested = IntensitySpatialConfig.builder()
+                .enabled(true)
+                .native3dEnabled(true)
+                .addAnalysis(IntensitySpatialConfig.AnalysisKey.ANISOTROPY_3D)
+                .build();
+        final List<String> logs = new ArrayList<String>();
+
+        IntensitySpatialConfig validated = requested.validateForChannelSetup(
+                2,
+                new boolean[]{true, false},
+                Integer.valueOf(3),
+                new IntensitySpatialConfig.LockLogger() {
+                    @Override
+                    public void log(String message) {
+                        logs.add(message);
+                    }
+                });
+
+        assertFalse(validated.isNative3dEnabled());
+        assertFalse(validated.getEnabledAnalyses().contains(IntensitySpatialConfig.AnalysisKey.ANISOTROPY_3D));
+        assertTrue(join(logs).contains("at least 5 slices"));
+    }
+
     private static void assertSpatialCliFields(CLIConfig cfg) {
         CLIConfig.IntensityConfig intensity = cfg.getIntensity();
         assertEquals(Boolean.TRUE, intensity.getSpatialEnabled());
@@ -388,5 +460,14 @@ public class CLIArgumentParserTest {
         assertEquals(Integer.valueOf(4), intensity.getSpatialTextureClassCount());
         assertEquals(Integer.valueOf(199), intensity.getSpatialPermutations());
         assertEquals(Long.valueOf(1L), intensity.getSpatialSeed());
+    }
+
+    private static String join(List<String> values) {
+        StringBuilder sb = new StringBuilder();
+        for (String value : values) {
+            if (sb.length() > 0) sb.append('\n');
+            sb.append(value);
+        }
+        return sb.toString();
     }
 }
