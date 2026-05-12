@@ -31,7 +31,9 @@ public final class IntensitySpatialRunner {
     public static IntensitySpatialRunner standard() {
         return new IntensitySpatialRunner(Arrays.<IntensitySpatialAnalysis>asList(
                 new PatchinessAnalysis(),
-                new NullModelAnalysis()));
+                new HotspotScanAnalysis(),
+                new NullModelAnalysis(),
+                new GranularityAnalysis()));
     }
 
     public IntensitySpatialResult measure(IntensitySpatialContext context) {
