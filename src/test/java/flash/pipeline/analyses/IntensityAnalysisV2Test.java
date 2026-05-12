@@ -170,6 +170,7 @@ public class IntensityAnalysisV2Test {
                 .enabled(true)
                 .mipEnabled(true)
                 .addAnalysis(IntensitySpatialConfig.AnalysisKey.PATCHINESS)
+                .addAnalysis(IntensitySpatialConfig.AnalysisKey.NULLMODEL)
                 .addAnalysis(IntensitySpatialConfig.AnalysisKey.CROSSMARK)
                 .build();
 
@@ -186,6 +187,9 @@ public class IntensityAnalysisV2Test {
                 columns.subList(0, 9));
         assertTrue(columns.indexOf("Intensity_PatchinessCV50")
                 < columns.indexOf("DAPI_Pearson_GFAP"));
+        assertTrue(columns.contains("Intensity_PatchinessCV50_binarized"));
+        assertTrue(columns.contains("Intensity_Lacunarity250_binarized"));
+        assertFalse(columns.contains("Intensity_NullModelP_binarized"));
         assertTrue(columns.indexOf("DAPI_Pearson_GFAP")
                 < columns.indexOf("DAPI_MarkCorrStrength_GFAP"));
     }
