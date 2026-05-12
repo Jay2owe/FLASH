@@ -4,6 +4,9 @@ import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinField;
 import flash.pipeline.bin.BinSetupChooser;
 import flash.pipeline.bin.BinSetupDispatcher;
+import flash.pipeline.analyses.wizard.IntensitySpatialConfig;
+import flash.pipeline.intensity.spatial.IntensitySpatialOutputKey;
+import flash.pipeline.intensity.spatial.IntensitySpatialOutputMode;
 import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.DependencyService;
 import flash.pipeline.runtime.DependencyStatus;
@@ -20,6 +23,7 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.Arrays;
 import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.List;
@@ -86,6 +90,104 @@ public class IntensityAnalysisV2Test {
         assertEquals(new File(writeRoot, "GFAP in DAPI ROI.csv").getAbsolutePath(),
                 IntensityAnalysisV2.intensityOutputCsv(writeRoot, "GFAP", true, 1,
                         new String[]{"DAPI", "GFAP"}).getAbsolutePath());
+        assertEquals(new File(writeRoot, "GFAP_MIP.csv").getAbsolutePath(),
+                IntensityAnalysisV2.intensityOutputCsv(writeRoot, "GFAP",
+                        IntensitySpatialOutputMode.MIP).getAbsolutePath());
+        assertEquals(new File(writeRoot, "GFAP_3D.csv").getAbsolutePath(),
+                IntensityAnalysisV2.intensityOutputCsv(writeRoot, "GFAP",
+                        IntensitySpatialOutputMode.NATIVE_3D).getAbsolutePath());
+    }
+
+    @Test
+    public void selectedMipOutputIsNotSuppressedByExistingBaseCsv() throws Exception {
+        File writeRoot = temp.newFolder("skip-mip");
+        assertTrue(new File(writeRoot, "DAPI.csv").createNewFile());
+        IntensitySpatialConfig spatial = IntensitySpatialConfig.builder()
+                .enabled(true)
+                .mipEnabled(true)
+                .addAnalysis(IntensitySpatialConfig.AnalysisKey.PATCHINESS)
+                .build();
+
+        IntensityAnalysisV2.IntensityOutputPlan plan = IntensityAnalysisV2.buildOutputPlan(
+                writeRoot, new String[]{"DAPI"}, false, -1, spatial, 5, true);
+
+        IntensitySpatialOutputKey base = IntensitySpatialOutputKey.base("DAPI");
+        IntensitySpatialOutputKey mip = IntensitySpatialOutputKey.of("DAPI",
+                IntensitySpatialOutputMode.MIP);
+        assertTrue(plan.selectedKeys().contains(base));
+        assertTrue(plan.selectedKeys().contains(mip));
+        assertTrue(plan.isSkipped(base));
+        assertFalse(plan.isSkipped(mip));
+        assertFalse(plan.allSelectedOutputsSkipped());
+        assertEquals(new File(writeRoot, "DAPI_MIP.csv").getAbsolutePath(),
+                plan.fileFor(mip).getAbsolutePath());
+    }
+
+    @Test
+    public void native3dOutputIsNotSelectedUnlessNative3dIsEnabled() throws Exception {
+        File writeRoot = temp.newFolder("native-off");
+        IntensitySpatialConfig spatial = IntensitySpatialConfig.builder()
+                .enabled(true)
+                .native3dEnabled(false)
+                .addAnalysis(IntensitySpatialConfig.AnalysisKey.ANISOTROPY_3D)
+                .build();
+
+        IntensityAnalysisV2.IntensityOutputPlan plan = IntensityAnalysisV2.buildOutputPlan(
+                writeRoot, new String[]{"DAPI"}, false, -1, spatial, 8, false);
+
+        assertFalse(plan.selectedKeys().contains(IntensitySpatialOutputKey.of("DAPI",
+                IntensitySpatialOutputMode.NATIVE_3D)));
+        assertTrue(plan.selectedKeys().contains(IntensitySpatialOutputKey.base("DAPI")));
+    }
+
+    @Test
+    public void channelRoiMaskOutputsStayBaseOnly() throws Exception {
+        File writeRoot = temp.newFolder("roi-mask-base");
+        IntensitySpatialConfig spatial = IntensitySpatialConfig.builder()
+                .enabled(true)
+                .mipEnabled(true)
+                .native3dEnabled(true)
+                .addAnalysis(IntensitySpatialConfig.AnalysisKey.PATCHINESS)
+                .addAnalysis(IntensitySpatialConfig.AnalysisKey.ANISOTROPY_3D)
+                .build();
+
+        IntensityAnalysisV2.IntensityOutputPlan plan = IntensityAnalysisV2.buildOutputPlan(
+                writeRoot, new String[]{"DAPI", "GFAP"}, true, 1, spatial, 8, false);
+
+        IntensitySpatialOutputKey gfapBase = IntensitySpatialOutputKey.roiMaskBase("GFAP", "DAPI");
+        assertTrue(plan.selectedKeys().contains(gfapBase));
+        assertEquals(new File(writeRoot, "GFAP in DAPI ROI.csv").getAbsolutePath(),
+                plan.fileFor(gfapBase).getAbsolutePath());
+        assertFalse(plan.selectedKeys().contains(IntensitySpatialOutputKey.of("GFAP",
+                IntensitySpatialOutputMode.MIP)));
+        assertFalse(plan.selectedKeys().contains(IntensitySpatialOutputKey.of("GFAP",
+                IntensitySpatialOutputMode.NATIVE_3D)));
+    }
+
+    @Test
+    public void orderedIntensityColumnsGroupMetadataBasicSameChannelThenPartners() {
+        IntensitySpatialConfig spatial = IntensitySpatialConfig.builder()
+                .enabled(true)
+                .mipEnabled(true)
+                .addAnalysis(IntensitySpatialConfig.AnalysisKey.PATCHINESS)
+                .addAnalysis(IntensitySpatialConfig.AnalysisKey.CROSSMARK)
+                .build();
+
+        List<String> columns = IntensityAnalysisV2.buildOrderedIntensityColumns(
+                IntensitySpatialOutputKey.base("DAPI"),
+                new ResultsTable(),
+                new String[]{"DAPI", "GFAP"},
+                spatial,
+                new boolean[]{true, false});
+
+        assertEquals(Arrays.asList("Region", "Hemisphere", "ROI", "Animal Name",
+                "IntDen", "IntDen_binarized", "%Area", "%Area_binarized",
+                "IntDen_Unfiltered"),
+                columns.subList(0, 9));
+        assertTrue(columns.indexOf("Intensity_PatchinessCV50")
+                < columns.indexOf("DAPI_Pearson_GFAP"));
+        assertTrue(columns.indexOf("DAPI_Pearson_GFAP")
+                < columns.indexOf("DAPI_MarkCorrStrength_GFAP"));
     }
 
     @Test
