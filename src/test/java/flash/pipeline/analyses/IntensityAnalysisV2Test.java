@@ -8,6 +8,7 @@ import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.DependencyService;
 import flash.pipeline.runtime.DependencyStatus;
 import flash.pipeline.runtime.FeatureDependencyGate;
+import ij.measure.ResultsTable;
 import org.junit.After;
 import org.junit.Rule;
 import org.junit.Test;
@@ -85,6 +86,21 @@ public class IntensityAnalysisV2Test {
         assertEquals(new File(writeRoot, "GFAP in DAPI ROI.csv").getAbsolutePath(),
                 IntensityAnalysisV2.intensityOutputCsv(writeRoot, "GFAP", true, 1,
                         new String[]{"DAPI", "GFAP"}).getAbsolutePath());
+    }
+
+    @Test
+    public void measurementColumnsUseRawFirstSchemaForBinarizedRows() {
+        ResultsTable table = new ResultsTable();
+        table.incrementCounter();
+
+        IntensityAnalysisV2.writeMeasurementColumns(table, 0,
+                10.0, 20.0, 30.0, true, 40.0, 50.0);
+
+        assertEquals(10.0, table.getValue("IntDen", 0), 0.0001);
+        assertEquals(40.0, table.getValue("IntDen_binarized", 0), 0.0001);
+        assertEquals(20.0, table.getValue("%Area", 0), 0.0001);
+        assertEquals(50.0, table.getValue("%Area_binarized", 0), 0.0001);
+        assertEquals(30.0, table.getValue("IntDen_Unfiltered", 0), 0.0001);
     }
 
     @Test

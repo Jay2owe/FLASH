@@ -1135,9 +1135,11 @@ public class IntensityAnalysisV2 implements Analysis {
         int channelThreads = Math.min(channelCount, Math.max(1, parallelThreads));
 
         // Per-channel result holders (pre-allocated slots, one per channel — no contention)
-        final double[][] allSignalIntDen = new double[channelCount][];
-        final double[][] allAreaFrac = new double[channelCount][];
-        final double[][] allRawIntDen = new double[channelCount][];
+        final double[][] allIntDenFilteredFullRoi = new double[channelCount][];
+        final double[][] allAreaFractionFilteredFullRoi = new double[channelCount][];
+        final double[][] allIntDenUnfilteredFullRoi = new double[channelCount][];
+        final double[][] allIntDenBinarizedRawInMask = new double[channelCount][];
+        final double[][] allAreaFractionBinarized = new double[channelCount][];
 
         // Capture effectively-final references for inner class access
         final ImagePlus finalMaskStack = maskStack;
@@ -1159,7 +1161,9 @@ public class IntensityAnalysisV2 implements Analysis {
                                 binarization, thresholds,
                                 cfg, filterSources, binDir, basicFilterMacro,
                                 finalMaskStack, finalRoi, finalParts, finalVerboseLogging,
-                                allSignalIntDen, allAreaFrac, allRawIntDen);
+                                allIntDenFilteredFullRoi, allAreaFractionFilteredFullRoi,
+                                allIntDenUnfilteredFullRoi, allIntDenBinarizedRawInMask,
+                                allAreaFractionBinarized);
                     }
                 }));
             }
@@ -1180,7 +1184,9 @@ public class IntensityAnalysisV2 implements Analysis {
                         binarization, thresholds,
                         cfg, filterSources, binDir, basicFilterMacro,
                         finalMaskStack, finalRoi, finalParts, finalVerboseLogging,
-                        allSignalIntDen, allAreaFrac, allRawIntDen);
+                        allIntDenFilteredFullRoi, allAreaFractionFilteredFullRoi,
+                        allIntDenUnfilteredFullRoi, allIntDenBinarizedRawInMask,
+                        allAreaFractionBinarized);
             }
         }
 
@@ -1194,9 +1200,9 @@ public class IntensityAnalysisV2 implements Analysis {
 
         // Merge per-channel results into totalTables in order (single-threaded, no contention)
         for (int c = 0; c < channelCount; c++) {
-            if (allSignalIntDen[c] == null) continue; // channel failed
+            if (allIntDenFilteredFullRoi[c] == null) continue; // channel failed
             ResultsTable total = totalTables[c];
-            int len = allSignalIntDen[c].length;
+            int len = allIntDenFilteredFullRoi[c].length;
             for (int r = 0; r < len; r++) {
                 total.incrementCounter();
                 int row = total.size() - 1;
@@ -1205,8 +1211,13 @@ public class IntensityAnalysisV2 implements Analysis {
                 total.setValue("Hemisphere", row, parts.hemisphere);
                 total.setValue("ROI", row, roiLabel);
                 total.setValue("Animal Name", row, parts.animal);
-                writeMeasurementColumns(total, row, allSignalIntDen[c][r],
-                        allAreaFrac[c][r], allRawIntDen[c][r]);
+                writeMeasurementColumns(total, row,
+                        allIntDenFilteredFullRoi[c][r],
+                        allAreaFractionFilteredFullRoi[c][r],
+                        allIntDenUnfilteredFullRoi[c][r],
+                        binarization[c],
+                        allIntDenBinarizedRawInMask[c][r],
+                        allAreaFractionBinarized[c][r]);
             }
             if (!compactLog) IJ.log("    - Channel " + channelNames[c] + ": " + len + " rows merged to results table");
         }
@@ -1231,7 +1242,11 @@ public class IntensityAnalysisV2 implements Analysis {
             String basicFilterMacro,
             ImagePlus maskStack, Roi roi,
             NameParts parts, boolean verbose,
-            double[][] outSignalIntDen, double[][] outAreaFrac, double[][] outRawIntDen
+            double[][] outIntDenFilteredFullRoi,
+            double[][] outAreaFractionFilteredFullRoi,
+            double[][] outIntDenUnfilteredFullRoi,
+            double[][] outIntDenBinarizedRawInMask,
+            double[][] outAreaFractionBinarized
     ) {
         long chStart = verbose ? System.currentTimeMillis() : 0;
         if (!compactLog) IJ.log("  > Channel " + (c + 1) + "/" + n + ": " + channelNames[c]);
@@ -1266,11 +1281,11 @@ public class IntensityAnalysisV2 implements Analysis {
             if (!compactLog) IJ.log("    - Basic background and noise removal applied");
         }
 
-        ImagePlus ch = filtered;
-
         // Binary duplicate from already-filtered image (no need to re-filter)
         ImagePlus binary = ImageOps.duplicateThreadSafe(filtered);
         binary.setTitle(channelNames[c] + "_binary");
+        ImagePlus filteredMeasurement = filtered;
+        ImagePlus binarizedRawInMask = null;
 
         if (binarization[c]) {
             if (!compactLog) IJ.log("    - Binarization: applying threshold=" + thresholds[c]);
@@ -1287,11 +1302,8 @@ public class IntensityAnalysisV2 implements Analysis {
 
             ImagePlus and = ImageCalcOps.andStackThreadSafe(binary, raw);
             if (and != null) {
-                and.setTitle(channelNames[c]);
-                ch.changes = false;
-                ch.close();
-                ch.flush();
-                ch = and;
+                and.setTitle(channelNames[c] + "_binarized");
+                binarizedRawInMask = and;
                 if (!compactLog) IJ.log("    - Binarization AND applied with raw image");
             }
         } else {
@@ -1300,34 +1312,47 @@ public class IntensityAnalysisV2 implements Analysis {
 
         if (maskStack != null) {
             if (!compactLog) IJ.log("    - Applying ROI channel mask");
-            ImagePlus masked = applyRoiChannelMask(maskStack, ch);
-            if (masked != null) {
-                masked.setTitle(channelNames[c]);
-                ch.changes = false;
-                ch.close();
-                ch.flush();
-                ch = masked;
+            ImagePlus maskedFiltered = applyRoiChannelMask(maskStack, filteredMeasurement);
+            if (maskedFiltered != null) {
+                maskedFiltered.setTitle(channelNames[c] + "_filtered");
+                closeImage(filteredMeasurement);
+                filteredMeasurement = maskedFiltered;
+                if (binarizedRawInMask != null) {
+                    ImagePlus maskedBinarized = applyRoiChannelMask(maskStack, binarizedRawInMask);
+                    if (maskedBinarized != null) {
+                        maskedBinarized.setTitle(channelNames[c] + "_binarized");
+                        closeImage(binarizedRawInMask);
+                        binarizedRawInMask = maskedBinarized;
+                    }
+                }
                 if (!compactLog) IJ.log("    - ROI channel mask applied");
             }
         }
 
         // Thread-safe measurement using ThreadSafeMeasure
         Roi measureRoi = roi != null ? (Roi) roi.clone() : null;
-        ThreadSafeMeasure.SliceResult[] sliceResults = ThreadSafeMeasure.measureAllSlices(ch, raw, measureRoi);
-        double[] signalIntDen = new double[sliceResults.length];
-        double[] areaFrac = new double[sliceResults.length];
-        double[] rawIntDen = new double[sliceResults.length];
+        ThreadSafeMeasure.SliceResult[] sliceResults = ThreadSafeMeasure.measureAllSlices(
+                filteredMeasurement, raw, binarizedRawInMask, measureRoi);
+        double[] intDenFilteredFullRoi = new double[sliceResults.length];
+        double[] areaFractionFilteredFullRoi = new double[sliceResults.length];
+        double[] intDenUnfilteredFullRoi = new double[sliceResults.length];
+        double[] intDenBinarizedRawInMask = new double[sliceResults.length];
+        double[] areaFractionBinarized = new double[sliceResults.length];
         for (int sr = 0; sr < sliceResults.length; sr++) {
-            signalIntDen[sr] = sliceResults[sr].intDen;
-            areaFrac[sr] = sliceResults[sr].areaFraction;
-            rawIntDen[sr] = sliceResults[sr].rawIntDen;
+            intDenFilteredFullRoi[sr] = sliceResults[sr].intDenFilteredFullRoi;
+            areaFractionFilteredFullRoi[sr] = sliceResults[sr].areaFractionFilteredFullRoi;
+            intDenUnfilteredFullRoi[sr] = sliceResults[sr].intDenUnfilteredFullRoi;
+            intDenBinarizedRawInMask[sr] = sliceResults[sr].intDenBinarizedRawInMask;
+            areaFractionBinarized[sr] = sliceResults[sr].areaFractionBinarized;
         }
         if (!compactLog) IJ.log("    - Measured signal + raw: " + sliceResults.length + " slices");
 
         // Store results in pre-allocated array slots (no synchronization needed — one slot per channel)
-        outSignalIntDen[c] = signalIntDen;
-        outAreaFrac[c] = areaFrac;
-        outRawIntDen[c] = rawIntDen;
+        outIntDenFilteredFullRoi[c] = intDenFilteredFullRoi;
+        outAreaFractionFilteredFullRoi[c] = areaFractionFilteredFullRoi;
+        outIntDenUnfilteredFullRoi[c] = intDenUnfilteredFullRoi;
+        outIntDenBinarizedRawInMask[c] = intDenBinarizedRawInMask;
+        outAreaFractionBinarized[c] = areaFractionBinarized;
 
         if (verbose) {
             IJ.log("    [DEBUG] Channel " + channelNames[c] + " processing time: "
@@ -1338,17 +1363,10 @@ public class IntensityAnalysisV2 implements Analysis {
         }
 
         // Clean up channel-local images
-        if (binary != null) {
-            binary.changes = false;
-            binary.close();
-            binary.flush();
-        }
-        raw.changes = false;
-        raw.close();
-        raw.flush();
-        ch.changes = false;
-        ch.close();
-        ch.flush();
+        closeImage(binary);
+        closeImage(raw);
+        closeImage(filteredMeasurement);
+        closeImage(binarizedRawInMask);
     }
 
     /**
@@ -1405,15 +1423,31 @@ public class IntensityAnalysisV2 implements Analysis {
         return ImageCalcOps.andStackThreadSafe(maskStack, measurement);
     }
 
+    private static void closeImage(ImagePlus image) {
+        if (image == null) return;
+        image.changes = false;
+        image.close();
+        image.flush();
+    }
+
     static void writeMeasurementColumns(ResultsTable table,
                                         int row,
-                                        double signalIntDen,
+                                        double intDen,
                                         double areaFraction,
-                                        double rawIntDen) {
+                                        double intDenUnfiltered,
+                                        boolean binarized,
+                                        double intDenBinarized,
+                                        double areaFractionBinarized) {
         if (table == null) return;
-        table.setValue("IntDen", row, signalIntDen);
+        table.setValue("IntDen", row, intDen);
+        if (binarized) {
+            table.setValue("IntDen_binarized", row, intDenBinarized);
+        }
         table.setValue("%Area", row, areaFraction);
-        table.setValue("RawIntDen", row, rawIntDen);
+        if (binarized) {
+            table.setValue("%Area_binarized", row, areaFractionBinarized);
+        }
+        table.setValue("IntDen_Unfiltered", row, intDenUnfiltered);
     }
 
     static File intensityWriteRoot(String directory) {

@@ -81,22 +81,27 @@ public final class IntensityDetailsWriter {
             // Analysis Macro - documents the measurement steps.
             w.write("\n");
             w.write("<Analysis Macro>\n");
-            w.write("// Filtered signal measurement\n");
+            w.write("// Base CSV columns: IntDen and %Area are measured on the filtered full ROI.\n");
             w.write("selectImage(" + channelName + "_filtered);\n");
+            w.write("run(\"Set Measurements...\", \"integrated area_fraction redirect=None decimal=3\");\n");
+            w.write("// Per-slice: run(\"Measure\");\n");
             if (binarized) {
+                w.write("\n");
+                w.write("// Binarized CSV columns: IntDen_binarized and %Area_binarized.\n");
+                w.write("selectImage(" + channelName + "_filtered);\n");
                 w.write("setThreshold(" + (thresholdValue != null ? thresholdValue : "0")
                         + ", 65535);\n");
                 w.write("run(\"Convert to Mask\", \"background=Light\");\n");
                 w.write("// Apply binary mask to raw signal: mask>0 keeps the raw pixel, mask==0 sets 0.\n");
+                w.write("run(\"Set Measurements...\", \"integrated area_fraction redirect=None decimal=3\");\n");
+                w.write("// Per-slice: run(\"Measure\");\n");
             }
             if (inRoi != null && !"None".equals(inRoi)) {
                 w.write("// ROI channel mask: " + inRoi + "\n");
                 w.write("// Apply ROI channel mask: mask>0 keeps the measurement pixel, mask==0 sets 0.\n");
             }
-            w.write("run(\"Set Measurements...\", \"integrated area_fraction redirect=None decimal=3\");\n");
-            w.write("// Per-slice: run(\"Measure\");\n");
             w.write("\n");
-            w.write("// Raw signal measurement (no filter)\n");
+            w.write("// IntDen_Unfiltered CSV column: raw signal measurement (no filter).\n");
             w.write("selectImage(" + channelName + "_raw);\n");
             w.write("run(\"Set Measurements...\", \"integrated redirect=None decimal=3\");\n");
             w.write("// Per-slice: run(\"Measure\");\n");

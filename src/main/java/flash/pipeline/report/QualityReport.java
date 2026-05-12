@@ -158,6 +158,8 @@ public class QualityReport {
         Map<String, String> params = new LinkedHashMap<String, String>();
         params.put("Filter", filterDescription != null ? filterDescription : "Basic background and noise removal");
         params.put("Z-Slice Subset", zSliceSummary != null ? zSliceSummary : "Full stack");
+        params.put("CSV Schema", "IntDen=filtered full ROI, %Area=filtered full ROI area fraction, "
+                + "IntDen_Unfiltered=raw full ROI; binarized channels also write IntDen_binarized and %Area_binarized");
         params.put("ROI Analysis", String.valueOf(roiAnalysis));
         if (roiAnalysis && roiChannelChoice != null && !"None".equals(roiChannelChoice)) {
             params.put("ROI Channel Mask", roiChannelChoice);
