@@ -108,6 +108,11 @@ public final class ZSliceSelectionStage implements ConfigQcStage {
     }
 
     @Override
+    public boolean controlsCanExpand() {
+        return true;
+    }
+
+    @Override
     public boolean isApplicable(ConfigQcContext context) {
         return !metas.isEmpty();
     }

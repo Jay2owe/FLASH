@@ -90,7 +90,7 @@ public class PreviewPairPanelTest {
     }
 
     @Test
-    public void previewToolstrip_containsLargeAndBcButtons() {
+    public void previewToolstrip_containsLargeBcAndLutButtons() {
         PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted",
                 PreviewPairPanel.PreviewLayout.HORIZONTAL_SLIM);
 
@@ -98,6 +98,38 @@ public class PreviewPairPanelTest {
 
         assertTrue(toolstrip.isAncestorOf(pair.largeViewButton()));
         assertTrue(toolstrip.isAncestorOf(pair.displayControlsButton()));
+        assertTrue(toolstrip.isAncestorOf(pair.lutToggleButton()));
+    }
+
+    @Test
+    public void lutToggleButtonSwitchesBetweenGreyAndChannelLut() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
+        pair.setChannelLutName("Red");
+        pair.setOriginal(singleSlice("original", 0, 100));
+
+        assertEquals(PreviewDisplaySettings.LutMode.CHANNEL,
+                pair.displaySettingsForTest().getLutMode());
+        assertEquals("Grey LUT", pair.lutToggleButton().getText());
+        IndexColorModel channelModel = (IndexColorModel) pair.originalPreviewForTest()
+                .renderedProcessorForTest().getColorModel();
+        assertEquals(255, channelModel.getRed(255));
+        assertEquals(0, channelModel.getGreen(255));
+
+        pair.lutToggleButton().doClick();
+
+        assertEquals(PreviewDisplaySettings.LutMode.GREY,
+                pair.displaySettingsForTest().getLutMode());
+        assertEquals("Red LUT", pair.lutToggleButton().getText());
+        IndexColorModel greyModel = (IndexColorModel) pair.originalPreviewForTest()
+                .renderedProcessorForTest().getColorModel();
+        assertEquals(greyModel.getRed(255), greyModel.getGreen(255));
+        assertEquals(greyModel.getGreen(255), greyModel.getBlue(255));
+
+        pair.lutToggleButton().doClick();
+
+        assertEquals(PreviewDisplaySettings.LutMode.CHANNEL,
+                pair.displaySettingsForTest().getLutMode());
+        assertEquals("Grey LUT", pair.lutToggleButton().getText());
     }
 
     @Test
@@ -307,6 +339,44 @@ public class PreviewPairPanelTest {
     }
 
     @Test
+    public void objectOverlayDefersRerenderWhileDisplayRangeSliderIsAdjusting() {
+        PreviewPairPanel pair = new PreviewPairPanel("Filtered", "Objects");
+        ByteProcessor sourceProcessor = new ByteProcessor(4, 1);
+        sourceProcessor.set(0, 0, 100);
+        sourceProcessor.set(1, 0, 100);
+        sourceProcessor.set(2, 0, 200);
+        sourceProcessor.set(3, 0, 0);
+        ImagePlus raw = new ImagePlus("raw", sourceProcessor.duplicate());
+        ImagePlus filtered = new ImagePlus("filtered", sourceProcessor);
+
+        ByteProcessor labelProcessor = new ByteProcessor(4, 1);
+        labelProcessor.set(0, 0, 1);
+        ImagePlus labels = new ImagePlus("Object labels", labelProcessor);
+        LabelMapStyler.apply(labels, 1);
+
+        pair.setLargePreviewImages(raw, filtered, labels);
+        pair.setOriginal(filtered);
+        pair.setAdjusted(labels);
+        pair.setObjectOverlaySelectedForTest(true);
+        pair.setDisplayRangeForTest(100.0, 200.0);
+        assertEquals(0x000000,
+                pair.adjustedPreviewForTest().renderedProcessorForTest().getPixel(1, 0) & 0xffffff);
+
+        pair.setDisplayRangeForTest(0.0, 200.0, true);
+
+        ImageProcessor sourceDuringDrag = pair.originalPreviewForTest().renderedProcessorForTest();
+        assertEquals(0.0, sourceDuringDrag.getMin(), 0.0001);
+        assertEquals(200.0, sourceDuringDrag.getMax(), 0.0001);
+        assertEquals(0x000000,
+                pair.adjustedPreviewForTest().renderedProcessorForTest().getPixel(1, 0) & 0xffffff);
+
+        pair.setDisplayRangeForTest(0.0, 200.0, false);
+
+        assertEquals(0x808080,
+                pair.adjustedPreviewForTest().renderedProcessorForTest().getPixel(1, 0) & 0xffffff);
+    }
+
+    @Test
     public void hiddenDisplayControlsPreserveSeparateImageDisplayRanges() {
         PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
         ImagePlus original = stack("original", 1);
@@ -319,6 +389,8 @@ public class PreviewPairPanelTest {
         pair.setDisplayControlsAvailable(false);
         pair.setAdjusted(adjusted);
 
+        assertFalse(pair.displayControlsButton().isVisible());
+        assertFalse(pair.lutToggleButton().isVisible());
         assertFalse(pair.displaySettingsForTest().hasDisplayRange());
         ImageProcessor originalRendered = pair.originalPreviewForTest().renderedProcessorForTest();
         ImageProcessor adjustedRendered = pair.adjustedPreviewForTest().renderedProcessorForTest();

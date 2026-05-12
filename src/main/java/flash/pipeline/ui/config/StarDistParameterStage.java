@@ -130,6 +130,11 @@ public final class StarDistParameterStage implements ConfigQcStage {
     }
 
     @Override
+    public boolean controlsCanExpand() {
+        return true;
+    }
+
+    @Override
     public JComponent buildControls(ConfigQcContext context, ConfigQcActions actions) {
         this.actions = actions;
         this.activeContext = context;
@@ -142,8 +147,8 @@ public final class StarDistParameterStage implements ConfigQcStage {
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
         panel.setBorder(BorderFactory.createEmptyBorder(2, 0, 0, 0));
         createParameterFields();
-        panel.add(buildGroupRow("Detection:", new String[]{"Probability", "NMS", "Area min", "Area max"},
-                new JTextField[]{probabilityField, nmsField, areaMinField, areaMaxField}));
+        panel.add(buildGroupRow("Detection:", new String[]{"Probability", "NMS"},
+                new JTextField[]{probabilityField, nmsField}));
         panel.add(Box.createVerticalStrut(4));
         panel.add(buildGroupRow("Linking:", new String[]{"Distance", "Gap distance", "Frame gap"},
                 new JTextField[]{linkingField, gapClosingField, frameGapField}));
@@ -170,7 +175,6 @@ public final class StarDistParameterStage implements ConfigQcStage {
                 showRawSource = mode == PreviewPairPanel.SourceMode.RAW;
                 refreshSourceAndOutputPreview();
             });
-            preview.setDisplaySettingsChangeListener(settings -> refreshSourceAndOutputPreview());
         }
         if (actions != null) {
             actions.registerPreviewButton(previewButton);
@@ -372,6 +376,14 @@ public final class StarDistParameterStage implements ConfigQcStage {
         if (font != null) heading.setFont(font.deriveFont(Font.BOLD));
         row.add(heading, gbc);
 
+        gbc.gridx++;
+        row.add(new JLabel("Area min"), gbc);
+        gbc.gridx++;
+        row.add(areaMinField, gbc);
+        gbc.gridx++;
+        row.add(new JLabel("Area max"), gbc);
+        gbc.gridx++;
+        row.add(areaMaxField, gbc);
         gbc.gridx++;
         row.add(new JLabel("Quality min"), gbc);
         gbc.gridx++;

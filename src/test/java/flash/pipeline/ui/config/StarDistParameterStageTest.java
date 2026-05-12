@@ -85,11 +85,20 @@ public class StarDistParameterStageTest {
 
         assertContainsText(controls, "Detection:");
         assertContainsText(controls, "Probability");
-        assertContainsText(controls, "Area max");
         assertContainsText(controls, "Linking:");
         assertContainsText(controls, "Gap distance");
         assertContainsText(controls, "Filters:");
+        assertContainsText(controls, "Area min");
+        assertContainsText(controls, "Area max");
         assertContainsText(controls, "Quality min");
+        assertFalse("Area min belongs in Filters, not Detection.",
+                siblingContainerContains(controls, "Detection:", "Area min"));
+        assertFalse("Area max belongs in Filters, not Detection.",
+                siblingContainerContains(controls, "Detection:", "Area max"));
+        assertTrue("Area min should be grouped with filters.",
+                siblingContainerContains(controls, "Filters:", "Area min"));
+        assertTrue("Area max should be grouped with filters.",
+                siblingContainerContains(controls, "Filters:", "Area max"));
         assertContainsText(controls, "Run Preview");
         assertNotContainsText(controls, "Minimum confidence required for StarDist");
         assertNotContainsText(controls, "Edit parameters, then press");
@@ -262,6 +271,25 @@ public class StarDistParameterStageTest {
             }
         }
         return false;
+    }
+
+    private static boolean siblingContainerContains(Component root, String anchorText, String expectedText) {
+        Component container = findParentContainingLabel(root, anchorText);
+        return container != null && containsText(container, expectedText);
+    }
+
+    private static Component findParentContainingLabel(Component component, String text) {
+        if (component instanceof JLabel && text.equals(((JLabel) component).getText())) {
+            return component.getParent();
+        }
+        if (component instanceof Container) {
+            Component[] children = ((Container) component).getComponents();
+            for (int i = 0; i < children.length; i++) {
+                Component found = findParentContainingLabel(children[i], text);
+                if (found != null) return found;
+            }
+        }
+        return null;
     }
 
     private static final class RecordingStore implements StarDistParameterStage.ParameterStore {

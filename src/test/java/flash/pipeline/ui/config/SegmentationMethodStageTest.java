@@ -1,5 +1,6 @@
 package flash.pipeline.ui.config;
 
+import flash.pipeline.ui.preview.PreviewPairPanel;
 import ij.ImagePlus;
 import ij.ImageStack;
 import ij.process.ByteProcessor;
@@ -8,6 +9,7 @@ import org.junit.Test;
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JRadioButton;
+import java.lang.reflect.Field;
 import java.util.Arrays;
 
 import static org.junit.Assert.assertEquals;
@@ -66,6 +68,30 @@ public class SegmentationMethodStageTest {
         assertEquals(SegmentationMethodStage.class.getName(), actions.jumpTarget);
     }
 
+    @Test
+    public void onEnterShowsSelectedChannelInsteadOfChannelOne() throws Exception {
+        SegmentationMethodStage stage = new SegmentationMethodStage(new RecordingStore());
+        ImagePlus source = twoChannelStack("Image A");
+        ConfigQcContext context = ConfigQcContext.fromImages(
+                null,
+                null,
+                null,
+                Arrays.asList(source),
+                Arrays.asList("DAPI", "IBA1"),
+                1);
+        PreviewPairPanel preview = new PreviewPairPanel("Original", "Adjusted");
+        preview.setOriginal(source);
+
+        stage.onEnter(context, preview);
+
+        ImagePlus shown = originalImageFrom(preview);
+        assertNotNull(shown);
+        assertEquals(1, shown.getNChannels());
+        assertEquals(255, shown.getStack().getProcessor(1).getPixel(0, 0));
+
+        stage.onLeave(context);
+    }
+
     private static void selectRadio(JComponent root, String actionCommand) {
         JRadioButton button = findRadio(root, actionCommand);
         if (button == null) {
@@ -112,6 +138,27 @@ public class SegmentationMethodStageTest {
         ImageStack stack = new ImageStack(2, 2);
         stack.addSlice(new ByteProcessor(2, 2));
         return new ImagePlus(title, stack);
+    }
+
+    private static ImagePlus twoChannelStack(String title) {
+        ImageStack stack = new ImageStack(2, 2);
+        ByteProcessor channelOne = new ByteProcessor(2, 2);
+        ByteProcessor channelTwo = new ByteProcessor(2, 2);
+        channelOne.set(0, 0, 10);
+        channelTwo.set(0, 0, 255);
+        stack.addSlice("C1", channelOne);
+        stack.addSlice("C2", channelTwo);
+        ImagePlus image = new ImagePlus(title, stack);
+        image.setDimensions(2, 1, 1);
+        image.setOpenAsHyperStack(true);
+        image.setPosition(1, 1, 1);
+        return image;
+    }
+
+    private static ImagePlus originalImageFrom(PreviewPairPanel preview) throws Exception {
+        Field field = PreviewPairPanel.class.getDeclaredField("originalImage");
+        field.setAccessible(true);
+        return (ImagePlus) field.get(preview);
     }
 
     private static final class RecordingStore implements SegmentationMethodStage.MethodStore {

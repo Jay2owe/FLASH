@@ -10,15 +10,10 @@ import javax.swing.BorderFactory;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
-import javax.swing.JScrollPane;
-import javax.swing.ScrollPaneConstants;
 import java.awt.BorderLayout;
 import java.awt.Color;
-import java.awt.Dimension;
 
 public final class ChannelThresholdStage implements ConfigQcStage {
-
-    private static final int CONTROL_PANEL_MAX_HEIGHT = 130;
 
     public interface ThresholdStore {
         String get();
@@ -66,6 +61,11 @@ public final class ChannelThresholdStage implements ConfigQcStage {
     }
 
     @Override
+    public boolean controlsCanExpand() {
+        return true;
+    }
+
+    @Override
     public JComponent buildControls(ConfigQcContext context, ConfigQcActions actions) {
         this.actions = actions;
         this.activeContext = context;
@@ -100,7 +100,7 @@ public final class ChannelThresholdStage implements ConfigQcStage {
                 }
             }
         });
-        panel.add(buildBoundedControlPanel(control), BorderLayout.CENTER);
+        panel.add(buildControlPanel(control), BorderLayout.CENTER);
 
         feedbackLabel = new JLabel(" ");
         feedbackLabel.setForeground(new Color(90, 90, 90));
@@ -187,25 +187,12 @@ public final class ChannelThresholdStage implements ConfigQcStage {
         return control == null ? "" : formatThreshold(control.getLowerThreshold());
     }
 
-    private JComponent buildBoundedControlPanel(ThresholdControlPanel control) {
-        JPanel bounded = new JPanel(new BorderLayout());
-        bounded.setOpaque(false);
-        bounded.setBorder(BorderFactory.createEmptyBorder(2, 0, 0, 0));
-
-        Dimension preferred = control.getPreferredSize();
-        if (preferred.height > CONTROL_PANEL_MAX_HEIGHT) {
-            JScrollPane scroll = new JScrollPane(control,
-                    ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
-                    ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
-            scroll.setBorder(BorderFactory.createEmptyBorder());
-            scroll.setOpaque(false);
-            scroll.getViewport().setOpaque(false);
-            scroll.setPreferredSize(new Dimension(preferred.width, CONTROL_PANEL_MAX_HEIGHT));
-            bounded.add(scroll, BorderLayout.CENTER);
-        } else {
-            bounded.add(control, BorderLayout.CENTER);
-        }
-        return bounded;
+    private JComponent buildControlPanel(ThresholdControlPanel control) {
+        JPanel wrapper = new JPanel(new BorderLayout());
+        wrapper.setOpaque(false);
+        wrapper.setBorder(BorderFactory.createEmptyBorder(2, 0, 0, 0));
+        wrapper.add(control, BorderLayout.CENTER);
+        return wrapper;
     }
 
     private void applySavedOrAutoThreshold() {

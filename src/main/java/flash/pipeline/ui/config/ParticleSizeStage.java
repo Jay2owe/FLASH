@@ -101,6 +101,11 @@ public final class ParticleSizeStage implements ConfigQcStage {
     }
 
     @Override
+    public boolean controlsCanExpand() {
+        return true;
+    }
+
+    @Override
     public JComponent buildControls(ConfigQcContext context, ConfigQcActions actions) {
         this.actions = actions;
         this.activeContext = context;
@@ -134,7 +139,6 @@ public final class ParticleSizeStage implements ConfigQcStage {
                 showRawSource = mode == PreviewPairPanel.SourceMode.RAW;
                 refreshSourceAndOutputPreview();
             });
-            preview.setDisplaySettingsChangeListener(settings -> refreshSourceAndOutputPreview());
         }
         if (actions != null) {
             actions.registerPreviewButton(previewButton);

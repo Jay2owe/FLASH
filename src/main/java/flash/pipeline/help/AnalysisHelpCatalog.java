@@ -260,9 +260,9 @@ public final class AnalysisHelpCatalog {
                 FLASH_Pipeline.IDX_INTENSITY,
                 "intensity",
                 "Fluorescence Intensity Analysis",
-                "Measure fluorescence inside saved ROIs, with optional thresholding and channel-mask restriction.",
+                "Measure fluorescence inside saved ROIs, with optional thresholding, channel-mask restriction, and pixel-based spatial analysis.",
                 list(
-                        "Use this when the question is how bright a marker is inside each saved region of interest.",
+                        "Use this when the question is how bright a marker is inside each saved region of interest, or how the signal is spatially distributed within those regions.",
                         "Use it after Set Up Configuration and Draw and Save ROIs, because the analysis needs configured channels and ROI zip files.",
                         "Use thresholded measurement when you want bright positive signal only, and whole-ROI measurement when background and dim signal should remain part of the mean."),
                 list(

@@ -66,6 +66,7 @@ public final class PreviewPairPanel extends JPanel {
     private final JComboBox<String> lutModeChoice = new JComboBox<String>();
     private final JButton largeViewButton = new JButton("Large view");
     private final JButton displayControlsButton = new JButton("Adjust Brightness/Contrast");
+    private final JButton lutToggleButton = new JButton("Grey LUT");
     private final JPanel objectOverlayControls = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
     private final JCheckBox objectOverlayCheck = new JCheckBox();
     private final JComboBox<String> objectOverlaySourceChoice = new JComboBox<String>();
@@ -276,10 +277,16 @@ public final class PreviewPairPanel extends JPanel {
         return displayControlsButton;
     }
 
+    public JButton lutToggleButton() {
+        return lutToggleButton;
+    }
+
     public void setDisplayControlsAvailable(boolean available) {
         displayControlsAvailable = available;
         displayControlsButton.setVisible(available);
         displayControlsButton.setEnabled(available);
+        lutToggleButton.setVisible(available);
+        lutToggleButton.setEnabled(available);
         if (!available) {
             hideDisplayControlsDialog();
             displaySettings = PreviewDisplaySettings.defaultFor(channelLutName);
@@ -289,6 +296,7 @@ public final class PreviewPairPanel extends JPanel {
         } else {
             refreshDisplayControlImage();
         }
+        updateLutToggleButton();
     }
 
     public void setCompactPreviewHeaders(boolean compact) {
@@ -326,6 +334,7 @@ public final class PreviewPairPanel extends JPanel {
         right.setOpaque(false);
         right.add(largeViewButton);
         right.add(displayControlsButton);
+        right.add(lutToggleButton);
 
         previewToolstripComponent = new JPanel(new BorderLayout(8, 0));
         previewToolstripComponent.setOpaque(false);
@@ -442,6 +451,11 @@ public final class PreviewPairPanel extends JPanel {
     void setDisplayRangeForTest(double min, double max) {
         displayControls.setRange(min, max);
         updateDisplaySettingsFromControls();
+    }
+
+    void setDisplayRangeForTest(double min, double max, boolean adjusting) {
+        displayControls.setRange(min, max);
+        updateDisplaySettingsFromControls(!adjusting, !adjusting);
     }
 
     PreviewDisplaySettings displaySettingsForTest() {
@@ -688,6 +702,11 @@ public final class PreviewPairPanel extends JPanel {
                 showDisplayControlsDialog();
             }
         });
+        lutToggleButton.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                togglePreviewLutMode();
+            }
+        });
     }
 
     private void wireObjectOverlayControls() {
@@ -708,7 +727,7 @@ public final class PreviewPairPanel extends JPanel {
         displayControls.setListener(new MinMaxControlPanel.Listener() {
             @Override public void rangeChanged(double min, double max, boolean adjusting) {
                 if (updatingDisplayControls) return;
-                updateDisplaySettingsFromControls();
+                updateDisplaySettingsFromControls(!adjusting, !adjusting);
             }
 
             @Override public void autoRequested() {
@@ -1046,6 +1065,11 @@ public final class PreviewPairPanel extends JPanel {
     }
 
     private void updateDisplaySettingsFromControls(boolean notifyListener) {
+        updateDisplaySettingsFromControls(notifyListener, true);
+    }
+
+    private void updateDisplaySettingsFromControls(boolean notifyListener,
+                                                   boolean renderObjectOverlay) {
         PreviewDisplaySettings.LutMode mode = lutModeChoice.getSelectedIndex() == 0
                 ? PreviewDisplaySettings.LutMode.GREY
                 : PreviewDisplaySettings.LutMode.CHANNEL;
@@ -1055,23 +1079,37 @@ public final class PreviewPairPanel extends JPanel {
                 mode,
                 channelLutName);
         rememberCurrentDisplaySettings();
-        applyDisplaySettings();
+        applyDisplaySettings(renderObjectOverlay);
+        updateLutToggleButton();
         if (notifyListener && displaySettingsChangeListener != null) {
             displaySettingsChangeListener.displaySettingsChanged(displaySettings);
         }
     }
 
+    private void togglePreviewLutMode() {
+        if (!displayControlsAvailable || !lutToggleButton.isEnabled()) return;
+        int nextIndex = lutModeChoice.getSelectedIndex() == 0 ? 1 : 0;
+        lutModeChoice.setSelectedIndex(nextIndex);
+        updateLutToggleButton();
+    }
+
     private void applyDisplaySettings() {
+        applyDisplaySettings(true);
+    }
+
+    private void applyDisplaySettings(boolean renderObjectOverlay) {
         boolean adjustedIsObjectPreview = usingCustomLargePreviewImages
                 && largePreviewThirdImage != null;
         originalPreview.setDisplaySettingsEnabled(true);
         adjustedPreview.setDisplaySettingsEnabled(!adjustedIsObjectPreview);
         originalPreview.setDisplaySettings(displaySettingsForImage(originalImage));
         adjustedPreview.setDisplaySettings(displaySettingsForImage(adjustedImage));
-        if (isObjectOverlaySelected()) {
+        if (renderObjectOverlay && isObjectOverlaySelected()) {
             updateAdjustedPreviewImage();
         }
-        if (largePreviewDialog != null) {
+        if (largePreviewDialog != null && (renderObjectOverlay
+                || !usingCustomLargePreviewImages
+                || largePreviewThirdImage == null)) {
             largePreviewDialog.setDisplaySettings(largeFirstDisplaySettings(),
                     largeSecondDisplaySettings());
         }
@@ -1177,9 +1215,18 @@ public final class PreviewPairPanel extends JPanel {
         } finally {
             updatingDisplayControls = false;
         }
+        updateLutToggleButton();
     }
 
     private String channelLutChoiceText() {
         return "Channel LUT (" + channelLutName + ")";
+    }
+
+    private void updateLutToggleButton() {
+        boolean greySelected = lutModeChoice.getSelectedIndex() == 0;
+        lutToggleButton.setText(greySelected ? channelLutName + " LUT" : "Grey LUT");
+        lutToggleButton.setToolTipText(greySelected
+                ? "Show previews with the selected channel LUT."
+                : "Show previews in grey.");
     }
 }

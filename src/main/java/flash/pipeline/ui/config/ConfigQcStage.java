@@ -20,6 +20,10 @@ public interface ConfigQcStage {
         return true;
     }
 
+    default boolean controlsCanExpand() {
+        return false;
+    }
+
     default void onEnter(ConfigQcContext context, PreviewPairPanel preview) {
     }
 

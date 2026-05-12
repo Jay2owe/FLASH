@@ -666,6 +666,12 @@ public class CreateBinFileAnalysisTest {
                 DisplayRangeStage.class,
                 SegmentationMethodStage.class), analysis.firstStageByDialog);
         assertTrue(analysis.stageTitles.contains("Channel Threshold"));
+        assertEquals(Arrays.asList("Display", "Object Segmentation"),
+                analysis.stagePaths.get(0));
+        assertEquals(0, analysis.stagePathIndices.get(0).intValue());
+        assertEquals(Arrays.asList("Display", "Object Segmentation"),
+                analysis.stagePaths.get(1));
+        assertEquals(1, analysis.stagePathIndices.get(1).intValue());
     }
 
     @Test
@@ -755,6 +761,41 @@ public class CreateBinFileAnalysisTest {
         thresholdStage.onLeave(context);
         assertEquals("44", cfg.objectThresholds.get(0));
         assertEquals("44", cfg.intensityThresholds.get(0));
+    }
+
+    @Test
+    public void filteredSetupSourceUsesConfirmedCacheBeforeRunningMacro() throws Exception {
+        File binFolder = temp.newFolder("filtered-stack-cache");
+        String macro = "not valid imagej macro syntax";
+        Files.write(new File(binFolder, "C1_Filters.ijm").toPath(),
+                macro.getBytes(StandardCharsets.UTF_8));
+        CreateBinFileAnalysis analysis = new CreateBinFileAnalysis();
+        CreateBinFileAnalysis.BinUserConfig cfg = oneChannelConfig("Custom");
+        ConfigQcContext.FilteredStackCache cache = new ConfigQcContext.FilteredStackCache();
+        ConfigQcContext context = new ConfigQcContext(
+                temp.getRoot(),
+                binFolder,
+                cfg,
+                Arrays.asList(new ConfigQcContext.ConfigQcImage(0, "raw", byteImage("raw"))),
+                cfg.names,
+                0,
+                cache);
+        ImagePlus cached = byteImage("cached");
+        cached.getProcessor().set(0, 0, 77);
+        context.cacheCurrentFilteredStack(macro, cached);
+
+        Method method = CreateBinFileAnalysis.class.getDeclaredMethod(
+                "createFilteredSetupSource",
+                ConfigQcContext.class,
+                CreateBinFileAnalysis.BinUserConfig.class,
+                File.class,
+                int.class,
+                String.class);
+        method.setAccessible(true);
+        ImagePlus result = (ImagePlus) method.invoke(
+                analysis, context, cfg, binFolder, Integer.valueOf(0), "Threshold input");
+
+        assertEquals(77, result.getProcessor().get(0, 0));
     }
 
     private static File configurationDir(File dir) {
@@ -1032,6 +1073,8 @@ public class CreateBinFileAnalysisTest {
         final List<Class<?>> stageTypes = new ArrayList<Class<?>>();
         final List<Class<?>> firstStageByDialog = new ArrayList<Class<?>>();
         final List<String> stageTitles = new ArrayList<String>();
+        final List<List<String>> stagePaths = new ArrayList<List<String>>();
+        final List<Integer> stagePathIndices = new ArrayList<Integer>();
         private final List<ConfigQcResult> results;
         private int nextResultIndex;
 
@@ -1047,6 +1090,8 @@ public class CreateBinFileAnalysisTest {
         @Override
         protected ConfigQcResult showEmbeddedConfigQcDialog(ConfigQcContext context,
                                                             List<ConfigQcStage> stages) {
+            stagePaths.add(new ArrayList<String>(currentEmbeddedStagePath()));
+            stagePathIndices.add(Integer.valueOf(currentEmbeddedStagePathIndex()));
             if (stages != null) {
                 if (!stages.isEmpty()) {
                     firstStageByDialog.add(stages.get(0) == null ? null : stages.get(0).getClass());

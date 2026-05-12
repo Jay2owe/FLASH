@@ -1,5 +1,6 @@
 package flash.pipeline.ui.config;
 
+import flash.pipeline.ui.preview.HistogramPanel;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import ij.ImagePlus;
 import ij.process.ByteProcessor;
@@ -8,7 +9,6 @@ import org.junit.Test;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JScrollPane;
-import javax.swing.ScrollPaneConstants;
 import java.awt.Component;
 import java.awt.Container;
 import java.util.Arrays;
@@ -16,6 +16,7 @@ import java.util.Arrays;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 public class DisplayRangeStageTest {
@@ -79,25 +80,27 @@ public class DisplayRangeStageTest {
                 new RecordingPreviewAdapter());
 
         assertFalse(stage.showPreviewDisplayControls());
+        assertTrue(stage.controlsCanExpand());
     }
 
     @Test
-    public void controlsUseBoundedRangeEditorWithoutDuplicatedSummary() {
+    public void controlsUseFullRangeEditorWithoutDuplicatedSummary() {
         DisplayRangeStage stage = new DisplayRangeStage(
                 new RecordingRangeStore("None"),
                 new RecordingPreviewAdapter());
 
         JComponent controls = stage.buildControls(context(), new RecordingActions());
         JScrollPane scroll = findFirst(controls, JScrollPane.class);
+        HistogramPanel histogram = findFirst(controls, HistogramPanel.class);
 
         assertTrue(hasLabel(controls, "Adjust min/max on the channel projection."));
         assertFalse(hasLabel(controls, "C1 - IBA1"));
         assertFalse(hasLabel(controls, "Image 1 / 1: QC image"));
         assertFalse(hasLabel(controls, "Adjust the displayed min/max range on the channel projection."));
-        assertNotNull(scroll);
-        assertEquals(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER, scroll.getHorizontalScrollBarPolicy());
-        assertTrue("bounded editor preferred height was " + scroll.getPreferredSize().height,
-                scroll.getPreferredSize().height <= 130);
+        assertNull(scroll);
+        assertNotNull(histogram);
+        assertTrue("histogram preferred height was " + histogram.getPreferredSize().height,
+                histogram.getPreferredSize().height <= 64);
     }
 
     private static ConfigQcContext context() {

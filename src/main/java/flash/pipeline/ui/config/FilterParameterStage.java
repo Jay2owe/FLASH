@@ -94,7 +94,7 @@ public final class FilterParameterStage implements ConfigQcStage {
 
     private static final Pattern RUN_LINE_PATTERN = Pattern.compile(
             "run\\s*\\(\\s*\"[^\"]+\"\\s*,\\s*\"([^\"]*)\"\\s*\\)");
-    private static final int ACCORDION_SCROLL_HEIGHT = 130;
+    private static final int ACCORDION_MIN_SCROLL_HEIGHT = 160;
 
     /**
      * Curated map of "default-visible" parameters per ImageJ command. Anything
@@ -132,6 +132,7 @@ public final class FilterParameterStage implements ConfigQcStage {
     private ConfigQcContext activeContext;
     private ImagePlus sourceImage;
     private ImagePlus adjustedPreview;
+    private String adjustedPreviewMacro;
     private SwingWorker<ImagePlus, Void> previewWorker;
 
     private JPanel parameterPanel;
@@ -220,6 +221,11 @@ public final class FilterParameterStage implements ConfigQcStage {
     }
 
     @Override
+    public boolean controlsCanExpand() {
+        return true;
+    }
+
+    @Override
     public JComponent buildControls(ConfigQcContext context, ConfigQcActions actions) {
         this.actions = actions;
         this.activeContext = context;
@@ -279,6 +285,7 @@ public final class FilterParameterStage implements ConfigQcStage {
             restartDisplayMacro = null;
             restartStructurallyMutated = false;
             previewStale = false;
+            cacheConfirmedPreview(context);
             setStatus(lockInSummary());
             return true;
         } catch (Exception e) {
@@ -462,6 +469,10 @@ public final class FilterParameterStage implements ConfigQcStage {
         return parameterPanel != null && parameterPanel.getBorder() != null;
     }
 
+    int parameterPanelPreferredHeightForTest() {
+        return parameterPanel == null ? 0 : parameterPanel.getPreferredSize().height;
+    }
+
     private JComponent buildTopPanel() {
         JPanel panel = new JPanel();
         panel.setOpaque(false);
@@ -526,13 +537,21 @@ public final class FilterParameterStage implements ConfigQcStage {
         gbc.gridx = 6;
         row.add(saveAsButton, gbc);
 
-        panel.add(row);
         presetDescriptionLabel = new JLabel(descriptionProvider.describe(selectedPreset));
         presetDescriptionLabel.setForeground(new Color(90, 90, 90));
-        presetDescriptionLabel.setAlignmentX(JComponent.LEFT_ALIGNMENT);
+        presetDescriptionLabel.setHorizontalAlignment(SwingConstants.LEFT);
         updatePresetDescriptionVisibility();
-        panel.add(Box.createVerticalStrut(2));
-        panel.add(presetDescriptionLabel);
+        gbc.gridx = 1;
+        gbc.gridy = 1;
+        gbc.gridwidth = GridBagConstraints.REMAINDER;
+        gbc.weightx = 1.0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.insets = new Insets(2, 0, 0, 0);
+        gbc.anchor = GridBagConstraints.WEST;
+        row.add(presetDescriptionLabel, gbc);
+
+        row.setAlignmentX(JComponent.LEFT_ALIGNMENT);
+        panel.add(row);
 
         // Branched-preset banner (visible only when DAG is non-linear).
         branchedBannerLabel = new JLabel(BRANCHED_BANNER_TEXT);
@@ -567,8 +586,8 @@ public final class FilterParameterStage implements ConfigQcStage {
         scroll.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createTitledBorder("Filters"),
                 BorderFactory.createEmptyBorder(2, 2, 2, 2)));
-        scroll.setPreferredSize(new Dimension(0, ACCORDION_SCROLL_HEIGHT));
-        scroll.setMinimumSize(new Dimension(0, 90));
+        scroll.setPreferredSize(new Dimension(0, ACCORDION_MIN_SCROLL_HEIGHT));
+        scroll.setMinimumSize(new Dimension(0, ACCORDION_MIN_SCROLL_HEIGHT));
         scroll.getVerticalScrollBar().setUnitIncrement(12);
         parameterScrollPane = scroll;
         return scroll;
@@ -715,7 +734,16 @@ public final class FilterParameterStage implements ConfigQcStage {
         finalizeRowControls();
         parameterPanel.revalidate();
         parameterPanel.repaint();
+        updateParameterScrollPanePreferredHeight();
         refreshActionState();
+    }
+
+    private void updateParameterScrollPanePreferredHeight() {
+        if (parameterScrollPane == null || parameterPanel == null) return;
+        int contentHeight = parameterPanel.getPreferredSize().height + 24;
+        int height = Math.max(ACCORDION_MIN_SCROLL_HEIGHT, contentHeight);
+        parameterScrollPane.setPreferredSize(new Dimension(0, height));
+        parameterScrollPane.revalidate();
     }
 
     private JComponent buildAccordionTopBar() {
@@ -747,6 +775,7 @@ public final class FilterParameterStage implements ConfigQcStage {
             sectionPanels.get(i).setExpanded(expanded);
         }
         if (parameterPanel != null) {
+            updateParameterScrollPanePreferredHeight();
             parameterPanel.revalidate();
             parameterPanel.repaint();
         }
@@ -948,6 +977,7 @@ public final class FilterParameterStage implements ConfigQcStage {
                 }
                 boolean nowVisible = !hiddenContainer.isVisible();
                 hiddenContainer.setVisible(nowVisible);
+                updateParameterScrollPanePreferredHeight();
                 advancedLink.setText(nowVisible ? "Hide advanced" : "Advanced…");
                 body.revalidate();
                 body.repaint();
@@ -1042,7 +1072,7 @@ public final class FilterParameterStage implements ConfigQcStage {
 
             @Override protected void done() {
                 try {
-                    installAdjustedPreview(get());
+                    installAdjustedPreview(get(), macro);
                 } catch (Exception e) {
                     setPreviewState(PreviewPairPanel.PreviewState.ERROR, e.getMessage());
                     setStatus("Filter preview failed: " + e.getMessage());
@@ -1060,13 +1090,15 @@ public final class FilterParameterStage implements ConfigQcStage {
         }
         syncFieldBindings();
         setPreviewState(PreviewPairPanel.PreviewState.RUNNING, "Running filter preview...");
-        ImagePlus rendered = previewAdapter.createFilteredPreview(sourceImage, currentMacro);
-        installAdjustedPreview(rendered);
+        String macro = currentMacro;
+        ImagePlus rendered = previewAdapter.createFilteredPreview(sourceImage, macro);
+        installAdjustedPreview(rendered, macro);
     }
 
-    private void installAdjustedPreview(ImagePlus image) {
+    private void installAdjustedPreview(ImagePlus image, String macroContent) {
         ImagePlus old = adjustedPreview;
         adjustedPreview = image;
+        adjustedPreviewMacro = macroContent;
         previewStale = false;
         if (actions != null) {
             actions.setAdjustedPreview(image, "Filter preview complete.");
@@ -1408,6 +1440,7 @@ public final class FilterParameterStage implements ConfigQcStage {
 
     private void markPreviewStale(String text) {
         previewStale = true;
+        adjustedPreviewMacro = null;
         setPreviewState(hasMacro()
                 ? PreviewPairPanel.PreviewState.STALE
                 : PreviewPairPanel.PreviewState.EMPTY,
@@ -1431,6 +1464,7 @@ public final class FilterParameterStage implements ConfigQcStage {
     private void clearAdjustedPreview() {
         ImagePlus old = adjustedPreview;
         adjustedPreview = null;
+        adjustedPreviewMacro = null;
         if (preview != null) {
             preview.setAdjusted(null);
         }
@@ -1527,9 +1561,18 @@ public final class FilterParameterStage implements ConfigQcStage {
         ImagePlus adjusted = adjustedPreview;
         ImagePlus source = sourceImage;
         adjustedPreview = null;
+        adjustedPreviewMacro = null;
         sourceImage = null;
         if (adjusted != null) previewAdapter.close(adjusted);
         if (source != null) previewAdapter.close(source);
+    }
+
+    private void cacheConfirmedPreview(ConfigQcContext context) {
+        if (context == null) return;
+        context.clearCurrentFilteredStackCache();
+        if (previewStale || adjustedPreview == null) return;
+        if (!safe(currentMacro).equals(safe(adjustedPreviewMacro))) return;
+        context.cacheCurrentFilteredStack(currentMacro, adjustedPreview);
     }
 
     private static JButton makeLinkButton(String text) {

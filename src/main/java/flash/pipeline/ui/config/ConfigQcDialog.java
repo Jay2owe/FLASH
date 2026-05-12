@@ -13,13 +13,17 @@ import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.JSplitPane;
 import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 import javax.swing.WindowConstants;
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Component;
 import java.awt.Dialog;
 import java.awt.Dimension;
+import java.awt.FlowLayout;
+import java.awt.Font;
 import java.awt.Frame;
 import java.awt.GraphicsEnvironment;
 import java.awt.GridBagConstraints;
@@ -52,16 +56,26 @@ public final class ConfigQcDialog {
     private static final Color PREVIEW_ACTION_BG = new Color(232, 245, 253);
     private static final Color PREVIEW_ACTION_FG = new Color(15, 87, 140);
     private static final Color PREVIEW_ACTION_BORDER = new Color(71, 145, 196);
+    private static final Color ACTIVE_STAGE_BG = new Color(222, 239, 231);
+    private static final Color ACTIVE_STAGE_BORDER = new Color(111, 173, 130);
     private static final String PREVIEW_BUTTON_LABEL = "Run Preview";
     private static final String STALE_PREFIX = "\u25CF ";
-    private static final Dimension MINIMUM_DIALOG_SIZE = new Dimension(1080, 720);
+    private static final Dimension MINIMUM_DIALOG_SIZE = new Dimension(1180, 820);
+    private static final int EXPANDABLE_PREVIEW_MIN_HEIGHT = 300;
+    private static final int EXPANDABLE_CONTROLS_MIN_HEIGHT = 220;
 
     private final Window owner;
     private final ConfigQcContext context;
     private final List<ConfigQcStage> stages;
+    private final List<String> stagePathOverride;
+    private final int stagePathCurrentIndexOverride;
     private final PreviewPairPanel previewPair;
     private final JPanel rootPanel = new JPanel(new BorderLayout(8, 8));
+    private final JPanel mainBodyPanel = new JPanel(new BorderLayout(0, 6));
+    private final JPanel stackedPreviewControlsPanel = new JPanel(new BorderLayout(0, 6));
+    private final JPanel stageControlsPanel = new JPanel(new BorderLayout(0, 6));
     private final JPanel controlsPanel = new JPanel(new BorderLayout());
+    private final JPanel stageBreadcrumbPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
     private final JLabel stageLabel = new JLabel(" ");
     private final JLabel channelLabel = new JLabel(" ");
     private final JLabel progressLabel = new JLabel(" ");
@@ -84,11 +98,24 @@ public final class ConfigQcDialog {
     private String currentImageDisplayName = " ";
     private String pendingNavigationStatus;
     private ConfigQcResult result = ConfigQcResult.CANCEL;
+    private boolean controlsExpandable;
+    private JSplitPane previewControlsSplit;
+    private String stagePathText = " ";
+    private String activeStagePathText = " ";
+    private JLabel activeStagePathLabel;
 
     public ConfigQcDialog(Window owner, ConfigQcContext context, List<ConfigQcStage> stages, boolean modal) {
+        this(owner, context, stages, modal, null, -1);
+    }
+
+    public ConfigQcDialog(Window owner, ConfigQcContext context, List<ConfigQcStage> stages,
+                          boolean modal, List<String> stagePathOverride,
+                          int stagePathCurrentIndexOverride) {
         this.owner = owner;
         this.context = context;
         this.stages = Collections.unmodifiableList(copyStages(stages));
+        this.stagePathOverride = Collections.unmodifiableList(copyStagePath(stagePathOverride));
+        this.stagePathCurrentIndexOverride = stagePathCurrentIndexOverride;
         this.previewPair = new PreviewPairPanel(owner, "Original Image", "Adjusted / output preview",
                 PreviewPairPanel.PreviewLayout.HORIZONTAL_SLIM);
         this.dialog = GraphicsEnvironment.isHeadless() ? null : createDialog(owner, modal);
@@ -119,6 +146,11 @@ public final class ConfigQcDialog {
         return new ConfigQcDialog(owner, context, stages, true);
     }
 
+    public static ConfigQcDialog createModal(Window owner, ConfigQcContext context, List<ConfigQcStage> stages,
+                                             List<String> stagePath, int currentStagePathIndex) {
+        return new ConfigQcDialog(owner, context, stages, true, stagePath, currentStagePathIndex);
+    }
+
     public static ConfigQcDialog createModeless(Window owner, ConfigQcContext context, List<ConfigQcStage> stages) {
         return new ConfigQcDialog(owner, context, stages, false);
     }
@@ -127,11 +159,17 @@ public final class ConfigQcDialog {
         return new ConfigQcDialog(null, context, stages, true);
     }
 
+    static ConfigQcDialog createForTest(ConfigQcContext context, List<ConfigQcStage> stages,
+                                        List<String> stagePath, int currentStagePathIndex) {
+        return new ConfigQcDialog(null, context, stages, true, stagePath, currentStagePathIndex);
+    }
+
     public ConfigQcResult showDialog() {
         if (dialog == null) {
             return result;
         }
         dialog.pack();
+        growDialogToMinimumSize();
         capDialogToScreenBounds();
         dialog.setLocationRelativeTo(owner);
         dialog.setVisible(true);
@@ -168,13 +206,15 @@ public final class ConfigQcDialog {
         header.setOpaque(false);
         stageLabel.setForeground(HEADER_COLOR);
         stageLabel.setFont(stageLabel.getFont().deriveFont(java.awt.Font.BOLD, 18f));
+        stageBreadcrumbPanel.setOpaque(false);
         channelLabel.setForeground(HEADER_COLOR);
         progressLabel.setForeground(HELP_COLOR);
 
         JPanel left = new JPanel();
         left.setOpaque(false);
         left.setLayout(new BoxLayout(left, BoxLayout.Y_AXIS));
-        left.add(stageLabel);
+        stageBreadcrumbPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        left.add(stageBreadcrumbPanel);
 
         JPanel right = new JPanel();
         right.setOpaque(false);
@@ -184,7 +224,7 @@ public final class ConfigQcDialog {
         right.add(channelLabel);
         right.add(progressLabel);
 
-        header.add(left, BorderLayout.WEST);
+        header.add(left, BorderLayout.CENTER);
         header.add(right, BorderLayout.EAST);
         return header;
     }
@@ -193,15 +233,18 @@ public final class ConfigQcDialog {
         JPanel main = new JPanel(new BorderLayout(8, 8));
         main.setOpaque(false);
         main.add(previewPair.previewToolstrip(), BorderLayout.NORTH);
-        main.add(previewPair, BorderLayout.CENTER);
 
-        JPanel south = new JPanel(new BorderLayout(0, 6));
-        south.setOpaque(false);
-        south.add(previewPair.sharedZRow(), BorderLayout.NORTH);
+        mainBodyPanel.setOpaque(false);
+        stackedPreviewControlsPanel.setOpaque(false);
+        stackedPreviewControlsPanel.add(previewPair, BorderLayout.CENTER);
+        stageControlsPanel.setOpaque(false);
+        stageControlsPanel.add(previewPair.sharedZRow(), BorderLayout.NORTH);
         controlsPanel.setOpaque(false);
         controlsPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
-        south.add(controlsPanel, BorderLayout.CENTER);
-        main.add(south, BorderLayout.SOUTH);
+        stageControlsPanel.add(controlsPanel, BorderLayout.CENTER);
+        stackedPreviewControlsPanel.add(stageControlsPanel, BorderLayout.SOUTH);
+        mainBodyPanel.add(stackedPreviewControlsPanel, BorderLayout.CENTER);
+        main.add(mainBodyPanel, BorderLayout.CENTER);
         return main;
     }
 
@@ -295,6 +338,7 @@ public final class ConfigQcDialog {
         detachPreviewImages();
         enteredStage = true;
         stageLabel.setText(stage.title());
+        refreshStageBreadcrumb();
         refreshHeader();
         String navigationStatus = pendingNavigationStatus;
         pendingNavigationStatus = null;
@@ -314,8 +358,12 @@ public final class ConfigQcDialog {
         if (controls != null) {
             controlsPanel.add(controls, BorderLayout.CENTER);
         }
+        applyControlsExpansionMode(stage.controlsCanExpand());
         refreshStageLayout();
         stage.onEnter(context, previewPair);
+        if (controlsExpandable) {
+            configureExpandableControlArea();
+        }
         if (navigationStatus != null && !navigationStatus.trim().isEmpty()) {
             setStatus(navigationStatus);
         }
@@ -349,16 +397,94 @@ public final class ConfigQcDialog {
     private void refreshStageLayout() {
         controlsPanel.revalidate();
         controlsPanel.repaint();
+        stageControlsPanel.revalidate();
+        stageControlsPanel.repaint();
+        mainBodyPanel.revalidate();
+        mainBodyPanel.repaint();
         rootPanel.revalidate();
         rootPanel.repaint();
         SwingUtilities.invokeLater(new Runnable() {
             @Override public void run() {
                 controlsPanel.revalidate();
                 controlsPanel.repaint();
+                stageControlsPanel.revalidate();
+                stageControlsPanel.repaint();
+                mainBodyPanel.revalidate();
+                mainBodyPanel.repaint();
                 rootPanel.revalidate();
                 rootPanel.repaint();
             }
         });
+    }
+
+    private void applyControlsExpansionMode(boolean expandable) {
+        boolean modeChanged = controlsExpandable != expandable;
+        controlsExpandable = expandable;
+        if (modeChanged) {
+            mainBodyPanel.removeAll();
+        }
+        if (expandable) {
+            if (previewControlsSplit == null || modeChanged) {
+                previewControlsSplit = new JSplitPane(JSplitPane.VERTICAL_SPLIT,
+                        previewPair, stageControlsPanel);
+                previewControlsSplit.setBorder(BorderFactory.createEmptyBorder());
+                previewControlsSplit.setContinuousLayout(true);
+                previewControlsSplit.setOneTouchExpandable(true);
+                mainBodyPanel.add(previewControlsSplit, BorderLayout.CENTER);
+            }
+            configureExpandableControlArea();
+        } else if (modeChanged) {
+            previewControlsSplit = null;
+            resetExpandableControlArea();
+            stackedPreviewControlsPanel.add(previewPair, BorderLayout.CENTER);
+            stackedPreviewControlsPanel.add(stageControlsPanel, BorderLayout.SOUTH);
+            mainBodyPanel.add(stackedPreviewControlsPanel, BorderLayout.CENTER);
+        }
+        mainBodyPanel.revalidate();
+        mainBodyPanel.repaint();
+    }
+
+    private void configureExpandableControlArea() {
+        stageControlsPanel.setPreferredSize(null);
+        int controlsHeight = expandableControlsInitialHeight();
+        previewPair.setMinimumSize(new Dimension(0, EXPANDABLE_PREVIEW_MIN_HEIGHT));
+        stageControlsPanel.setMinimumSize(new Dimension(0, EXPANDABLE_CONTROLS_MIN_HEIGHT));
+        stageControlsPanel.setPreferredSize(new Dimension(0, controlsHeight));
+        if (previewControlsSplit != null) {
+            previewControlsSplit.setResizeWeight(1.0);
+            previewControlsSplit.resetToPreferredSizes();
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    positionExpandableDivider();
+                }
+            });
+        }
+    }
+
+    private void resetExpandableControlArea() {
+        previewPair.setMinimumSize(null);
+        stageControlsPanel.setMinimumSize(null);
+        stageControlsPanel.setPreferredSize(null);
+    }
+
+    private int expandableControlsInitialHeight() {
+        int preferred = stageControlsPanel.getPreferredSize().height;
+        if (preferred <= 0) {
+            preferred = controlsPanel.getPreferredSize().height
+                    + previewPair.sharedZRow().getPreferredSize().height
+                    + 12;
+        }
+        return Math.max(preferred, EXPANDABLE_CONTROLS_MIN_HEIGHT);
+    }
+
+    private void positionExpandableDivider() {
+        if (previewControlsSplit == null) return;
+        int height = previewControlsSplit.getHeight();
+        if (height <= 0) return;
+        int controlsHeight = stageControlsPanel.getPreferredSize().height;
+        int divider = height - controlsHeight - previewControlsSplit.getDividerSize();
+        divider = Math.max(EXPANDABLE_PREVIEW_MIN_HEIGHT, divider);
+        previewControlsSplit.setDividerLocation(divider);
     }
 
     private void setStatus(String text) {
@@ -600,6 +726,96 @@ public final class ConfigQcDialog {
         return "Stage " + currentPosition + " / " + applicableCount;
     }
 
+    private void refreshStageBreadcrumb() {
+        stageBreadcrumbPanel.removeAll();
+        activeStagePathLabel = null;
+        List<String> path = currentStagePathLabels();
+        int activeIndex = currentStagePathIndex(path);
+        StringBuilder plain = new StringBuilder();
+        for (int i = 0; i < path.size(); i++) {
+            String labelText = path.get(i);
+            if (i > 0) {
+                JLabel separator = new JLabel(">");
+                separator.setForeground(HELP_COLOR);
+                separator.setBorder(BorderFactory.createEmptyBorder(0, 1, 0, 1));
+                stageBreadcrumbPanel.add(separator);
+                plain.append(" > ");
+            }
+            JLabel label = new JLabel(labelText);
+            boolean active = i == activeIndex;
+            styleStageBreadcrumbLabel(label, active);
+            if (active) {
+                activeStagePathLabel = label;
+                activeStagePathText = labelText;
+            }
+            stageBreadcrumbPanel.add(label);
+            plain.append(labelText);
+        }
+        if (path.isEmpty()) {
+            activeStagePathText = " ";
+            stagePathText = " ";
+        } else {
+            stagePathText = plain.toString();
+        }
+        stageBreadcrumbPanel.revalidate();
+        stageBreadcrumbPanel.repaint();
+    }
+
+    private void styleStageBreadcrumbLabel(JLabel label, boolean active) {
+        label.setFont(label.getFont().deriveFont(
+                active ? Font.BOLD : Font.PLAIN,
+                active ? 18f : 16f));
+        label.setForeground(active ? PRIMARY_ACTION_FG : HELP_COLOR);
+        label.setOpaque(active);
+        if (active) {
+            label.setBackground(ACTIVE_STAGE_BG);
+            label.setBorder(BorderFactory.createCompoundBorder(
+                    BorderFactory.createLineBorder(ACTIVE_STAGE_BORDER),
+                    BorderFactory.createEmptyBorder(3, 9, 3, 9)));
+        } else {
+            label.setBorder(BorderFactory.createEmptyBorder(4, 2, 4, 2));
+        }
+    }
+
+    private List<String> currentStagePathLabels() {
+        if (!stagePathOverride.isEmpty()) {
+            return stagePathOverride;
+        }
+        List<String> labels = new ArrayList<String>();
+        for (int i = 0; i < stages.size(); i++) {
+            ConfigQcStage stage = stages.get(i);
+            if (stage == null || !stage.isApplicable(context)) continue;
+            labels.add(stage.title());
+        }
+        if (labels.isEmpty()) {
+            ConfigQcStage stage = currentStage();
+            if (stage != null) {
+                labels.add(stage.title());
+            }
+        }
+        return labels;
+    }
+
+    private int currentStagePathIndex(List<String> path) {
+        if (path == null || path.isEmpty()) {
+            return -1;
+        }
+        if (!stagePathOverride.isEmpty()) {
+            if (stagePathCurrentIndexOverride < 0) return 0;
+            return Math.min(stagePathCurrentIndexOverride, path.size() - 1);
+        }
+        int currentPosition = 0;
+        for (int i = 0; i < stages.size(); i++) {
+            ConfigQcStage stage = stages.get(i);
+            if (stage == null || !stage.isApplicable(context)) continue;
+            if (i == stageIndex) {
+                return currentPosition;
+            }
+            currentPosition++;
+        }
+        return 0;
+    }
+
     private void waitForModelessClose() {
         if (SwingUtilities.isEventDispatchThread()) {
             loop = Toolkit.getDefaultToolkit().getSystemEventQueue().createSecondaryLoop();
@@ -627,6 +843,16 @@ public final class ConfigQcDialog {
         }
     }
 
+    private void growDialogToMinimumSize() {
+        if (dialog == null) return;
+        Dimension size = dialog.getSize();
+        int width = Math.max(size.width, MINIMUM_DIALOG_SIZE.width);
+        int height = Math.max(size.height, MINIMUM_DIALOG_SIZE.height);
+        if (width != size.width || height != size.height) {
+            dialog.setSize(width, height);
+        }
+    }
+
     private static List<ConfigQcStage> copyStages(List<ConfigQcStage> source) {
         List<ConfigQcStage> copy = new ArrayList<ConfigQcStage>();
         if (source != null) {
@@ -634,6 +860,19 @@ public final class ConfigQcDialog {
                 ConfigQcStage stage = source.get(i);
                 if (stage != null) {
                     copy.add(stage);
+                }
+            }
+        }
+        return copy;
+    }
+
+    private static List<String> copyStagePath(List<String> source) {
+        List<String> copy = new ArrayList<String>();
+        if (source != null) {
+            for (int i = 0; i < source.size(); i++) {
+                String label = source.get(i);
+                if (label != null && !label.trim().isEmpty()) {
+                    copy.add(label.trim());
                 }
             }
         }
@@ -661,6 +900,20 @@ public final class ConfigQcDialog {
 
     String stageTextForTest() {
         return stageLabel.getText();
+    }
+
+    String stagePathTextForTest() {
+        return stagePathText;
+    }
+
+    String activeStagePathTextForTest() {
+        return activeStagePathText;
+    }
+
+    boolean activeStagePathHighlightedForTest() {
+        return activeStagePathLabel != null
+                && activeStagePathLabel.isOpaque()
+                && ACTIVE_STAGE_BG.equals(activeStagePathLabel.getBackground());
     }
 
     String channelTextForTest() {
@@ -709,6 +962,18 @@ public final class ConfigQcDialog {
 
     JButton previousImageButtonForTest() {
         return previousImageButton;
+    }
+
+    boolean controlsExpandableForTest() {
+        return controlsExpandable;
+    }
+
+    JSplitPane previewControlsSplitForTest() {
+        return previewControlsSplit;
+    }
+
+    int stageControlsPreferredHeightForTest() {
+        return stageControlsPanel.getPreferredSize().height;
     }
 
     void lockInForTest() {

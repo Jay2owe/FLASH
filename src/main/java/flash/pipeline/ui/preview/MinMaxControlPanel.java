@@ -8,6 +8,7 @@ import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JPanel;
 import java.awt.BorderLayout;
+import java.awt.Dimension;
 import java.awt.FlowLayout;
 
 public final class MinMaxControlPanel extends JPanel {
@@ -20,6 +21,8 @@ public final class MinMaxControlPanel extends JPanel {
     }
 
     private static final double AUTO_SATURATION_FRACTION = 0.0035;
+    private static final int HISTOGRAM_MINIMUM_HEIGHT = 48;
+    private static final int HISTOGRAM_PREFERRED_HEIGHT = 62;
 
     private final HistogramPanel histogramPanel = new HistogramPanel();
     private final FijiStyleRangeSliderPanel minimumSlider = new FijiStyleRangeSliderPanel("Minimum");
@@ -45,6 +48,8 @@ public final class MinMaxControlPanel extends JPanel {
         super(new BorderLayout(0, 6));
         this.includeSetButton = includeSetButton;
         setBorder(BorderFactory.createTitledBorder("Brightness/Contrast"));
+        histogramPanel.setMinimumSize(new Dimension(220, HISTOGRAM_MINIMUM_HEIGHT));
+        histogramPanel.setPreferredSize(new Dimension(320, HISTOGRAM_PREFERRED_HEIGHT));
         add(histogramPanel, BorderLayout.NORTH);
         add(buildControls(), BorderLayout.CENTER);
         add(buildActions(), BorderLayout.SOUTH);

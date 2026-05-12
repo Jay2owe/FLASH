@@ -9,7 +9,6 @@ import org.junit.Test;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JScrollPane;
-import javax.swing.ScrollPaneConstants;
 import java.awt.Component;
 import java.awt.Container;
 import java.util.Arrays;
@@ -17,6 +16,7 @@ import java.util.Arrays;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 public class ChannelThresholdStageTest {
@@ -86,10 +86,11 @@ public class ChannelThresholdStageTest {
                 new RecordingPreviewAdapter());
 
         assertFalse(stage.showPreviewDisplayControls());
+        assertTrue(stage.controlsCanExpand());
     }
 
     @Test
-    public void controlsUseBoundedThresholdEditorWithoutDuplicatedSummary() {
+    public void controlsUseFullThresholdEditorWithoutDuplicatedSummary() {
         ChannelThresholdStage stage = new ChannelThresholdStage(
                 new RecordingThresholdStore("default"),
                 new RecordingPreviewAdapter());
@@ -101,10 +102,7 @@ public class ChannelThresholdStageTest {
         assertFalse(hasLabel(controls, "C1 - IBA1"));
         assertFalse(hasLabel(controls, "Image 1 / 1: QC image"));
         assertFalse(hasLabel(controls, "Adjust the lower threshold; FLASH saves that value for object and intensity measurements."));
-        assertNotNull(scroll);
-        assertEquals(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER, scroll.getHorizontalScrollBarPolicy());
-        assertTrue("bounded editor preferred height was " + scroll.getPreferredSize().height,
-                scroll.getPreferredSize().height <= 130);
+        assertNull(scroll);
     }
 
     private static ConfigQcContext context() {

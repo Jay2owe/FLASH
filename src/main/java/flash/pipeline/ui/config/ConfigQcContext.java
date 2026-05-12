@@ -7,6 +7,9 @@ import ij.ImagePlus;
 
 import java.io.File;
 import java.lang.reflect.Field;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -55,6 +58,7 @@ public final class ConfigQcContext {
     private final List<ConfigQcImage> images;
     private final List<String> channelNames;
     private final Map<String, Object> attributes = new HashMap<String, Object>();
+    private final FilteredStackCache filteredStackCache;
     private int channelIndex;
     private int currentImageIndex;
     private Integer requestedNextImageIndex;
@@ -62,11 +66,20 @@ public final class ConfigQcContext {
     public ConfigQcContext(File projectDirectory, File binFolder, Object config,
                            List<ConfigQcImage> images, List<String> channelNames,
                            int channelIndex) {
+        this(projectDirectory, binFolder, config, images, channelNames, channelIndex, null);
+    }
+
+    public ConfigQcContext(File projectDirectory, File binFolder, Object config,
+                           List<ConfigQcImage> images, List<String> channelNames,
+                           int channelIndex, FilteredStackCache filteredStackCache) {
         this.projectDirectory = projectDirectory;
         this.binFolder = binFolder;
         this.config = config;
         this.images = Collections.unmodifiableList(copyImages(images));
         this.channelNames = Collections.unmodifiableList(copyStrings(channelNames));
+        this.filteredStackCache = filteredStackCache == null
+                ? new FilteredStackCache()
+                : filteredStackCache;
         this.channelIndex = Math.max(0, channelIndex);
         this.currentImageIndex = 0;
     }
@@ -254,6 +267,39 @@ public final class ConfigQcContext {
         return Collections.unmodifiableMap(attributes);
     }
 
+    public void cacheCurrentFilteredStack(String macroContent, ImagePlus filteredStack) {
+        cacheFilteredStackForCurrentImage(channelIndex, macroContent, filteredStack);
+    }
+
+    public synchronized void cacheFilteredStackForCurrentImage(int channelIndex,
+                                                              String macroContent,
+                                                              ImagePlus filteredStack) {
+        if (filteredStack == null || !hasText(macroContent)) return;
+        filteredStackCache.put(filteredStackKey(channelIndex, macroContent), filteredStack);
+    }
+
+    public ImagePlus duplicateCurrentFilteredStack(String macroContent) {
+        return duplicateFilteredStackForCurrentImage(channelIndex, macroContent);
+    }
+
+    public synchronized ImagePlus duplicateFilteredStackForCurrentImage(int channelIndex,
+                                                                       String macroContent) {
+        if (!hasText(macroContent)) return null;
+        return filteredStackCache.duplicate(filteredStackKey(channelIndex, macroContent));
+    }
+
+    public synchronized void clearCurrentFilteredStackCache() {
+        filteredStackCache.removeForImageChannel(currentSeriesIndex(), channelIndex);
+    }
+
+    public synchronized void clearFilteredStackCache() {
+        filteredStackCache.clear();
+    }
+
+    int filteredStackCacheSizeForTest() {
+        return filteredStackCache.sizeForTest();
+    }
+
     private static List<ConfigQcImage> copyImages(List<ConfigQcImage> source) {
         List<ConfigQcImage> copy = new ArrayList<ConfigQcImage>();
         if (source != null) {
@@ -286,6 +332,44 @@ public final class ConfigQcContext {
 
     private static String safe(String value) {
         return value == null ? "" : value;
+    }
+
+    private static boolean hasText(String value) {
+        return value != null && !value.trim().isEmpty();
+    }
+
+    private FilteredStackKey filteredStackKey(int channelIndex, String macroContent) {
+        return new FilteredStackKey(currentSeriesIndex(), Math.max(0, channelIndex),
+                macroFingerprint(macroContent));
+    }
+
+    private int currentSeriesIndex() {
+        ConfigQcImage current = getCurrentImage();
+        return current == null ? currentImageIndex : current.getSeriesIndex();
+    }
+
+    private static String macroFingerprint(String macroContent) {
+        String value = safe(macroContent);
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] bytes = digest.digest(value.getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder(bytes.length * 2);
+            for (int i = 0; i < bytes.length; i++) {
+                sb.append(String.format("%02x", Integer.valueOf(bytes[i] & 0xff)));
+            }
+            return sb.toString();
+        } catch (NoSuchAlgorithmException e) {
+            return Integer.toHexString(value.hashCode());
+        }
+    }
+
+    private static void disposeCachedImage(ImagePlus image) {
+        if (image == null) return;
+        image.changes = false;
+        if (image.getWindow() != null) {
+            image.close();
+        }
+        image.flush();
     }
 
     static String shortDisplayName(String displayName) {
@@ -331,5 +415,81 @@ public final class ConfigQcContext {
             }
         }
         return null;
+    }
+
+    public static final class FilteredStackCache {
+        private final Map<FilteredStackKey, ImagePlus> stacks =
+                new HashMap<FilteredStackKey, ImagePlus>();
+
+        private synchronized void put(FilteredStackKey key, ImagePlus filteredStack) {
+            if (key == null || filteredStack == null) return;
+            ImagePlus cached = filteredStack.duplicate();
+            if (cached == null) return;
+            cached.setTitle(filteredStack.getTitle());
+            removeForImageChannel(key.seriesIndex, key.channelIndex);
+            ImagePlus old = stacks.put(key, cached);
+            disposeCachedImage(old);
+        }
+
+        private synchronized ImagePlus duplicate(FilteredStackKey key) {
+            if (key == null) return null;
+            ImagePlus cached = stacks.get(key);
+            if (cached == null) return null;
+            ImagePlus copy = cached.duplicate();
+            if (copy != null) copy.setTitle(cached.getTitle());
+            return copy;
+        }
+
+        private synchronized void removeForImageChannel(int seriesIndex, int channelIndex) {
+            int safeChannelIndex = Math.max(0, channelIndex);
+            List<FilteredStackKey> keysToRemove = new ArrayList<FilteredStackKey>();
+            for (FilteredStackKey key : stacks.keySet()) {
+                if (key.seriesIndex == seriesIndex && key.channelIndex == safeChannelIndex) {
+                    keysToRemove.add(key);
+                }
+            }
+            for (FilteredStackKey key : keysToRemove) {
+                disposeCachedImage(stacks.remove(key));
+            }
+        }
+
+        public synchronized void clear() {
+            for (ImagePlus image : stacks.values()) {
+                disposeCachedImage(image);
+            }
+            stacks.clear();
+        }
+
+        private synchronized int sizeForTest() {
+            return stacks.size();
+        }
+    }
+
+    private static final class FilteredStackKey {
+        final int seriesIndex;
+        final int channelIndex;
+        final String macroHash;
+
+        FilteredStackKey(int seriesIndex, int channelIndex, String macroHash) {
+            this.seriesIndex = seriesIndex;
+            this.channelIndex = channelIndex;
+            this.macroHash = safe(macroHash);
+        }
+
+        @Override public boolean equals(Object obj) {
+            if (this == obj) return true;
+            if (!(obj instanceof FilteredStackKey)) return false;
+            FilteredStackKey other = (FilteredStackKey) obj;
+            return seriesIndex == other.seriesIndex
+                    && channelIndex == other.channelIndex
+                    && macroHash.equals(other.macroHash);
+        }
+
+        @Override public int hashCode() {
+            int result = seriesIndex;
+            result = 31 * result + channelIndex;
+            result = 31 * result + macroHash.hashCode();
+            return result;
+        }
     }
 }

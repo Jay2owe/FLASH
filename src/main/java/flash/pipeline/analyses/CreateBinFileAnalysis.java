@@ -212,6 +212,10 @@ public class CreateBinFileAnalysis implements Analysis {
     private final Set<String> customFilterPromptsHandled = new HashSet<String>();
     private final Map<String, String> customFilterDemotions = new HashMap<String, String>();
     private BinConfig settingsStatusReference = null;
+    private List<String> activeEmbeddedStagePath = Collections.emptyList();
+    private int activeEmbeddedStagePathIndex = -1;
+    private final ConfigQcContext.FilteredStackCache setupFilteredStackCache =
+            new ConfigQcContext.FilteredStackCache();
 
     private static boolean gateStarDistFeature(String featureDisplayName) {
         return FeatureDependencyGate.gate(DependencyId.STARDIST_RUNTIME,
@@ -268,8 +272,10 @@ public class CreateBinFileAnalysis implements Analysis {
     @Override
     public void execute(String directory) {
         try {
+            setupFilteredStackCache.clear();
             executeInternal(directory);
         } finally {
+            setupFilteredStackCache.clear();
             closeAllImageWindows();
         }
     }
@@ -282,8 +288,10 @@ public class CreateBinFileAnalysis implements Analysis {
         }
 
         try {
+            setupFilteredStackCache.clear();
             executeFilteredInternal(directory, fields);
         } finally {
+            setupFilteredStackCache.clear();
             closeAllImageWindows();
         }
     }
@@ -386,6 +394,8 @@ public class CreateBinFileAnalysis implements Analysis {
 
     protected ConfigQcResult showEmbeddedConfigQcDialog(ConfigQcContext context,
                                                         List<ConfigQcStage> stages) {
+        final List<String> dialogStagePath = activeEmbeddedStagePath;
+        final int dialogStagePathIndex = activeEmbeddedStagePathIndex;
         if (!SwingUtilities.isEventDispatchThread()) {
             final ConfigQcContext dialogContext = context;
             final List<ConfigQcStage> dialogStages = stages;
@@ -393,7 +403,8 @@ public class CreateBinFileAnalysis implements Analysis {
             try {
                 SwingUtilities.invokeAndWait(new Runnable() {
                     @Override public void run() {
-                        result[0] = showEmbeddedConfigQcDialogOnEventThread(dialogContext, dialogStages);
+                        result[0] = showEmbeddedConfigQcDialogOnEventThread(
+                                dialogContext, dialogStages, dialogStagePath, dialogStagePathIndex);
                     }
                 });
             } catch (InterruptedException e) {
@@ -404,12 +415,42 @@ public class CreateBinFileAnalysis implements Analysis {
             }
             return result[0] == null ? ConfigQcResult.CANCEL : result[0];
         }
-        return showEmbeddedConfigQcDialogOnEventThread(context, stages);
+        return showEmbeddedConfigQcDialogOnEventThread(
+                context, stages, dialogStagePath, dialogStagePathIndex);
+    }
+
+    protected ConfigQcResult showEmbeddedConfigQcDialog(ConfigQcContext context,
+                                                        List<ConfigQcStage> stages,
+                                                        List<String> stagePath,
+                                                        int activeStagePathIndex) {
+        List<String> previousPath = activeEmbeddedStagePath;
+        int previousIndex = activeEmbeddedStagePathIndex;
+        activeEmbeddedStagePath = stagePath == null
+                ? Collections.<String>emptyList()
+                : new ArrayList<String>(stagePath);
+        activeEmbeddedStagePathIndex = activeStagePathIndex;
+        try {
+            return showEmbeddedConfigQcDialog(context, stages);
+        } finally {
+            activeEmbeddedStagePath = previousPath;
+            activeEmbeddedStagePathIndex = previousIndex;
+        }
+    }
+
+    protected List<String> currentEmbeddedStagePath() {
+        return activeEmbeddedStagePath;
+    }
+
+    protected int currentEmbeddedStagePathIndex() {
+        return activeEmbeddedStagePathIndex;
     }
 
     private ConfigQcResult showEmbeddedConfigQcDialogOnEventThread(ConfigQcContext context,
-                                                                   List<ConfigQcStage> stages) {
-        ConfigQcDialog dialog = ConfigQcDialog.createModal(null, context, stages);
+                                                                   List<ConfigQcStage> stages,
+                                                                   List<String> stagePath,
+                                                                   int activeStagePathIndex) {
+        ConfigQcDialog dialog = ConfigQcDialog.createModal(
+                null, context, stages, stagePath, activeStagePathIndex);
         return dialog.showDialog();
     }
 
@@ -3663,7 +3704,8 @@ public class CreateBinFileAnalysis implements Analysis {
                 cfg,
                 zSliceContextImages(lifFile, metas),
                 cfg.names,
-                0);
+                0,
+                setupFilteredStackCache);
         ZSliceSelectionStage stage = createZSliceSelectionStage(supplier, metas, cfg);
         ConfigQcResult result = showEmbeddedConfigQcDialog(
                 context, Collections.<ConfigQcStage>singletonList(stage));
@@ -5030,7 +5072,11 @@ public class CreateBinFileAnalysis implements Analysis {
         List<InteractiveQcStep> steps = buildInteractiveQcSteps(cfg, customSettings);
         int stepIndex = 0;
         while (stepIndex < steps.size()) {
-            String result = runInteractiveQcStep(images, cfg, binFolder, steps.get(stepIndex));
+            InteractiveQcStep step = steps.get(stepIndex);
+            List<String> stagePath = interactiveStagePathForChannel(steps, step.channelIndex);
+            int activeStagePathIndex = interactiveStagePathIndex(steps, step);
+            String result = runInteractiveQcStep(
+                    images, cfg, binFolder, step, stagePath, activeStagePathIndex);
             if ("cancel".equals(result)) {
                 return "cancel";
             }
@@ -5101,6 +5147,81 @@ public class CreateBinFileAnalysis implements Analysis {
         }
     }
 
+    private String runInteractiveQcStep(List<QcImageSelection> images, BinUserConfig cfg,
+                                        File binFolder, InteractiveQcStep step,
+                                        List<String> stagePath, int activeStagePathIndex) {
+        List<String> previousPath = activeEmbeddedStagePath;
+        int previousIndex = activeEmbeddedStagePathIndex;
+        activeEmbeddedStagePath = stagePath == null
+                ? Collections.<String>emptyList()
+                : new ArrayList<String>(stagePath);
+        activeEmbeddedStagePathIndex = activeStagePathIndex;
+        try {
+            return runInteractiveQcStep(images, cfg, binFolder, step);
+        } finally {
+            activeEmbeddedStagePath = previousPath;
+            activeEmbeddedStagePathIndex = previousIndex;
+        }
+    }
+
+    private static List<String> interactiveStagePathForChannel(List<InteractiveQcStep> steps,
+                                                               int channelIndex) {
+        List<String> path = new ArrayList<String>();
+        if (steps == null) {
+            return path;
+        }
+        for (int i = 0; i < steps.size(); i++) {
+            InteractiveQcStep candidate = steps.get(i);
+            if (candidate != null && candidate.channelIndex == channelIndex) {
+                path.add(interactiveStageLabel(candidate.stage));
+            }
+        }
+        return path;
+    }
+
+    private static int interactiveStagePathIndex(List<InteractiveQcStep> steps,
+                                                 InteractiveQcStep activeStep) {
+        if (steps == null || activeStep == null) {
+            return -1;
+        }
+        int indexForChannel = 0;
+        for (int i = 0; i < steps.size(); i++) {
+            InteractiveQcStep candidate = steps.get(i);
+            if (candidate == null || candidate.channelIndex != activeStep.channelIndex) {
+                continue;
+            }
+            if (candidate == activeStep) {
+                return indexForChannel;
+            }
+            indexForChannel++;
+        }
+        return -1;
+    }
+
+    private static String interactiveStageLabel(InteractiveQcStage stage) {
+        if (stage == null) {
+            return "";
+        }
+        switch (stage) {
+            case DISPLAY_RANGE:
+                return "Display";
+            case FILTER_PARAMETERS:
+                return "Filter";
+            case SEGMENTATION_OBJECT:
+                return "Object Segmentation";
+            case CHANNEL_THRESHOLD:
+                return "Threshold";
+            case PARTICLE_SIZE:
+                return "Particle Size";
+            case STARDIST_PARAMETERS:
+                return "StarDist";
+            case CELLPOSE_PARAMETERS:
+                return "Cellpose";
+            default:
+                return stage.name();
+        }
+    }
+
     private enum InteractiveQcStage {
         FILTER_PARAMETERS,
         DISPLAY_RANGE,
@@ -5142,7 +5263,8 @@ public class CreateBinFileAnalysis implements Analysis {
                 cfg,
                 filterParameterContextImages(images),
                 cfg.names,
-                channelIndex);
+                channelIndex,
+                setupFilteredStackCache);
         ParticleSizeStage stage = createParticleSizeStage(cfg, binFolder, channelIndex);
         ConfigQcResult result = showEmbeddedConfigQcDialog(
                 context, Collections.<ConfigQcStage>singletonList(stage));
@@ -5186,15 +5308,8 @@ public class CreateBinFileAnalysis implements Analysis {
                     }
 
                     @Override public ImagePlus createFilteredSource(ConfigQcContext context) {
-                        ImagePlus source = duplicateCurrentChannel(context, channelNum);
-                        if (source == null) return null;
-                        String filterContent = resolveFilterContent(binFolder, cfg, channelIndex);
-                        if (filterContent != null && !filterContent.trim().isEmpty()) {
-                            FilterExecutor.runThreadSafe(source, filterContent);
-                        }
-                        source.setTitle("Particle size filtered input | " + chLabel + " | "
-                                + (context == null ? "" : context.getCurrentImageDisplayName()));
-                        return applyPreviewLut(source, channelColor(cfg, channelIndex));
+                        return createFilteredSetupSource(context, cfg, binFolder, channelIndex,
+                                "Particle size filtered input");
                     }
 
                     @Override public int resolveThreshold(ImagePlus filteredSource,
@@ -5312,7 +5427,8 @@ public class CreateBinFileAnalysis implements Analysis {
                 cfg,
                 filterParameterContextImages(images),
                 cfg.names,
-                channelIndex);
+                channelIndex,
+                setupFilteredStackCache);
         DisplayRangeStage stage = createDisplayRangeStage(cfg, channelIndex);
         ConfigQcResult result = showEmbeddedConfigQcDialog(
                 context, Collections.<ConfigQcStage>singletonList(stage));
@@ -5449,7 +5565,8 @@ public class CreateBinFileAnalysis implements Analysis {
                 cfg,
                 filterParameterContextImages(images),
                 cfg.names,
-                channelIndex);
+                channelIndex,
+                setupFilteredStackCache);
         ChannelThresholdStage stage = createChannelThresholdStage(cfg, binFolder, channelIndex);
         ConfigQcResult result = showEmbeddedConfigQcDialog(
                 context, Collections.<ConfigQcStage>singletonList(stage));
@@ -5487,15 +5604,8 @@ public class CreateBinFileAnalysis implements Analysis {
                     }
 
                     @Override public ImagePlus createThresholdSource(ConfigQcContext context) {
-                        ImagePlus thresholdInput = duplicateCurrentChannel(context, channelNum);
-                        if (thresholdInput == null) return null;
-                        String filterContent = resolveFilterContent(binFolder, cfg, channelIndex);
-                        if (filterContent != null && !filterContent.trim().isEmpty()) {
-                            FilterExecutor.runThreadSafe(thresholdInput, filterContent);
-                        }
-                        thresholdInput.setTitle("Threshold input | " + chLabel + " | "
-                                + (context == null ? "" : context.getCurrentImageDisplayName()));
-                        return applyPreviewLut(thresholdInput, channelColor(cfg, channelIndex));
+                        return createFilteredSetupSource(context, cfg, binFolder, channelIndex,
+                                "Threshold input");
                     }
 
                     @Override public void close(ImagePlus image) {
@@ -5637,7 +5747,8 @@ public class CreateBinFileAnalysis implements Analysis {
                 cfg,
                 filterParameterContextImages(images),
                 cfg.names,
-                channelIndex);
+                channelIndex,
+                setupFilteredStackCache);
         List<ConfigQcStage> stages = new ArrayList<ConfigQcStage>();
         stages.add(new SegmentationMethodStage(methodStore));
         stages.add(new ConditionalConfigQcStage(
@@ -5719,7 +5830,8 @@ public class CreateBinFileAnalysis implements Analysis {
                 cfg,
                 filterParameterContextImages(images),
                 cfg.names,
-                channelIndex);
+                channelIndex,
+                setupFilteredStackCache);
         StarDistParameterStage stage = createStarDistParameterStage(cfg, binFolder, channelIndex);
         ConfigQcResult result = showEmbeddedConfigQcDialog(
                 context, Collections.<ConfigQcStage>singletonList(stage));
@@ -5812,7 +5924,8 @@ public class CreateBinFileAnalysis implements Analysis {
                 cfg,
                 filterParameterContextImages(images),
                 cfg.names,
-                channelIndex);
+                channelIndex,
+                setupFilteredStackCache);
         CellposeParameterStage stage = createCellposeParameterStage(cfg, binFolder, channelIndex);
         ConfigQcResult result = showEmbeddedConfigQcDialog(
                 context, Collections.<ConfigQcStage>singletonList(stage));
@@ -5936,13 +6049,29 @@ public class CreateBinFileAnalysis implements Analysis {
 
     private ImagePlus createFilteredAiSource(ConfigQcContext context, BinUserConfig cfg, File binFolder,
                                              int channelIndex, String titlePrefix) {
+        return createFilteredSetupSource(context, cfg, binFolder, channelIndex, titlePrefix);
+    }
+
+    private ImagePlus createFilteredSetupSource(ConfigQcContext context, BinUserConfig cfg, File binFolder,
+                                                int channelIndex, String titlePrefix) {
         int channelNum = channelIndex + 1;
         String chLabel = "C" + channelNum + " (" + cfg.names.get(channelIndex) + ")";
-        ImagePlus source = duplicateCurrentChannel(context, channelNum);
-        if (source == null) return null;
         String filterContent = resolveFilterContent(binFolder, cfg, channelIndex);
-        if (filterContent != null && !filterContent.trim().isEmpty()) {
+        ImagePlus source = null;
+        boolean cacheHit = false;
+        if (context != null && hasText(filterContent)) {
+            source = context.duplicateFilteredStackForCurrentImage(channelIndex, filterContent);
+            cacheHit = source != null;
+        }
+        if (source == null) {
+            source = duplicateCurrentChannel(context, channelNum);
+            if (source == null) return null;
+        }
+        if (hasText(filterContent) && !cacheHit) {
             FilterExecutor.runThreadSafe(source, filterContent);
+            if (context != null) {
+                context.cacheFilteredStackForCurrentImage(channelIndex, filterContent, source);
+            }
         }
         source.setTitle(titlePrefix + " | " + chLabel + " | "
                 + (context == null ? "" : context.getCurrentImageDisplayName()));
@@ -5965,7 +6094,8 @@ public class CreateBinFileAnalysis implements Analysis {
                 cfg,
                 filterParameterContextImages(images),
                 cfg.names,
-                channelIndex);
+                channelIndex,
+                setupFilteredStackCache);
         FilterParameterStage stage = createFilterParameterStage(images, cfg, binFolder, channelIndex);
         ConfigQcResult result = showEmbeddedConfigQcDialog(
                 context, Collections.<ConfigQcStage>singletonList(stage));
@@ -7551,6 +7681,10 @@ public class CreateBinFileAnalysis implements Analysis {
             return delegate == null || delegate.showPreviewDisplayControls();
         }
 
+        @Override public boolean controlsCanExpand() {
+            return delegate != null && delegate.controlsCanExpand();
+        }
+
         @Override public void onEnter(ConfigQcContext context, flash.pipeline.ui.preview.PreviewPairPanel preview) {
             if (delegate != null) delegate.onEnter(context, preview);
         }
@@ -7604,6 +7738,10 @@ public class CreateBinFileAnalysis implements Analysis {
 
         @Override public boolean showPreviewDisplayControls() {
             return delegate == null || delegate.showPreviewDisplayControls();
+        }
+
+        @Override public boolean controlsCanExpand() {
+            return delegate != null && delegate.controlsCanExpand();
         }
 
         @Override public void onEnter(ConfigQcContext context, flash.pipeline.ui.preview.PreviewPairPanel preview) {

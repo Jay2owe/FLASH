@@ -12,6 +12,7 @@ import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JRadioButton;
+import javax.swing.JSplitPane;
 import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
@@ -54,6 +55,20 @@ public class ConfigQcDialogTest {
     }
 
     @Test
+    public void headerBreadcrumb_usesProvidedStagePathAndHighlightsActiveStage() {
+        RecordingStage stage = new RecordingStage("Set Filter and Parameters");
+        ConfigQcContext context = contextWithTwoImages();
+
+        ConfigQcDialog dialog = ConfigQcDialog.createForTest(context, Arrays.asList(stage),
+                Arrays.asList("Display", "Filter", "Object Segmentation"), 1);
+
+        assertEquals("Set Filter and Parameters", dialog.stageTextForTest());
+        assertEquals("Display > Filter > Object Segmentation", dialog.stagePathTextForTest());
+        assertEquals("Filter", dialog.activeStagePathTextForTest());
+        assertTrue(dialog.activeStagePathHighlightedForTest());
+    }
+
+    @Test
     public void headerText_includesFilename() {
         RecordingStage stage = new RecordingStage("Display range");
         ConfigQcDialog dialog = ConfigQcDialog.createForTest(contextWithTwoImages(), Arrays.asList(stage));
@@ -82,6 +97,35 @@ public class ConfigQcDialogTest {
         ConfigQcDialog dialog = ConfigQcDialog.createForTest(contextWithTwoImages(), Arrays.asList(stage));
 
         assertFalse(dialog.displayControlsButtonForTest().isVisible());
+    }
+
+    @Test
+    public void expandableControlStageUsesResizablePreviewControlsSplit() {
+        RecordingStage stage = new RecordingStage("Filter");
+        stage.controlsCanExpand = true;
+
+        ConfigQcDialog dialog = ConfigQcDialog.createForTest(contextWithTwoImages(), Arrays.asList(stage));
+        JSplitPane split = dialog.previewControlsSplitForTest();
+
+        assertTrue(dialog.controlsExpandableForTest());
+        assertNotNull(split);
+        assertEquals(JSplitPane.VERTICAL_SPLIT, split.getOrientation());
+        assertTrue(split.isOneTouchExpandable());
+        assertEquals(1.0, split.getResizeWeight(), 0.0001);
+        assertTrue("control area preferred height was " + dialog.stageControlsPreferredHeightForTest(),
+                dialog.stageControlsPreferredHeightForTest() >= 220);
+    }
+
+    @Test
+    public void expandableControlStageInitialHeightFollowsLoadedContent() {
+        RecordingStage stage = new RecordingStage("Large controls");
+        stage.controlsCanExpand = true;
+        stage.preferredControlHeight = 640;
+
+        ConfigQcDialog dialog = ConfigQcDialog.createForTest(contextWithTwoImages(), Arrays.asList(stage));
+
+        assertTrue("control area preferred height was " + dialog.stageControlsPreferredHeightForTest(),
+                dialog.stageControlsPreferredHeightForTest() >= 640);
     }
 
     @Test
@@ -223,11 +267,11 @@ public class ConfigQcDialogTest {
     }
 
     @Test
-    public void dialogMinimumSize_is1080x720() {
+    public void dialogMinimumSize_is1180x820() {
         Dimension minimum = ConfigQcDialog.minimumDialogSizeForTest();
 
-        assertEquals(1080, minimum.width);
-        assertEquals(720, minimum.height);
+        assertEquals(1180, minimum.width);
+        assertEquals(820, minimum.height);
     }
 
     @Test
@@ -474,6 +518,8 @@ public class ConfigQcDialogTest {
         private int restartCount;
         private ConfigQcActions actions;
         private boolean previewDisplayControls = true;
+        private boolean controlsCanExpand;
+        private int preferredControlHeight;
 
         RecordingStage(String title) {
             this.title = title;
@@ -487,6 +533,10 @@ public class ConfigQcDialogTest {
             return previewDisplayControls;
         }
 
+        @Override public boolean controlsCanExpand() {
+            return controlsCanExpand;
+        }
+
         @Override public void onEnter(ConfigQcContext context, PreviewPairPanel preview) {
             enterCount++;
         }
@@ -495,6 +545,9 @@ public class ConfigQcDialogTest {
             this.actions = actions;
             JPanel panel = new JPanel();
             panel.add(new JLabel(title));
+            if (preferredControlHeight > 0) {
+                panel.setPreferredSize(new Dimension(240, preferredControlHeight));
+            }
             return panel;
         }
 

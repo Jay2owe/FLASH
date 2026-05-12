@@ -14,9 +14,16 @@ import ij.process.ByteProcessor;
 import org.junit.Test;
 
 import javax.swing.JButton;
+import javax.swing.JComponent;
+import javax.swing.JLabel;
 import javax.swing.JScrollPane;
 import javax.swing.ScrollPaneConstants;
+import javax.swing.SwingConstants;
+import java.awt.Component;
+import java.awt.Container;
 import java.awt.Dimension;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -25,6 +32,7 @@ import java.util.Map;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 public class FilterParameterStageTest {
@@ -151,7 +159,36 @@ public class FilterParameterStageTest {
     }
 
     @Test
-    public void controlsUseBoundedScrollableAccordion() {
+    public void presetDescriptionSitsLeftAlignedUnderFilterDropdown() {
+        RecordingMacroStore store = new RecordingMacroStore("Default", DEFAULT_MACRO);
+        FilterParameterStage.PresetDescriptionProvider descriptions =
+                new FilterParameterStage.PresetDescriptionProvider() {
+                    @Override public String describe(String presetName) {
+                        return "Default filter explanation";
+                    }
+                };
+        FilterParameterStage stage = new FilterParameterStage(
+                Arrays.asList("Default", "Custom"),
+                store,
+                new RecordingPreviewAdapter(),
+                null,
+                descriptions);
+
+        JComponent controls = stage.buildControls(context(), new RecordingActions());
+        JLabel description = findLabel(controls, "Default filter explanation");
+
+        assertNotNull(description);
+        assertEquals(SwingConstants.LEFT, description.getHorizontalAlignment());
+        assertTrue(description.getParent().getLayout() instanceof GridBagLayout);
+        GridBagConstraints constraints = ((GridBagLayout) description.getParent().getLayout())
+                .getConstraints(description);
+        assertEquals(1, constraints.gridx);
+        assertEquals(1, constraints.gridy);
+        assertEquals(GridBagConstraints.HORIZONTAL, constraints.fill);
+    }
+
+    @Test
+    public void controlsUseTallerExpandableScrollableAccordion() {
         RecordingMacroStore store = new RecordingMacroStore("Default", TWO_STEP_MACRO);
         FilterParameterStage stage = new FilterParameterStage(
                 Arrays.asList("Default", "Custom"), store, new RecordingPreviewAdapter(), null, null);
@@ -168,9 +205,26 @@ public class FilterParameterStageTest {
                 scroll.getVerticalScrollBarPolicy());
         assertEquals(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER,
                 scroll.getHorizontalScrollBarPolicy());
+        assertTrue("filter controls should use the dialog's expandable control area",
+                stage.controlsCanExpand());
         Dimension preferred = scroll.getPreferredSize();
-        assertTrue("accordion preferred height should stay compact",
-                preferred.height >= 100 && preferred.height <= 150);
+        assertTrue("accordion preferred height should fit its loaded content",
+                preferred.height >= stage.parameterPanelPreferredHeightForTest());
+    }
+
+    @Test
+    public void accordionPreferredHeightGrowsWithLoadedDefaultContent() {
+        RecordingMacroStore store = new RecordingMacroStore("Default", manyStepMacro(24));
+        FilterParameterStage stage = new FilterParameterStage(
+                Arrays.asList("Default", "Custom"), store, new RecordingPreviewAdapter(), null, null);
+
+        stage.buildControls(context(), new RecordingActions());
+
+        Dimension preferred = stage.parameterScrollPaneForTest().getPreferredSize();
+        assertTrue("accordion preferred height should not be capped at the old 380px limit",
+                preferred.height > 390);
+        assertTrue("accordion preferred height should fit its loaded content",
+                preferred.height >= stage.parameterPanelPreferredHeightForTest());
     }
 
     @Test
@@ -613,6 +667,43 @@ public class FilterParameterStageTest {
                 stage.customBuilderButtonTextForTest().toLowerCase().contains("open in canvas"));
     }
 
+    @Test
+    public void lockInCachesConfirmedFilteredPreview() throws Exception {
+        RecordingMacroStore store = new RecordingMacroStore(
+                "Default",
+                DEFAULT_MACRO);
+        FilterParameterStage stage = new FilterParameterStage(
+                Arrays.asList("Default", "Custom"), store, new RecordingPreviewAdapter(), null, null);
+        ConfigQcContext context = context();
+
+        stage.buildControls(context, new RecordingActions());
+        stage.onEnter(context, new PreviewPairPanel("Original", "Adjusted"));
+        stage.runPreviewNowForTest();
+
+        assertTrue(stage.lockIn(context));
+
+        assertNotNull(context.duplicateCurrentFilteredStack(DEFAULT_MACRO));
+    }
+
+    @Test
+    public void staleFilteredPreviewIsNotCachedOnLockIn() throws Exception {
+        RecordingMacroStore store = new RecordingMacroStore(
+                "Default",
+                DEFAULT_MACRO);
+        FilterParameterStage stage = new FilterParameterStage(
+                Arrays.asList("Default", "Custom"), store, new RecordingPreviewAdapter(), null, null);
+        ConfigQcContext context = context();
+
+        stage.buildControls(context, new RecordingActions());
+        stage.onEnter(context, new PreviewPairPanel("Original", "Adjusted"));
+        stage.runPreviewNowForTest();
+        stage.setParameterForTest("sigma", "4");
+
+        assertTrue(stage.lockIn(context));
+
+        assertNull(context.duplicateCurrentFilteredStack(stage.currentMacroForTest()));
+    }
+
     private static ConfigQcContext context() {
         return ConfigQcContext.fromImages(
                 null,
@@ -629,6 +720,30 @@ public class FilterParameterStageTest {
         processor.set(1, 1, 12);
         stack.addSlice(processor);
         return new ImagePlus(title, stack);
+    }
+
+    private static String manyStepMacro(int count) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < count; i++) {
+            sb.append("run(\"Median...\", \"radius=")
+                    .append(i + 1)
+                    .append(" stack\");\n");
+        }
+        return sb.toString();
+    }
+
+    private static JLabel findLabel(Component component, String text) {
+        if (component instanceof JLabel && text.equals(((JLabel) component).getText())) {
+            return (JLabel) component;
+        }
+        if (component instanceof Container) {
+            Component[] children = ((Container) component).getComponents();
+            for (int i = 0; i < children.length; i++) {
+                JLabel found = findLabel(children[i], text);
+                if (found != null) return found;
+            }
+        }
+        return null;
     }
 
     private static final class RecordingMacroStore implements FilterParameterStage.MacroStore {

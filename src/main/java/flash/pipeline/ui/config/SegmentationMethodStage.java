@@ -1,5 +1,9 @@
 package flash.pipeline.ui.config;
 
+import flash.pipeline.ui.preview.PreviewPairPanel;
+import ij.ImagePlus;
+import ij.plugin.Duplicator;
+
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
@@ -35,6 +39,7 @@ public final class SegmentationMethodStage implements ConfigQcStage {
     private final MethodStore methodStore;
     private ConfigQcActions actions;
     private MethodChoicePanel choicePanel;
+    private ImagePlus previewSource;
 
     public SegmentationMethodStage(MethodStore methodStore) {
         if (methodStore == null) {
@@ -46,6 +51,11 @@ public final class SegmentationMethodStage implements ConfigQcStage {
     @Override
     public String title() {
         return "Segmentation Method";
+    }
+
+    @Override
+    public boolean controlsCanExpand() {
+        return true;
     }
 
     @Override
@@ -73,6 +83,19 @@ public final class SegmentationMethodStage implements ConfigQcStage {
     }
 
     @Override
+    public void onEnter(ConfigQcContext context, PreviewPairPanel preview) {
+        closePreviewSource();
+        previewSource = duplicateSelectedChannel(context);
+        if (preview == null || previewSource == null) {
+            return;
+        }
+        preview.setOriginal(previewSource);
+        preview.setAdjusted(null);
+        preview.setAdjustedState(PreviewPairPanel.PreviewState.EMPTY,
+                "Choose a segmentation method.");
+    }
+
+    @Override
     public boolean lockIn(ConfigQcContext context) {
         String choice = choicePanel == null ? methodStore.getChoice() : choicePanel.selectedChoice();
         if (!methodStore.selectChoice(choice)) {
@@ -84,6 +107,11 @@ public final class SegmentationMethodStage implements ConfigQcStage {
         }
         setStatus("Segmentation method: " + choice + ".");
         return true;
+    }
+
+    @Override
+    public void onLeave(ConfigQcContext context) {
+        closePreviewSource();
     }
 
     public static JComponent buildChangeMethodPanel(final MethodStore methodStore,
@@ -129,6 +157,61 @@ public final class SegmentationMethodStage implements ConfigQcStage {
     private void setStatus(String text) {
         if (actions != null) {
             actions.setStatus(text);
+        }
+    }
+
+    private ImagePlus duplicateSelectedChannel(ConfigQcContext context) {
+        ImagePlus source = context == null ? null : context.getCurrentImagePlus();
+        if (source == null) return null;
+
+        int channel = Math.max(1, context.getChannelNumber());
+        try {
+            int channels = Math.max(1, source.getNChannels());
+            int slices = Math.max(1, source.getNSlices());
+            int frames = Math.max(1, source.getNFrames());
+            int selected = Math.min(channel, channels);
+            ImagePlus duplicate = new Duplicator().run(
+                    source,
+                    selected,
+                    selected,
+                    1,
+                    slices,
+                    1,
+                    frames);
+            if (duplicate != null) {
+                duplicate.setTitle(previewTitle(context, selected));
+                return duplicate;
+            }
+        } catch (RuntimeException e) {
+            // Fall through to a normal duplicate so the UI still has a preview.
+        }
+
+        try {
+            ImagePlus duplicate = source.duplicate();
+            if (duplicate != null) {
+                int selected = Math.min(channel, Math.max(1, duplicate.getNChannels()));
+                duplicate.setPosition(selected, 1, 1);
+                duplicate.setTitle(previewTitle(context, selected));
+                return duplicate;
+            }
+        } catch (RuntimeException e) {
+            return null;
+        }
+        return null;
+    }
+
+    private String previewTitle(ConfigQcContext context, int channel) {
+        String imageName = context == null ? "" : context.getCurrentImageDisplayName();
+        if (imageName == null || imageName.trim().isEmpty()) {
+            imageName = "Selected image";
+        }
+        return "Segmentation source C" + channel + " - " + imageName;
+    }
+
+    private void closePreviewSource() {
+        if (previewSource != null) {
+            previewSource.flush();
+            previewSource = null;
         }
     }
 
