@@ -35,7 +35,11 @@ public final class IntensitySpatialRunner {
                 new NullModelAnalysis(),
                 new GranularityAnalysis(),
                 new DepthProfileAnalysis(),
-                new Anisotropy2DAnalysis()));
+                new Anisotropy2DAnalysis(),
+                new PeriodicityAnalysis(),
+                new GlcmTextureAnalysis(),
+                new TextureClassAnalysis(),
+                new ScaleDivergenceAnalysis()));
     }
 
     public IntensitySpatialResult measure(IntensitySpatialContext context) {
