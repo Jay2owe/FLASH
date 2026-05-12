@@ -294,7 +294,7 @@ final class SummaryHistoryStore {
             int roiCol = findColumn(header, "ROI");
             int intDenCol = findColumn(header, "IntDen");
             int areaCol = findColumn(header, "%Area");
-            int rawIntDenCol = findColumn(header, "RawIntDen");
+            int intDenUnfilteredCol = findColumn(header, "IntDen_Unfiltered", "RawIntDen");
             String metricPrefix = stripExtension(csvFile.getName());
 
             LinkedHashMap<String, IntensityMetricAccumulator> byImage =
@@ -318,7 +318,7 @@ final class SummaryHistoryStore {
 
                 acc.addIntDen(numberAt(row, intDenCol));
                 acc.addArea(numberAt(row, areaCol));
-                acc.addRawIntDen(numberAt(row, rawIntDenCol));
+                acc.addIntDenUnfiltered(numberAt(row, intDenUnfilteredCol));
             }
 
             for (IntensityMetricAccumulator acc : byImage.values()) {
@@ -328,8 +328,9 @@ final class SummaryHistoryStore {
                 if (acc.areaCount > 0) {
                     acc.metrics.put(metricPrefix + " mean area %", acc.areaSum / acc.areaCount);
                 }
-                if (acc.rawIntDenCount > 0) {
-                    acc.metrics.put(metricPrefix + " mean raw intensity", acc.rawIntDenSum / acc.rawIntDenCount);
+                if (acc.intDenUnfilteredCount > 0) {
+                    acc.metrics.put(metricPrefix + " mean unfiltered intensity",
+                            acc.intDenUnfilteredSum / acc.intDenUnfilteredCount);
                 }
                 mergeImageMetrics(imageMetadata, duplicateKeys, identityToSnapshotKey, acc);
             }
@@ -1004,8 +1005,8 @@ final class SummaryHistoryStore {
         int intDenCount = 0;
         double areaSum = 0.0;
         int areaCount = 0;
-        double rawIntDenSum = 0.0;
-        int rawIntDenCount = 0;
+        double intDenUnfilteredSum = 0.0;
+        int intDenUnfilteredCount = 0;
 
         IntensityMetricAccumulator(String animalId, String hemisphere,
                                    String region, int sectionIndex, String roiLabel) {
@@ -1026,10 +1027,10 @@ final class SummaryHistoryStore {
             }
         }
 
-        void addRawIntDen(double value) {
+        void addIntDenUnfiltered(double value) {
             if (!Double.isNaN(value)) {
-                rawIntDenSum += value;
-                rawIntDenCount++;
+                intDenUnfilteredSum += value;
+                intDenUnfilteredCount++;
             }
         }
     }

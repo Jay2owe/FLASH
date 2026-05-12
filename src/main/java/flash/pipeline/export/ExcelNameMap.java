@@ -149,12 +149,18 @@ public final class ExcelNameMap {
         addRule("<ab>_ROI_IntDenMean",
                 "<ab> ROI IntDen (A.U.)",
                 "The total integrated density of <ab> signal within the ROI was quantified and then adjusted by the volume of the ROI.");
-        addRule("<ab>_ROI_RawIntDenMean",
-                "<ab> ROI Raw IntDen (A.U.)",
+        addRule("<ab>_ROI_IntDen_binarizedMean",
+                "<ab> ROI Binarized IntDen (A.U.)",
+                "The total integrated density of thresholded <ab>-positive signal within the ROI was quantified and then averaged per section.");
+        addRule("<ab>_ROI_IntDen_UnfilteredMean",
+                "<ab> ROI Unfiltered IntDen (A.U.)",
                 "The total integrated density of unfiltered <ab> signal within the ROI was quantified and then averaged per section.");
         addRule("<ab>_ROI_%AreaMean",
                 "<ab> %Area",
                 "The percentage of ROI area occupied by thresholded <ab>-positive signal.");
+        addRule("<ab>_ROI_%Area_binarizedMean",
+                "<ab> Binarized %Area",
+                "The percentage of ROI area occupied by thresholded <ab>-positive signal was quantified from the binarized mask.");
         addRule("<ab>_DistToVentricle",
                 "<ab> Mean Ventricle Distance",
                 OBJ_COUNTER + "Using euclidean distance calculations and the centre of mass of <ab> objects, the distance to the ventricular boundary was calculated.\n"

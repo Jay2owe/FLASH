@@ -1736,6 +1736,7 @@ public class MasterAggregationAnalysis implements Analysis {
         Set<String> allAnimals = new LinkedHashSet<String>();
         LinkedHashMap<String, Map<String, LinkedHashMap<String, Double>>> channelData =
                 new LinkedHashMap<String, Map<String, LinkedHashMap<String, Double>>>();
+        boolean loggedLegacyRawIntDen = false;
 
         for (File csvFile : csvFiles) {
             String safeName = csvFile.getName();
@@ -1817,18 +1818,43 @@ public class MasterAggregationAnalysis implements Analysis {
                 List<String[]> animalRows = entry.getValue();
                 int count = animalRows.size();
 
-                double intDenSum = 0, areaSum = 0, rawIntDenSum = 0;
-                int intDenN = 0, areaN = 0, rawIntDenN = 0;
+                double intDenSum = 0, intDenBinarizedSum = 0, areaSum = 0,
+                        areaBinarizedSum = 0, intDenUnfilteredSum = 0;
+                int intDenN = 0, intDenBinarizedN = 0, areaN = 0,
+                        areaBinarizedN = 0, intDenUnfilteredN = 0;
 
-                boolean hasRawIntDen = colIdx.containsKey("RawIntDen");
+                int intDenCol = columnIndex(colIdx, "IntDen", null);
+                int intDenBinarizedCol = columnIndex(colIdx, "IntDen_binarized", null);
+                int areaCol = columnIndex(colIdx, "%Area", null);
+                int areaBinarizedCol = columnIndex(colIdx, "%Area_binarized", null);
+                int intDenUnfilteredCol = columnIndex(colIdx, "IntDen_Unfiltered", "RawIntDen");
+
+                boolean usesLegacyRawIntDen = !colIdx.containsKey("IntDen_Unfiltered")
+                        && colIdx.containsKey("RawIntDen");
+                if (usesLegacyRawIntDen && !loggedLegacyRawIntDen) {
+                    IJ.log("  Legacy intensity column RawIntDen detected; aggregating as IntDen_Unfiltered.");
+                    loggedLegacyRawIntDen = true;
+                }
+
                 for (String[] row : animalRows) {
-                    double intDen = parseDouble(safeGet(row, colIdx.get("IntDen")));
-                    double area = parseDouble(safeGet(row, colIdx.get("%Area")));
+                    double intDen = parseDouble(safeGet(row, intDenCol));
+                    double intDenBinarized = parseDouble(safeGet(row, intDenBinarizedCol));
+                    double area = parseDouble(safeGet(row, areaCol));
+                    double areaBinarized = parseDouble(safeGet(row, areaBinarizedCol));
+                    double intDenUnfiltered = parseDouble(safeGet(row, intDenUnfilteredCol));
                     if (!Double.isNaN(intDen)) { intDenSum += intDen; intDenN++; }
+                    if (!Double.isNaN(intDenBinarized)) {
+                        intDenBinarizedSum += intDenBinarized;
+                        intDenBinarizedN++;
+                    }
                     if (!Double.isNaN(area))   { areaSum   += area;   areaN++;   }
-                    if (hasRawIntDen) {
-                        double rawIntDen = parseDouble(safeGet(row, colIdx.get("RawIntDen")));
-                        if (!Double.isNaN(rawIntDen)) { rawIntDenSum += rawIntDen; rawIntDenN++; }
+                    if (!Double.isNaN(areaBinarized)) {
+                        areaBinarizedSum += areaBinarized;
+                        areaBinarizedN++;
+                    }
+                    if (!Double.isNaN(intDenUnfiltered)) {
+                        intDenUnfilteredSum += intDenUnfiltered;
+                        intDenUnfilteredN++;
                     }
                 }
 
@@ -1836,11 +1862,19 @@ public class MasterAggregationAnalysis implements Analysis {
                 LinkedHashMap<String, Double> metrics = new LinkedHashMap<String, Double>();
                 metrics.put(prefix + "ROI_IntDenMean",
                         intDenN > 0 ? intDenSum / intDenN : Double.NaN);
+                if (intDenBinarizedCol >= 0) {
+                    metrics.put(prefix + "ROI_IntDen_binarizedMean",
+                            intDenBinarizedN > 0 ? intDenBinarizedSum / intDenBinarizedN : Double.NaN);
+                }
                 metrics.put(prefix + "ROI_%AreaMean",
                         areaN > 0 ? areaSum / areaN : Double.NaN);
-                if (hasRawIntDen) {
-                    metrics.put(prefix + "ROI_RawIntDenMean",
-                            rawIntDenN > 0 ? rawIntDenSum / rawIntDenN : Double.NaN);
+                if (areaBinarizedCol >= 0) {
+                    metrics.put(prefix + "ROI_%Area_binarizedMean",
+                            areaBinarizedN > 0 ? areaBinarizedSum / areaBinarizedN : Double.NaN);
+                }
+                if (intDenUnfilteredCol >= 0) {
+                    metrics.put(prefix + "ROI_IntDen_UnfilteredMean",
+                            intDenUnfilteredN > 0 ? intDenUnfilteredSum / intDenUnfilteredN : Double.NaN);
                 }
 
                 int numSections = numSectionsPerAnimal.containsKey(parentAnimal)
@@ -1924,6 +1958,14 @@ public class MasterAggregationAnalysis implements Analysis {
     private static String safeGet(String[] arr, Integer idx) {
         if (idx == null || idx < 0 || idx >= arr.length) return "";
         return arr[idx];
+    }
+
+    private static int columnIndex(Map<String, Integer> colIdx, String preferred, String legacy) {
+        Integer preferredIdx = colIdx.get(preferred);
+        if (preferredIdx != null) return preferredIdx;
+        if (legacy == null) return -1;
+        Integer legacyIdx = colIdx.get(legacy);
+        return legacyIdx == null ? -1 : legacyIdx;
     }
 
     /**

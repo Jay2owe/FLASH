@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class PostRunSummaryTest {
@@ -86,6 +87,54 @@ public class PostRunSummaryTest {
                 foundMetrics = true;
                 assertEquals(2.0, ((Number) metrics.get("DAPI object count")).doubleValue(), 0.0);
                 assertEquals(55.0, ((Number) metrics.get("DAPI object mean intensity")).doubleValue(), 0.0);
+            }
+        }
+        assertTrue(foundMetrics);
+    }
+
+    @Test
+    public void writeIfPossible_readsIntensityUnfilteredMetricsWithLegacyFallback() throws Exception {
+        File root = temp.newFolder("post-run-intensity-metrics");
+        File binDir = new File(root, ".bin");
+        FlashProjectLayout layout = FlashProjectLayout.forDirectory(root.getAbsolutePath());
+        File intensitiesDir = layout.intensityDataWriteDir();
+        File aggregationDir = layout.aggregationWriteDir();
+        assertTrue(binDir.mkdirs());
+        assertTrue(intensitiesDir.mkdirs());
+        assertTrue(aggregationDir.mkdirs());
+
+        writeBin(root, "default");
+        Files.write(new File(aggregationDir, FlashProjectLayout.MASTER_INTENSITIES_FILENAME).toPath(),
+                ("AnimalName,DAPI_ROI_IntDen_UnfilteredMean\n"
+                        + "Mouse1,70\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(new File(intensitiesDir, "GFAP.csv").toPath(),
+                ("Animal Name,ROI,Region,SCN,Hemisphere,IntDen,%Area,IntDen_Unfiltered,RawIntDen\n"
+                        + "Mouse1,SCN1,SCN,1,LH,10,5,44,999\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(new File(intensitiesDir, "DAPI.csv").toPath(),
+                ("Animal Name,ROI,Region,SCN,Hemisphere,IntDen,%Area,RawIntDen\n"
+                        + "Mouse1,SCN1,SCN,1,LH,20,6,70\n").getBytes(StandardCharsets.UTF_8));
+
+        PostRunSummary.writeIfPossible(root.getAbsolutePath());
+
+        SummaryHistoryStore.Snapshot snapshot = SummaryHistoryStore.load(root.getAbsolutePath());
+        assertTrue(snapshot != null);
+
+        boolean foundMetrics = false;
+        for (Map<String, Object> image : snapshot.imageMetadata.values()) {
+            Object metricsObj = image.get("metrics");
+            if (!(metricsObj instanceof Map)) continue;
+            @SuppressWarnings("unchecked")
+            Map<String, Object> metrics = (Map<String, Object>) metricsObj;
+            for (String key : metrics.keySet()) {
+                assertFalse(key.contains("mean raw intensity"));
+            }
+            if (metrics.containsKey("GFAP mean unfiltered intensity")
+                    && metrics.containsKey("DAPI mean unfiltered intensity")) {
+                foundMetrics = true;
+                assertEquals(44.0,
+                        ((Number) metrics.get("GFAP mean unfiltered intensity")).doubleValue(), 0.0);
+                assertEquals(70.0,
+                        ((Number) metrics.get("DAPI mean unfiltered intensity")).doubleValue(), 0.0);
             }
         }
         assertTrue(foundMetrics);

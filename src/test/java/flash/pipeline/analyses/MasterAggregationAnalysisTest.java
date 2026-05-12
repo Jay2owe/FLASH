@@ -301,6 +301,123 @@ public class MasterAggregationAnalysisTest {
         assertFalse(new File(root, "ImageJ Exports/3D Objects.csv").exists());
     }
 
+    @Test
+    public void execute_readsLegacyRawIntDenAsIntDenUnfiltered() throws Exception {
+        File root = temp.newFolder("master-agg-legacy-intensity");
+        File intensities = FlashProjectLayout.forDirectory(root.getAbsolutePath()).intensityDataWriteDir();
+        assertTrue(intensities.mkdirs());
+
+        writeCsv(new File(intensities, "GFAP.csv"),
+                "Animal Name,ROI,Region,SCN,Hemisphere,IntDen,%Area,RawIntDen",
+                "Mouse1,SCN1,SCN,1,LH,10,3,100\n"
+                        + "Mouse1,SCN2,SCN,2,LH,20,5,200");
+
+        Map<String, String> row = aggregateIntensityRow(root);
+        String header = Files.readAllLines(
+                aggregationFile(root, "Image Intensities.csv").toPath(),
+                StandardCharsets.UTF_8).get(0);
+
+        assertEquals("15", row.get("GFAP_ROI_IntDenMean"));
+        assertEquals("4", row.get("GFAP_ROI_%AreaMean"));
+        assertEquals("150", row.get("GFAP_ROI_IntDen_UnfilteredMean"));
+        assertFalse(header.contains("GFAP_ROI_RawIntDenMean"));
+    }
+
+    @Test
+    public void execute_mixesLegacyAndNewIntensitySchemas() throws Exception {
+        File root = temp.newFolder("master-agg-mixed-intensity");
+        File intensities = FlashProjectLayout.forDirectory(root.getAbsolutePath()).intensityDataWriteDir();
+        assertTrue(intensities.mkdirs());
+
+        writeCsv(new File(intensities, "GFAP.csv"),
+                "Animal Name,ROI,Region,SCN,Hemisphere,IntDen,%Area,RawIntDen",
+                "Mouse1,SCN1,SCN,1,LH,40,7,80");
+        writeCsv(new File(intensities, "DAPI.csv"),
+                "Animal Name,ROI,Region,SCN,Hemisphere,IntDen,%Area,IntDen_Unfiltered",
+                "Mouse1,SCN1,SCN,1,LH,25,2,30");
+
+        Map<String, String> row = aggregateIntensityRow(root);
+        String header = Files.readAllLines(
+                aggregationFile(root, "Image Intensities.csv").toPath(),
+                StandardCharsets.UTF_8).get(0);
+
+        assertEquals("80", row.get("GFAP_ROI_IntDen_UnfilteredMean"));
+        assertEquals("30", row.get("DAPI_ROI_IntDen_UnfilteredMean"));
+        assertFalse(header.contains("ROI_RawIntDenMean"));
+    }
+
+    @Test
+    public void execute_prefersIntDenUnfilteredWhenLegacyColumnAlsoExists() throws Exception {
+        File root = temp.newFolder("master-agg-prefer-new-intensity");
+        File intensities = FlashProjectLayout.forDirectory(root.getAbsolutePath()).intensityDataWriteDir();
+        assertTrue(intensities.mkdirs());
+
+        writeCsv(new File(intensities, "GFAP.csv"),
+                "Animal Name,ROI,Region,SCN,Hemisphere,IntDen,%Area,IntDen_Unfiltered,RawIntDen",
+                "Mouse1,SCN1,SCN,1,LH,40,7,123,999");
+
+        Map<String, String> row = aggregateIntensityRow(root);
+
+        assertEquals("123", row.get("GFAP_ROI_IntDen_UnfilteredMean"));
+    }
+
+    @Test
+    public void execute_aggregatesNewBasicIntensitySchema() throws Exception {
+        File root = temp.newFolder("master-agg-new-basic-intensity");
+        File intensities = FlashProjectLayout.forDirectory(root.getAbsolutePath()).intensityDataWriteDir();
+        assertTrue(intensities.mkdirs());
+
+        writeCsv(new File(intensities, "Iba1.csv"),
+                "Animal Name,ROI,Region,SCN,Hemisphere,IntDen,%Area,IntDen_Unfiltered",
+                "Mouse1,SCN1,SCN,1,LH,12,20,100\n"
+                        + "Mouse1,SCN2,SCN,2,LH,18,30,140");
+
+        Map<String, String> row = aggregateIntensityRow(root);
+
+        assertEquals("15", row.get("Iba1_ROI_IntDenMean"));
+        assertEquals("25", row.get("Iba1_ROI_%AreaMean"));
+        assertEquals("120", row.get("Iba1_ROI_IntDen_UnfilteredMean"));
+    }
+
+    @Test
+    public void execute_aggregatesNewBinarizedIntensityColumns() throws Exception {
+        File root = temp.newFolder("master-agg-binarized-intensity");
+        File intensities = FlashProjectLayout.forDirectory(root.getAbsolutePath()).intensityDataWriteDir();
+        assertTrue(intensities.mkdirs());
+
+        writeCsv(new File(intensities, "GFAP.csv"),
+                "Animal Name,ROI,Region,SCN,Hemisphere,IntDen,IntDen_binarized,%Area,%Area_binarized,IntDen_Unfiltered",
+                "Mouse1,SCN1,SCN,1,LH,10,6,30,12,100\n"
+                        + "Mouse1,SCN2,SCN,2,LH,20,8,50,14,200");
+
+        Map<String, String> row = aggregateIntensityRow(root);
+
+        assertEquals("15", row.get("GFAP_ROI_IntDenMean"));
+        assertEquals("7", row.get("GFAP_ROI_IntDen_binarizedMean"));
+        assertEquals("40", row.get("GFAP_ROI_%AreaMean"));
+        assertEquals("13", row.get("GFAP_ROI_%Area_binarizedMean"));
+        assertEquals("150", row.get("GFAP_ROI_IntDen_UnfilteredMean"));
+    }
+
+    @Test
+    public void execute_preservesChannelRoiMaskBasicAggregation() throws Exception {
+        File root = temp.newFolder("master-agg-channel-roi-mask-intensity");
+        File intensities = FlashProjectLayout.forDirectory(root.getAbsolutePath()).intensityDataWriteDir();
+        assertTrue(intensities.mkdirs());
+
+        writeCsv(new File(intensities, "GFAP in DAPI ROI.csv"),
+                "Animal Name,ROI,Region,SCN,Hemisphere,IntDen,IntDen_binarized,%Area,%Area_binarized,RawIntDen",
+                "Mouse1,SCN1,SCN,1,LH,30,12,9,4,88");
+
+        Map<String, String> row = aggregateIntensityRow(root);
+
+        assertEquals("30", row.get("GFAP in DAPI ROI_ROI_IntDenMean"));
+        assertEquals("12", row.get("GFAP in DAPI ROI_ROI_IntDen_binarizedMean"));
+        assertEquals("9", row.get("GFAP in DAPI ROI_ROI_%AreaMean"));
+        assertEquals("4", row.get("GFAP in DAPI ROI_ROI_%Area_binarizedMean"));
+        assertEquals("88", row.get("GFAP in DAPI ROI_ROI_IntDen_UnfilteredMean"));
+    }
+
     private void writeCsv(File file, String header, String rows) throws Exception {
         PrintWriter pw = new PrintWriter(file, "UTF-8");
         try {
@@ -335,6 +452,18 @@ public class MasterAggregationAnalysisTest {
         } finally {
             pw.close();
         }
+    }
+
+    private Map<String, String> aggregateIntensityRow(File root) throws Exception {
+        MasterAggregationAnalysis analysis = new MasterAggregationAnalysis();
+        analysis.setSuppressDialogs(true);
+        analysis.execute(root.getAbsolutePath());
+
+        List<String> lines = Files.readAllLines(
+                aggregationFile(root, "Image Intensities.csv").toPath(),
+                StandardCharsets.UTF_8);
+        assertEquals(2, lines.size());
+        return csvRow(lines.get(0), lines.get(1));
     }
 
     private Map<String, String> csvRow(String header, String row) {
