@@ -33,7 +33,9 @@ public final class IntensitySpatialRunner {
                 new PatchinessAnalysis(),
                 new HotspotScanAnalysis(),
                 new NullModelAnalysis(),
-                new GranularityAnalysis()));
+                new GranularityAnalysis(),
+                new DepthProfileAnalysis(),
+                new Anisotropy2DAnalysis()));
     }
 
     public IntensitySpatialResult measure(IntensitySpatialContext context) {
