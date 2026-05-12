@@ -44,6 +44,7 @@ public final class ThresholdControlPanel extends JPanel {
     private final JComboBox<String> methodCombo = new JComboBox<String>(METHODS);
     private final JComboBox<String> backgroundCombo = new JComboBox<String>(BACKGROUNDS);
     private final JComboBox<String> previewCombo = new JComboBox<String>(PREVIEWS);
+    private final JLabel previewLabel = new JLabel("Preview:");
     private final JButton autoButton = new JButton("Auto");
     private final JButton resetButton = new JButton("Reset");
     private final JButton setButton = new JButton("Set");
@@ -135,6 +136,23 @@ public final class ThresholdControlPanel extends JPanel {
         setComboSelection(previewCombo, previewMode);
     }
 
+    public void setPreviewSelectorVisible(boolean visible) {
+        previewLabel.setVisible(visible);
+        previewCombo.setVisible(visible);
+        revalidate();
+        repaint();
+    }
+
+    public boolean isPreviewSelectorVisible() {
+        return previewCombo.isVisible();
+    }
+
+    public void setSetButtonVisible(boolean visible) {
+        setButton.setVisible(visible);
+        revalidate();
+        repaint();
+    }
+
     HistogramPanel histogramPanelForTest() {
         return histogramPanel;
     }
@@ -184,7 +202,7 @@ public final class ThresholdControlPanel extends JPanel {
 
         gbc.gridy = 1;
         gbc.gridx = 0;
-        selectors.add(new JLabel("Preview:"), gbc);
+        selectors.add(previewLabel, gbc);
         gbc.gridx = 1;
         gbc.gridwidth = 3;
         gbc.fill = GridBagConstraints.HORIZONTAL;
