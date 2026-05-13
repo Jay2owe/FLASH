@@ -5,7 +5,6 @@ import flash.pipeline.analyses.wizard.IntensitySpatialConfig;
 import flash.pipeline.runtime.DependencyId;
 import ij.ImagePlus;
 import ij.gui.Roi;
-import ij.measure.Calibration;
 import ij.process.ImageProcessor;
 
 import java.awt.Rectangle;
@@ -105,9 +104,8 @@ public final class PeriodicityAnalysis implements IntensitySpatialAnalysis {
     }
 
     private static double pixelSize(ImagePlus image, boolean xAxis) {
-        Calibration cal = image == null ? null : image.getCalibration();
-        double value = cal == null ? 1.0 : (xAxis ? cal.pixelWidth : cal.pixelHeight);
-        return value > 0.0 && !Double.isNaN(value) && !Double.isInfinite(value) ? value : 1.0;
+        return CalibrationUtil.pixelSizeUm(image,
+                xAxis ? CalibrationUtil.Axis.X : CalibrationUtil.Axis.Y);
     }
 
     private static Rectangle clippedBounds(ImagePlus image, Roi roi) {
