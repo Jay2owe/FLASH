@@ -5,6 +5,8 @@ import flash.pipeline.image.FilterMacroParser.Op;
 import flash.pipeline.image.FilterMacroParser.OpType;
 import flash.pipeline.image.dag.DagIR;
 import ij.IJ;
+import ij.ImagePlus;
+import ij.WindowManager;
 
 import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
@@ -20,6 +22,7 @@ import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Dimension;
+import java.awt.Dialog;
 import java.awt.Font;
 import java.awt.GraphicsEnvironment;
 import java.awt.GridLayout;
@@ -73,6 +76,10 @@ public final class CustomFilterEntryDialog {
 
         public static Result sandbox(DagIR dag, String ijmFallback) {
             return new Result(Choice.SANDBOX, null, null, dag, ijmFallback);
+        }
+
+        public static Result imported(String macroContent, String demotedPreset) {
+            return new Result(Choice.IMPORT, macroContent, demotedPreset, null, null);
         }
     }
 
@@ -143,9 +150,10 @@ public final class CustomFilterEntryDialog {
             PresetMatcher.Match match = PresetMatcher.match(macro);
             boolean confirmed = showImportConfirmation(owner, channelLabel, selected, macro, summary, match, previewHandler);
             if (!confirmed) return Result.cancel();
-            return new Result(Choice.IMPORT, macro, match == null ? null : match.presetName, null, null);
+            return Result.imported(macro, match == null ? null : match.presetName);
         } catch (IOException e) {
-            IJ.showMessage("Import Filter Macro", "Could not read the selected macro as UTF-8:\n" + e.getMessage());
+            showOwnedMessage(owner, "Import Filter Macro",
+                    "Could not read the selected macro as UTF-8:\n" + e.getMessage());
             return Result.cancel();
         }
     }
@@ -309,8 +317,9 @@ public final class CustomFilterEntryDialog {
             preview.addActionListener(e -> {
                 try {
                     previewHandler.preview(macro);
+                    allowImageJWindowsThroughModalBlock();
                 } catch (Exception ex) {
-                    IJ.showMessage("Import Filter Macro",
+                    showOwnedMessage(dialog.getWindow(), "Import Filter Macro",
                             "Preview failed for " + safe(channelLabel) + ":\n" + ex.getMessage());
                 }
             });
@@ -332,6 +341,35 @@ public final class CustomFilterEntryDialog {
 
     private static String safe(String value) {
         return value == null ? "" : value;
+    }
+
+    private static void showOwnedMessage(Window owner, String title, String message) {
+        if (GraphicsEnvironment.isHeadless()) {
+            IJ.log(title + ": " + message);
+            return;
+        }
+        JOptionPane.showMessageDialog(owner, message, title, JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    private static void allowImageJWindowsThroughModalBlock() {
+        allowWindowThroughModalBlock(IJ.getInstance());
+        int[] ids = WindowManager.getIDList();
+        if (ids == null) return;
+        for (int id : ids) {
+            ImagePlus image = WindowManager.getImage(id);
+            if (image != null) {
+                allowWindowThroughModalBlock(image.getWindow());
+            }
+        }
+    }
+
+    private static void allowWindowThroughModalBlock(Window window) {
+        if (window == null) return;
+        try {
+            window.setModalExclusionType(Dialog.ModalExclusionType.APPLICATION_EXCLUDE);
+        } catch (RuntimeException ignored) {
+            // Best effort: import preview remains usable where modal exclusion is supported.
+        }
     }
 
     private static final class ParseSummary {

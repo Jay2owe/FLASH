@@ -6,6 +6,7 @@ import flash.pipeline.image.NamedFilterLoader;
 import flash.pipeline.io.SeriesMeta;
 import flash.pipeline.runtime.DependencyService;
 import flash.pipeline.runtime.FeatureDependencyGate;
+import flash.pipeline.ui.CustomFilterEntryDialog;
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.ToggleSwitch;
 import flash.pipeline.ui.config.ChannelThresholdStage;
@@ -276,6 +277,29 @@ public class CreateBinFileAnalysisTest {
         assertTrue(new File(project,
                 "FLASH/.settings/Presets/Custom Filter Presets/IBA1 cleanup filter.ijm").isFile());
         assertFalse(new File(binFolder, "Custom Filter Presets/IBA1 cleanup filter.ijm").exists());
+    }
+
+    @Test
+    public void importedCustomFilterWritesMacroAndDemotedPreset() throws Exception {
+        File project = temp.newFolder("project-import-custom-filter");
+        File binFolder = configurationDir(project);
+        assertTrue(binFolder.mkdirs());
+        CreateBinFileAnalysis analysis = new CreateBinFileAnalysis();
+        CreateBinFileAnalysis.BinUserConfig cfg = oneChannelConfig("Custom");
+        String macro = "run(\"Gaussian Blur...\", \"sigma=2 stack\");\n";
+
+        boolean applied = invokeApplyCustomFilterEntryResult(
+                analysis,
+                binFolder,
+                cfg,
+                0,
+                CustomFilterEntryDialog.Result.imported(macro, "Default"),
+                false);
+
+        assertTrue(applied);
+        assertEquals("Default", cfg.filterPresets.get(0));
+        assertEquals(macro, new String(Files.readAllBytes(
+                new File(binFolder, "C1_Filters.ijm").toPath()), StandardCharsets.UTF_8));
     }
 
     @Test
@@ -998,6 +1022,30 @@ public class CreateBinFileAnalysisTest {
                 "saveCustomFilterPreset", File.class, String.class, String.class);
         method.setAccessible(true);
         method.invoke(analysis, binFolder, presetName, macroContent);
+    }
+
+    private static boolean invokeApplyCustomFilterEntryResult(
+            CreateBinFileAnalysis analysis,
+            File binFolder,
+            CreateBinFileAnalysis.BinUserConfig cfg,
+            int channelIndex,
+            CustomFilterEntryDialog.Result result,
+            boolean writeConfigOnDemote) throws Exception {
+        Method method = CreateBinFileAnalysis.class.getDeclaredMethod(
+                "applyCustomFilterEntryResult",
+                File.class,
+                CreateBinFileAnalysis.BinUserConfig.class,
+                int.class,
+                CustomFilterEntryDialog.Result.class,
+                boolean.class);
+        method.setAccessible(true);
+        return ((Boolean) method.invoke(
+                analysis,
+                binFolder,
+                cfg,
+                Integer.valueOf(channelIndex),
+                result,
+                Boolean.valueOf(writeConfigOnDemote))).booleanValue();
     }
 
     private static Double invokeReadThresholdFromImage(CreateBinFileAnalysis analysis,

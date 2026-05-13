@@ -103,6 +103,7 @@ import java.awt.Color;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
+import java.awt.Dialog;
 import java.awt.Font;
 import java.awt.GraphicsEnvironment;
 import java.awt.GridBagConstraints;
@@ -2551,27 +2552,42 @@ public class CreateBinFileAnalysis implements Analysis {
     }
 
     private String promptForCustomFilterPresetName(String channelLabel, String defaultName) {
+        return promptForCustomFilterPresetName(null, channelLabel, defaultName);
+    }
+
+    private String promptForCustomFilterPresetName(Window owner, String channelLabel, String defaultName) {
         String value = sanitizeCustomFilterPresetName(defaultName);
         while (true) {
-            PipelineDialog dialog = new PipelineDialog("Save Custom Filter Preset");
+            PipelineDialog dialog = owner == null
+                    ? new PipelineDialog("Save Custom Filter Preset")
+                    : new PipelineDialog(owner, "Save Custom Filter Preset");
             dialog.addHeader("Save Filter Preset");
             dialog.addMessage("Name this custom filter so it appears in the Filter Preset list on later runs.");
             dialog.addStringField("Preset name", value, 28);
             if (!dialog.showDialog()) return null;
             String entered = sanitizeCustomFilterPresetName(dialog.getNextString());
             if (entered.length() == 0) {
-                IJ.showMessage("Save Custom Filter Preset", "Enter a preset name.");
+                showOwnedMessage(owner, "Save Custom Filter Preset", "Enter a preset name.");
                 value = channelLabel == null ? "Custom Filter" : channelLabel + " Filter";
                 continue;
             }
             if (isReservedFilterPresetName(entered)) {
-                IJ.showMessage("Save Custom Filter Preset",
+                showOwnedMessage(owner, "Save Custom Filter Preset",
                         "That name is already used by a built-in filter. Choose a different name.");
                 value = entered;
                 continue;
             }
             return entered;
         }
+    }
+
+    private static void showOwnedMessage(Window owner, String title, String message) {
+        if (GraphicsEnvironment.isHeadless()) {
+            IJ.log(title + ": " + message);
+            return;
+        }
+        javax.swing.JOptionPane.showMessageDialog(owner, message, title,
+                javax.swing.JOptionPane.INFORMATION_MESSAGE);
     }
 
     private String customFilterKey(File binFolder, int channelIndex) {
@@ -6318,7 +6334,7 @@ public class CreateBinFileAnalysis implements Analysis {
                             seedMacro != null && seedMacro.trim().length() > 0),
                     sampleSupplier,
                     seedMacro);
-            boolean applied = applyCustomFilterEntryResult(binFolder, cfg, channelIndex, result, false);
+            boolean applied = applyCustomFilterEntryResult(owner, binFolder, cfg, channelIndex, result, false);
             if (!applied) {
                 return new FilterParameterStage.CustomFilterResult(false, null, null);
             }
@@ -6555,6 +6571,7 @@ public class CreateBinFileAnalysis implements Analysis {
         }
         preview.setTitle("Filter Preview | " + chLabel + " | " + imageTitle);
         preview.show();
+        allowWindowThroughModalBlock(preview.getWindow());
         IJ.run(preview, toLutName(colorName), "");
         positionImageLeft(preview);
         return preview;
@@ -6605,6 +6622,15 @@ public class CreateBinFileAnalysis implements Analysis {
             if (openImg != null && openImg.getTitle().startsWith(titlePrefix)) {
                 closeImageQuietly(openImg);
             }
+        }
+    }
+
+    private static void allowWindowThroughModalBlock(Window window) {
+        if (window == null) return;
+        try {
+            window.setModalExclusionType(Dialog.ModalExclusionType.APPLICATION_EXCLUDE);
+        } catch (RuntimeException ignored) {
+            // Best effort: preview images still open normally where modal exclusion is unavailable.
         }
     }
 
@@ -7327,10 +7353,16 @@ public class CreateBinFileAnalysis implements Analysis {
 
     private void applyCustomFilterEntryResult(File binFolder, BinUserConfig cfg, int channelIndex,
                                               CustomFilterEntryDialog.Result result) throws IOException {
-        applyCustomFilterEntryResult(binFolder, cfg, channelIndex, result, true);
+        applyCustomFilterEntryResult(null, binFolder, cfg, channelIndex, result, true);
     }
 
     private boolean applyCustomFilterEntryResult(File binFolder, BinUserConfig cfg, int channelIndex,
+                                                 CustomFilterEntryDialog.Result result,
+                                                 boolean writeConfigOnDemote) throws IOException {
+        return applyCustomFilterEntryResult(null, binFolder, cfg, channelIndex, result, writeConfigOnDemote);
+    }
+
+    private boolean applyCustomFilterEntryResult(Window owner, File binFolder, BinUserConfig cfg, int channelIndex,
                                                  CustomFilterEntryDialog.Result result,
                                                  boolean writeConfigOnDemote) throws IOException {
         if (result == null) return false;
@@ -7359,7 +7391,7 @@ public class CreateBinFileAnalysis implements Analysis {
                         : "That preset will be stored when the configuration is saved."));
             }
             if (matchedPreset == null) {
-                saveNamedCustomFilterPreset(binFolder, cfg, channelIndex, savedMacro);
+                saveNamedCustomFilterPreset(owner, binFolder, cfg, channelIndex, savedMacro);
             }
             return true;
         } else {
@@ -7378,19 +7410,24 @@ public class CreateBinFileAnalysis implements Analysis {
                     + " while preserving the " + source + " C" + (channelIndex + 1)
                     + "_Filters.ijm file.");
         } else {
-            saveNamedCustomFilterPreset(binFolder, cfg, channelIndex, savedMacro);
+            saveNamedCustomFilterPreset(owner, binFolder, cfg, channelIndex, savedMacro);
         }
         return true;
     }
 
     private void saveNamedCustomFilterPreset(File binFolder, BinUserConfig cfg, int channelIndex,
                                              String macroContent) throws IOException {
+        saveNamedCustomFilterPreset(null, binFolder, cfg, channelIndex, macroContent);
+    }
+
+    private void saveNamedCustomFilterPreset(Window owner, File binFolder, BinUserConfig cfg, int channelIndex,
+                                             String macroContent) throws IOException {
         if (macroContent == null || cfg == null || channelIndex < 0 || channelIndex >= cfg.names.size()) return;
         String channelName = cfg.names.get(channelIndex);
         String defaultName = channelName == null || channelName.trim().length() == 0
                 ? "C" + (channelIndex + 1) + " Custom Filter"
                 : channelName.trim() + " Filter";
-        String presetName = promptForCustomFilterPresetName(
+        String presetName = promptForCustomFilterPresetName(owner,
                 "C" + (channelIndex + 1) + " (" + cfg.names.get(channelIndex) + ")", defaultName);
         if (presetName == null) return;
         saveCustomFilterPreset(binFolder, presetName, macroContent);
