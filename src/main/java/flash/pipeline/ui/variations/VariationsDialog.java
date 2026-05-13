@@ -1,6 +1,7 @@
 package flash.pipeline.ui.variations;
 
 import flash.pipeline.ui.PipelineDialog;
+import flash.pipeline.ui.variations.analysis.KneeDetector;
 import flash.pipeline.ui.variations.strategy.VariationStrategyChooser;
 
 import ij.ImagePlus;
@@ -35,6 +36,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalInt;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -56,7 +58,11 @@ public final class VariationsDialog extends PipelineDialog {
     private final JRadioButton customCrop = new JRadioButton("custom...");
     private final Map<String, VariationCellPanel> cellsByCombo =
             new HashMap<String, VariationCellPanel>();
+    private final Map<String, Integer> cellIndexesByCombo =
+            new HashMap<String, Integer>();
     private final List<VariationCellPanel> cells = new ArrayList<VariationCellPanel>();
+    private final List<VariationResult> resultsByCell =
+            new ArrayList<VariationResult>();
 
     private VariationExecutor executor;
     private ParameterSweep currentSweep;
@@ -331,6 +337,8 @@ public final class VariationsDialog extends PipelineDialog {
         List<ParameterCombo> combos = currentSweep.combos();
         cells.clear();
         cellsByCombo.clear();
+        cellIndexesByCombo.clear();
+        resultsByCell.clear();
         BiConsumer<ParameterCombo, VariationCellPanel> compare =
                 new BiConsumer<ParameterCombo, VariationCellPanel>() {
                     @Override public void accept(ParameterCombo combo, VariationCellPanel cell) {
@@ -351,6 +359,8 @@ public final class VariationsDialog extends PipelineDialog {
             cell.setZ(zSlider.getValue());
             cells.add(cell);
             cellsByCombo.put(combo.toCanonicalJson(), cell);
+            cellIndexesByCombo.put(combo.toCanonicalJson(), Integer.valueOf(i));
+            resultsByCell.add(null);
         }
         gridPanel.setSweep(currentSweep);
         gridPanel.setCells(cells);
@@ -387,15 +397,24 @@ public final class VariationsDialog extends PipelineDialog {
             return;
         }
         VariationCellPanel cell = cellsByCombo.get(result.combo().toCanonicalJson());
+        Integer comboIndex = cellIndexesByCombo.get(result.combo().toCanonicalJson());
+        int targetIndex = comboIndex == null ? index : comboIndex.intValue();
         if (cell == null && index >= 0 && index < cells.size()) {
             cell = cells.get(index);
+            targetIndex = index;
         }
         if (cell == null) {
             return;
         }
         cell.setResult(result);
+        if (targetIndex >= 0 && targetIndex < resultsByCell.size()) {
+            resultsByCell.set(targetIndex, result);
+        }
         completedCount++;
         statusLabel.setText("Status: " + completedCount + "/" + cells.size() + " complete");
+        if (completedCount >= cells.size()) {
+            applyKneeHint();
+        }
     }
 
     private void handleExecutorDone() {
@@ -415,11 +434,70 @@ public final class VariationsDialog extends PipelineDialog {
         }
         try {
             worker.get();
+            applyKneeHint();
             statusLabel.setText("Status: done");
         } catch (Exception e) {
             statusLabel.setText("Status: error");
             showMessage(e.getMessage());
         }
+    }
+
+    private void applyKneeHint() {
+        ParameterId swept = singleNumericAxis();
+        if (swept == null || resultsByCell.size() != cells.size()) {
+            return;
+        }
+        double[] xs = new double[cells.size()];
+        double[] ys = new double[cells.size()];
+        for (int i = 0; i < cells.size(); i++) {
+            Object value = cells.get(i).combo().get(swept);
+            if (!(value instanceof Number)) {
+                return;
+            }
+            xs[i] = ((Number) value).doubleValue();
+            VariationResult result = resultsByCell.get(i);
+            ys[i] = result == null || result.hasError()
+                    ? Double.NaN
+                    : result.nObjects();
+        }
+        OptionalInt kneeIndex = KneeDetector.findKneeIndex(xs, ys);
+        if (!kneeIndex.isPresent()) {
+            suggestionLabel.setText("Suggested: no clear knee");
+            return;
+        }
+        int index = kneeIndex.getAsInt();
+        if (index < 0 || index >= cells.size()) {
+            return;
+        }
+        VariationCellPanel cell = cells.get(index);
+        cell.setBorderHint(VariationCellPanel.BorderHint.KNEE);
+        suggestionLabel.setText("Suggested: knee at "
+                + swept.name() + " = " + safe(String.valueOf(cell.combo().get(swept))));
+    }
+
+    private ParameterId singleNumericAxis() {
+        if (currentSweep == null) {
+            return null;
+        }
+        ParameterId swept = null;
+        for (Map.Entry<ParameterId, ParameterValueList> entry
+                : currentSweep.valueLists().entrySet()) {
+            ParameterValueList values = entry.getValue();
+            int size = values == null ? 0 : values.size();
+            if (size <= 1) {
+                continue;
+            }
+            if (swept != null) {
+                return null;
+            }
+            for (int i = 0; i < size; i++) {
+                if (!(values.get(i) instanceof Number)) {
+                    return null;
+                }
+            }
+            swept = entry.getKey();
+        }
+        return swept;
     }
 
     private void handleCompare(ParameterCombo combo, VariationCellPanel cell) {

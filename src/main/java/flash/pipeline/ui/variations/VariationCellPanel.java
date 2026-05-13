@@ -30,6 +30,12 @@ public final class VariationCellPanel extends JPanel {
     private static final Color KNEE_BORDER = new Color(58, 150, 86);
     private static final Color STABILITY_BORDER = new Color(210, 160, 30);
 
+    public enum BorderHint {
+        NONE,
+        KNEE,
+        STABILITY
+    }
+
     private final ParameterCombo combo;
     private final ImagePlus croppedSource;
     private final Consumer<ParameterCombo> onAccept;
@@ -138,7 +144,7 @@ public final class VariationCellPanel extends JPanel {
             rendered = cachedLabel;
         }
         preview.setImage(rendered);
-        footer.setText(String.valueOf(objectCount));
+        refreshFooter();
         refreshTooltip();
     }
 
@@ -148,12 +154,30 @@ public final class VariationCellPanel extends JPanel {
 
     public void setKneeWinner(boolean kneeWinner) {
         this.kneeWinner = kneeWinner;
+        refreshFooter();
         refreshBorder();
+        refreshTooltip();
     }
 
     public void setStabilityWinner(boolean stabilityWinner) {
         this.stabilityWinner = stabilityWinner;
+        refreshFooter();
         refreshBorder();
+        refreshTooltip();
+    }
+
+    public void setBorderHint(BorderHint hint) {
+        if (hint == null || hint == BorderHint.NONE) {
+            kneeWinner = false;
+            stabilityWinner = false;
+        } else if (hint == BorderHint.KNEE) {
+            kneeWinner = true;
+        } else if (hint == BorderHint.STABILITY) {
+            stabilityWinner = true;
+        }
+        refreshFooter();
+        refreshBorder();
+        refreshTooltip();
     }
 
     void setSelectedForCompare(boolean selectedForCompare) {
@@ -219,10 +243,10 @@ public final class VariationCellPanel extends JPanel {
         int thickness = 1;
         if (stabilityWinner) {
             color = STABILITY_BORDER;
-            thickness = 2;
+            thickness = 3;
         } else if (kneeWinner) {
             color = KNEE_BORDER;
-            thickness = 2;
+            thickness = 3;
         }
         if (selectedForCompare) {
             thickness = 3;
@@ -236,10 +260,28 @@ public final class VariationCellPanel extends JPanel {
         setBorder(BorderFactory.createCompoundBorder(outer, inner));
     }
 
+    private void refreshFooter() {
+        if (objectCount < 0) {
+            return;
+        }
+        String text = String.valueOf(objectCount);
+        if (stabilityWinner) {
+            text += " - Most stable";
+        } else if (kneeWinner) {
+            text += " - Suggested knee";
+        }
+        footer.setText(text);
+    }
+
     private void refreshTooltip() {
         StringBuilder sb = new StringBuilder();
         sb.append("<html>");
         sb.append(combo.toCanonicalJson());
+        if (stabilityWinner) {
+            sb.append("<br>Most stable");
+        } else if (kneeWinner) {
+            sb.append("<br>Suggested knee");
+        }
         if (durationMs >= 0L) {
             sb.append("<br>").append(durationMs).append(" ms");
         }
