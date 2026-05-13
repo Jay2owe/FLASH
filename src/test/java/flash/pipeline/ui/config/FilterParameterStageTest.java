@@ -619,7 +619,7 @@ public class FilterParameterStageTest {
                 stage.isBranchedBannerVisibleForTest());
         assertFalse("+ Add filter… must be disabled on branched DAGs",
                 stage.isAddFilterEnabledForTest());
-        assertTrue("Open in canvas… must be visible on branched DAGs",
+        assertTrue("Custom macro button must be visible on branched DAGs",
                 stage.isCustomBuilderButtonVisibleForTest());
     }
 
@@ -659,7 +659,7 @@ public class FilterParameterStageTest {
                 stage.isBranchedBannerVisibleForTest());
         assertTrue("Linear DAG must re-enable + Add filter…",
                 stage.isAddFilterEnabledForTest());
-        assertFalse("Open in canvas… must be hidden on linear pipelines",
+        assertTrue("Custom macro button must remain available on linear pipelines",
                 stage.isCustomBuilderButtonVisibleForTest());
     }
 
@@ -679,7 +679,7 @@ public class FilterParameterStageTest {
     }
 
     @Test
-    public void openInCanvasButtonIsRenamedAndStillVisible() {
+    public void customMacroButtonIsVisibleOnLinearFilters() {
         RecordingMacroStore store = new RecordingMacroStore("Default", DEFAULT_MACRO);
         FilterParameterStage stage = new FilterParameterStage(
                 Arrays.asList("Default", "Custom"), store, new RecordingPreviewAdapter(), null, null);
@@ -687,8 +687,41 @@ public class FilterParameterStageTest {
         stage.buildControls(context(), new RecordingActions());
 
         assertNotNull(stage.customBuilderButtonTextForTest());
-        assertTrue("button label must be renamed to 'Open in canvas...'",
-                stage.customBuilderButtonTextForTest().toLowerCase().contains("open in canvas"));
+        assertTrue("button label must expose the custom macro chooser",
+                stage.customBuilderButtonTextForTest().toLowerCase().contains("custom macro"));
+        assertTrue("custom macro chooser must be visible in the linear embedded filter UI",
+                stage.isCustomBuilderButtonVisibleForTest());
+    }
+
+    @Test
+    public void customMacroBuilderResultLoadsBackIntoEmbeddedAccordion() {
+        RecordingMacroStore store = new RecordingMacroStore("Default", DEFAULT_MACRO);
+        final boolean[] receivedCurrentMacro = new boolean[]{false};
+        FilterParameterStage.CustomFilterBuilder mock = new FilterParameterStage.CustomFilterBuilder() {
+            @Override
+            public FilterParameterStage.CustomFilterResult open(ConfigQcContext context,
+                                                                String currentPreset,
+                                                                String currentMacro) {
+                receivedCurrentMacro[0] = "Default".equals(currentPreset)
+                        && DEFAULT_MACRO.equals(currentMacro);
+                return new FilterParameterStage.CustomFilterResult(
+                        true, "Imported Custom", CUSTOM_MACRO);
+            }
+        };
+        FilterParameterStage stage = new FilterParameterStage(
+                Arrays.asList("Default", "Custom"), store, new RecordingPreviewAdapter(), mock, null);
+        ConfigQcContext context = context();
+
+        stage.buildControls(context, new RecordingActions());
+        stage.onEnter(context, new PreviewPairPanel("Original", "Adjusted"));
+        stage.simulateOpenCustomFilterBuilderForTest();
+
+        assertTrue("custom macro chooser must receive the current embedded macro",
+                receivedCurrentMacro[0]);
+        assertEquals("Imported Custom", stage.selectedPresetForTest());
+        assertEquals(CUSTOM_MACRO, stage.currentMacroForTest());
+        assertTrue("returned macro must rebuild the embedded parameter accordion",
+                stage.hasFieldBindingForTest("radius"));
     }
 
     @Test

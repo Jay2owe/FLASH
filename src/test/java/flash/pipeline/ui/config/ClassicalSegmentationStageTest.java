@@ -14,6 +14,7 @@ import javax.swing.JButton;
 import javax.swing.JLabel;
 import java.awt.Component;
 import java.awt.Container;
+import java.awt.image.IndexColorModel;
 import java.util.Arrays;
 
 import static org.junit.Assert.assertEquals;
@@ -144,7 +145,7 @@ public class ClassicalSegmentationStageTest {
     }
 
     @Test
-    public void thresholdAndSizeEditsMarkObjectPreviewStale() throws Exception {
+    public void thresholdEditsMarkStaleButSizeEditsRelabelLive() throws Exception {
         RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
         RecordingActions actions = new RecordingActions();
         ClassicalSegmentationStage stage = stage(
@@ -168,10 +169,15 @@ public class ClassicalSegmentationStageTest {
 
         stage.setMinSizeForTest("3");
 
-        assertTrue(stage.isObjectPreviewStaleForTest());
+        assertFalse(stage.isObjectPreviewStaleForTest());
         assertEquals("Size edits must not execute the object preview",
                 2, adapter.previewRuns);
-        assertTrue(actions.previewButtonStale);
+        assertFalse(actions.previewButtonStale);
+        assertEquals("Objects: 1 kept; removed 1 small, 0 large. Threshold 60.",
+                actions.status);
+        assertEquals("Objects: 1 kept; removed 1 small, 0 large",
+                stage.sizeCutoffSummaryForTest());
+        assertRemovedLabelUsesCutoffColor(actions.adjustedPreview, 1, 0xe53935);
     }
 
     @Test
@@ -360,7 +366,11 @@ public class ClassicalSegmentationStageTest {
             labels.set(1, 0, 2);
             ResultsTable stats = new ResultsTable();
             stats.incrementCounter();
+            stats.setValue("Label", 0, 1);
+            stats.setValue("Volume (pixel^3)", 0, 2);
             stats.incrementCounter();
+            stats.setValue("Label", 1, 2);
+            stats.setValue("Volume (pixel^3)", 1, 10);
             return new ObjectsCounter3DWrapper.Result(
                     stats, new ImagePlus("labels", labels), null, true);
         }
@@ -418,5 +428,18 @@ public class ClassicalSegmentationStageTest {
 
         @Override public void cancel() {
         }
+    }
+
+    private static void assertRemovedLabelUsesCutoffColor(ImagePlus labelImage,
+                                                          int label,
+                                                          int expectedRgb) {
+        assertNotNull(labelImage);
+        assertTrue(labelImage.getProcessor().getColorModel() instanceof IndexColorModel);
+        IndexColorModel model = (IndexColorModel) labelImage.getProcessor().getColorModel();
+        int index = ((Math.max(1, label) - 1) % 255) + 1;
+        int actual = (model.getRed(index) << 16)
+                | (model.getGreen(index) << 8)
+                | model.getBlue(index);
+        assertEquals(expectedRgb, actual);
     }
 }

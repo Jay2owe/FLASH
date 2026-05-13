@@ -115,7 +115,9 @@ public final class MinMaxControlPanel extends JPanel {
         JPanel actions = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
         actions.setOpaque(false);
         JButton auto = new JButton("Auto");
+        flash.pipeline.ui.FlashIcons.apply(auto, flash.pipeline.ui.FlashIcons.wand());
         JButton reset = new JButton("Reset");
+        flash.pipeline.ui.FlashIcons.apply(reset, flash.pipeline.ui.FlashIcons.refresh());
         auto.addActionListener(e -> {
             double[] autoRange = calculateAutoDisplayRange();
             applyRange(autoRange[0], autoRange[1], true, false);
@@ -129,6 +131,7 @@ public final class MinMaxControlPanel extends JPanel {
         actions.add(reset);
         if (includeSetButton) {
             JButton set = new JButton("Set");
+            flash.pipeline.ui.FlashIcons.apply(set, flash.pipeline.ui.FlashIcons.check());
             set.addActionListener(e -> {
                 if (listener != null) listener.setRequested();
             });

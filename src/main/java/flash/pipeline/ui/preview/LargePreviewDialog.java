@@ -31,6 +31,11 @@ public final class LargePreviewDialog extends JDialog {
         void sourceChoiceChanged(PreviewPairPanel.SourceMode mode);
     }
 
+    interface DisplayActionListener {
+        void adjustBrightnessContrastRequested();
+        void lutToggleRequested();
+    }
+
     private final ImagePreviewPanel originalPreview = new ImagePreviewPanel("Original image");
     private final ImagePreviewPanel adjustedPreview = new ImagePreviewPanel("Adjusted preview");
     private final ImagePreviewPanel extraPreview = new ImagePreviewPanel("Object map");
@@ -40,8 +45,11 @@ public final class LargePreviewDialog extends JDialog {
     private final JPanel overlayControls = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
     private final JCheckBox overlayCheck = new JCheckBox("Overlay objects");
     private final JComboBox<String> overlaySourceChoice = new JComboBox<String>();
+    private final JButton displayControlsButton = new JButton("Adjust Brightness/Contrast");
+    private final JButton lutToggleButton = new JButton("Grey LUT");
     private SliceListener sliceListener;
     private SourceChoiceListener sourceChoiceListener;
+    private DisplayActionListener displayActionListener;
     private boolean syncingSlices;
     private boolean updatingSourceChoice;
     private boolean extraPreviewVisible;
@@ -69,6 +77,7 @@ public final class LargePreviewDialog extends JDialog {
         wireSliceSync();
         wireSourceControls();
         wireOverlayControls();
+        wireDisplayActionControls();
         pack();
         setMinimumSize(new Dimension(820, 520));
         sizeNearDesktop();
@@ -80,6 +89,21 @@ public final class LargePreviewDialog extends JDialog {
 
     void setSourceChoiceListener(SourceChoiceListener sourceChoiceListener) {
         this.sourceChoiceListener = sourceChoiceListener;
+    }
+
+    void setDisplayActionListener(DisplayActionListener displayActionListener) {
+        this.displayActionListener = displayActionListener;
+    }
+
+    void setDisplayActionState(String lutButtonText, String lutButtonTooltip) {
+        displayControlsButton.setVisible(true);
+        displayControlsButton.setEnabled(true);
+        lutToggleButton.setVisible(true);
+        lutToggleButton.setEnabled(true);
+        lutToggleButton.setText(lutButtonText == null || lutButtonText.trim().isEmpty()
+                ? "Grey LUT"
+                : lutButtonText);
+        lutToggleButton.setToolTipText(lutButtonTooltip);
     }
 
     void setSourceChoices(ImagePlus originalSource,
@@ -212,6 +236,14 @@ public final class LargePreviewDialog extends JDialog {
         return extraPreview.titleTextForTest();
     }
 
+    JButton displayControlsButtonForTest() {
+        return displayControlsButton;
+    }
+
+    JButton lutToggleButtonForTest() {
+        return lutToggleButton;
+    }
+
     ij.process.ImageProcessor extraPreviewRenderedProcessorForTest() {
         return extraPreview.renderedProcessorForTest();
     }
@@ -286,8 +318,10 @@ public final class LargePreviewDialog extends JDialog {
         leftControls.add(overlayControls);
         footer.add(leftControls, BorderLayout.WEST);
 
-        JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+        JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
         buttons.setOpaque(false);
+        buttons.add(displayControlsButton);
+        buttons.add(lutToggleButton);
         JButton close = new JButton("Close");
         close.addActionListener(e -> setVisible(false));
         buttons.add(close);
@@ -331,6 +365,19 @@ public final class LargePreviewDialog extends JDialog {
             updateOverlayControls();
         });
         overlaySourceChoice.addActionListener(e -> refreshObjectPreviewImage());
+    }
+
+    private void wireDisplayActionControls() {
+        displayControlsButton.addActionListener(e -> {
+            if (displayActionListener != null) {
+                displayActionListener.adjustBrightnessContrastRequested();
+            }
+        });
+        lutToggleButton.addActionListener(e -> {
+            if (displayActionListener != null) {
+                displayActionListener.lutToggleRequested();
+            }
+        });
     }
 
     private void refreshObjectPreviewImage() {

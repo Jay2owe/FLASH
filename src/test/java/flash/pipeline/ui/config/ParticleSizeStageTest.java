@@ -9,6 +9,7 @@ import ij.process.ByteProcessor;
 import org.junit.Test;
 
 import javax.swing.JButton;
+import java.awt.image.IndexColorModel;
 import java.util.Arrays;
 
 import static org.junit.Assert.assertEquals;
@@ -80,6 +81,30 @@ public class ParticleSizeStageTest {
         assertEquals("Objects: 2 ready", actions.status);
         assertFalse(actions.previewButtonStale);
         assertEquals("Run Preview", actions.previewButton.getText());
+    }
+
+    @Test
+    public void sizeEditsAfterPreviewRelabelRemovedObjectsWithoutRerunning() throws Exception {
+        RecordingStore store = new RecordingStore("1-Infinity");
+        RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
+        RecordingActions actions = new RecordingActions();
+        ParticleSizeStage stage = new ParticleSizeStage(store, adapter);
+
+        stage.buildControls(context(), actions);
+        stage.onEnter(context(), new PreviewPairPanel("Original", "Adjusted"));
+        stage.runPreviewNowForTest();
+        adapter.previewRuns = 0;
+
+        stage.setMinSizeForTest("5");
+
+        assertFalse(stage.isPreviewStaleForTest());
+        assertEquals("Size edits must reuse cached object statistics",
+                0, adapter.previewRuns);
+        assertEquals("Objects: 1 kept; removed 1 small, 0 large", actions.status);
+        assertEquals("Objects: 1 kept; removed 1 small, 0 large",
+                stage.sizeCutoffSummaryForTest());
+        assertFalse(actions.previewButtonStale);
+        assertRemovedLabelUsesCutoffColor(actions.adjustedPreview, 1, 0xe53935);
     }
 
     @Test
@@ -248,7 +273,11 @@ public class ParticleSizeStageTest {
             labels.set(1, 0, 2);
             ResultsTable stats = new ResultsTable();
             stats.incrementCounter();
+            stats.setValue("Label", 0, 1);
+            stats.setValue("Volume (pixel^3)", 0, 2);
             stats.incrementCounter();
+            stats.setValue("Label", 1, 2);
+            stats.setValue("Volume (pixel^3)", 1, 10);
             return new ObjectsCounter3DWrapper.Result(
                     stats, new ImagePlus("labels", labels), null, true);
         }
@@ -306,5 +335,18 @@ public class ParticleSizeStageTest {
 
         @Override public void cancel() {
         }
+    }
+
+    private static void assertRemovedLabelUsesCutoffColor(ImagePlus labelImage,
+                                                          int label,
+                                                          int expectedRgb) {
+        assertNotNull(labelImage);
+        assertTrue(labelImage.getProcessor().getColorModel() instanceof IndexColorModel);
+        IndexColorModel model = (IndexColorModel) labelImage.getProcessor().getColorModel();
+        int index = ((Math.max(1, label) - 1) % 255) + 1;
+        int actual = (model.getRed(index) << 16)
+                | (model.getGreen(index) << 8)
+                | model.getBlue(index);
+        assertEquals(expectedRgb, actual);
     }
 }

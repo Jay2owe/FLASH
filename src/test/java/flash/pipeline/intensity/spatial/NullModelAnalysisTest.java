@@ -51,6 +51,20 @@ public class NullModelAnalysisTest {
         assertTrue(Double.isNaN(result.value("Intensity_NullModelPass")));
     }
 
+    @Test
+    public void runnerLinkageFailureFillsSelectedFamilyWithNan() {
+        IntensitySpatialRunner runner = new IntensitySpatialRunner(
+                Collections.<IntensitySpatialAnalysis>singletonList(new LinkageFailingNullModelAnalysis()));
+
+        IntensitySpatialResult result = runner.measure(context(
+                uniformImage(8, 8, 25.0f), null, config(), null));
+
+        assertTrue(Double.isNaN(result.value("Intensity_NullModelP")));
+        assertTrue(Double.isNaN(result.value("Intensity_NullModelZ")));
+        assertTrue(Double.isNaN(result.value("Intensity_NullModelPass")));
+    }
+
+
     private static IntensitySpatialContext context(ImagePlus raw,
                                                    ImagePlus binarized,
                                                    IntensitySpatialConfig config,
@@ -123,6 +137,43 @@ public class NullModelAnalysisTest {
         @Override
         public IntensitySpatialResult measure(IntensitySpatialContext context) throws Exception {
             throw new IllegalStateException("synthetic failure");
+        }
+    }
+
+    private static final class LinkageFailingNullModelAnalysis implements IntensitySpatialAnalysis {
+        @Override
+        public IntensitySpatialConfig.AnalysisKey key() {
+            return IntensitySpatialConfig.AnalysisKey.NULLMODEL;
+        }
+
+        @Override
+        public AnalysisValidity validity() {
+            return AnalysisValidity.RAW_ONLY;
+        }
+
+        @Override
+        public EnumSet<IntensitySpatialOutputMode> outputModes() {
+            return EnumSet.of(IntensitySpatialOutputMode.BASE);
+        }
+
+        @Override
+        public Set<DependencyId> dependencyIds() {
+            return Collections.emptySet();
+        }
+
+        @Override
+        public List<String> columns(IntensitySpatialConfig config, boolean binarizedPartner) {
+            return new NullModelAnalysis().columns(config, binarizedPartner);
+        }
+
+        @Override
+        public int estimatedCost() {
+            return 1;
+        }
+
+        @Override
+        public IntensitySpatialResult measure(IntensitySpatialContext context) {
+            throw new NoClassDefFoundError("synthetic/missing/InnerClass");
         }
     }
 }

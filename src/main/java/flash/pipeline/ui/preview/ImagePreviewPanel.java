@@ -26,6 +26,10 @@ import java.awt.image.ColorModel;
 import java.awt.image.IndexColorModel;
 
 public final class ImagePreviewPanel extends JPanel {
+    private static final Dimension DEFAULT_CANVAS_SIZE = new Dimension(260, 220);
+    private static final Dimension SLIM_CANVAS_SIZE = new Dimension(340, 280);
+    private static final int DEFAULT_PANEL_GAP = 6;
+    private static final int SLIM_PANEL_GAP = 2;
 
     public interface ZSliceChangeListener {
         void zSliceChanged(ImagePreviewPanel source, int zSlice);
@@ -54,7 +58,7 @@ public final class ImagePreviewPanel extends JPanel {
     private boolean displaySettingsEnabled = true;
 
     public ImagePreviewPanel(String title) {
-        super(new BorderLayout(6, 6));
+        super(new BorderLayout(DEFAULT_PANEL_GAP, DEFAULT_PANEL_GAP));
         this.previewTitle = normalizePreviewTitle(title);
         refreshBorder();
 
@@ -72,7 +76,7 @@ public final class ImagePreviewPanel extends JPanel {
         labels.add(statusLabel);
         add(labels, BorderLayout.NORTH);
 
-        canvas.setPreferredSize(new Dimension(260, 220));
+        setCanvasPreferredSize(DEFAULT_CANVAS_SIZE);
         add(canvas, BorderLayout.CENTER);
 
         zRow.setOpaque(false);
@@ -126,11 +130,15 @@ public final class ImagePreviewPanel extends JPanel {
         if (this.slim == slim) return;
         this.slim = slim;
         if (slim) {
+            setPanelGap(SLIM_PANEL_GAP);
+            setCanvasPreferredSize(SLIM_CANVAS_SIZE);
             setMetadataHeaderVisible(false);
             setZRowVisible(false);
             installSlimTitleLabel();
         } else {
             removeSlimTitleLabel();
+            setPanelGap(DEFAULT_PANEL_GAP);
+            setCanvasPreferredSize(DEFAULT_CANVAS_SIZE);
             setMetadataHeaderVisible(true);
             setZRowVisible(true);
         }
@@ -264,6 +272,14 @@ public final class ImagePreviewPanel extends JPanel {
         return slimTitleLabel;
     }
 
+    Dimension canvasPreferredSizeForTest() {
+        return canvas.getPreferredSize();
+    }
+
+    int layoutVerticalGapForTest() {
+        return ((BorderLayout) getLayout()).getVgap();
+    }
+
     ImageProcessor renderedProcessorForTest() {
         return currentProcessor();
     }
@@ -314,6 +330,16 @@ public final class ImagePreviewPanel extends JPanel {
         if (slimTitleLabel != null && slimTitleLabel.getParent() == this) {
             remove(slimTitleLabel);
         }
+    }
+
+    private void setCanvasPreferredSize(Dimension size) {
+        canvas.setPreferredSize(new Dimension(size));
+    }
+
+    private void setPanelGap(int gap) {
+        BorderLayout layout = (BorderLayout) getLayout();
+        layout.setHgap(gap);
+        layout.setVgap(gap);
     }
 
     private static String normalizePreviewTitle(String title) {

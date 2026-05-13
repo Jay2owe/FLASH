@@ -306,6 +306,7 @@ public class DeconvolutionAnalysis implements Analysis {
         presetChoice.setMaximumSize(new Dimension(220, 24));
         bindings.presetChoice = presetChoice;
         JButton presetButton = new JButton("Save as preset...");
+        flash.pipeline.ui.FlashIcons.apply(presetButton, flash.pipeline.ui.FlashIcons.save());
         dialog.addComponent(labelAndTwoComponents("Preset", presetChoice, presetButton));
 
         dialog.addHeader("Engine & Algorithm");

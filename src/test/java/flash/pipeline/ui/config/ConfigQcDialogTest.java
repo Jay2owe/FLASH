@@ -25,6 +25,7 @@ import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
 import java.awt.GraphicsEnvironment;
+import java.awt.Rectangle;
 import java.awt.event.ActionEvent;
 import java.awt.event.KeyEvent;
 import java.util.Arrays;
@@ -47,7 +48,7 @@ public class ConfigQcDialogTest {
 
         assertEquals("Display range", dialog.stageTextForTest());
         assertEquals("C2 - IBA1", dialog.channelTextForTest());
-        assertEquals("Stage 1 / 1    Image 1 / 2    - Image A", dialog.progressTextForTest());
+        assertEquals("Image 1 / 2    - Image A", dialog.progressTextForTest());
         assertEquals("Image A", dialog.imageTextForTest());
         assertEquals(1, stage.enterCount);
         assertNotNull(stage.actions);
@@ -98,6 +99,7 @@ public class ConfigQcDialogTest {
 
         assertTrue(dialog.progressTextForTest().contains("Image 1 / 2"));
         assertTrue(dialog.progressTextForTest().contains("Image A"));
+        assertFalse(dialog.progressTextForTest().contains("Stage"));
     }
 
     @Test
@@ -295,6 +297,24 @@ public class ConfigQcDialogTest {
 
         assertEquals(1180, minimum.width);
         assertEquals(820, minimum.height);
+    }
+
+    @Test
+    public void defaultDialogSizeUsesSeventyPercentScreenHeightAndCurrentRatio() {
+        Dimension size = ConfigQcDialog.defaultDialogSizeForTest(
+                new Rectangle(0, 0, 2560, 1440), new Dimension(900, 600));
+
+        assertEquals(1451, size.width);
+        assertEquals(1008, size.height);
+    }
+
+    @Test
+    public void defaultDialogSizeDoesNotExceedAvailableScreen() {
+        Dimension size = ConfigQcDialog.defaultDialogSizeForTest(
+                new Rectangle(0, 0, 1600, 1000), new Dimension(1700, 1100));
+
+        assertEquals(1600, size.width);
+        assertEquals(1000, size.height);
     }
 
     @Test

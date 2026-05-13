@@ -95,6 +95,7 @@ public final class PreviewPairPanel extends JPanel {
     private boolean syncingSlices;
     private boolean updatingDisplayControls;
     private boolean displayControlsAvailable = true;
+    private boolean largeDisplayControlsActivated;
     private boolean displayRangeInitialized;
     private LargePreviewDialog largePreviewDialog;
     private JDialog displayControlsDialog;
@@ -327,7 +328,7 @@ public final class PreviewPairPanel extends JPanel {
         displayControlsButton.setEnabled(available);
         lutToggleButton.setVisible(available);
         lutToggleButton.setEnabled(available);
-        if (!available) {
+        if (!available && !largeDisplayControlsActivated) {
             hideDisplayControlsDialog();
             displaySettings = PreviewDisplaySettings.defaultFor(channelLutName);
             displaySettingsByImage.clear();
@@ -337,6 +338,7 @@ public final class PreviewPairPanel extends JPanel {
             refreshDisplayControlImage();
         }
         updateLutToggleButton();
+        updateLargeDialogDisplayActionState();
     }
 
     public void setCompactPreviewHeaders(boolean compact) {
@@ -429,6 +431,15 @@ public final class PreviewPairPanel extends JPanel {
         setSourceMode(SourceMode.FILTERED);
         setSourceModeEnabled(true);
         setObjectOverlayEnabled(true);
+        largeDisplayControlsActivated = false;
+        if (!displayControlsAvailable) {
+            hideDisplayControlsDialog();
+            displaySettings = PreviewDisplaySettings.defaultFor(channelLutName);
+            displaySettingsByImage.clear();
+            displayControlImage = null;
+            applyDisplaySettings();
+        }
+        updateLargeDialogDisplayActionState();
         // Overlay choice is intentionally preserved across related object-preview stages.
     }
 
@@ -747,7 +758,8 @@ public final class PreviewPairPanel extends JPanel {
     private void wireDisplayControlsButton() {
         displayControlsButton.addActionListener(new ActionListener() {
             @Override public void actionPerformed(ActionEvent e) {
-                showDisplayControlsDialog();
+                if (!displayControlsButton.isEnabled()) return;
+                showDisplayControlsDialog(currentOwner());
             }
         });
         lutToggleButton.addActionListener(new ActionListener() {
@@ -827,9 +839,8 @@ public final class PreviewPairPanel extends JPanel {
         largePreviewDialog.raiseForUser();
     }
 
-    private void showDisplayControlsDialog() {
-        if (GraphicsEnvironment.isHeadless() || !displayControlsButton.isEnabled()) return;
-        Window currentOwner = currentOwner();
+    private void showDisplayControlsDialog(Window currentOwner) {
+        if (GraphicsEnvironment.isHeadless()) return;
         if (displayControlsDialog == null || displayControlsDialog.getOwner() != currentOwner) {
             disposeDisplayControlsDialog();
             displayControlsDialog = new JDialog(currentOwner, "Preview Brightness/Contrast",
@@ -885,6 +896,18 @@ public final class PreviewPairPanel extends JPanel {
                 setLargePreviewSourceMode(mode);
             }
         });
+        largePreviewDialog.setDisplayActionListener(new LargePreviewDialog.DisplayActionListener() {
+            @Override public void adjustBrightnessContrastRequested() {
+                activateLargeDisplayControls();
+                showDisplayControlsDialog(largePreviewDialog);
+            }
+
+            @Override public void lutToggleRequested() {
+                activateLargeDisplayControls();
+                togglePreviewLutMode();
+            }
+        });
+        updateLargeDialogDisplayActionState();
     }
 
     private void applyCurrentZ(int requestedZ) {
@@ -1086,7 +1109,7 @@ public final class PreviewPairPanel extends JPanel {
     }
 
     private void refreshDisplayControlImage() {
-        if (!displayControlsAvailable) {
+        if (!displaySettingsAvailable()) {
             displaySettings = PreviewDisplaySettings.defaultFor(channelLutName);
             applyDisplaySettings();
             return;
@@ -1156,7 +1179,7 @@ public final class PreviewPairPanel extends JPanel {
     }
 
     private void togglePreviewLutMode() {
-        if (!displayControlsAvailable || !lutToggleButton.isEnabled()) return;
+        if (!displaySettingsAvailable()) return;
         int nextIndex = lutModeChoice.getSelectedIndex() == 0 ? 1 : 0;
         lutModeChoice.setSelectedIndex(nextIndex);
         updateLutToggleButton();
@@ -1221,7 +1244,7 @@ public final class PreviewPairPanel extends JPanel {
     }
 
     private PreviewDisplaySettings displaySettingsForImage(ImagePlus image) {
-        if (!displayControlsAvailable) {
+        if (!displaySettingsAvailable()) {
             return PreviewDisplaySettings.defaultFor(channelLutName);
         }
         if (!roleAwareDisplaySettings()) {
@@ -1341,5 +1364,24 @@ public final class PreviewPairPanel extends JPanel {
         lutToggleButton.setToolTipText(greySelected
                 ? "Show previews with the selected channel LUT."
                 : "Show previews in grey.");
+        updateLargeDialogDisplayActionState();
+    }
+
+    private boolean displaySettingsAvailable() {
+        return displayControlsAvailable || largeDisplayControlsActivated;
+    }
+
+    private void activateLargeDisplayControls() {
+        if (largeDisplayControlsActivated) return;
+        largeDisplayControlsActivated = true;
+        refreshDisplayControlImage();
+        updateLargeDialogDisplayActionState();
+    }
+
+    private void updateLargeDialogDisplayActionState() {
+        if (largePreviewDialog == null) return;
+        largePreviewDialog.setDisplayActionState(
+                lutToggleButton.getText(),
+                lutToggleButton.getToolTipText());
     }
 }

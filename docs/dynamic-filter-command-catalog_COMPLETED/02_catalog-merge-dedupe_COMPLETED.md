@@ -15,7 +15,7 @@ The command registry from Stage 01 is only useful once `FilterCatalog` consumes 
 - `src/main/java/flash/pipeline/ui/sandbox/FijiCommandRegistry.java`
 - `src/main/java/flash/pipeline/ui/sandbox/FilterCatalog.java` lines 31-315.
 - `src/test/java/flash/pipeline/ui/sandbox/FilterCatalogTest.java` lines 15-84.
-- Reference only: `C:/Users/jamie/UK Dementia Research Institute Dropbox/Brancaccio Lab/Jamie/Experiments/Macro-Builder/src/main/java/macro/builder/ui/sandbox/FilterCatalog.java` lines 33-45 and 194-216 for grouping legacy plugin commands separately from ordinary Fiji commands.
+- Reference only: a local Macro Builder prototype grouped legacy plugin commands separately from ordinary Fiji commands.
 
 ## Scope
 

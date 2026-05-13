@@ -3,9 +3,12 @@ package flash.pipeline.ui.config;
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.help.SetupHelpCatalog;
 import flash.pipeline.help.SetupHelpTopic;
-import flash.pipeline.ui.preview.LabelMapStyler;
+import flash.pipeline.objects.ObjectsCounter3DWrapper;
+import flash.pipeline.stardist.StarDist3DRunner;
+import flash.pipeline.ui.preview.ObjectSizeFilterPreview;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import ij.ImagePlus;
+import ij.measure.ResultsTable;
 
 import javax.swing.BorderFactory;
 import javax.swing.Box;
@@ -22,12 +25,19 @@ import java.awt.Font;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
+import java.util.HashMap;
+import java.util.Map;
 
 public final class StarDistParameterStage implements ConfigQcStage {
 
     public interface ParameterStore {
         String getMethodToken();
         void save(String methodToken);
+    }
+
+    public interface SizeStore {
+        String get();
+        void set(String token);
     }
 
     public interface PreviewAdapter {
@@ -87,6 +97,7 @@ public final class StarDistParameterStage implements ConfigQcStage {
     private static final String EMPTY_TEXT = "Filtered input is ready. Press Run Preview.";
 
     private final ParameterStore parameterStore;
+    private final SizeStore sizeStore;
     private final PreviewAdapter previewAdapter;
 
     private ConfigQcActions actions;
@@ -94,9 +105,12 @@ public final class StarDistParameterStage implements ConfigQcStage {
     private ConfigQcContext activeContext;
     private Parameters savedParameters = Parameters.defaults();
     private Parameters restartParameters;
+    private ParticleSizeStage.SizeToken savedSize = new ParticleSizeStage.SizeToken("100", "Infinity");
+    private ParticleSizeStage.SizeToken restartSize;
     private ImagePlus rawSource;
     private ImagePlus filteredSource;
     private ImagePlus labelPreview;
+    private ResultsTable objectStats;
     private SwingWorker<ImagePlus, Void> previewWorker;
     private boolean previewStale = true;
     private boolean updatingFields;
@@ -112,17 +126,32 @@ public final class StarDistParameterStage implements ConfigQcStage {
     private JTextField areaMaxField;
     private JTextField qualityMinField;
     private JTextField intensityMinField;
+    private JTextField sizeMinField;
+    private JTextField sizeMaxField;
     private JButton previewButton;
     private JButton resetButton;
+    private ObjectSizeCutoffPanel sizeCutoffPanel;
+    private ObjectSizeFilterPreview.Summary sizeSummary;
+    private ObjectFilterSummary objectFilterSummary;
 
     public StarDistParameterStage(ParameterStore parameterStore, PreviewAdapter previewAdapter) {
+        this(parameterStore, defaultSizeStore(), previewAdapter);
+    }
+
+    public StarDistParameterStage(ParameterStore parameterStore,
+                                  SizeStore sizeStore,
+                                  PreviewAdapter previewAdapter) {
         if (parameterStore == null) {
             throw new IllegalArgumentException("parameterStore must not be null");
+        }
+        if (sizeStore == null) {
+            throw new IllegalArgumentException("sizeStore must not be null");
         }
         if (previewAdapter == null) {
             throw new IllegalArgumentException("previewAdapter must not be null");
         }
         this.parameterStore = parameterStore;
+        this.sizeStore = sizeStore;
         this.previewAdapter = previewAdapter;
     }
 
@@ -148,6 +177,9 @@ public final class StarDistParameterStage implements ConfigQcStage {
         this.savedParameters = restartParameters == null
                 ? parseMethod(parameterStore.getMethodToken())
                 : restartParameters;
+        this.savedSize = restartSize == null
+                ? ParticleSizeStage.parseSizeToken(sizeStore.get())
+                : restartSize;
 
         JPanel panel = new JPanel();
         panel.setOpaque(false);
@@ -161,7 +193,14 @@ public final class StarDistParameterStage implements ConfigQcStage {
                 new JTextField[]{linkingField, gapClosingField, frameGapField}));
         panel.add(Box.createVerticalStrut(4));
         panel.add(buildFilterActionRow());
+        panel.add(Box.createVerticalStrut(4));
+        panel.add(buildSizeRow());
+        panel.add(Box.createVerticalStrut(4));
+        sizeCutoffPanel = new ObjectSizeCutoffPanel();
+        panel.add(sizeCutoffPanel);
         loadFields(savedParameters);
+        loadSizeFields(savedSize);
+        refreshSizeCutoffPanelOnly();
         markPreviewStale(EMPTY_TEXT);
         return panel;
     }
@@ -200,6 +239,7 @@ public final class StarDistParameterStage implements ConfigQcStage {
                 preview.setAdjusted(null);
                 preview.setAdjustedState(PreviewPairPanel.PreviewState.STALE, EMPTY_TEXT);
             }
+            refreshSizeCutoffPanelOnly();
             refreshLargePreviewModel();
             setStatus(EMPTY_TEXT);
         } catch (Exception e) {
@@ -210,12 +250,21 @@ public final class StarDistParameterStage implements ConfigQcStage {
 
     @Override
     public boolean lockIn(ConfigQcContext context) {
-        Parameters parameters = collectParameters();
-        parameterStore.save(formatMethod(parameters));
-        savedParameters = parameters;
-        restartParameters = null;
-        setStatus("Locked StarDist parameters.");
-        return true;
+        try {
+            Parameters parameters = collectParameters();
+            ParticleSizeStage.SizeToken size = collectSizeToken();
+            parameterStore.save(formatMethod(parameters));
+            sizeStore.set(size.toToken());
+            savedParameters = parameters;
+            savedSize = size;
+            restartParameters = null;
+            restartSize = null;
+            setStatus("Locked StarDist parameters.");
+            return true;
+        } catch (RuntimeException e) {
+            setError("Enter valid min and max voxel sizes.");
+            return false;
+        }
     }
 
     @Override
@@ -226,6 +275,11 @@ public final class StarDistParameterStage implements ConfigQcStage {
     @Override
     public void restartStage(ConfigQcContext context) {
         restartParameters = collectParameters();
+        try {
+            restartSize = collectSizeToken();
+        } catch (RuntimeException ignored) {
+            // Keep the prior restart value if the current fields are invalid.
+        }
         setStatus("Restarting StarDist review from the first image.");
     }
 
@@ -286,8 +340,20 @@ public final class StarDistParameterStage implements ConfigQcStage {
         setTextForTest(intensityMinField, value);
     }
 
+    void setSizeMinForTest(String value) {
+        setTextForTest(sizeMinField, value);
+    }
+
+    void setSizeMaxForTest(String value) {
+        setTextForTest(sizeMaxField, value);
+    }
+
     void runPreviewNowForTest() throws Exception {
         runPreviewNow();
+    }
+
+    String sizeCutoffSummaryForTest() {
+        return sizeCutoffPanel == null ? "" : sizeCutoffPanel.summaryTextForTest();
     }
 
     void selectRawSourceForTest() {
@@ -322,15 +388,29 @@ public final class StarDistParameterStage implements ConfigQcStage {
         linkingField = createNumberField(5);
         gapClosingField = createNumberField(5);
         frameGapField = createNumberField(4);
-        areaMinField = createNumberField(5);
-        areaMaxField = createNumberField(5);
-        qualityMinField = createNumberField(5);
-        intensityMinField = createNumberField(5);
+        areaMinField = createPostDetectionFilterField(5);
+        areaMaxField = createPostDetectionFilterField(5);
+        qualityMinField = createPostDetectionFilterField(5);
+        intensityMinField = createPostDetectionFilterField(5);
+        sizeMinField = createSizeField(6);
+        sizeMaxField = createSizeField(8);
     }
 
     private JTextField createNumberField(int columns) {
         JTextField field = new JTextField(columns);
         installFieldListener(field);
+        return field;
+    }
+
+    private JTextField createSizeField(int columns) {
+        JTextField field = new JTextField(columns);
+        installPostDetectionFilterListener(field);
+        return field;
+    }
+
+    private JTextField createPostDetectionFilterField(int columns) {
+        JTextField field = new JTextField(columns);
+        installPostDetectionFilterListener(field);
         return field;
     }
 
@@ -399,13 +479,13 @@ public final class StarDistParameterStage implements ConfigQcStage {
         row.add(new JLabel("Intensity min"), gbc);
         gbc.gridx++;
         row.add(intensityMinField, gbc);
-
         gbc.gridx++;
         gbc.weightx = 1.0;
         gbc.fill = GridBagConstraints.HORIZONTAL;
         row.add(Box.createHorizontalGlue(), gbc);
 
         previewButton = new JButton("Run Preview");
+        flash.pipeline.ui.FlashIcons.apply(previewButton, flash.pipeline.ui.FlashIcons.play());
         previewButton.addActionListener(e -> runPreviewOnWorker());
         gbc.gridx++;
         gbc.weightx = 0.0;
@@ -413,10 +493,44 @@ public final class StarDistParameterStage implements ConfigQcStage {
         row.add(previewButton, gbc);
 
         resetButton = new JButton("Reset to saved");
+        flash.pipeline.ui.FlashIcons.apply(resetButton, flash.pipeline.ui.FlashIcons.refresh());
         resetButton.addActionListener(e -> resetToSaved());
         gbc.gridx++;
         gbc.insets = new Insets(0, 2, 0, 0);
         row.add(resetButton, gbc);
+        return row;
+    }
+
+    private JComponent buildSizeRow() {
+        JPanel row = new JPanel(new GridBagLayout());
+        row.setOpaque(false);
+        row.setAlignmentX(JComponent.LEFT_ALIGNMENT);
+        row.setBorder(BorderFactory.createEmptyBorder(2, 0, 2, 0));
+
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.gridy = 0;
+        gbc.insets = new Insets(0, 0, 0, 6);
+        gbc.anchor = GridBagConstraints.WEST;
+
+        gbc.gridx = 0;
+        JLabel heading = new JLabel("Object size:");
+        Font font = heading.getFont();
+        if (font != null) heading.setFont(font.deriveFont(Font.BOLD));
+        row.add(heading, gbc);
+
+        gbc.gridx++;
+        row.add(new JLabel("Size min"), gbc);
+        gbc.gridx++;
+        row.add(sizeMinField, gbc);
+        gbc.gridx++;
+        row.add(new JLabel("Size max"), gbc);
+        gbc.gridx++;
+        row.add(sizeMaxField, gbc);
+
+        gbc.gridx++;
+        gbc.weightx = 1.0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        row.add(Box.createHorizontalGlue(), gbc);
         return row;
     }
 
@@ -432,6 +546,22 @@ public final class StarDistParameterStage implements ConfigQcStage {
 
             @Override public void changedUpdate(DocumentEvent e) {
                 fieldChanged();
+            }
+        });
+    }
+
+    private void installPostDetectionFilterListener(JTextField field) {
+        field.getDocument().addDocumentListener(new DocumentListener() {
+            @Override public void insertUpdate(DocumentEvent e) {
+                postDetectionFilterFieldChanged();
+            }
+
+            @Override public void removeUpdate(DocumentEvent e) {
+                postDetectionFilterFieldChanged();
+            }
+
+            @Override public void changedUpdate(DocumentEvent e) {
+                postDetectionFilterFieldChanged();
             }
         });
     }
@@ -454,14 +584,37 @@ public final class StarDistParameterStage implements ConfigQcStage {
         }
     }
 
+    private void loadSizeFields(ParticleSizeStage.SizeToken token) {
+        updatingFields = true;
+        try {
+            ParticleSizeStage.SizeToken safe = token == null
+                    ? new ParticleSizeStage.SizeToken("100", "Infinity")
+                    : token;
+            if (sizeMinField != null) sizeMinField.setText(safe.minText);
+            if (sizeMaxField != null) sizeMaxField.setText(safe.maxText);
+        } finally {
+            updatingFields = false;
+        }
+    }
+
     private void fieldChanged() {
         if (updatingFields) return;
         markPreviewStale(STALE_TEXT);
     }
 
+    private void postDetectionFilterFieldChanged() {
+        if (updatingFields) return;
+        if (!refreshObjectFilterPreview()) {
+            markPreviewStale(STALE_TEXT);
+        }
+    }
+
     private void resetToSaved() {
         loadFields(savedParameters);
-        markPreviewStale(STALE_TEXT);
+        loadSizeFields(savedSize);
+        if (!refreshObjectFilterPreview()) {
+            markPreviewStale(STALE_TEXT);
+        }
     }
 
     private void runPreviewOnWorker() {
@@ -470,7 +623,7 @@ public final class StarDistParameterStage implements ConfigQcStage {
             setError("No StarDist input image is available.");
             return;
         }
-        final Parameters parameters = collectParameters();
+        final Parameters parameters = previewRunParameters(collectParameters());
         setPreviewState(PreviewPairPanel.PreviewState.RUNNING, "Running StarDist preview...");
         setButtonsEnabled(false);
         previewWorker = new SwingWorker<ImagePlus, Void>() {
@@ -496,7 +649,8 @@ public final class StarDistParameterStage implements ConfigQcStage {
             throw new IllegalStateException("No StarDist input image is available.");
         }
         setPreviewState(PreviewPairPanel.PreviewState.RUNNING, "Running StarDist preview...");
-        installLabelPreview(previewAdapter.runPreview(filteredSource, collectParameters()));
+        installLabelPreview(previewAdapter.runPreview(filteredSource,
+                previewRunParameters(collectParameters())));
     }
 
     private void installLabelPreview(ImagePlus labelImage) {
@@ -506,15 +660,19 @@ public final class StarDistParameterStage implements ConfigQcStage {
         }
         int count = previewAdapter.countLabels(labelImage);
         labelImage.setTitle("StarDist label preview");
-        LabelMapStyler.apply(labelImage, count);
         ImagePlus old = labelPreview;
         labelPreview = labelImage;
+        objectStats = objectStatsForLabelPreview(labelImage);
         previewStale = false;
         lastObjectCount = count;
-        String text = "Objects: " + count + " ready";
-        refreshSourceAndOutputPreview();
-        setStatus(text);
-        if (actions != null) actions.setPreviewButtonStale(false);
+        boolean ready = refreshObjectFilterPreview();
+        if (ready) {
+            String text = objectCountText();
+            setStatus(text);
+            if (actions != null) actions.setPreviewButtonStale(false);
+        } else {
+            markPreviewStale(STALE_TEXT);
+        }
         if (old != null && old != labelImage) {
             previewAdapter.close(old);
         }
@@ -573,9 +731,221 @@ public final class StarDistParameterStage implements ConfigQcStage {
     }
 
     private String objectCountText() {
+        if (objectFilterSummary != null && objectFilterSummary.totalCount > 0) {
+            return objectFilterSummary.statusText();
+        }
+        if (sizeSummary != null && sizeSummary.totalCount > 0) {
+            return sizeSummary.statusText();
+        }
         return lastObjectCount >= 0
                 ? "Objects: " + lastObjectCount + " ready"
                 : "Objects: not previewed";
+    }
+
+    private ParticleSizeStage.SizeToken collectSizeToken() {
+        int min = ObjectsCounter3DWrapper.parseMinSizeVoxels(
+                sizeMinField == null ? null : sizeMinField.getText(), 100);
+        min = Math.max(0, min);
+        String max = normalizeMaxText(sizeMaxField == null ? null : sizeMaxField.getText());
+        return new ParticleSizeStage.SizeToken(String.valueOf(min), max);
+    }
+
+    private boolean refreshObjectFilterPreview() {
+        if (labelPreview == null || objectStats == null) {
+            refreshSizeCutoffPanelOnly();
+            return false;
+        }
+        try {
+            Parameters parameters = collectParameters();
+            ParticleSizeStage.SizeToken token = collectSizeToken();
+            int minSize = ObjectsCounter3DWrapper.parseMinSizeVoxels(token.minText, 100);
+            int maxSize = ObjectsCounter3DWrapper.parseMaxSizeVoxels(token.maxText, filteredSource);
+            boolean maxFinite = isFiniteMaxToken(token.maxText);
+            sizeSummary = ObjectSizeFilterPreview.summarize(
+                    objectStats, filteredSource, minSize, maxSize, maxFinite);
+            Map<Integer, ObjectSizeFilterPreview.Classification> starDistClasses =
+                    starDistFilterClassifications(objectStats, parameters);
+            if (starDistClasses == null) {
+                return false;
+            }
+            Map<Integer, ObjectSizeFilterPreview.Classification> additionalClasses =
+                    additionalStarDistClasses(objectStats, sizeSummary, starDistClasses);
+            objectFilterSummary = summarizeObjectFilters(objectStats, sizeSummary, additionalClasses);
+            ObjectSizeFilterPreview.applyClassifiedLut(labelPreview, sizeSummary, additionalClasses);
+            if (sizeCutoffPanel != null) sizeCutoffPanel.setSummary(sizeSummary);
+            previewStale = false;
+            refreshSourceAndOutputPreview();
+            setStatus(objectFilterSummary.statusText());
+            if (actions != null) actions.setPreviewButtonStale(false);
+            return true;
+        } catch (RuntimeException e) {
+            setError("Enter valid min and max voxel sizes.");
+            return true;
+        }
+    }
+
+    private void refreshSizeCutoffPanelOnly() {
+        if (sizeCutoffPanel == null) return;
+        try {
+            ParticleSizeStage.SizeToken token = collectSizeToken();
+            int minSize = ObjectsCounter3DWrapper.parseMinSizeVoxels(token.minText, 100);
+            int maxSize = ObjectsCounter3DWrapper.parseMaxSizeVoxels(token.maxText, filteredSource);
+            boolean maxFinite = isFiniteMaxToken(token.maxText);
+            sizeSummary = ObjectSizeFilterPreview.summarize(
+                    null, filteredSource, minSize, maxSize, maxFinite);
+            sizeCutoffPanel.setSummary(sizeSummary);
+        } catch (RuntimeException e) {
+            sizeCutoffPanel.setSummary(null);
+        }
+    }
+
+    private ResultsTable objectStatsForLabelPreview(ImagePlus labelImage) {
+        ResultsTable stats = ObjectSizeFilterPreview.statisticsFromLabelMap(labelImage, filteredSource);
+        Object property = labelImage == null ? null
+                : labelImage.getProperty(StarDist3DRunner.OBJECT_STATS_PROPERTY);
+        if (!(property instanceof ResultsTable)) return stats;
+        ResultsTable starDistStats = (ResultsTable) property;
+        copyStarDistMetricColumn(starDistStats, stats, StarDist3DRunner.STATS_AREA_MEAN);
+        copyStarDistMetricColumn(starDistStats, stats, StarDist3DRunner.STATS_QUALITY_MEAN);
+        copyStarDistMetricColumn(starDistStats, stats, StarDist3DRunner.STATS_INTENSITY_MEAN);
+        return stats;
+    }
+
+    private static void copyStarDistMetricColumn(ResultsTable source,
+                                                 ResultsTable target,
+                                                 String column) {
+        if (!hasColumn(source, column) || source == null || target == null) return;
+        Map<Integer, Integer> targetRows = rowsByLabel(target);
+        for (int row = 0; row < source.size(); row++) {
+            int label = labelForStatsRow(source, row);
+            Integer targetRow = targetRows.get(Integer.valueOf(label));
+            if (targetRow == null) continue;
+            double value = metric(source, column, row);
+            if (Double.isFinite(value)) {
+                target.setValue(column, targetRow.intValue(), value);
+            }
+        }
+    }
+
+    private Map<Integer, ObjectSizeFilterPreview.Classification> starDistFilterClassifications(
+            ResultsTable stats,
+            Parameters parameters) {
+        Map<Integer, ObjectSizeFilterPreview.Classification> classes =
+                new HashMap<Integer, ObjectSizeFilterPreview.Classification>();
+        if (stats == null || stats.size() == 0 || parameters == null) return classes;
+        boolean areaActive = parameters.areaMin > 0 || Double.isFinite(parameters.areaMax);
+        boolean qualityActive = parameters.qualityMin > 0;
+        boolean intensityActive = parameters.intensityMin > 0;
+        if (!areaActive && !qualityActive && !intensityActive) return classes;
+        if ((areaActive && !hasColumn(stats, StarDist3DRunner.STATS_AREA_MEAN))
+                || (qualityActive && !hasColumn(stats, StarDist3DRunner.STATS_QUALITY_MEAN))
+                || (intensityActive && !hasColumn(stats, StarDist3DRunner.STATS_INTENSITY_MEAN))) {
+            return null;
+        }
+        for (int row = 0; row < stats.size(); row++) {
+            int label = labelForStatsRow(stats, row);
+            ObjectSizeFilterPreview.Classification classification =
+                    ObjectSizeFilterPreview.Classification.KEPT;
+            double area = metric(stats, StarDist3DRunner.STATS_AREA_MEAN, row);
+            if (Double.isFinite(area)) {
+                if (parameters.areaMin > 0 && area < parameters.areaMin) {
+                    classification = ObjectSizeFilterPreview.Classification.BELOW_MIN;
+                } else if (Double.isFinite(parameters.areaMax) && area > parameters.areaMax) {
+                    classification = ObjectSizeFilterPreview.Classification.ABOVE_MAX;
+                }
+            }
+            double quality = metric(stats, StarDist3DRunner.STATS_QUALITY_MEAN, row);
+            if (classification == ObjectSizeFilterPreview.Classification.KEPT
+                    && parameters.qualityMin > 0
+                    && Double.isFinite(quality)
+                    && quality < parameters.qualityMin) {
+                classification = ObjectSizeFilterPreview.Classification.BELOW_MIN;
+            }
+            double intensity = metric(stats, StarDist3DRunner.STATS_INTENSITY_MEAN, row);
+            if (classification == ObjectSizeFilterPreview.Classification.KEPT
+                    && parameters.intensityMin > 0
+                    && Double.isFinite(intensity)
+                    && intensity < parameters.intensityMin) {
+                classification = ObjectSizeFilterPreview.Classification.BELOW_MIN;
+            }
+            if (classification != ObjectSizeFilterPreview.Classification.KEPT) {
+                classes.put(Integer.valueOf(label), classification);
+            }
+        }
+        return classes;
+    }
+
+    private static Map<Integer, ObjectSizeFilterPreview.Classification> additionalStarDistClasses(
+            ResultsTable stats,
+            ObjectSizeFilterPreview.Summary sizeSummary,
+            Map<Integer, ObjectSizeFilterPreview.Classification> starDistClasses) {
+        Map<Integer, ObjectSizeFilterPreview.Classification> additional =
+                new HashMap<Integer, ObjectSizeFilterPreview.Classification>();
+        if (stats == null || starDistClasses == null || starDistClasses.isEmpty()) return additional;
+        for (int row = 0; row < stats.size(); row++) {
+            int label = labelForStatsRow(stats, row);
+            ObjectSizeFilterPreview.Classification sizeClass = sizeSummary == null
+                    ? ObjectSizeFilterPreview.Classification.KEPT
+                    : sizeSummary.classificationForLabel(label);
+            ObjectSizeFilterPreview.Classification starDistClass =
+                    starDistClasses.get(Integer.valueOf(label));
+            if (sizeClass == ObjectSizeFilterPreview.Classification.KEPT
+                    && starDistClass != null
+                    && starDistClass != ObjectSizeFilterPreview.Classification.KEPT) {
+                additional.put(Integer.valueOf(label), starDistClass);
+            }
+        }
+        return additional;
+    }
+
+    private static ObjectFilterSummary summarizeObjectFilters(
+            ResultsTable stats,
+            ObjectSizeFilterPreview.Summary sizeSummary,
+            Map<Integer, ObjectSizeFilterPreview.Classification> additionalClasses) {
+        int total = stats == null ? 0 : stats.size();
+        int small = sizeSummary == null ? 0 : sizeSummary.belowMinCount;
+        int large = sizeSummary == null ? 0 : sizeSummary.aboveMaxCount;
+        int starDist = additionalClasses == null ? 0 : additionalClasses.size();
+        int kept = Math.max(0, total - small - large - starDist);
+        return new ObjectFilterSummary(total, kept, small, large, starDist);
+    }
+
+    private static Map<Integer, Integer> rowsByLabel(ResultsTable stats) {
+        Map<Integer, Integer> rows = new HashMap<Integer, Integer>();
+        if (stats == null) return rows;
+        for (int row = 0; row < stats.size(); row++) {
+            rows.put(Integer.valueOf(labelForStatsRow(stats, row)), Integer.valueOf(row));
+        }
+        return rows;
+    }
+
+    private static int labelForStatsRow(ResultsTable stats, int row) {
+        try {
+            double label = stats.getValue("Label", row);
+            if (Double.isFinite(label) && label > 0) return (int) Math.round(label);
+        } catch (RuntimeException ignored) {
+            // Fall through to row order.
+        }
+        return row + 1;
+    }
+
+    private static boolean hasColumn(ResultsTable stats, String column) {
+        if (stats == null || column == null) return false;
+        String[] headings = stats.getHeadings();
+        if (headings == null) return false;
+        for (int i = 0; i < headings.length; i++) {
+            if (column.equals(headings[i])) return true;
+        }
+        return false;
+    }
+
+    private static double metric(ResultsTable stats, String column, int row) {
+        try {
+            double value = stats.getValue(column, row);
+            return Double.isFinite(value) ? value : Double.NaN;
+        } catch (RuntimeException e) {
+            return Double.NaN;
+        }
     }
 
     private Parameters collectParameters() {
@@ -591,6 +961,20 @@ public final class StarDistParameterStage implements ConfigQcStage {
                 rawAreaMax <= 0 ? Double.POSITIVE_INFINITY : rawAreaMax,
                 parse(qualityMinField, fallback.qualityMin),
                 parse(intensityMinField, fallback.intensityMin));
+    }
+
+    private static Parameters previewRunParameters(Parameters parameters) {
+        Parameters p = parameters == null ? Parameters.defaults() : parameters;
+        return new Parameters(
+                p.probabilityThreshold,
+                p.nmsThreshold,
+                p.linkingMaxDistance,
+                p.gapClosingMaxDistance,
+                p.maxFrameGap,
+                0,
+                Double.POSITIVE_INFINITY,
+                0,
+                0);
     }
 
     private void markPreviewStale(String text) {
@@ -628,6 +1012,9 @@ public final class StarDistParameterStage implements ConfigQcStage {
     private void setPreviewError(String text) {
         ImagePlus old = labelPreview;
         labelPreview = null;
+        objectStats = null;
+        sizeSummary = null;
+        objectFilterSummary = null;
         previewStale = true;
         lastObjectCount = -1;
         if (preview != null) {
@@ -653,6 +1040,8 @@ public final class StarDistParameterStage implements ConfigQcStage {
         if (areaMaxField != null) areaMaxField.setEnabled(enabled);
         if (qualityMinField != null) qualityMinField.setEnabled(enabled);
         if (intensityMinField != null) intensityMinField.setEnabled(enabled);
+        if (sizeMinField != null) sizeMinField.setEnabled(enabled);
+        if (sizeMaxField != null) sizeMaxField.setEnabled(enabled);
         if (preview != null) {
             preview.setSourceModeEnabled(enabled);
             preview.setObjectOverlayEnabled(enabled);
@@ -675,6 +1064,9 @@ public final class StarDistParameterStage implements ConfigQcStage {
         ImagePlus filtered = filteredSource;
         ImagePlus raw = rawSource;
         labelPreview = null;
+        objectStats = null;
+        sizeSummary = null;
+        objectFilterSummary = null;
         rawSource = null;
         filteredSource = null;
         lastObjectCount = -1;
@@ -773,5 +1165,70 @@ public final class StarDistParameterStage implements ConfigQcStage {
 
     private static int sanitizeFrameGap(double value) {
         return Math.max(0, (int) Math.round(value));
+    }
+
+    private static String normalizeMaxText(String value) {
+        if (value == null) return "Infinity";
+        String trimmed = value.trim();
+        if (trimmed.isEmpty()
+                || "infinity".equalsIgnoreCase(trimmed)
+                || "inf".equalsIgnoreCase(trimmed)) {
+            return "Infinity";
+        }
+        double parsed = Double.parseDouble(trimmed);
+        if (!Double.isFinite(parsed)) return "Infinity";
+        return String.valueOf(Math.max(0, (int) Math.round(parsed)));
+    }
+
+    private static boolean isFiniteMaxToken(String value) {
+        String normalized = normalizeMaxText(value);
+        return !"Infinity".equals(normalized);
+    }
+
+    private static SizeStore defaultSizeStore() {
+        return new SizeStore() {
+            @Override public String get() {
+                return "0-Infinity";
+            }
+
+            @Override public void set(String token) {
+            }
+        };
+    }
+
+    private static final class ObjectFilterSummary {
+        final int totalCount;
+        final int keptCount;
+        final int belowMinCount;
+        final int aboveMaxCount;
+        final int starDistRemovedCount;
+
+        ObjectFilterSummary(int totalCount,
+                            int keptCount,
+                            int belowMinCount,
+                            int aboveMaxCount,
+                            int starDistRemovedCount) {
+            this.totalCount = totalCount;
+            this.keptCount = keptCount;
+            this.belowMinCount = belowMinCount;
+            this.aboveMaxCount = aboveMaxCount;
+            this.starDistRemovedCount = starDistRemovedCount;
+        }
+
+        String statusText() {
+            if (totalCount <= 0) {
+                return "Objects: not previewed";
+            }
+            int removed = belowMinCount + aboveMaxCount + starDistRemovedCount;
+            if (removed <= 0) {
+                return "Objects: " + keptCount + " ready";
+            }
+            String text = "Objects: " + keptCount + " kept; removed "
+                    + belowMinCount + " small, " + aboveMaxCount + " large";
+            if (starDistRemovedCount > 0) {
+                text += ", " + starDistRemovedCount + " by StarDist filters";
+            }
+            return text;
+        }
     }
 }

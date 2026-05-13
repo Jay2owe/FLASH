@@ -362,6 +362,7 @@ public class StatisticalAnalysis implements Analysis {
                 "Apply a saved Statistics preset to populate paired/distribution/post-hoc choices.");
 
         final JButton savePreset = new JButton("Save as preset...");
+        flash.pipeline.ui.FlashIcons.apply(savePreset, flash.pipeline.ui.FlashIcons.save());
         savePreset.setToolTipText("Save the current statistics configuration as a named preset.");
         savePreset.addActionListener(e -> handleSaveAsPreset(directory, presetCombo));
 

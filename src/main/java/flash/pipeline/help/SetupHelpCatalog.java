@@ -18,9 +18,6 @@ public final class SetupHelpCatalog {
                     + "The saved names and colours are reused for setup files, result tables, previews, "
                     + "making presentation-ready images, ROI drawing, and exported presentation images.",
             section("Controls",
-                    "Preset dropdown: loads a saved Set Up Configuration preset.",
-                    "Save as preset: saves the current setup as a reusable preset.",
-                    "Channel Setup Helper: opens a guided marker-aware setup helper.",
                     "Number of channels: the number of colour channels in each image.",
                     "Channel name: the marker, stain, or signal identity written into outputs.",
                     "LUT: the display colour used for previews and generated images."),
@@ -94,10 +91,7 @@ public final class SetupHelpCatalog {
                     "Set Filter and Parameters: choose a filter preset and adjust its parameters.",
                     "Display Ranges: set how channels are scaled for previews and presentation-ready images.",
                     "Channel Thresholds: set signal-positive pixels for ROI / Intensity Analysis and classical object detection.",
-                    "Segmentation Method: choose Classical, StarDist 3D, or Cellpose for object analysis.",
-                    "Object Size Filter: keep classical objects within a voxel-size range.",
-                    "TrackMate-StarDist Parameters: tune channels using StarDist 3D.",
-                    "Cellpose 3D Parameters: tune channels using Cellpose."),
+                    "Segmentation Method: choose which channels open object segmentation setup; the method-specific controls appear in the preview stage."),
             section("Status icons",
                     "Tick means full saved data, ! means partial saved data, blank means no saved data found."));
 
@@ -207,7 +201,7 @@ public final class SetupHelpCatalog {
                     "Diffuse Object: for faint diffuse staining.",
                     "Custom: use or create a custom macro instead of a bundled preset."),
             section("Controls",
-                    "Open in canvas...: opens the visual filter builder for custom macros or larger structural edits.",
+                    "Custom macro...: opens the custom macro chooser to build visually, record Fiji actions, or import a macro file.",
                     "+ Add filter...: adds another filter step.",
                     "Run Preview: applies the current filter to the selected QC image.",
                     "Reset: restores the saved filter.",

@@ -1173,6 +1173,7 @@ public class ThreeDObjectAnalysis implements Analysis {
             bindings.presetCombo = presetCombo;
         }
         final JButton savePreset = new JButton("Save as preset...");
+        flash.pipeline.ui.FlashIcons.apply(savePreset, flash.pipeline.ui.FlashIcons.save());
         savePreset.setToolTipText("Save the current 3D Object Analysis options as a named preset.");
         savePreset.addActionListener(e -> handleSaveThreeDObjectPreset(directory, cfg, bindings));
         JPanel row = SetupHelperButton.createHeaderRow("3D Object Setup", presetCombo, savePreset,
@@ -2626,6 +2627,8 @@ public class ThreeDObjectAnalysis implements Analysis {
                         res = ocWrapper.fromLabelImage(
                                 fr.labelImage,
                                 fr.unfiltered,   // redirect for intensity measurements
+                                fr.minSizeVox,
+                                fr.maxSizeVox,
                                 true,            // wantObjectsMap
                                 true             // wantMaskedImage
                         );
@@ -2775,6 +2778,8 @@ public class ThreeDObjectAnalysis implements Analysis {
                             res = ocWrapper.fromLabelImage(
                                     res.getObjectsMap(),
                                     fr.unfiltered,
+                                    fr.minSizeVox,
+                                    fr.maxSizeVox,
                                     true, true);
                         }
                     }
@@ -2987,7 +2992,9 @@ public class ThreeDObjectAnalysis implements Analysis {
             try {
                 if (fr.labelImageSegmentation) {
                     countResults[c] = ocWrapper.fromLabelImage(
-                            fr.labelImage, fr.unfiltered, true, true);
+                            fr.labelImage, fr.unfiltered,
+                            fr.minSizeVox, fr.maxSizeVox,
+                            true, true);
                     int objectCount = countResults[c].getStatistics() == null
                             ? 0 : countResults[c].getStatistics().size();
                     IJ.log("    3DObjectCounter [" + channelName + "]: "
@@ -3097,7 +3104,8 @@ public class ThreeDObjectAnalysis implements Analysis {
 
                 // Re-derive statistics from the cropped, centroid-filtered label image
                 ObjectsCounter3DWrapper.Result roiRes = (roiLabels != null && roiUnfiltered != null)
-                        ? ocWrapper.fromLabelImage(roiLabels, roiUnfiltered, true, true)
+                        ? ocWrapper.fromLabelImage(roiLabels, roiUnfiltered,
+                        fr.minSizeVox, fr.maxSizeVox, true, true)
                         : new ObjectsCounter3DWrapper.Result(null, roiLabels, null, false);
 
                 // Register images for downstream use (coloc, process length, save)

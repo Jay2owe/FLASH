@@ -28,6 +28,7 @@ import java.awt.Dialog;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
+import java.awt.GraphicsConfiguration;
 import java.awt.Frame;
 import java.awt.GraphicsEnvironment;
 import java.awt.GridBagConstraints;
@@ -65,6 +66,9 @@ public final class ConfigQcDialog {
     private static final String PREVIEW_BUTTON_LABEL = "Run Preview";
     private static final String STALE_PREFIX = "\u25CF ";
     private static final Dimension MINIMUM_DIALOG_SIZE = new Dimension(1180, 820);
+    private static final double DEFAULT_SCREEN_HEIGHT_FRACTION = 0.70;
+    private static final double DIALOG_WIDTH_HEIGHT_RATIO =
+            MINIMUM_DIALOG_SIZE.getWidth() / MINIMUM_DIALOG_SIZE.getHeight();
     private static final int EXPANDABLE_PREVIEW_MIN_HEIGHT = 300;
     private static final int EXPANDABLE_CONTROLS_MIN_HEIGHT = 220;
 
@@ -75,9 +79,9 @@ public final class ConfigQcDialog {
     private final int stagePathCurrentIndexOverride;
     private final PreviewPairPanel previewPair;
     private final JPanel rootPanel = new JPanel(new BorderLayout(8, 8));
-    private final JPanel mainBodyPanel = new JPanel(new BorderLayout(0, 6));
-    private final JPanel stackedPreviewControlsPanel = new JPanel(new BorderLayout(0, 6));
-    private final JPanel stageControlsPanel = new JPanel(new BorderLayout(0, 6));
+    private final JPanel mainBodyPanel = new JPanel(new BorderLayout(0, 2));
+    private final JPanel stackedPreviewControlsPanel = new JPanel(new BorderLayout(0, 2));
+    private final JPanel stageControlsPanel = new JPanel(new BorderLayout(0, 4));
     private final JPanel controlsPanel = new JPanel(new BorderLayout());
     private final JPanel stageBreadcrumbPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
     private final JLabel stageLabel = new JLabel(" ");
@@ -174,8 +178,7 @@ public final class ConfigQcDialog {
             return result;
         }
         dialog.pack();
-        growDialogToMinimumSize();
-        capDialogToScreenBounds();
+        sizeDialogForScreen();
         dialog.setLocationRelativeTo(owner);
         dialog.setVisible(true);
         if (!dialog.isModal()) {
@@ -235,7 +238,7 @@ public final class ConfigQcDialog {
     }
 
     private JComponent buildMain() {
-        JPanel main = new JPanel(new BorderLayout(8, 8));
+        JPanel main = new JPanel(new BorderLayout(8, 2));
         main.setOpaque(false);
         main.add(previewPair.previewToolstrip(), BorderLayout.NORTH);
 
@@ -380,8 +383,7 @@ public final class ConfigQcDialog {
         channelLabel.setText(context.getChannelLabel());
         currentImageDisplayName = context.getCurrentImageDisplayName();
         String imageName = context.getCurrentImageShortDisplayName();
-        progressLabel.setText(stageProgressText() + "    " + context.getImageProgressText()
-                + "    - " + imageName);
+        progressLabel.setText(imageProgressHeaderText(imageName));
         previewPair.setOriginalPreviewTitle("Original Image - " + imageName);
         previewPair.setAdjustedPreviewTitle("Adjusted / output preview");
     }
@@ -716,20 +718,11 @@ public final class ConfigQcDialog {
         return !context.hasImages() || context.getCurrentImageIndex() + 1 >= context.getImageCount();
     }
 
-    private String stageProgressText() {
-        int applicableCount = 0;
-        int currentPosition = 0;
-        for (int i = 0; i < stages.size(); i++) {
-            if (!stages.get(i).isApplicable(context)) continue;
-            applicableCount++;
-            if (i == stageIndex) {
-                currentPosition = applicableCount;
-            }
+    private String imageProgressHeaderText(String imageName) {
+        if (!context.hasImages()) {
+            return context.getImageProgressText();
         }
-        if (applicableCount == 0) {
-            return "No stages";
-        }
-        return "Stage " + currentPosition + " / " + applicableCount;
+        return context.getImageProgressText() + "    - " + imageName;
     }
 
     private void refreshStageBreadcrumb() {
@@ -862,27 +855,68 @@ public final class ConfigQcDialog {
         }
     }
 
-    private void capDialogToScreenBounds() {
+    private void sizeDialogForScreen() {
         if (dialog == null) return;
-        Rectangle screen = GraphicsEnvironment
-                .getLocalGraphicsEnvironment()
-                .getMaximumWindowBounds();
-        Dimension size = dialog.getSize();
-        int width = Math.min(size.width, screen.width);
-        int height = Math.min(size.height, screen.height);
-        if (width != size.width || height != size.height) {
-            dialog.setSize(width, height);
-        }
+        Rectangle screen = availableScreenBounds();
+        Dimension size = defaultDialogSize(screen, dialog.getSize());
+        dialog.setMinimumSize(boundedMinimumDialogSize(screen));
+        dialog.setSize(size);
     }
 
-    private void growDialogToMinimumSize() {
-        if (dialog == null) return;
-        Dimension size = dialog.getSize();
-        int width = Math.max(size.width, MINIMUM_DIALOG_SIZE.width);
-        int height = Math.max(size.height, MINIMUM_DIALOG_SIZE.height);
-        if (width != size.width || height != size.height) {
-            dialog.setSize(width, height);
+    private Rectangle availableScreenBounds() {
+        GraphicsConfiguration configuration = dialog == null ? null : dialog.getGraphicsConfiguration();
+        if (configuration == null && owner != null) {
+            configuration = owner.getGraphicsConfiguration();
         }
+        if (configuration == null) {
+            return GraphicsEnvironment
+                    .getLocalGraphicsEnvironment()
+                    .getMaximumWindowBounds();
+        }
+        Rectangle bounds = configuration.getBounds();
+        Insets insets = Toolkit.getDefaultToolkit().getScreenInsets(configuration);
+        int width = Math.max(1, bounds.width - insets.left - insets.right);
+        int height = Math.max(1, bounds.height - insets.top - insets.bottom);
+        return new Rectangle(bounds.x + insets.left, bounds.y + insets.top, width, height);
+    }
+
+    private static Dimension defaultDialogSize(Rectangle screen, Dimension packedSize) {
+        Rectangle bounds = screen == null
+                ? new Rectangle(0, 0, MINIMUM_DIALOG_SIZE.width, MINIMUM_DIALOG_SIZE.height)
+                : screen;
+        int screenWidth = Math.max(1, bounds.width);
+        int screenHeight = Math.max(1, bounds.height);
+
+        int height = Math.max(1, (int) Math.round(screenHeight * DEFAULT_SCREEN_HEIGHT_FRACTION));
+        int width = Math.max(1, (int) Math.round(height * DIALOG_WIDTH_HEIGHT_RATIO));
+
+        int minimumHeight = Math.min(MINIMUM_DIALOG_SIZE.height, screenHeight);
+        if (height < minimumHeight) {
+            height = minimumHeight;
+            width = Math.max(width, (int) Math.round(height * DIALOG_WIDTH_HEIGHT_RATIO));
+        }
+
+        if (width > screenWidth) {
+            width = screenWidth;
+            height = Math.min(height, Math.max(1, (int) Math.round(width / DIALOG_WIDTH_HEIGHT_RATIO)));
+        }
+
+        if (packedSize != null) {
+            width = Math.max(width, Math.min(packedSize.width, screenWidth));
+            height = Math.max(height, Math.min(packedSize.height, screenHeight));
+        }
+        width = Math.min(width, screenWidth);
+        height = Math.min(height, screenHeight);
+        return new Dimension(width, height);
+    }
+
+    private static Dimension boundedMinimumDialogSize(Rectangle screen) {
+        if (screen == null) {
+            return new Dimension(MINIMUM_DIALOG_SIZE);
+        }
+        int width = Math.min(MINIMUM_DIALOG_SIZE.width, Math.max(1, screen.width));
+        int height = Math.min(MINIMUM_DIALOG_SIZE.height, Math.max(1, screen.height));
+        return new Dimension(width, height);
     }
 
     private static List<ConfigQcStage> copyStages(List<ConfigQcStage> source) {
@@ -970,6 +1004,10 @@ public final class ConfigQcDialog {
 
     static Dimension minimumDialogSizeForTest() {
         return new Dimension(MINIMUM_DIALOG_SIZE);
+    }
+
+    static Dimension defaultDialogSizeForTest(Rectangle screen, Dimension packedSize) {
+        return defaultDialogSize(screen, packedSize);
     }
 
     PreviewPairPanel previewForTest() {

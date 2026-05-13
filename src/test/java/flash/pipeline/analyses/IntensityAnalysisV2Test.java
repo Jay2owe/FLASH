@@ -42,6 +42,8 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 public class IntensityAnalysisV2Test {
@@ -108,6 +110,19 @@ public class IntensityAnalysisV2Test {
     }
 
     @Test
+    public void intensityCleanupDoesNotCloseMainOrFlashWindows() {
+        assertFalse(IntensityAnalysisV2.shouldCloseIntensityNonImageFrame("Log", "ij.text.TextWindow"));
+        assertFalse(IntensityAnalysisV2.shouldCloseIntensityNonImageFrame("ImageJ", "ij.ImageJ"));
+        assertFalse(IntensityAnalysisV2.shouldCloseIntensityNonImageFrame(
+                "FLASH - The Pipeline for Fluorescence Automated Spatial Histology",
+                "javax.swing.JFrame"));
+        assertFalse(IntensityAnalysisV2.shouldCloseIntensityNonImageFrame(
+                "Repeat Pipeline?", "javax.swing.JFrame"));
+        assertTrue(IntensityAnalysisV2.shouldCloseIntensityNonImageFrame(
+                "Results", "ij.text.TextWindow"));
+    }
+
+    @Test
     public void selectedMipOutputIsNotSuppressedByExistingBaseCsv() throws Exception {
         File writeRoot = temp.newFolder("skip-mip");
         assertTrue(new File(writeRoot, "DAPI.csv").createNewFile());
@@ -130,6 +145,52 @@ public class IntensityAnalysisV2Test {
         assertFalse(plan.allSelectedOutputsSkipped());
         assertEquals(new File(writeRoot, "DAPI_MIP.csv").getAbsolutePath(),
                 plan.fileFor(mip).getAbsolutePath());
+    }
+
+    @Test
+    public void mipSourceKeepsBaseCsvForIntensityOnlyAndSpatialInMipCsv() {
+        IntensitySpatialConfig spatial = IntensitySpatialConfig.builder()
+                .enabled(true)
+                .mipEnabled(true)
+                .addAnalysis(IntensitySpatialConfig.AnalysisKey.PATCHINESS)
+                .build();
+
+        List<String> baseColumns = IntensityAnalysisV2.buildOrderedIntensityColumns(
+                IntensitySpatialOutputKey.base("DAPI"),
+                new ResultsTable(),
+                new String[]{"DAPI"},
+                spatial,
+                new boolean[]{false});
+        List<String> mipColumns = IntensityAnalysisV2.buildOrderedIntensityColumns(
+                IntensitySpatialOutputKey.of("DAPI", IntensitySpatialOutputMode.MIP),
+                new ResultsTable(),
+                new String[]{"DAPI"},
+                spatial,
+                new boolean[]{false});
+
+        assertFalse(baseColumns.contains("Intensity_PatchinessCV50"));
+        assertTrue(mipColumns.contains("Intensity_PatchinessCV50"));
+    }
+
+    @Test
+    public void failedSpatialMeasurementKeepsSelectedMipAndNativeRowsAvailable() throws Exception {
+        File writeRoot = temp.newFolder("failed-spatial-placeholders");
+        IntensitySpatialConfig spatial = IntensitySpatialConfig.builder()
+                .enabled(true)
+                .mipEnabled(true)
+                .native3dEnabled(true)
+                .addAnalysis(IntensitySpatialConfig.AnalysisKey.GRANULARITY)
+                .addAnalysis(IntensitySpatialConfig.AnalysisKey.ANISOTROPY_3D)
+                .build();
+        IntensityAnalysisV2.IntensityOutputPlan plan = IntensityAnalysisV2.buildOutputPlan(
+                writeRoot, new String[]{"DAPI"}, false, -1, spatial, 5, false);
+
+        Object failed = invokeFailedChannelSpatialResults(
+                syntheticImage(16, 16), "DAPI", plan, spatial);
+
+        assertNull(fieldValue(failed, "baseResults"));
+        assertNotNull(fieldValue(failed, "mipResult"));
+        assertNotNull(fieldValue(failed, "nativeResult"));
     }
 
     @Test
@@ -209,7 +270,7 @@ public class IntensityAnalysisV2Test {
     public void orderedIntensityColumnsGroupMetadataBasicSameChannelThenPartners() {
         IntensitySpatialConfig spatial = IntensitySpatialConfig.builder()
                 .enabled(true)
-                .mipEnabled(true)
+                .spatialSourceMode(IntensitySpatialConfig.SpatialSourceMode.FULL_STACK)
                 .addAnalysis(IntensitySpatialConfig.AnalysisKey.PATCHINESS)
                 .addAnalysis(IntensitySpatialConfig.AnalysisKey.NULLMODEL)
                 .addAnalysis(IntensitySpatialConfig.AnalysisKey.CROSSMARK)
@@ -518,6 +579,27 @@ public class IntensityAnalysisV2Test {
         Method method = plan.getClass().getDeclaredMethod("newTables");
         method.setAccessible(true);
         return method.invoke(plan);
+    }
+
+    private static Object invokeFailedChannelSpatialResults(
+            ImagePlus raw,
+            String channelName,
+            IntensityAnalysisV2.IntensityOutputPlan outputPlan,
+            IntensitySpatialConfig spatialConfig) throws Exception {
+        Method method = IntensityAnalysisV2.class.getDeclaredMethod(
+                "failedChannelSpatialResults",
+                ImagePlus.class,
+                String.class,
+                IntensityAnalysisV2.IntensityOutputPlan.class,
+                IntensitySpatialConfig.class);
+        method.setAccessible(true);
+        return method.invoke(null, raw, channelName, outputPlan, spatialConfig);
+    }
+
+    private static Object fieldValue(Object target, String fieldName) throws Exception {
+        java.lang.reflect.Field field = target.getClass().getDeclaredField(fieldName);
+        field.setAccessible(true);
+        return field.get(target);
     }
 
     private static ResultsTable tableFor(Object totalTables,

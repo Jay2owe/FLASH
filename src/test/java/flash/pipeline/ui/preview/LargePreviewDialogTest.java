@@ -6,6 +6,7 @@ import ij.process.ImageProcessor;
 import org.junit.Test;
 
 import java.awt.GraphicsEnvironment;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.Assert.assertEquals;
@@ -115,6 +116,40 @@ public class LargePreviewDialogTest {
             dialog.clearSourceChoices();
 
             assertFalse(dialog.sourceControlsVisibleForTest());
+        } finally {
+            dialog.dispose();
+        }
+    }
+
+    @Test
+    public void displayActionButtonsForwardRequests() {
+        assumeFalse(GraphicsEnvironment.isHeadless());
+
+        LargePreviewDialog dialog = new LargePreviewDialog(null);
+        final AtomicInteger brightnessRequests = new AtomicInteger();
+        final AtomicInteger lutRequests = new AtomicInteger();
+        try {
+            dialog.setDisplayActionListener(new LargePreviewDialog.DisplayActionListener() {
+                @Override public void adjustBrightnessContrastRequested() {
+                    brightnessRequests.incrementAndGet();
+                }
+
+                @Override public void lutToggleRequested() {
+                    lutRequests.incrementAndGet();
+                }
+            });
+            dialog.setDisplayActionState("Red LUT", "Show red LUT");
+
+            assertTrue(dialog.displayControlsButtonForTest().isVisible());
+            assertTrue(dialog.displayControlsButtonForTest().isEnabled());
+            assertTrue(dialog.lutToggleButtonForTest().isVisible());
+            assertEquals("Red LUT", dialog.lutToggleButtonForTest().getText());
+
+            dialog.displayControlsButtonForTest().doClick();
+            dialog.lutToggleButtonForTest().doClick();
+
+            assertEquals(1, brightnessRequests.get());
+            assertEquals(1, lutRequests.get());
         } finally {
             dialog.dispose();
         }

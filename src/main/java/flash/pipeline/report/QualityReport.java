@@ -186,6 +186,7 @@ public class QualityReport {
         if (safeSpatial.isEnabled()) {
             params.put("Spatial Families",
                     IntensitySpatialConfig.joinAnalysisTokens(safeSpatial.getEnabledAnalyses()));
+            params.put("Spatial 2D Source", safeSpatial.getSpatialSourceMode().token());
             params.put("Spatial MIP", String.valueOf(safeSpatial.isMipEnabled()));
             params.put("Spatial Native 3D", String.valueOf(safeSpatial.isNative3dEnabled()));
             params.put("Spatial Overlays", String.valueOf(safeSpatial.isOverlaysEnabled()));

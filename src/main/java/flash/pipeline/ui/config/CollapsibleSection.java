@@ -1,7 +1,10 @@
 package flash.pipeline.ui.config;
 
+import flash.pipeline.ui.FlashIcons;
+
 import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
+import javax.swing.Icon;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
@@ -116,12 +119,28 @@ public final class CollapsibleSection extends JPanel {
     }
 
     private void refreshHeader() {
-        String prefix = expanded ? "[-] " : "[+] ";
-        String text = prefix + escape(headerText);
-        if (strikethrough) {
-            headerLabel.setText("<html><strike>" + text + "</strike></html>");
+        Icon chevron = expanded
+                ? FlashIcons.chevronDown(12, new Color(33, 33, 33))
+                : FlashIcons.chevronRight(12, new Color(33, 33, 33));
+        if (chevron != null) {
+            headerLabel.setIcon(chevron);
+            headerLabel.setIconTextGap(6);
+            String escaped = escape(headerText);
+            if (strikethrough) {
+                headerLabel.setText("<html><strike>" + escaped + "</strike></html>");
+            } else {
+                headerLabel.setText(escaped);
+            }
         } else {
-            headerLabel.setText(text);
+            // Fallback: jsvg unavailable or icon load failed — keep old behaviour
+            headerLabel.setIcon(null);
+            String prefix = expanded ? "[-] " : "[+] ";
+            String text = prefix + escape(headerText);
+            if (strikethrough) {
+                headerLabel.setText("<html><strike>" + text + "</strike></html>");
+            } else {
+                headerLabel.setText(text);
+            }
         }
     }
 

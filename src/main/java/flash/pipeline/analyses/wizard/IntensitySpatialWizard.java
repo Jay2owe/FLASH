@@ -11,9 +11,13 @@ import flash.pipeline.ui.ToggleSwitch;
 import flash.pipeline.ui.wizard.WizardFlow;
 
 import javax.swing.JButton;
+import javax.swing.JComboBox;
 import javax.swing.JLabel;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumSet;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -30,9 +34,11 @@ public class IntensitySpatialWizard extends WizardFlow {
     public static final String INTENT_TEXTURE = "What is the texture / complexity of the signal?";
     public static final String INTENT_CROSS_CHANNEL = "How do two channels relate spatially?";
     public static final String INTENT_ALL = "All of the above (exploratory).";
+    public static final String INTENT_MANUAL = "Manual selection";
 
     private static final String FIELD_INTENT = "intensity.spatial.intent";
     private static final String FIELD_SELECTION_INTENT = "intensity.spatial.selection.intent";
+    private static final String FIELD_SOURCE_MODE = "intensity.spatial.sourceMode";
     private static final String FIELD_MIP = "intensity.spatial.mip";
     private static final String FIELD_NATIVE_3D = "intensity.spatial.native3d";
     private static final String FIELD_OVERLAYS = "intensity.spatial.overlays";
@@ -46,8 +52,27 @@ public class IntensitySpatialWizard extends WizardFlow {
     private static final String FIELD_PERMUTATIONS = "intensity.spatial.permutations";
     private static final String FIELD_SEED = "intensity.spatial.seed";
 
+    private static final String SOURCE_MIP = "MIP projection (faster)";
+    private static final String SOURCE_FULL_STACK = "Full z-stack, per-slice (slower)";
+
+    private static final String[] SOURCE_MODE_OPTIONS = {
+            SOURCE_MIP,
+            SOURCE_FULL_STACK
+    };
+
     private static final String[] INTENT_OPTIONS = {
             INTENT_NONE,
+            INTENT_DISTRIBUTION,
+            INTENT_HOTSPOTS,
+            INTENT_DEPTH,
+            INTENT_ALIGNMENT,
+            INTENT_TEXTURE,
+            INTENT_CROSS_CHANNEL,
+            INTENT_ALL
+    };
+
+    private static final String[] EMBEDDED_HELPER_OPTIONS = {
+            INTENT_MANUAL,
             INTENT_DISTRIBUTION,
             INTENT_HOTSPOTS,
             INTENT_DEPTH,
@@ -84,6 +109,7 @@ public class IntensitySpatialWizard extends WizardFlow {
     private final int likelyStackDepth;
     private final IntensitySpatialConfig initialConfig;
     private final DependencyActions dependencies;
+    private final boolean intentPrelude;
 
     public IntensitySpatialWizard(MainPanelBinding panel,
                                   String[] channelNames,
@@ -95,6 +121,16 @@ public class IntensitySpatialWizard extends WizardFlow {
                 new ServiceDependencyActions(new DependencyService()), headless);
     }
 
+    public static IntensitySpatialWizard analysisChooser(MainPanelBinding panel,
+                                                         String[] channelNames,
+                                                         boolean[] channelBinarization,
+                                                         int likelyStackDepth,
+                                                         IntensitySpatialConfig initialConfig,
+                                                         boolean headless) {
+        return new IntensitySpatialWizard(panel, channelNames, channelBinarization, likelyStackDepth,
+                initialConfig, new ServiceDependencyActions(new DependencyService()), headless, false);
+    }
+
     IntensitySpatialWizard(MainPanelBinding panel,
                            String[] channelNames,
                            boolean[] channelBinarization,
@@ -102,7 +138,19 @@ public class IntensitySpatialWizard extends WizardFlow {
                            IntensitySpatialConfig initialConfig,
                            DependencyActions dependencies,
                            boolean headless) {
-        super("Intensity Spatial Helper", panel, headless);
+        this(panel, channelNames, channelBinarization, likelyStackDepth, initialConfig,
+                dependencies, headless, true);
+    }
+
+    private IntensitySpatialWizard(MainPanelBinding panel,
+                                   String[] channelNames,
+                                   boolean[] channelBinarization,
+                                   int likelyStackDepth,
+                                   IntensitySpatialConfig initialConfig,
+                                   DependencyActions dependencies,
+                                   boolean headless,
+                                   boolean intentPrelude) {
+        super(intentPrelude ? "Intensity Spatial Helper" : "Choose Intensity-Spatial Analyses", panel, headless);
         this.channelNames = channelNames == null ? new String[0] : channelNames.clone();
         this.channelBinarization = channelBinarization == null
                 ? new boolean[0]
@@ -112,11 +160,11 @@ public class IntensitySpatialWizard extends WizardFlow {
         this.dependencies = dependencies == null
                 ? new ServiceDependencyActions(new DependencyService())
                 : dependencies;
-        register(new SpatialIntentScreen());
+        this.intentPrelude = intentPrelude;
+        if (intentPrelude) {
+            register(new SpatialIntentScreen());
+        }
         register(new SpatialAnalysisSelectionScreen());
-        register(new SpatialZModeScreen());
-        register(new Spatial3DScreen());
-        register(new SpatialReviewScreen());
     }
 
     public IntensitySpatialConfig deriveCurrentConfig() {
@@ -131,31 +179,31 @@ public class IntensitySpatialWizard extends WizardFlow {
                 ? Collections.<String, Object>emptyMap()
                 : answers;
         String intent = answerString(safeAnswers, FIELD_INTENT, INTENT_NONE);
+        boolean hasAnalysisAnswers = hasAnyAnalysisAnswer(safeAnswers);
         EnumSet<IntensitySpatialConfig.AnalysisKey> analyses = EnumSet.noneOf(IntensitySpatialConfig.AnalysisKey.class);
-        if (!INTENT_NONE.equals(intent)) {
-            if (hasAnyAnalysisAnswer(safeAnswers)) {
-                for (IntensitySpatialConfig.AnalysisKey key : SELECTION_ANALYSES) {
-                    if (booleanAnswer(safeAnswers, fieldFor(key), false)) {
-                        analyses.add(key);
-                    }
+        if (hasAnalysisAnswers) {
+            for (IntensitySpatialConfig.AnalysisKey key : SELECTION_ANALYSES) {
+                if (booleanAnswer(safeAnswers, fieldFor(key), false)) {
+                    analyses.add(key);
                 }
-            } else {
-                analyses.addAll(defaultAnalysesForIntent(intent,
-                        safeChannelCount(channelNames, channelBinarization), channelBinarization));
             }
             for (IntensitySpatialConfig.AnalysisKey key : NATIVE_3D_ANALYSES) {
                 if (booleanAnswer(safeAnswers, fieldFor(key), false)) {
                     analyses.add(key);
                 }
             }
+        } else if (!INTENT_NONE.equals(intent) && !INTENT_MANUAL.equals(intent)) {
+            analyses.addAll(defaultAnalysesForIntent(intent,
+                    safeChannelCount(channelNames, channelBinarization), channelBinarization));
         }
 
-        boolean enabled = !INTENT_NONE.equals(intent) && !analyses.isEmpty();
-        boolean mipDefault = likelyStackDepth > 1;
+        boolean enabled = !analyses.isEmpty();
+        IntensitySpatialConfig.SpatialSourceMode sourceMode =
+                sourceModeAnswer(safeAnswers, likelyStackDepth);
         IntensitySpatialConfig config = IntensitySpatialConfig.builder()
                 .enabled(enabled)
                 .enabledAnalyses(enabled ? analyses : EnumSet.noneOf(IntensitySpatialConfig.AnalysisKey.class))
-                .mipEnabled(enabled && booleanAnswer(safeAnswers, FIELD_MIP, mipDefault))
+                .spatialSourceMode(enabled ? sourceMode : IntensitySpatialConfig.SpatialSourceMode.FULL_STACK)
                 .native3dEnabled(enabled && booleanAnswer(safeAnswers, FIELD_NATIVE_3D, false))
                 .overlaysEnabled(enabled && booleanAnswer(safeAnswers, FIELD_OVERLAYS, false))
                 .shellWidthUm(doubleAnswer(safeAnswers, FIELD_SHELL_WIDTH,
@@ -269,10 +317,13 @@ public class IntensitySpatialWizard extends WizardFlow {
         return initialConfig != null && initialConfig.getEnabledAnalyses().contains(key);
     }
 
-    private boolean initialMipDefault() {
+    private IntensitySpatialConfig.SpatialSourceMode initialSourceModeDefault() {
+        if (likelyStackDepth <= 1) {
+            return IntensitySpatialConfig.SpatialSourceMode.FULL_STACK;
+        }
         return initialConfig != null && initialConfig.hasConfiguration()
-                ? initialConfig.isMipEnabled()
-                : likelyStackDepth > 1;
+                ? initialConfig.getSpatialSourceMode()
+                : IntensitySpatialConfig.SpatialSourceMode.MIP;
     }
 
     private boolean initialNative3dDefault() {
@@ -295,6 +346,9 @@ public class IntensitySpatialWizard extends WizardFlow {
         for (IntensitySpatialConfig.AnalysisKey key : NATIVE_3D_ANALYSES) {
             answers.put(fieldFor(key), Boolean.FALSE);
         }
+        answers.put(FIELD_SOURCE_MODE, sourceChoiceFor(likelyStackDepth > 1
+                ? IntensitySpatialConfig.SpatialSourceMode.MIP
+                : IntensitySpatialConfig.SpatialSourceMode.FULL_STACK));
         answers.put(FIELD_MIP, Boolean.valueOf(likelyStackDepth > 1));
         answers.put(FIELD_NATIVE_3D, Boolean.FALSE);
         answers.put(FIELD_SELECTION_INTENT, intent);
@@ -416,6 +470,31 @@ public class IntensitySpatialWizard extends WizardFlow {
         Object value = answers.get(key);
         if (value instanceof Boolean) return ((Boolean) value).booleanValue();
         return Boolean.parseBoolean(String.valueOf(value));
+    }
+
+    private static IntensitySpatialConfig.SpatialSourceMode sourceModeAnswer(
+            Map<String, Object> answers,
+            int likelyStackDepth) {
+        IntensitySpatialConfig.SpatialSourceMode fallback = likelyStackDepth > 1
+                ? IntensitySpatialConfig.SpatialSourceMode.MIP
+                : IntensitySpatialConfig.SpatialSourceMode.FULL_STACK;
+        Object raw = answers == null ? null : answers.get(FIELD_SOURCE_MODE);
+        if (raw != null) {
+            String text = String.valueOf(raw).trim();
+            if (SOURCE_MIP.equals(text)) return IntensitySpatialConfig.SpatialSourceMode.MIP;
+            if (SOURCE_FULL_STACK.equals(text)) return IntensitySpatialConfig.SpatialSourceMode.FULL_STACK;
+            return IntensitySpatialConfig.SpatialSourceMode.parse(text, fallback);
+        }
+        boolean mip = booleanAnswer(answers, FIELD_MIP, fallback == IntensitySpatialConfig.SpatialSourceMode.MIP);
+        return mip && likelyStackDepth > 1
+                ? IntensitySpatialConfig.SpatialSourceMode.MIP
+                : IntensitySpatialConfig.SpatialSourceMode.FULL_STACK;
+    }
+
+    private static String sourceChoiceFor(IntensitySpatialConfig.SpatialSourceMode mode) {
+        return mode == IntensitySpatialConfig.SpatialSourceMode.MIP
+                ? SOURCE_MIP
+                : SOURCE_FULL_STACK;
     }
 
     private static int intAnswer(Map<String, Object> answers, String key, int fallback) {
@@ -620,6 +699,9 @@ public class IntensitySpatialWizard extends WizardFlow {
     private final class SpatialAnalysisSelectionScreen extends Screen {
         private SpatialAnalysisSelectionScreen() {
             super("Choose intensity-spatial analyses");
+            if (!intentPrelude) {
+                defaultAnswer(FIELD_INTENT, INTENT_MANUAL);
+            }
             for (IntensitySpatialConfig.AnalysisKey key : SELECTION_ANALYSES) {
                 defaultAnswer(fieldFor(key), Boolean.valueOf(initialAnalysis(key)));
             }
@@ -629,67 +711,128 @@ public class IntensitySpatialWizard extends WizardFlow {
             defaultAnswer(FIELD_TILE_SCALES, IntensitySpatialConfig.joinDoubles(initialConfig.getTileScalesUm()));
             defaultAnswer(FIELD_GRANULARITY_SCALES,
                     IntensitySpatialConfig.joinDoubles(initialConfig.getGranularityScalesUm()));
+            defaultAnswer(FIELD_SOURCE_MODE, sourceChoiceFor(initialSourceModeDefault()));
+            defaultAnswer(FIELD_MIP, Boolean.valueOf(initialSourceModeDefault()
+                    == IntensitySpatialConfig.SpatialSourceMode.MIP));
+            defaultAnswer(FIELD_NATIVE_3D, Boolean.valueOf(initialNative3dDefault()));
             defaultAnswer(FIELD_DEPTH_BIN, Double.valueOf(initialConfig.getDepthBinWidthUm()));
             defaultAnswer(FIELD_RIM_DEPTH, Double.valueOf(initialConfig.getRimDepthUm()));
             defaultAnswer(FIELD_TEXTURE_CLASSES, Integer.valueOf(initialConfig.getTextureClassCount()));
             defaultAnswer(FIELD_PERMUTATIONS, Integer.valueOf(initialConfig.getPermutations()));
             defaultAnswer(FIELD_SEED, Long.valueOf(initialConfig.getSeed()));
+            for (IntensitySpatialConfig.AnalysisKey key : NATIVE_3D_ANALYSES) {
+                defaultAnswer(fieldFor(key), Boolean.valueOf(initialAnalysis(key)));
+            }
         }
 
         public boolean isApplicable(AnswerMap prior) {
-            return !INTENT_NONE.equals(prior.getString(FIELD_INTENT, INTENT_NONE));
+            return !intentPrelude || !INTENT_NONE.equals(prior.getString(FIELD_INTENT, INTENT_NONE));
         }
 
         public void build(PipelineDialog dialog, AnswerMap answers) {
-            seedSelectionFromIntent(answers);
+            if (intentPrelude) {
+                seedSelectionFromIntent(answers);
+            }
             dialog.addHeader("Choose intensity-spatial analyses");
+            final JComboBox<String> helperChoice = intentPrelude
+                    ? null
+                    : dialog.addChoice("Setup helper", EMBEDDED_HELPER_OPTIONS,
+                    answers.getString(FIELD_INTENT, INTENT_MANUAL));
+            final Map<IntensitySpatialConfig.AnalysisKey, ToggleSwitch> analysisToggles =
+                    new LinkedHashMap<IntensitySpatialConfig.AnalysisKey, ToggleSwitch>();
+
+            dialog.addSubHeader("2D spatial analysis source");
+            final JComboBox<String> sourceChoice = dialog.addChoice("2D source", SOURCE_MODE_OPTIONS,
+                    answers.getString(FIELD_SOURCE_MODE,
+                            sourceChoiceFor(initialSourceModeDefault())));
+            final JLabel sourceWarning = dialog.addHelpText("");
+            if (likelyStackDepth <= 1) {
+                sourceChoice.setSelectedItem(SOURCE_FULL_STACK);
+                sourceChoice.setEnabled(false);
+                sourceWarning.setText("<html><body width='280'>MIP source requires a z-stack with more than one slice.</body></html>");
+            }
+            dialog.addSubHeader("Output modes");
+            final ToggleSwitch native3d = dialog.addToggle("Native 3D spatial measurements",
+                    answers.getBoolean(FIELD_NATIVE_3D, false));
+            if (likelyStackDepth < IntensitySpatialConfig.MIN_NATIVE_3D_SLICES) {
+                native3d.setSelected(false);
+                native3d.setEnabled(false);
+                dialog.addHelpText("Native 3D output requires at least "
+                        + IntensitySpatialConfig.MIN_NATIVE_3D_SLICES + " z-slices.");
+            }
+            dialog.addToggle("Write visual overlays", answers.getBoolean(FIELD_OVERLAYS, false));
+
             dialog.addSubHeader("Single-channel distribution");
-            addAnalysisToggle(dialog, IntensitySpatialConfig.AnalysisKey.PATCHINESS,
+            analysisToggles.put(IntensitySpatialConfig.AnalysisKey.PATCHINESS, addAnalysisToggle(dialog, IntensitySpatialConfig.AnalysisKey.PATCHINESS,
                     labelFor(IntensitySpatialConfig.AnalysisKey.PATCHINESS),
-                    answers.getBoolean(fieldFor(IntensitySpatialConfig.AnalysisKey.PATCHINESS), false));
-            addAnalysisToggle(dialog, IntensitySpatialConfig.AnalysisKey.HOTSPOTSCAN,
+                    answers.getBoolean(fieldFor(IntensitySpatialConfig.AnalysisKey.PATCHINESS), false)));
+            analysisToggles.put(IntensitySpatialConfig.AnalysisKey.HOTSPOTSCAN, addAnalysisToggle(dialog, IntensitySpatialConfig.AnalysisKey.HOTSPOTSCAN,
                     labelFor(IntensitySpatialConfig.AnalysisKey.HOTSPOTSCAN),
-                    answers.getBoolean(fieldFor(IntensitySpatialConfig.AnalysisKey.HOTSPOTSCAN), false));
-            addAnalysisToggle(dialog, IntensitySpatialConfig.AnalysisKey.NULLMODEL,
+                    answers.getBoolean(fieldFor(IntensitySpatialConfig.AnalysisKey.HOTSPOTSCAN), false)));
+            analysisToggles.put(IntensitySpatialConfig.AnalysisKey.NULLMODEL, addAnalysisToggle(dialog, IntensitySpatialConfig.AnalysisKey.NULLMODEL,
                     labelFor(IntensitySpatialConfig.AnalysisKey.NULLMODEL),
-                    answers.getBoolean(fieldFor(IntensitySpatialConfig.AnalysisKey.NULLMODEL), false));
+                    answers.getBoolean(fieldFor(IntensitySpatialConfig.AnalysisKey.NULLMODEL), false)));
 
             dialog.addSubHeader("Depth and structure");
-            addAnalysisToggle(dialog, IntensitySpatialConfig.AnalysisKey.GRANULARITY,
+            analysisToggles.put(IntensitySpatialConfig.AnalysisKey.GRANULARITY, addAnalysisToggle(dialog, IntensitySpatialConfig.AnalysisKey.GRANULARITY,
                     labelFor(IntensitySpatialConfig.AnalysisKey.GRANULARITY),
-                    answers.getBoolean(fieldFor(IntensitySpatialConfig.AnalysisKey.GRANULARITY), false));
-            addAnalysisToggle(dialog, IntensitySpatialConfig.AnalysisKey.DEPTH_PROFILE,
+                    answers.getBoolean(fieldFor(IntensitySpatialConfig.AnalysisKey.GRANULARITY), false)));
+            analysisToggles.put(IntensitySpatialConfig.AnalysisKey.DEPTH_PROFILE, addAnalysisToggle(dialog, IntensitySpatialConfig.AnalysisKey.DEPTH_PROFILE,
                     labelFor(IntensitySpatialConfig.AnalysisKey.DEPTH_PROFILE),
-                    answers.getBoolean(fieldFor(IntensitySpatialConfig.AnalysisKey.DEPTH_PROFILE), false));
-            addAnalysisToggle(dialog, IntensitySpatialConfig.AnalysisKey.ANISOTROPY,
+                    answers.getBoolean(fieldFor(IntensitySpatialConfig.AnalysisKey.DEPTH_PROFILE), false)));
+            analysisToggles.put(IntensitySpatialConfig.AnalysisKey.ANISOTROPY, addAnalysisToggle(dialog, IntensitySpatialConfig.AnalysisKey.ANISOTROPY,
                     labelFor(IntensitySpatialConfig.AnalysisKey.ANISOTROPY),
-                    answers.getBoolean(fieldFor(IntensitySpatialConfig.AnalysisKey.ANISOTROPY), false));
+                    answers.getBoolean(fieldFor(IntensitySpatialConfig.AnalysisKey.ANISOTROPY), false)));
 
             dialog.addSubHeader("Cross-channel");
-            addAnalysisToggle(dialog, IntensitySpatialConfig.AnalysisKey.CROSSMARK,
+            analysisToggles.put(IntensitySpatialConfig.AnalysisKey.CROSSMARK, addAnalysisToggle(dialog, IntensitySpatialConfig.AnalysisKey.CROSSMARK,
                     labelFor(IntensitySpatialConfig.AnalysisKey.CROSSMARK),
-                    answers.getBoolean(fieldFor(IntensitySpatialConfig.AnalysisKey.CROSSMARK), false));
-            addAnalysisToggle(dialog, IntensitySpatialConfig.AnalysisKey.ENTROPY_MI,
+                    answers.getBoolean(fieldFor(IntensitySpatialConfig.AnalysisKey.CROSSMARK), false)));
+            analysisToggles.put(IntensitySpatialConfig.AnalysisKey.ENTROPY_MI, addAnalysisToggle(dialog, IntensitySpatialConfig.AnalysisKey.ENTROPY_MI,
                     labelFor(IntensitySpatialConfig.AnalysisKey.ENTROPY_MI),
-                    answers.getBoolean(fieldFor(IntensitySpatialConfig.AnalysisKey.ENTROPY_MI), false));
-            addAnalysisToggle(dialog, IntensitySpatialConfig.AnalysisKey.DISTANCE_SHELL,
+                    answers.getBoolean(fieldFor(IntensitySpatialConfig.AnalysisKey.ENTROPY_MI), false)));
+            analysisToggles.put(IntensitySpatialConfig.AnalysisKey.DISTANCE_SHELL, addAnalysisToggle(dialog, IntensitySpatialConfig.AnalysisKey.DISTANCE_SHELL,
                     labelFor(IntensitySpatialConfig.AnalysisKey.DISTANCE_SHELL),
-                    answers.getBoolean(fieldFor(IntensitySpatialConfig.AnalysisKey.DISTANCE_SHELL), false));
+                    answers.getBoolean(fieldFor(IntensitySpatialConfig.AnalysisKey.DISTANCE_SHELL), false)));
+
+            dialog.addSubHeader("Native 3D analyses");
+            final Map<IntensitySpatialConfig.AnalysisKey, ToggleSwitch> native3dToggles =
+                    new LinkedHashMap<IntensitySpatialConfig.AnalysisKey, ToggleSwitch>();
+            for (IntensitySpatialConfig.AnalysisKey key : NATIVE_3D_ANALYSES) {
+                native3dToggles.put(key, addAnalysisToggle(dialog, key, labelFor(key),
+                        answers.getBoolean(fieldFor(key), false)));
+            }
+            updateNative3dAnalysisToggles(native3d, native3dToggles);
+            native3d.addChangeListener(new Runnable() {
+                public void run() {
+                    updateNative3dAnalysisToggles(native3d, native3dToggles);
+                }
+            });
 
             dialog.beginAdvancedSection("intensity.spatial.advanced");
             dialog.addSubHeader("Advanced analysis families");
-            addAnalysisToggle(dialog, IntensitySpatialConfig.AnalysisKey.PERIODICITY,
+            analysisToggles.put(IntensitySpatialConfig.AnalysisKey.PERIODICITY, addAnalysisToggle(dialog, IntensitySpatialConfig.AnalysisKey.PERIODICITY,
                     labelFor(IntensitySpatialConfig.AnalysisKey.PERIODICITY),
-                    answers.getBoolean(fieldFor(IntensitySpatialConfig.AnalysisKey.PERIODICITY), false));
-            addAnalysisToggle(dialog, IntensitySpatialConfig.AnalysisKey.GLCM,
+                    answers.getBoolean(fieldFor(IntensitySpatialConfig.AnalysisKey.PERIODICITY), false)));
+            analysisToggles.put(IntensitySpatialConfig.AnalysisKey.GLCM, addAnalysisToggle(dialog, IntensitySpatialConfig.AnalysisKey.GLCM,
                     labelFor(IntensitySpatialConfig.AnalysisKey.GLCM),
-                    answers.getBoolean(fieldFor(IntensitySpatialConfig.AnalysisKey.GLCM), false));
-            addAnalysisToggle(dialog, IntensitySpatialConfig.AnalysisKey.TEXTURECLASS,
+                    answers.getBoolean(fieldFor(IntensitySpatialConfig.AnalysisKey.GLCM), false)));
+            analysisToggles.put(IntensitySpatialConfig.AnalysisKey.TEXTURECLASS, addAnalysisToggle(dialog, IntensitySpatialConfig.AnalysisKey.TEXTURECLASS,
                     labelFor(IntensitySpatialConfig.AnalysisKey.TEXTURECLASS),
-                    answers.getBoolean(fieldFor(IntensitySpatialConfig.AnalysisKey.TEXTURECLASS), false));
-            addAnalysisToggle(dialog, IntensitySpatialConfig.AnalysisKey.SCALEDIVERGENCE,
+                    answers.getBoolean(fieldFor(IntensitySpatialConfig.AnalysisKey.TEXTURECLASS), false)));
+            analysisToggles.put(IntensitySpatialConfig.AnalysisKey.SCALEDIVERGENCE, addAnalysisToggle(dialog, IntensitySpatialConfig.AnalysisKey.SCALEDIVERGENCE,
                     labelFor(IntensitySpatialConfig.AnalysisKey.SCALEDIVERGENCE),
-                    answers.getBoolean(fieldFor(IntensitySpatialConfig.AnalysisKey.SCALEDIVERGENCE), false));
+                    answers.getBoolean(fieldFor(IntensitySpatialConfig.AnalysisKey.SCALEDIVERGENCE), false)));
+            installSourceWarningUpdates(sourceChoice, sourceWarning, analysisToggles,
+                    native3d, native3dToggles);
+            if (helperChoice != null) {
+                helperChoice.addActionListener(e -> {
+                    applyEmbeddedHelperSelection(
+                            String.valueOf(helperChoice.getSelectedItem()), analysisToggles);
+                    updateSourceWarning(sourceChoice, sourceWarning, analysisToggles,
+                            native3d, native3dToggles);
+                });
+            }
 
             dialog.addSubHeader("Parameters");
             dialog.addNumericField("Shell width (um)", doubleAnswer(answers, FIELD_SHELL_WIDTH,
@@ -714,118 +857,209 @@ public class IntensitySpatialWizard extends WizardFlow {
         }
 
         public void read(PipelineDialog dialog, AnswerMap answers) {
+            if (!intentPrelude) {
+                answers.put(FIELD_INTENT, dialog.getNextChoice());
+            }
+            String sourceMode = dialog.getNextChoice();
+            answers.put(FIELD_SOURCE_MODE, sourceMode);
+            answers.put(FIELD_MIP, Boolean.valueOf(SOURCE_MIP.equals(sourceMode)));
+            answers.put(FIELD_NATIVE_3D, Boolean.valueOf(dialog.getNextBoolean()));
+            answers.put(FIELD_OVERLAYS, Boolean.valueOf(dialog.getNextBoolean()));
             for (IntensitySpatialConfig.AnalysisKey key : SELECTION_ANALYSES) {
+                answers.put(fieldFor(key), Boolean.valueOf(dialog.getNextBoolean()));
+            }
+            for (IntensitySpatialConfig.AnalysisKey key : NATIVE_3D_ANALYSES) {
                 answers.put(fieldFor(key), Boolean.valueOf(dialog.getNextBoolean()));
             }
             answers.put(FIELD_SHELL_WIDTH, Double.valueOf(dialog.getNextNumber()));
             answers.put(FIELD_SHELL_COUNT, Integer.valueOf((int) dialog.getNextNumber()));
+            answers.put(FIELD_TILE_SCALES, dialog.getNextString());
+            answers.put(FIELD_GRANULARITY_SCALES, dialog.getNextString());
             answers.put(FIELD_DEPTH_BIN, Double.valueOf(dialog.getNextNumber()));
             answers.put(FIELD_RIM_DEPTH, Double.valueOf(dialog.getNextNumber()));
             answers.put(FIELD_TEXTURE_CLASSES, Integer.valueOf((int) dialog.getNextNumber()));
             answers.put(FIELD_PERMUTATIONS, Integer.valueOf((int) dialog.getNextNumber()));
             answers.put(FIELD_SEED, Long.valueOf((long) dialog.getNextNumber()));
-            answers.put(FIELD_TILE_SCALES, dialog.getNextString());
-            answers.put(FIELD_GRANULARITY_SCALES, dialog.getNextString());
             answers.put(FIELD_SELECTION_INTENT, answers.getString(FIELD_INTENT, INTENT_NONE));
-        }
-
-        public void writeTo(MainPanelBinding panel, AnswerMap answers) {
-        }
-    }
-
-    private final class SpatialZModeScreen extends Screen {
-        private SpatialZModeScreen() {
-            super("Choose z-stack spatial outputs");
-            defaultAnswer(FIELD_MIP, Boolean.valueOf(initialMipDefault()));
-            defaultAnswer(FIELD_NATIVE_3D, Boolean.valueOf(initialNative3dDefault()));
-        }
-
-        public boolean isApplicable(AnswerMap prior) {
-            return deriveConfig(channelNames, channelBinarization, likelyStackDepth, prior).isEnabled();
-        }
-
-        public void build(PipelineDialog dialog, AnswerMap answers) {
-            dialog.addHeader("Choose z-stack spatial outputs");
-            ToggleSwitch mip = dialog.addToggle("MIP spatial measurements", answers.getBoolean(FIELD_MIP, likelyStackDepth > 1));
-            if (likelyStackDepth <= 1) {
-                mip.setSelected(false);
-                mip.setEnabled(false);
-                dialog.addHelpText("MIP output requires a z-stack with more than one slice.");
-            }
-            ToggleSwitch native3d = dialog.addToggle("Native 3D spatial measurements",
-                    answers.getBoolean(FIELD_NATIVE_3D, false));
-            if (likelyStackDepth < IntensitySpatialConfig.MIN_NATIVE_3D_SLICES) {
-                native3d.setSelected(false);
-                native3d.setEnabled(false);
-                dialog.addHelpText("Native 3D output requires at least "
-                        + IntensitySpatialConfig.MIN_NATIVE_3D_SLICES + " z-slices.");
-            }
-            dialog.addToggle("Write visual overlays", answers.getBoolean(FIELD_OVERLAYS, false));
-        }
-
-        public void read(PipelineDialog dialog, AnswerMap answers) {
-            answers.put(FIELD_MIP, Boolean.valueOf(dialog.getNextBoolean()));
-            answers.put(FIELD_NATIVE_3D, Boolean.valueOf(dialog.getNextBoolean()));
-            answers.put(FIELD_OVERLAYS, Boolean.valueOf(dialog.getNextBoolean()));
-        }
-
-        public void writeTo(MainPanelBinding panel, AnswerMap answers) {
-        }
-    }
-
-    private final class Spatial3DScreen extends Screen {
-        private Spatial3DScreen() {
-            super("Choose native 3D analyses");
-            for (IntensitySpatialConfig.AnalysisKey key : NATIVE_3D_ANALYSES) {
-                defaultAnswer(fieldFor(key), Boolean.valueOf(initialAnalysis(key)));
-            }
-        }
-
-        public boolean isApplicable(AnswerMap prior) {
-            return deriveConfig(channelNames, channelBinarization, likelyStackDepth, prior).isNative3dEnabled();
-        }
-
-        public void build(PipelineDialog dialog, AnswerMap answers) {
-            dialog.addHeader("Choose native 3D analyses");
-            for (IntensitySpatialConfig.AnalysisKey key : NATIVE_3D_ANALYSES) {
-                addAnalysisToggle(dialog, key, labelFor(key), answers.getBoolean(fieldFor(key), false));
-            }
-        }
-
-        public void read(PipelineDialog dialog, AnswerMap answers) {
-            for (IntensitySpatialConfig.AnalysisKey key : NATIVE_3D_ANALYSES) {
-                answers.put(fieldFor(key), Boolean.valueOf(dialog.getNextBoolean()));
-            }
-        }
-
-        public void writeTo(MainPanelBinding panel, AnswerMap answers) {
-        }
-    }
-
-    private final class SpatialReviewScreen extends Screen {
-        private SpatialReviewScreen() {
-            super("Review intensity-spatial setup");
-        }
-
-        public boolean isApplicable(AnswerMap prior) {
-            return deriveConfig(channelNames, channelBinarization, likelyStackDepth, prior).isEnabled();
-        }
-
-        public void build(PipelineDialog dialog, AnswerMap answers) {
-            IntensitySpatialConfig config = deriveConfig(channelNames, channelBinarization, likelyStackDepth, answers);
-            dialog.addHeader("Review intensity-spatial setup");
-            dialog.addMessage("Selected analyses: " + analysisList(config.getEnabledAnalyses()));
-            dialog.addMessage("Expected output files: " + expectedFiles(config, channelNames));
-            dialog.addMessage("Dependency gates: " + dependencySummary(config));
-            dialog.addMessage("Estimated cost: " + costClass(config));
-        }
-
-        public void read(PipelineDialog dialog, AnswerMap answers) {
         }
 
         public void writeTo(MainPanelBinding panel, AnswerMap answers) {
             panel.setValue("intensity.spatial.config", deriveConfig(
                     channelNames, channelBinarization, likelyStackDepth, answers));
+        }
+
+        private void applyEmbeddedHelperSelection(
+                String intent,
+                Map<IntensitySpatialConfig.AnalysisKey, ToggleSwitch> analysisToggles) {
+            if (INTENT_MANUAL.equals(intent) || intent == null) {
+                return;
+            }
+            Set<IntensitySpatialConfig.AnalysisKey> defaults =
+                    defaultAnalysesForIntent(intent, channelNames.length, channelBinarization);
+            for (Map.Entry<IntensitySpatialConfig.AnalysisKey, ToggleSwitch> entry : analysisToggles.entrySet()) {
+                ToggleSwitch toggle = entry.getValue();
+                toggle.setSelected(toggle.isEnabled() && defaults.contains(entry.getKey()));
+            }
+        }
+
+        private void updateNative3dAnalysisToggles(
+                ToggleSwitch native3d,
+                Map<IntensitySpatialConfig.AnalysisKey, ToggleSwitch> native3dToggles) {
+            boolean enabled = native3d != null && native3d.isEnabled() && native3d.isSelected();
+            for (Map.Entry<IntensitySpatialConfig.AnalysisKey, ToggleSwitch> entry : native3dToggles.entrySet()) {
+                ToggleSwitch toggle = entry.getValue();
+                boolean available = availabilityFor(entry.getKey()).available;
+                if (!enabled || !available) {
+                    toggle.setSelected(false);
+                }
+                toggle.setEnabled(enabled && available);
+            }
+        }
+
+        private void installSourceWarningUpdates(
+                final JComboBox<String> sourceChoice,
+                final JLabel sourceWarning,
+                final Map<IntensitySpatialConfig.AnalysisKey, ToggleSwitch> analysisToggles,
+                final ToggleSwitch native3d,
+                final Map<IntensitySpatialConfig.AnalysisKey, ToggleSwitch> native3dToggles) {
+            if (sourceChoice != null) {
+                sourceChoice.addActionListener(e -> updateSourceWarning(
+                        sourceChoice, sourceWarning, analysisToggles, native3d, native3dToggles));
+            }
+            for (ToggleSwitch toggle : analysisToggles.values()) {
+                if (toggle != null) {
+                    toggle.addChangeListener(new Runnable() {
+                        public void run() {
+                            updateSourceWarning(sourceChoice, sourceWarning,
+                                    analysisToggles, native3d, native3dToggles);
+                        }
+                    });
+                }
+            }
+            if (native3d != null) {
+                native3d.addChangeListener(new Runnable() {
+                    public void run() {
+                        updateSourceWarning(sourceChoice, sourceWarning,
+                                analysisToggles, native3d, native3dToggles);
+                    }
+                });
+            }
+            for (ToggleSwitch toggle : native3dToggles.values()) {
+                if (toggle != null) {
+                    toggle.addChangeListener(new Runnable() {
+                        public void run() {
+                            updateSourceWarning(sourceChoice, sourceWarning,
+                                    analysisToggles, native3d, native3dToggles);
+                        }
+                    });
+                }
+            }
+            updateSourceWarning(sourceChoice, sourceWarning, analysisToggles, native3d, native3dToggles);
+        }
+
+        private void updateSourceWarning(
+                JComboBox<String> sourceChoice,
+                JLabel sourceWarning,
+                Map<IntensitySpatialConfig.AnalysisKey, ToggleSwitch> analysisToggles,
+                ToggleSwitch native3d,
+                Map<IntensitySpatialConfig.AnalysisKey, ToggleSwitch> native3dToggles) {
+            if (sourceWarning == null) return;
+            IntensitySpatialConfig.SpatialSourceMode sourceMode =
+                    sourceModeFromChoice(sourceChoice == null ? null : sourceChoice.getSelectedItem());
+            Set<IntensitySpatialConfig.AnalysisKey> selected =
+                    selectedAnalyses(analysisToggles, native3d, native3dToggles);
+            sourceWarning.setText(sourceWarningHtml(sourceMode, selected));
+        }
+
+        private IntensitySpatialConfig.SpatialSourceMode sourceModeFromChoice(Object choice) {
+            String text = choice == null ? null : String.valueOf(choice);
+            if (SOURCE_MIP.equals(text)) return IntensitySpatialConfig.SpatialSourceMode.MIP;
+            if (SOURCE_FULL_STACK.equals(text)) return IntensitySpatialConfig.SpatialSourceMode.FULL_STACK;
+            return IntensitySpatialConfig.SpatialSourceMode.parse(text,
+                    initialSourceModeDefault());
+        }
+
+        private Set<IntensitySpatialConfig.AnalysisKey> selectedAnalyses(
+                Map<IntensitySpatialConfig.AnalysisKey, ToggleSwitch> analysisToggles,
+                ToggleSwitch native3d,
+                Map<IntensitySpatialConfig.AnalysisKey, ToggleSwitch> native3dToggles) {
+            EnumSet<IntensitySpatialConfig.AnalysisKey> selected =
+                    EnumSet.noneOf(IntensitySpatialConfig.AnalysisKey.class);
+            for (Map.Entry<IntensitySpatialConfig.AnalysisKey, ToggleSwitch> entry : analysisToggles.entrySet()) {
+                ToggleSwitch toggle = entry.getValue();
+                if (toggle != null && toggle.isSelected()) {
+                    selected.add(entry.getKey());
+                }
+            }
+            boolean nativeEnabled = native3d != null && native3d.isEnabled() && native3d.isSelected();
+            if (nativeEnabled) {
+                for (Map.Entry<IntensitySpatialConfig.AnalysisKey, ToggleSwitch> entry : native3dToggles.entrySet()) {
+                    ToggleSwitch toggle = entry.getValue();
+                    if (toggle != null && toggle.isSelected()) {
+                        selected.add(entry.getKey());
+                    }
+                }
+            }
+            return selected;
+        }
+
+        private String sourceWarningHtml(IntensitySpatialConfig.SpatialSourceMode sourceMode,
+                                         Set<IntensitySpatialConfig.AnalysisKey> selected) {
+            String text;
+            if (likelyStackDepth <= 1) {
+                text = "MIP source requires a z-stack with more than one slice.";
+            } else if (sourceMode == IntensitySpatialConfig.SpatialSourceMode.MIP) {
+                List<String> risky = mipRiskLabels(selected);
+                text = "MIP is faster but collapses z-slices into one image.";
+                if (!risky.isEmpty()) {
+                    text += " These selected analyses may be less accurate on MIP: "
+                            + String.join(", ", risky) + ".";
+                } else {
+                    text += " Choose analyses below to see projection-specific accuracy warnings.";
+                }
+            } else {
+                List<String> slow = fullStackSlowLabels(selected);
+                text = "Full z-stack runs selected 2D spatial analyses on every slice.";
+                if (!slow.isEmpty()) {
+                    text += " These selected analyses are likely to take longest: "
+                            + String.join(", ", slow) + ".";
+                } else {
+                    text += " Runtime still scales with slice count, ROI count, channel count, and channel pairs.";
+                }
+            }
+            return "<html><body width='280'>" + html(text) + "</body></html>";
+        }
+
+        private List<String> fullStackSlowLabels(Set<IntensitySpatialConfig.AnalysisKey> selected) {
+            ArrayList<String> out = new ArrayList<String>();
+            addIfSelected(out, selected, IntensitySpatialConfig.AnalysisKey.CROSSMARK);
+            addIfSelected(out, selected, IntensitySpatialConfig.AnalysisKey.ENTROPY_MI);
+            addIfSelected(out, selected, IntensitySpatialConfig.AnalysisKey.DISTANCE_SHELL);
+            addIfSelected(out, selected, IntensitySpatialConfig.AnalysisKey.HOTSPOTSCAN);
+            addIfSelected(out, selected, IntensitySpatialConfig.AnalysisKey.GRANULARITY);
+            addIfSelected(out, selected, IntensitySpatialConfig.AnalysisKey.PERIODICITY);
+            addIfSelected(out, selected, IntensitySpatialConfig.AnalysisKey.TEXTURECLASS);
+            addIfSelected(out, selected, IntensitySpatialConfig.AnalysisKey.SCALEDIVERGENCE);
+            addIfSelected(out, selected, IntensitySpatialConfig.AnalysisKey.CROSSMARK_3D);
+            addIfSelected(out, selected, IntensitySpatialConfig.AnalysisKey.DISTANCE_SHELL_3D);
+            addIfSelected(out, selected, IntensitySpatialConfig.AnalysisKey.ANISOTROPY_3D);
+            return out;
+        }
+
+        private List<String> mipRiskLabels(Set<IntensitySpatialConfig.AnalysisKey> selected) {
+            ArrayList<String> out = new ArrayList<String>();
+            for (IntensitySpatialConfig.AnalysisKey key : SELECTION_ANALYSES) {
+                addIfSelected(out, selected, key);
+            }
+            return out;
+        }
+
+        private void addIfSelected(List<String> out,
+                                   Set<IntensitySpatialConfig.AnalysisKey> selected,
+                                   IntensitySpatialConfig.AnalysisKey key) {
+            if (selected != null && selected.contains(key)) {
+                out.add(labelFor(key));
+            }
         }
     }
 }

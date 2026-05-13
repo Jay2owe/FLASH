@@ -174,4 +174,30 @@ public class FLASH_PipelineAnalysisConfigurationTest {
         assertTrue("CLI Spectral Decontamination should stay headless", spy.headless);
         assertTrue(spy.suppressDialogs);
     }
+
+    @Test
+    public void guiExecutionCatchesLinkageErrorSoRepeatPromptCanContinue() {
+        FLASH_Pipeline pipeline = new FLASH_Pipeline();
+        Analysis failing = new Analysis() {
+            @Override public void execute(String directory) {
+                throw new NoClassDefFoundError("flash/pipeline/intensity/spatial/PeriodicityAnalysis$Plane");
+            }
+        };
+
+        assertFalse(pipeline.executeAnalysisSafelyForGui(
+                failing, FLASH_Pipeline.IDX_INTENSITY, "C:/fake/project"));
+    }
+
+    @Test(expected = ThreadDeath.class)
+    public void guiExecutionRethrowsThreadDeath() {
+        FLASH_Pipeline pipeline = new FLASH_Pipeline();
+        Analysis failing = new Analysis() {
+            @Override public void execute(String directory) {
+                throw new ThreadDeath();
+            }
+        };
+
+        pipeline.executeAnalysisSafelyForGui(
+                failing, FLASH_Pipeline.IDX_INTENSITY, "C:/fake/project");
+    }
 }

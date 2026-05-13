@@ -16,7 +16,9 @@ import java.util.Map;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 
 public class CsvTableIOTest {
 
@@ -134,5 +136,55 @@ public class CsvTableIOTest {
         assertEquals("12", loaded.get(0, "Colocalisation with B"));
         assertEquals(0.7, Double.parseDouble(loaded.get(0, "A_Pearson_B")), 0.0001);
         assertEquals(0.04, Double.parseDouble(loaded.get(0, "A_Costes_p_B")), 0.0001);
+    }
+
+    @Test
+    public void mergeResultsTableCsvAddsColumnsWithoutDroppingExistingOnes() throws Exception {
+        File csv = temp.newFile("merge-results.csv");
+        List<String> header = new ArrayList<String>(Arrays.asList("Region", "IntDen", "ManualNote"));
+        Map<String, Integer> colIdx = new LinkedHashMap<String, Integer>();
+        for (int i = 0; i < header.size(); i++) {
+            colIdx.put(header.get(i), i);
+        }
+        List<List<String>> rows = new ArrayList<List<String>>();
+        rows.add(new ArrayList<String>(Arrays.asList("SCN", "10", "keep")));
+        CsvTableIO.writeChannelCsv(csv, new CsvTableIO.ChannelData("DAPI", header, rows, colIdx));
+
+        ResultsTable table = new ResultsTable();
+        table.incrementCounter();
+        table.setValue("Region", 0, "SCN");
+        table.setValue("IntDen", 0, 12);
+        table.setValue("Intensity_PatchinessCV50", 0, 0.25);
+
+        assertTrue(CsvTableIO.mergeResultsTableCsv(csv, table,
+                Arrays.asList("Region", "IntDen", "Intensity_PatchinessCV50")));
+
+        CsvTableIO.ChannelData loaded = CsvTableIO.loadChannelCsv(csv, "DAPI");
+        assertNotNull(loaded);
+        assertEquals(Arrays.asList("Region", "IntDen", "ManualNote", "Intensity_PatchinessCV50"),
+                loaded.header);
+        assertEquals("keep", loaded.get(0, "ManualNote"));
+        assertEquals("12", loaded.get(0, "IntDen"));
+        assertEquals(0.25, Double.parseDouble(loaded.get(0, "Intensity_PatchinessCV50")), 0.0001);
+    }
+
+    @Test
+    public void mergeResultsTableCsvRefusesDifferentRowCount() throws Exception {
+        File csv = temp.newFile("merge-row-count.csv");
+        List<String> header = new ArrayList<String>(Arrays.asList("Region", "IntDen"));
+        Map<String, Integer> colIdx = new LinkedHashMap<String, Integer>();
+        colIdx.put("Region", Integer.valueOf(0));
+        colIdx.put("IntDen", Integer.valueOf(1));
+        List<List<String>> rows = new ArrayList<List<String>>();
+        rows.add(new ArrayList<String>(Arrays.asList("SCN", "10")));
+        CsvTableIO.writeChannelCsv(csv, new CsvTableIO.ChannelData("DAPI", header, rows, colIdx));
+
+        ResultsTable table = new ResultsTable();
+        table.incrementCounter();
+        table.setValue("Region", 0, "SCN");
+        table.incrementCounter();
+        table.setValue("Region", 1, "SCN");
+
+        assertFalse(CsvTableIO.mergeResultsTableCsv(csv, table, Arrays.asList("Region")));
     }
 }

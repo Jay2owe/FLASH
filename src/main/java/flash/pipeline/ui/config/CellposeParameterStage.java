@@ -4,9 +4,11 @@ import flash.pipeline.bin.BinConfig;
 import flash.pipeline.cellpose.CellposeModel;
 import flash.pipeline.help.SetupHelpCatalog;
 import flash.pipeline.help.SetupHelpTopic;
-import flash.pipeline.ui.preview.LabelMapStyler;
+import flash.pipeline.objects.ObjectsCounter3DWrapper;
+import flash.pipeline.ui.preview.ObjectSizeFilterPreview;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import ij.ImagePlus;
+import ij.measure.ResultsTable;
 
 import javax.swing.BorderFactory;
 import javax.swing.Box;
@@ -39,6 +41,11 @@ public final class CellposeParameterStage implements ConfigQcStage {
     public interface ParameterStore {
         String getMethodToken();
         void save(String methodToken);
+    }
+
+    public interface SizeStore {
+        String get();
+        void set(String token);
     }
 
     public interface PreviewAdapter {
@@ -107,6 +114,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
     private static final String EMPTY_TEXT = "Filtered input is ready. Press Run Preview.";
 
     private final ParameterStore parameterStore;
+    private final SizeStore sizeStore;
     private final PreviewAdapter previewAdapter;
     private final RuntimeAdapter runtimeAdapter;
     private final LinkedHashMap<String, Integer> companionChoices;
@@ -119,9 +127,12 @@ public final class CellposeParameterStage implements ConfigQcStage {
     private ConfigQcContext activeContext;
     private Parameters savedParameters;
     private Parameters restartParameters;
+    private ParticleSizeStage.SizeToken savedSize = new ParticleSizeStage.SizeToken("100", "Infinity");
+    private ParticleSizeStage.SizeToken restartSize;
     private ImagePlus rawSource;
     private ImagePlus filteredSource;
     private ImagePlus labelPreview;
+    private ResultsTable objectStats;
     private SwingWorker<ImagePlus, Void> previewWorker;
     private SwingWorker<GpuInstallResult, Void> installWorker;
     private boolean previewStale = true;
@@ -134,6 +145,8 @@ public final class CellposeParameterStage implements ConfigQcStage {
     private JTextField diameterField;
     private JTextField flowField;
     private JTextField cellprobField;
+    private JTextField sizeMinField;
+    private JTextField sizeMaxField;
     private JCheckBox gpuCheckBox;
     private JButton previewButton;
     private JButton installGpuButton;
@@ -141,8 +154,21 @@ public final class CellposeParameterStage implements ConfigQcStage {
     private JLabel modelDescriptionLabel;
     private JLabel companionHelpLabel;
     private JLabel runtimeLabel;
+    private ObjectSizeCutoffPanel sizeCutoffPanel;
+    private ObjectSizeFilterPreview.Summary sizeSummary;
 
     public CellposeParameterStage(ParameterStore parameterStore,
+                                  PreviewAdapter previewAdapter,
+                                  RuntimeAdapter runtimeAdapter,
+                                  List<String> channelNames,
+                                  int primaryChannelIndex,
+                                  boolean defaultUseGpu) {
+        this(parameterStore, defaultSizeStore(), previewAdapter, runtimeAdapter,
+                channelNames, primaryChannelIndex, defaultUseGpu);
+    }
+
+    public CellposeParameterStage(ParameterStore parameterStore,
+                                  SizeStore sizeStore,
                                   PreviewAdapter previewAdapter,
                                   RuntimeAdapter runtimeAdapter,
                                   List<String> channelNames,
@@ -151,10 +177,14 @@ public final class CellposeParameterStage implements ConfigQcStage {
         if (parameterStore == null) {
             throw new IllegalArgumentException("parameterStore must not be null");
         }
+        if (sizeStore == null) {
+            throw new IllegalArgumentException("sizeStore must not be null");
+        }
         if (previewAdapter == null) {
             throw new IllegalArgumentException("previewAdapter must not be null");
         }
         this.parameterStore = parameterStore;
+        this.sizeStore = sizeStore;
         this.previewAdapter = previewAdapter;
         this.runtimeAdapter = runtimeAdapter == null ? noopRuntimeAdapter() : runtimeAdapter;
         this.primaryChannelIndex = Math.max(0, primaryChannelIndex);
@@ -166,6 +196,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
                 defaultUseGpu,
                 channelCount,
                 primaryChannelIndex);
+        this.savedSize = ParticleSizeStage.parseSizeToken(sizeStore.get());
     }
 
     @Override
@@ -193,6 +224,9 @@ public final class CellposeParameterStage implements ConfigQcStage {
                 channelCount,
                 primaryChannelIndex)
                 : restartParameters;
+        this.savedSize = restartSize == null
+                ? ParticleSizeStage.parseSizeToken(sizeStore.get())
+                : restartSize;
 
         JPanel panel = new JPanel();
         panel.setOpaque(false);
@@ -202,10 +236,17 @@ public final class CellposeParameterStage implements ConfigQcStage {
         panel.add(Box.createVerticalStrut(4));
         panel.add(buildDetectionRow());
         panel.add(Box.createVerticalStrut(4));
+        panel.add(buildSizeRow());
+        panel.add(Box.createVerticalStrut(4));
+        sizeCutoffPanel = new ObjectSizeCutoffPanel();
+        panel.add(sizeCutoffPanel);
+        panel.add(Box.createVerticalStrut(4));
         panel.add(buildHintRow());
         panel.add(Box.createVerticalStrut(4));
         panel.add(buildActionRow());
         loadFields(savedParameters);
+        loadSizeFields(savedSize);
+        refreshSizeCutoffPanelOnly();
         refreshCompanionState();
         markPreviewStale(EMPTY_TEXT);
         return panel;
@@ -245,6 +286,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
                 preview.setAdjusted(null);
                 preview.setAdjustedState(PreviewPairPanel.PreviewState.STALE, EMPTY_TEXT);
             }
+            refreshSizeCutoffPanelOnly();
             refreshLargePreviewModel();
             setStatus(EMPTY_TEXT);
         } catch (Exception e) {
@@ -255,12 +297,21 @@ public final class CellposeParameterStage implements ConfigQcStage {
 
     @Override
     public boolean lockIn(ConfigQcContext context) {
-        Parameters parameters = collectParameters();
-        parameterStore.save(formatMethod(parameters));
-        savedParameters = parameters;
-        restartParameters = null;
-        setStatus("Locked Cellpose parameters.");
-        return true;
+        try {
+            Parameters parameters = collectParameters();
+            ParticleSizeStage.SizeToken size = collectSizeToken();
+            parameterStore.save(formatMethod(parameters));
+            sizeStore.set(size.toToken());
+            savedParameters = parameters;
+            savedSize = size;
+            restartParameters = null;
+            restartSize = null;
+            setStatus("Locked Cellpose parameters.");
+            return true;
+        } catch (RuntimeException e) {
+            setError("Enter valid min and max voxel sizes.");
+            return false;
+        }
     }
 
     @Override
@@ -271,6 +322,11 @@ public final class CellposeParameterStage implements ConfigQcStage {
     @Override
     public void restartStage(ConfigQcContext context) {
         restartParameters = collectParameters();
+        try {
+            restartSize = collectSizeToken();
+        } catch (RuntimeException ignored) {
+            // Keep the prior restart value if the current fields are invalid.
+        }
         setStatus("Restarting Cellpose review from the first image.");
     }
 
@@ -323,8 +379,20 @@ public final class CellposeParameterStage implements ConfigQcStage {
         }
     }
 
+    void setSizeMinForTest(String value) {
+        if (sizeMinField != null) sizeMinField.setText(value);
+    }
+
+    void setSizeMaxForTest(String value) {
+        if (sizeMaxField != null) sizeMaxField.setText(value);
+    }
+
     void runPreviewNowForTest() throws Exception {
         runPreviewNow();
+    }
+
+    String sizeCutoffSummaryForTest() {
+        return sizeCutoffPanel == null ? "" : sizeCutoffPanel.summaryTextForTest();
     }
 
     void selectRawSourceForTest() {
@@ -447,6 +515,35 @@ public final class CellposeParameterStage implements ConfigQcStage {
         return row;
     }
 
+    private JComponent buildSizeRow() {
+        JPanel row = new JPanel(new GridBagLayout());
+        row.setOpaque(false);
+        row.setAlignmentX(JComponent.LEFT_ALIGNMENT);
+        row.setBorder(BorderFactory.createEmptyBorder(2, 0, 2, 0));
+
+        JLabel heading = new JLabel("Object size:");
+        Font font = heading.getFont();
+        if (font != null) heading.setFont(font.deriveFont(Font.BOLD));
+        sizeMinField = createSizeField(6);
+        sizeMaxField = createSizeField(8);
+
+        GridBagConstraints gbc = rowConstraints();
+        row.add(heading, gbc);
+        gbc.gridx++;
+        row.add(new JLabel("Min"), gbc);
+        gbc.gridx++;
+        row.add(sizeMinField, gbc);
+        gbc.gridx++;
+        row.add(new JLabel("Max"), gbc);
+        gbc.gridx++;
+        row.add(sizeMaxField, gbc);
+        gbc.gridx++;
+        gbc.weightx = 1.0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        row.add(Box.createHorizontalGlue(), gbc);
+        return row;
+    }
+
     private JComponent buildHintRow() {
         JPanel row = new JPanel(new GridBagLayout());
         row.setOpaque(false);
@@ -481,8 +578,10 @@ public final class CellposeParameterStage implements ConfigQcStage {
         row.setAlignmentX(JComponent.LEFT_ALIGNMENT);
 
         previewButton = new JButton("Run Preview");
+        flash.pipeline.ui.FlashIcons.apply(previewButton, flash.pipeline.ui.FlashIcons.play());
         previewButton.addActionListener(e -> runPreviewOnWorker());
         resetButton = new JButton("Reset to saved");
+        flash.pipeline.ui.FlashIcons.apply(resetButton, flash.pipeline.ui.FlashIcons.refresh());
         resetButton.addActionListener(e -> resetToSaved());
 
         GridBagConstraints gbc = rowConstraints();
@@ -502,6 +601,12 @@ public final class CellposeParameterStage implements ConfigQcStage {
     private JTextField createNumberField(int columns) {
         JTextField field = new JTextField(columns);
         installFieldListener(field);
+        return field;
+    }
+
+    private JTextField createSizeField(int columns) {
+        JTextField field = new JTextField(columns);
+        installSizeFieldListener(field);
         return field;
     }
 
@@ -538,6 +643,22 @@ public final class CellposeParameterStage implements ConfigQcStage {
         });
     }
 
+    private void installSizeFieldListener(JTextField field) {
+        field.getDocument().addDocumentListener(new DocumentListener() {
+            @Override public void insertUpdate(DocumentEvent e) {
+                sizeFieldChanged();
+            }
+
+            @Override public void removeUpdate(DocumentEvent e) {
+                sizeFieldChanged();
+            }
+
+            @Override public void changedUpdate(DocumentEvent e) {
+                sizeFieldChanged();
+            }
+        });
+    }
+
     private void loadFields(Parameters parameters) {
         updatingControls = true;
         try {
@@ -549,6 +670,19 @@ public final class CellposeParameterStage implements ConfigQcStage {
             gpuCheckBox.setSelected(parameters.useGpu);
             refreshModelDescriptionLabel();
             refreshCompanionHelpLabel();
+        } finally {
+            updatingControls = false;
+        }
+    }
+
+    private void loadSizeFields(ParticleSizeStage.SizeToken token) {
+        updatingControls = true;
+        try {
+            ParticleSizeStage.SizeToken safe = token == null
+                    ? new ParticleSizeStage.SizeToken("100", "Infinity")
+                    : token;
+            if (sizeMinField != null) sizeMinField.setText(safe.minText);
+            if (sizeMaxField != null) sizeMaxField.setText(safe.maxText);
         } finally {
             updatingControls = false;
         }
@@ -625,10 +759,20 @@ public final class CellposeParameterStage implements ConfigQcStage {
         markPreviewStale(STALE_TEXT);
     }
 
+    private void sizeFieldChanged() {
+        if (updatingControls) return;
+        if (!refreshSizeFilterPreview()) {
+            markPreviewStale(STALE_TEXT);
+        }
+    }
+
     private void resetToSaved() {
         loadFields(savedParameters);
+        loadSizeFields(savedSize);
         refreshCompanionState();
-        markPreviewStale(STALE_TEXT);
+        if (!refreshSizeFilterPreview()) {
+            markPreviewStale(STALE_TEXT);
+        }
     }
 
     private void runPreviewOnWorker() {
@@ -687,13 +831,13 @@ public final class CellposeParameterStage implements ConfigQcStage {
         }
         int count = previewAdapter.countLabels(labelImage);
         labelImage.setTitle("Cellpose label preview");
-        LabelMapStyler.apply(labelImage, count);
         ImagePlus old = labelPreview;
         labelPreview = labelImage;
+        objectStats = ObjectSizeFilterPreview.statisticsFromLabelMap(labelImage, filteredSource);
         previewStale = false;
         lastObjectCount = count;
-        String text = "Objects: " + count + " ready";
-        refreshSourceAndOutputPreview();
+        refreshSizeFilterPreview();
+        String text = objectCountText();
         setStatus(text);
         if (actions != null) actions.setPreviewButtonStale(false);
         if (old != null && old != labelImage) {
@@ -754,9 +898,60 @@ public final class CellposeParameterStage implements ConfigQcStage {
     }
 
     private String objectCountText() {
+        if (sizeSummary != null && sizeSummary.totalCount > 0) {
+            return sizeSummary.statusText();
+        }
         return lastObjectCount >= 0
                 ? "Objects: " + lastObjectCount + " ready"
                 : "Objects: not previewed";
+    }
+
+    private ParticleSizeStage.SizeToken collectSizeToken() {
+        int min = ObjectsCounter3DWrapper.parseMinSizeVoxels(
+                sizeMinField == null ? null : sizeMinField.getText(), 100);
+        min = Math.max(0, min);
+        String max = normalizeMaxText(sizeMaxField == null ? null : sizeMaxField.getText());
+        return new ParticleSizeStage.SizeToken(String.valueOf(min), max);
+    }
+
+    private boolean refreshSizeFilterPreview() {
+        if (labelPreview == null || objectStats == null) {
+            refreshSizeCutoffPanelOnly();
+            return false;
+        }
+        try {
+            ParticleSizeStage.SizeToken token = collectSizeToken();
+            int minSize = ObjectsCounter3DWrapper.parseMinSizeVoxels(token.minText, 100);
+            int maxSize = ObjectsCounter3DWrapper.parseMaxSizeVoxels(token.maxText, filteredSource);
+            boolean maxFinite = isFiniteMaxToken(token.maxText);
+            sizeSummary = ObjectSizeFilterPreview.summarize(
+                    objectStats, filteredSource, minSize, maxSize, maxFinite);
+            ObjectSizeFilterPreview.applyClassifiedLut(labelPreview, sizeSummary);
+            if (sizeCutoffPanel != null) sizeCutoffPanel.setSummary(sizeSummary);
+            previewStale = false;
+            refreshSourceAndOutputPreview();
+            setStatus(sizeSummary.statusText());
+            if (actions != null) actions.setPreviewButtonStale(false);
+            return true;
+        } catch (RuntimeException e) {
+            setError("Enter valid min and max voxel sizes.");
+            return true;
+        }
+    }
+
+    private void refreshSizeCutoffPanelOnly() {
+        if (sizeCutoffPanel == null) return;
+        try {
+            ParticleSizeStage.SizeToken token = collectSizeToken();
+            int minSize = ObjectsCounter3DWrapper.parseMinSizeVoxels(token.minText, 100);
+            int maxSize = ObjectsCounter3DWrapper.parseMaxSizeVoxels(token.maxText, filteredSource);
+            boolean maxFinite = isFiniteMaxToken(token.maxText);
+            sizeSummary = ObjectSizeFilterPreview.summarize(
+                    null, filteredSource, minSize, maxSize, maxFinite);
+            sizeCutoffPanel.setSummary(sizeSummary);
+        } catch (RuntimeException e) {
+            sizeCutoffPanel.setSummary(null);
+        }
     }
 
     private void installGpuSupport() {
@@ -874,6 +1069,8 @@ public final class CellposeParameterStage implements ConfigQcStage {
         if (diameterField != null) diameterField.setEnabled(enabled);
         if (flowField != null) flowField.setEnabled(enabled);
         if (cellprobField != null) cellprobField.setEnabled(enabled);
+        if (sizeMinField != null) sizeMinField.setEnabled(enabled);
+        if (sizeMaxField != null) sizeMaxField.setEnabled(enabled);
         if (gpuCheckBox != null) gpuCheckBox.setEnabled(enabled);
         if (preview != null) {
             preview.setSourceModeEnabled(enabled);
@@ -900,6 +1097,8 @@ public final class CellposeParameterStage implements ConfigQcStage {
         ImagePlus filtered = filteredSource;
         ImagePlus raw = rawSource;
         labelPreview = null;
+        objectStats = null;
+        sizeSummary = null;
         rawSource = null;
         filteredSource = null;
         lastObjectCount = -1;
@@ -1043,5 +1242,34 @@ public final class CellposeParameterStage implements ConfigQcStage {
 
     private static double sanitizeNonNegative(double value) {
         return Math.max(0, value);
+    }
+
+    private static String normalizeMaxText(String value) {
+        if (value == null) return "Infinity";
+        String trimmed = value.trim();
+        if (trimmed.isEmpty()
+                || "infinity".equalsIgnoreCase(trimmed)
+                || "inf".equalsIgnoreCase(trimmed)) {
+            return "Infinity";
+        }
+        double parsed = Double.parseDouble(trimmed);
+        if (!Double.isFinite(parsed)) return "Infinity";
+        return String.valueOf(Math.max(0, (int) Math.round(parsed)));
+    }
+
+    private static boolean isFiniteMaxToken(String value) {
+        String normalized = normalizeMaxText(value);
+        return !"Infinity".equals(normalized);
+    }
+
+    private static SizeStore defaultSizeStore() {
+        return new SizeStore() {
+            @Override public String get() {
+                return "0-Infinity";
+            }
+
+            @Override public void set(String token) {
+            }
+        };
     }
 }

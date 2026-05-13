@@ -246,6 +246,9 @@ public class CLIConfig {
             parts.add("intensity.spatial.analyses="
                     + IntensitySpatialConfig.joinAnalysisTokens(intensity.spatialAnalyses));
         }
+        if (intensity.spatialSourceMode != null) {
+            parts.add("intensity.spatial.source=" + intensity.spatialSourceMode.token());
+        }
         appendBoolean(parts, "intensity.spatial.mip", intensity.spatialMipEnabled);
         appendBoolean(parts, "intensity.spatial.native3d", intensity.spatialNative3dEnabled);
         appendBoolean(parts, "intensity.spatial.overlays", intensity.spatialOverlaysEnabled);
@@ -629,6 +632,7 @@ public class CLIConfig {
         final Map<Integer, String> thresholds = new LinkedHashMap<Integer, String>();
         Boolean spatialEnabled = null;
         Set<IntensitySpatialConfig.AnalysisKey> spatialAnalyses = null;
+        IntensitySpatialConfig.SpatialSourceMode spatialSourceMode = null;
         Boolean spatialMipEnabled = null;
         Boolean spatialNative3dEnabled = null;
         Boolean spatialOverlaysEnabled = null;
@@ -652,6 +656,7 @@ public class CLIConfig {
                     : Collections.unmodifiableSet(spatialAnalyses);
         }
         public Boolean getSpatialMipEnabled() { return spatialMipEnabled; }
+        public IntensitySpatialConfig.SpatialSourceMode getSpatialSourceMode() { return spatialSourceMode; }
         public Boolean getSpatialNative3dEnabled() { return spatialNative3dEnabled; }
         public Boolean getSpatialOverlaysEnabled() { return spatialOverlaysEnabled; }
         public Double getSpatialShellWidthUm() { return spatialShellWidthUm; }
@@ -678,6 +683,7 @@ public class CLIConfig {
         public boolean hasSpatialConfiguration() {
             return spatialEnabled != null
                     || spatialAnalyses != null
+                    || spatialSourceMode != null
                     || spatialMipEnabled != null
                     || spatialNative3dEnabled != null
                     || spatialOverlaysEnabled != null
@@ -711,6 +717,11 @@ public class CLIConfig {
             if (spatialMipEnabled != null) {
                 builder.mipEnabled(spatialMipEnabled.booleanValue());
                 impliedEnabled = impliedEnabled || spatialMipEnabled.booleanValue();
+            }
+            if (spatialSourceMode != null) {
+                builder.spatialSourceMode(spatialSourceMode);
+                impliedEnabled = impliedEnabled
+                        || spatialSourceMode == IntensitySpatialConfig.SpatialSourceMode.MIP;
             }
             if (spatialNative3dEnabled != null) {
                 builder.native3dEnabled(spatialNative3dEnabled.booleanValue());

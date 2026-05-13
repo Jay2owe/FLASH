@@ -22,13 +22,21 @@ import flash.pipeline.intelligence.AnalysisStatusScanner;
 import flash.pipeline.intelligence.EmptySliceSuggester;
 import flash.pipeline.intelligence.MetadataDiagnostics;
 import flash.pipeline.io.DeferredImageSupplier;
+import flash.pipeline.io.ConditionManifestIO;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.LifIO;
+import flash.pipeline.io.OrientationManifestIO;
 import flash.pipeline.io.SeriesMeta;
 import flash.pipeline.help.SetupHelpCatalog;
 import flash.pipeline.help.SetupHelpTopic;
+import flash.pipeline.naming.ConditionNameParser;
+import flash.pipeline.naming.ImageOrientationResolver;
 import flash.pipeline.naming.ImageNameParser;
+import flash.pipeline.naming.NameParts;
+import flash.pipeline.naming.OrientationManifestRow;
+import flash.pipeline.naming.ResolvedImageMetadata;
 import flash.pipeline.objects.ObjectsCounter3DWrapper;
+import flash.pipeline.orientation.OrientationImageIdentity;
 import flash.pipeline.qc.QcMinMaxPerConditionSelector;
 import flash.pipeline.qc.QcSelectionChannel;
 import flash.pipeline.runtime.DependencyId;
@@ -55,7 +63,6 @@ import flash.pipeline.ui.config.StarDistParameterStage;
 import flash.pipeline.ui.config.ZSliceSelectionStage;
 import flash.pipeline.ui.sandbox.SandboxDialog;
 import flash.pipeline.ui.wizard.MarkerAutoComplete;
-import flash.pipeline.ui.wizard.SetupHelperButton;
 import flash.pipeline.zslice.ZSliceConfig;
 import flash.pipeline.zslice.ZSliceConfigIO;
 import flash.pipeline.zslice.ZSliceMode;
@@ -83,10 +90,13 @@ import javax.swing.JComponent;
 import javax.swing.Icon;
 import javax.swing.ImageIcon;
 import javax.swing.JLabel;
-import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.JTable;
 import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
+import javax.swing.table.DefaultTableCellRenderer;
+import javax.swing.table.DefaultTableModel;
 
 import java.awt.BorderLayout;
 import java.awt.Color;
@@ -99,6 +109,7 @@ import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
 import java.awt.Toolkit;
+import java.awt.Window;
 import java.io.File;
 import java.io.IOException;
 import java.net.URL;
@@ -111,6 +122,7 @@ import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -176,8 +188,7 @@ public class CreateBinFileAnalysis implements Analysis {
     private static final String[] COLOR_OPTIONS = {
             "Grays", "Red", "Green", "Blue", "Cyan", "Magenta", "Yellow"
     };
-    private static final Color CHANNEL_IDENTITY_HELP_COLOR = new Color(117, 117, 117);
-    private static final int CHANNEL_IDENTITY_ROW_LABEL_WIDTH = 116;
+    private static final int CHANNEL_IDENTITY_ROW_LABEL_WIDTH = 100;
     private static final int CHANNEL_IDENTITY_CELL_WIDTH = 160;
     private static final int CHANNEL_IDENTITY_NAME_WIDTH = 150;
     private static final String SEGMENTATION_CLASSICAL = "Classical";
@@ -195,7 +206,6 @@ public class CreateBinFileAnalysis implements Analysis {
     private static final String QC_SELECTION_MODE_RANDOM = "Randomly select images";
     private static final String QC_SELECTION_MODE_MIN_MAX_CONDITION = "Min and max per condition";
     private static final String Z_SLICE_SCOPE_LABEL = "Restrict analysis to selected z-slices";
-    private static final String BIN_PRESET_PLACEHOLDER = "(choose preset)";
     private static final int SETTINGS_FILTER_PARAMETERS = 0;
     private static final int SETTINGS_MIN_MAX = 1;
     private static final int SETTINGS_ROI_INTENSITY_THRESHOLD = 2;
@@ -527,7 +537,7 @@ public class CreateBinFileAnalysis implements Analysis {
         dialog.setModal(false);
         dialog.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
         dialog.addSetupHelpSubHeader("Filter Presets", SetupHelpCatalog.FILTER_PARAMETERS);
-        dialog.addHelpText("'Custom' will open the custom filter builder after QC image selection. Saved custom filters can be reused from this list on later runs.");
+        dialog.addHelpText("'Custom' opens the standard Set Filter and Parameters QC step with the current channel macro loaded. Saved custom filters can be reused from this list on later runs.");
         for (int i = 0; i < cfg.names.size(); i++) {
             String defPreset = i < cfg.filterPresets.size() ? cfg.filterPresets.get(i) : FILTER_PRESETS[0];
             JComboBox<String> combo = dialog.addChoice(
@@ -622,26 +632,17 @@ public class CreateBinFileAnalysis implements Analysis {
                 false, doMinMax, doThreshold, doParticleSize, doSegmentationMethod, null);
         if (customSettings == null) return false;
 
-        if (anyTrue(customSettings) || hasPendingCustomFilters(cfg)) {
+        boolean[][] qcSettings = qcSelectionSettings(customSettings, cfg);
+        if (anyTrue(qcSettings)) {
             QcImageOpenResult qcOpenResult =
                     openImagesForQC(directory, binFolder, cfg,
-                            qcSelectionSettings(customSettings, cfg));
+                            qcSettings);
             showQcOpenMessageIfPresent(qcOpenResult);
             if (qcOpenResult.isCancel()) return false;
             if (qcOpenResult.isReady()) {
-                try {
-                    String customFilterResult = interactivePendingCustomFilters(qcOpenResult.images, cfg, binFolder);
-                    if ("cancel".equals(customFilterResult)) {
-                        cleanupImages(qcOpenResult.images);
-                        return false;
-                    }
-                    String qcResult = interactiveQC(qcOpenResult.images, cfg, binFolder, customSettings);
-                    cleanupImages(qcOpenResult.images);
-                    return "done".equals(qcResult) || "skip".equals(qcResult);
-                } catch (IOException e) {
-                    IJ.handleException(e);
-                    return false;
-                }
+                String qcResult = interactiveQC(qcOpenResult.images, cfg, binFolder, qcSettings);
+                cleanupImages(qcOpenResult.images);
+                return "done".equals(qcResult) || "skip".equals(qcResult);
             }
         }
 
@@ -785,61 +786,37 @@ public class CreateBinFileAnalysis implements Analysis {
                 // .bin exists but is malformed — offer full override
             }
 
-            PipelineDialog ovr = new PipelineDialog("Set Up Configuration", PipelineDialog.Phase.SETUP);
+            PipelineDialog ovr = setupAnalysisDialog("Set Up Configuration");
             ovr.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
             ovr.addSubHeader("Existing Configuration Found");
-            ovr.addMessage("Configuration folder already exists at:\n" + binFolder.getAbsolutePath());
-            final BinConfig existingCfgForPreset = existingCfg;
-            addCreateBinSetupControls(ovr, directory, null,
-                    new BinPresetApplier() {
-                        @Override
-                        public void apply(BinUserConfig appliedConfig) {
-                            if (appliedConfig == null) {
-                                return;
-                            }
-                            try {
-                                writeDefaultFilter(binFolder);
-                                writeChannelFilters(binFolder, appliedConfig);
-                                writeBinConfigFiles(binFolder, appliedConfig);
-                                ovr.closeWithAction("bin_config_applied");
-                            } catch (IOException e) {
-                                IJ.handleException(e);
-                            }
-                        }
-                    },
-                    new BinPresetSaveProvider() {
-                        @Override
-                        public BinUserConfig currentConfig() {
-                            return existingCfgForPreset == null ? null : fromBinConfig(existingCfgForPreset);
-                        }
-                    });
-            ovr.addHeader("Override Options");
+            ovr.addMessage("A saved configuration was found.");
+            ovr.addHeader("Override Options", flash.pipeline.ui.FlashIcons.section("settings"));
 
             ovr.addSubHeader("Full Reset");
             ToggleSwitch allToggle = ovr.addToggle("Override ALL settings (start from scratch)", false);
 
-            ovr.addHeader("Channel Identity & Processing");
+            ovr.addHeader("Channel Identity & Processing", flash.pipeline.ui.FlashIcons.section("tags"));
             ovr.addSetupHelpSubHeader("Filter Presets", SetupHelpCatalog.FILTER_PARAMETERS);
             ToggleSwitch fpToggle = ovr.addToggle("Override Filter Presets", false);
             ovr.addSetupHelpSubHeader("Set Filter and Parameters", SetupHelpCatalog.FILTER_PARAMETERS);
             ToggleSwitch fhToggle = ovr.addToggle("Set Filter and Parameters", false);
 
-            ovr.addHeader("Image Display");
+            ovr.addHeader("Image Display", flash.pipeline.ui.FlashIcons.section("sun"));
             ovr.addSetupHelpSubHeader("Display Ranges", SetupHelpCatalog.DISPLAY_RANGE);
             ToggleSwitch mmToggle = ovr.addToggle("Override Custom Min-Max Display Ranges", false);
 
-            ovr.addHeader("ROI / Intensity Analysis");
+            ovr.addHeader("ROI / Intensity Analysis", flash.pipeline.ui.FlashIcons.section("ruler"));
             ovr.addSetupHelpSubHeader("Channel Thresholds", SetupHelpCatalog.CHANNEL_THRESHOLD);
             ToggleSwitch thToggle = ovr.addToggle("Override Channel Thresholds", false);
 
-            ovr.addHeader("Object Analysis");
+            ovr.addHeader("Object Analysis", flash.pipeline.ui.FlashIcons.section("microscope"));
             ovr.addSetupHelpSubHeader("Segmentation Method", SetupHelpCatalog.SEGMENTATION_METHOD);
             ToggleSwitch segToggle = ovr.addToggle("Override Segmentation Method", false);
             ovr.addSetupHelpSubHeader("Classical Object Size Filter",
                     SetupHelpCatalog.CLASSICAL_OBJECT_SEGMENTATION);
             ToggleSwitch szToggle = ovr.addToggle("Override Particle Sizes (n Voxels)", false);
 
-            ovr.addHeader("Z-Stack Scope");
+            ovr.addHeader("Z-Stack Scope", flash.pipeline.ui.FlashIcons.section("stack"));
             ovr.addSetupHelpSubHeader("Z-Slice Subset", SetupHelpCatalog.Z_SLICE_SUBSET);
             ToggleSwitch zSliceToggle = ovr.addToggle("Override z-slice subset selection", false);
 
@@ -889,7 +866,7 @@ public class CreateBinFileAnalysis implements Analysis {
 
         // ── Fresh creation: confirm ─────────────────────────────────────
         if (!overrideMode) {
-            PipelineDialog confirm = new PipelineDialog("Set Up Configuration", PipelineDialog.Phase.SETUP);
+            PipelineDialog confirm = setupAnalysisDialog("Set Up Configuration");
             confirm.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
             confirm.addSubHeader("New Configuration");
             confirm.addMessage("No Configuration folder detected. Click OK to create one.");
@@ -912,6 +889,12 @@ public class CreateBinFileAnalysis implements Analysis {
         } catch (Exception e) {
             IJ.handleException(e);
         }
+    }
+
+    private static PipelineDialog setupAnalysisDialog(String title) {
+        PipelineDialog dialog = new PipelineDialog(title, PipelineDialog.Phase.SETUP);
+        dialog.setBreadcrumb(null, null);
+        return dialog;
     }
 
     private boolean shouldRunHeadlessPreset() {
@@ -1032,7 +1015,7 @@ public class CreateBinFileAnalysis implements Analysis {
                     }
                     customSettings = selectedSettings;
                     step = cfg.usesZSliceSubset() ? 4
-                            : ((anyTrue(customSettings) || hasPendingCustomFilters(cfg)) ? 5 : 6);
+                            : (needsQcImages(customSettings, cfg) ? 5 : 6);
                     break;
                 }
                 case 4: {
@@ -1043,13 +1026,14 @@ public class CreateBinFileAnalysis implements Analysis {
                         IJ.showMessage("Set Up Configuration", "Cancelled.");
                         return;
                     }
-                    step = (anyTrue(customSettings) || hasPendingCustomFilters(cfg)) ? 5 : 6;
+                    step = needsQcImages(customSettings, cfg) ? 5 : 6;
                     break;
                 }
                 case 5: {
+                    boolean[][] qcSettings = qcSelectionSettings(customSettings, cfg);
                     QcImageOpenResult qcOpenResult =
                             openImagesForQC(directory, binFolder, cfg,
-                                    qcSelectionSettings(customSettings, cfg));
+                                    qcSettings);
                     showQcOpenMessageIfPresent(qcOpenResult);
                     if (qcOpenResult.isCancel()) {
                         if (!hasFiles(binFolder)) deleteRecursively(binFolder);
@@ -1059,15 +1043,8 @@ public class CreateBinFileAnalysis implements Analysis {
                         return;
                     }
                     if (qcOpenResult.isReady()) {
-                        String customFilterResult = interactivePendingCustomFilters(qcOpenResult.images, cfg, binFolder);
-                        if ("cancel".equals(customFilterResult)) {
-                            cleanupImages(qcOpenResult.images);
-                            if (!hasFiles(binFolder)) deleteRecursively(binFolder);
-                            IJ.showMessage("Set Up Configuration", "Cancelled.");
-                            return;
-                        }
-                        String qcResult = anyTrue(customSettings)
-                                ? interactiveQC(qcOpenResult.images, cfg, binFolder, customSettings)
+                        String qcResult = anyTrue(qcSettings)
+                                ? interactiveQC(qcOpenResult.images, cfg, binFolder, qcSettings)
                                 : "done";
                         cleanupImages(qcOpenResult.images);
                         if ("back".equals(qcResult)) { step = 3; break; }
@@ -1138,7 +1115,7 @@ public class CreateBinFileAnalysis implements Analysis {
                     PipelineDialog pd = new PipelineDialog("Override Filter Presets");
                     pd.setModal(false);
                     pd.addHeader("Filter Preset Per Channel");
-                    pd.addHelpText("'Custom' will open the custom filter builder after QC image selection. Saved custom filters can be reused from this list on later runs.");
+                    pd.addHelpText("'Custom' opens the standard Set Filter and Parameters QC step with the current channel macro loaded. Saved custom filters can be reused from this list on later runs.");
                     for (int i = 0; i < n; i++) {
                         String defaultPreset = cfg.filterPresets.get(i);
                         JComboBox<String> filterCombo = pd.addChoice(
@@ -1154,7 +1131,7 @@ public class CreateBinFileAnalysis implements Analysis {
                     applyHandledCustomDemotions(binFolder, cfg);
                     writeChannelFilters(binFolder, cfg);
                     step = doZSliceSelection ? 2
-                            : ((needsQC || hasPendingCustomFilters(cfg)) ? 3 : 4);
+                            : ((needsQC || needsQcImages(customSettings, cfg)) ? 3 : 4);
                     break;
                 }
                 case 2: { // Analysis scope / z-slice enablement
@@ -1171,7 +1148,7 @@ public class CreateBinFileAnalysis implements Analysis {
                         }
                         if ("cancel".equals(zSliceResult)) return;
                     }
-                    step = (needsQC || hasPendingCustomFilters(cfg)) ? 3 : 4;
+                    step = (needsQC || needsQcImages(customSettings, cfg)) ? 3 : 4;
                     break;
                 }
                 case 3: { // Granular fork + QC
@@ -1211,21 +1188,16 @@ public class CreateBinFileAnalysis implements Analysis {
                         if ("cancel".equals(zSliceResult)) return;
                     }
 
-                    if (anyTrue(customSettings) || hasPendingCustomFilters(cfg)) {
+                    boolean[][] qcSettings = qcSelectionSettings(customSettings, cfg);
+                    if (anyTrue(qcSettings)) {
                         QcImageOpenResult qcOpenResult =
                                 openImagesForQC(directory, binFolder, cfg,
-                                        qcSelectionSettings(customSettings, cfg));
+                                        qcSettings);
                         showQcOpenMessageIfPresent(qcOpenResult);
                         if (qcOpenResult.isCancel()) return;
                         if (qcOpenResult.isReady()) {
-                            String customFilterResult = interactivePendingCustomFilters(
-                                    qcOpenResult.images, cfg, binFolder);
-                            if ("cancel".equals(customFilterResult)) {
-                                cleanupImages(qcOpenResult.images);
-                                return;
-                            }
-                            String qcResult = anyTrue(customSettings)
-                                    ? interactiveQC(qcOpenResult.images, cfg, binFolder, customSettings)
+                            String qcResult = anyTrue(qcSettings)
+                                    ? interactiveQC(qcOpenResult.images, cfg, binFolder, qcSettings)
                                     : "done";
                             cleanupImages(qcOpenResult.images);
                             if ("back".equals(qcResult)) continue; // re-show granular fork
@@ -1260,13 +1232,14 @@ public class CreateBinFileAnalysis implements Analysis {
 
     /**
      * Shows a per-step, per-channel settings dialog.
-     * Label-image segmentation channels skip the classical size toggle
-     * and instead get dedicated segmentation-parameter toggles.
-     * @return boolean[5][nChannels]: [0]=filter params, [1]=minMax,
+     * Object-analysis channels are selected once, then the segmentation
+     * method chosen during QC determines which method-specific stage appears.
+     * @return boolean[6][nChannels]: [0]=filter params, [1]=minMax,
      *         [2]=channel thresholds (drives the unified threshold QC),
      *         [3]=channel thresholds for classical channels (mirrors [2]) /
      *             AI params for stardist/cellpose,
-     *         [4]=object size filter (classical) / AI params (stardist/cellpose).
+     *         [4]=object size filter (classical) / AI params (stardist/cellpose),
+     *         [5]=segmentation method.
      *         null if cancelled or Back pressed (check lastWasBack).
      */
     private boolean[][] showGranularCustomFork(List<String> channelNames, List<String> segmentationMethods,
@@ -1318,30 +1291,21 @@ public class CreateBinFileAnalysis implements Analysis {
                                                BinConfig statusConfig) {
         PipelineDialog fork = new PipelineDialog("Settings Mode");
         fork.enableBackButton();
-        fork.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
-        fork.addSetupHelpSubHeader("Settings Mode", SetupHelpCatalog.SETTINGS_MODE);
+        fork.addSetupHelpHeader("Settings Mode", SetupHelpCatalog.SETTINGS_MODE);
         fork.addMessage("Toggle ON the settings you want to adjust interactively per channel.");
 
         int n = channelNames == null ? 0 : channelNames.size();
         boolean[] isStarDist = new boolean[n];
         boolean[] isCellpose = new boolean[n];
-        boolean anyClassical = false;
-        boolean anyStarDist = false;
-        boolean anyCellpose = false;
         for (int i = 0; i < n; i++) {
             String method = segmentationMethods != null && i < segmentationMethods.size()
                     ? safe(segmentationMethods.get(i))
                     : "classical";
             isStarDist[i] = method.startsWith("stardist");
             isCellpose[i] = method.startsWith("cellpose");
-            if (isStarDist[i]) anyStarDist = true;
-            else if (isCellpose[i]) anyCellpose = true;
-            else anyClassical = true;
         }
         int[] allChannels = channelIndexes(n);
         int[] classicalChannels = matchingChannelIndexes(isStarDist, isCellpose, false, false);
-        int[] starDistChannels = matchingChannelIndexes(isStarDist, isCellpose, true, false);
-        int[] cellposeChannels = matchingChannelIndexes(isStarDist, isCellpose, false, true);
 
         SettingsDataStatus filterStatus = settingsDataStatusForFields(statusConfig,
                 allChannels, BinField.FILTER_PRESETS);
@@ -1353,21 +1317,15 @@ public class CreateBinFileAnalysis implements Analysis {
                 classicalChannels, BinField.PARTICLE_SIZES);
         SettingsDataStatus segmentationMethodStatus = settingsDataStatusForFields(statusConfig,
                 allChannels, BinField.SEGMENTATION_METHODS);
-        SettingsDataStatus starDistStatus = settingsDataStatusForEngine(statusConfig,
-                starDistChannels, "stardist");
-        SettingsDataStatus cellposeStatus = settingsDataStatusForEngine(statusConfig,
-                cellposeChannels, "cellpose");
-        SettingsDataStatus aiAssistedStatus = combineDisplayedSettingsDataStatuses(
-                anyStarDist ? starDistStatus : null,
-                anyCellpose ? cellposeStatus : null);
+        boolean showObjectAnalysisSelection = showSegmentationMethod || showParticleSize;
+        SettingsDataStatus objectAnalysisStatus = combineDisplayedSettingsDataStatuses(
+                showSegmentationMethod ? segmentationMethodStatus : null,
+                showParticleSize ? objectSizeStatus : null);
         SettingsDataStatus allStatus = combineDisplayedSettingsDataStatuses(
                 showFilterParameters ? filterStatus : null,
                 showMinMax ? minMaxStatus : null,
                 showThreshold ? thresholdStatus : null,
-                showSegmentationMethod ? segmentationMethodStatus : null,
-                showParticleSize && anyClassical ? objectSizeStatus : null,
-                showThreshold && anyStarDist ? starDistStatus : null,
-                showThreshold && anyCellpose ? cellposeStatus : null);
+                showObjectAnalysisSelection ? objectAnalysisStatus : null);
 
         SettingsModeTickAllGroup allSettingsGroup = new SettingsModeTickAllGroup(
                 fork.addHeaderToggleWithStatus("All Settings Mode Options", false,
@@ -1375,7 +1333,7 @@ public class CreateBinFileAnalysis implements Analysis {
         fork.addHelpText("Status icons match the main screen: tick = full saved data, ! = partial saved data, blank = none saved.");
 
         if (showFilterParameters) {
-            fork.addHeader("Channel Identity & Processing");
+            fork.addHeader("Channel Identity & Processing", flash.pipeline.ui.FlashIcons.section("tags"));
             SettingsModeTickAllGroup filterGroup = addSettingsModeTickAllGroup(fork,
                     "Set Filter and Parameters", filterStatus);
             fork.addHelpText("Choose a filter preset, preview it on the current Z-stack, and adjust detected key=value parameters per channel.");
@@ -1387,7 +1345,7 @@ public class CreateBinFileAnalysis implements Analysis {
             }
         }
         if (showMinMax) {
-            fork.addHeader("Image Display");
+            fork.addHeader("Image Display", flash.pipeline.ui.FlashIcons.section("sun"));
             SettingsModeTickAllGroup minMaxGroup = addSettingsModeTickAllGroup(fork,
                     "Display Ranges", minMaxStatus);
             fork.addHelpText("Min-Max display ranges via B&C on a max projection.");
@@ -1399,7 +1357,7 @@ public class CreateBinFileAnalysis implements Analysis {
             }
         }
         if (showThreshold) {
-            fork.addHeader("ROI / Intensity Analysis");
+            fork.addHeader("ROI / Intensity Analysis", flash.pipeline.ui.FlashIcons.section("ruler"));
             SettingsModeTickAllGroup thresholdGroup = addSettingsModeTickAllGroup(fork,
                     "Channel Thresholds", thresholdStatus);
             fork.addHelpText("Set the channel threshold (after the per-channel filter). The same value feeds both classical object detection and ROI intensity measurements.");
@@ -1414,75 +1372,18 @@ public class CreateBinFileAnalysis implements Analysis {
                         thresholdGroup, allSettingsGroup);
             }
         }
-        if (showSegmentationMethod
-                || ((showThreshold || showParticleSize) && anyClassical)
-                || (showThreshold && (anyStarDist || anyCellpose))) {
-            fork.addHeader("Object Analysis");
-        }
-        if (showSegmentationMethod) {
+        if (showObjectAnalysisSelection) {
+            fork.addHeader("Object Analysis", flash.pipeline.ui.FlashIcons.section("microscope"));
             SettingsModeTickAllGroup segmentationMethodGroup = addSettingsModeTickAllGroup(fork,
-                    "Segmentation Method", segmentationMethodStatus);
-            fork.addHelpText("Choose Classical, StarDist, or Cellpose during object QC. Selecting this opens the required method-specific preview screens.");
+                    "Segmentation Method", objectAnalysisStatus);
+            fork.addHelpText("Choose which channels should open object segmentation setup. The segmentation method is chosen in that preview stage, then FLASH shows the matching Classical, StarDist, or Cellpose controls.");
             for (int i = 0; i < n; i++) {
                 addSettingsModeToggle(fork, "C" + (i + 1) + " (" + channelName(channelNames, i) + ")",
-                        settingSelected(initialSettings, SETTINGS_SEGMENTATION_METHOD, i),
-                        settingsDataStatusForFields(statusConfig, channelIndex(i), BinField.SEGMENTATION_METHODS),
+                        settingSelected(initialSettings, SETTINGS_SEGMENTATION_METHOD, i)
+                                || settingSelected(initialSettings, SETTINGS_OBJECT_SIZE_FILTER, i),
+                        objectAnalysisChannelStatus(statusConfig, channelIndex(i),
+                                showSegmentationMethod, showParticleSize),
                         segmentationMethodGroup, allSettingsGroup);
-            }
-        }
-        SettingsModeTickAllGroup classicalGroup = null;
-        if ((showThreshold || showParticleSize) && anyClassical) {
-            if (showParticleSize) {
-                classicalGroup = addSettingsModeTickAllGroup(fork,
-                        "Classical Object Analysis", objectSizeStatus);
-            } else {
-                fork.addSetupHelpSubHeader("Classical Object Analysis",
-                        SetupHelpCatalog.CLASSICAL_OBJECT_SEGMENTATION);
-            }
-        }
-        if (showParticleSize && anyClassical) {
-            SettingsModeTickAllGroup objectSizeGroup = addSettingsModeTickAllGroup(fork,
-                    "Object Size Filter", objectSizeStatus);
-            fork.addHelpText("Preview 3D Objects Counter results and adjust the object size range.");
-            for (int i = 0; i < n; i++) {
-                if (!isStarDist[i] && !isCellpose[i]) {
-                    addSettingsModeToggle(fork, "C" + (i + 1) + " (" + channelName(channelNames, i) + ")",
-                            settingSelected(initialSettings, SETTINGS_OBJECT_SIZE_FILTER, i),
-                            settingsDataStatusForFields(statusConfig, channelIndex(i), BinField.PARTICLE_SIZES),
-                            objectSizeGroup, classicalGroup, allSettingsGroup);
-                }
-            }
-        }
-        if (showThreshold && (anyStarDist || anyCellpose)) {
-            SettingsModeTickAllGroup aiAssistedGroup = addSettingsModeTickAllGroup(fork,
-                    "AI-Assisted Object Analysis", aiAssistedStatus);
-            if (anyStarDist) {
-                SettingsModeTickAllGroup starDistGroup = addSettingsModeTickAllGroup(fork,
-                        "TrackMate-StarDist Parameters", starDistStatus);
-                fork.addHelpText("Adjust detection thresholds and post-detection filters (area, quality, intensity).");
-                for (int i = 0; i < n; i++) {
-                    if (isStarDist[i]) {
-                        addSettingsModeToggle(fork, "C" + (i + 1) + " (" + channelName(channelNames, i) + ")",
-                                settingSelected(initialSettings, SETTINGS_OBJECT_THRESHOLD, i)
-                                        || settingSelected(initialSettings, SETTINGS_OBJECT_SIZE_FILTER, i),
-                                settingsDataStatusForEngine(statusConfig, channelIndex(i), "stardist"),
-                                starDistGroup, aiAssistedGroup, allSettingsGroup);
-                    }
-                }
-            }
-            if (anyCellpose) {
-                SettingsModeTickAllGroup cellposeGroup = addSettingsModeTickAllGroup(fork,
-                        "Cellpose 3D Parameters", cellposeStatus);
-                fork.addHelpText("Adjust model choice and Cellpose thresholds for irregular, whole-cell, or companion-channel segmentation.");
-                for (int i = 0; i < n; i++) {
-                    if (isCellpose[i]) {
-                        addSettingsModeToggle(fork, "C" + (i + 1) + " (" + channelName(channelNames, i) + ")",
-                                settingSelected(initialSettings, SETTINGS_OBJECT_THRESHOLD, i)
-                                        || settingSelected(initialSettings, SETTINGS_OBJECT_SIZE_FILTER, i),
-                                settingsDataStatusForEngine(statusConfig, channelIndex(i), "cellpose"),
-                                cellposeGroup, aiAssistedGroup, allSettingsGroup);
-                    }
-                }
             }
         }
 
@@ -1490,16 +1391,15 @@ public class CreateBinFileAnalysis implements Analysis {
             lastWasBack = fork.wasBackPressed();
             if (lastWasBack && initialSettings != null) {
                 copySettings(readGranularCustomForkSelections(fork, n, showFilterParameters, showMinMax,
-                        showThreshold, showParticleSize, showSegmentationMethod, isStarDist, isCellpose,
-                        anyClassical, anyStarDist, anyCellpose), initialSettings);
+                        showThreshold, showParticleSize, showSegmentationMethod, isStarDist, isCellpose),
+                        initialSettings);
             }
             return null;
         }
         lastWasBack = false;
 
         return readGranularCustomForkSelections(fork, n, showFilterParameters, showMinMax,
-                showThreshold, showParticleSize, showSegmentationMethod, isStarDist, isCellpose,
-                anyClassical, anyStarDist, anyCellpose);
+                showThreshold, showParticleSize, showSegmentationMethod, isStarDist, isCellpose);
     }
 
     private boolean[][] readGranularCustomForkSelections(PipelineDialog fork,
@@ -1510,11 +1410,9 @@ public class CreateBinFileAnalysis implements Analysis {
                                                          boolean showParticleSize,
                                                          boolean showSegmentationMethod,
                                                          boolean[] isStarDist,
-                                                         boolean[] isCellpose,
-                                                         boolean anyClassical,
-                                                         boolean anyStarDist,
-                                                         boolean anyCellpose) {
+                                                         boolean[] isCellpose) {
         boolean[][] result = new boolean[SETTINGS_SLOT_COUNT][n];
+        boolean showObjectAnalysisSelection = showSegmentationMethod || showParticleSize;
 
         if (showFilterParameters) {
             for (int i = 0; i < n; i++) result[SETTINGS_FILTER_PARAMETERS][i] = fork.getNextBoolean();
@@ -1534,50 +1432,33 @@ public class CreateBinFileAnalysis implements Analysis {
                 }
             }
         }
-        if (showSegmentationMethod) {
+        if (showObjectAnalysisSelection) {
             for (int i = 0; i < n; i++) {
                 boolean on = fork.getNextBoolean();
-                result[SETTINGS_SEGMENTATION_METHOD][i] = on;
                 if (on) {
+                    result[SETTINGS_SEGMENTATION_METHOD][i] = showSegmentationMethod;
                     result[SETTINGS_OBJECT_THRESHOLD][i] = true;
                     result[SETTINGS_OBJECT_SIZE_FILTER][i] = true;
                 }
             }
         }
-        if (showParticleSize && anyClassical) {
-            for (int i = 0; i < n; i++) {
-                if (!isStarDist[i] && !isCellpose[i]) {
-                    result[SETTINGS_OBJECT_SIZE_FILTER][i] =
-                            result[SETTINGS_OBJECT_SIZE_FILTER][i] || fork.getNextBoolean();
-                }
-            }
-        }
-        if (showThreshold) {
-            // Read StarDist parameter toggles — map to both threshold and size slots
-            if (anyStarDist) {
-                for (int i = 0; i < n; i++) {
-                    if (isStarDist[i]) {
-                        boolean on = fork.getNextBoolean();
-                        result[SETTINGS_OBJECT_THRESHOLD][i] =
-                                result[SETTINGS_OBJECT_THRESHOLD][i] || on;
-                        result[SETTINGS_OBJECT_SIZE_FILTER][i] =
-                                result[SETTINGS_OBJECT_SIZE_FILTER][i] || on;
-                    }
-                }
-            }
-            if (anyCellpose) {
-                for (int i = 0; i < n; i++) {
-                    if (isCellpose[i]) {
-                        boolean on = fork.getNextBoolean();
-                        result[SETTINGS_OBJECT_THRESHOLD][i] =
-                                result[SETTINGS_OBJECT_THRESHOLD][i] || on;
-                        result[SETTINGS_OBJECT_SIZE_FILTER][i] =
-                                result[SETTINGS_OBJECT_SIZE_FILTER][i] || on;
-                    }
-                }
-            }
-        }
         return result;
+    }
+
+    private SettingsDataStatus objectAnalysisChannelStatus(BinConfig statusConfig, int[] channel,
+                                                           boolean includeSegmentationMethod,
+                                                           boolean includeParticleSize) {
+        if (includeSegmentationMethod && includeParticleSize) {
+            return settingsDataStatusForFields(statusConfig, channel,
+                    BinField.SEGMENTATION_METHODS, BinField.PARTICLE_SIZES);
+        }
+        if (includeSegmentationMethod) {
+            return settingsDataStatusForFields(statusConfig, channel, BinField.SEGMENTATION_METHODS);
+        }
+        if (includeParticleSize) {
+            return settingsDataStatusForFields(statusConfig, channel, BinField.PARTICLE_SIZES);
+        }
+        return SettingsDataStatus.NONE;
     }
 
     private static boolean settingSelected(boolean[][] settings, int slot, int channelIndex) {
@@ -1944,28 +1825,6 @@ public class CreateBinFileAnalysis implements Analysis {
         return cfg;
     }
 
-    private static BinUserConfig fromDerivedConfig(ChannelSetupWizard.DerivedConfig derived) {
-        BinUserConfig cfg = new BinUserConfig(
-                new ArrayList<String>(derived.names),
-                new ArrayList<String>(derived.colors),
-                new ArrayList<String>(derived.objectThresholds),
-                new ArrayList<String>(derived.sizes),
-                new ArrayList<String>(derived.minmax),
-                new ArrayList<String>(derived.filterPresets),
-                new ArrayList<String>(derived.intensityThresholds));
-        cfg.segmentationMethods.clear();
-        cfg.segmentationMethods.addAll(derived.segmentationMethods);
-        cfg.markerIds.clear();
-        cfg.markerIds.addAll(derived.markerIds);
-        cfg.markerShapes.clear();
-        cfg.markerShapes.addAll(derived.markerShapes);
-        cfg.markerCrowdingSensitive.clear();
-        cfg.markerCrowdingSensitive.addAll(derived.markerCrowdingSensitive);
-        cfg.zSliceMode = derived.zSliceMode;
-        cfg.zSliceSelections.putAll(derived.zSliceSelections);
-        return cfg;
-    }
-
     private static void ensureConfigHasChannels(BinUserConfig cfg) {
         if (cfg == null || !cfg.names.isEmpty()) return;
         cfg.names.add("Channel1");
@@ -2150,7 +2009,7 @@ public class CreateBinFileAnalysis implements Analysis {
         } else if (seriesInfo != null && seriesInfo.sizeC > 0) {
             n = seriesInfo.sizeC;
         } else {
-            PipelineDialog gdCount = new PipelineDialog("Set Up Configuration", PipelineDialog.Phase.SETUP);
+            PipelineDialog gdCount = setupAnalysisDialog("Set Up Configuration");
             gdCount.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
             gdCount.addSetupHelpSubHeader("Channel Setup", SetupHelpCatalog.CHANNEL_IDENTITY);
             gdCount.addNumericField("Number of channels", 3, 0);
@@ -2169,27 +2028,12 @@ public class CreateBinFileAnalysis implements Analysis {
                 trimConfigToChannelCount(draftConfig, n);
             }
             final BinUserConfig dialogDefaults = normalizedConfigForChannelCount(existing, draftConfig, n);
-            PipelineDialog pd = new PipelineDialog("Set Up Configuration - Channel Identity", PipelineDialog.Phase.SETUP);
+            PipelineDialog pd = setupAnalysisDialog("Set Up Configuration - Channel Identity");
             pd.setModal(false);
             if (existing == null) pd.enableBackButton();
-            pd.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
+            pd.addSetupHelpHeader("Channel Identity", SetupHelpCatalog.CHANNEL_IDENTITY);
             final int channelCount = n;
             final BinSetupBindings binBindings = new BinSetupBindings(channelCount);
-            addCreateBinSetupControls(pd, directory, binBindings,
-                    new BinPresetApplier() {
-                        @Override
-                        public void apply(BinUserConfig appliedConfig) {
-                            applyBinConfigToDialog(appliedConfig, binBindings, binFolder);
-                        }
-                    },
-                    new BinPresetSaveProvider() {
-                        @Override
-                        public BinUserConfig currentConfig() {
-                            return buildBinUserConfigFromDialog(channelCount, existing,
-                                    dialogDefaults, binBindings);
-                        }
-                    });
-            pd.addSetupHelpSubHeader("Channel Identity", SetupHelpCatalog.CHANNEL_IDENTITY);
             pd.addMessage("Assign each channel's display name and LUT.");
             ChannelIdentityGrid identityGrid = buildChannelIdentityGrid(dialogDefaults,
                     false, false, null);
@@ -2242,22 +2086,22 @@ public class CreateBinFileAnalysis implements Analysis {
 
         JPanel panel = new JPanel(new GridBagLayout());
         panel.setOpaque(false);
-        panel.setBorder(BorderFactory.createEmptyBorder(0, 4, 6, 4));
+        panel.setBorder(BorderFactory.createEmptyBorder(0, 2, 2, 2));
 
         addChannelIdentityGridComponent(panel, Box.createHorizontalStrut(CHANNEL_IDENTITY_ROW_LABEL_WIDTH),
-                0, 0, 0.0, GridBagConstraints.NONE, new Insets(0, 0, 4, 8));
+                0, 0, 0.0, GridBagConstraints.NONE, new Insets(0, 0, 2, 6));
         for (int ch = 0; ch < nCh; ch++) {
             JLabel channelLabel = new JLabel("Channel " + (ch + 1));
             channelLabel.setFont(channelLabel.getFont().deriveFont(Font.BOLD, 12f));
             channelLabel.setForeground(Color.DARK_GRAY);
             addChannelIdentityGridComponent(panel, channelLabel,
-                    ch + 1, 0, 1.0, GridBagConstraints.HORIZONTAL, new Insets(0, 0, 4, 10));
+                    ch + 1, 0, 1.0, GridBagConstraints.HORIZONTAL, new Insets(0, 0, 2, 8));
         }
 
         addChannelIdentityGridComponent(panel, rowLabels[0],
-                0, 1, 0.0, GridBagConstraints.NONE, new Insets(4, 0, 4, 8));
+                0, 1, 0.0, GridBagConstraints.NONE, new Insets(2, 0, 2, 6));
         addChannelIdentityGridComponent(panel, rowLabels[1],
-                0, 2, 0.0, GridBagConstraints.NONE, new Insets(4, 0, 4, 8));
+                0, 2, 0.0, GridBagConstraints.NONE, new Insets(2, 0, 2, 6));
 
         for (int ch = 0; ch < nCh; ch++) {
             String defName = valueAt(defaults.names, ch, "Channel" + (ch + 1));
@@ -2274,11 +2118,11 @@ public class CreateBinFileAnalysis implements Analysis {
             constrainChannelIdentityInput(lutCombos[ch], CHANNEL_IDENTITY_CELL_WIDTH);
 
             addChannelIdentityGridComponent(panel,
-                    createChannelIdentityGridCell(nameFields[ch], null),
-                    ch + 1, 1, 1.0, GridBagConstraints.HORIZONTAL, new Insets(4, 0, 4, 10));
+                    createChannelIdentityGridCell(nameFields[ch]),
+                    ch + 1, 1, 1.0, GridBagConstraints.HORIZONTAL, new Insets(2, 0, 2, 8));
             addChannelIdentityGridComponent(panel,
-                    createChannelIdentityGridCell(lutCombos[ch], "Display color"),
-                    ch + 1, 2, 1.0, GridBagConstraints.HORIZONTAL, new Insets(4, 0, 4, 10));
+                    createChannelIdentityGridCell(lutCombos[ch]),
+                    ch + 1, 2, 1.0, GridBagConstraints.HORIZONTAL, new Insets(2, 0, 2, 8));
         }
 
         return new ChannelIdentityGrid(panel, nameFields, lutCombos, segmentationCombos, rowLabels);
@@ -2304,26 +2148,13 @@ public class CreateBinFileAnalysis implements Analysis {
         return label;
     }
 
-    private static JLabel createChannelIdentityGridHelperLabel(String text) {
-        JLabel label = new JLabel(text == null ? "" : text);
-        label.setFont(label.getFont().deriveFont(Font.PLAIN, 10f));
-        label.setForeground(CHANNEL_IDENTITY_HELP_COLOR);
-        label.setAlignmentX(Component.LEFT_ALIGNMENT);
-        label.setMaximumSize(new Dimension(CHANNEL_IDENTITY_CELL_WIDTH, 18));
-        return label;
-    }
-
-    private static JPanel createChannelIdentityGridCell(JComponent input, String helperText) {
+    private static JPanel createChannelIdentityGridCell(JComponent input) {
         JPanel cell = new JPanel();
         cell.setLayout(new BoxLayout(cell, BoxLayout.Y_AXIS));
         cell.setOpaque(false);
         cell.setAlignmentX(Component.LEFT_ALIGNMENT);
         input.setAlignmentX(Component.LEFT_ALIGNMENT);
         cell.add(input);
-        if (helperText != null && !helperText.trim().isEmpty()) {
-            cell.add(Box.createVerticalStrut(2));
-            cell.add(createChannelIdentityGridHelperLabel(helperText));
-        }
         return cell;
     }
 
@@ -2362,152 +2193,6 @@ public class CreateBinFileAnalysis implements Analysis {
             return "Flexible whole-cell or irregular object segmentation.";
         }
         return "Classical filter and threshold segmentation.";
-    }
-
-    private void addCreateBinSetupControls(final PipelineDialog dialog,
-                                           final String directory,
-                                           final BinSetupBindings bindings,
-                                           final BinPresetApplier applier,
-                                           final BinPresetSaveProvider saveProvider) {
-        final JComboBox<String> presetCombo = new JComboBox<String>(listBinPresetNames(directory));
-        presetCombo.setMaximumSize(new Dimension(260, 24));
-        if (bindings != null) {
-            bindings.presetCombo = presetCombo;
-        }
-        JButton savePreset = new JButton("Save as preset...");
-        savePreset.setToolTipText("Save the current Channel Setup options as a named preset.");
-        savePreset.setEnabled(saveProvider != null);
-        savePreset.addActionListener(e -> handleSaveBinPreset(directory, bindings, saveProvider));
-        JPanel row = SetupHelperButton.createHeaderRow("Channel Setup", presetCombo, savePreset,
-                new SetupHelperButton.WizardLauncher() {
-                    @Override public void run() {
-                        final BinUserConfig[] selected = new BinUserConfig[1];
-                        dialog.runChildWorkflow(new Runnable() {
-                            @Override public void run() {
-                                selected[0] = runChannelSetupHelper(
-                                        directory, ChannelSetupWizard.firstSeriesInfo(directory));
-                            }
-                        });
-                        if (selected[0] != null && applier != null) {
-                            applier.apply(selected[0]);
-                        }
-                    }
-                });
-        presetCombo.addActionListener(e -> {
-            if (bindings != null && bindings.programmaticChange) {
-                return;
-            }
-            Object selected = presetCombo.getSelectedItem();
-            if (selected != null && !BIN_PRESET_PLACEHOLDER.equals(String.valueOf(selected))) {
-                BinUserConfig presetCfg = loadBinPresetConfig(directory, String.valueOf(selected));
-                if (presetCfg != null && applier != null) {
-                    applier.apply(presetCfg);
-                    if (bindings != null) {
-                        bindings.programmaticChange = true;
-                        try {
-                            presetCombo.setSelectedItem(String.valueOf(selected));
-                        } finally {
-                            bindings.programmaticChange = false;
-                        }
-                    }
-                }
-            }
-        });
-        dialog.addComponent(row);
-    }
-
-    private void applyBinConfigToDialog(BinUserConfig cfg,
-                                        BinSetupBindings bindings,
-                                        File binFolder) {
-        if (cfg == null || bindings == null) {
-            return;
-        }
-        int channelCount = bindings.nameFields.length;
-        if (cfg.names.size() != channelCount) {
-            IJ.showMessage("Create Bin File",
-                    "This preset has " + cfg.names.size() + " channels, but this dialog has "
-                            + channelCount + ". Go Back and set the channel count first.");
-            return;
-        }
-        bindings.appliedConfig = cfg;
-        for (int i = 0; i < channelCount; i++) {
-            if (bindings.nameFields[i] != null) {
-                bindings.nameFields[i].setText(valueAt(cfg.names, i, "Channel" + (i + 1)));
-            }
-            if (bindings.colorCombos[i] != null) {
-                selectComboItem(bindings.colorCombos[i], toLutName(valueAt(cfg.colors, i, "Grays")));
-            }
-            if (bindings.filterCombos[i] != null) {
-                String filter = valueAt(cfg.filterPresets, i, FILTER_PRESETS[0]);
-                ensureComboItem(bindings.filterCombos[i], filter);
-                bindings.filterCombos[i].setSelectedItem(filter);
-            }
-            if (bindings.segmentationCombos[i] != null) {
-                selectComboItem(bindings.segmentationCombos[i],
-                        segmentationChoiceForMethod(valueAt(cfg.segmentationMethods, i, "classical")));
-            }
-        }
-    }
-
-    private void handleSaveBinPreset(String directory,
-                                     BinSetupBindings bindings,
-                                     BinPresetSaveProvider saveProvider) {
-        if (headless || suppressDialogs || saveProvider == null) return;
-        String name = JOptionPane.showInputDialog(
-                bindings == null ? null : bindings.presetCombo,
-                "Preset name:",
-                "Save Channel Setup Preset",
-                JOptionPane.PLAIN_MESSAGE);
-        if (name == null) {
-            return;
-        }
-        String trimmed = name.trim();
-        if (trimmed.isEmpty()) {
-            IJ.showMessage("Create Bin File", "Preset name cannot be empty.");
-            return;
-        }
-        BinUserConfig cfg = saveProvider.currentConfig();
-        if (cfg == null || cfg.names.isEmpty()) {
-            IJ.showMessage("Create Bin File", "Could not save preset: no channel setup is available.");
-            return;
-        }
-        try {
-            BinPreset preset = new BinPreset(trimmed,
-                    "Saved from Create Bin File dialog",
-                    BinPreset.CURRENT_LIBRARY_VERSION,
-                    toPresetBinConfig(cfg),
-                    cfg.markerIds,
-                    cfg.markerShapes,
-                    cfg.markerCrowdingSensitive);
-            new BinPresetIO(new File(directory)).save(preset);
-            IJ.log("Saved Create Bin preset: " + trimmed);
-            refreshBinPresetChoice(directory, bindings, preset.getName());
-        } catch (IOException e) {
-            IJ.showMessage("Create Bin File", "Could not save preset: " + e.getMessage());
-        } catch (IllegalArgumentException e) {
-            IJ.showMessage("Create Bin File", "Could not save preset: " + e.getMessage());
-        }
-    }
-
-    private void refreshBinPresetChoice(String directory,
-                                        BinSetupBindings bindings,
-                                        String selectedName) {
-        if (bindings == null || bindings.presetCombo == null) {
-            return;
-        }
-        bindings.programmaticChange = true;
-        try {
-            bindings.presetCombo.removeAllItems();
-            String[] names = listBinPresetNames(directory);
-            for (String presetName : names) {
-                bindings.presetCombo.addItem(presetName);
-            }
-            bindings.presetCombo.setSelectedItem(selectedName == null
-                    ? BIN_PRESET_PLACEHOLDER
-                    : selectedName);
-        } finally {
-            bindings.programmaticChange = false;
-        }
     }
 
     private BinUserConfig buildBinUserConfigFromDialog(int channelCount,
@@ -2641,14 +2326,6 @@ public class CreateBinFileAnalysis implements Analysis {
         if (values == null || index < 0 || index >= values.size()) return fallback;
         Boolean value = values.get(index);
         return value == null ? fallback : value;
-    }
-
-    private interface BinPresetApplier {
-        void apply(BinUserConfig appliedConfig);
-    }
-
-    private interface BinPresetSaveProvider {
-        BinUserConfig currentConfig();
     }
 
     private static final class BinSetupBindings {
@@ -2932,63 +2609,11 @@ public class CreateBinFileAnalysis implements Analysis {
         }
     }
 
-    private String[] listBinPresetNames(String directory) {
-        List<String> labels = new ArrayList<String>();
-        labels.add(BIN_PRESET_PLACEHOLDER);
-        try {
-            List<BinPreset> presets = new BinPresetIO(new File(directory)).listAll();
-            for (BinPreset preset : presets) {
-                labels.add(preset.getName());
-            }
-        } catch (IOException e) {
-            IJ.log("WARNING: Could not list configuration presets: " + e.getMessage());
-        }
-        return labels.toArray(new String[labels.size()]);
-    }
-
-    private BinUserConfig runChannelSetupHelper(String directory, MetadataDiagnostics.SeriesInfo seriesInfo) {
-        try {
-            MetadataDiagnostics.SeriesInfo info = seriesInfo == null
-                    ? ChannelSetupWizard.firstSeriesInfo(directory)
-                    : seriesInfo;
-            ChannelSetupWizard wizard = new ChannelSetupWizard(
-                    flash.pipeline.ui.wizard.WizardFlow.MainPanelBinding.NULL,
-                    info,
-                    false);
-            wizard.run();
-            if (!wizard.wasFinished()) {
-                return null;
-            }
-            return fromDerivedConfig(wizard.deriveCurrentConfig());
-        } catch (Exception e) {
-            IJ.handleException(e);
-            return null;
-        }
-    }
-
-    private BinUserConfig loadBinPresetConfig(String directory, String presetName) {
-        try {
-            BinPreset preset = new BinPresetIO(new File(directory)).load(presetName);
-            BinUserConfig cfg = fromBinConfig(preset.getPayload());
-            cfg.markerIds.clear();
-            cfg.markerIds.addAll(preset.getMarkerIds());
-            cfg.markerShapes.clear();
-            cfg.markerShapes.addAll(preset.getMarkerShapes());
-            cfg.markerCrowdingSensitive.clear();
-            cfg.markerCrowdingSensitive.addAll(preset.getMarkerCrowdingSensitive());
-            return cfg;
-        } catch (IOException e) {
-            IJ.showMessage("Set Up Configuration", "Could not load preset: " + e.getMessage());
-            return null;
-        }
-    }
-
     private Boolean showAnalysisScopeDialog(BinUserConfig cfg, boolean allowBack) {
         lastWasBack = false;
-        PipelineDialog pd = new PipelineDialog("Set Up Configuration - Analysis Scope", PipelineDialog.Phase.SETUP);
+        PipelineDialog pd = setupAnalysisDialog("Set Up Configuration - Analysis Scope");
         if (allowBack) pd.enableBackButton();
-        pd.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
-        pd.addSetupHelpSubHeader("Analysis Scope", SetupHelpCatalog.ANALYSIS_SCOPE);
+        pd.addSetupHelpHeader("Analysis Scope", SetupHelpCatalog.ANALYSIS_SCOPE);
         pd.addMessage("Choose whether the analysis should use the full z-stack or a contiguous z-slice subset.");
         pd.addToggle(Z_SLICE_SCOPE_LABEL, cfg != null && cfg.usesZSliceSubset());
         pd.addHelpText("Default OFF analyses the full stack. When ON, every image series will be reviewed before the other QC stages.");
@@ -3131,6 +2756,11 @@ public class CreateBinFileAnalysis implements Analysis {
                     return QcImageOpenResult.cancel(
                             "Cannot run quality check: No QC-selected channels were found for min/max assessment.");
                 }
+                MetadataReviewResult metadataReview =
+                        showMinMaxConditionMetadataReview(directory, lifFile, qcSeriesMetas);
+                if (metadataReview == null) {
+                    return QcImageOpenResult.cancel("Min/max per condition metadata review cancelled.");
+                }
                 int selectorThreads = Math.max(parallelThreads, loaderThreads);
                 if (selectorThreads <= 1 && loaderPercent > 0) {
                     selectorThreads = Math.max(2, parallelThreads);
@@ -3138,7 +2768,9 @@ public class CreateBinFileAnalysis implements Analysis {
                 QcMinMaxPerConditionSelector.SelectionResult selection =
                         QcMinMaxPerConditionSelector.selectMinMaxPerCondition(
                                 directory, binFolder, lifFile, qcChannels, cfg.getZSliceConfig(),
-                                recomputeMinMax, selectorThreads);
+                                recomputeMinMax || metadataReview.changed,
+                                selectorThreads,
+                                metadataReview.assignmentsBySeries);
                 resultMessage = selection.message;
                 selectedSeriesIndexes = selection.selectedSeriesIndexes;
             } else {
@@ -3168,6 +2800,341 @@ public class CreateBinFileAnalysis implements Analysis {
             return QcImageOpenResult.ready(images, resultMessage);
         } catch (Exception e) {
             return QcImageOpenResult.cancel("Cannot run quality check: " + e.getMessage());
+        }
+    }
+
+    private MetadataReviewResult showMinMaxConditionMetadataReview(
+            String directory,
+            File lifFile,
+            List<SeriesMeta> metas) throws Exception {
+        List<MetadataReviewRow> rows = buildMetadataReviewRows(directory, lifFile, metas);
+        if (rows.isEmpty()) {
+            return new MetadataReviewResult(
+                    new LinkedHashMap<Integer, QcMinMaxPerConditionSelector.MetadataAssignment>(),
+                    false);
+        }
+
+        DefaultTableModel model = new DefaultTableModel(
+                metadataReviewTableData(rows),
+                new String[]{"Image / Series", "Animal", "Condition"}) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return column == 1 || column == 2;
+            }
+        };
+        JTable table = new JTable(model);
+        table.setRowHeight(24);
+        table.getColumnModel().getColumn(0).setPreferredWidth(320);
+        table.getColumnModel().getColumn(1).setPreferredWidth(160);
+        table.getColumnModel().getColumn(2).setPreferredWidth(160);
+        table.setDefaultRenderer(Object.class, new MetadataReviewRenderer());
+
+        JScrollPane scroll = new JScrollPane(table);
+        scroll.setPreferredSize(new Dimension(680, Math.min(420, 60 + rows.size() * 25)));
+
+        PipelineDialog dialog = new PipelineDialog(
+                "Min/Max QC Metadata Review", PipelineDialog.Phase.SETUP);
+        dialog.addHeader("Animal and Condition Review");
+        dialog.addMessage("Min and max per condition uses these labels to choose QC images. "
+                + "Correct any guessed animal names or condition groups before the scan starts.");
+        dialog.addComponent(scroll);
+        if (!dialog.showDialog()) {
+            return null;
+        }
+
+        if (table.isEditing()) {
+            table.getCellEditor().stopCellEditing();
+        }
+
+        boolean changed = false;
+        LinkedHashMap<Integer, QcMinMaxPerConditionSelector.MetadataAssignment> assignmentsBySeries =
+                new LinkedHashMap<Integer, QcMinMaxPerConditionSelector.MetadataAssignment>();
+        for (int i = 0; i < rows.size(); i++) {
+            MetadataReviewRow row = rows.get(i);
+            row.animalName = stringValue(model.getValueAt(i, 1));
+            row.conditionName = stringValue(model.getValueAt(i, 2));
+            if (!sameText(row.originalAnimalName, row.animalName)
+                    || !sameText(row.originalConditionName, row.conditionName)) {
+                changed = true;
+            }
+            assignmentsBySeries.put(Integer.valueOf(row.seriesIndex),
+                    new QcMinMaxPerConditionSelector.MetadataAssignment(
+                            row.animalName, row.conditionName));
+        }
+
+        saveReviewedMetadata(directory, rows);
+        return new MetadataReviewResult(assignmentsBySeries, changed);
+    }
+
+    private List<MetadataReviewRow> buildMetadataReviewRows(
+            String directory,
+            File lifFile,
+            List<SeriesMeta> metas) throws Exception {
+        List<MetadataReviewRow> rows = new ArrayList<MetadataReviewRow>();
+        if (metas == null || metas.isEmpty()) return rows;
+
+        OrientationImageIdentity.SourceContext source =
+                OrientationImageIdentity.SourceContext.resolve(directory);
+        LinkedHashMap<String, OrientationManifestRow> savedByKey =
+                OrientationManifestIO.readByImageKeyIfExists(directory);
+        Map<Integer, OrientationManifestRow> savedBySeries =
+                savedOrientationRowsBySeries(directory, lifFile);
+        LinkedHashSet<String> animals = new LinkedHashSet<String>();
+
+        for (SeriesMeta meta : metas) {
+            if (meta == null) continue;
+            String originalName = metadataOriginalName(lifFile, meta);
+            OrientationImageIdentity identity = source.identityFor(meta.index, originalName);
+            OrientationManifestRow saved = savedByKey.get(identity.imageKey);
+            if (saved == null) {
+                saved = savedBySeries.get(Integer.valueOf(meta.index + 1));
+            }
+
+            ResolvedImageMetadata resolved =
+                    ImageOrientationResolver.resolve(directory, originalName, meta.index + 1);
+            NameParts parsed = ImageNameParser.parse(originalName);
+            String animal = firstNonBlank(
+                    saved == null ? "" : saved.animalName,
+                    resolved == null ? "" : resolved.animalName,
+                    ConditionManifestIO.extractAnimalName(originalName),
+                    "Series " + (meta.index + 1));
+
+            MetadataReviewRow row = new MetadataReviewRow();
+            row.seriesIndex = meta.index;
+            row.seriesLabel = seriesDisplayLabel(lifFile, meta);
+            row.imageKey = identity.imageKey;
+            row.sourceFile = identity.sourceFile;
+            row.oneBasedSeriesIndex = identity.seriesIndex;
+            row.originalName = identity.originalName;
+            row.displayName = identity.displayName;
+            row.animalName = animal;
+            row.originalAnimalName = animal;
+            row.hemisphere = saved == null
+                    ? OrientationManifestRow.Hemisphere.fromCsv(firstNonBlank(
+                            resolved == null ? "" : resolved.hemisphere,
+                            parsed == null ? "" : parsed.hemisphere))
+                    : saved.hemisphere;
+            row.region = firstNonBlank(
+                    saved == null ? "" : saved.region,
+                    resolved == null ? "" : resolved.region,
+                    parsed == null ? "" : parsed.region);
+            row.rotateDegrees = saved == null
+                    ? (resolved == null ? OrientationManifestRow.RotationDegrees.DEG_0
+                            : resolved.rotateDegrees)
+                    : saved.rotateDegrees;
+            row.flipHorizontal = saved == null
+                    ? resolved != null && resolved.flipHorizontal
+                    : saved.flipHorizontal;
+            row.flipVertical = saved == null
+                    ? resolved != null && resolved.flipVertical
+                    : saved.flipVertical;
+            row.viewPolicy = saved == null
+                    ? (resolved == null ? OrientationManifestRow.ViewPolicy.MANUAL_ONLY
+                            : resolved.viewPolicy)
+                    : saved.viewPolicy;
+            row.existingImageKey = saved == null ? "" : saved.imageKey;
+            row.notes = firstNonBlank(saved == null ? "" : saved.notes,
+                    "Reviewed during Set Up Configuration min/max QC");
+            rows.add(row);
+            if (!animal.trim().isEmpty()) {
+                animals.add(animal);
+            }
+        }
+
+        Map<String, String> conditions = ConditionManifestIO.resolveAssignments(directory, animals);
+        for (MetadataReviewRow row : rows) {
+            String condition = firstNonBlank(
+                    conditions.get(row.animalName),
+                    ConditionNameParser.detectCondition(row.animalName),
+                    row.animalName);
+            row.conditionName = condition;
+            row.originalConditionName = condition;
+        }
+        return rows;
+    }
+
+    private Map<Integer, OrientationManifestRow> savedOrientationRowsBySeries(
+            String directory,
+            File lifFile) {
+        Map<Integer, OrientationManifestRow> bySeries =
+                new LinkedHashMap<Integer, OrientationManifestRow>();
+        String sourceFile = lifFile == null ? "" : lifFile.getName();
+        for (OrientationManifestRow row : OrientationManifestIO.readIfExists(directory)) {
+            if (row == null) continue;
+            if (!sourceFile.isEmpty() && !sourceFile.equals(row.sourceFile)) continue;
+            bySeries.put(Integer.valueOf(row.seriesIndex), row);
+        }
+        return bySeries;
+    }
+
+    private Object[][] metadataReviewTableData(List<MetadataReviewRow> rows) {
+        Object[][] data = new Object[rows.size()][3];
+        for (int i = 0; i < rows.size(); i++) {
+            MetadataReviewRow row = rows.get(i);
+            data[i][0] = row.seriesLabel;
+            data[i][1] = row.animalName;
+            data[i][2] = row.conditionName;
+        }
+        return data;
+    }
+
+    private void saveReviewedMetadata(String directory, List<MetadataReviewRow> rows)
+            throws IOException {
+        LinkedHashMap<String, String> existingConditionAssignments =
+                ConditionManifestIO.readAssignmentsIfExists(directory);
+        LinkedHashMap<String, String> conditionAssignments =
+                new LinkedHashMap<String, String>(existingConditionAssignments);
+        for (MetadataReviewRow row : rows) {
+            String animal = stringValue(row.animalName);
+            String condition = stringValue(row.conditionName);
+            if (!animal.isEmpty() && !condition.isEmpty()) {
+                conditionAssignments.put(animal, condition);
+            }
+        }
+        if (!conditionAssignments.equals(existingConditionAssignments)) {
+            ConditionManifestIO.saveAssignments(directory, conditionAssignments);
+        }
+
+        List<OrientationManifestRow> existingRows =
+                OrientationManifestIO.readIfExists(directory);
+        LinkedHashMap<String, OrientationManifestRow> byKey =
+                OrientationManifestIO.indexByImageKey(existingRows);
+        boolean orientationChanged = false;
+        for (MetadataReviewRow row : rows) {
+            String animal = stringValue(row.animalName);
+            if (animal.isEmpty()) continue;
+            if (!row.existingImageKey.isEmpty()
+                    && !row.existingImageKey.equals(row.imageKey)) {
+                if (byKey.remove(row.existingImageKey) != null) {
+                    orientationChanged = true;
+                }
+            }
+            OrientationManifestRow next = new OrientationManifestRow(
+                    row.imageKey,
+                    row.sourceFile,
+                    row.oneBasedSeriesIndex,
+                    row.originalName,
+                    row.displayName,
+                    animal,
+                    row.hemisphere,
+                    row.region,
+                    row.rotateDegrees,
+                    row.flipHorizontal,
+                    row.flipVertical,
+                    row.viewPolicy,
+                    OrientationManifestRow.DecisionSource.MANUAL,
+                    OrientationManifestRow.ConfirmationState.YES,
+                    "Reviewed during Set Up Configuration min/max QC");
+            OrientationManifestRow previous = byKey.get(row.imageKey);
+            if (!sameOrientationRow(previous, next)) {
+                byKey.put(row.imageKey, next);
+                orientationChanged = true;
+            }
+        }
+        if (orientationChanged) {
+            OrientationManifestIO.saveRows(
+                    directory,
+                    new ArrayList<OrientationManifestRow>(byKey.values()));
+        }
+    }
+
+    private static String metadataOriginalName(File lifFile, SeriesMeta meta) {
+        if (meta == null) return "";
+        if (meta.name != null && !meta.name.trim().isEmpty()) {
+            return meta.name.trim();
+        }
+        return seriesDisplayLabelText(lifFile, meta);
+    }
+
+    private static String firstNonBlank(String... values) {
+        if (values == null) return "";
+        for (String value : values) {
+            String trimmed = stringValue(value);
+            if (!trimmed.isEmpty()) return trimmed;
+        }
+        return "";
+    }
+
+    private static String stringValue(Object value) {
+        return value == null ? "" : value.toString().trim();
+    }
+
+    private static boolean sameText(String left, String right) {
+        return stringValue(left).equals(stringValue(right));
+    }
+
+    private static boolean sameOrientationRow(OrientationManifestRow left,
+                                              OrientationManifestRow right) {
+        if (left == right) return true;
+        if (left == null || right == null) return false;
+        return sameText(left.imageKey, right.imageKey)
+                && sameText(left.sourceFile, right.sourceFile)
+                && left.seriesIndex == right.seriesIndex
+                && sameText(left.originalName, right.originalName)
+                && sameText(left.displayName, right.displayName)
+                && sameText(left.animalName, right.animalName)
+                && left.hemisphere == right.hemisphere
+                && sameText(left.region, right.region)
+                && left.rotateDegrees == right.rotateDegrees
+                && left.flipHorizontal == right.flipHorizontal
+                && left.flipVertical == right.flipVertical
+                && left.viewPolicy == right.viewPolicy
+                && left.confirmed == right.confirmed;
+    }
+
+    private static final class MetadataReviewResult {
+        final LinkedHashMap<Integer, QcMinMaxPerConditionSelector.MetadataAssignment> assignmentsBySeries;
+        final boolean changed;
+
+        MetadataReviewResult(
+                LinkedHashMap<Integer, QcMinMaxPerConditionSelector.MetadataAssignment> assignmentsBySeries,
+                boolean changed) {
+            this.assignmentsBySeries = assignmentsBySeries == null
+                    ? new LinkedHashMap<Integer, QcMinMaxPerConditionSelector.MetadataAssignment>()
+                    : assignmentsBySeries;
+            this.changed = changed;
+        }
+    }
+
+    private static final class MetadataReviewRow {
+        int seriesIndex;
+        String seriesLabel;
+        String imageKey;
+        String sourceFile;
+        int oneBasedSeriesIndex;
+        String originalName;
+        String displayName;
+        String existingImageKey;
+        String originalAnimalName;
+        String originalConditionName;
+        String animalName;
+        String conditionName;
+        OrientationManifestRow.Hemisphere hemisphere;
+        String region;
+        OrientationManifestRow.RotationDegrees rotateDegrees;
+        boolean flipHorizontal;
+        boolean flipVertical;
+        OrientationManifestRow.ViewPolicy viewPolicy;
+        String notes;
+    }
+
+    private static final class MetadataReviewRenderer extends DefaultTableCellRenderer {
+        private final Color warning = new Color(255, 230, 230);
+
+        @Override
+        public Component getTableCellRendererComponent(JTable table, Object value,
+                                                       boolean isSelected, boolean hasFocus,
+                                                       int row, int column) {
+            Component c = super.getTableCellRendererComponent(
+                    table, value, isSelected, hasFocus, row, column);
+            Object animal = table.getModel().getValueAt(row, 1);
+            Object condition = table.getModel().getValueAt(row, 2);
+            boolean incomplete = stringValue(animal).isEmpty()
+                    || stringValue(condition).isEmpty();
+            if (!isSelected) {
+                c.setBackground(incomplete ? warning : Color.WHITE);
+            }
+            return c;
         }
     }
 
@@ -3284,9 +3251,21 @@ public class CreateBinFileAnalysis implements Analysis {
     private boolean hasPendingCustomFilters(BinUserConfig cfg) {
         if (cfg == null || cfg.filterPresets == null) return false;
         for (int i = 0; i < cfg.filterPresets.size(); i++) {
-            if ("Custom".equals(cfg.filterPresets.get(i))) return true;
+            if (isCustomFilterPlaceholder(cfg, i)) return true;
         }
         return false;
+    }
+
+    private static boolean isCustomFilterPlaceholder(BinUserConfig cfg, int channelIndex) {
+        return cfg != null
+                && cfg.filterPresets != null
+                && channelIndex >= 0
+                && channelIndex < cfg.filterPresets.size()
+                && "Custom".equals(cfg.filterPresets.get(channelIndex));
+    }
+
+    private boolean needsQcImages(boolean[][] customSettings, BinUserConfig cfg) {
+        return anyTrue(qcSelectionSettings(customSettings, cfg));
     }
 
     private boolean[][] emptyCustomSettings(int channelCount) {
@@ -3314,7 +3293,7 @@ public class CreateBinFileAnalysis implements Analysis {
         if (cfg != null && cfg.filterPresets != null) {
             int n = Math.min(cfg.filterPresets.size(), nChannels);
             for (int ch = 0; ch < n; ch++) {
-                if ("Custom".equals(cfg.filterPresets.get(ch))) {
+                if (isCustomFilterPlaceholder(cfg, ch)) {
                     result[SETTINGS_FILTER_PARAMETERS][ch] = true;
                 }
             }
@@ -4229,7 +4208,7 @@ public class CreateBinFileAnalysis implements Analysis {
         boolean[] customObjectSizeFilter = customSettings[SETTINGS_OBJECT_SIZE_FILTER];
 
         for (int ch = 0; ch < nChannels; ch++) {
-            boolean doFilter = customFilterParameters[ch];
+            boolean doFilter = customFilterParameters[ch] || isCustomFilterPlaceholder(cfg, ch);
             boolean doMM = customMinMax[ch];
             boolean doRoiIntensityTh = customRoiIntensityThreshold[ch];
             boolean doObjTh = customObjectThreshold[ch];
@@ -5111,7 +5090,8 @@ public class CreateBinFileAnalysis implements Analysis {
             if (doMM) {
                 steps.add(new InteractiveQcStep(InteractiveQcStage.DISPLAY_RANGE, ch));
             }
-            boolean doFilter = settingSelected(customSettings, SETTINGS_FILTER_PARAMETERS, ch);
+            boolean doFilter = settingSelected(customSettings, SETTINGS_FILTER_PARAMETERS, ch)
+                    || isCustomFilterPlaceholder(cfg, ch);
             if (doFilter) {
                 steps.add(new InteractiveQcStep(InteractiveQcStage.FILTER_PARAMETERS, ch));
             }
@@ -5918,7 +5898,6 @@ public class CreateBinFileAnalysis implements Analysis {
                 context, Collections.<ConfigQcStage>singletonList(stage));
         if (result == ConfigQcResult.DONE || result == ConfigQcResult.SKIP_CURRENT_IMAGE) {
             cfg.objectThresholds.set(channelIndex, "default");
-            cfg.sizes.set(channelIndex, "100-Infinity");
             return "continue";
         }
         if (result == ConfigQcResult.BACK) {
@@ -5940,6 +5919,15 @@ public class CreateBinFileAnalysis implements Analysis {
 
                     @Override public void save(String methodToken) {
                         cfg.segmentationMethods.set(channelIndex, methodToken);
+                    }
+                },
+                new StarDistParameterStage.SizeStore() {
+                    @Override public String get() {
+                        return cfg.sizes.get(channelIndex);
+                    }
+
+                    @Override public void set(String token) {
+                        cfg.sizes.set(channelIndex, token);
                     }
                 },
                 new StarDistParameterStage.PreviewAdapter() {
@@ -6012,7 +6000,6 @@ public class CreateBinFileAnalysis implements Analysis {
                 context, Collections.<ConfigQcStage>singletonList(stage));
         if (result == ConfigQcResult.DONE || result == ConfigQcResult.SKIP_CURRENT_IMAGE) {
             cfg.objectThresholds.set(channelIndex, "default");
-            cfg.sizes.set(channelIndex, "100-Infinity");
             return "continue";
         }
         if (result == ConfigQcResult.BACK) {
@@ -6038,6 +6025,15 @@ public class CreateBinFileAnalysis implements Analysis {
 
                     @Override public void save(String methodToken) {
                         cfg.segmentationMethods.set(channelIndex, methodToken);
+                    }
+                },
+                new CellposeParameterStage.SizeStore() {
+                    @Override public String get() {
+                        return cfg.sizes.get(channelIndex);
+                    }
+
+                    @Override public void set(String token) {
+                        cfg.sizes.set(channelIndex, token);
                     }
                 },
                 new CellposeParameterStage.PreviewAdapter() {
@@ -6276,8 +6272,14 @@ public class CreateBinFileAnalysis implements Analysis {
                 new FilterParameterStage.CustomFilterBuilder() {
                     @Override public FilterParameterStage.CustomFilterResult open(
                             ConfigQcContext context, String currentPreset, String currentMacro) throws Exception {
+                        return open(context, currentPreset, currentMacro, null);
+                    }
+
+                    @Override public FilterParameterStage.CustomFilterResult open(
+                            ConfigQcContext context, String currentPreset, String currentMacro,
+                            Window owner) throws Exception {
                         return openCustomFilterBuilderFromFilterStage(
-                                images, cfg, binFolder, channelIndex, chLabel, currentMacro);
+                                owner, images, cfg, binFolder, channelIndex, chLabel, currentMacro);
                     }
                 },
                 new FilterParameterStage.PresetDescriptionProvider() {
@@ -6297,6 +6299,7 @@ public class CreateBinFileAnalysis implements Analysis {
     }
 
     private FilterParameterStage.CustomFilterResult openCustomFilterBuilderFromFilterStage(
+            final Window owner,
             final List<QcImageSelection> images,
             final BinUserConfig cfg,
             final File binFolder,
@@ -6314,9 +6317,10 @@ public class CreateBinFileAnalysis implements Analysis {
                 sampleSupplier.openSample();
             }
             CustomFilterEntryDialog.Result result = CustomFilterEntryDialog.show(
+                    owner,
                     chLabel,
                     createQcCustomFilterPreviewHandler(images, cfg, channelIndex, chLabel),
-                    createQcSandboxHandler(binFolder, cfg, channelIndex, chLabel, images,
+                    createQcSandboxHandler(owner, binFolder, cfg, channelIndex, chLabel, images,
                             seedMacro != null && seedMacro.trim().length() > 0),
                     sampleSupplier,
                     seedMacro);
@@ -7177,7 +7181,18 @@ public class CreateBinFileAnalysis implements Analysis {
                                                                           final int channelIndex,
                                                                           final String chLabel,
                                                                           final List<QcImageSelection> images) {
-        return createQcSandboxHandler(binFolder, cfg, channelIndex, chLabel, images, true);
+        return createQcSandboxHandler(null, binFolder, cfg, channelIndex, chLabel, images, true);
+    }
+
+    private CustomFilterEntryDialog.SandboxHandler createQcSandboxHandler(final Window owner,
+                                                                          final File binFolder,
+                                                                          final BinUserConfig cfg,
+                                                                          final int channelIndex,
+                                                                          final String chLabel,
+                                                                          final List<QcImageSelection> images,
+                                                                          final boolean startFromExisting) {
+        return createQcSandboxHandlerInternal(owner, binFolder, cfg, channelIndex, chLabel, images,
+                startFromExisting);
     }
 
     private CustomFilterEntryDialog.SandboxHandler createQcSandboxHandler(final File binFolder,
@@ -7186,6 +7201,17 @@ public class CreateBinFileAnalysis implements Analysis {
                                                                           final String chLabel,
                                                                           final List<QcImageSelection> images,
                                                                           final boolean startFromExisting) {
+        return createQcSandboxHandlerInternal(null, binFolder, cfg, channelIndex, chLabel, images,
+                startFromExisting);
+    }
+
+    private CustomFilterEntryDialog.SandboxHandler createQcSandboxHandlerInternal(final Window owner,
+                                                                                  final File binFolder,
+                                                                                  final BinUserConfig cfg,
+                                                                                  final int channelIndex,
+                                                                                  final String chLabel,
+                                                                                  final List<QcImageSelection> images,
+                                                                                  final boolean startFromExisting) {
         return new CustomFilterEntryDialog.SandboxHandler() {
             @Override public CustomFilterEntryDialog.Result openSandbox() {
                 String seedMacro = startFromExisting ? resolveFilterContent(binFolder, cfg, channelIndex) : null;
@@ -7193,7 +7219,7 @@ public class CreateBinFileAnalysis implements Analysis {
                     seedMacro = getFilterPresetContent("Default");
                 }
                 SandboxDialog.Result result = SandboxDialog.show(
-                        chLabel, binFolder, channelIndex, seedMacro,
+                        owner, chLabel, binFolder, channelIndex, seedMacro,
                         createQcSandboxPreviewHandler(cfg, channelIndex, chLabel, images));
                 if (result == null || result.dag == null) return CustomFilterEntryDialog.Result.cancel();
                 return CustomFilterEntryDialog.Result.sandbox(result.dag, result.ijmFallback);

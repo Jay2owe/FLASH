@@ -4,6 +4,7 @@ import ij.IJ;
 import flash.pipeline.io.ConditionManifestIO;
 import flash.pipeline.io.CsvSupport;
 import flash.pipeline.io.LifIO;
+import flash.pipeline.io.OrientationManifestIO;
 import flash.pipeline.io.SeriesMeta;
 import flash.pipeline.naming.ConditionNameParser;
 import flash.pipeline.naming.ImageNameParser;
@@ -62,6 +63,9 @@ public final class QcMinMaxPerConditionSelector {
     private static final String KEY_CONDITIONS_EXISTS = "conditions.exists";
     private static final String KEY_CONDITIONS_LENGTH = "conditions.length";
     private static final String KEY_CONDITIONS_MODIFIED = "conditions.modified";
+    private static final String KEY_ORIENTATION_EXISTS = "orientation.exists";
+    private static final String KEY_ORIENTATION_LENGTH = "orientation.length";
+    private static final String KEY_ORIENTATION_MODIFIED = "orientation.modified";
     private static final String KEY_QC_CHANNEL_SIGNATURE = "qc.channels";
     private static final String KEY_Z_SLICE_SIGNATURE = "zslice.signature";
 
@@ -99,6 +103,16 @@ public final class QcMinMaxPerConditionSelector {
         }
     }
 
+    public static final class MetadataAssignment {
+        public final String animalName;
+        public final String conditionName;
+
+        public MetadataAssignment(String animalName, String conditionName) {
+            this.animalName = animalName == null ? "" : animalName.trim();
+            this.conditionName = conditionName == null ? "" : conditionName.trim();
+        }
+    }
+
     private static final class LoadedCandidate {
         final QcSelectionCandidate candidate;
         final LinkedHashMap<Integer, float[]> projections;
@@ -115,6 +129,18 @@ public final class QcMinMaxPerConditionSelector {
                                                            ZSliceConfig zSliceConfig,
                                                            boolean forceRecompute,
                                                            int parallelThreads) throws Exception {
+        return selectMinMaxPerCondition(directory, binFolder, lifFile, qcChannels, zSliceConfig,
+                forceRecompute, parallelThreads, null);
+    }
+
+    public static SelectionResult selectMinMaxPerCondition(String directory, File binFolder,
+                                                           File lifFile,
+                                                           List<QcSelectionChannel> qcChannels,
+                                                           ZSliceConfig zSliceConfig,
+                                                           boolean forceRecompute,
+                                                           int parallelThreads,
+                                                           Map<Integer, MetadataAssignment> reviewedMetadata)
+            throws Exception {
         if (binFolder != null && !binFolder.isDirectory()) {
             flash.pipeline.io.IoUtils.mustMkdirs(binFolder);
         }
@@ -122,7 +148,7 @@ public final class QcMinMaxPerConditionSelector {
         File scoresFile = new File(binFolder, SCORES_FILE_NAME);
         File cacheFile = new File(binFolder, CACHE_FILE_NAME);
         List<SeriesMeta> metas = LifIO.readAllSeriesMetadata(lifFile);
-        List<QcSelectionCandidate> candidates = buildCandidates(directory, metas);
+        List<QcSelectionCandidate> candidates = buildCandidates(directory, metas, reviewedMetadata);
         if (candidates.isEmpty()) {
             return new SelectionResult(new ArrayList<Integer>(), scoresFile, cacheFile,
                     false, false,
@@ -171,6 +197,13 @@ public final class QcMinMaxPerConditionSelector {
 
     public static List<QcSelectionCandidate> buildCandidates(String directory,
                                                              List<SeriesMeta> metas) {
+        return buildCandidates(directory, metas, null);
+    }
+
+    public static List<QcSelectionCandidate> buildCandidates(
+            String directory,
+            List<SeriesMeta> metas,
+            Map<Integer, MetadataAssignment> reviewedMetadata) {
         List<QcSelectionCandidate> candidates = new ArrayList<QcSelectionCandidate>();
         if (metas == null || metas.isEmpty()) return candidates;
 
@@ -192,6 +225,11 @@ public final class QcMinMaxPerConditionSelector {
             SeriesMeta meta = usableMetas.get(i);
             String animalName = animalNames.get(i);
             String conditionName = assignments.get(animalName);
+            MetadataAssignment reviewed = reviewedMetadata == null ? null : reviewedMetadata.get(meta.index);
+            if (reviewed != null && !reviewed.animalName.isEmpty()) {
+                animalName = reviewed.animalName;
+                conditionName = reviewed.conditionName;
+            }
             if (conditionName == null || conditionName.trim().isEmpty()) {
                 conditionName = ConditionNameParser.detectCondition(animalName);
             }
@@ -825,6 +863,14 @@ public final class QcMinMaxPerConditionSelector {
             if (!String.valueOf(conditionFile.length()).equals(props.getProperty(KEY_CONDITIONS_LENGTH))) return false;
             if (!String.valueOf(conditionFile.lastModified()).equals(props.getProperty(KEY_CONDITIONS_MODIFIED))) return false;
         }
+
+        File orientationFile = OrientationManifestIO.getExistingFile(directory);
+        boolean orientationExists = orientationFile != null && orientationFile.isFile();
+        if (!String.valueOf(orientationExists).equals(props.getProperty(KEY_ORIENTATION_EXISTS))) return false;
+        if (orientationExists) {
+            if (!String.valueOf(orientationFile.length()).equals(props.getProperty(KEY_ORIENTATION_LENGTH))) return false;
+            if (!String.valueOf(orientationFile.lastModified()).equals(props.getProperty(KEY_ORIENTATION_MODIFIED))) return false;
+        }
         return true;
     }
 
@@ -848,6 +894,14 @@ public final class QcMinMaxPerConditionSelector {
         if (conditionExists) {
             props.setProperty(KEY_CONDITIONS_LENGTH, String.valueOf(conditionFile.length()));
             props.setProperty(KEY_CONDITIONS_MODIFIED, String.valueOf(conditionFile.lastModified()));
+        }
+
+        File orientationFile = OrientationManifestIO.getExistingFile(directory);
+        boolean orientationExists = orientationFile != null && orientationFile.isFile();
+        props.setProperty(KEY_ORIENTATION_EXISTS, String.valueOf(orientationExists));
+        if (orientationExists) {
+            props.setProperty(KEY_ORIENTATION_LENGTH, String.valueOf(orientationFile.length()));
+            props.setProperty(KEY_ORIENTATION_MODIFIED, String.valueOf(orientationFile.lastModified()));
         }
 
         PrintWriter pw = new PrintWriter(cacheFile, StandardCharsets.UTF_8.name());

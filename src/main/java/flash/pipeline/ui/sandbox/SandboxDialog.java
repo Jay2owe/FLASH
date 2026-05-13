@@ -12,12 +12,16 @@ import javax.swing.JDialog;
 import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
 import java.awt.BorderLayout;
+import java.awt.Dialog;
 import java.awt.Dimension;
+import java.awt.Frame;
 import java.awt.GraphicsEnvironment;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
+import java.awt.KeyboardFocusManager;
 import java.awt.SecondaryLoop;
+import java.awt.Window;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -59,26 +63,37 @@ public final class SandboxDialog extends JDialog {
     private SecondaryLoop loop;
     private Result result = Result.cancel();
 
-    private SandboxDialog(String channelLabel, DagIR initialDag, PreviewHandler previewHandler) {
-        super((java.awt.Frame) null, "Filter Builder - " + safe(channelLabel), false);
+    private SandboxDialog(Window owner, String channelLabel, DagIR initialDag, PreviewHandler previewHandler) {
+        super(owner, "Filter Builder - " + safe(channelLabel), Dialog.ModalityType.MODELESS);
         this.panel = new FilterBuilderPanel(initialDag, /*sharedPreview=*/null, previewHandler, null);
 
         setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
+        try {
+            setModalExclusionType(Dialog.ModalExclusionType.APPLICATION_EXCLUDE);
+        } catch (RuntimeException ignored) {
+            // Best effort: ownership is the primary protection against modal parent blocking.
+        }
         setMinimumSize(new Dimension(980, 620));
         setLayout(new BorderLayout(8, 8));
         add(panel, BorderLayout.CENTER);
         add(buildFooter(), BorderLayout.SOUTH);
         wireButtons();
         pack();
-        setLocationRelativeTo(null);
+        setLocationRelativeTo(owner);
     }
 
     public static Result show(String channelLabel, File binFolder, int channelIndex,
                               String seedMacro, PreviewHandler previewHandler) {
+        return show(resolveActiveOwner(), channelLabel, binFolder, channelIndex, seedMacro, previewHandler);
+    }
+
+    public static Result show(Window owner, String channelLabel, File binFolder, int channelIndex,
+                              String seedMacro, PreviewHandler previewHandler) {
         if (GraphicsEnvironment.isHeadless()) return Result.cancel();
         final DagIR initialDag = loadInitialDag(binFolder, channelIndex, seedMacro);
-        final SandboxDialog dialog = new SandboxDialog(channelLabel, initialDag, previewHandler);
+        final SandboxDialog dialog = new SandboxDialog(owner, channelLabel, initialDag, previewHandler);
         dialog.setVisible(true);
+        dialog.bringToFront();
 
         if (SwingUtilities.isEventDispatchThread()) {
             dialog.loop = java.awt.Toolkit.getDefaultToolkit().getSystemEventQueue().createSecondaryLoop();
@@ -92,6 +107,27 @@ public final class SandboxDialog extends JDialog {
             }
         }
         return dialog.result;
+    }
+
+    private static Window resolveActiveOwner() {
+        KeyboardFocusManager focusManager = KeyboardFocusManager.getCurrentKeyboardFocusManager();
+        Window focused = focusManager.getFocusedWindow();
+        if (usableOwner(focused)) return focused;
+        Window active = focusManager.getActiveWindow();
+        if (usableOwner(active)) return active;
+        Window[] windows = Window.getWindows();
+        for (int i = windows.length - 1; i >= 0; i--) {
+            Window window = windows[i];
+            if (usableOwner(window)) return window;
+        }
+        return null;
+    }
+
+    private static boolean usableOwner(Window window) {
+        return window != null
+                && window.isDisplayable()
+                && window.isShowing()
+                && (window instanceof Dialog || window instanceof Frame);
     }
 
     private static DagIR loadInitialDag(File binFolder, int channelIndex, String seedMacro) {
@@ -159,6 +195,17 @@ public final class SandboxDialog extends JDialog {
 
     private void close() {
         dispose();
+    }
+
+    private void bringToFront() {
+        toFront();
+        requestFocus();
+        SwingUtilities.invokeLater(new Runnable() {
+            @Override public void run() {
+                toFront();
+                requestFocus();
+            }
+        });
     }
 
     private static String safe(String value) {

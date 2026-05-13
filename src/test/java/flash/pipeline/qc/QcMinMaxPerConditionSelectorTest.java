@@ -1,7 +1,9 @@
 package flash.pipeline.qc;
 
 import flash.pipeline.io.LifIO;
+import flash.pipeline.io.OrientationManifestIO;
 import flash.pipeline.io.SeriesMeta;
+import flash.pipeline.naming.OrientationManifestRow;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -12,7 +14,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -45,6 +49,65 @@ public class QcMinMaxPerConditionSelectorTest {
         assertEquals("SynWeekTwo", candidates.get(0).conditionName);
         assertEquals("hAPP2WeekEight", candidates.get(1).animalName);
         assertEquals("hAPPWeekEight", candidates.get(1).conditionName);
+    }
+
+    @Test
+    public void buildCandidates_prefersReviewedMetadataAssignments() throws Exception {
+        File dir = temp.newFolder("reviewed-project");
+        List<SeriesMeta> metas = Arrays.asList(
+                new SeriesMeta(0, "project.lif - BadGuess_LH_SCN", 12, 1.0, 1.0, 1.0, "pixel"),
+                new SeriesMeta(1, "project.lif - OtherGuess_RH_SCN", 12, 1.0, 1.0, 1.0, "pixel"));
+
+        Map<Integer, QcMinMaxPerConditionSelector.MetadataAssignment> reviewed =
+                new LinkedHashMap<Integer, QcMinMaxPerConditionSelector.MetadataAssignment>();
+        reviewed.put(Integer.valueOf(0),
+                new QcMinMaxPerConditionSelector.MetadataAssignment("MouseA", "Control"));
+        reviewed.put(Integer.valueOf(1),
+                new QcMinMaxPerConditionSelector.MetadataAssignment("MouseB", "Treatment"));
+
+        List<QcSelectionCandidate> candidates =
+                QcMinMaxPerConditionSelector.buildCandidates(
+                        dir.getAbsolutePath(), metas, reviewed);
+
+        assertEquals(2, candidates.size());
+        assertEquals("MouseA", candidates.get(0).animalName);
+        assertEquals("Control", candidates.get(0).conditionName);
+        assertEquals("MouseB", candidates.get(1).animalName);
+        assertEquals("Treatment", candidates.get(1).conditionName);
+    }
+
+    @Test
+    public void cacheInvalidatesWhenOrientationManifestChanges() throws Exception {
+        File dir = temp.newFolder("cache-project");
+        File lif = temp.newFile("experiment.lif");
+        File cache = temp.newFile("cache.properties");
+        File scores = temp.newFile("scores.csv");
+
+        OrientationManifestIO.saveRows(dir.getAbsolutePath(), Arrays.asList(
+                orientationRow("A", "MouseA")));
+
+        List<QcSelectionChannel> qcChannels = Arrays.asList(
+                new QcSelectionChannel(0, "DAPI", true, false, false));
+        Method write = QcMinMaxPerConditionSelector.class.getDeclaredMethod(
+                "writeCacheProperties", String.class, File.class, List.class,
+                flash.pipeline.zslice.ZSliceConfig.class, File.class);
+        write.setAccessible(true);
+        write.invoke(null, dir.getAbsolutePath(), lif, qcChannels, null, cache);
+
+        Method valid = QcMinMaxPerConditionSelector.class.getDeclaredMethod(
+                "isCacheValid", String.class, File.class, List.class,
+                flash.pipeline.zslice.ZSliceConfig.class, File.class, File.class);
+        valid.setAccessible(true);
+        assertEquals(Boolean.TRUE,
+                valid.invoke(null, dir.getAbsolutePath(), lif, qcChannels, null, cache, scores));
+
+        Thread.sleep(5L);
+        OrientationManifestIO.saveRows(dir.getAbsolutePath(), Arrays.asList(
+                orientationRow("A", "MouseA"),
+                orientationRow("B", "MouseB")));
+
+        assertEquals(Boolean.FALSE,
+                valid.invoke(null, dir.getAbsolutePath(), lif, qcChannels, null, cache, scores));
     }
 
     @Test
@@ -189,5 +252,25 @@ public class QcMinMaxPerConditionSelectorTest {
         record.channelScores.put(1, c1);
         record.channelScores.put(2, c2);
         return record;
+    }
+
+    private static OrientationManifestRow orientationRow(String keySuffix, String animalName) {
+        return new OrientationManifestRow(
+                OrientationManifestRow.buildImageKey(
+                        "CONTAINER", "experiment.lif", 1, "Series " + keySuffix),
+                "experiment.lif",
+                1,
+                "Series " + keySuffix,
+                "Series " + keySuffix,
+                animalName,
+                OrientationManifestRow.Hemisphere.LH,
+                "SCN",
+                OrientationManifestRow.RotationDegrees.DEG_0,
+                false,
+                false,
+                OrientationManifestRow.ViewPolicy.MANUAL_ONLY,
+                OrientationManifestRow.DecisionSource.MANUAL,
+                OrientationManifestRow.ConfirmationState.YES,
+                "");
     }
 }

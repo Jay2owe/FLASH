@@ -5,8 +5,14 @@ import flash.pipeline.image.GpuConcurrency;
 import ij.IJ;
 import ij.ImagePlus;
 import ij.ImageStack;
+import ij.measure.ResultsTable;
 import ij.process.ImageProcessor;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import fiji.plugin.trackmate.Model;
@@ -15,7 +21,6 @@ import fiji.plugin.trackmate.Spot;
 import fiji.plugin.trackmate.TrackMate;
 import fiji.plugin.trackmate.action.LabelImgExporter;
 import fiji.plugin.trackmate.detection.DetectorKeys;
-import fiji.plugin.trackmate.features.FeatureFilter;
 import fiji.plugin.trackmate.stardist.StarDistDetectorFactory;
 import fiji.plugin.trackmate.tracking.jaqaman.SparseLAPTrackerFactory;
 
@@ -27,6 +32,11 @@ import fiji.plugin.trackmate.tracking.jaqaman.SparseLAPTrackerFactory;
  * Each detected object gets a globally unique label across all slices.
  */
 public class StarDist3DRunner {
+
+    public static final String OBJECT_STATS_PROPERTY = "flash.stardist.objectStats";
+    public static final String STATS_AREA_MEAN = "StarDist Area Mean";
+    public static final String STATS_QUALITY_MEAN = "StarDist Quality Mean";
+    public static final String STATS_INTENSITY_MEAN = "StarDist Intensity Mean";
 
     /** Whether the TF thread-cap system properties have already been written.
      *  TensorFlow reads the properties at session construction, so first-write
@@ -215,14 +225,6 @@ public class StarDist3DRunner {
                     settings.trackerSettings.put("GAP_CLOSING_MAX_DISTANCE", Double.valueOf(safeGapClosingMaxDistance));
                     settings.trackerSettings.put("MAX_FRAME_GAP", Integer.valueOf(safeMaxFrameGap));
 
-                    // Quality and intensity filters use TrackMate's FeatureFilter (these features exist)
-                    if (qualityMin > 0) {
-                        settings.addSpotFilter(new FeatureFilter(Spot.QUALITY, qualityMin, true));
-                    }
-                    if (intensityMin > 0) {
-                        settings.addSpotFilter(new FeatureFilter("MEAN_INTENSITY_CH1", intensityMin, true));
-                    }
-
                     TrackMate trackmate = new TrackMate(model, settings);
 
                     if (!trackmate.checkInput()) {
@@ -243,31 +245,6 @@ public class StarDist3DRunner {
                     trackmate.execInitialSpotFiltering();
                     trackmate.execSpotFiltering(false);
 
-                    // Area filter: SpotShapeAnalyzerFactory isn't discovered by addAllAnalyzers(),
-                    // so AREA is not available as a feature. Compute area from RADIUS (π*r²) and
-                    // filter spots manually.
-                    boolean hasAreaFilter = areaMin > 0 || Double.isFinite(areaMax);
-                    if (hasAreaFilter) {
-                        int beforeArea = model.getSpots().getNSpots(true);
-                        java.util.List<Spot> toRemove = new java.util.ArrayList<Spot>();
-                        for (Spot spot : model.getSpots().iterable(true)) {
-                            Double radius = spot.getFeature(Spot.RADIUS);
-                            if (radius == null) continue;
-                            double area = Math.PI * radius * radius;
-                            if (areaMin > 0 && area < areaMin) toRemove.add(spot);
-                            else if (Double.isFinite(areaMax) && area > areaMax) toRemove.add(spot);
-                        }
-                        for (Spot spot : toRemove) {
-                            model.getSpots().remove(spot, spot.getFeature(Spot.FRAME).intValue());
-                        }
-                        int afterArea = model.getSpots().getNSpots(true);
-                        String chTagA = (channelName != null && !channelName.isEmpty())
-                                ? " [" + channelName + "]" : "";
-                        IJ.log("    StarDist" + chTagA + " area filter (π*r²): " + beforeArea
-                                + " → " + afterArea + " spots (area " + areaMin + "-"
-                                + (Double.isFinite(areaMax) ? areaMax : "Inf") + ")");
-                    }
-
                     // If no spots survived detection + filtering, return empty label image
                     int nSpots = model.getSpots().getNSpots(true);
                     if (nSpots == 0) {
@@ -282,6 +259,7 @@ public class StarDist3DRunner {
                         if (input.getCalibration() != null) {
                             emptyLabel.setCalibration(input.getCalibration().copy());
                         }
+                        emptyLabel.setProperty(OBJECT_STATS_PROPERTY, new ResultsTable());
                         return emptyLabel;
                     }
 
@@ -311,6 +289,7 @@ public class StarDist3DRunner {
                     for (Spot spot : unlinked) {
                         model.getSpots().remove(spot, spot.getFeature(Spot.FRAME).intValue());
                     }
+                    ResultsTable objectStats = buildObjectStats(model);
 
                     String chTagTrack = (channelName != null && !channelName.isEmpty())
                             ? " [" + channelName + "]" : "";
@@ -339,6 +318,9 @@ public class StarDist3DRunner {
                     }
 
                     labelImp = exported;
+                    if (labelImp != null) {
+                        labelImp.setProperty(OBJECT_STATS_PROPERTY, objectStats);
+                    }
                 } finally {
                     // Release the duplicate's pixel buffer. dup was never
                     // shown, so no WindowManager state to clean up — just free
@@ -376,6 +358,19 @@ public class StarDist3DRunner {
                 labelImp.setCalibration(input.getCalibration().copy());
             }
 
+            Object statsProperty = labelImp.getProperty(OBJECT_STATS_PROPERTY);
+            ResultsTable objectStats = statsProperty instanceof ResultsTable
+                    ? (ResultsTable) statsProperty
+                    : new ResultsTable();
+            int removedByStarDistFilters = applyObjectFilters(
+                    labelImp, objectStats, areaMin, areaMax, qualityMin, intensityMin);
+            if (removedByStarDistFilters > 0) {
+                String chTagFilter = (channelName != null && !channelName.isEmpty())
+                        ? " [" + channelName + "]" : "";
+                IJ.log("    StarDist" + chTagFilter + " object filters removed "
+                        + removedByStarDistFilters + " object(s)");
+            }
+
             int nObjects = countLabels(labelImp);
             long timeMs = System.currentTimeMillis() - startTime;
             String chTag = (channelName != null && !channelName.isEmpty())
@@ -407,23 +402,142 @@ public class StarDist3DRunner {
     }
 
     /**
-     * Finds the max pixel value across all slices of a label image.
-     * Each label is a unique integer, so max value equals the object count.
+     * Counts distinct positive labels across all slices of a label image.
      *
      * @param labelImage label image produced by StarDist
      * @return number of labelled objects
      */
     public static int countLabels(ImagePlus labelImage) {
-        double maxVal = 0;
+        if (labelImage == null || labelImage.getStack() == null) return 0;
+        Set<Integer> labels = new HashSet<Integer>();
         int nSlices = labelImage.getStackSize();
         for (int s = 1; s <= nSlices; s++) {
             ImageProcessor ip = labelImage.getStack().getProcessor(s);
-            double sliceMax = ip.getStats().max;
-            if (sliceMax > maxVal) {
-                maxVal = sliceMax;
+            if (ip == null) continue;
+            for (int i = 0; i < ip.getPixelCount(); i++) {
+                int label = Math.round(ip.getf(i));
+                if (label > 0) labels.add(Integer.valueOf(label));
             }
         }
-        return (int) maxVal;
+        return labels.size();
+    }
+
+    private static ResultsTable buildObjectStats(Model model) {
+        ResultsTable table = new ResultsTable();
+        if (model == null || model.getTrackModel() == null) return table;
+        List<Integer> trackIds = new ArrayList<Integer>(model.getTrackModel().trackIDs(true));
+        Collections.sort(trackIds);
+        int row = 0;
+        for (Integer trackId : trackIds) {
+            Set<Spot> spots = model.getTrackModel().trackSpots(trackId);
+            if (spots == null || spots.isEmpty()) continue;
+            MetricStats area = new MetricStats();
+            MetricStats quality = new MetricStats();
+            MetricStats intensity = new MetricStats();
+            for (Spot spot : spots) {
+                Double radius = spot.getFeature(Spot.RADIUS);
+                if (radius != null && Double.isFinite(radius.doubleValue())) {
+                    area.add(Math.PI * radius.doubleValue() * radius.doubleValue());
+                }
+                quality.add(spot.getFeature(Spot.QUALITY));
+                intensity.add(spot.getFeature("MEAN_INTENSITY_CH1"));
+            }
+            table.incrementCounter();
+            table.setValue("Label", row, trackId.intValue());
+            if (area.hasValues()) table.setValue(STATS_AREA_MEAN, row, area.mean());
+            if (quality.hasValues()) table.setValue(STATS_QUALITY_MEAN, row, quality.mean());
+            if (intensity.hasValues()) table.setValue(STATS_INTENSITY_MEAN, row, intensity.mean());
+            row++;
+        }
+        return table;
+    }
+
+    public static int applyObjectFilters(ImagePlus labelImage,
+                                         ResultsTable objectStats,
+                                         double areaMin,
+                                         double areaMax,
+                                         double qualityMin,
+                                         double intensityMin) {
+        if (labelImage == null || objectStats == null || objectStats.size() == 0) return 0;
+        Set<Integer> labelsToRemove = new HashSet<Integer>();
+        for (int row = 0; row < objectStats.size(); row++) {
+            int label = labelForRow(objectStats, row);
+            if (label <= 0) continue;
+            double area = metric(objectStats, STATS_AREA_MEAN, row);
+            double quality = metric(objectStats, STATS_QUALITY_MEAN, row);
+            double intensity = metric(objectStats, STATS_INTENSITY_MEAN, row);
+            boolean remove = false;
+            if (Double.isFinite(area)) {
+                remove = (areaMin > 0 && area < areaMin)
+                        || (Double.isFinite(areaMax) && area > areaMax);
+            }
+            if (!remove && qualityMin > 0 && Double.isFinite(quality)) {
+                remove = quality < qualityMin;
+            }
+            if (!remove && intensityMin > 0 && Double.isFinite(intensity)) {
+                remove = intensity < intensityMin;
+            }
+            if (remove) labelsToRemove.add(Integer.valueOf(label));
+        }
+        if (labelsToRemove.isEmpty() || labelImage.getStack() == null) return 0;
+        ImageStack stack = labelImage.getStack();
+        for (int slice = 1; slice <= stack.getSize(); slice++) {
+            ImageProcessor processor = stack.getProcessor(slice);
+            if (processor == null) continue;
+            for (int i = 0; i < processor.getPixelCount(); i++) {
+                int label = Math.round(processor.getf(i));
+                if (label > 0 && labelsToRemove.contains(Integer.valueOf(label))) {
+                    processor.setf(i, 0f);
+                }
+            }
+        }
+        labelImage.updateAndDraw();
+        return labelsToRemove.size();
+    }
+
+    private static int labelForRow(ResultsTable table, int row) {
+        try {
+            double label = table.getValue("Label", row);
+            if (Double.isFinite(label) && label > 0) return (int) Math.round(label);
+        } catch (RuntimeException ignored) {
+            // Fall through to row order.
+        }
+        return row + 1;
+    }
+
+    private static double metric(ResultsTable table, String column, int row) {
+        try {
+            double value = table.getValue(column, row);
+            return Double.isFinite(value) ? value : Double.NaN;
+        } catch (RuntimeException e) {
+            return Double.NaN;
+        }
+    }
+
+    private static final class MetricStats {
+        private double sum;
+        private int count;
+
+        void add(Double value) {
+            if (value != null && Double.isFinite(value.doubleValue())) {
+                add(value.doubleValue());
+            }
+        }
+
+        void add(double value) {
+            if (Double.isFinite(value)) {
+                sum += value;
+                count++;
+            }
+        }
+
+        boolean hasValues() {
+            return count > 0;
+        }
+
+        double mean() {
+            return count == 0 ? Double.NaN : sum / count;
+        }
     }
 
     private static void logTrackMateFailure(String phase, String message) {

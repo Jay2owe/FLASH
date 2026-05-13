@@ -1,8 +1,10 @@
 package flash.pipeline.ui.config;
 
+import flash.pipeline.stardist.StarDist3DRunner;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import ij.ImagePlus;
 import ij.ImageStack;
+import ij.measure.ResultsTable;
 import ij.process.ByteProcessor;
 import org.junit.Test;
 
@@ -13,6 +15,7 @@ import javax.swing.JLabel;
 import javax.swing.text.JTextComponent;
 import java.awt.Component;
 import java.awt.Container;
+import java.awt.image.IndexColorModel;
 import java.util.Arrays;
 
 import static org.junit.Assert.assertEquals;
@@ -91,6 +94,8 @@ public class StarDistParameterStageTest {
         assertContainsText(controls, "Area min");
         assertContainsText(controls, "Area max");
         assertContainsText(controls, "Quality min");
+        assertContainsText(controls, "Size min");
+        assertContainsText(controls, "Size max");
         assertFalse("Area min belongs in Filters, not Detection.",
                 siblingContainerContains(controls, "Detection:", "Area min"));
         assertFalse("Area max belongs in Filters, not Detection.",
@@ -122,10 +127,76 @@ public class StarDistParameterStageTest {
         assertEquals(1, adapter.previewRuns);
         assertFalse(stage.isPreviewStaleForTest());
         assertNotNull(actions.adjustedPreview);
-        assertEquals("Objects: 3 ready", actions.status);
+        assertEquals("Objects: 2 ready", actions.status);
         assertFalse(actions.previewButtonStale);
         assertEquals("Run Preview", actions.previewButton.getText());
         assertEquals(3, stage.largePreviewPaneCountForTest());
+    }
+
+    @Test
+    public void sizeEditsAfterPreviewRelabelRemovedObjectsWithoutRerunning() throws Exception {
+        RecordingStore store = new RecordingStore("stardist:0.5:0.4");
+        RecordingSizeStore sizeStore = new RecordingSizeStore("0-Infinity");
+        RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
+        RecordingActions actions = new RecordingActions();
+        StarDistParameterStage stage = new StarDistParameterStage(store, sizeStore, adapter);
+
+        stage.buildControls(context(), actions);
+        stage.onEnter(context(), new PreviewPairPanel("Original", "Adjusted"));
+        stage.runPreviewNowForTest();
+        adapter.previewRuns = 0;
+
+        stage.setSizeMinForTest("2");
+
+        assertFalse(stage.isPreviewStaleForTest());
+        assertEquals("Size edits must reuse cached label sizes",
+                0, adapter.previewRuns);
+        assertEquals("Objects: 1 kept; removed 1 small, 0 large", actions.status);
+        assertEquals("Objects: 1 kept; removed 1 small, 0 large",
+                stage.sizeCutoffSummaryForTest());
+        assertFalse(actions.previewButtonStale);
+        assertRemovedLabelUsesCutoffColor(actions.adjustedPreview, 1, 0xe53935);
+
+        assertTrue(stage.lockIn(context()));
+        assertEquals("2-Infinity", sizeStore.token);
+    }
+
+    @Test
+    public void starDistFilterEditsAfterPreviewRelabelRemovedObjectsWithoutRerunning() throws Exception {
+        RecordingStore store = new RecordingStore(
+                "stardist:0.5:0.4:area=5.0-30.0:quality=0.5:intensity=50.0");
+        RecordingSizeStore sizeStore = new RecordingSizeStore("0-Infinity");
+        RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
+        RecordingActions actions = new RecordingActions();
+        StarDistParameterStage stage = new StarDistParameterStage(store, sizeStore, adapter);
+
+        stage.buildControls(context(), actions);
+        stage.onEnter(context(), new PreviewPairPanel("Original", "Adjusted"));
+        stage.runPreviewNowForTest();
+
+        assertEquals(1, adapter.previewRuns);
+        assertNotNull(adapter.lastPreviewParameters);
+        assertEquals(0.0, adapter.lastPreviewParameters.areaMin, 0.001);
+        assertTrue(Double.isInfinite(adapter.lastPreviewParameters.areaMax));
+        assertEquals(0.0, adapter.lastPreviewParameters.qualityMin, 0.001);
+        assertEquals(0.0, adapter.lastPreviewParameters.intensityMin, 0.001);
+        assertEquals("Objects: 1 kept; removed 0 small, 0 large, 1 by StarDist filters",
+                actions.status);
+        assertRemovedLabelUsesCutoffColor(actions.adjustedPreview, 1, 0xe53935);
+
+        adapter.previewRuns = 0;
+        stage.setAreaMaxForTest("10");
+
+        assertFalse(stage.isPreviewStaleForTest());
+        assertEquals("StarDist filter edits must reuse cached object metrics",
+                0, adapter.previewRuns);
+        assertEquals("Objects: 0 kept; removed 0 small, 0 large, 2 by StarDist filters",
+                actions.status);
+        assertRemovedLabelUsesCutoffColor(actions.adjustedPreview, 2, 0xf9a825);
+
+        assertTrue(stage.lockIn(context()));
+        assertEquals("stardist:0.5:0.4:area=5.0-10.0:quality=0.5:intensity=50.0",
+                store.token);
     }
 
     @Test
@@ -313,6 +384,7 @@ public class StarDistParameterStageTest {
         int filteredSourceCreations;
         int previewRuns;
         boolean returnNullPreview;
+        StarDistParameterStage.Parameters lastPreviewParameters;
 
         @Override public ImagePlus createRawSource(ConfigQcContext context) {
             rawSourceCreations++;
@@ -331,13 +403,29 @@ public class StarDistParameterStageTest {
         @Override public ImagePlus runPreview(ImagePlus filteredSource,
                                               StarDistParameterStage.Parameters parameters) {
             previewRuns++;
+            lastPreviewParameters = parameters;
             if (returnNullPreview) {
                 return null;
             }
-            ByteProcessor processor = new ByteProcessor(2, 1);
+            ByteProcessor processor = new ByteProcessor(4, 1);
             processor.set(0, 0, 1);
-            processor.set(1, 0, 3);
-            return new ImagePlus("labels", processor);
+            processor.set(1, 0, 2);
+            processor.set(2, 0, 2);
+            processor.set(3, 0, 2);
+            ImagePlus labels = new ImagePlus("labels", processor);
+            ResultsTable stats = new ResultsTable();
+            stats.incrementCounter();
+            stats.setValue("Label", 0, 1);
+            stats.setValue(StarDist3DRunner.STATS_AREA_MEAN, 0, 4);
+            stats.setValue(StarDist3DRunner.STATS_QUALITY_MEAN, 0, 0.2);
+            stats.setValue(StarDist3DRunner.STATS_INTENSITY_MEAN, 0, 10);
+            stats.incrementCounter();
+            stats.setValue("Label", 1, 2);
+            stats.setValue(StarDist3DRunner.STATS_AREA_MEAN, 1, 20);
+            stats.setValue(StarDist3DRunner.STATS_QUALITY_MEAN, 1, 0.9);
+            stats.setValue(StarDist3DRunner.STATS_INTENSITY_MEAN, 1, 100);
+            labels.setProperty(StarDist3DRunner.OBJECT_STATS_PROPERTY, stats);
+            return labels;
         }
 
         @Override public int countLabels(ImagePlus labelImage) {
@@ -346,6 +434,22 @@ public class StarDistParameterStageTest {
 
         @Override public void close(ImagePlus image) {
             if (image != null) image.flush();
+        }
+    }
+
+    private static final class RecordingSizeStore implements StarDistParameterStage.SizeStore {
+        String token;
+
+        RecordingSizeStore(String token) {
+            this.token = token;
+        }
+
+        @Override public String get() {
+            return token;
+        }
+
+        @Override public void set(String token) {
+            this.token = token;
         }
     }
 
@@ -403,5 +507,18 @@ public class StarDistParameterStageTest {
 
         @Override public void cancel() {
         }
+    }
+
+    private static void assertRemovedLabelUsesCutoffColor(ImagePlus labelImage,
+                                                          int label,
+                                                          int expectedRgb) {
+        assertNotNull(labelImage);
+        assertTrue(labelImage.getProcessor().getColorModel() instanceof IndexColorModel);
+        IndexColorModel model = (IndexColorModel) labelImage.getProcessor().getColorModel();
+        int index = ((Math.max(1, label) - 1) % 255) + 1;
+        int actual = (model.getRed(index) << 16)
+                | (model.getGreen(index) << 8)
+                | model.getBlue(index);
+        assertEquals(expectedRgb, actual);
     }
 }

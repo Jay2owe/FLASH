@@ -16,6 +16,7 @@ import flash.pipeline.image.ParallelContext;
 import flash.pipeline.image.ProcessingNotes;
 import flash.pipeline.io.AsyncImageSaver;
 import flash.pipeline.io.BoundedImageLoader;
+import flash.pipeline.io.ConditionManifestIO;
 import flash.pipeline.io.DeferredImageSupplier;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.FlashProjectLayout.AnalysisFolder;
@@ -28,6 +29,9 @@ import flash.pipeline.naming.ImageOrientationResolver;
 import flash.pipeline.naming.ImageNameParser;
 import flash.pipeline.naming.NameParts;
 import flash.pipeline.naming.ResolvedImageMetadata;
+import flash.pipeline.presentation.PresentationTileConfig;
+import flash.pipeline.presentation.PresentationTileRecord;
+import flash.pipeline.presentation.PresentationTileWriter;
 import flash.pipeline.results.AnalysisDetailsWriter;
 import flash.pipeline.results.SplitAndMergeDetailsWriter;
 import flash.pipeline.runtime.DependencyId;
@@ -47,10 +51,12 @@ import ij.io.Opener;
 
 import ij.WindowManager;
 
+import javax.imageio.ImageIO;
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.ItemEvent;
 import java.awt.event.ItemListener;
+import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -59,10 +65,14 @@ import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.EnumSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
@@ -88,6 +98,8 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
     private final long startTimeMillis = System.currentTimeMillis();
     private boolean useDeconvolvedInput = true;
     private CLIConfig cliConfig = null;
+    private final List<PresentationTileRecord> presentationTileRecords =
+            Collections.synchronizedList(new ArrayList<PresentationTileRecord>());
 
     @Override
     public Set<BinField> requiredBinFields() {
@@ -196,6 +208,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
         int backgroundIndex;
         boolean[] subtractFromChannels;
         boolean useDeconvolvedInput;
+        PresentationTileConfig tileConfig;
     }
 
     static final class ChannelSettingsGrid {
@@ -280,6 +293,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
         MainDialogResult mdr = showMainDialog(channelNames, channelColors, defaultMinMax, new File(directory));
         if (mdr == null) return;
         useDeconvolvedInput = mdr.useDeconvolvedInput;
+        presentationTileRecords.clear();
 
         File splitMergeRoot = splitMergeWriteRoot(directory);
         File outRoot = splitMergeImageWriteRoot(directory);
@@ -472,6 +486,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
         }
 
         AsyncImageSaver.waitForAllWithProgress(parallelThreads);
+        writePresentationTileOutputs(directory, splitMergeRoot, mdr.tileConfig);
         long totalElapsed = System.currentTimeMillis() - loopStartTime;
         IJ.log("__________________________________________________________");
         IJ.log("Split and Merge Image Channels Analysis complete.");
@@ -863,95 +878,597 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
         pd.beginAdvancedSection("splitMerge");
         final JTextField additionalMergesField = pd.addStringField(
                 "Additional merges (e.g. 1-2 3-4):", "", 15);
-
-        // ── Section: Background Subtraction ──
-        pd.addHeader("Background Subtraction");
-        final ToggleSwitch subtractBgToggle = pd.addToggle("Subtract background channel",
-                autoBackgroundIndex >= 0);
-        final JComboBox<String> bgChannelBox = pd.addChoice("Background Channel:", bgChoices,
-                bgChoices[autoBackgroundIndex >= 0 ? autoBackgroundIndex + 1 : 0]);
-        bgChannelBox.setEnabled(autoBackgroundIndex >= 0);
-        final JButton overrideBackgroundBtn = pd.addButton("Override");
-        overrideBackgroundBtn.setEnabled(autoBackgroundIndex >= 0);
-
-        final JLabel subtractFromLabel = pd.addMessage("Subtract from:");
-        subtractFromLabel.setEnabled(autoBackgroundIndex >= 0);
-
-        final ToggleSwitch[] subtractToggles = new ToggleSwitch[nCh];
-        for (int i = 0; i < nCh; i++) {
-            subtractToggles[i] = pd.addToggle(channelNames[i], i != autoBackgroundIndex);
-            subtractToggles[i].setEnabled(autoBackgroundIndex >= 0);
-        }
         pd.endAdvancedSection();
 
-        overrideBackgroundBtn.addActionListener(new java.awt.event.ActionListener() {
+        final TileOptionsPanel tileOptions = new TileOptionsPanel(defaultTileOrder(channelNames));
+        pd.addComponent(tileOptions.panel);
+        final BackgroundSubtractionPanel backgroundOptions =
+                new BackgroundSubtractionPanel(channelNames, bgChoices, autoBackgroundIndex);
+        pd.addComponent(backgroundOptions.panel);
+        tileOptions.previewButton.addActionListener(new java.awt.event.ActionListener() {
             @Override
             public void actionPerformed(java.awt.event.ActionEvent e) {
-                int selected = bgChannelBox.getSelectedIndex();
-                bgChannelBox.removeAllItems();
-                bgChannelBox.addItem(NONE_OPTION);
-                for (String channelName : channelNames) {
-                    bgChannelBox.addItem(channelName);
-                }
-                bgChannelBox.setSelectedIndex(selected);
-                overrideBackgroundBtn.setEnabled(false);
-            }
-        });
-
-        subtractBgToggle.addChangeListener(new Runnable() {
-            @Override
-            public void run() {
-                boolean on = subtractBgToggle.isSelected();
-                bgChannelBox.setEnabled(on);
-                overrideBackgroundBtn.setEnabled(on && autoBackgroundIndex >= 0);
-                subtractFromLabel.setEnabled(on);
-                if (!on) {
-                    bgChannelBox.setSelectedIndex(0);
-                } else if (bgChannelBox.getSelectedIndex() <= 0 && autoBackgroundIndex >= 0) {
-                    bgChannelBox.setSelectedIndex(autoBackgroundIndex + 1);
-                }
-                for (int i = 0; i < nCh; i++) {
-                    subtractToggles[i].setEnabled(on);
-                }
+                PresentationTileConfig previewConfig = tileOptions.buildConfig();
+                PresentationTileRecord previewRecord = representativePreviewRecord(projectRoot);
+                BufferedImage preview = PresentationTileWriter.renderAnnotationPreview(
+                        previewConfig, previewRecord);
+                JOptionPane.showMessageDialog(pd.getWindow(), previewComponent(preview),
+                        "Annotation Preview", JOptionPane.PLAIN_MESSAGE);
             }
         });
 
         boolean ok = pd.showDialog();
         if (!ok) return null;
 
-        // ── Sequential retrieval ── add-order per type:
-        //   channelGrid:   read directly from Swing controls
-        //   toggles:       useDeconv, createMerge, saveOmeTiff, subtractBg, subtractToggles[0..nCh-1]
-        //   textFields:    additionalMergesField
-        //   combos:        bgChannelBox
+        // Read direct Swing values so compact optional panels do not depend on insertion order.
         final MainDialogResult result = new MainDialogResult();
-        result.useDeconvolvedInput = pd.getNextBoolean();
+        result.useDeconvolvedInput = useDeconvToggle.isSelected();
 
         ChannelSettingsSelections channelSettings = readChannelSettingsGrid(channelGrid);
         result.processMethodPerCh = channelSettings.processMethodPerCh;
         result.saturationsPerCh = channelSettings.saturationsPerCh;
         result.customMinMaxPerCh = channelSettings.customMinMaxPerCh;
 
-        result.createMerge = pd.getNextBoolean();
-        result.saveOmeTiff = pd.getNextBoolean();
-        result.additionalMergeSpec = pd.getNextString().trim();
+        result.createMerge = createMergeToggle.isSelected();
+        result.saveOmeTiff = saveOmeTiffToggle.isSelected();
+        result.additionalMergeSpec = additionalMergesField.getText() == null
+                ? "" : additionalMergesField.getText().trim();
+        result.tileConfig = tileOptions.buildConfig();
 
-        result.subtractBackground = pd.getNextBoolean();
-        // Advance combo index past bgChannelBox; index lookup uses the live ref.
-        pd.getNextChoice();
-        result.backgroundIndex = -1;
-        if (result.subtractBackground && bgChannelBox.getSelectedIndex() > 0) {
-            result.backgroundIndex = bgChannelBox.getSelectedIndex() - 1;
-        }
-        if (result.backgroundIndex < 0) {
-            result.subtractBackground = false;
-        }
-
-        result.subtractFromChannels = new boolean[nCh];
-        for (int i = 0; i < nCh; i++) {
-            result.subtractFromChannels[i] = pd.getNextBoolean();
-        }
+        result.subtractBackground = backgroundOptions.subtractBackground();
+        result.backgroundIndex = backgroundOptions.backgroundIndex();
+        if (result.backgroundIndex < 0) result.subtractBackground = false;
+        result.subtractFromChannels = backgroundOptions.subtractFromChannels();
         return result;
+    }
+
+    private static String[] positionChoices() {
+        return new String[]{"Top left", "Top right", "Bottom left", "Bottom right"};
+    }
+
+    private static List<String> defaultTileOrder(String[] channelNames) {
+        List<String> order = new ArrayList<String>();
+        if (channelNames != null) {
+            for (String channelName : channelNames) {
+                if (channelName != null && !channelName.trim().isEmpty()) {
+                    order.add(channelName.trim());
+                }
+            }
+        }
+        order.add("Merge");
+        return order;
+    }
+
+    static PresentationTileConfig buildTileConfigFromControls(
+            ToggleSwitch createTileToggle,
+            ToggleSwitch annotateOverviewToggle,
+            ToggleSwitch annotateIndividualToggle,
+            JComboBox<String> tileGroupBox,
+            TileOrderPanel tileOrderPanel,
+            JTextField tileCellSizeField,
+            ToggleSwitch scaleBarToggle,
+            JTextField scaleBarLengthField,
+            JTextField scaleBarThicknessField,
+            JComboBox<String> scaleBarPositionBox,
+            JComboBox<String> annotationColorBox,
+            JComboBox<String> labelModeBox,
+            JTextField customLabelField,
+            JTextField labelFontSizeField,
+            JComboBox<String> labelPositionBox) {
+
+        boolean annotateIndividual = isSelected(annotateIndividualToggle);
+        boolean createTile = isSelected(createTileToggle) || annotateIndividual;
+        boolean annotateOverview = isSelected(annotateOverviewToggle) || annotateIndividual;
+        PresentationTileConfig.GroupRowsBy groupRowsBy =
+                "Condition".equals(selectedText(tileGroupBox))
+                        ? PresentationTileConfig.GroupRowsBy.CONDITION
+                        : PresentationTileConfig.GroupRowsBy.ANIMAL;
+        Color annotationColor = "Black".equals(selectedText(annotationColorBox))
+                ? Color.BLACK : Color.WHITE;
+
+        return PresentationTileConfig.builder()
+                .createOverviewTile(createTile)
+                .annotateOverviewTile(annotateOverview)
+                .annotateIndividualImages(annotateIndividual)
+                .groupRowsBy(groupRowsBy)
+                .channelOrder(tileOrderPanel == null ? Collections.<String>emptyList() : tileOrderPanel.orderedItems())
+                .cellSizePx(parseInt(tileCellSizeField, 260))
+                .scaleBarEnabled(isSelected(scaleBarToggle))
+                .scaleBarLengthUm(parseDouble(scaleBarLengthField, 100.0))
+                .scaleBarThicknessPx(parseInt(scaleBarThicknessField, 6))
+                .scaleBarPosition(parsePosition(selectedText(scaleBarPositionBox)))
+                .annotationColor(annotationColor)
+                .labelMode(parseLabelMode(selectedText(labelModeBox)))
+                .customLabelTemplate(textValue(customLabelField, "{stain}"))
+                .labelFontSizePx(parseInt(labelFontSizeField, 18))
+                .labelPosition(parsePosition(selectedText(labelPositionBox)))
+                .build();
+    }
+
+    private static boolean isSelected(ToggleSwitch toggle) {
+        return toggle != null && toggle.isSelected();
+    }
+
+    private static String selectedText(JComboBox<String> combo) {
+        Object value = combo == null ? null : combo.getSelectedItem();
+        return value == null ? "" : value.toString();
+    }
+
+    private static String textValue(JTextField field, String fallback) {
+        String value = field == null ? null : field.getText();
+        if (value == null || value.trim().isEmpty()) return fallback;
+        return value.trim();
+    }
+
+    private static int parseInt(JTextField field, int fallback) {
+        try {
+            return Integer.parseInt(textValue(field, String.valueOf(fallback)));
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
+    private static double parseDouble(JTextField field, double fallback) {
+        try {
+            return Double.parseDouble(textValue(field, String.valueOf(fallback)));
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
+    private static PresentationTileConfig.Position parsePosition(String value) {
+        String text = value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+        if ("top right".equals(text)) return PresentationTileConfig.Position.TOP_RIGHT;
+        if ("bottom left".equals(text)) return PresentationTileConfig.Position.BOTTOM_LEFT;
+        if ("bottom right".equals(text)) return PresentationTileConfig.Position.BOTTOM_RIGHT;
+        return PresentationTileConfig.Position.TOP_LEFT;
+    }
+
+    private static PresentationTileConfig.LabelMode parseLabelMode(String value) {
+        String text = value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+        if ("none".equals(text)) return PresentationTileConfig.LabelMode.NONE;
+        if ("image name".equals(text)) return PresentationTileConfig.LabelMode.IMAGE_NAME;
+        if ("condition + image".equals(text)) return PresentationTileConfig.LabelMode.CONDITION_IMAGE;
+        if ("custom text".equals(text)) return PresentationTileConfig.LabelMode.CUSTOM;
+        return PresentationTileConfig.LabelMode.STAIN_NAME;
+    }
+
+    static final class TileOptionsPanel {
+        final JPanel panel;
+        final JButton previewButton = new JButton("Preview annotation");
+        private final ToggleSwitch createTileToggle = new ToggleSwitch(false);
+        private final JComboBox<String> tileGroupBox =
+                new JComboBox<String>(new String[]{"Animal", "Condition"});
+        private final TileOrderPanel tileOrderPanel;
+        private final JTextField tileCellSizeField = compactField("260", 5);
+        private final ToggleSwitch annotateOverviewToggle = new ToggleSwitch(true);
+        private final ToggleSwitch annotateIndividualToggle = new ToggleSwitch(false);
+        private final ToggleSwitch scaleBarToggle = new ToggleSwitch(true);
+        private final JTextField scaleBarLengthField = compactField("100", 5);
+        private final JTextField scaleBarThicknessField = compactField("6", 4);
+        private final JComboBox<String> scaleBarPositionBox =
+                new JComboBox<String>(positionChoices());
+        private final JComboBox<String> annotationColorBox =
+                new JComboBox<String>(new String[]{"White", "Black"});
+        private final JComboBox<String> labelModeBox =
+                new JComboBox<String>(new String[]{"None", "Stain name", "Image name",
+                        "Condition + image", "Custom text"});
+        private final JTextField customLabelField = compactField("{stain}", 10);
+        private final JTextField labelFontSizeField = compactField("18", 4);
+        private final JComboBox<String> labelPositionBox =
+                new JComboBox<String>(positionChoices());
+
+        TileOptionsPanel(List<String> defaultOrder) {
+            CollapsibleOptionsPanel section = new CollapsibleOptionsPanel("Overview Tile");
+            this.panel = section.panel;
+            this.tileOrderPanel = new TileOrderPanel(defaultOrder);
+            tileGroupBox.setSelectedItem("Animal");
+            scaleBarPositionBox.setSelectedItem("Bottom right");
+            annotationColorBox.setSelectedItem("White");
+            labelModeBox.setSelectedItem("Stain name");
+            labelPositionBox.setSelectedItem("Top left");
+
+            section.add(compactRow(
+                    labelledToggle("Create tile", createTileToggle),
+                    labelled("Rows by", tileGroupBox),
+                    labelled("Cell px", tileCellSizeField)));
+            section.add(compactRow(
+                    labelledToggle("Annotate tile", annotateOverviewToggle),
+                    labelledToggle("Annotated copies", annotateIndividualToggle),
+                    labelledToggle("Scale bar", scaleBarToggle)));
+            section.add(compactRow(
+                    labelled("Bar um", scaleBarLengthField),
+                    labelled("Bar px", scaleBarThicknessField),
+                    labelled("Bar position", scaleBarPositionBox),
+                    labelled("Colour", annotationColorBox)));
+            section.add(compactRow(
+                    labelled("Label", labelModeBox),
+                    labelled("Custom", customLabelField),
+                    labelled("Font px", labelFontSizeField),
+                    labelled("Label position", labelPositionBox),
+                    previewButton));
+            section.add(tileOrderPanel.panel);
+
+            annotateIndividualToggle.addChangeListener(new Runnable() {
+                @Override
+                public void run() {
+                    boolean forceTileAnnotations = annotateIndividualToggle.isSelected();
+                    if (forceTileAnnotations) {
+                        createTileToggle.setSelected(true);
+                        annotateOverviewToggle.setSelected(true);
+                    }
+                    createTileToggle.setEnabled(!forceTileAnnotations);
+                    annotateOverviewToggle.setEnabled(!forceTileAnnotations);
+                }
+            });
+        }
+
+        PresentationTileConfig buildConfig() {
+            return buildTileConfigFromControls(
+                    createTileToggle, annotateOverviewToggle, annotateIndividualToggle,
+                    tileGroupBox, tileOrderPanel, tileCellSizeField,
+                    scaleBarToggle, scaleBarLengthField, scaleBarThicknessField,
+                    scaleBarPositionBox, annotationColorBox, labelModeBox,
+                    customLabelField, labelFontSizeField, labelPositionBox);
+        }
+    }
+
+    static final class BackgroundSubtractionPanel {
+        final JPanel panel;
+        private final ToggleSwitch subtractBgToggle;
+        private final JComboBox<String> bgChannelBox;
+        private final JButton overrideBackgroundBtn = new JButton("Override");
+        private final JLabel subtractFromLabel = new JLabel("Subtract from");
+        private final ToggleSwitch[] subtractToggles;
+        private final String[] channelNames;
+        private final int autoBackgroundIndex;
+
+        BackgroundSubtractionPanel(final String[] channelNames, final String[] bgChoices,
+                                   final int autoBackgroundIndex) {
+            this.channelNames = channelNames == null ? new String[0] : channelNames;
+            this.autoBackgroundIndex = autoBackgroundIndex;
+            this.subtractBgToggle = new ToggleSwitch(autoBackgroundIndex >= 0);
+            this.bgChannelBox = new JComboBox<String>(bgChoices);
+            this.subtractToggles = new ToggleSwitch[this.channelNames.length];
+
+            CollapsibleOptionsPanel section = new CollapsibleOptionsPanel("Background Subtraction");
+            this.panel = section.panel;
+            bgChannelBox.setSelectedIndex(autoBackgroundIndex >= 0 ? autoBackgroundIndex + 1 : 0);
+
+            section.add(compactRow(
+                    labelledToggle("Subtract background", subtractBgToggle),
+                    labelled("Background channel", bgChannelBox),
+                    overrideBackgroundBtn));
+
+            JPanel subtractRow = compactRow(subtractFromLabel);
+            for (int i = 0; i < this.channelNames.length; i++) {
+                subtractToggles[i] = new ToggleSwitch(i != autoBackgroundIndex);
+                subtractRow.add(labelledToggle(this.channelNames[i], subtractToggles[i]));
+            }
+            section.add(subtractRow);
+
+            overrideBackgroundBtn.addActionListener(new java.awt.event.ActionListener() {
+                @Override
+                public void actionPerformed(java.awt.event.ActionEvent e) {
+                    int selected = bgChannelBox.getSelectedIndex();
+                    bgChannelBox.removeAllItems();
+                    bgChannelBox.addItem(NONE_OPTION);
+                    for (String channelName : BackgroundSubtractionPanel.this.channelNames) {
+                        bgChannelBox.addItem(channelName);
+                    }
+                    bgChannelBox.setSelectedIndex(Math.max(0,
+                            Math.min(selected, bgChannelBox.getItemCount() - 1)));
+                    overrideBackgroundBtn.setEnabled(false);
+                }
+            });
+
+            subtractBgToggle.addChangeListener(new Runnable() {
+                @Override
+                public void run() {
+                    updateEnabledState();
+                }
+            });
+            updateEnabledState();
+        }
+
+        boolean subtractBackground() {
+            return subtractBgToggle.isSelected();
+        }
+
+        int backgroundIndex() {
+            if (!subtractBackground() || bgChannelBox.getSelectedIndex() <= 0) return -1;
+            return bgChannelBox.getSelectedIndex() - 1;
+        }
+
+        boolean[] subtractFromChannels() {
+            boolean[] out = new boolean[subtractToggles.length];
+            for (int i = 0; i < subtractToggles.length; i++) {
+                out[i] = subtractToggles[i].isSelected();
+            }
+            return out;
+        }
+
+        private void updateEnabledState() {
+            boolean on = subtractBgToggle.isSelected();
+            bgChannelBox.setEnabled(on);
+            overrideBackgroundBtn.setEnabled(on && autoBackgroundIndex >= 0);
+            subtractFromLabel.setEnabled(on);
+            if (!on) {
+                bgChannelBox.setSelectedIndex(0);
+            } else if (bgChannelBox.getSelectedIndex() <= 0 && autoBackgroundIndex >= 0) {
+                bgChannelBox.setSelectedIndex(autoBackgroundIndex + 1);
+            }
+            for (ToggleSwitch toggle : subtractToggles) {
+                toggle.setEnabled(on);
+            }
+        }
+    }
+
+    static final class CollapsibleOptionsPanel {
+        final JPanel panel = new JPanel();
+        private final JPanel content = new JPanel();
+        private final JLabel titleLabel;
+
+        CollapsibleOptionsPanel(String title) {
+            panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+            panel.setOpaque(false);
+            panel.setAlignmentX(Component.LEFT_ALIGNMENT);
+            panel.setBorder(BorderFactory.createEmptyBorder(2, 4, 6, 4));
+
+            JPanel header = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+            header.setOpaque(false);
+            header.setAlignmentX(Component.LEFT_ALIGNMENT);
+            header.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            titleLabel = new JLabel(collapsedTitle(title, false));
+            titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD, 12f));
+            titleLabel.setForeground(new Color(55, 71, 79));
+            header.add(titleLabel);
+
+            content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
+            content.setOpaque(false);
+            content.setVisible(false);
+            content.setBorder(BorderFactory.createEmptyBorder(4, 14, 2, 0));
+
+            java.awt.event.MouseAdapter listener = new java.awt.event.MouseAdapter() {
+                @Override
+                public void mouseClicked(java.awt.event.MouseEvent e) {
+                    setOpen(!content.isVisible());
+                }
+            };
+            header.addMouseListener(listener);
+            titleLabel.addMouseListener(listener);
+
+            panel.add(header);
+            panel.add(content);
+        }
+
+        void add(JComponent component) {
+            component.setAlignmentX(Component.LEFT_ALIGNMENT);
+            content.add(component);
+        }
+
+        private void setOpen(boolean open) {
+            content.setVisible(open);
+            titleLabel.setText(collapsedTitle(titleText(), open));
+            panel.revalidate();
+            panel.repaint();
+        }
+
+        private String titleText() {
+            String text = titleLabel.getText();
+            return text.length() > 2 ? text.substring(2) : text;
+        }
+
+        private static String collapsedTitle(String title, boolean open) {
+            return (open ? "\u25BE " : "\u25B8 ") + title;
+        }
+    }
+
+    private static JPanel compactRow(Component... components) {
+        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 3));
+        row.setOpaque(false);
+        row.setAlignmentX(Component.LEFT_ALIGNMENT);
+        if (components != null) {
+            for (Component component : components) {
+                if (component != null) row.add(component);
+            }
+        }
+        return row;
+    }
+
+    private static JPanel labelled(String label, JComponent component) {
+        JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+        panel.setOpaque(false);
+        JLabel text = new JLabel(label);
+        text.setFont(text.getFont().deriveFont(Font.PLAIN, 11f));
+        panel.add(text);
+        panel.add(component);
+        return panel;
+    }
+
+    private static JPanel labelledToggle(String label, ToggleSwitch toggle) {
+        JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+        panel.setOpaque(false);
+        panel.add(toggle);
+        JLabel text = new JLabel(label);
+        text.setFont(text.getFont().deriveFont(Font.PLAIN, 11f));
+        panel.add(text);
+        return panel;
+    }
+
+    private static JTextField compactField(String value, int columns) {
+        JTextField field = new JTextField(value, columns);
+        field.setMaximumSize(new Dimension(Math.max(48, columns * 12), 24));
+        return field;
+    }
+
+    private static JComponent previewComponent(BufferedImage preview) {
+        JLabel label = new JLabel(new ImageIcon(preview));
+        int viewportW = Math.min(preview.getWidth() + 24, 920);
+        int viewportH = Math.min(preview.getHeight() + 24, 720);
+        JScrollPane scroll = new JScrollPane(label);
+        scroll.setBorder(BorderFactory.createEmptyBorder());
+        scroll.getViewport().setBackground(Color.DARK_GRAY);
+        scroll.setPreferredSize(new Dimension(viewportW, viewportH));
+        return scroll;
+    }
+
+    private static PresentationTileRecord representativePreviewRecord(File projectRoot) {
+        if (projectRoot == null) return null;
+        File splitMergeRoot = splitMergeWriteRoot(projectRoot.getAbsolutePath());
+        File manifest = new File(splitMergeRoot, "Presentation_Image_Manifest.csv");
+        if (manifest.isFile()) {
+            try {
+                List<PresentationTileRecord> records = PresentationTileWriter.readManifest(manifest);
+                for (PresentationTileRecord record : records) {
+                    if (record.imageFile() != null && record.imageFile().isFile()) {
+                        return record;
+                    }
+                }
+            } catch (IOException e) {
+                IJ.log("  - Warning: could not read presentation preview manifest: "
+                        + e.getMessage());
+            }
+        }
+
+        PresentationTileRecord fromPng = representativePreviewRecordFromSavedPng(splitMergeRoot);
+        if (fromPng != null) return fromPng;
+
+        try {
+            List<SeriesMeta> metas = ImageSourceDispatcher.readAllMetadata(projectRoot.getAbsolutePath());
+            for (SeriesMeta meta : metas) {
+                if (meta != null && meta.width > 0 && meta.height > 0) {
+                    double multiplier = calibrationUnitToMicronMultiplier(meta.unit);
+                    double pixelWidthUm = Double.isFinite(multiplier) && multiplier > 0
+                            ? meta.pixelWidth * multiplier : Double.NaN;
+                    double pixelHeightUm = Double.isFinite(multiplier) && multiplier > 0
+                            ? meta.pixelHeight * multiplier : Double.NaN;
+                    String animal = ConditionManifestIO.extractAnimalName(meta.name);
+                    if (animal == null || animal.trim().isEmpty()) animal = "Animal1";
+                    return new PresentationTileRecord(
+                            null, animal, "LH", "Region", "DAPI", "DAPI",
+                            0, meta.width, meta.height, pixelWidthUm, pixelHeightUm);
+                }
+            }
+        } catch (Exception e) {
+            IJ.log("  - Warning: could not read image metadata for annotation preview: "
+                    + e.getMessage());
+        }
+
+        return null;
+    }
+
+    private static PresentationTileRecord representativePreviewRecordFromSavedPng(File splitMergeRoot) {
+        File imagesRoot = new File(splitMergeRoot, "Images");
+        File png = firstPng(imagesRoot, 0);
+        if (png == null) return null;
+        try {
+            BufferedImage image = ImageIO.read(png);
+            if (image == null) return null;
+            File animalDir = png.getParentFile();
+            String animal = animalDir == null ? "Animal1" : animalDir.getName();
+            String outputName = ImageNameParser.stripExtension(png.getName());
+            if (outputName == null || outputName.trim().isEmpty()) outputName = "DAPI";
+            int suffix = outputName.indexOf('_');
+            String stain = suffix > 0 ? outputName.substring(0, suffix) : outputName;
+            return new PresentationTileRecord(
+                    png, animal, "LH", "Region", outputName, stain,
+                    0, image.getWidth(), image.getHeight(), Double.NaN, Double.NaN);
+        } catch (IOException e) {
+            IJ.log("  - Warning: could not read saved image for annotation preview: "
+                    + e.getMessage());
+            return null;
+        }
+    }
+
+    private static File firstPng(File dir, int depth) {
+        if (dir == null || !dir.isDirectory() || depth > 3) return null;
+        File[] files = dir.listFiles();
+        if (files == null) return null;
+        java.util.Arrays.sort(files);
+        for (File file : files) {
+            if (file.isFile() && file.getName().toLowerCase(Locale.ROOT).endsWith(".png")) {
+                return file;
+            }
+        }
+        for (File file : files) {
+            if (file.isDirectory()) {
+                File nested = firstPng(file, depth + 1);
+                if (nested != null) return nested;
+            }
+        }
+        return null;
+    }
+
+    static final class TileOrderPanel {
+        final JPanel panel;
+        private final DefaultListModel<String> model = new DefaultListModel<String>();
+        private final JList<String> list = new JList<String>(model);
+
+        TileOrderPanel(List<String> items) {
+            panel = new JPanel(new BorderLayout(8, 4));
+            panel.setOpaque(false);
+            panel.setBorder(BorderFactory.createEmptyBorder(2, 4, 8, 4));
+
+            JLabel label = new JLabel("Tile column order");
+            label.setFont(label.getFont().deriveFont(Font.BOLD, 12f));
+            panel.add(label, BorderLayout.NORTH);
+
+            if (items != null) {
+                for (String item : items) {
+                    if (item != null && !item.trim().isEmpty()) model.addElement(item.trim());
+                }
+            }
+            list.setVisibleRowCount(Math.min(6, Math.max(3, model.size())));
+            list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+            if (model.size() > 0) list.setSelectedIndex(0);
+            JScrollPane scroll = new JScrollPane(list);
+            scroll.setPreferredSize(new Dimension(240, 96));
+            panel.add(scroll, BorderLayout.CENTER);
+
+            JPanel buttons = new JPanel();
+            buttons.setOpaque(false);
+            buttons.setLayout(new BoxLayout(buttons, BoxLayout.Y_AXIS));
+            JButton up = new JButton("Up");
+            JButton down = new JButton("Down");
+            up.setAlignmentX(Component.LEFT_ALIGNMENT);
+            down.setAlignmentX(Component.LEFT_ALIGNMENT);
+            buttons.add(up);
+            buttons.add(Box.createVerticalStrut(4));
+            buttons.add(down);
+            panel.add(buttons, BorderLayout.EAST);
+
+            up.addActionListener(new java.awt.event.ActionListener() {
+                @Override
+                public void actionPerformed(java.awt.event.ActionEvent e) {
+                    moveSelected(-1);
+                }
+            });
+            down.addActionListener(new java.awt.event.ActionListener() {
+                @Override
+                public void actionPerformed(java.awt.event.ActionEvent e) {
+                    moveSelected(1);
+                }
+            });
+        }
+
+        List<String> orderedItems() {
+            List<String> out = new ArrayList<String>();
+            for (int i = 0; i < model.getSize(); i++) {
+                out.add(model.getElementAt(i));
+            }
+            return out;
+        }
+
+        private void moveSelected(int delta) {
+            int index = list.getSelectedIndex();
+            int next = index + delta;
+            if (index < 0 || next < 0 || next >= model.getSize()) return;
+            String value = model.getElementAt(index);
+            model.removeElementAt(index);
+            model.add(next, value);
+            list.setSelectedIndex(next);
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -1150,6 +1667,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
         result.saveOmeTiff = false;
         result.additionalMergeSpec = "";
         result.useDeconvolvedInput = useDeconvolvedInput;
+        result.tileConfig = PresentationTileConfig.disabled(defaultTileOrder(channelNames));
         result.subtractBackground = autoBackgroundIndex >= 0;
         result.backgroundIndex = autoBackgroundIndex;
         result.subtractFromChannels = new boolean[nCh];
@@ -1242,6 +1760,8 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
         }
 
         String hemiRegion = parts.fileSuffix();
+        double pixelWidthUm = calibratedPixelWidthUm(imp, true);
+        double pixelHeightUm = calibratedPixelWidthUm(imp, false);
 
         for (int c = 0; c < n; c++) {
             String method = c < processMethodPerCh.length ? processMethodPerCh[c] : METHOD_NONE;
@@ -1287,7 +1807,10 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
             applyPseudoColor(maxForPng, channelColors[c]);
             String safeChannel = ChannelFilenameCodec.toSafe(channelNames[c]);
             String singleSaveName = safeChannel + (hemiRegion.isEmpty() ? "" : "_" + hemiRegion) + ".png";
-            AsyncImageSaver.saveAsPngAsync(maxForPng, new File(outDir, singleSaveName).getAbsolutePath());
+            File singleOut = new File(outDir, singleSaveName);
+            AsyncImageSaver.saveAsPngAsync(maxForPng, singleOut.getAbsolutePath());
+            recordPresentationImage(singleOut, parts, channelNames[c], channelNames[c], c,
+                    maxForPng.getWidth(), maxForPng.getHeight(), pixelWidthUm, pixelHeightUm);
             if (!compactLog) IJ.log("    - Saved: " + singleSaveName);
             maxForPng.changes = false;
             maxForPng.close();
@@ -1330,7 +1853,10 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
             ImagePlus mergedRgb = mergePseudoColorsToRgb(maxProjs, channelColors);
             if (mergedRgb != null) {
                 String mergePngName = hemiRegion.isEmpty() ? "Merge.png" : "Merge_" + hemiRegion + ".png";
-                AsyncImageSaver.saveAsPngAsync(mergedRgb, new File(outDir, mergePngName).getAbsolutePath());
+                File mergeOut = new File(outDir, mergePngName);
+                AsyncImageSaver.saveAsPngAsync(mergedRgb, mergeOut.getAbsolutePath());
+                recordPresentationImage(mergeOut, parts, "Merge", "Merge", -1,
+                        mergedRgb.getWidth(), mergedRgb.getHeight(), pixelWidthUm, pixelHeightUm);
                 if (!compactLog) IJ.log("    - Saved merge PNG: " + mergePngName);
                 mergedRgb.changes = false;
                 mergedRgb.close();
@@ -1361,7 +1887,8 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
 
         if (additionalMergeSpec != null && !additionalMergeSpec.trim().isEmpty()) {
             if (!compactLog) IJ.log("  > Additional Merges: " + additionalMergeSpec);
-            createAdditionalMerges(additionalMergeSpec, maxProjs, channelNames, channelColors, outDir, parts);
+            createAdditionalMerges(additionalMergeSpec, maxProjs, channelNames, channelColors,
+                    outDir, parts, pixelWidthUm, pixelHeightUm);
         }
 
         // Write per-image details file
@@ -1376,6 +1903,124 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                 mp.flush();
             }
         }
+    }
+
+    private void recordPresentationImage(File imageFile,
+                                         NameParts parts,
+                                         String outputName,
+                                         String stainName,
+                                         int channelIndex,
+                                         int widthPx,
+                                         int heightPx,
+                                         double pixelWidthUm,
+                                         double pixelHeightUm) {
+        if (imageFile == null || parts == null) return;
+        presentationTileRecords.add(new PresentationTileRecord(
+                imageFile,
+                parts.animal,
+                parts.hemisphere,
+                parts.region,
+                outputName,
+                stainName,
+                channelIndex,
+                widthPx,
+                heightPx,
+                pixelWidthUm,
+                pixelHeightUm));
+    }
+
+    private void writePresentationTileOutputs(String directory, File splitMergeRoot,
+                                              PresentationTileConfig config) {
+        if (config == null || (!config.createOverviewTile() && !config.annotateIndividualImages())) {
+            return;
+        }
+
+        List<PresentationTileRecord> records;
+        synchronized (presentationTileRecords) {
+            records = new ArrayList<PresentationTileRecord>(presentationTileRecords);
+        }
+        records = mergeExistingPresentationManifest(splitMergeRoot, records);
+        if (records.isEmpty()) {
+            IJ.log("  - Presentation overview tile skipped: no saved image records were found.");
+            return;
+        }
+
+        LinkedHashSet<String> animals = new LinkedHashSet<String>();
+        for (PresentationTileRecord record : records) {
+            animals.add(record.animal());
+        }
+        Map<String, String> conditions = ConditionManifestIO.resolveAssignments(directory, animals);
+
+        try {
+            PresentationTileWriter.writeRequestedOutputs(splitMergeRoot, records, conditions, config);
+        } catch (IOException e) {
+            IJ.log("  - WARNING: failed to write presentation overview tile: " + e.getMessage());
+        }
+    }
+
+    private static List<PresentationTileRecord> mergeExistingPresentationManifest(
+            File splitMergeRoot, List<PresentationTileRecord> currentRecords) {
+        LinkedHashMap<String, PresentationTileRecord> merged =
+                new LinkedHashMap<String, PresentationTileRecord>();
+        File manifest = new File(splitMergeRoot, "Presentation_Image_Manifest.csv");
+        if (manifest.isFile()) {
+            try {
+                List<PresentationTileRecord> existing = PresentationTileWriter.readManifest(manifest);
+                for (PresentationTileRecord record : existing) {
+                    if (record.imageFile() != null && record.imageFile().isFile()) {
+                        merged.put(presentationRecordKey(record), record);
+                    }
+                }
+            } catch (IOException e) {
+                IJ.log("  - Warning: could not read previous presentation image manifest: "
+                        + e.getMessage());
+            }
+        }
+        if (currentRecords != null) {
+            for (PresentationTileRecord record : currentRecords) {
+                merged.put(presentationRecordKey(record), record);
+            }
+        }
+        return new ArrayList<PresentationTileRecord>(merged.values());
+    }
+
+    private static String presentationRecordKey(PresentationTileRecord record) {
+        if (record == null) return "";
+        return record.imageKey() + "\n" + record.outputName();
+    }
+
+    private static double calibratedPixelWidthUm(ImagePlus imp, boolean xAxis) {
+        if (imp == null || imp.getCalibration() == null) return Double.NaN;
+        double value = xAxis ? imp.getCalibration().pixelWidth : imp.getCalibration().pixelHeight;
+        if (!Double.isFinite(value) || value <= 0) return Double.NaN;
+        double multiplier = calibrationUnitToMicronMultiplier(imp.getCalibration().getUnit());
+        if (!Double.isFinite(multiplier) || multiplier <= 0) return Double.NaN;
+        return value * multiplier;
+    }
+
+    private static double calibrationUnitToMicronMultiplier(String unit) {
+        String normalized = unit == null ? "" : unit.trim().toLowerCase(Locale.ROOT);
+        if (normalized.isEmpty() || "pixel".equals(normalized) || "pixels".equals(normalized)) {
+            return Double.NaN;
+        }
+        if ("um".equals(normalized) || "\u00b5m".equals(normalized) || "\u03bcm".equals(normalized)
+                || "micron".equals(normalized) || "microns".equals(normalized)
+                || "micrometer".equals(normalized) || "micrometers".equals(normalized)) {
+            return 1.0;
+        }
+        if ("nm".equals(normalized) || "nanometer".equals(normalized) || "nanometers".equals(normalized)) {
+            return 0.001;
+        }
+        if ("mm".equals(normalized) || "millimeter".equals(normalized) || "millimeters".equals(normalized)) {
+            return 1000.0;
+        }
+        if ("cm".equals(normalized) || "centimeter".equals(normalized) || "centimeters".equals(normalized)) {
+            return 10000.0;
+        }
+        if ("m".equals(normalized) || "meter".equals(normalized) || "meters".equals(normalized)) {
+            return 1000000.0;
+        }
+        return Double.NaN;
     }
 
     private void writePerImageDetails(
@@ -1576,7 +2221,9 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
             String[] channelNames,
             String[] channelColors,
             File outDir,
-            NameParts parts
+            NameParts parts,
+            double pixelWidthUm,
+            double pixelHeightUm
     ) {
         String[] groups = spec.trim().split("\\s+");
         for (String g : groups) {
@@ -1613,7 +2260,11 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
             ImagePlus mergedRgb = mergePseudoColorsToRgb(sub, subColors);
             if (mergedRgb != null) {
                 String mergeSaveName = "Merge(" + namesTrim + ")" + (hemiRegion.isEmpty() ? "" : "_" + hemiRegion) + ".png";
-                AsyncImageSaver.saveAsPngAsync(mergedRgb, new File(outDir, mergeSaveName).getAbsolutePath());
+                File mergeOut = new File(outDir, mergeSaveName);
+                AsyncImageSaver.saveAsPngAsync(mergedRgb, mergeOut.getAbsolutePath());
+                String outputName = "Merge(" + namesTrim + ")";
+                recordPresentationImage(mergeOut, parts, outputName, outputName, -1,
+                        mergedRgb.getWidth(), mergedRgb.getHeight(), pixelWidthUm, pixelHeightUm);
                 if (!compactLog) IJ.log("    - Saved additional merge: " + mergeSaveName);
                 mergedRgb.changes = false;
                 mergedRgb.close();

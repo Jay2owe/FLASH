@@ -120,6 +120,8 @@ public class PipelineDialog {
                 ? new JDialog((Frame) null, title, true)
                 : new JDialog(owner, title, Dialog.ModalityType.APPLICATION_MODAL);
         dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+        java.awt.image.BufferedImage brand = flash.pipeline.ui.FlashIcons.brandImage(32);
+        if (brand != null) dialog.setIconImage(brand);
 
         contentPanel = new BodyPanel();
         contentPanel.setLayout(new BoxLayout(contentPanel, BoxLayout.Y_AXIS));
@@ -244,16 +246,36 @@ public class PipelineDialog {
         chip.setBorder(BorderFactory.createLineBorder(HEADER_COLOR, 1, true));
         chip.setBackground(phase == currentPhase ? HEADER_COLOR : BG_COLOR);
         chip.setForeground(phase == currentPhase ? Color.WHITE : HEADER_COLOR);
+        String iconOp = null;
+        if (phase == Phase.SETUP)   iconOp = "settings";
+        else if (phase == Phase.ANALYSE) iconOp = "microscope";
+        else if (phase == Phase.EXPORT)  iconOp = "file-export";
+        if (iconOp != null) {
+            javax.swing.Icon icon = flash.pipeline.ui.FlashIcons.phaseChip(iconOp, phase == currentPhase);
+            if (icon != null) {
+                chip.setIcon(icon);
+                chip.setIconTextGap(4);
+            }
+        }
         return chip;
     }
 
     /** Adds a bold section header. */
     public void addHeader(String text) {
+        addHeader(text, null);
+    }
+
+    /** Adds a bold section header with an optional leading icon. */
+    public void addHeader(String text, javax.swing.Icon icon) {
         addToBody(Box.createVerticalStrut(10));
         JLabel label = new JLabel(text);
         label.setFont(label.getFont().deriveFont(Font.BOLD, 13f));
         label.setForeground(HEADER_COLOR);
         label.setAlignmentX(Component.LEFT_ALIGNMENT);
+        if (icon != null) {
+            label.setIcon(icon);
+            label.setIconTextGap(8);
+        }
         addToBody(label);
         addToBody(Box.createVerticalStrut(4));
 

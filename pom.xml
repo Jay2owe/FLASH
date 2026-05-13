@@ -279,6 +279,13 @@
 			</exclusions>
 		</dependency>
 
+		<!-- jsvg: small SVG renderer used by FlashIcons (chevron + action-button icons). Java 8 compatible. Bundled into FLASH jar via maven-shade-plugin below. -->
+		<dependency>
+			<groupId>com.github.weisj</groupId>
+			<artifactId>jsvg</artifactId>
+			<version>1.4.0</version>
+		</dependency>
+
 		<!-- Test dependencies -->
 		<dependency>
 			<groupId>junit</groupId>
@@ -309,6 +316,40 @@
 						</manifest>
 					</archive>
 				</configuration>
+			</plugin>
+
+			<!-- Bundle ONLY jsvg into the FLASH jar so FlashIcons can render SVGs at runtime without an extra Fiji jar to install. Other deps (ij, bio-formats, etc.) are provided by Fiji and must NOT be shaded. -->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-shade-plugin</artifactId>
+				<version>3.4.1</version>
+				<executions>
+					<execution>
+						<phase>package</phase>
+						<goals><goal>shade</goal></goals>
+						<configuration>
+							<createDependencyReducedPom>false</createDependencyReducedPom>
+							<shadedArtifactAttached>false</shadedArtifactAttached>
+							<artifactSet>
+								<includes>
+									<include>com.github.weisj:jsvg</include>
+								</includes>
+							</artifactSet>
+							<filters>
+								<filter>
+									<artifact>com.github.weisj:jsvg</artifact>
+									<excludes>
+										<exclude>META-INF/MANIFEST.MF</exclude>
+										<exclude>META-INF/maven/**</exclude>
+										<exclude>META-INF/*.SF</exclude>
+										<exclude>META-INF/*.DSA</exclude>
+										<exclude>META-INF/*.RSA</exclude>
+									</excludes>
+								</filter>
+							</filters>
+						</configuration>
+					</execution>
+				</executions>
 			</plugin>
 		</plugins>
 	</build>

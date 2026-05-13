@@ -10,7 +10,6 @@ import ij.process.FloatProcessor;
 import ij.process.ImageProcessor;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -22,40 +21,124 @@ import java.util.Map;
 public final class IntensitySpatialRunner {
     private final List<IntensitySpatialAnalysis> analyses;
     private final List<IntensitySpatialPairAnalysis> pairAnalyses;
+    private final boolean progressLogging;
 
     public IntensitySpatialRunner(List<IntensitySpatialAnalysis> analyses) {
-        this(analyses, Collections.<IntensitySpatialPairAnalysis>emptyList());
+        this(analyses, Collections.<IntensitySpatialPairAnalysis>emptyList(), false);
     }
 
     public IntensitySpatialRunner(List<IntensitySpatialAnalysis> analyses,
                                   List<IntensitySpatialPairAnalysis> pairAnalyses) {
+        this(analyses, pairAnalyses, false);
+    }
+
+    public IntensitySpatialRunner(List<IntensitySpatialAnalysis> analyses,
+                                  List<IntensitySpatialPairAnalysis> pairAnalyses,
+                                  boolean progressLogging) {
         this.analyses = analyses == null
                 ? Collections.<IntensitySpatialAnalysis>emptyList()
                 : Collections.unmodifiableList(new ArrayList<IntensitySpatialAnalysis>(analyses));
         this.pairAnalyses = pairAnalyses == null
                 ? Collections.<IntensitySpatialPairAnalysis>emptyList()
                 : Collections.unmodifiableList(new ArrayList<IntensitySpatialPairAnalysis>(pairAnalyses));
+        this.progressLogging = progressLogging;
     }
 
     public static IntensitySpatialRunner standard() {
-        return new IntensitySpatialRunner(Arrays.<IntensitySpatialAnalysis>asList(
-                new PatchinessAnalysis(),
-                new HotspotScanAnalysis(),
-                new NullModelAnalysis(),
-                new GranularityAnalysis(),
-                new DepthProfileAnalysis(),
-                new Anisotropy2DAnalysis(),
-                new PeriodicityAnalysis(),
-                new GlcmTextureAnalysis(),
-                new TextureClassAnalysis(),
-                new ScaleDivergenceAnalysis(),
-                new Anisotropy3DAnalysis()),
-                Arrays.<IntensitySpatialPairAnalysis>asList(
-                        new CrossMark2DAnalysis(),
-                        new EntropyMiAnalysis(),
-                        new DistanceShell2DAnalysis(),
-                        new CrossMark3DAnalysis(),
-                        new DistanceShell3DAnalysis()));
+        return standard(false);
+    }
+
+    public static IntensitySpatialRunner standardWithProgress() {
+        return standard(true);
+    }
+
+    private static IntensitySpatialRunner standard(boolean progressLogging) {
+        List<IntensitySpatialAnalysis> sameChannel =
+                new ArrayList<IntensitySpatialAnalysis>();
+        addSameChannelAnalysis(sameChannel, "patchiness", new SameChannelFactory() {
+            @Override public IntensitySpatialAnalysis create() { return new PatchinessAnalysis(); }
+        });
+        addSameChannelAnalysis(sameChannel, "hotspot", new SameChannelFactory() {
+            @Override public IntensitySpatialAnalysis create() { return new HotspotScanAnalysis(); }
+        });
+        addSameChannelAnalysis(sameChannel, "nullmodel", new SameChannelFactory() {
+            @Override public IntensitySpatialAnalysis create() { return new NullModelAnalysis(); }
+        });
+        addSameChannelAnalysis(sameChannel, "granularity", new SameChannelFactory() {
+            @Override public IntensitySpatialAnalysis create() { return new GranularityAnalysis(); }
+        });
+        addSameChannelAnalysis(sameChannel, "depth_profile", new SameChannelFactory() {
+            @Override public IntensitySpatialAnalysis create() { return new DepthProfileAnalysis(); }
+        });
+        addSameChannelAnalysis(sameChannel, "anisotropy_2d", new SameChannelFactory() {
+            @Override public IntensitySpatialAnalysis create() { return new Anisotropy2DAnalysis(); }
+        });
+        addSameChannelAnalysis(sameChannel, "periodicity", new SameChannelFactory() {
+            @Override public IntensitySpatialAnalysis create() { return new PeriodicityAnalysis(); }
+        });
+        addSameChannelAnalysis(sameChannel, "glcm_texture", new SameChannelFactory() {
+            @Override public IntensitySpatialAnalysis create() { return new GlcmTextureAnalysis(); }
+        });
+        addSameChannelAnalysis(sameChannel, "texture_class", new SameChannelFactory() {
+            @Override public IntensitySpatialAnalysis create() { return new TextureClassAnalysis(); }
+        });
+        addSameChannelAnalysis(sameChannel, "scale_divergence", new SameChannelFactory() {
+            @Override public IntensitySpatialAnalysis create() { return new ScaleDivergenceAnalysis(); }
+        });
+        addSameChannelAnalysis(sameChannel, "anisotropy_3d", new SameChannelFactory() {
+            @Override public IntensitySpatialAnalysis create() { return new Anisotropy3DAnalysis(); }
+        });
+
+        List<IntensitySpatialPairAnalysis> pair =
+                new ArrayList<IntensitySpatialPairAnalysis>();
+        addPairAnalysis(pair, "crossmark_2d", new PairFactory() {
+            @Override public IntensitySpatialPairAnalysis create() { return new CrossMark2DAnalysis(); }
+        });
+        addPairAnalysis(pair, "entropy_mi", new PairFactory() {
+            @Override public IntensitySpatialPairAnalysis create() { return new EntropyMiAnalysis(); }
+        });
+        addPairAnalysis(pair, "distance_shell_2d", new PairFactory() {
+            @Override public IntensitySpatialPairAnalysis create() { return new DistanceShell2DAnalysis(); }
+        });
+        addPairAnalysis(pair, "crossmark_3d", new PairFactory() {
+            @Override public IntensitySpatialPairAnalysis create() { return new CrossMark3DAnalysis(); }
+        });
+        addPairAnalysis(pair, "distance_shell_3d", new PairFactory() {
+            @Override public IntensitySpatialPairAnalysis create() { return new DistanceShell3DAnalysis(); }
+        });
+        return new IntensitySpatialRunner(sameChannel, pair, progressLogging);
+    }
+
+    private static void addSameChannelAnalysis(List<IntensitySpatialAnalysis> out,
+                                               String token,
+                                               SameChannelFactory factory) {
+        try {
+            IntensitySpatialAnalysis analysis = factory.create();
+            if (analysis != null) out.add(analysis);
+        } catch (LinkageError err) {
+            IJ.log("[FLASH] Intensity-spatial " + token
+                    + " disabled: runtime class/dependency problem: " + safeMessage(err));
+        }
+    }
+
+    private static void addPairAnalysis(List<IntensitySpatialPairAnalysis> out,
+                                        String token,
+                                        PairFactory factory) {
+        try {
+            IntensitySpatialPairAnalysis analysis = factory.create();
+            if (analysis != null) out.add(analysis);
+        } catch (LinkageError err) {
+            IJ.log("[FLASH] Intensity-spatial " + token
+                    + " disabled: runtime class/dependency problem: " + safeMessage(err));
+        }
+    }
+
+    private interface SameChannelFactory {
+        IntensitySpatialAnalysis create();
+    }
+
+    private interface PairFactory {
+        IntensitySpatialPairAnalysis create();
     }
 
     public IntensitySpatialResult measure(IntensitySpatialContext context) {
@@ -89,10 +172,20 @@ public final class IntensitySpatialRunner {
             }
 
             try {
+                long analysisStart = logSameChannelStart(analysis, effectiveContext);
                 IntensitySpatialResult result = analysis.measure(effectiveContext);
                 if (result != null) {
                     values.putAll(result.values());
                 }
+                logSameChannelComplete(analysis, effectiveContext, result, analysisStart);
+            } catch (LinkageError err) {
+                IJ.log("[FLASH] Intensity-spatial " + analysis.key().token()
+                        + " skipped for " + context.imageId()
+                        + " channel " + context.channelName()
+                        + ": runtime class/dependency problem: " + safeMessage(err));
+                values.putAll(IntensitySpatialResult
+                        .nanFor(analysis.columns(context.config(), binarizedPartner))
+                        .values());
             } catch (Exception ex) {
                 IJ.log("[FLASH] Intensity-spatial " + analysis.key().token()
                         + " skipped for " + context.imageId()
@@ -143,10 +236,23 @@ public final class IntensitySpatialRunner {
             boolean sourceBinarized = context.hasSourceBinarizedImage();
             boolean partnerBinarized = context.hasPartnerBinarizedImage();
             try {
+                long analysisStart = logPairStart(analysis, context);
                 IntensitySpatialResult result = analysis.measure(context);
                 if (result != null) {
                     values.putAll(result.values());
                 }
+                logPairComplete(analysis, context, result, analysisStart);
+            } catch (LinkageError err) {
+                IJ.log("[FLASH] Intensity-spatial " + analysis.key().token()
+                        + " skipped for " + context.imageId()
+                        + " source " + context.sourceChannelName()
+                        + " partner " + context.partnerChannelName()
+                        + ": runtime class/dependency problem: " + safeMessage(err));
+                values.putAll(IntensitySpatialResult
+                        .nanFor(analysis.columns(context.config(),
+                                context.sourceChannelName(), context.partnerChannelName(),
+                                sourceBinarized, partnerBinarized))
+                        .values());
             } catch (Exception ex) {
                 IJ.log("[FLASH] Intensity-spatial " + analysis.key().token()
                         + " skipped for " + context.imageId()
@@ -180,6 +286,79 @@ public final class IntensitySpatialRunner {
             }
         }
         return true;
+    }
+
+    private long logSameChannelStart(IntensitySpatialAnalysis analysis,
+                                     IntensitySpatialContext context) {
+        if (!progressLogging) return 0L;
+        IJ.log("[FLASH] Intensity-spatial " + analysis.key().token()
+                + " running: " + sameChannelLabel(context)
+                + " (cost " + analysis.estimatedCost() + ")");
+        return System.currentTimeMillis();
+    }
+
+    private void logSameChannelComplete(IntensitySpatialAnalysis analysis,
+                                        IntensitySpatialContext context,
+                                        IntensitySpatialResult result,
+                                        long startMillis) {
+        if (!progressLogging) return;
+        IJ.log("[FLASH] Intensity-spatial " + analysis.key().token()
+                + " complete: " + sameChannelLabel(context)
+                + resultSummary(result, startMillis));
+    }
+
+    private long logPairStart(IntensitySpatialPairAnalysis analysis,
+                              IntensitySpatialPairContext context) {
+        if (!progressLogging) return 0L;
+        IJ.log("[FLASH] Intensity-spatial " + analysis.key().token()
+                + " running: " + pairLabel(context)
+                + " (cost " + analysis.estimatedCost() + ")");
+        return System.currentTimeMillis();
+    }
+
+    private void logPairComplete(IntensitySpatialPairAnalysis analysis,
+                                 IntensitySpatialPairContext context,
+                                 IntensitySpatialResult result,
+                                 long startMillis) {
+        if (!progressLogging) return;
+        IJ.log("[FLASH] Intensity-spatial " + analysis.key().token()
+                + " complete: " + pairLabel(context)
+                + resultSummary(result, startMillis));
+    }
+
+    private static String sameChannelLabel(IntensitySpatialContext context) {
+        return context.imageId()
+                + " channel " + context.channelName()
+                + roiLabel(context.roiLabel())
+                + " " + modeLabel(context.outputMode(), context.sliceIndex());
+    }
+
+    private static String pairLabel(IntensitySpatialPairContext context) {
+        return context.imageId()
+                + " source " + context.sourceChannelName()
+                + " -> partner " + context.partnerChannelName()
+                + roiLabel(context.roiLabel())
+                + " " + modeLabel(context.outputMode(), context.sliceIndex());
+    }
+
+    private static String roiLabel(String roiLabel) {
+        return roiLabel == null || roiLabel.trim().isEmpty()
+                ? ""
+                : " ROI " + roiLabel.trim();
+    }
+
+    private static String modeLabel(IntensitySpatialOutputMode mode, int sliceIndex) {
+        if (mode == IntensitySpatialOutputMode.MIP) return "MIP";
+        if (mode == IntensitySpatialOutputMode.NATIVE_3D) return "native 3D";
+        return "base slice " + Math.max(1, sliceIndex);
+    }
+
+    private static String resultSummary(IntensitySpatialResult result, long startMillis) {
+        int values = result == null ? 0 : result.values().size();
+        String elapsed = startMillis > 0L
+                ? ", " + formatDurationCompact(System.currentTimeMillis() - startMillis)
+                : "";
+        return " (" + values + " columns" + elapsed + ")";
     }
 
     private static boolean native3dAllowed(IntensitySpatialConfig config, int stackDepth) {
@@ -220,10 +399,29 @@ public final class IntensitySpatialRunner {
         return mip;
     }
 
-    private static String safeMessage(Exception ex) {
+    private static String safeMessage(Throwable ex) {
         String message = ex == null ? null : ex.getMessage();
         return message == null || message.trim().isEmpty()
                 ? ex.getClass().getSimpleName()
                 : message.trim();
+    }
+
+    private static String formatDurationCompact(long ms) {
+        long safeMs = Math.max(0L, ms);
+        if (safeMs < 1000L) {
+            return safeMs + " ms";
+        }
+        long seconds = safeMs / 1000L;
+        if (seconds < 60L) {
+            return seconds + " s";
+        }
+        long minutes = seconds / 60L;
+        long remSeconds = seconds % 60L;
+        if (minutes < 60L) {
+            return minutes + "m " + remSeconds + "s";
+        }
+        long hours = minutes / 60L;
+        long remMinutes = minutes % 60L;
+        return hours + "h " + remMinutes + "m";
     }
 }

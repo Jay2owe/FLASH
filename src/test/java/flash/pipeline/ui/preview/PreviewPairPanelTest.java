@@ -7,6 +7,7 @@ import ij.process.ImageProcessor;
 import ij.process.ShortProcessor;
 import org.junit.Test;
 
+import java.awt.Dimension;
 import java.awt.Frame;
 import java.awt.GraphicsEnvironment;
 import java.awt.GridLayout;
@@ -39,6 +40,12 @@ public class PreviewPairPanelTest {
         assertFalse(pair.adjustedPreviewForTest().zRowVisibleForTest());
         assertNotNull(pair.originalPreviewForTest().slimTitleLabelForTest());
         assertNotNull(pair.adjustedPreviewForTest().slimTitleLabelForTest());
+        assertEquals(new Dimension(340, 280),
+                pair.originalPreviewForTest().canvasPreferredSizeForTest());
+        assertEquals(new Dimension(340, 280),
+                pair.adjustedPreviewForTest().canvasPreferredSizeForTest());
+        assertEquals(2, pair.originalPreviewForTest().layoutVerticalGapForTest());
+        assertEquals(2, pair.adjustedPreviewForTest().layoutVerticalGapForTest());
     }
 
     @Test
@@ -398,6 +405,37 @@ public class PreviewPairPanelTest {
         assertEquals(100.0, originalRendered.getMax(), 0.0001);
         assertEquals(20.0, adjustedRendered.getMin(), 0.0001);
         assertEquals(80.0, adjustedRendered.getMax(), 0.0001);
+    }
+
+    @Test
+    public void largePreviewDisplayButtonsWorkWhenCompactControlsAreHidden() {
+        assumeFalse(GraphicsEnvironment.isHeadless());
+
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
+        LargePreviewDialog dialog = new LargePreviewDialog(null);
+        try {
+            pair.setChannelLutName("Red");
+            pair.setOriginal(singleSlice("original", 0, 100));
+            pair.setDisplayControlsAvailable(false);
+            pair.setLargePreviewDialogForTest(dialog);
+
+            assertFalse(pair.displayControlsButton().isVisible());
+            assertFalse(pair.lutToggleButton().isVisible());
+            assertTrue(dialog.displayControlsButtonForTest().isVisible());
+            assertTrue(dialog.lutToggleButtonForTest().isVisible());
+
+            dialog.lutToggleButtonForTest().doClick();
+
+            assertEquals(PreviewDisplaySettings.LutMode.GREY,
+                    pair.displaySettingsForTest().getLutMode());
+
+            dialog.displayControlsButtonForTest().doClick();
+
+            assertSame(dialog, pair.displayControlsOwnerForTest());
+        } finally {
+            pair.disposeDisplayControlsDialogForTest();
+            dialog.dispose();
+        }
     }
 
     @Test

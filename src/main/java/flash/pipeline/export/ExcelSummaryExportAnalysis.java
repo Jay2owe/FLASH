@@ -264,6 +264,7 @@ public class ExcelSummaryExportAnalysis implements Analysis {
         final JComboBox<String> presetCombo = new JComboBox<String>();
         populatePresetChoice(presetCombo, presetIO, selected[0].getName());
         final JButton saveButton = new JButton("Save as preset...");
+        flash.pipeline.ui.FlashIcons.apply(saveButton, flash.pipeline.ui.FlashIcons.save());
         JPanel presetRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
         presetRow.setOpaque(false);
         presetRow.add(new JLabel("Preset:"));

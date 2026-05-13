@@ -79,6 +79,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -105,6 +106,7 @@ public class IntensityAnalysisV2 implements Analysis {
     private CLIConfig cliConfig = null;
     private int cliConfiguredMaskIndex1Based = -1;
     private IntensitySpatialConfig intensitySpatialConfig = IntensitySpatialConfig.disabled();
+    private final AtomicBoolean stalePluginWarningShown = new AtomicBoolean(false);
 
     @Override
     public Set<BinField> requiredBinFields() {
@@ -277,6 +279,7 @@ public class IntensityAnalysisV2 implements Analysis {
             roiChannelChoice = channelNames[roiChannelIndex1Based - 1];
         }
         anyBinarize = anyTrue(binarization);
+        boolean runIntensitySpatial = intensitySpatialConfig != null && intensitySpatialConfig.isEnabled();
 
         int intensityStep = 0;
         while (!suppressDialogs && intensityStep >= 0) {
@@ -294,6 +297,7 @@ public class IntensityAnalysisV2 implements Analysis {
                 gd.addSubHeader("Analysis Options");
                 gd.addToggle("Use deconvolved stacks if available", useDeconvolvedInput);
                 gd.addToggle("ROI Analysis", anyRois);
+                gd.addToggle("Intensity-spatial analysis", runIntensitySpatial);
 
                 gd.addHeader("Filter Source (per channel)");
                 for (int i = 0; i < channelNames.length; i++) {
@@ -324,6 +328,7 @@ public class IntensityAnalysisV2 implements Analysis {
 
                 useDeconvolvedInput = gd.getNextBoolean();
                 roiAnalysis = anyRois && gd.getNextBoolean();
+                runIntensitySpatial = gd.getNextBoolean();
                 if (cliConfiguredMaskIndex1Based > 0 && cliConfiguredMaskIndex1Based <= channelNames.length) {
                     roiChannelIndex1Based = cliConfiguredMaskIndex1Based;
                     roiChannelChoice = channelNames[roiChannelIndex1Based - 1];
@@ -494,19 +499,23 @@ public class IntensityAnalysisV2 implements Analysis {
                         }
                     });
         } else {
-            IntensitySpatialWizard spatialWizard = new IntensitySpatialWizard(
-                    flash.pipeline.ui.wizard.WizardFlow.MainPanelBinding.NULL,
-                    channelNames,
-                    binarization,
-                    likelyStackDepthForSpatialWizard(directory, cfg),
-                    intensitySpatialConfig,
-                    false);
-            spatialWizard.run();
-            if (spatialWizard.wasCancelled()) {
-                IJ.log("[FLASH] Intensity-spatial setup cancelled by user.");
-                return;
+            if (runIntensitySpatial) {
+                IntensitySpatialWizard spatialWizard = IntensitySpatialWizard.analysisChooser(
+                        flash.pipeline.ui.wizard.WizardFlow.MainPanelBinding.NULL,
+                        channelNames,
+                        binarization,
+                        likelyStackDepthForSpatialWizard(directory, cfg),
+                        intensitySpatialConfig,
+                        false);
+                spatialWizard.run();
+                if (spatialWizard.wasCancelled()) {
+                    IJ.log("[FLASH] Intensity-spatial setup cancelled by user.");
+                    return;
+                }
+                intensitySpatialConfig = spatialWizard.deriveCurrentConfig();
+            } else {
+                intensitySpatialConfig = IntensitySpatialConfig.disabled();
             }
-            intensitySpatialConfig = spatialWizard.deriveCurrentConfig();
         }
 
         // Log user selections
@@ -533,7 +542,8 @@ public class IntensityAnalysisV2 implements Analysis {
         if (intensitySpatialConfig.isEnabled()) {
             IJ.log("  Intensity-spatial analyses: "
                     + IntensitySpatialConfig.joinAnalysisTokens(intensitySpatialConfig.getEnabledAnalyses()));
-            IJ.log("  Intensity-spatial MIP: " + intensitySpatialConfig.isMipEnabled());
+            IJ.log("  Intensity-spatial 2D source: "
+                    + intensitySpatialConfig.getSpatialSourceMode().token());
             IJ.log("  Intensity-spatial native 3D: " + intensitySpatialConfig.isNative3dEnabled());
         }
 
@@ -725,8 +735,12 @@ public class IntensityAnalysisV2 implements Analysis {
                 ResultsTable table = totalTables.table(key);
                 List<String> orderedColumns = buildOrderedIntensityColumns(key, table,
                         channelNames, intensitySpatialConfig, binarization);
-                CsvTableIO.writeResultsTableCsv(outCsv, table, orderedColumns);
-                IJ.log("  Saved: " + outCsv.getName() + " (" + table.size() + " rows)");
+                boolean merged = CsvTableIO.mergeResultsTableCsv(outCsv, table, orderedColumns);
+                if (!merged) {
+                    CsvTableIO.writeResultsTableCsv(outCsv, table, orderedColumns);
+                }
+                IJ.log("  " + (merged ? "Updated existing: " : "Saved: ")
+                        + outCsv.getName() + " (" + table.size() + " rows)");
             } catch (Exception e) {
                 IJ.log("  WARNING: failed saving intensity CSV for "
                         + key.channelName() + " " + key.mode() + ": " + e.getMessage());
@@ -1042,8 +1056,9 @@ public class IntensityAnalysisV2 implements Analysis {
                                 System.gc();
                                 IJ.freeMemory();
                             }
-                        } catch (Exception e) {
-                            IJ.log("[" + (idx + 1) + "/" + total + "] ERROR: " + e.getMessage());
+                        } catch (Throwable t) {
+                            rethrowIfFatal(t);
+                            handleParallelImageThrowable(idx, total, t);
                         } finally {
                             imp.changes = false;
                             imp.close();
@@ -1060,10 +1075,34 @@ public class IntensityAnalysisV2 implements Analysis {
             try {
                 f.get();
             } catch (Exception e) {
-                IJ.log("Parallel processing error: " + e.getMessage());
+                Throwable cause = e.getCause() == null ? e : e.getCause();
+                rethrowIfFatal(cause);
+                IJ.log("[FLASH] Parallel worker failed outside image scope: "
+                        + describeThrowable(cause));
             }
         }
         pool.shutdown();
+    }
+
+    private void handleParallelImageThrowable(int zeroBasedIndex, int total, Throwable t) {
+        String prefix = "[" + (zeroBasedIndex + 1) + "/" + total + "] ERROR: ";
+        if (t instanceof NoClassDefFoundError
+                && stalePluginWarningShown.compareAndSet(false, true)
+                && PluginInstallGuard.reportMissingInternalClass(
+                "Fluorescence Intensity Analysis", (NoClassDefFoundError) t)) {
+            IJ.log(prefix + "stale or partial FLASH plugin JAR; see message above.");
+            return;
+        }
+        IJ.log(prefix + describeThrowable(t));
+    }
+
+    private static String describeThrowable(Throwable t) {
+        if (t == null) return "unknown";
+        String message = t.getMessage();
+        if (message == null || message.trim().isEmpty()) {
+            return t.getClass().getSimpleName();
+        }
+        return t.getClass().getSimpleName() + ": " + message.trim();
     }
 
     // ── Per-image measurement (thread-safe) ──
@@ -1216,6 +1255,12 @@ public class IntensityAnalysisV2 implements Analysis {
                     finalParts, outputPlan, intensitySpatialConfig,
                     allRawSpatialImages, allBinarizedSpatialImages, allBinarySpatialMasks,
                     allBaseSpatialResults, allMipSpatialResults, allNativeSpatialResults);
+        } catch (Throwable t) {
+            rethrowIfFatal(t);
+            IJ.log("[FLASH] Intensity-spatial cross-channel skipped for "
+                    + (finalParts == null ? "unknown" : finalParts.displayLabel())
+                    + roiLogSuffix(finalRoiLabel)
+                    + ": runtime class/dependency problem: " + safeThrowableMessage(t));
         } finally {
             closeImages(allRawSpatialImages);
             closeImages(allBinarizedSpatialImages);
@@ -1449,8 +1494,10 @@ public class IntensityAnalysisV2 implements Analysis {
             return;
         }
 
-        IntensitySpatialRunner runner = IntensitySpatialRunner.standard();
+        IntensitySpatialRunner runner = IntensitySpatialRunner.standardWithProgress();
         String imageId = parts == null ? "unknown" : parts.displayLabel();
+        IJ.log("    - Intensity-spatial cross-channel: " + crossChannelPlanSummary(spatialConfig)
+                + " for " + imageId + roiLogSuffix(roiLabel));
         for (int c = 0; c < channelCount; c++) {
             ImagePlus sourceRaw = rawImages[c];
             if (sourceRaw == null) continue;
@@ -1459,14 +1506,19 @@ public class IntensityAnalysisV2 implements Analysis {
             IntensitySpatialOutputKey baseKey = outputPlan.baseKeyForChannel(sourceName);
             boolean baseAllowed = outputPlan.shouldPopulate(baseKey)
                     && baseKey != null
-                    && !baseKey.isChannelRoiMaskOutput();
+                    && !baseKey.isChannelRoiMaskOutput()
+                    && sourceAllowsSpatialMode(spatialConfig, IntensitySpatialOutputMode.BASE);
             if (has2d && baseAllowed) {
                 int slices = Math.max(1, sourceRaw.getStackSize());
                 baseResults[c] = ensureResultArray(baseResults[c], slices);
                 for (int p = 0; p < channelCount; p++) {
                     if (p == c || rawImages[p] == null) continue;
                     int pairSlices = Math.min(slices, Math.max(1, rawImages[p].getStackSize()));
+                    IJ.log("      Pair " + orderedPairProgress(c, p, channelCount)
+                            + " " + sourceName + " -> " + channelNames[p]
+                            + " base: " + pairSlices + " slices");
                     for (int s = 1; s <= pairSlices; s++) {
+                        IJ.log("        Base slice [" + s + "/" + pairSlices + "]");
                         IntensitySpatialResult result = runner.measurePair(new IntensitySpatialPairContext(
                                 spatialConfig,
                                 sourceRaw, imageAt(binarizedImages, c), imageAt(binaryMasks, c),
@@ -1483,6 +1535,8 @@ public class IntensityAnalysisV2 implements Analysis {
             if (has2d && outputPlan.shouldPopulate(mipKey)) {
                 for (int p = 0; p < channelCount; p++) {
                     if (p == c || rawImages[p] == null) continue;
+                    IJ.log("      Pair " + orderedPairProgress(c, p, channelCount)
+                            + " " + sourceName + " -> " + channelNames[p] + " MIP");
                     ImagePlus sourceMip = null;
                     ImagePlus sourceBinMip = null;
                     ImagePlus sourceMaskMip = null;
@@ -1538,6 +1592,9 @@ public class IntensityAnalysisV2 implements Analysis {
                 for (int p = 0; p < channelCount; p++) {
                     if (p == c || rawImages[p] == null) continue;
                     int pairDepth = Math.min(sourceDepth, Math.max(1, rawImages[p].getStackSize()));
+                    IJ.log("      Pair " + orderedPairProgress(c, p, channelCount)
+                            + " " + sourceName + " -> " + channelNames[p]
+                            + " native 3D: " + pairDepth + " slices");
                     if (pairDepth < IntensitySpatialConfig.MIN_NATIVE_3D_SLICES) {
                         IJ.log("[FLASH] Intensity-spatial native 3D skipped for "
                                 + imageId + " source " + sourceName
@@ -1604,6 +1661,98 @@ public class IntensityAnalysisV2 implements Analysis {
                 || analyses.contains(IntensitySpatialConfig.AnalysisKey.DISTANCE_SHELL_3D));
     }
 
+    private static boolean hasSelected2dSameChannelAnalysis(IntensitySpatialConfig spatialConfig) {
+        if (spatialConfig == null || !spatialConfig.isEnabled()) return false;
+        Set<IntensitySpatialConfig.AnalysisKey> analyses = spatialConfig.getEnabledAnalyses();
+        if (analyses == null) return false;
+        for (IntensitySpatialConfig.AnalysisKey key : analyses) {
+            if (key != null && !key.isCrossChannel() && !key.isNative3d()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasSelectedNative3dSameChannelAnalysis(IntensitySpatialConfig spatialConfig) {
+        if (spatialConfig == null || !spatialConfig.isEnabled()) return false;
+        Set<IntensitySpatialConfig.AnalysisKey> analyses = spatialConfig.getEnabledAnalyses();
+        if (analyses == null) return false;
+        for (IntensitySpatialConfig.AnalysisKey key : analyses) {
+            if (key != null && !key.isCrossChannel() && key.isNative3d()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String sameChannelPlanSummary(IntensitySpatialConfig spatialConfig,
+                                                 boolean include2d,
+                                                 boolean includeNative3d) {
+        List<String> parts = new ArrayList<String>();
+        if (include2d) {
+            String tokens = analysisTokens(spatialConfig, false, false);
+            if (!tokens.isEmpty()) parts.add(sourceModeLabel(spatialConfig) + " " + tokens);
+        }
+        if (includeNative3d) {
+            String tokens = analysisTokens(spatialConfig, false, true);
+            if (!tokens.isEmpty()) parts.add("native 3D " + tokens);
+        }
+        return parts.isEmpty() ? "no same-channel spatial families selected" : String.join("; ", parts);
+    }
+
+    private static String crossChannelPlanSummary(IntensitySpatialConfig spatialConfig) {
+        List<String> parts = new ArrayList<String>();
+        String twoD = analysisTokens(spatialConfig, true, false);
+        if (!twoD.isEmpty()) parts.add(sourceModeLabel(spatialConfig) + " " + twoD);
+        String native3d = analysisTokens(spatialConfig, true, true);
+        if (!native3d.isEmpty()) parts.add("native 3D " + native3d);
+        return parts.isEmpty() ? "no cross-channel spatial families selected" : String.join("; ", parts);
+    }
+
+    private static String analysisTokens(IntensitySpatialConfig spatialConfig,
+                                         boolean crossChannel,
+                                         boolean native3d) {
+        if (spatialConfig == null || !spatialConfig.isEnabled()
+                || spatialConfig.getEnabledAnalyses() == null) {
+            return "";
+        }
+        List<String> tokens = new ArrayList<String>();
+        for (IntensitySpatialConfig.AnalysisKey key : spatialConfig.getEnabledAnalyses()) {
+            if (key != null
+                    && key.isCrossChannel() == crossChannel
+                    && key.isNative3d() == native3d) {
+                tokens.add(key.token());
+            }
+        }
+        return String.join(", ", tokens);
+    }
+
+    private static String sourceModeLabel(IntensitySpatialConfig spatialConfig) {
+        return spatialConfig != null && spatialConfig.isMipEnabled()
+                ? "MIP"
+                : "full z-stack";
+    }
+
+    private static String roiLogSuffix(String roiLabel) {
+        return roiLabel == null || roiLabel.trim().isEmpty()
+                ? ""
+                : " ROI " + roiLabel.trim();
+    }
+
+    private static String orderedPairProgress(int sourceIndex,
+                                              int partnerIndex,
+                                              int channelCount) {
+        int safeChannelCount = Math.max(0, channelCount);
+        int total = safeChannelCount * Math.max(0, safeChannelCount - 1);
+        if (sourceIndex < 0 || partnerIndex < 0 || sourceIndex == partnerIndex
+                || safeChannelCount < 2) {
+            return "[?/" + Math.max(0, total) + "]";
+        }
+        int pairNumber = sourceIndex * (safeChannelCount - 1)
+                + (partnerIndex < sourceIndex ? partnerIndex + 1 : partnerIndex);
+        return "[" + pairNumber + "/" + total + "]";
+    }
+
     private static IntensitySpatialResult[] ensureResultArray(IntensitySpatialResult[] results,
                                                               int length) {
         if (results == null) return new IntensitySpatialResult[length];
@@ -1634,66 +1783,145 @@ public class IntensityAnalysisV2 implements Analysis {
             return ChannelSpatialResults.empty();
         }
 
-        IntensitySpatialRunner runner = IntensitySpatialRunner.standard();
-        String imageId = parts == null ? "unknown" : parts.displayLabel();
-        IntensitySpatialResult[] baseResults = null;
-        IntensitySpatialResult mipResult = null;
-        IntensitySpatialResult nativeResult = null;
-
-        IntensitySpatialOutputKey baseKey = outputPlan.baseKeyForChannel(channelName);
-        boolean baseAllowed = outputPlan.shouldPopulate(baseKey)
-                && baseKey != null
-                && !baseKey.isChannelRoiMaskOutput();
-        if (baseAllowed) {
-            int slices = Math.max(1, raw.getStackSize());
-            baseResults = new IntensitySpatialResult[slices];
-            for (int s = 1; s <= slices; s++) {
-                baseResults[s - 1] = runner.measure(new IntensitySpatialContext(
-                        spatialConfig, raw, binarizedRawInMask, s, roi,
-                        IntensitySpatialOutputMode.BASE, imageId, channelName, roiLabel, null));
-            }
+        boolean hasSame2d = hasSelected2dSameChannelAnalysis(spatialConfig);
+        boolean hasSameNative3d = hasSelectedNative3dSameChannelAnalysis(spatialConfig);
+        if (!hasSame2d && !hasSameNative3d) {
+            return ChannelSpatialResults.empty();
         }
 
-        IntensitySpatialOutputKey mipKey = outputPlan.keyForChannelMode(channelName,
-                IntensitySpatialOutputMode.MIP);
-        if (outputPlan.shouldPopulate(mipKey)) {
-            ImagePlus rawMip = null;
-            ImagePlus binarizedMip = null;
-            try {
-                rawMip = IntensitySpatialRunner.maxIntensityProjection(raw,
-                        channelName + "_raw_MIP");
-                if (binarizedRawInMask != null) {
-                    binarizedMip = IntensitySpatialRunner.maxIntensityProjection(
-                            binarizedRawInMask, channelName + "_binarized_MIP");
+        try {
+            IntensitySpatialRunner runner = IntensitySpatialRunner.standardWithProgress();
+            String imageId = parts == null ? "unknown" : parts.displayLabel();
+            IntensitySpatialResult[] baseResults = null;
+            IntensitySpatialResult mipResult = null;
+            IntensitySpatialResult nativeResult = null;
+
+            IntensitySpatialOutputKey baseKey = outputPlan.baseKeyForChannel(channelName);
+            boolean baseAllowed = outputPlan.shouldPopulate(baseKey)
+                    && baseKey != null
+                    && !baseKey.isChannelRoiMaskOutput()
+                    && sourceAllowsSpatialMode(spatialConfig, IntensitySpatialOutputMode.BASE);
+            IntensitySpatialOutputKey mipKey = outputPlan.keyForChannelMode(channelName,
+                    IntensitySpatialOutputMode.MIP);
+            boolean mipAllowed = outputPlan.shouldPopulate(mipKey)
+                    && sourceAllowsSpatialMode(spatialConfig, IntensitySpatialOutputMode.MIP);
+            IntensitySpatialOutputKey nativeKey = outputPlan.keyForChannelMode(channelName,
+                    IntensitySpatialOutputMode.NATIVE_3D);
+            boolean nativeAllowed = outputPlan.shouldPopulate(nativeKey);
+
+            IJ.log("    - Intensity-spatial same-channel [" + channelName + "]: "
+                    + sameChannelPlanSummary(spatialConfig, hasSame2d && (baseAllowed || mipAllowed),
+                    hasSameNative3d && nativeAllowed)
+                    + " for " + imageId + roiLogSuffix(roiLabel));
+
+            if (baseAllowed && hasSame2d) {
+                int slices = Math.max(1, raw.getStackSize());
+                baseResults = new IntensitySpatialResult[slices];
+                IJ.log("      Base output: " + slices + " slices");
+                for (int s = 1; s <= slices; s++) {
+                    IJ.log("        Base slice [" + s + "/" + slices + "]");
+                    baseResults[s - 1] = runner.measure(new IntensitySpatialContext(
+                            spatialConfig, raw, binarizedRawInMask, s, roi,
+                            IntensitySpatialOutputMode.BASE, imageId, channelName, roiLabel, null));
                 }
-                mipResult = runner.measure(new IntensitySpatialContext(
-                        spatialConfig, rawMip, binarizedMip, 1, roi,
-                        IntensitySpatialOutputMode.MIP, imageId, channelName, roiLabel, null));
-            } catch (RuntimeException ex) {
-                IJ.log("[FLASH] Intensity-spatial MIP skipped for " + imageId
-                        + " channel " + channelName + ": " + ex.getMessage());
-            } finally {
-                closeImage(rawMip);
-                closeImage(binarizedMip);
             }
+
+            if (mipAllowed && hasSame2d) {
+                ImagePlus rawMip = null;
+                ImagePlus binarizedMip = null;
+                try {
+                    IJ.log("      MIP output: building max-intensity projection");
+                    rawMip = IntensitySpatialRunner.maxIntensityProjection(raw,
+                            channelName + "_raw_MIP");
+                    if (binarizedRawInMask != null) {
+                        binarizedMip = IntensitySpatialRunner.maxIntensityProjection(
+                                binarizedRawInMask, channelName + "_binarized_MIP");
+                    }
+                    mipResult = runner.measure(new IntensitySpatialContext(
+                            spatialConfig, rawMip, binarizedMip, 1, roi,
+                            IntensitySpatialOutputMode.MIP, imageId, channelName, roiLabel, null));
+                } catch (RuntimeException ex) {
+                    IJ.log("[FLASH] Intensity-spatial MIP skipped for " + imageId
+                            + " channel " + channelName + ": " + ex.getMessage());
+                } finally {
+                    closeImage(rawMip);
+                    closeImage(binarizedMip);
+                }
+            }
+
+            if (nativeAllowed && hasSameNative3d) {
+                int stackDepth = Math.max(1, raw.getStackSize());
+                IJ.log("      Native 3D output: " + stackDepth + " slices");
+                if (stackDepth < IntensitySpatialConfig.MIN_NATIVE_3D_SLICES) {
+                    IJ.log("[FLASH] Intensity-spatial native 3D skipped for " + imageId
+                            + " channel " + channelName + ": stack has fewer than "
+                            + IntensitySpatialConfig.MIN_NATIVE_3D_SLICES + " slices");
+                } else {
+                    nativeResult = runner.measure(new IntensitySpatialContext(
+                            spatialConfig, raw, binarizedRawInMask, 1, roi,
+                            IntensitySpatialOutputMode.NATIVE_3D, imageId, channelName, roiLabel, null));
+                }
+            }
+
+            return new ChannelSpatialResults(baseResults, mipResult, nativeResult);
+        } catch (Throwable t) {
+            rethrowIfFatal(t);
+            String imageId = parts == null ? "unknown" : parts.displayLabel();
+            IJ.log("[FLASH] Intensity-spatial same-channel skipped for "
+                    + imageId + " channel " + channelName + roiLogSuffix(roiLabel)
+                    + ": runtime class/dependency problem: " + safeThrowableMessage(t));
+            return failedChannelSpatialResults(raw, channelName, outputPlan, spatialConfig);
+        }
+    }
+
+    private static ChannelSpatialResults failedChannelSpatialResults(
+            ImagePlus raw,
+            String channelName,
+            IntensityOutputPlan outputPlan,
+            IntensitySpatialConfig spatialConfig) {
+        if (outputPlan == null || spatialConfig == null || !spatialConfig.isEnabled()) {
+            return ChannelSpatialResults.empty();
+        }
+        IntensitySpatialResult empty = IntensitySpatialResult.empty();
+        IntensitySpatialResult[] baseResults = null;
+        IntensitySpatialOutputKey baseKey = outputPlan.baseKeyForChannel(channelName);
+        if (outputPlan.shouldPopulate(baseKey)
+                && baseKey != null
+                && !baseKey.isChannelRoiMaskOutput()
+                && sourceAllowsSpatialMode(spatialConfig, IntensitySpatialOutputMode.BASE)) {
+            int slices = Math.max(1, raw == null ? 1 : raw.getStackSize());
+            baseResults = new IntensitySpatialResult[slices];
+            Arrays.fill(baseResults, empty);
         }
 
-        IntensitySpatialOutputKey nativeKey = outputPlan.keyForChannelMode(channelName,
-                IntensitySpatialOutputMode.NATIVE_3D);
-        if (outputPlan.shouldPopulate(nativeKey)) {
-            int stackDepth = Math.max(1, raw.getStackSize());
-            if (stackDepth < IntensitySpatialConfig.MIN_NATIVE_3D_SLICES) {
-                IJ.log("[FLASH] Intensity-spatial native 3D skipped for " + imageId
-                        + " channel " + channelName + ": stack has fewer than "
-                        + IntensitySpatialConfig.MIN_NATIVE_3D_SLICES + " slices");
-            } else {
-                nativeResult = runner.measure(new IntensitySpatialContext(
-                        spatialConfig, raw, binarizedRawInMask, 1, roi,
-                        IntensitySpatialOutputMode.NATIVE_3D, imageId, channelName, roiLabel, null));
-            }
-        }
+        IntensitySpatialOutputKey mipKey = outputPlan.keyForChannelMode(
+                channelName, IntensitySpatialOutputMode.MIP);
+        IntensitySpatialResult mipResult = outputPlan.shouldPopulate(mipKey)
+                && sourceAllowsSpatialMode(spatialConfig, IntensitySpatialOutputMode.MIP)
+                ? empty
+                : null;
+
+        IntensitySpatialOutputKey nativeKey = outputPlan.keyForChannelMode(
+                channelName, IntensitySpatialOutputMode.NATIVE_3D);
+        IntensitySpatialResult nativeResult = outputPlan.shouldPopulate(nativeKey)
+                ? empty
+                : null;
 
         return new ChannelSpatialResults(baseResults, mipResult, nativeResult);
+    }
+
+    private static String safeThrowableMessage(Throwable t) {
+        if (t == null) return "unknown";
+        String message = t.getMessage();
+        return message == null || message.trim().isEmpty()
+                ? t.getClass().getSimpleName()
+                : message.trim();
+    }
+
+    private static void rethrowIfFatal(Throwable t) {
+        if (t instanceof ThreadDeath) {
+            throw (ThreadDeath) t;
+        }
     }
 
     /**
@@ -1953,7 +2181,8 @@ public class IntensityAnalysisV2 implements Analysis {
                                              boolean[] binarization) {
         LinkedHashSet<String> columns = new LinkedHashSet<String>();
         if (key == null || key.isChannelRoiMaskOutput()
-                || spatialConfig == null || !spatialConfig.isEnabled()) {
+                || spatialConfig == null || !spatialConfig.isEnabled()
+                || !sourceAllowsSpatialMode(spatialConfig, key.mode())) {
             return new ArrayList<String>(columns);
         }
         Set<IntensitySpatialConfig.AnalysisKey> analyses = spatialConfig.getEnabledAnalyses();
@@ -1997,6 +2226,14 @@ public class IntensityAnalysisV2 implements Analysis {
                 && spatialConfig.isNative3dEnabled()
                 && (stackDepth < 0 || stackDepth >= IntensitySpatialConfig.MIN_NATIVE_3D_SLICES)
                 && hasNativeSpatialAnalysis(spatialConfig);
+    }
+
+    private static boolean sourceAllowsSpatialMode(IntensitySpatialConfig spatialConfig,
+                                                   IntensitySpatialOutputMode mode) {
+        if (spatialConfig == null || mode == null) return false;
+        if (mode == IntensitySpatialOutputMode.NATIVE_3D) return true;
+        if (mode == IntensitySpatialOutputMode.MIP) return spatialConfig.isMipEnabled();
+        return !spatialConfig.isMipEnabled();
     }
 
     private static boolean hasNonNativeSpatialAnalysis(IntensitySpatialConfig spatialConfig) {
@@ -2794,11 +3031,22 @@ public class IntensityAnalysisV2 implements Analysis {
         Frame[] frames = WindowManager.getNonImageWindows();
         if (frames != null) {
             for (Frame f : frames) {
-                if (f != null && !"Log".equals(f.getTitle())) {
+                if (f != null && shouldCloseIntensityNonImageFrame(
+                        f.getTitle(), f.getClass().getName())) {
                     f.dispose();
                 }
             }
         }
+    }
+
+    static boolean shouldCloseIntensityNonImageFrame(String title, String className) {
+        String safeTitle = title == null ? "" : title.trim();
+        String safeClass = className == null ? "" : className.trim();
+        if ("Log".equals(safeTitle)) return false;
+        if ("ImageJ".equals(safeTitle) || "Fiji".equals(safeTitle)) return false;
+        if (safeTitle.startsWith("FLASH") || safeTitle.startsWith("Repeat Pipeline")) return false;
+        if ("ij.ImageJ".equals(safeClass)) return false;
+        return "ij.text.TextWindow".equals(safeClass);
     }
 
     private ImagePlus applyConfiguredZSliceSubset(BinConfig cfg, int seriesIndex, ImagePlus imp, String contextLabel) {

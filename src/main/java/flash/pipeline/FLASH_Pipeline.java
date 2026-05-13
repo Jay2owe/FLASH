@@ -247,6 +247,8 @@ public class FLASH_Pipeline implements PlugIn {
 
             GpuConcurrency.logEffectivePermits();
 
+            boolean[] completedAnalyses = new boolean[selections.length];
+            boolean runHadFailure = false;
             for (int i = 0; i < selections.length; i++) {
                 if (!selections[i]) continue;
 
@@ -254,31 +256,52 @@ public class FLASH_Pipeline implements PlugIn {
                 if (analysis != null) {
                     configureAnalysis(analysis, i, suppressDialogs, qualityReport);
                     BinSetupDispatcher.clearLastFieldSources();
-                    analysis.execute(directory);
-                    resetBioFormatsWindowless();
+                    boolean completed = executeAnalysisSafelyForGui(analysis, i, directory);
+                    completedAnalyses[i] = completed;
+                    runHadFailure |= !completed;
                     writeRunAudit(analysis, i);
                 } else {
+                    runHadFailure = true;
                     IJ.showMessage("Analysis not implemented");
                 }
             }
 
             // Auto-trigger aggregation after 3D Object or Intensity analyses
-            boolean ran3D = selections[IDX_3D_OBJECT];
-            boolean ranSpatial = selections[IDX_SPATIAL];
-            boolean ranIntensity = selections[IDX_INTENSITY];
+            boolean ran3D = selections[IDX_3D_OBJECT] && completedAnalyses[IDX_3D_OBJECT];
+            boolean ranSpatial = selections[IDX_SPATIAL] && completedAnalyses[IDX_SPATIAL];
+            boolean ranIntensity = selections[IDX_INTENSITY] && completedAnalyses[IDX_INTENSITY];
             boolean manuallyRanAgg = selections[IDX_AGGREGATION];
             if (autoAggregate && (ran3D || ranSpatial || ranIntensity) && !manuallyRanAgg) {
                 IJ.log("Auto-running Master Data Aggregation...");
                 Analysis aggAnalysis = analysisMap.get(IDX_AGGREGATION);
-                configureAnalysis(aggAnalysis, IDX_AGGREGATION, true, qualityReport);
-                BinSetupDispatcher.clearLastFieldSources();
-                aggAnalysis.execute(directory);
-                writeRunAudit(aggAnalysis, IDX_AGGREGATION);
+                if (aggAnalysis != null) {
+                    configureAnalysis(aggAnalysis, IDX_AGGREGATION, true, qualityReport);
+                    BinSetupDispatcher.clearLastFieldSources();
+                    boolean aggregationCompleted = executeAnalysisSafelyForGui(
+                            aggAnalysis, IDX_AGGREGATION, directory);
+                    runHadFailure |= !aggregationCompleted;
+                    writeRunAudit(aggAnalysis, IDX_AGGREGATION);
+                } else {
+                    runHadFailure = true;
+                    IJ.log("[FLASH] Auto aggregation skipped: analysis not implemented.");
+                }
             }
 
             // Post-run summary (R-01, R-08, R-09) — informational only
-            PostRunSummary.writeIfPossible(directory);
-            saveProjectRecipe(selections);
+            runGuiStepSafely("Post-run summary", new Runnable() {
+                @Override public void run() {
+                    PostRunSummary.writeIfPossible(directory);
+                }
+            });
+            if (!runHadFailure) {
+                runGuiStepSafely("Project recipe save", new Runnable() {
+                    @Override public void run() {
+                        saveProjectRecipe(selections);
+                    }
+                });
+            } else {
+                IJ.log("[FLASH] Last-run recipe not updated because one or more analyses failed.");
+            }
 
             PipelineDialog repeat = new PipelineDialog("Repeat Pipeline?");
             repeat.addMessage("Would you like to perform another analysis?");
@@ -1012,6 +1035,67 @@ public class FLASH_Pipeline implements PlugIn {
      */
     private static void resetBioFormatsWindowless() {
         BioFormatsRuntime.resetWindowlessModeIfTouched();
+    }
+
+    boolean executeAnalysisSafelyForGui(Analysis analysis, int index, String runDirectory) {
+        if (analysis == null) return false;
+        String label = analysisLabel(index);
+        try {
+            analysis.execute(runDirectory);
+            return true;
+        } catch (Throwable t) {
+            rethrowControlThrowable(t);
+            reportGuiStepFailure(label, t);
+            return false;
+        } finally {
+            resetBioFormatsWindowless();
+        }
+    }
+
+    void runGuiStepSafely(String label, Runnable step) {
+        if (step == null) return;
+        try {
+            step.run();
+        } catch (Throwable t) {
+            rethrowControlThrowable(t);
+            reportGuiStepFailure(label, t);
+        }
+    }
+
+    private String analysisLabel(int index) {
+        if (index >= 0 && index < analyses.length) return analyses[index];
+        return "Analysis";
+    }
+
+    private void reportGuiStepFailure(String label, Throwable t) {
+        String context = label == null || label.trim().isEmpty() ? "FLASH" : label.trim();
+        String message = describeThrowable(t);
+        IJ.log("[FLASH] " + context + " FAILED: " + message);
+        try {
+            IJ.handleException(t);
+        } catch (Throwable ignored) {
+            // Keep the GUI runner alive even if ImageJ's exception handler fails.
+        }
+        if (!GraphicsEnvironment.isHeadless()) {
+            IJ.showMessage("FLASH",
+                    context + " failed.\n\n"
+                    + message + "\n\n"
+                    + "FLASH will return to the next prompt so you can run another analysis.");
+        }
+    }
+
+    private static String describeThrowable(Throwable t) {
+        if (t == null) return "Unknown error";
+        String type = t.getClass().getSimpleName();
+        String message = t.getMessage();
+        if (message == null || message.trim().isEmpty()) return type;
+        return type + ": " + message.trim();
+    }
+
+    private static void rethrowControlThrowable(Throwable t) {
+        if (t instanceof ThreadDeath) {
+            throw (ThreadDeath) t;
+        }
     }
 
     private void configureFeatureDependencyGate() {

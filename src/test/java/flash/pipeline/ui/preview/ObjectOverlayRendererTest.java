@@ -1,6 +1,7 @@
 package flash.pipeline.ui.preview;
 
 import ij.ImagePlus;
+import ij.measure.ResultsTable;
 import ij.process.ByteProcessor;
 import ij.process.ImageProcessor;
 import org.junit.Test;
@@ -51,6 +52,56 @@ public class ObjectOverlayRendererTest {
         assertEquals(blend(0x000000, LabelMapStyler.rgbForLabel(1), 0.35),
                 rendered.getPixel(0, 0) & 0xffffff);
         assertEquals(0x000000, rendered.getPixel(1, 0) & 0xffffff);
+    }
+
+    @Test
+    public void objectOverlayUsesClassifiedSizeFilterColors() {
+        ByteProcessor sourceProcessor = new ByteProcessor(1, 1);
+        sourceProcessor.set(0, 0, 0);
+        ImagePlus source = new ImagePlus("source", sourceProcessor);
+
+        ByteProcessor labelProcessor = new ByteProcessor(1, 1);
+        labelProcessor.set(0, 0, 1);
+        ImagePlus labels = new ImagePlus("labels", labelProcessor);
+
+        ResultsTable stats = new ResultsTable();
+        stats.incrementCounter();
+        stats.setValue("Label", 0, 1);
+        stats.setValue("Volume (pixel^3)", 0, 2);
+        ObjectSizeFilterPreview.Summary summary =
+                ObjectSizeFilterPreview.summarize(stats, source, 5, 100, true);
+        ObjectSizeFilterPreview.applyClassifiedLut(labels, summary);
+
+        ImagePlus overlay = ObjectOverlayRenderer.renderOverlay(source, labels);
+        ImageProcessor rendered = overlay.getProcessor();
+
+        assertEquals(blend(0x000000, 0xe53935, 0.35),
+                rendered.getPixel(0, 0) & 0xffffff);
+    }
+
+    @Test
+    public void objectOverlayUsesLargeObjectCutoffColor() {
+        ByteProcessor sourceProcessor = new ByteProcessor(1, 1);
+        sourceProcessor.set(0, 0, 0);
+        ImagePlus source = new ImagePlus("source", sourceProcessor);
+
+        ByteProcessor labelProcessor = new ByteProcessor(1, 1);
+        labelProcessor.set(0, 0, 1);
+        ImagePlus labels = new ImagePlus("labels", labelProcessor);
+
+        ResultsTable stats = new ResultsTable();
+        stats.incrementCounter();
+        stats.setValue("Label", 0, 1);
+        stats.setValue("Volume (pixel^3)", 0, 200);
+        ObjectSizeFilterPreview.Summary summary =
+                ObjectSizeFilterPreview.summarize(stats, source, 5, 100, true);
+        ObjectSizeFilterPreview.applyClassifiedLut(labels, summary);
+
+        ImagePlus overlay = ObjectOverlayRenderer.renderOverlay(source, labels);
+        ImageProcessor rendered = overlay.getProcessor();
+
+        assertEquals(blend(0x000000, 0xf9a825, 0.35),
+                rendered.getPixel(0, 0) & 0xffffff);
     }
 
     private static int blend(int base, int overlay, double alpha) {

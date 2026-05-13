@@ -370,6 +370,28 @@ public class CLIArgumentParserTest {
     }
 
     @Test
+    public void parse_intensitySpatialSourceModeOverridesLegacyMipFlag() {
+        CLIConfig parsed = CLIArgumentParser.parse("dir=[/tmp/data] "
+                + "intensity.spatial=true "
+                + "intensity.spatial.analyses=patchiness "
+                + "intensity.spatial.mip=true "
+                + "intensity.spatial.source=full_stack");
+
+        assertEquals(IntensitySpatialConfig.SpatialSourceMode.FULL_STACK,
+                parsed.getIntensity().getSpatialSourceMode());
+
+        IntensitySpatialConfig merged = parsed.getIntensity().mergeSpatialConfig(
+                IntensitySpatialConfig.disabled(),
+                1,
+                new boolean[]{false},
+                null);
+
+        assertEquals(IntensitySpatialConfig.SpatialSourceMode.FULL_STACK,
+                merged.getSpatialSourceMode());
+        assertFalse(merged.isMipEnabled());
+    }
+
+    @Test
     public void intensitySpatialCliMergeEnforcesChannelAndBinarizationLocks() {
         CLIConfig crossChannelParsed = CLIArgumentParser.parse("dir=[/tmp/data] "
                 + "intensity.spatial=true "

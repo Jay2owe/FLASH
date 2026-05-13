@@ -13,6 +13,7 @@ import javax.swing.JLabel;
 import javax.swing.text.JTextComponent;
 import java.awt.Component;
 import java.awt.Container;
+import java.awt.image.IndexColorModel;
 import java.util.Arrays;
 
 import static org.junit.Assert.assertEquals;
@@ -82,6 +83,7 @@ public class CellposeParameterStageTest {
         assertContainsText(controls, "Diameter");
         assertContainsText(controls, "Flow threshold");
         assertContainsText(controls, "Cell probability");
+        assertContainsText(controls, "Object size:");
         assertContainsText(controls, "cyto3: Recommended first-pass model");
         assertContainsText(controls, "Companion: optional second channel");
         assertContainsText(controls, "Runtime: Cellpose test runtime.");
@@ -154,6 +156,34 @@ public class CellposeParameterStageTest {
     }
 
     @Test
+    public void sizeEditsAfterPreviewRelabelRemovedObjectsWithoutRerunning() throws Exception {
+        RecordingStore store = new RecordingStore("cellpose:30.0:cyto3:0.4:0.0:gpu=false");
+        RecordingSizeStore sizeStore = new RecordingSizeStore("0-Infinity");
+        RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
+        RecordingActions actions = new RecordingActions();
+        CellposeParameterStage stage = stage(store, sizeStore, adapter);
+
+        stage.buildControls(context(), actions);
+        stage.onEnter(context(), new PreviewPairPanel("Original", "Adjusted"));
+        stage.runPreviewNowForTest();
+        adapter.previewRuns = 0;
+
+        stage.setSizeMinForTest("2");
+
+        assertFalse(stage.isPreviewStaleForTest());
+        assertEquals("Size edits must reuse cached label sizes",
+                0, adapter.previewRuns);
+        assertEquals("Objects: 1 kept; removed 1 small, 0 large", actions.status);
+        assertEquals("Objects: 1 kept; removed 1 small, 0 large",
+                stage.sizeCutoffSummaryForTest());
+        assertFalse(actions.previewButtonStale);
+        assertRemovedLabelUsesCutoffColor(actions.adjustedPreview, 1, 0xe53935);
+
+        assertTrue(stage.lockIn(context()));
+        assertEquals("2-Infinity", sizeStore.token);
+    }
+
+    @Test
     public void sourceToggleSwapsRawAndFilteredWithoutRunningPreview() {
         RecordingStore store = new RecordingStore("cellpose:30.0:cyto3:0.4:0.0:gpu=false");
         RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
@@ -212,8 +242,15 @@ public class CellposeParameterStageTest {
 
     private static CellposeParameterStage stage(RecordingStore store,
                                                 RecordingPreviewAdapter adapter) {
+        return stage(store, new RecordingSizeStore("0-Infinity"), adapter);
+    }
+
+    private static CellposeParameterStage stage(RecordingStore store,
+                                                RecordingSizeStore sizeStore,
+                                                RecordingPreviewAdapter adapter) {
         return new CellposeParameterStage(
                 store,
+                sizeStore,
                 adapter,
                 new RecordingRuntimeAdapter(),
                 Arrays.asList("Primary", "Companion", "Other"),
@@ -313,9 +350,11 @@ public class CellposeParameterStageTest {
                                               ImagePlus filteredCompanionSource,
                                               CellposeParameterStage.Parameters parameters) {
             previewRuns++;
-            ByteProcessor processor = new ByteProcessor(2, 1);
+            ByteProcessor processor = new ByteProcessor(4, 1);
             processor.set(0, 0, 1);
             processor.set(1, 0, 2);
+            processor.set(2, 0, 2);
+            processor.set(3, 0, 2);
             return new ImagePlus("labels", processor);
         }
 
@@ -325,6 +364,22 @@ public class CellposeParameterStageTest {
 
         @Override public void close(ImagePlus image) {
             if (image != null) image.flush();
+        }
+    }
+
+    private static final class RecordingSizeStore implements CellposeParameterStage.SizeStore {
+        String token;
+
+        RecordingSizeStore(String token) {
+            this.token = token;
+        }
+
+        @Override public String get() {
+            return token;
+        }
+
+        @Override public void set(String token) {
+            this.token = token;
         }
     }
 
@@ -384,5 +439,18 @@ public class CellposeParameterStageTest {
 
         @Override public void cancel() {
         }
+    }
+
+    private static void assertRemovedLabelUsesCutoffColor(ImagePlus labelImage,
+                                                          int label,
+                                                          int expectedRgb) {
+        assertNotNull(labelImage);
+        assertTrue(labelImage.getProcessor().getColorModel() instanceof IndexColorModel);
+        IndexColorModel model = (IndexColorModel) labelImage.getProcessor().getColorModel();
+        int index = ((Math.max(1, label) - 1) % 255) + 1;
+        int actual = (model.getRed(index) << 16)
+                | (model.getGreen(index) << 8)
+                | model.getBlue(index);
+        assertEquals(expectedRgb, actual);
     }
 }

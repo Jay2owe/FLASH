@@ -180,6 +180,36 @@ public final class CsvTableIO {
     }
 
     /**
+     * Writes a ResultsTable while preserving an existing same-row CSV and
+     * appending or refreshing the supplied columns by row index.
+     *
+     * @return true when an existing CSV was merged, false when the caller
+     * should fall back to a normal overwrite.
+     */
+    public static boolean mergeResultsTableCsv(File outFile, ResultsTable table, List<String> orderedColumns) {
+        if (outFile == null || table == null || orderedColumns == null || !outFile.exists()) {
+            return false;
+        }
+        ChannelData existing = loadChannelCsv(outFile, outFile.getName());
+        if (existing == null || existing.rows.size() != table.size()) {
+            return false;
+        }
+        for (String column : orderedColumns) {
+            if (column != null && !column.trim().isEmpty()) {
+                existing.addColumn(column);
+            }
+        }
+        for (int row = 0; row < table.size(); row++) {
+            for (String column : orderedColumns) {
+                if (column == null || column.trim().isEmpty()) continue;
+                existing.set(row, column, resultsTableValue(table, column, row));
+            }
+        }
+        writeChannelCsv(outFile, existing);
+        return true;
+    }
+
+    /**
      * Parses a string as a double, returning 0.0 for null, empty, or
      * unparseable values.
      */

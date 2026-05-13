@@ -23,6 +23,7 @@ import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.GraphicsEnvironment;
 import java.awt.GridLayout;
+import java.awt.Window;
 import java.awt.event.ActionEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
@@ -79,9 +80,18 @@ public final class CustomFilterEntryDialog {
         return show(channelLabel, previewHandler, null, null, null);
     }
 
+    public static Result show(Window owner, String channelLabel, PreviewHandler previewHandler) {
+        return show(owner, channelLabel, previewHandler, null, null, null);
+    }
+
     public static Result show(String channelLabel, PreviewHandler previewHandler,
                               SandboxHandler sandboxHandler) {
         return show(channelLabel, previewHandler, sandboxHandler, null, null);
+    }
+
+    public static Result show(Window owner, String channelLabel, PreviewHandler previewHandler,
+                              SandboxHandler sandboxHandler) {
+        return show(owner, channelLabel, previewHandler, sandboxHandler, null, null);
     }
 
     public static Result show(String channelLabel, PreviewHandler previewHandler,
@@ -90,15 +100,28 @@ public final class CustomFilterEntryDialog {
         return show(channelLabel, previewHandler, sandboxHandler, sampleSupplier, null);
     }
 
+    public static Result show(Window owner, String channelLabel, PreviewHandler previewHandler,
+                              SandboxHandler sandboxHandler,
+                              RecorderDialog.SampleSupplier sampleSupplier) {
+        return show(owner, channelLabel, previewHandler, sandboxHandler, sampleSupplier, null);
+    }
+
     public static Result show(String channelLabel, PreviewHandler previewHandler,
+                              SandboxHandler sandboxHandler,
+                              RecorderDialog.SampleSupplier sampleSupplier,
+                              String seedMacro) {
+        return show(null, channelLabel, previewHandler, sandboxHandler, sampleSupplier, seedMacro);
+    }
+
+    public static Result show(Window owner, String channelLabel, PreviewHandler previewHandler,
                               SandboxHandler sandboxHandler,
                               RecorderDialog.SampleSupplier sampleSupplier,
                               String seedMacro) {
         if (GraphicsEnvironment.isHeadless()) return Result.cancel();
 
-        String action = showTileChooser(channelLabel);
+        String action = showTileChooser(owner, channelLabel);
         if ("record".equals(action)) {
-            RecorderDialog.Result rr = RecorderDialog.show(channelLabel, previewHandler, sampleSupplier, seedMacro);
+            RecorderDialog.Result rr = RecorderDialog.show(owner, channelLabel, previewHandler, sampleSupplier, seedMacro);
             if (rr == null || rr.macroText == null) return Result.cancel();
             return new Result(Choice.RECORD, rr.macroText, rr.demotedPreset, null, null);
         }
@@ -112,13 +135,13 @@ public final class CustomFilterEntryDialog {
         }
         if (!"import".equals(action)) return Result.cancel();
 
-        File selected = chooseImportFile();
+        File selected = chooseImportFile(owner);
         if (selected == null) return Result.cancel();
         try {
             String macro = new String(Files.readAllBytes(selected.toPath()), StandardCharsets.UTF_8);
             ParseSummary summary = summarize(macro);
             PresetMatcher.Match match = PresetMatcher.match(macro);
-            boolean confirmed = showImportConfirmation(channelLabel, selected, macro, summary, match, previewHandler);
+            boolean confirmed = showImportConfirmation(owner, channelLabel, selected, macro, summary, match, previewHandler);
             if (!confirmed) return Result.cancel();
             return new Result(Choice.IMPORT, macro, match == null ? null : match.presetName, null, null);
         } catch (IOException e) {
@@ -127,8 +150,10 @@ public final class CustomFilterEntryDialog {
         }
     }
 
-    private static String showTileChooser(String channelLabel) {
-        final PipelineDialog dialog = new PipelineDialog("Custom Filter — " + safe(channelLabel));
+    private static String showTileChooser(Window owner, String channelLabel) {
+        final PipelineDialog dialog = owner == null
+                ? new PipelineDialog("Custom Filter — " + safe(channelLabel))
+                : new PipelineDialog(owner, "Custom Filter — " + safe(channelLabel));
         dialog.setDefaultButtonsVisible(false);
         dialog.addHeader("How do you want to build this filter?");
         dialog.addMessage("You can preview your work and switch methods by cancelling at any time.");
@@ -137,19 +162,19 @@ public final class CustomFilterEntryDialog {
         tiles.setOpaque(false);
         final JPanel firstTile = makeTile("Build it step-by-step",
                 "Pick filter steps from a list and arrange them visually. Best place to start.",
-                dialog, "sandbox", true);
+                dialog, "sandbox", true, flash.pipeline.ui.FlashIcons.build());
         tiles.add(firstTile);
         tiles.add(makeTile("Record what I do in Fiji",
                 "Run the filters you want in Fiji normally; the steps are captured as you go.",
-                dialog, "record", false));
+                dialog, "record", false, flash.pipeline.ui.FlashIcons.record()));
         tiles.add(makeTile("Import an existing macro file",
                 "Use a saved .ijm or .txt macro you already have.",
-                dialog, "import", false));
+                dialog, "import", false, flash.pipeline.ui.FlashIcons.importFile()));
         dialog.addComponent(tiles);
 
         JButton help = dialog.addFooterButton("?");
         help.setToolTipText("What do these options do?");
-        help.addActionListener(e -> showEntryChooserHelp());
+        help.addActionListener(e -> showEntryChooserHelp(owner));
         JButton cancel = dialog.addRightFooterButton("Cancel");
         cancel.addActionListener(e -> dialog.closeWithAction("cancel"));
         dialog.requestFocusOnShow(firstTile);
@@ -157,7 +182,7 @@ public final class CustomFilterEntryDialog {
         return dialog.getActionCommand();
     }
 
-    private static void showEntryChooserHelp() {
+    private static void showEntryChooserHelp(Window owner) {
         String msg = "<html><body style='width:340px;'>"
                 + "Pick how you want to author the custom filter for this channel."
                 + "<br><br>"
@@ -175,7 +200,7 @@ public final class CustomFilterEntryDialog {
                 + "<b>Cancel</b><br>"
                 + "Close this dialog without changing the channel's filter."
                 + "</body></html>";
-        JOptionPane.showMessageDialog(null, msg, "Custom Filter — Help",
+        JOptionPane.showMessageDialog(owner, msg, "Custom Filter — Help",
                 JOptionPane.INFORMATION_MESSAGE);
     }
 
@@ -187,6 +212,11 @@ public final class CustomFilterEntryDialog {
      */
     static JPanel makeTile(String title, String description, final PipelineDialog dialog,
                            final String action, boolean recommended) {
+        return makeTile(title, description, dialog, action, recommended, null);
+    }
+
+    static JPanel makeTile(String title, String description, final PipelineDialog dialog,
+                           final String action, boolean recommended, javax.swing.Icon icon) {
         final JPanel panel = new JPanel(new BorderLayout(0, 6));
         final Color borderColor = recommended ? new Color(70, 120, 200) : new Color(180, 180, 180);
         final Color baseBg = new Color(250, 250, 250);
@@ -207,6 +237,7 @@ public final class CustomFilterEntryDialog {
         }
 
         final JButton button = new JButton(title);
+        flash.pipeline.ui.FlashIcons.apply(button, icon);
         button.setFocusPainted(false);
         button.addActionListener(e -> dialog.closeWithAction(action));
 
@@ -246,21 +277,23 @@ public final class CustomFilterEntryDialog {
         return panel;
     }
 
-    private static File chooseImportFile() {
+    private static File chooseImportFile(Window owner) {
         JFileChooser chooser = new JFileChooser();
         chooser.setDialogTitle("Import Filter Macro");
         chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
         chooser.setAcceptAllFileFilterUsed(true);
         chooser.addChoosableFileFilter(new FileNameExtensionFilter("ImageJ macro (*.ijm)", "ijm"));
         chooser.addChoosableFileFilter(new FileNameExtensionFilter("Text file (*.txt)", "txt"));
-        if (chooser.showOpenDialog(null) != JFileChooser.APPROVE_OPTION) return null;
+        if (chooser.showOpenDialog(owner) != JFileChooser.APPROVE_OPTION) return null;
         return chooser.getSelectedFile();
     }
 
-    private static boolean showImportConfirmation(String channelLabel, File file, String macro,
+    private static boolean showImportConfirmation(Window owner, String channelLabel, File file, String macro,
                                                   ParseSummary summary, PresetMatcher.Match match,
                                                   final PreviewHandler previewHandler) {
-        final PipelineDialog dialog = new PipelineDialog("Import Filter - " + safe(channelLabel));
+        final PipelineDialog dialog = owner == null
+                ? new PipelineDialog("Import Filter - " + safe(channelLabel))
+                : new PipelineDialog(owner, "Import Filter - " + safe(channelLabel));
         dialog.addHeader("Imported Macro");
         dialog.addMessage("File: " + file.getAbsolutePath());
         dialog.addMessage("Parsed operations: " + summary.total + " total, "

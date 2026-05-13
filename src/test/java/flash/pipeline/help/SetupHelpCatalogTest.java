@@ -61,6 +61,16 @@ public class SetupHelpCatalogTest {
     }
 
     @Test
+    public void channelIdentityHelpMatchesCompactIdentityDialog() {
+        String text = topicText(SetupHelpCatalog.CHANNEL_IDENTITY);
+        assertFalse(text.contains("Preset dropdown"));
+        assertFalse(text.contains("Save as preset"));
+        assertFalse(text.contains("Channel Setup Helper"));
+        assertContains(text, "Channel name");
+        assertContains(text, "LUT");
+    }
+
+    @Test
     public void objectSegmentationTopicsRemainMethodSpecific() {
         assertContains(SetupHelpCatalog.CLASSICAL_OBJECT_SEGMENTATION.summary,
                 "signal threshold");

@@ -3,12 +3,13 @@ package flash.pipeline.ui.config;
 import flash.pipeline.help.SetupHelpCatalog;
 import flash.pipeline.help.SetupHelpTopic;
 import flash.pipeline.objects.ObjectsCounter3DWrapper;
-import flash.pipeline.ui.preview.LabelMapStyler;
+import flash.pipeline.ui.preview.ObjectSizeFilterPreview;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import flash.pipeline.ui.preview.ThresholdControlPanel;
 import flash.pipeline.ui.preview.ThresholdOverlayRenderer;
 import ij.ImagePlus;
 import ij.ImageStack;
+import ij.measure.ResultsTable;
 import ij.process.ImageProcessor;
 
 import javax.swing.BorderFactory;
@@ -71,6 +72,7 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
     private ImagePlus filteredSource;
     private ImagePlus thresholdPreview;
     private ImagePlus labelPreview;
+    private ResultsTable objectStats;
     private SwingWorker<ObjectsCounter3DWrapper.Result, Void> previewWorker;
     private Double restartLowerThreshold;
     private Double restartUpperThreshold;
@@ -83,6 +85,8 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
     private JButton previewButton;
     private JButton resetButton;
     private JLabel feedbackLabel;
+    private ObjectSizeCutoffPanel sizeCutoffPanel;
+    private ObjectSizeFilterPreview.Summary sizeSummary;
 
     public ClassicalSegmentationStage(ThresholdStore thresholdStore,
                                       SizeStore sizeStore,
@@ -155,6 +159,9 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
         panel.add(Box.createVerticalStrut(4));
         panel.add(buildObjectRow());
         panel.add(Box.createVerticalStrut(4));
+        sizeCutoffPanel = new ObjectSizeCutoffPanel();
+        panel.add(sizeCutoffPanel);
+        panel.add(Box.createVerticalStrut(4));
 
         feedbackLabel = new JLabel(" ");
         feedbackLabel.setForeground(new Color(90, 90, 90));
@@ -162,6 +169,7 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
         panel.add(feedbackLabel);
 
         loadSizeFields(savedSize);
+        refreshSizeCutoffPanelOnly();
         markObjectPreviewStale(EMPTY_TEXT);
         return panel;
     }
@@ -207,6 +215,7 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
                 preview.setAdjustedState(PreviewPairPanel.PreviewState.STALE, EMPTY_TEXT);
             }
             updateThresholdPreview(false);
+            refreshSizeCutoffPanelOnly();
             markObjectPreviewStale(EMPTY_TEXT);
         } catch (Exception e) {
             closeImages();
@@ -313,6 +322,10 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
         runPreviewNow();
     }
 
+    String sizeCutoffSummaryForTest() {
+        return sizeCutoffPanel == null ? "" : sizeCutoffPanel.summaryTextForTest();
+    }
+
     private JComponent buildObjectRow() {
         JPanel row = new JPanel(new GridBagLayout());
         row.setOpaque(false);
@@ -325,8 +338,10 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
         installFieldListener(maxField);
 
         previewButton = new JButton("Run Object Preview");
+        flash.pipeline.ui.FlashIcons.apply(previewButton, flash.pipeline.ui.FlashIcons.play());
         previewButton.addActionListener(e -> runPreviewOnWorker());
         resetButton = new JButton("Reset sizes");
+        flash.pipeline.ui.FlashIcons.apply(resetButton, flash.pipeline.ui.FlashIcons.refresh());
         resetButton.addActionListener(e -> resetSizesToSaved());
 
         GridBagConstraints gbc = new GridBagConstraints();
@@ -394,12 +409,16 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
 
     private void sizeFieldChanged() {
         if (updatingFields) return;
-        markObjectPreviewStale(STALE_TEXT);
+        if (!refreshSizeFilterPreview()) {
+            markObjectPreviewStale(STALE_TEXT);
+        }
     }
 
     private void resetSizesToSaved() {
         loadSizeFields(savedSize);
-        markObjectPreviewStale(STALE_TEXT);
+        if (!refreshSizeFilterPreview()) {
+            markObjectPreviewStale(STALE_TEXT);
+        }
     }
 
     private void applySavedOrAutoThreshold() {
@@ -519,13 +538,14 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
             previewAdapter.close(result.getMaskedImage());
         }
         labelImage.setTitle(count > 0 ? "Object label preview" : "Object label preview (no objects)");
-        LabelMapStyler.apply(labelImage, count);
 
         ImagePlus old = labelPreview;
         labelPreview = labelImage;
+        objectStats = result == null ? null : result.getStatistics();
         objectPreviewStale = false;
         lastObjectCount = count;
-        String text = "Objects: " + count + " ready. Threshold " + currentThresholdToken() + ".";
+        refreshSizeFilterPreview();
+        String text = objectCountText();
         refreshObjectPreview(text, PreviewPairPanel.PreviewState.READY);
         setStatus(text);
         if (actions != null) actions.setPreviewButtonStale(false);
@@ -606,6 +626,59 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
         return new ParticleSizeStage.SizeToken(String.valueOf(min), max);
     }
 
+    private boolean refreshSizeFilterPreview() {
+        if (labelPreview == null || objectStats == null) {
+            refreshSizeCutoffPanelOnly();
+            return false;
+        }
+        try {
+            ParticleSizeStage.SizeToken token = collectSizeToken();
+            int minSize = ObjectsCounter3DWrapper.parseMinSizeVoxels(token.minText, 100);
+            int maxSize = ObjectsCounter3DWrapper.parseMaxSizeVoxels(token.maxText, filteredSource);
+            boolean maxFinite = isFiniteMaxToken(token.maxText);
+            sizeSummary = ObjectSizeFilterPreview.summarize(
+                    objectStats, filteredSource, minSize, maxSize, maxFinite);
+            ObjectSizeFilterPreview.applyClassifiedLut(labelPreview, sizeSummary);
+            if (sizeCutoffPanel != null) sizeCutoffPanel.setSummary(sizeSummary);
+            objectPreviewStale = false;
+            String text = objectCountText();
+            refreshObjectPreview(text, PreviewPairPanel.PreviewState.READY);
+            setStatus(text);
+            if (actions != null) actions.setPreviewButtonStale(false);
+            return true;
+        } catch (RuntimeException e) {
+            setError("Enter valid min and max voxel sizes.");
+            return true;
+        }
+    }
+
+    private void refreshSizeCutoffPanelOnly() {
+        if (sizeCutoffPanel == null) return;
+        try {
+            ParticleSizeStage.SizeToken token = collectSizeToken();
+            int minSize = ObjectsCounter3DWrapper.parseMinSizeVoxels(token.minText, 100);
+            int maxSize = ObjectsCounter3DWrapper.parseMaxSizeVoxels(token.maxText, filteredSource);
+            boolean maxFinite = isFiniteMaxToken(token.maxText);
+            sizeSummary = ObjectSizeFilterPreview.summarize(
+                    null, filteredSource, minSize, maxSize, maxFinite);
+            sizeCutoffPanel.setSummary(sizeSummary);
+        } catch (RuntimeException e) {
+            sizeCutoffPanel.setSummary(null);
+        }
+    }
+
+    private String objectCountText() {
+        String prefix;
+        if (sizeSummary != null && sizeSummary.totalCount > 0) {
+            prefix = sizeSummary.statusText();
+        } else if (lastObjectCount >= 0) {
+            prefix = "Objects: " + lastObjectCount + " ready";
+        } else {
+            prefix = "Objects: not previewed";
+        }
+        return prefix + ". Threshold " + currentThresholdToken() + ".";
+    }
+
     private String currentThresholdToken() {
         return thresholdControl == null
                 ? ""
@@ -667,6 +740,8 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
         filteredSource = null;
         thresholdPreview = null;
         labelPreview = null;
+        objectStats = null;
+        sizeSummary = null;
         lastObjectCount = -1;
         Set<ImagePlus> closed = Collections.newSetFromMap(new IdentityHashMap<ImagePlus, Boolean>());
         closeUnique(label, closed);
@@ -715,5 +790,10 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
         double parsed = Double.parseDouble(trimmed);
         if (!Double.isFinite(parsed)) return "Infinity";
         return String.valueOf(Math.max(0, (int) Math.round(parsed)));
+    }
+
+    private static boolean isFiniteMaxToken(String value) {
+        String normalized = normalizeMaxText(value);
+        return !"Infinity".equals(normalized);
     }
 }

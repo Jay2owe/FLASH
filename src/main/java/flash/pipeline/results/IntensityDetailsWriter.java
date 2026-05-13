@@ -166,12 +166,14 @@ public final class IntensityDetailsWriter {
         if (safeConfig.isEnabled()) {
             w.write("Selected analyses: "
                     + IntensitySpatialConfig.joinAnalysisTokens(safeConfig.getEnabledAnalyses()) + "\n");
+            w.write("2D spatial source: " + safeConfig.getSpatialSourceMode().token() + "\n");
             w.write("MIP output: " + safeConfig.isMipEnabled() + "\n");
             w.write("Native 3D output: " + safeConfig.isNative3dEnabled() + "\n");
             w.write("Overlays: " + safeConfig.isOverlaysEnabled() + "\n");
             w.write("Overlay path: " + emptyFallback(overlayPath, "Not written") + "\n");
         } else {
             w.write("Selected analyses: none\n");
+            w.write("2D spatial source: full_stack\n");
             w.write("MIP output: false\n");
             w.write("Native 3D output: false\n");
             w.write("Overlays: false\n");

@@ -50,6 +50,52 @@ public class IntensitySpatialWizardTest {
     }
 
     @Test
+    public void manualAnalysisSelectionEnablesSpatialWithoutIntentPrelude() {
+        Map<String, Object> answers = new LinkedHashMap<String, Object>();
+        answers.put("intensity.spatial.intent", IntensitySpatialWizard.INTENT_MANUAL);
+        answers.put("intensity.spatial.analysis.patchiness", Boolean.TRUE);
+
+        IntensitySpatialConfig config = IntensitySpatialWizard.deriveConfig(
+                channels("DAPI", "IBA1"), new boolean[]{false, false}, 6, answers);
+
+        assertTrue(config.isEnabled());
+        assertTrue(config.getEnabledAnalyses().contains(IntensitySpatialConfig.AnalysisKey.PATCHINESS));
+    }
+
+    @Test
+    public void sourceModeSelectsFullStackInsteadOfMip() {
+        Map<String, Object> answers = new LinkedHashMap<String, Object>();
+        answers.put("intensity.spatial.intent", IntensitySpatialWizard.INTENT_MANUAL);
+        answers.put("intensity.spatial.analysis.patchiness", Boolean.TRUE);
+        answers.put("intensity.spatial.sourceMode", "full_stack");
+
+        IntensitySpatialConfig config = IntensitySpatialWizard.deriveConfig(
+                channels("DAPI", "IBA1"), new boolean[]{false, false}, 8, answers);
+
+        assertTrue(config.isEnabled());
+        assertEquals(IntensitySpatialConfig.SpatialSourceMode.FULL_STACK,
+                config.getSpatialSourceMode());
+        assertFalse(config.isMipEnabled());
+    }
+
+    @Test
+    public void manualChooserDefaultsToDisabledUntilAnalysisIsChosen() {
+        IntensitySpatialWizard wizard = IntensitySpatialWizard.analysisChooser(
+                WizardFlow.MainPanelBinding.NULL,
+                channels("DAPI", "IBA1"),
+                new boolean[]{false, true},
+                8,
+                IntensitySpatialConfig.disabled(),
+                true);
+
+        wizard.run();
+        IntensitySpatialConfig config = wizard.deriveCurrentConfig();
+
+        assertFalse(config.isEnabled());
+        assertTrue(config.getEnabledAnalyses().isEmpty());
+    }
+
+    @Test
     public void channelLocksClearInvalidCrossChannelSelectionsWithoutBinarizing() {
         boolean[] binarization = new boolean[]{false};
         Map<String, Object> answers = new LinkedHashMap<String, Object>();

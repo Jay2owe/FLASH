@@ -33,14 +33,14 @@ public final class CustomFilterContinueDialog {
         final JPanel firstTile = CustomFilterEntryDialog.makeTile("Continue building",
                 "Open the visual builder with the current filter loaded. " +
                         "Add, remove, or rearrange steps.",
-                dialog, "continue", true);
+                dialog, "continue", true, flash.pipeline.ui.FlashIcons.build());
         tiles.add(firstTile);
         tiles.add(CustomFilterEntryDialog.makeTile("Adjust parameters",
                 "Tweak the numbers on the existing steps without changing what they are.",
-                dialog, "adjust", false));
+                dialog, "adjust", false, flash.pipeline.ui.FlashIcons.sliders()));
         tiles.add(CustomFilterEntryDialog.makeTile("Start over",
                 "Throw the current filter away and pick a fresh starting point.",
-                dialog, "restart", false));
+                dialog, "restart", false, flash.pipeline.ui.FlashIcons.refresh()));
         dialog.addComponent(tiles);
 
         JButton help = dialog.addFooterButton("?");

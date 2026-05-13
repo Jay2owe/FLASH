@@ -45,6 +45,42 @@ public final class IntensitySpatialConfig implements Serializable {
         }
     }
 
+    public enum SpatialSourceMode {
+        FULL_STACK("full_stack"),
+        MIP("mip");
+
+        private final String token;
+
+        SpatialSourceMode(String token) {
+            this.token = token;
+        }
+
+        public String token() {
+            return token;
+        }
+
+        public boolean isMip() {
+            return this == MIP;
+        }
+
+        public static SpatialSourceMode parse(String raw, SpatialSourceMode fallback) {
+            if (raw == null || raw.trim().isEmpty()) return fallback;
+            String normalized = normalizeToken(raw);
+            if ("mip".equals(normalized)
+                    || "maximumintensityprojection".equals(normalized)
+                    || "projection".equals(normalized)) {
+                return MIP;
+            }
+            if ("fullstack".equals(normalized)
+                    || "zstack".equals(normalized)
+                    || "perslice".equals(normalized)
+                    || "baseslices".equals(normalized)) {
+                return FULL_STACK;
+            }
+            return fallback;
+        }
+    }
+
     public enum AnalysisKey {
         PATCHINESS("patchiness", false, false),
         HOTSPOTSCAN("hotspots", false, false),
@@ -114,7 +150,7 @@ public final class IntensitySpatialConfig implements Serializable {
 
     private final boolean enabled;
     private final Set<AnalysisKey> enabledAnalyses;
-    private final boolean mipEnabled;
+    private final SpatialSourceMode spatialSourceMode;
     private final boolean native3dEnabled;
     private final boolean overlaysEnabled;
     private final double shellWidthUm;
@@ -131,7 +167,9 @@ public final class IntensitySpatialConfig implements Serializable {
     private IntensitySpatialConfig(Builder builder) {
         this.enabled = builder.enabled;
         this.enabledAnalyses = immutableCopy(builder.enabledAnalyses);
-        this.mipEnabled = builder.mipEnabled;
+        this.spatialSourceMode = builder.spatialSourceMode == null
+                ? SpatialSourceMode.FULL_STACK
+                : builder.spatialSourceMode;
         this.native3dEnabled = builder.native3dEnabled;
         this.overlaysEnabled = builder.overlaysEnabled;
         this.shellWidthUm = positive(builder.shellWidthUm, DEFAULT_SHELL_WIDTH_UM);
@@ -162,7 +200,9 @@ public final class IntensitySpatialConfig implements Serializable {
 
     public boolean isEnabled() { return enabled; }
     public Set<AnalysisKey> getEnabledAnalyses() { return enabledAnalyses; }
-    public boolean isMipEnabled() { return mipEnabled; }
+    public SpatialSourceMode getSpatialSourceMode() { return spatialSourceMode; }
+    public boolean isMipEnabled() { return spatialSourceMode.isMip(); }
+    public boolean isFullStackSpatialSource() { return spatialSourceMode == SpatialSourceMode.FULL_STACK; }
     public boolean isNative3dEnabled() { return native3dEnabled; }
     public boolean isOverlaysEnabled() { return overlaysEnabled; }
     public double getShellWidthUm() { return shellWidthUm; }
@@ -179,7 +219,7 @@ public final class IntensitySpatialConfig implements Serializable {
     public boolean hasConfiguration() {
         return enabled
                 || !enabledAnalyses.isEmpty()
-                || mipEnabled
+                || spatialSourceMode != SpatialSourceMode.FULL_STACK
                 || native3dEnabled
                 || overlaysEnabled
                 || Double.compare(shellWidthUm, DEFAULT_SHELL_WIDTH_UM) != 0
@@ -215,6 +255,13 @@ public final class IntensitySpatialConfig implements Serializable {
             log(logger, "Intensity-spatial distance-shell analyses require a binarized partner channel; selections were cleared.");
         }
 
+        SpatialSourceMode sourceMode = spatialSourceMode;
+        if (actualSliceCount != null && actualSliceCount.intValue() <= 1
+                && sourceMode == SpatialSourceMode.MIP) {
+            log(logger, "Intensity-spatial MIP source requires a z-stack with more than one slice; full-stack source will be used.");
+            sourceMode = SpatialSourceMode.FULL_STACK;
+        }
+
         boolean native3d = native3dEnabled;
         if (!native3d && removeNative3d(adjusted)) {
             log(logger, "Intensity-spatial native 3D analyses require native 3D output to be selected; selections were cleared.");
@@ -230,6 +277,7 @@ public final class IntensitySpatialConfig implements Serializable {
 
         return builder(this)
                 .enabledAnalyses(adjusted)
+                .spatialSourceMode(sourceMode)
                 .native3dEnabled(native3d)
                 .build();
     }
@@ -238,7 +286,8 @@ public final class IntensitySpatialConfig implements Serializable {
         Map<String, Object> root = new LinkedHashMap<String, Object>();
         root.put("enabled", Boolean.valueOf(enabled));
         root.put("analyses", analysisTokenList(enabledAnalyses));
-        root.put("mip", Boolean.valueOf(mipEnabled));
+        root.put("sourceMode", spatialSourceMode.token());
+        root.put("mip", Boolean.valueOf(isMipEnabled()));
         root.put("native3d", Boolean.valueOf(native3dEnabled));
         root.put("overlays", Boolean.valueOf(overlaysEnabled));
         root.put("shellWidthUm", Double.valueOf(shellWidthUm));
@@ -261,10 +310,15 @@ public final class IntensitySpatialConfig implements Serializable {
         }
         Set<AnalysisKey> analyses = parseAnalysisSet(root.get("analyses"));
         boolean enabled = JsonIO.booleanValue(first(root, "enabled", "spatial"), !analyses.isEmpty());
+        SpatialSourceMode sourceMode = SpatialSourceMode.parse(
+                JsonIO.stringValue(first(root, "sourceMode", "source_mode", "spatialSourceMode")),
+                JsonIO.booleanValue(first(root, "mip", "mipEnabled"), false)
+                        ? SpatialSourceMode.MIP
+                        : SpatialSourceMode.FULL_STACK);
         return builder()
                 .enabled(enabled)
                 .enabledAnalyses(analyses)
-                .mipEnabled(JsonIO.booleanValue(first(root, "mip", "mipEnabled"), false))
+                .spatialSourceMode(sourceMode)
                 .native3dEnabled(JsonIO.booleanValue(first(root, "native3d", "native3D", "native3dEnabled"), false))
                 .overlaysEnabled(JsonIO.booleanValue(first(root, "overlays", "overlaysEnabled"), false))
                 .shellWidthUm(doubleValue(first(root, "shellWidthUm", "shell_width_um"), DEFAULT_SHELL_WIDTH_UM))
@@ -500,7 +554,7 @@ public final class IntensitySpatialConfig implements Serializable {
     public static final class Builder {
         private boolean enabled = false;
         private Set<AnalysisKey> enabledAnalyses = EnumSet.noneOf(AnalysisKey.class);
-        private boolean mipEnabled = false;
+        private SpatialSourceMode spatialSourceMode = SpatialSourceMode.FULL_STACK;
         private boolean native3dEnabled = false;
         private boolean overlaysEnabled = false;
         private double shellWidthUm = DEFAULT_SHELL_WIDTH_UM;
@@ -521,7 +575,7 @@ public final class IntensitySpatialConfig implements Serializable {
             if (base == null) return;
             this.enabled = base.enabled;
             this.enabledAnalyses = mutableCopy(base.enabledAnalyses);
-            this.mipEnabled = base.mipEnabled;
+            this.spatialSourceMode = base.spatialSourceMode;
             this.native3dEnabled = base.native3dEnabled;
             this.overlaysEnabled = base.overlaysEnabled;
             this.shellWidthUm = base.shellWidthUm;
@@ -552,7 +606,14 @@ public final class IntensitySpatialConfig implements Serializable {
         }
 
         public Builder mipEnabled(boolean mipEnabled) {
-            this.mipEnabled = mipEnabled;
+            this.spatialSourceMode = mipEnabled ? SpatialSourceMode.MIP : SpatialSourceMode.FULL_STACK;
+            return this;
+        }
+
+        public Builder spatialSourceMode(SpatialSourceMode spatialSourceMode) {
+            this.spatialSourceMode = spatialSourceMode == null
+                    ? SpatialSourceMode.FULL_STACK
+                    : spatialSourceMode;
             return this;
         }
 

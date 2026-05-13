@@ -6,6 +6,7 @@ import flash.pipeline.image.NamedFilterLoader;
 import flash.pipeline.io.SeriesMeta;
 import flash.pipeline.runtime.DependencyService;
 import flash.pipeline.runtime.FeatureDependencyGate;
+import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.ToggleSwitch;
 import flash.pipeline.ui.config.ChannelThresholdStage;
 import flash.pipeline.ui.config.ClassicalSegmentationStage;
@@ -207,6 +208,18 @@ public class CreateBinFileAnalysisTest {
     }
 
     @Test
+    public void setupAnalysisDialogsHideMainPhaseBreadcrumb() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless());
+        PipelineDialog dialog = invokeSetupAnalysisDialog("Set Up Configuration");
+        try {
+            javax.swing.JPanel breadcrumb = pipelineDialogPanel(dialog, "breadcrumbPanel");
+            assertFalse(breadcrumb.isVisible());
+        } finally {
+            disposePipelineDialog(dialog);
+        }
+    }
+
+    @Test
     public void qcSelectionSettings_marksCustomFilterChannelsForQcImageSelection() throws Exception {
         CreateBinFileAnalysis analysis = new CreateBinFileAnalysis();
         CreateBinFileAnalysis.BinUserConfig customCfg = oneChannelConfig("Custom");
@@ -217,6 +230,15 @@ public class CreateBinFileAnalysisTest {
 
         assertTrue(customSelection[0][0]);
         assertFalse(defaultSelection[0][0]);
+    }
+
+    @Test
+    public void customFilterPlaceholderRoutesThroughStandardFilterQcStage() throws Exception {
+        CreateBinFileAnalysis.BinUserConfig cfg = oneChannelConfig("Custom");
+        boolean[][] noSelectedSettings = new boolean[6][1];
+
+        assertEquals(Collections.singletonList("FILTER_PARAMETERS:0"),
+                invokeInteractiveQcStepPlan(new CreateBinFileAnalysis(), cfg, noSelectedSettings));
     }
 
     @Test
@@ -381,6 +403,7 @@ public class CreateBinFileAnalysisTest {
         assertNull(grid.segmentationCombos[1]);
         assertFalse(containsComponentText(grid.panel, "Filter Preset"));
         assertFalse(containsComponentText(grid.panel, "Segmentation"));
+        assertFalse(containsComponentText(grid.panel, "Display color"));
         assertEquals(0, countComponentNamesContaining(grid.panel, "filter"));
     }
 
@@ -1084,6 +1107,24 @@ public class CreateBinFileAnalysisTest {
             if (expected.equals(value)) return true;
         }
         return false;
+    }
+
+    private static PipelineDialog invokeSetupAnalysisDialog(String title) throws Exception {
+        Method method = CreateBinFileAnalysis.class.getDeclaredMethod("setupAnalysisDialog", String.class);
+        method.setAccessible(true);
+        return (PipelineDialog) method.invoke(null, title);
+    }
+
+    private static javax.swing.JPanel pipelineDialogPanel(PipelineDialog dialog, String fieldName) throws Exception {
+        Field field = PipelineDialog.class.getDeclaredField(fieldName);
+        field.setAccessible(true);
+        return (javax.swing.JPanel) field.get(dialog);
+    }
+
+    private static void disposePipelineDialog(PipelineDialog pipelineDialog) throws Exception {
+        Field field = PipelineDialog.class.getDeclaredField("dialog");
+        field.setAccessible(true);
+        ((javax.swing.JDialog) field.get(pipelineDialog)).dispose();
     }
 
     private static boolean containsComponentText(Component component, String expected) {

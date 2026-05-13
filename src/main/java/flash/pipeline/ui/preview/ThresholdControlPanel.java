@@ -62,6 +62,9 @@ public final class ThresholdControlPanel extends JPanel {
     public ThresholdControlPanel() {
         super(new BorderLayout(0, 6));
         setBorder(BorderFactory.createTitledBorder("Threshold"));
+        flash.pipeline.ui.FlashIcons.apply(autoButton, flash.pipeline.ui.FlashIcons.wand());
+        flash.pipeline.ui.FlashIcons.apply(resetButton, flash.pipeline.ui.FlashIcons.refresh());
+        flash.pipeline.ui.FlashIcons.apply(setButton, flash.pipeline.ui.FlashIcons.check());
         add(histogramPanel, BorderLayout.NORTH);
         add(buildControls(), BorderLayout.CENTER);
         add(buildActions(), BorderLayout.SOUTH);

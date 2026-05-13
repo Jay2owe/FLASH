@@ -30,12 +30,14 @@ public final class ObjectOverlayRenderer {
         }
 
         ImageStack out = new ImageStack(source.getWidth(), source.getHeight());
+        ColorModel labelColorModel = colorModelForLabelMap(labelMap);
         for (int i = 1; i <= sourceStack.getSize(); i++) {
             ImageProcessor sourceProcessor = sourceStack.getProcessor(i);
             ImageProcessor labelProcessor = labelStack.getProcessor(
                     Math.min(i, labelStack.getSize()));
             out.addSlice(sourceStack.getSliceLabel(i),
-                    renderOverlaySlice(source, sourceProcessor, labelProcessor, displaySettings));
+                    renderOverlaySlice(source, sourceProcessor, labelProcessor,
+                            labelColorModel, displaySettings));
         }
 
         ImagePlus result = new ImagePlus("Object overlay | " + safeTitle(source), out);
@@ -74,6 +76,7 @@ public final class ObjectOverlayRenderer {
     private static ColorProcessor renderOverlaySlice(ImagePlus sourceImage,
                                                      ImageProcessor source,
                                                      ImageProcessor labels,
+                                                     ColorModel labelColorModel,
                                                      PreviewDisplaySettings displaySettings) {
         int width = source.getWidth();
         int height = source.getHeight();
@@ -87,7 +90,7 @@ public final class ObjectOverlayRenderer {
                 int base = baseRgb(source, x, y, range[0], range[1], model);
                 int label = labelAt(labels, x, y);
                 pixels[p++] = label > 0
-                        ? blend(base, LabelMapStyler.rgbForLabel(label), OVERLAY_ALPHA)
+                        ? blend(base, labelRgb(labelColorModel, labels, label), OVERLAY_ALPHA)
                         : base;
             }
         }
@@ -143,6 +146,38 @@ public final class ObjectOverlayRenderer {
         double value = labels.getPixelValue(x, y);
         if (!Double.isFinite(value) || value <= 0.0) return 0;
         return (int) Math.round(value);
+    }
+
+    private static int labelRgb(ColorModel labelColorModel, ImageProcessor labels, int label) {
+        ColorModel model = labelColorModel != null
+                ? labelColorModel
+                : labels == null ? null : labels.getColorModel();
+        if (model instanceof IndexColorModel) {
+            IndexColorModel indexed = (IndexColorModel) model;
+            int index = ((Math.max(1, label) - 1) % 255) + 1;
+            int rgb = (indexed.getRed(index) << 16)
+                    | (indexed.getGreen(index) << 8)
+                    | indexed.getBlue(index);
+            int strongestChannel = Math.max(indexed.getRed(index),
+                    Math.max(indexed.getGreen(index), indexed.getBlue(index)));
+            if (strongestChannel > 16) {
+                return rgb;
+            }
+        }
+        return LabelMapStyler.rgbForLabel(label);
+    }
+
+    private static ColorModel colorModelForLabelMap(ImagePlus labelMap) {
+        if (labelMap == null) return null;
+        try {
+            ImageProcessor processor = labelMap.getProcessor();
+            if (processor != null && processor.getColorModel() != null) {
+                return processor.getColorModel();
+            }
+        } catch (RuntimeException ignored) {
+            // Fall through to default label colors.
+        }
+        return null;
     }
 
     private static int scaledByte(double value, double min, double max) {

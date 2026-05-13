@@ -60,6 +60,16 @@ public final class SetupHelpDialog {
         panel.add(titleLabel(topic.title));
         panel.add(Box.createVerticalStrut(5));
         panel.add(paragraph(topic.summary, 12f, TEXT, TEXT_WIDTH));
+
+        if (topic.key != null && HelpDiagram.has(topic.key)) {
+            javax.swing.Icon diagram = HelpDiagram.diagramFor(topic.key, 320);
+            if (diagram != null) {
+                panel.add(Box.createVerticalStrut(10));
+                JLabel diagramLabel = new JLabel(diagram);
+                diagramLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+                panel.add(diagramLabel);
+            }
+        }
         panel.add(Box.createVerticalStrut(8));
 
         for (SetupHelpTopic.Section section : topic.sections) {

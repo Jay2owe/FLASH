@@ -249,6 +249,7 @@ public final class CLIArgumentParser {
                 + "  intensity.threshold_channel2=45\n"
                 + "  intensity.spatial=true|false\n"
                 + "  intensity.spatial.analyses=patchiness,hotspots,depth,anisotropy,crossmark,mi,distance_shell\n"
+                + "  intensity.spatial.source=mip|full_stack\n"
                 + "  intensity.spatial.mip=true|false\n"
                 + "  intensity.spatial.native3d=true|false\n"
                 + "  intensity.spatial.overlays=true|false\n"
@@ -624,6 +625,14 @@ public final class CLIArgumentParser {
 
         intensity.spatialMipEnabled = parseNullableBoolean(
                 options, "intensity.spatial.mip", intensity.spatialMipEnabled);
+        String sourceMode = getValue(options, "intensity.spatial.source");
+        if (sourceMode == null) {
+            sourceMode = getValue(options, "intensity.spatial.source_mode");
+        }
+        if (sourceMode != null) {
+            intensity.spatialSourceMode = IntensitySpatialConfig.SpatialSourceMode.parse(
+                    sourceMode, intensity.spatialSourceMode);
+        }
         intensity.spatialNative3dEnabled = parseNullableBoolean(
                 options, "intensity.spatial.native3d", intensity.spatialNative3dEnabled);
         intensity.spatialOverlaysEnabled = parseNullableBoolean(

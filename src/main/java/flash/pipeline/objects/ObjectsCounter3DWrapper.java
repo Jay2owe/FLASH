@@ -10,8 +10,12 @@ import ij.measure.ResultsTable;
 import ij.process.ImageProcessor;
 
 import java.lang.reflect.Field;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.Vector;
 
 /**
@@ -260,38 +264,107 @@ public final class ObjectsCounter3DWrapper {
             boolean wantObjectsMap,
             boolean wantMaskedImage
     ) {
+        return fromLabelImage(labelImage, redirectImage, 0, Integer.MAX_VALUE,
+                wantObjectsMap, wantMaskedImage);
+    }
+
+    public Result fromLabelImage(
+            ImagePlus labelImage,
+            ImagePlus redirectImage,
+            int minSize,
+            int maxSize,
+            boolean wantObjectsMap,
+            boolean wantMaskedImage
+    ) {
         if (labelImage == null) throw new IllegalArgumentException("labelImage is null");
 
-        mcib3d.image3d.ImageHandler labelledIH = mcib3d.image3d.ImageHandler.wrap(labelImage);
+        ImagePlus filteredLabelImage = filterLabelImageBySize(labelImage, minSize, maxSize);
+        boolean closeFiltered = filteredLabelImage != labelImage;
 
-        // Build population directly from pre-existing labels
-        mcib3d.geom2.Objects3DIntPopulation population =
-                new mcib3d.geom2.Objects3DIntPopulation(labelledIH);
+        try {
+            mcib3d.image3d.ImageHandler labelledIH = mcib3d.image3d.ImageHandler.wrap(filteredLabelImage);
 
-        int nbObjects = population.getNbObjects();
+            // Build population directly from pre-existing labels
+            mcib3d.geom2.Objects3DIntPopulation population =
+                    new mcib3d.geom2.Objects3DIntPopulation(labelledIH);
 
-        // Build statistics table with the same columns as runNative
-        Calibration cal = labelImage.getCalibration();
-        mcib3d.image3d.ImageHandler convergenceIH =
-                (redirectImage != null) ? mcib3d.image3d.ImageHandler.wrap(redirectImage) : null;
-        ResultsTable stats = buildNativeStatisticsTable(population, cal, convergenceIH);
+            int nbObjects = population.getNbObjects();
 
-        // Objects map
-        ImagePlus objectsMap = null;
-        if (wantObjectsMap) {
-            objectsMap = labelImage.duplicate();
-            objectsMap.setTitle("Objects map of " + labelImage.getTitle());
+            // Build statistics table with the same columns as runNative
+            Calibration cal = filteredLabelImage.getCalibration();
+            mcib3d.image3d.ImageHandler convergenceIH =
+                    (redirectImage != null) ? mcib3d.image3d.ImageHandler.wrap(redirectImage) : null;
+            ResultsTable stats = buildNativeStatisticsTable(population, cal, convergenceIH);
+
+            // Objects map
+            ImagePlus objectsMap = null;
+            if (wantObjectsMap) {
+                objectsMap = filteredLabelImage.duplicate();
+                objectsMap.setTitle("Objects map of " + labelImage.getTitle());
+            }
+
+            // Masked image
+            ImagePlus masked = null;
+            if (wantMaskedImage && redirectImage != null && nbObjects > 0) {
+                masked = buildMaskedImage(redirectImage, filteredLabelImage);
+                masked.setTitle("Masked image for " + labelImage.getTitle());
+            }
+
+            boolean foundObjects = nbObjects > 0;
+            return new Result(stats, objectsMap, masked, foundObjects);
+        } finally {
+            if (closeFiltered) {
+                filteredLabelImage.changes = false;
+                filteredLabelImage.close();
+                filteredLabelImage.flush();
+            }
         }
+    }
 
-        // Masked image
-        ImagePlus masked = null;
-        if (wantMaskedImage && redirectImage != null && nbObjects > 0) {
-            masked = buildMaskedImage(redirectImage, labelImage);
-            masked.setTitle("Masked image for " + labelImage.getTitle());
+    private static ImagePlus filterLabelImageBySize(ImagePlus labelImage, int minSize, int maxSize) {
+        if (labelImage == null || labelImage.getStack() == null) return labelImage;
+        int safeMin = Math.max(0, minSize);
+        int safeMax = Math.max(safeMin, maxSize);
+        if (safeMin <= 0 && safeMax == Integer.MAX_VALUE) return labelImage;
+
+        Map<Integer, Integer> voxelsByLabel = new HashMap<Integer, Integer>();
+        ImageStack stack = labelImage.getStack();
+        for (int slice = 1; slice <= stack.getSize(); slice++) {
+            ImageProcessor processor = stack.getProcessor(slice);
+            if (processor == null) continue;
+            for (int i = 0; i < processor.getPixelCount(); i++) {
+                int label = Math.round(processor.getf(i));
+                if (label <= 0) continue;
+                Integer previous = voxelsByLabel.get(Integer.valueOf(label));
+                voxelsByLabel.put(Integer.valueOf(label),
+                        Integer.valueOf(previous == null ? 1 : previous.intValue() + 1));
+            }
         }
+        if (voxelsByLabel.isEmpty()) return labelImage;
 
-        boolean foundObjects = nbObjects > 0;
-        return new Result(stats, objectsMap, masked, foundObjects);
+        Set<Integer> labelsToRemove = new HashSet<Integer>();
+        for (Map.Entry<Integer, Integer> entry : voxelsByLabel.entrySet()) {
+            int voxels = entry.getValue().intValue();
+            if (voxels < safeMin || voxels > safeMax) {
+                labelsToRemove.add(entry.getKey());
+            }
+        }
+        if (labelsToRemove.isEmpty()) return labelImage;
+
+        ImagePlus filtered = labelImage.duplicate();
+        filtered.setTitle(labelImage.getTitle() + " size-filtered");
+        ImageStack filteredStack = filtered.getStack();
+        for (int slice = 1; slice <= filteredStack.getSize(); slice++) {
+            ImageProcessor processor = filteredStack.getProcessor(slice);
+            if (processor == null) continue;
+            for (int i = 0; i < processor.getPixelCount(); i++) {
+                int label = Math.round(processor.getf(i));
+                if (label > 0 && labelsToRemove.contains(Integer.valueOf(label))) {
+                    processor.setf(i, 0f);
+                }
+            }
+        }
+        return filtered;
     }
 
     /**

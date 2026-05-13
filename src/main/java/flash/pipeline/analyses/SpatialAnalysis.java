@@ -4784,6 +4784,7 @@ public class SpatialAnalysis implements Analysis {
             bindings.presetCombo = presetCombo;
         }
         JButton savePreset = new JButton("Save as preset...");
+        flash.pipeline.ui.FlashIcons.apply(savePreset, flash.pipeline.ui.FlashIcons.save());
         savePreset.setToolTipText("Save the current Spatial Analysis options as a named preset.");
         savePreset.addActionListener(e -> handleSaveSpatialPreset(directory, bindings));
         JPanel row = SetupHelperButton.createHeaderRow("Spatial & Morphometry", presetCombo, savePreset,

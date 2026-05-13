@@ -3,10 +3,11 @@ package flash.pipeline.ui.config;
 import flash.pipeline.help.SetupHelpCatalog;
 import flash.pipeline.help.SetupHelpTopic;
 import flash.pipeline.objects.ObjectsCounter3DWrapper;
-import flash.pipeline.ui.preview.LabelMapStyler;
+import flash.pipeline.ui.preview.ObjectSizeFilterPreview;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import ij.ImagePlus;
 import ij.ImageStack;
+import ij.measure.ResultsTable;
 import ij.process.ImageProcessor;
 
 import javax.swing.BorderFactory;
@@ -73,6 +74,7 @@ public final class ParticleSizeStage implements ConfigQcStage {
     private ImagePlus rawSource;
     private ImagePlus filteredSource;
     private ImagePlus labelPreview;
+    private ResultsTable objectStats;
     private SwingWorker<ObjectsCounter3DWrapper.Result, Void> previewWorker;
     private boolean previewStale = true;
     private boolean updatingFields;
@@ -84,6 +86,8 @@ public final class ParticleSizeStage implements ConfigQcStage {
     private JButton previewButton;
     private JButton resetButton;
     private JLabel thresholdLabel;
+    private ObjectSizeCutoffPanel sizeCutoffPanel;
+    private ObjectSizeFilterPreview.Summary sizeSummary;
     private boolean showRawSource;
 
     public ParticleSizeStage(SizeStore sizeStore, PreviewAdapter previewAdapter) {
@@ -124,8 +128,12 @@ public final class ParticleSizeStage implements ConfigQcStage {
         panel.setBorder(BorderFactory.createEmptyBorder(2, 0, 0, 0));
         panel.add(buildSizeRow());
         panel.add(Box.createVerticalStrut(4));
+        sizeCutoffPanel = new ObjectSizeCutoffPanel();
+        panel.add(sizeCutoffPanel);
+        panel.add(Box.createVerticalStrut(4));
         panel.add(buildActionRow());
         loadFields(savedSize);
+        refreshSizeCutoffPanelOnly();
         markPreviewStale(EMPTY_TEXT);
         return panel;
     }
@@ -161,6 +169,7 @@ public final class ParticleSizeStage implements ConfigQcStage {
             }
             thresholdValue = Integer.valueOf(previewAdapter.resolveThreshold(filteredSource, context));
             refreshThresholdLabel();
+            refreshSizeCutoffPanelOnly();
             if (preview != null) {
                 preview.setOriginal(currentSourceImage());
                 preview.setAdjusted(null);
@@ -243,6 +252,10 @@ public final class ParticleSizeStage implements ConfigQcStage {
         runPreviewNow();
     }
 
+    String sizeCutoffSummaryForTest() {
+        return sizeCutoffPanel == null ? "" : sizeCutoffPanel.summaryTextForTest();
+    }
+
     void selectRawSourceForTest() {
         setRawSourceVisible(true);
     }
@@ -305,11 +318,13 @@ public final class ParticleSizeStage implements ConfigQcStage {
         buttons.setAlignmentX(JComponent.LEFT_ALIGNMENT);
         buttons.add(Box.createHorizontalGlue());
         previewButton = new JButton("Run Preview");
+        flash.pipeline.ui.FlashIcons.apply(previewButton, flash.pipeline.ui.FlashIcons.play());
         previewButton.addActionListener(e -> runPreviewOnWorker());
         buttons.add(previewButton);
         buttons.add(Box.createHorizontalStrut(8));
 
         resetButton = new JButton("Reset to saved");
+        flash.pipeline.ui.FlashIcons.apply(resetButton, flash.pipeline.ui.FlashIcons.refresh());
         resetButton.addActionListener(e -> resetToSaved());
         buttons.add(resetButton);
         return buttons;
@@ -344,12 +359,16 @@ public final class ParticleSizeStage implements ConfigQcStage {
 
     private void fieldChanged() {
         if (updatingFields) return;
-        markPreviewStale(STALE_TEXT);
+        if (!refreshSizeFilterPreview()) {
+            markPreviewStale(STALE_TEXT);
+        }
     }
 
     private void resetToSaved() {
         loadFields(savedSize);
-        markPreviewStale(STALE_TEXT);
+        if (!refreshSizeFilterPreview()) {
+            markPreviewStale(STALE_TEXT);
+        }
     }
 
     private void runPreviewOnWorker() {
@@ -416,14 +435,13 @@ public final class ParticleSizeStage implements ConfigQcStage {
             previewAdapter.close(result.getMaskedImage());
         }
         labelImage.setTitle(count > 0 ? "Object label preview" : "Object label preview (no objects)");
-        LabelMapStyler.apply(labelImage, count);
-
         ImagePlus old = labelPreview;
         labelPreview = labelImage;
+        objectStats = result == null ? null : result.getStatistics();
         lastObjectCount = count;
         previewStale = false;
-        String text = "Objects: " + count + " ready";
-        refreshSourceAndOutputPreview();
+        refreshSizeFilterPreview();
+        String text = objectCountText();
         setStatus(text);
         if (actions != null) actions.setPreviewButtonStale(false);
         closeOldPreviewImage(old);
@@ -483,6 +501,9 @@ public final class ParticleSizeStage implements ConfigQcStage {
     }
 
     private String objectCountText() {
+        if (sizeSummary != null && sizeSummary.totalCount > 0) {
+            return sizeSummary.statusText();
+        }
         return lastObjectCount >= 0
                 ? "Objects: " + lastObjectCount + " ready"
                 : "Objects: not previewed";
@@ -508,6 +529,46 @@ public final class ParticleSizeStage implements ConfigQcStage {
         min = Math.max(0, min);
         String max = normalizeMaxText(maxField == null ? null : maxField.getText());
         return new SizeToken(String.valueOf(min), max);
+    }
+
+    private boolean refreshSizeFilterPreview() {
+        if (labelPreview == null || objectStats == null) {
+            refreshSizeCutoffPanelOnly();
+            return false;
+        }
+        try {
+            SizeToken token = collectSizeToken();
+            int minSize = ObjectsCounter3DWrapper.parseMinSizeVoxels(token.minText, 100);
+            int maxSize = ObjectsCounter3DWrapper.parseMaxSizeVoxels(token.maxText, filteredSource);
+            boolean maxFinite = isFiniteMaxToken(token.maxText);
+            sizeSummary = ObjectSizeFilterPreview.summarize(
+                    objectStats, filteredSource, minSize, maxSize, maxFinite);
+            ObjectSizeFilterPreview.applyClassifiedLut(labelPreview, sizeSummary);
+            if (sizeCutoffPanel != null) sizeCutoffPanel.setSummary(sizeSummary);
+            previewStale = false;
+            refreshSourceAndOutputPreview();
+            setStatus(sizeSummary.statusText());
+            if (actions != null) actions.setPreviewButtonStale(false);
+            return true;
+        } catch (RuntimeException e) {
+            setError("Enter valid min and max voxel sizes.");
+            return true;
+        }
+    }
+
+    private void refreshSizeCutoffPanelOnly() {
+        if (sizeCutoffPanel == null) return;
+        try {
+            SizeToken token = collectSizeToken();
+            int minSize = ObjectsCounter3DWrapper.parseMinSizeVoxels(token.minText, 100);
+            int maxSize = ObjectsCounter3DWrapper.parseMaxSizeVoxels(token.maxText, filteredSource);
+            boolean maxFinite = isFiniteMaxToken(token.maxText);
+            sizeSummary = ObjectSizeFilterPreview.summarize(
+                    null, filteredSource, minSize, maxSize, maxFinite);
+            sizeCutoffPanel.setSummary(sizeSummary);
+        } catch (RuntimeException e) {
+            sizeCutoffPanel.setSummary(null);
+        }
     }
 
     private void markPreviewStale(String text) {
@@ -574,6 +635,8 @@ public final class ParticleSizeStage implements ConfigQcStage {
         rawSource = null;
         filteredSource = null;
         labelPreview = null;
+        objectStats = null;
+        sizeSummary = null;
         lastObjectCount = -1;
         Set<ImagePlus> closed = Collections.newSetFromMap(new IdentityHashMap<ImagePlus, Boolean>());
         closeUnique(label, closed);
@@ -632,6 +695,11 @@ public final class ParticleSizeStage implements ConfigQcStage {
         double parsed = Double.parseDouble(trimmed);
         if (!Double.isFinite(parsed)) return "Infinity";
         return String.valueOf(Math.max(0, (int) Math.round(parsed)));
+    }
+
+    private static boolean isFiniteMaxToken(String value) {
+        String normalized = normalizeMaxText(value);
+        return !"Infinity".equals(normalized);
     }
 
     private static String firstNonBlank(String value, String fallback) {
