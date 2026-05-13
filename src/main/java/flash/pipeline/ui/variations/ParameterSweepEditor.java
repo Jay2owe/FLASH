@@ -92,6 +92,20 @@ public final class ParameterSweepEditor extends JPanel {
         fireChanged();
     }
 
+    public void applySuggestedValues(Map<ParameterId, ParameterValueList> suggestions) {
+        if (suggestions == null || suggestions.isEmpty()) {
+            return;
+        }
+        for (int i = 0; i < rows.size(); i++) {
+            Row row = rows.get(i);
+            ParameterValueList values = suggestions.get(row.id);
+            if (values != null && values.size() > 0) {
+                row.values.setValues(values.values());
+            }
+        }
+        fireChanged();
+    }
+
     public void addChangeListener(ChangeListener listener) {
         if (listener != null) {
             listeners.add(listener);

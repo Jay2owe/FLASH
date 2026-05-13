@@ -62,6 +62,12 @@ public final class CropSpec {
     }
 
     public ImagePlus apply(ImagePlus source) {
+        if (source == null) {
+            throw new IllegalArgumentException("source must not be null");
+        }
+        if (mode == Mode.FULL) {
+            return source;
+        }
         Rectangle resolved = boundsFor(source);
         ImageStack input = source.getStack();
         ImageStack output = new ImageStack(resolved.width, resolved.height);
@@ -74,14 +80,8 @@ public final class CropSpec {
         if (source.getCalibration() != null) {
             cropped.setCalibration(source.getCalibration().copy());
         }
-        int channels = source.getNChannels();
-        int slices = source.getNSlices();
-        int frames = source.getNFrames();
-        if (channels > 0 && slices > 0 && frames > 0
-                && channels * slices * frames == output.getSize()) {
-            cropped.setDimensions(channels, slices, frames);
-            cropped.setOpenAsHyperStack(source.isHyperStack());
-        }
+        cropped.setDimensions(1, output.getSize(), 1);
+        cropped.setOpenAsHyperStack(output.getSize() > 1);
         return cropped;
     }
 

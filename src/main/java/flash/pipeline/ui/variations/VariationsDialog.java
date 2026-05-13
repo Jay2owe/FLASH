@@ -17,6 +17,7 @@ import javax.swing.JScrollPane;
 import javax.swing.JSlider;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
+import javax.swing.SwingWorker;
 import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
 import java.awt.BorderLayout;
@@ -24,8 +25,11 @@ import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.EventQueue;
 import java.awt.Window;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+import java.awt.Rectangle;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -45,9 +49,10 @@ public final class VariationsDialog extends PipelineDialog {
     private final JLabel suggestionLabel = new JLabel("Suggested: pending");
     private final JLabel statusLabel = new JLabel("Status: idle");
     private final JSlider zSlider = new JSlider(1, 1, 1);
+    private final JButton suggestButton = new JButton("Suggest ranges from image");
     private final JRadioButton fullCrop = new JRadioButton("full image");
     private final JRadioButton centreCrop = new JRadioButton("centered 256 x 256");
-    private final JRadioButton customCrop = new JRadioButton("custom");
+    private final JRadioButton customCrop = new JRadioButton("custom...");
     private final Map<String, VariationCellPanel> cellsByCombo =
             new HashMap<String, VariationCellPanel>();
     private final List<VariationCellPanel> cells = new ArrayList<VariationCellPanel>();
@@ -56,6 +61,8 @@ public final class VariationsDialog extends PipelineDialog {
     private ParameterSweep currentSweep;
     private ParameterCombo pendingCompareCombo;
     private VariationCellPanel pendingCompareCell;
+    private CropSpec currentCropSpec = CropSpec.centre256();
+    private boolean suppressCropEvents;
     private int completedCount;
     private VariationStrategy strategyForTest;
 
@@ -117,6 +124,10 @@ public final class VariationsDialog extends PipelineDialog {
 
     void setSweepForTest(ParameterSweep sweep) {
         editor.setSweep(sweep);
+        if (sweep != null) {
+            currentCropSpec = sweep.cropSpec();
+            selectCropButton(currentCropSpec);
+        }
         refreshCellEstimate();
     }
 
@@ -198,9 +209,8 @@ public final class VariationsDialog extends PipelineDialog {
         JPanel row = new JPanel();
         row.setOpaque(false);
         row.setLayout(new BoxLayout(row, BoxLayout.X_AXIS));
-        JButton suggest = new JButton("Suggest ranges from image");
-        suggest.setEnabled(false);
-        row.add(suggest);
+        suggestButton.addActionListener(e -> runRangeSuggester());
+        row.add(suggestButton);
         row.add(Box.createHorizontalGlue());
         return row;
     }
@@ -214,11 +224,10 @@ public final class VariationsDialog extends PipelineDialog {
         group.add(fullCrop);
         group.add(centreCrop);
         group.add(customCrop);
-        centreCrop.setSelected(true);
+        selectCropButton(currentCropSpec);
         fullCrop.setOpaque(false);
         centreCrop.setOpaque(false);
         customCrop.setOpaque(false);
-        customCrop.setEnabled(false);
 
         row.add(new JLabel("Crop: "));
         row.add(fullCrop);
@@ -228,16 +237,15 @@ public final class VariationsDialog extends PipelineDialog {
         row.add(customCrop);
         row.add(Box.createHorizontalGlue());
 
-        ChangeListener listener = new ChangeListener() {
-            @Override public void stateChanged(ChangeEvent e) {
-                editor.setCropSpec(selectedCropSpec());
-                refreshCellEstimate();
+        ActionListener listener = new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                handleCropSelection((JRadioButton) e.getSource());
             }
         };
-        fullCrop.addChangeListener(listener);
-        centreCrop.addChangeListener(listener);
-        customCrop.addChangeListener(listener);
-        editor.setCropSpec(selectedCropSpec());
+        fullCrop.addActionListener(listener);
+        centreCrop.addActionListener(listener);
+        customCrop.addActionListener(listener);
+        editor.setCropSpec(currentCropSpec);
         return row;
     }
 
@@ -448,6 +456,43 @@ public final class VariationsDialog extends PipelineDialog {
         });
     }
 
+    private void runRangeSuggester() {
+        final ParameterSweep draft;
+        try {
+            draft = editor.currentSweep();
+        } catch (RuntimeException e) {
+            showMessage(e.getMessage());
+            return;
+        }
+        suggestButton.setEnabled(false);
+        suggestionLabel.setText("Suggested: working...");
+        statusLabel.setText("Status: suggesting ranges");
+        SwingWorker<Map<ParameterId, ParameterValueList>, Void> worker =
+                new SwingWorker<Map<ParameterId, ParameterValueList>, Void>() {
+                    @Override protected Map<ParameterId, ParameterValueList> doInBackground() {
+                        return RangeSuggester.suggest(context, draft);
+                    }
+
+                    @Override protected void done() {
+                        try {
+                            Map<ParameterId, ParameterValueList> suggestions = get();
+                            editor.applySuggestedValues(suggestions);
+                            refreshCellEstimate();
+                            suggestionLabel.setText("Suggested: "
+                                    + suggestions.size() + " rows updated");
+                            statusLabel.setText("Status: idle");
+                        } catch (Exception e) {
+                            suggestionLabel.setText("Suggested: failed");
+                            statusLabel.setText("Status: idle");
+                            showMessage(e.getMessage());
+                        } finally {
+                            suggestButton.setEnabled(true);
+                        }
+                    }
+                };
+        worker.execute();
+    }
+
     private void refreshCellEstimate() {
         try {
             ParameterSweep sweep = editor.currentSweep();
@@ -459,10 +504,53 @@ public final class VariationsDialog extends PipelineDialog {
     }
 
     private CropSpec selectedCropSpec() {
-        if (fullCrop.isSelected()) {
-            return CropSpec.full();
+        return currentCropSpec;
+    }
+
+    private void handleCropSelection(JRadioButton selected) {
+        if (suppressCropEvents) {
+            return;
         }
-        return CropSpec.centre256();
+        CropSpec previous = currentCropSpec;
+        if (selected == fullCrop) {
+            currentCropSpec = CropSpec.full();
+        } else if (selected == centreCrop) {
+            currentCropSpec = CropSpec.centre256();
+        } else if (selected == customCrop) {
+            ImagePlus source = context.filteredSource();
+            if (source == null) {
+                showMessage("No source image is available for custom crop selection.");
+                currentCropSpec = previous;
+                selectCropButton(previous);
+                return;
+            }
+            Rectangle initial = previous.mode() == CropSpec.Mode.CUSTOM
+                    ? previous.bounds()
+                    : null;
+            Rectangle chosen = CustomCropPicker.choose(getWindow(), source, initial);
+            if (chosen == null) {
+                currentCropSpec = previous;
+                selectCropButton(previous);
+                editor.setCropSpec(currentCropSpec);
+                refreshCellEstimate();
+                return;
+            }
+            currentCropSpec = CropSpec.custom(chosen);
+        }
+        editor.setCropSpec(currentCropSpec);
+        refreshCellEstimate();
+    }
+
+    private void selectCropButton(CropSpec spec) {
+        suppressCropEvents = true;
+        try {
+            CropSpec.Mode mode = spec == null ? CropSpec.Mode.CENTRE_256 : spec.mode();
+            fullCrop.setSelected(mode == CropSpec.Mode.FULL);
+            centreCrop.setSelected(mode == CropSpec.Mode.CENTRE_256);
+            customCrop.setSelected(mode == CropSpec.Mode.CUSTOM);
+        } finally {
+            suppressCropEvents = false;
+        }
     }
 
     private int sourceSliceCount() {
