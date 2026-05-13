@@ -6,8 +6,11 @@ import flash.pipeline.image.FilterMacroParser.OpType;
 import flash.pipeline.image.NamedFilterLoader;
 import flash.pipeline.image.dag.Combiner;
 import flash.pipeline.image.dag.DagIR;
+import flash.pipeline.image.dag.DagIRSerializer;
 import flash.pipeline.image.dag.DagLine;
 import flash.pipeline.image.dag.DagNode;
+import flash.pipeline.image.dag.DagToIjmEmitter;
+import flash.pipeline.image.dag.IjmToDagLoader;
 import flash.pipeline.image.variation.VariantPlan;
 import flash.pipeline.io.SeriesMeta;
 import flash.pipeline.runtime.DependencyService;
@@ -310,6 +313,42 @@ public class CreateBinFileAnalysisTest {
                 new File(binFolder, "C1_Filters.ijm").exists());
         assertFalse("save-variant must not alter the active channel sandbox DAG",
                 new File(binFolder, "C1_Sandbox.dag.json").exists());
+    }
+
+    @Test
+    public void sandboxSaveFlowWritesPromotedDagIjmAndPreservesDisabledNodes() throws Exception {
+        File project = temp.newFolder("project-save-promoted-sandbox");
+        File binFolder = configurationDir(project);
+        assertTrue(binFolder.mkdirs());
+        CreateBinFileAnalysis analysis = new CreateBinFileAnalysis();
+        DagIR promoted = dagWithDisabledLegacyAndUnknown("sigma=6 stack");
+        String ijm = DagToIjmEmitter.emit(promoted);
+
+        boolean applied = invokeApplyCustomFilterEntryResult(
+                analysis,
+                binFolder,
+                null,
+                0,
+                CustomFilterEntryDialog.Result.sandbox(promoted, ijm),
+                false);
+
+        File dagFile = new File(binFolder, "C1_Sandbox.dag.json");
+        File ijmFile = new File(binFolder, "C1_Filters.ijm");
+        assertTrue(applied);
+        assertTrue("sandbox save must write the promoted DAG JSON", dagFile.isFile());
+        assertTrue("sandbox save must write the promoted IJM fallback", ijmFile.isFile());
+
+        DagIR savedDag = DagIRSerializer.fromJson(new String(
+                Files.readAllBytes(dagFile.toPath()), StandardCharsets.UTF_8));
+        String savedIjm = new String(Files.readAllBytes(ijmFile.toPath()), StandardCharsets.UTF_8);
+        assertEquals(promoted, savedDag);
+        assertEquals(promoted, IjmToDagLoader.load(savedIjm));
+        assertTrue(savedIjm.contains("sigma=6"));
+        assertFalse("disabled legacy command must remain non-executing after save",
+                savedIjm.contains("run(\"Legacy Disabled\""));
+        assertTrue(findNode(savedDag, "disabledLegacy").disabled);
+        assertTrue(findNode(savedDag, "disabledUnknown").disabled);
+        assertEquals("native", savedDag.executionTier);
     }
 
     @Test
@@ -1073,6 +1112,31 @@ public class CreateBinFileAnalysisTest {
                 Collections.<Combiner>emptyList(),
                 "line_A",
                 "native");
+    }
+
+    private static DagIR dagWithDisabledLegacyAndUnknown(String activeArgs) {
+        DagNode active = new DagNode("active", OpType.GAUSSIAN_BLUR, activeArgs);
+        DagNode disabledLegacy = new DagNode("disabledLegacy", OpType.UNKNOWN,
+                "radius=99 stack", "Legacy Disabled", "Plugins > Legacy Disabled");
+        disabledLegacy.disabled = true;
+        DagNode disabledUnknown = new DagNode("disabledUnknown", OpType.UNKNOWN,
+                "selectWindow(\"legacy\");");
+        disabledUnknown.disabled = true;
+        return new DagIR(1,
+                Collections.singletonList(new DagLine("line_A",
+                        Arrays.asList(active, disabledLegacy, disabledUnknown))),
+                Collections.<Combiner>emptyList(),
+                "line_A",
+                "native");
+    }
+
+    private static DagNode findNode(DagIR dag, String id) {
+        for (DagLine line : dag.lines) {
+            for (DagNode node : line.ops) {
+                if (id.equals(node.id)) return node;
+            }
+        }
+        throw new AssertionError("Missing node: " + id);
     }
 
     private static boolean invokeApplyCustomFilterEntryResult(

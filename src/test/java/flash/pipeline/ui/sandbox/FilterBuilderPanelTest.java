@@ -6,11 +6,15 @@ import flash.pipeline.image.dag.DagNode;
 import flash.pipeline.image.dag.IjmToDagLoader;
 import flash.pipeline.image.FilterMacroParser.OpType;
 import flash.pipeline.image.dag.Combiner;
+import flash.pipeline.image.variation.VariantAxis;
+import flash.pipeline.image.variation.VariantPlan;
+import flash.pipeline.image.variation.VariantSampler;
 import ij.ImagePlus;
 import ij.ImageStack;
 import ij.process.ByteProcessor;
 import org.junit.Test;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Collections;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -86,6 +90,33 @@ public class FilterBuilderPanelTest {
                 panel.currentIjm().contains("sigma=4"));
         assertTrue("promotion must notify hosts so Save/Cancel state can update",
                 fired.get() >= 1);
+    }
+
+    @Test
+    public void generatedVariationPromotionRoundTripsAndPreservesDisabledNodes() {
+        DagIR baseline = dagWithDisabledLegacyAndUnknown("sigma=2 stack");
+        VariantAxis axis = new VariantAxis("active", VariantAxis.Kind.PARAM_SWEEP,
+                Collections.singletonList(new VariantAxis.AlternativeValue(
+                        "sigma=6", null, "sigma=6 stack")));
+        VariantPlan promoted = VariantSampler.ofat(baseline,
+                Collections.singletonList(axis), 2).get(1);
+        FilterBuilderPanel panel = new FilterBuilderPanel(baseline, null, noopRunner(), null);
+
+        panel.replaceCurrentDag(promoted.dag, "Applied variation: sigma=6");
+
+        String ijm = panel.currentIjm();
+        assertTrue("promoted IJM must contain the generated parameter value",
+                ijm.contains("sigma=6"));
+        assertFalse("disabled legacy command must not execute from the IJM body",
+                ijm.contains("run(\"Legacy Disabled\""));
+        assertTrue("embedded DAG JSON must keep disabled nodes",
+                ijm.contains("\"disabled\":true"));
+        DagIR reloaded = IjmToDagLoader.load(ijm);
+        assertEquals("promoted DAG must survive IJM emission and reload",
+                panel.currentDag(), reloaded);
+        assertEquals("native", reloaded.executionTier);
+        assertTrue(findNode(reloaded, "disabledLegacy").disabled);
+        assertTrue(findNode(reloaded, "disabledUnknown").disabled);
     }
 
     @Test
@@ -269,5 +300,30 @@ public class FilterBuilderPanelTest {
                 // no-op
             }
         };
+    }
+
+    private static DagIR dagWithDisabledLegacyAndUnknown(String activeArgs) {
+        DagNode active = new DagNode("active", OpType.GAUSSIAN_BLUR, activeArgs);
+        DagNode disabledLegacy = new DagNode("disabledLegacy", OpType.UNKNOWN,
+                "radius=99 stack", "Legacy Disabled", "Plugins > Legacy Disabled");
+        disabledLegacy.disabled = true;
+        DagNode disabledUnknown = new DagNode("disabledUnknown", OpType.UNKNOWN,
+                "selectWindow(\"legacy\");");
+        disabledUnknown.disabled = true;
+        return new DagIR(1,
+                Collections.singletonList(new DagLine("line_A",
+                        Arrays.asList(active, disabledLegacy, disabledUnknown))),
+                Collections.<Combiner>emptyList(),
+                "line_A",
+                "native");
+    }
+
+    private static DagNode findNode(DagIR dag, String id) {
+        for (DagLine line : dag.lines) {
+            for (DagNode node : line.ops) {
+                if (id.equals(node.id)) return node;
+            }
+        }
+        throw new AssertionError("Missing node: " + id);
     }
 }

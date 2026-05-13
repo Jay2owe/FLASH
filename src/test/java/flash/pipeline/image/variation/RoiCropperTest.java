@@ -1,5 +1,8 @@
 package flash.pipeline.image.variation;
 
+import flash.pipeline.image.dag.Combiner;
+import flash.pipeline.image.dag.DagIR;
+import flash.pipeline.image.dag.DagLine;
 import ij.ImagePlus;
 import ij.ImageStack;
 import ij.gui.Roi;
@@ -8,6 +11,7 @@ import ij.process.FloatProcessor;
 import org.junit.Test;
 
 import java.awt.Rectangle;
+import java.util.Collections;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotSame;
@@ -105,6 +109,38 @@ public class RoiCropperTest {
         assertEquals(30.0, prepared.displaySource.getDisplayRangeMax(), 0.0);
     }
 
+    @Test
+    public void runReturnsDisplaySourceMatchingExecutedRoiTimepointSource() {
+        ImagePlus source = hyperstack(5, 4, 1, 2, 3);
+        source.setPositionWithoutUpdate(1, 2, 3);
+
+        VariationRunResult run = VariationSourcePreparer.run(
+                source,
+                new Roi(1, 1, 2, 2),
+                Collections.singletonList(new VariantPlan("identity",
+                        identityDag(), Collections.<String, String>emptyMap())),
+                null);
+
+        try {
+            VariantResult result = run.results.get(0);
+            assertTrue("identity variant should execute successfully", result.error == null);
+            assertTrue("identity variant should return an output image", result.output != null);
+            assertEquals(2, run.displaySource.getWidth());
+            assertEquals(2, run.displaySource.getHeight());
+            assertEquals(1, run.displaySource.getNFrames());
+            assertEquals(pixel(source, 1, 2, 3, 1, 1),
+                    pixel(run.displaySource, 1, 2, 1, 0, 0), 0.0);
+            assertEquals("raw display source and variant execution source must match",
+                    pixel(run.displaySource, 1, 2, 1, 0, 0),
+                    pixel(result.output, 1, 2, 1, 0, 0), 0.0);
+        } finally {
+            run.displaySource.flush();
+            if (!run.results.isEmpty() && run.results.get(0).output != null) {
+                run.results.get(0).output.flush();
+            }
+        }
+    }
+
     private static ImagePlus hyperstack(int width, int height,
                                         int channels, int slices, int frames) {
         ImageStack stack = new ImageStack(width, height);
@@ -131,5 +167,14 @@ public class RoiCropperTest {
                                 int frame, int x, int y) {
         int index = imp.getStackIndex(channel, slice, frame);
         return imp.getStack().getProcessor(index).getf(x, y);
+    }
+
+    private static DagIR identityDag() {
+        return new DagIR(1,
+                Collections.singletonList(new DagLine("line_A",
+                        Collections.emptyList())),
+                Collections.<Combiner>emptyList(),
+                "line_A",
+                "native");
     }
 }

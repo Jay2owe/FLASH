@@ -7,6 +7,7 @@ import flash.pipeline.image.dag.DagIR;
 import flash.pipeline.image.dag.DagLine;
 import flash.pipeline.image.dag.DagNode;
 import flash.pipeline.image.dag.DagToIjmEmitter;
+import flash.pipeline.image.dag.IjmToDagLoader;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import flash.pipeline.ui.sandbox.FilterCatalog;
 import ij.ImagePlus;
@@ -688,6 +689,18 @@ public class FilterParameterStageTest {
                 "native");
     }
 
+    private static DagIR dagWithDisabledMedian(String args) {
+        DagNode gaussian = new DagNode("node_1", OpType.GAUSSIAN_BLUR, args);
+        DagNode median = new DagNode("node_2", OpType.MEDIAN, "radius=4 stack");
+        median.disabled = true;
+        return new DagIR(1,
+                Collections.singletonList(new DagLine("line_A",
+                        Arrays.asList(gaussian, median))),
+                Collections.<Combiner>emptyList(),
+                "line_A",
+                "native");
+    }
+
     @Test
     public void customMacroButtonIsVisibleOnLinearFilters() {
         RecordingMacroStore store = new RecordingMacroStore("Default", DEFAULT_MACRO);
@@ -718,25 +731,63 @@ public class FilterParameterStageTest {
     }
 
     @Test
-    public void promotedVariationUpdatesQcMacroButSavesOnlyOnLockIn() {
+    public void promotedVariationUpdatesQcMacroButSavesOnlyOnLockIn() throws Exception {
         RecordingMacroStore store = new RecordingMacroStore("Default", DEFAULT_MACRO);
+        RecordingPreviewAdapter previewAdapter = new RecordingPreviewAdapter();
+        RecordingActions actions = new RecordingActions();
         FilterParameterStage stage = new FilterParameterStage(
-                Arrays.asList("Default", "Custom"), store, new RecordingPreviewAdapter(), null, null);
+                Arrays.asList("Default", "Custom"), store, previewAdapter, null, null);
         ConfigQcContext context = context();
 
-        stage.buildControls(context, new RecordingActions());
+        stage.buildControls(context, actions);
         stage.onEnter(context, new PreviewPairPanel("Original", "Adjusted"));
         stage.simulatePromoteVariationForTest(singleStepDag("sigma=6 stack"), "sigma=6");
 
         assertTrue(stage.currentMacroForTest().contains("sigma=6"));
         assertTrue("promotion must remain unsaved until Lock in", stage.isDirtyForTest());
         assertTrue(stage.isPreviewStaleForTest());
+        assertTrue("promotion must mark the main QC preview as stale",
+                actions.previewButtonStale);
         assertEquals("", store.savedMacro);
+
+        stage.runPreviewNowForTest();
+
+        assertFalse(stage.isPreviewStaleForTest());
+        assertTrue("preview refresh must run against the promoted macro",
+                previewAdapter.lastMacroContent.contains("sigma=6"));
+        assertTrue("preview refresh must update the adjusted preview",
+                actions.adjustedPreviewSet);
 
         assertTrue(stage.lockIn(context));
 
         assertTrue("saved macro was: " + store.savedMacro,
                 store.savedMacro.contains("sigma=6"));
+    }
+
+    @Test
+    public void promotedVariationPreservesDisabledNodesThroughQcLockIn() {
+        RecordingMacroStore store = new RecordingMacroStore("Default", DEFAULT_MACRO);
+        FilterParameterStage stage = new FilterParameterStage(
+                Arrays.asList("Default", "Custom"), store, new RecordingPreviewAdapter(), null, null);
+        ConfigQcContext context = context();
+        DagIR promoted = dagWithDisabledMedian("sigma=7 stack");
+
+        stage.buildControls(context, new RecordingActions());
+        stage.onEnter(context, new PreviewPairPanel("Original", "Adjusted"));
+        stage.simulatePromoteVariationForTest(promoted, "sigma=7");
+
+        assertFalse("disabled step must not execute in the current macro",
+                stage.currentMacroForTest().contains("run(\"Median..."));
+        assertTrue("embedded DAG must preserve disabled state before Lock in",
+                stage.currentMacroForTest().contains("\"disabled\":true"));
+
+        assertTrue(stage.lockIn(context));
+
+        assertFalse("disabled step must not execute after Lock in",
+                store.savedMacro.contains("run(\"Median..."));
+        assertTrue("locked macro must retain embedded disabled state",
+                store.savedMacro.contains("\"disabled\":true"));
+        assertEquals(promoted, IjmToDagLoader.load(store.savedMacro));
     }
 
     @Test
