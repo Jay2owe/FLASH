@@ -2,10 +2,13 @@ package flash.pipeline.ui.sandbox.variation;
 
 import flash.pipeline.image.variation.VariantPlan;
 import flash.pipeline.image.variation.VariantResult;
+import ij.IJ;
 import ij.ImagePlus;
+import ij.plugin.frame.Recorder;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
+import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
@@ -13,6 +16,7 @@ import javax.swing.JScrollBar;
 import javax.swing.JToggleButton;
 import javax.swing.JToolBar;
 import javax.swing.event.ChangeListener;
+import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
@@ -22,6 +26,7 @@ import java.awt.GridLayout;
 import java.awt.KeyboardFocusManager;
 import java.awt.event.MouseWheelEvent;
 import java.awt.event.MouseWheelListener;
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -48,6 +53,9 @@ public final class VariantGridFrame extends JFrame {
     private TilePanel rawTile;
     private TilePanel promotedTile;
     private TileActionListener actionListener;
+    private VariationSessionLog sessionLog;
+    private MontageExporter montageExporter;
+    private IjmClipboardExporter ijmClipboardExporter;
     private CompareLauncher compareLauncher = new CompareLauncher() {
         @Override
         public void open(VariantGridFrame owner,
@@ -146,9 +154,17 @@ public final class VariantGridFrame extends JFrame {
         toolbar.setFloatable(false);
         toolbar.add(mipToggle);
         toolbar.addSeparator();
+        JButton saveMontage = new JButton("Save montage");
+        saveMontage.setToolTipText("Save a labelled PNG montage of the visible tiles");
+        saveMontage.addActionListener(e -> saveMontage());
+        JButton copyIjm = new JButton("Copy .ijm");
+        copyIjm.setToolTipText("Copy ImageJ macro code for visible variants");
+        copyIjm.addActionListener(e -> copyIjm());
         JButton saveFocusedPreset = new JButton("Save preset");
         saveFocusedPreset.setToolTipText("Save the focused visible variant as a preset");
         saveFocusedPreset.addActionListener(e -> saveFocusedPreset());
+        toolbar.add(saveMontage);
+        toolbar.add(copyIjm);
         toolbar.add(saveFocusedPreset);
 
         statusLabel = new JLabel(" ");
@@ -178,6 +194,16 @@ public final class VariantGridFrame extends JFrame {
         refreshAllTileActions();
     }
 
+    public void setSessionLog(VariationSessionLog sessionLog) {
+        this.sessionLog = sessionLog;
+    }
+
+    public void attachExporters(MontageExporter montageExporter,
+                                IjmClipboardExporter ijmClipboardExporter) {
+        this.montageExporter = montageExporter;
+        this.ijmClipboardExporter = ijmClipboardExporter;
+    }
+
     public List<TilePanel> visibleTilesInDisplayOrder() {
         List<TilePanel> out = new ArrayList<TilePanel>();
         for (int i = 0; i < tiles.size(); i++) {
@@ -201,6 +227,10 @@ public final class VariantGridFrame extends JFrame {
         if (tile == promotedTile) promotedTile = null;
         tile.setVisible(false);
         driver.unregister(tile.getScrubImp());
+        if (sessionLog != null) sessionLog.recordEliminate(tile.plan(), tile.label());
+        if (Recorder.record) {
+            Recorder.recordString("// flash variation: eliminated " + tile.label() + "\n");
+        }
 
         List<TilePanel> remainingVariants = visibleVariantTilesInDisplayOrder();
         if (remainingVariants.size() == 1) {
@@ -341,9 +371,38 @@ public final class VariantGridFrame extends JFrame {
         compareLauncher.open(this, left, right, actionListener);
     }
 
+    private void saveMontage() {
+        if (montageExporter == null) montageExporter = new MontageExporter(this);
+        JFileChooser chooser = new JFileChooser();
+        chooser.setDialogTitle("Save labelled montage");
+        chooser.setSelectedFile(new File(defaultExportBaseName() + "_variations.png"));
+        chooser.addChoosableFileFilter(
+                new FileNameExtensionFilter("PNG image (*.png)", "png"));
+        if (chooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return;
+        File file = ensureExtension(chooser.getSelectedFile(), ".png");
+        montageExporter.exportTo(file);
+        if (Recorder.record && file != null) {
+            Recorder.recordString("// flash variation: saved montage " + file.getName() + "\n");
+        }
+    }
+
+    private void copyIjm() {
+        if (ijmClipboardExporter == null) ijmClipboardExporter = new IjmClipboardExporter(this);
+        try {
+            ijmClipboardExporter.copyVisibleVariantsToClipboard();
+            if (Recorder.record) Recorder.recordString("// flash variation: copied visible .ijm\n");
+        } catch (RuntimeException ex) {
+            IJ.showMessage("Variations", "Could not copy .ijm to clipboard:\n" + ex.getMessage());
+        }
+    }
+
     private void saveFocusedPreset() {
         TilePanel tile = focusedVariantTile();
-        if (tile == null || tile.plan() == null || actionListener == null) return;
+        if (tile == null || tile.plan() == null) {
+            IJ.showMessage("Variations", "Click a visible variant tile first.");
+            return;
+        }
+        if (actionListener == null) return;
         actionListener.onSavePreset(tile.plan());
     }
 
@@ -393,5 +452,19 @@ public final class VariantGridFrame extends JFrame {
 
     void setCompareLauncherForTest(CompareLauncher launcher) {
         compareLauncher = launcher == null ? compareLauncher : launcher;
+    }
+
+    private String defaultExportBaseName() {
+        if (rawTile == null || rawTile.getScrubImp() == null) return "variations";
+        String title = rawTile.getScrubImp().getTitle();
+        if (title == null || title.trim().isEmpty()) return "variations";
+        return title.replaceAll("[^A-Za-z0-9._-]+", "_");
+    }
+
+    private static File ensureExtension(File file, String extension) {
+        if (file == null) return null;
+        String name = file.getName().toLowerCase();
+        if (name.endsWith(extension)) return file;
+        return new File(file.getParentFile(), file.getName() + extension);
     }
 }
