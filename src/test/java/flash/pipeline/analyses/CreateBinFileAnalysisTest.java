@@ -6,8 +6,10 @@ import flash.pipeline.image.NamedFilterLoader;
 import flash.pipeline.io.SeriesMeta;
 import flash.pipeline.runtime.DependencyService;
 import flash.pipeline.runtime.FeatureDependencyGate;
+import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.ToggleSwitch;
 import flash.pipeline.ui.config.ChannelThresholdStage;
+import flash.pipeline.ui.config.ClassicalSegmentationStage;
 import flash.pipeline.ui.config.ConfigQcActions;
 import flash.pipeline.ui.config.ConfigQcContext;
 import flash.pipeline.ui.config.ConfigQcResult;
@@ -206,6 +208,18 @@ public class CreateBinFileAnalysisTest {
     }
 
     @Test
+    public void setupAnalysisDialogsHideMainPhaseBreadcrumb() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless());
+        PipelineDialog dialog = invokeSetupAnalysisDialog("Set Up Configuration");
+        try {
+            javax.swing.JPanel breadcrumb = pipelineDialogPanel(dialog, "breadcrumbPanel");
+            assertFalse(breadcrumb.isVisible());
+        } finally {
+            disposePipelineDialog(dialog);
+        }
+    }
+
+    @Test
     public void qcSelectionSettings_marksCustomFilterChannelsForQcImageSelection() throws Exception {
         CreateBinFileAnalysis analysis = new CreateBinFileAnalysis();
         CreateBinFileAnalysis.BinUserConfig customCfg = oneChannelConfig("Custom");
@@ -380,6 +394,7 @@ public class CreateBinFileAnalysisTest {
         assertNull(grid.segmentationCombos[1]);
         assertFalse(containsComponentText(grid.panel, "Filter Preset"));
         assertFalse(containsComponentText(grid.panel, "Segmentation"));
+        assertFalse(containsComponentText(grid.panel, "Display color"));
         assertEquals(0, countComponentNamesContaining(grid.panel, "filter"));
     }
 
@@ -643,6 +658,48 @@ public class CreateBinFileAnalysisTest {
     }
 
     @Test
+    public void segmentationObjectQcRoutesClassicalThroughSingleMergedStage() throws Exception {
+        File binFolder = temp.newFolder("classical-merged-routing");
+        Files.write(new File(binFolder, "C1_Filters.ijm").toPath(),
+                "".getBytes(StandardCharsets.UTF_8));
+        CreateBinFileAnalysis.BinUserConfig cfg = oneChannelConfig("Default");
+        List<?> images = privateQcSelections(byteImage("classical route"));
+        RecordingEmbeddedDialogAnalysis analysis = new RecordingEmbeddedDialogAnalysis();
+
+        assertEquals("continue", invokeInteractiveSegmentationObjectQc(
+                analysis, images, cfg, binFolder, 0, false));
+
+        assertEquals(Arrays.asList("Segmentation Method", "Classical Segmentation"),
+                analysis.applicableStageTitles);
+    }
+
+    @Test
+    public void segmentationObjectQcKeepsAiThresholdOnlyForAiMethodsWhenRequested() throws Exception {
+        File binFolder = temp.newFolder("ai-threshold-routing");
+        Files.write(new File(binFolder, "C1_Filters.ijm").toPath(),
+                "".getBytes(StandardCharsets.UTF_8));
+        List<?> images = privateQcSelections(byteImage("ai threshold route"));
+
+        CreateBinFileAnalysis.BinUserConfig starDistCfg = oneChannelConfig("Default");
+        starDistCfg.segmentationMethods.set(0, "stardist:0.5:0.4");
+        RecordingEmbeddedDialogAnalysis withThreshold = new RecordingEmbeddedDialogAnalysis();
+        assertEquals("continue", invokeInteractiveSegmentationObjectQc(
+                withThreshold, images, starDistCfg, binFolder, 0, true));
+        assertEquals(Arrays.asList(
+                "Segmentation Method",
+                "StarDist",
+                "Channel Threshold"),
+                withThreshold.applicableStageTitles);
+
+        CreateBinFileAnalysis.BinUserConfig classicalCfg = oneChannelConfig("Default");
+        RecordingEmbeddedDialogAnalysis classical = new RecordingEmbeddedDialogAnalysis();
+        assertEquals("continue", invokeInteractiveSegmentationObjectQc(
+                classical, images, classicalCfg, binFolder, 0, true));
+        assertEquals(Arrays.asList("Segmentation Method", "Classical Segmentation"),
+                classical.applicableStageTitles);
+    }
+
+    @Test
     public void interactiveQcBackReturnsToPreviousEmbeddedStage() throws Exception {
         File binFolder = temp.newFolder("embedded-qc-back-history");
         CreateBinFileAnalysis.BinUserConfig cfg = oneChannelConfig("Default");
@@ -665,7 +722,7 @@ public class CreateBinFileAnalysisTest {
                 SegmentationMethodStage.class,
                 DisplayRangeStage.class,
                 SegmentationMethodStage.class), analysis.firstStageByDialog);
-        assertTrue(analysis.stageTitles.contains("Channel Threshold"));
+        assertTrue(analysis.stageTitles.contains("Classical Segmentation"));
         assertEquals(Arrays.asList("Display", "Object Segmentation"),
                 analysis.stagePaths.get(0));
         assertEquals(0, analysis.stagePathIndices.get(0).intValue());
@@ -761,6 +818,25 @@ public class CreateBinFileAnalysisTest {
         thresholdStage.onLeave(context);
         assertEquals("44", cfg.objectThresholds.get(0));
         assertEquals("44", cfg.intensityThresholds.get(0));
+
+        ClassicalSegmentationStage classicalStage =
+                analysis.createClassicalSegmentationStage(cfg, binFolder, 0);
+        classicalStage.buildControls(context, actions);
+        classicalStage.onEnter(context, new PreviewPairPanel("Original", "Objects"));
+        invokeStageTestMethod(classicalStage, "setThresholdForTest",
+                new Class<?>[]{double.class, double.class},
+                new Object[]{Double.valueOf(55.0), Double.valueOf(255.0)});
+        invokeStageTestMethod(classicalStage, "setMinSizeForTest",
+                new Class<?>[]{String.class},
+                new Object[]{"12"});
+        invokeStageTestMethod(classicalStage, "setMaxSizeForTest",
+                new Class<?>[]{String.class},
+                new Object[]{"34"});
+        assertTrue(classicalStage.lockIn(context));
+        classicalStage.onLeave(context);
+        assertEquals("55", cfg.objectThresholds.get(0));
+        assertEquals("55", cfg.intensityThresholds.get(0));
+        assertEquals("12-34", cfg.sizes.get(0));
     }
 
     @Test
@@ -935,6 +1011,29 @@ public class CreateBinFileAnalysisTest {
                 analysis, images, cfg, binFolder, Integer.valueOf(channelIndex));
     }
 
+    private static String invokeInteractiveSegmentationObjectQc(CreateBinFileAnalysis analysis,
+                                                                List<?> images,
+                                                                CreateBinFileAnalysis.BinUserConfig cfg,
+                                                                File binFolder,
+                                                                int channelIndex,
+                                                                boolean includeAiChannelThreshold) throws Exception {
+        Method method = CreateBinFileAnalysis.class.getDeclaredMethod(
+                "interactiveSegmentationObjectQC",
+                List.class,
+                CreateBinFileAnalysis.BinUserConfig.class,
+                File.class,
+                int.class,
+                boolean.class);
+        method.setAccessible(true);
+        return (String) method.invoke(
+                analysis,
+                images,
+                cfg,
+                binFolder,
+                Integer.valueOf(channelIndex),
+                Boolean.valueOf(includeAiChannelThreshold));
+    }
+
     private static String invokeInteractiveQc(CreateBinFileAnalysis analysis,
                                               List<?> images,
                                               CreateBinFileAnalysis.BinUserConfig cfg,
@@ -1001,6 +1100,24 @@ public class CreateBinFileAnalysisTest {
         return false;
     }
 
+    private static PipelineDialog invokeSetupAnalysisDialog(String title) throws Exception {
+        Method method = CreateBinFileAnalysis.class.getDeclaredMethod("setupAnalysisDialog", String.class);
+        method.setAccessible(true);
+        return (PipelineDialog) method.invoke(null, title);
+    }
+
+    private static javax.swing.JPanel pipelineDialogPanel(PipelineDialog dialog, String fieldName) throws Exception {
+        Field field = PipelineDialog.class.getDeclaredField(fieldName);
+        field.setAccessible(true);
+        return (javax.swing.JPanel) field.get(dialog);
+    }
+
+    private static void disposePipelineDialog(PipelineDialog pipelineDialog) throws Exception {
+        Field field = PipelineDialog.class.getDeclaredField("dialog");
+        field.setAccessible(true);
+        ((javax.swing.JDialog) field.get(pipelineDialog)).dispose();
+    }
+
     private static boolean containsComponentText(Component component, String expected) {
         if (component instanceof javax.swing.JLabel) {
             String text = ((javax.swing.JLabel) component).getText();
@@ -1051,6 +1168,7 @@ public class CreateBinFileAnalysisTest {
 
     private static final class RecordingEmbeddedDialogAnalysis extends CreateBinFileAnalysis {
         final List<Class<?>> stageTypes = new ArrayList<Class<?>>();
+        final List<String> applicableStageTitles = new ArrayList<String>();
 
         @Override
         protected boolean embeddedConfigQcUiAvailable() {
@@ -1063,6 +1181,9 @@ public class CreateBinFileAnalysisTest {
             if (stages != null) {
                 for (ConfigQcStage stage : stages) {
                     stageTypes.add(stage == null ? null : stage.getClass());
+                    if (stage != null && stage.isApplicable(context)) {
+                        applicableStageTitles.add(stage.title());
+                    }
                 }
             }
             return ConfigQcResult.DONE;

@@ -1,5 +1,7 @@
 package flash.pipeline.ui.config;
 
+import flash.pipeline.help.SetupHelpCatalog;
+import flash.pipeline.help.SetupHelpTopic;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import flash.pipeline.ui.preview.ThresholdControlPanel;
 import flash.pipeline.ui.preview.ThresholdOverlayRenderer;
@@ -53,6 +55,11 @@ public final class ChannelThresholdStage implements ConfigQcStage {
     @Override
     public String title() {
         return "Channel Threshold";
+    }
+
+    @Override
+    public SetupHelpTopic helpTopic() {
+        return SetupHelpCatalog.CHANNEL_THRESHOLD;
     }
 
     @Override

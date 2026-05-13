@@ -1,5 +1,7 @@
 package flash.pipeline.ui.config;
 
+import flash.pipeline.help.SetupHelpCatalog;
+import flash.pipeline.help.SetupHelpTopic;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import ij.ImagePlus;
 import ij.plugin.Duplicator;
@@ -51,6 +53,11 @@ public final class SegmentationMethodStage implements ConfigQcStage {
     @Override
     public String title() {
         return "Segmentation Method";
+    }
+
+    @Override
+    public SetupHelpTopic helpTopic() {
+        return SetupHelpCatalog.SEGMENTATION_METHOD;
     }
 
     @Override
@@ -151,7 +158,7 @@ public final class SegmentationMethodStage implements ConfigQcStage {
     public static String stageKeyForChoice(String choice) {
         if (STARDIST.equals(choice)) return StarDistParameterStage.class.getName();
         if (CELLPOSE.equals(choice)) return CellposeParameterStage.class.getName();
-        return ChannelThresholdStage.class.getName();
+        return ClassicalSegmentationStage.class.getName();
     }
 
     private void setStatus(String text) {
@@ -226,7 +233,7 @@ public final class SegmentationMethodStage implements ConfigQcStage {
             addCard(group, CLASSICAL,
                     "Classical: 3D Objects Counter",
                     "Threshold-based segmentation using Fiji's 3D Objects Counter.<br>"
-                            + "Next steps: set the signal threshold, then set the object size filter.<br>"
+                            + "Next screen: set the signal threshold and object size filter.<br>"
                             + "Best for: bright, clean stains where objects stand out clearly from background and a consistent threshold can be applied across images. Works well for puncta, plaques, or well-separated labelled structures.<br>"
                             + "Watch out for: touching objects may merge, and uneven background can make one threshold unreliable.");
             add(Box.createVerticalStrut(6));

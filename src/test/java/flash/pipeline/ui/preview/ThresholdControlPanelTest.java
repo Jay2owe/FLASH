@@ -82,6 +82,18 @@ public class ThresholdControlPanelTest {
     }
 
     @Test
+    public void previewSelectorCanBeHiddenForFixedOverlayStages() {
+        ThresholdControlPanel panel = new ThresholdControlPanel();
+
+        assertTrue(panel.isPreviewSelectorVisible());
+
+        panel.setPreviewSelectorVisible(false);
+
+        assertTrue(ThresholdOverlayRenderer.MODE_RED_OVERLAY.equals(panel.getPreviewMode()));
+        assertTrue(!panel.isPreviewSelectorVisible());
+    }
+
+    @Test
     public void minMaxFallsBackSafelyWhenImageHasBeenClosed() {
         ImagePlus temporary = image(0, 10, 20);
         MinMaxControlPanel minMax = new MinMaxControlPanel();

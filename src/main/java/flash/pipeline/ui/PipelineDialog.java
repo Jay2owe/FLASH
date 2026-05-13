@@ -3,6 +3,8 @@ package flash.pipeline.ui;
 import flash.pipeline.help.AnalysisHelpCatalog;
 import flash.pipeline.help.AnalysisHelpDialog;
 import flash.pipeline.help.AnalysisHelpTopic;
+import flash.pipeline.help.SetupHelpDialog;
+import flash.pipeline.help.SetupHelpTopic;
 import ij.IJ;
 
 import javax.swing.*;
@@ -301,6 +303,33 @@ public class PipelineDialog {
     }
 
     /**
+     * Adds a top-level setup-stage header with a question-mark help control.
+     */
+    public JButton addSetupHelpHeader(String text, SetupHelpTopic topic) {
+        JButton helpButton = createSetupHelpButton(topic);
+
+        addToBody(Box.createVerticalStrut(10));
+
+        JPanel row = createRow();
+        JLabel label = new JLabel(text);
+        label.setFont(label.getFont().deriveFont(Font.BOLD, 13f));
+        label.setForeground(HEADER_COLOR);
+        row.add(label);
+        row.add(Box.createHorizontalStrut(6));
+        row.add(helpButton);
+        row.add(Box.createHorizontalGlue());
+        addToBody(row);
+        addToBody(Box.createVerticalStrut(4));
+
+        JSeparator sep = new JSeparator(SwingConstants.HORIZONTAL);
+        sep.setMaximumSize(new Dimension(Integer.MAX_VALUE, 1));
+        sep.setAlignmentX(Component.LEFT_ALIGNMENT);
+        addToBody(sep);
+        addToBody(Box.createVerticalStrut(6));
+        return helpButton;
+    }
+
+    /**
      * Adds a section header with a controlling toggle. The returned toggle is not
      * part of the sequential getNextBoolean() list.
      */
@@ -369,6 +398,28 @@ public class PipelineDialog {
         label.setBorder(new EmptyBorder(0, 16, 0, 0));
         addToBody(label);
         addToBody(Box.createVerticalStrut(3));
+    }
+
+    /**
+     * Adds a subsection label with a setup-stage question-mark help control.
+     */
+    public JButton addSetupHelpSubHeader(String text, SetupHelpTopic topic) {
+        addToBody(Box.createVerticalStrut(6));
+
+        JPanel row = createRow();
+        row.setBorder(new EmptyBorder(0, 20, 0, 4));
+        JLabel label = new JLabel(text);
+        label.setFont(label.getFont().deriveFont(Font.BOLD, 12f));
+        label.setForeground(SUBHEADER_COLOR);
+        row.add(label);
+        row.add(Box.createHorizontalStrut(6));
+        JButton helpButton = createSetupHelpButton(topic);
+        row.add(helpButton);
+        row.add(Box.createHorizontalGlue());
+
+        addToBody(row);
+        addToBody(Box.createVerticalStrut(3));
+        return helpButton;
     }
 
     /**
@@ -910,6 +961,18 @@ public class PipelineDialog {
         row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
         row.setBorder(new EmptyBorder(0, 4, 0, 4));
         return row;
+    }
+
+    private JButton createSetupHelpButton(final SetupHelpTopic topic) {
+        String tooltip = topic == null
+                ? "Setup help is not available yet."
+                : "About " + topic.title;
+        JButton helpButton = HelpButton.question(tooltip);
+        helpButton.setEnabled(topic != null);
+        if (topic != null) {
+            helpButton.addActionListener(e -> SetupHelpDialog.show(dialog, topic));
+        }
+        return helpButton;
     }
 
     private JLabel normalizeStatusIcon(JComponent leadingIcon) {

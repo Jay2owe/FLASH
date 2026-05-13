@@ -30,7 +30,7 @@ public class AnalysisDialogHelpAttachmentTest {
     @Test
     public void multiPageDialogsKeepHelpOnBackPages() throws Exception {
         assertSourceContains("src/main/java/flash/pipeline/analyses/CreateBinFileAnalysis.java",
-                "fork.addAnalysisHelpHeader(\"Set Up Configuration\", FLASH_Pipeline.IDX_CREATE_BIN);");
+                "fork.addSetupHelpHeader(\"Settings Mode\", SetupHelpCatalog.SETTINGS_MODE);");
         assertSourceContains("src/main/java/flash/pipeline/analyses/CreateBinFileAnalysis.java",
                 "sdDialog.addAnalysisHelpHeader(\"Set Up Configuration\", FLASH_Pipeline.IDX_CREATE_BIN);");
         assertSourceContains("src/main/java/flash/pipeline/analyses/CreateBinFileAnalysis.java",

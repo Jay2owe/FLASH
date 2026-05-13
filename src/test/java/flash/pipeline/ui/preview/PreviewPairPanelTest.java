@@ -454,6 +454,32 @@ public class PreviewPairPanelTest {
     }
 
     @Test
+    public void customLargePreviewSourceChoiceSwitchesFirstPaneOnlyForLargeView() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
+        ImagePlus original = stack("original source", 4);
+        ImagePlus filtered = stack("filtered source", 4);
+        ImagePlus threshold = stack("threshold preview", 4);
+        ImagePlus labels = stack("objects", 4);
+
+        pair.setOriginal(threshold);
+        pair.setAdjusted(labels);
+        pair.setLargePreviewSourceChoices(original, filtered);
+        pair.setLargePreviewImages(original, threshold, labels);
+
+        assertFalse(pair.sourceToggleVisibleForTest());
+        assertEquals("original source", pair.largePreviewFirstImageForTest().getTitle());
+        assertEquals(PreviewPairPanel.SourceMode.RAW, pair.largePreviewSourceModeForTest());
+        assertEquals("threshold preview", pair.originalPreviewForTest().titleTextForTest());
+
+        pair.setLargePreviewSourceMode(PreviewPairPanel.SourceMode.FILTERED);
+
+        assertFalse(pair.sourceToggleVisibleForTest());
+        assertEquals("filtered source", pair.largePreviewFirstImageForTest().getTitle());
+        assertEquals(PreviewPairPanel.SourceMode.FILTERED, pair.largePreviewSourceModeForTest());
+        assertEquals("threshold preview", pair.originalPreviewForTest().titleTextForTest());
+    }
+
+    @Test
     public void compactHeadersHidePerImageMetadataRowsAndUsePanelTitles() {
         PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
 

@@ -87,6 +87,75 @@ public class FeatureDependencyGateTest {
     }
 
     @Test
+    public void availabilityHelperUsesConfiguredStatusWithoutPrompting() {
+        EnumMap<DependencyId, DependencyStatus> statuses =
+                DependencyRuntimeTestSupport.withStatuses(
+                        DependencyId.IMGLIB2_ALGORITHM_RUNTIME,
+                        DependencyStatus.present("ImgLib2 Algorithm present"),
+                        DependencyId.JTRANSFORMS_RUNTIME,
+                        DependencyStatus.missing("JTransforms missing"));
+        FeatureDependencyGate.configure(DependencyRuntimeTestSupport.serviceWith(statuses), opener);
+        ui.headless = false;
+
+        assertTrue(FeatureDependencyGate.isAvailable(DependencyId.IMGLIB2_ALGORITHM_RUNTIME));
+        assertFalse(FeatureDependencyGate.isAvailable(DependencyId.JTRANSFORMS_RUNTIME));
+        assertEquals(DependencyStatus.State.MISSING,
+                FeatureDependencyGate.getStatus(DependencyId.JTRANSFORMS_RUNTIME).getState());
+
+        assertEquals(0, ui.prompts.size());
+        assertEquals(0, ui.logs.size());
+        assertEquals(0, ui.messages.size());
+        assertEquals(0, opener.calls);
+    }
+
+    @Test
+    public void missingIntensitySpatialDependencyBlocksOnlyFamilyDecisionInHeadlessMode() {
+        EnumMap<DependencyId, DependencyStatus> statuses =
+                DependencyRuntimeTestSupport.withStatuses(
+                        DependencyId.COLOC2_RUNTIME,
+                        DependencyStatus.missing("Coloc 2 algorithm classes missing"));
+        FeatureDependencyGate.configure(DependencyRuntimeTestSupport.serviceWith(statuses), opener);
+        ui.headless = true;
+
+        FeatureDependencyGate.GateDecision decision = FeatureDependencyGate.check(
+                DependencyId.COLOC2_RUNTIME,
+                "Intensity Spatial",
+                "Cross-channel Pearson correlation");
+
+        assertFalse(decision.isAllowed());
+        assertTrue(FeatureDependencyGate.gate(DependencyId.IMAGEJ_RUNTIME, "Basic intensity output"));
+        assertEquals(0, ui.prompts.size());
+        assertTrue(join(ui.logs).contains("Blocked analysis: Intensity Spatial"));
+        assertTrue(join(ui.logs).contains("Required for: Cross-channel Pearson correlation"));
+        assertTrue(join(ui.logs).contains("Missing dependency: Coloc 2 runtime"));
+        assertEquals(0, opener.calls);
+    }
+
+    @Test
+    public void missingIntensitySpatialDependencyGuiDecisionOffersInstallAction() {
+        EnumMap<DependencyId, DependencyStatus> statuses =
+                DependencyRuntimeTestSupport.withStatuses(
+                        DependencyId.COLOC2_RUNTIME,
+                        DependencyStatus.missing("Coloc 2 algorithm classes missing"));
+        FeatureDependencyGate.configure(DependencyRuntimeTestSupport.serviceWith(statuses), opener);
+        ui.headless = false;
+        ui.nextAction = "change_setup";
+
+        FeatureDependencyGate.GateDecision decision = FeatureDependencyGate.check(
+                DependencyId.COLOC2_RUNTIME,
+                "Intensity Spatial",
+                "Cross-channel Pearson correlation");
+
+        assertEquals(FeatureDependencyGate.GateDecision.CHANGE_SETUP, decision);
+        assertEquals(1, ui.prompts.size());
+        assertTrue(ui.prompts.get(0).plainMessage.contains("Missing dependency: Coloc 2 runtime"));
+        assertTrue(ui.prompts.get(0).plainMessage.contains("Required for: Cross-channel Pearson correlation"));
+        assertTrue(ui.prompts.get(0).buttonLabels.contains("Install Coloc 2"));
+        assertTrue(ui.prompts.get(0).buttonLabels.contains("Open Dependencies"));
+        assertEquals(0, opener.calls);
+    }
+
+    @Test
     public void missingNonFixableDependencyOffersOpenDependenciesOnly() {
         EnumMap<DependencyId, DependencyStatus> statuses =
                 DependencyRuntimeTestSupport.withStatuses(

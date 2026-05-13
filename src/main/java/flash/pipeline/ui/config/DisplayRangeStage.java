@@ -1,5 +1,7 @@
 package flash.pipeline.ui.config;
 
+import flash.pipeline.help.SetupHelpCatalog;
+import flash.pipeline.help.SetupHelpTopic;
 import flash.pipeline.ui.preview.MinMaxControlPanel;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import ij.ImagePlus;
@@ -49,6 +51,11 @@ public final class DisplayRangeStage implements ConfigQcStage {
     @Override
     public String title() {
         return "Display Range";
+    }
+
+    @Override
+    public SetupHelpTopic helpTopic() {
+        return SetupHelpCatalog.DISPLAY_RANGE;
     }
 
     @Override

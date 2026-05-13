@@ -3,17 +3,20 @@ package flash.pipeline.cli;
 import flash.pipeline.analyses.StatisticsConfig;
 import flash.pipeline.bin.BinField;
 import flash.pipeline.analyses.wizard.AggregationConfig;
+import flash.pipeline.analyses.wizard.IntensitySpatialConfig;
 import flash.pipeline.deconv.engine.Algorithm;
 import flash.pipeline.deconv.engine.DeconvParams;
 import flash.pipeline.deconv.psf.PsfModel;
 import flash.pipeline.deconv.psf.ScopeModality;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Parsed CLI state for one IHF Pipeline invocation.
@@ -238,6 +241,50 @@ public class CLIConfig {
             parts.add("intensity.preset=" + intensity.presetName.trim());
         }
         appendChannelOverrides(parts, "intensity.threshold_channel", "", intensity.thresholds);
+        appendBoolean(parts, "intensity.spatial", intensity.spatialEnabled);
+        if (intensity.spatialAnalyses != null) {
+            parts.add("intensity.spatial.analyses="
+                    + IntensitySpatialConfig.joinAnalysisTokens(intensity.spatialAnalyses));
+        }
+        appendBoolean(parts, "intensity.spatial.mip", intensity.spatialMipEnabled);
+        appendBoolean(parts, "intensity.spatial.native3d", intensity.spatialNative3dEnabled);
+        appendBoolean(parts, "intensity.spatial.overlays", intensity.spatialOverlaysEnabled);
+        if (intensity.spatialShellWidthUm != null) {
+            parts.add("intensity.spatial.shell_width_um="
+                    + formatDouble(intensity.spatialShellWidthUm.doubleValue()));
+        }
+        if (intensity.spatialShellCount != null) {
+            parts.add("intensity.spatial.shell_count=" + intensity.spatialShellCount);
+        }
+        if (intensity.spatialTileScalesUm != null) {
+            parts.add("intensity.spatial.tile_um="
+                    + IntensitySpatialConfig.joinDoubles(intensity.spatialTileScalesUm));
+        }
+        if (intensity.spatialGranularityScalesUm != null) {
+            parts.add("intensity.spatial.granularity_um="
+                    + IntensitySpatialConfig.joinDoubles(intensity.spatialGranularityScalesUm));
+        }
+        if (intensity.spatialDepthBinWidthUm != null) {
+            parts.add("intensity.spatial.depth_bin_um="
+                    + formatDouble(intensity.spatialDepthBinWidthUm.doubleValue()));
+        }
+        if (intensity.spatialRimDepthUm != null) {
+            parts.add("intensity.spatial.rim_depth_um="
+                    + formatDouble(intensity.spatialRimDepthUm.doubleValue()));
+        }
+        if (intensity.spatialTextureClassCount != null) {
+            parts.add("intensity.spatial.texture_k=" + intensity.spatialTextureClassCount);
+        }
+        if (intensity.spatialPermutations != null) {
+            parts.add("intensity.spatial.permutations=" + intensity.spatialPermutations);
+        }
+        if (intensity.spatialSeed != null) {
+            parts.add("intensity.spatial.seed=" + intensity.spatialSeed);
+        }
+        if (intensity.spatialFailurePolicy != null) {
+            parts.add("intensity.spatial.failure_policy="
+                    + intensity.spatialFailurePolicy.name().toLowerCase(Locale.ROOT));
+        }
 
         if (spectral.presetName != null && !spectral.presetName.trim().isEmpty()) {
             parts.add("spectral.preset=" + spectral.presetName.trim());
@@ -580,13 +627,122 @@ public class CLIConfig {
     public static final class IntensityConfig {
         String presetName = null;
         final Map<Integer, String> thresholds = new LinkedHashMap<Integer, String>();
+        Boolean spatialEnabled = null;
+        Set<IntensitySpatialConfig.AnalysisKey> spatialAnalyses = null;
+        Boolean spatialMipEnabled = null;
+        Boolean spatialNative3dEnabled = null;
+        Boolean spatialOverlaysEnabled = null;
+        Double spatialShellWidthUm = null;
+        Integer spatialShellCount = null;
+        double[] spatialTileScalesUm = null;
+        double[] spatialGranularityScalesUm = null;
+        Double spatialDepthBinWidthUm = null;
+        Double spatialRimDepthUm = null;
+        Integer spatialTextureClassCount = null;
+        Integer spatialPermutations = null;
+        Long spatialSeed = null;
+        IntensitySpatialConfig.FailurePolicy spatialFailurePolicy = null;
 
         public String getPresetName() { return presetName; }
         public Map<Integer, String> getThresholds() { return thresholds; }
+        public Boolean getSpatialEnabled() { return spatialEnabled; }
+        public Set<IntensitySpatialConfig.AnalysisKey> getSpatialAnalyses() {
+            return spatialAnalyses == null
+                    ? Collections.<IntensitySpatialConfig.AnalysisKey>emptySet()
+                    : Collections.unmodifiableSet(spatialAnalyses);
+        }
+        public Boolean getSpatialMipEnabled() { return spatialMipEnabled; }
+        public Boolean getSpatialNative3dEnabled() { return spatialNative3dEnabled; }
+        public Boolean getSpatialOverlaysEnabled() { return spatialOverlaysEnabled; }
+        public Double getSpatialShellWidthUm() { return spatialShellWidthUm; }
+        public Integer getSpatialShellCount() { return spatialShellCount; }
+        public double[] getSpatialTileScalesUm() {
+            return spatialTileScalesUm == null ? null : spatialTileScalesUm.clone();
+        }
+        public double[] getSpatialGranularityScalesUm() {
+            return spatialGranularityScalesUm == null ? null : spatialGranularityScalesUm.clone();
+        }
+        public Double getSpatialDepthBinWidthUm() { return spatialDepthBinWidthUm; }
+        public Double getSpatialRimDepthUm() { return spatialRimDepthUm; }
+        public Integer getSpatialTextureClassCount() { return spatialTextureClassCount; }
+        public Integer getSpatialPermutations() { return spatialPermutations; }
+        public Long getSpatialSeed() { return spatialSeed; }
+        public IntensitySpatialConfig.FailurePolicy getSpatialFailurePolicy() { return spatialFailurePolicy; }
 
         public boolean hasConfiguration() {
             return (presetName != null && !presetName.trim().isEmpty())
-                    || !thresholds.isEmpty();
+                    || !thresholds.isEmpty()
+                    || hasSpatialConfiguration();
+        }
+
+        public boolean hasSpatialConfiguration() {
+            return spatialEnabled != null
+                    || spatialAnalyses != null
+                    || spatialMipEnabled != null
+                    || spatialNative3dEnabled != null
+                    || spatialOverlaysEnabled != null
+                    || spatialShellWidthUm != null
+                    || spatialShellCount != null
+                    || spatialTileScalesUm != null
+                    || spatialGranularityScalesUm != null
+                    || spatialDepthBinWidthUm != null
+                    || spatialRimDepthUm != null
+                    || spatialTextureClassCount != null
+                    || spatialPermutations != null
+                    || spatialSeed != null
+                    || spatialFailurePolicy != null;
+        }
+
+        public IntensitySpatialConfig getSpatialConfig() {
+            return mergeSpatialConfig(IntensitySpatialConfig.disabled(), -1, null, null);
+        }
+
+        public IntensitySpatialConfig mergeSpatialConfig(IntensitySpatialConfig base,
+                                                         int channelCount,
+                                                         boolean[] channelBinarization,
+                                                         IntensitySpatialConfig.LockLogger logger) {
+            IntensitySpatialConfig safeBase = base == null ? IntensitySpatialConfig.disabled() : base;
+            IntensitySpatialConfig.Builder builder = IntensitySpatialConfig.builder(safeBase);
+            boolean impliedEnabled = false;
+            if (spatialAnalyses != null) {
+                builder.enabledAnalyses(spatialAnalyses);
+                impliedEnabled = impliedEnabled || !spatialAnalyses.isEmpty();
+            }
+            if (spatialMipEnabled != null) {
+                builder.mipEnabled(spatialMipEnabled.booleanValue());
+                impliedEnabled = impliedEnabled || spatialMipEnabled.booleanValue();
+            }
+            if (spatialNative3dEnabled != null) {
+                builder.native3dEnabled(spatialNative3dEnabled.booleanValue());
+                impliedEnabled = impliedEnabled || spatialNative3dEnabled.booleanValue();
+            }
+            if (spatialOverlaysEnabled != null) {
+                builder.overlaysEnabled(spatialOverlaysEnabled.booleanValue());
+                impliedEnabled = impliedEnabled || spatialOverlaysEnabled.booleanValue();
+            }
+            if (spatialShellWidthUm != null) builder.shellWidthUm(spatialShellWidthUm.doubleValue());
+            if (spatialShellCount != null) builder.shellCount(spatialShellCount.intValue());
+            if (spatialTileScalesUm != null) builder.tileScalesUm(spatialTileScalesUm);
+            if (spatialGranularityScalesUm != null) builder.granularityScalesUm(spatialGranularityScalesUm);
+            if (spatialDepthBinWidthUm != null) builder.depthBinWidthUm(spatialDepthBinWidthUm.doubleValue());
+            if (spatialRimDepthUm != null) builder.rimDepthUm(spatialRimDepthUm.doubleValue());
+            if (spatialTextureClassCount != null) {
+                builder.textureClassCount(spatialTextureClassCount.intValue());
+            }
+            if (spatialPermutations != null) builder.permutations(spatialPermutations.intValue());
+            if (spatialSeed != null) builder.seed(spatialSeed.longValue());
+            if (spatialFailurePolicy != null) builder.failurePolicy(spatialFailurePolicy);
+            if (spatialEnabled != null) {
+                builder.enabled(spatialEnabled.booleanValue());
+            } else if (!safeBase.isEnabled() && impliedEnabled) {
+                builder.enabled(true);
+            }
+
+            IntensitySpatialConfig merged = builder.build();
+            if (channelCount >= 0) {
+                return merged.validateForChannelSetup(channelCount, channelBinarization, null, logger);
+            }
+            return merged;
         }
     }
 

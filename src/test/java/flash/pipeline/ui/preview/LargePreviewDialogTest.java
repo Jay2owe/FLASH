@@ -6,6 +6,7 @@ import ij.process.ImageProcessor;
 import org.junit.Test;
 
 import java.awt.GraphicsEnvironment;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -78,6 +79,42 @@ public class LargePreviewDialogTest {
             dialog.setImages(image("raw"), image("filtered"), 1);
 
             assertFalse(dialog.overlayControlsVisibleForTest());
+        } finally {
+            dialog.dispose();
+        }
+    }
+
+    @Test
+    public void sourceChoiceIsVisibleOnlyWhenLargeViewProvidesOriginalAndFilteredSources() {
+        assumeFalse(GraphicsEnvironment.isHeadless());
+
+        LargePreviewDialog dialog = new LargePreviewDialog(null);
+        AtomicReference<PreviewPairPanel.SourceMode> changed =
+                new AtomicReference<PreviewPairPanel.SourceMode>();
+        try {
+            dialog.setSourceChoiceListener(new LargePreviewDialog.SourceChoiceListener() {
+                @Override public void sourceChoiceChanged(PreviewPairPanel.SourceMode mode) {
+                    changed.set(mode);
+                }
+            });
+            dialog.setSourceChoices(
+                    image("original source"),
+                    PreviewDisplaySettings.defaultFor("Grays"),
+                    image("filtered source"),
+                    PreviewDisplaySettings.defaultFor("Grays"),
+                    PreviewPairPanel.SourceMode.RAW);
+
+            assertTrue(dialog.sourceControlsVisibleForTest());
+            assertEquals("Original", dialog.selectedSourceChoiceForTest());
+
+            dialog.setSourceChoiceForTest("Filtered");
+
+            assertEquals(PreviewPairPanel.SourceMode.FILTERED, changed.get());
+            assertEquals("Filtered", dialog.selectedSourceChoiceForTest());
+
+            dialog.clearSourceChoices();
+
+            assertFalse(dialog.sourceControlsVisibleForTest());
         } finally {
             dialog.dispose();
         }

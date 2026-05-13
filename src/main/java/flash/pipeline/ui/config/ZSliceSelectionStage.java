@@ -1,5 +1,7 @@
 package flash.pipeline.ui.config;
 
+import flash.pipeline.help.SetupHelpCatalog;
+import flash.pipeline.help.SetupHelpTopic;
 import flash.pipeline.intelligence.EmptySliceSuggester;
 import flash.pipeline.io.SeriesMeta;
 import flash.pipeline.ui.preview.PreviewPairPanel;
@@ -105,6 +107,11 @@ public final class ZSliceSelectionStage implements ConfigQcStage {
     @Override
     public String title() {
         return "Z-Slice Subset";
+    }
+
+    @Override
+    public SetupHelpTopic helpTopic() {
+        return SetupHelpCatalog.Z_SLICE_SUBSET;
     }
 
     @Override

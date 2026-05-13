@@ -44,8 +44,8 @@ public class SegmentationMethodStageTest {
     }
 
     @Test
-    public void stageKeyRoutesClassicalToThresholdAndAiToAiStages() {
-        assertEquals(ChannelThresholdStage.class.getName(),
+    public void stageKeyRoutesClassicalToMergedStageAndAiToAiStages() {
+        assertEquals(ClassicalSegmentationStage.class.getName(),
                 SegmentationMethodStage.stageKeyForChoice(SegmentationMethodStage.CLASSICAL));
         assertEquals(StarDistParameterStage.class.getName(),
                 SegmentationMethodStage.stageKeyForChoice(SegmentationMethodStage.STARDIST));

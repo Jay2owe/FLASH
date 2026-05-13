@@ -1,5 +1,7 @@
 package flash.pipeline.ui.config;
 
+import flash.pipeline.help.SetupHelpCatalog;
+import flash.pipeline.help.SetupHelpTopic;
 import flash.pipeline.objects.ObjectsCounter3DWrapper;
 import flash.pipeline.ui.preview.LabelMapStyler;
 import flash.pipeline.ui.preview.PreviewPairPanel;
@@ -98,6 +100,11 @@ public final class ParticleSizeStage implements ConfigQcStage {
     @Override
     public String title() {
         return "Particle Size";
+    }
+
+    @Override
+    public SetupHelpTopic helpTopic() {
+        return SetupHelpCatalog.CLASSICAL_OBJECT_SEGMENTATION;
     }
 
     @Override

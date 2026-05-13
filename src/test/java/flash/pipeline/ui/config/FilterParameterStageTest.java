@@ -8,6 +8,7 @@ import flash.pipeline.image.dag.DagLine;
 import flash.pipeline.image.dag.DagNode;
 import flash.pipeline.image.dag.DagToIjmEmitter;
 import flash.pipeline.ui.preview.PreviewPairPanel;
+import flash.pipeline.ui.sandbox.FilterCatalog;
 import ij.ImagePlus;
 import ij.ImageStack;
 import ij.process.ByteProcessor;
@@ -24,6 +25,7 @@ import java.awt.Container;
 import java.awt.Dimension;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
+import java.lang.reflect.Constructor;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -505,6 +507,28 @@ public class FilterParameterStageTest {
     }
 
     @Test
+    public void legacyAddFailureLeavesCurrentMacroUnchanged() {
+        RecordingMacroStore store = new RecordingMacroStore("Default", DEFAULT_MACRO);
+        RecordingActions actions = new RecordingActions();
+        FilterParameterStage stage = new FilterParameterStage(
+                Arrays.asList("Default", "Custom"), store, new RecordingPreviewAdapter(), null, null);
+
+        stage.buildControls(context(), actions);
+        String before = stage.currentMacroForTest();
+
+        stage.simulateAddFilterForTest(legacyEntry("Plugin Filter"));
+
+        assertEquals("legacy add without safe Recorder capture must not mutate currentMacro",
+                before, stage.currentMacroForTest());
+        assertFalse("failed legacy add must not append a blank plugin run line",
+                stage.currentMacroForTest().contains("Plugin Filter"));
+        assertTrue("failed legacy add should explain why the command was not added",
+                actions.status.contains("parameter capture")
+                        || actions.status.contains("preview image")
+                        || actions.status.contains("Command was not added"));
+    }
+
+    @Test
     public void add_betweenSteps_dragReordersUnderlyingDag() {
         RecordingMacroStore store = new RecordingMacroStore("Default", TWO_STEP_MACRO);
         FilterParameterStage stage = new FilterParameterStage(
@@ -744,6 +768,19 @@ public class FilterParameterStageTest {
             }
         }
         return null;
+    }
+
+    private static FilterCatalog.Entry legacyEntry(String commandName) {
+        try {
+            Constructor<FilterCatalog.Entry> constructor = FilterCatalog.Entry.class
+                    .getDeclaredConstructor(String.class, String.class, OpType.class,
+                            String.class, boolean.class, boolean.class, String.class, String.class);
+            constructor.setAccessible(true);
+            return constructor.newInstance("Fiji commands", commandName, OpType.UNKNOWN,
+                    "", false, true, commandName, "Fiji commands > " + commandName);
+        } catch (Exception e) {
+            throw new AssertionError("Unable to create legacy catalog entry for test", e);
+        }
     }
 
     private static final class RecordingMacroStore implements FilterParameterStage.MacroStore {

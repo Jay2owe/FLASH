@@ -1,5 +1,7 @@
 package flash.pipeline.ui.config;
 
+import flash.pipeline.help.SetupHelpCatalog;
+import flash.pipeline.help.SetupHelpTopic;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import ij.ImagePlus;
 import ij.ImageStack;
@@ -66,6 +68,27 @@ public class ConfigQcDialogTest {
         assertEquals("Display > Filter > Object Segmentation", dialog.stagePathTextForTest());
         assertEquals("Filter", dialog.activeStagePathTextForTest());
         assertTrue(dialog.activeStagePathHighlightedForTest());
+    }
+
+    @Test
+    public void headerHelpButtonTracksCurrentStageTopic() {
+        RecordingStage stage = new RecordingStage("Display Range");
+        stage.helpTopic = SetupHelpCatalog.DISPLAY_RANGE;
+        ConfigQcDialog dialog = ConfigQcDialog.createForTest(contextWithTwoImages(), Arrays.asList(stage));
+
+        assertSame(SetupHelpCatalog.DISPLAY_RANGE, dialog.currentHelpTopicForTest());
+        assertTrue(dialog.stageHelpButtonForTest().isVisible());
+        assertTrue(dialog.stageHelpButtonForTest().isEnabled());
+        assertEquals("About Display Range", dialog.stageHelpButtonForTest().getToolTipText());
+    }
+
+    @Test
+    public void headerHelpButtonHidesWhenStageHasNoTopic() {
+        RecordingStage stage = new RecordingStage("Untitled");
+        ConfigQcDialog dialog = ConfigQcDialog.createForTest(contextWithTwoImages(), Arrays.asList(stage));
+
+        assertTrue(dialog.currentHelpTopicForTest() == null);
+        assertFalse(dialog.stageHelpButtonForTest().isVisible());
     }
 
     @Test
@@ -302,6 +325,28 @@ public class ConfigQcDialogTest {
     }
 
     @Test
+    public void classicalMethodSelectionAdvancesToMergedClassicalStageOnly() {
+        RecordingMethodStore store = new RecordingMethodStore(SegmentationMethodStage.CLASSICAL);
+        SegmentationMethodStage methodStage = new SegmentationMethodStage(store);
+        RecordingStage classical = new MethodSpecificRecordingStage(
+                "Classical Segmentation", store, SegmentationMethodStage.CLASSICAL);
+        RecordingStage starDist = new MethodSpecificRecordingStage(
+                "StarDist", store, SegmentationMethodStage.STARDIST);
+        RecordingStage cellpose = new MethodSpecificRecordingStage(
+                "Cellpose", store, SegmentationMethodStage.CELLPOSE);
+        ConfigQcDialog dialog = ConfigQcDialog.createForTest(
+                contextWithTwoImages(),
+                Arrays.<ConfigQcStage>asList(methodStage, classical, starDist, cellpose));
+
+        dialog.lockInForTest();
+
+        assertEquals("Classical Segmentation", dialog.stageTextForTest());
+        assertEquals(1, classical.enterCount);
+        assertEquals(0, starDist.enterCount);
+        assertEquals(0, cellpose.enterCount);
+    }
+
+    @Test
     public void skipAndRestartDelegateToCurrentStage() {
         RecordingStage stage = new RecordingStage("Particle size");
         ConfigQcContext context = contextWithTwoImages();
@@ -520,6 +565,7 @@ public class ConfigQcDialogTest {
         private boolean previewDisplayControls = true;
         private boolean controlsCanExpand;
         private int preferredControlHeight;
+        private SetupHelpTopic helpTopic;
 
         RecordingStage(String title) {
             this.title = title;
@@ -531,6 +577,10 @@ public class ConfigQcDialogTest {
 
         @Override public boolean showPreviewDisplayControls() {
             return previewDisplayControls;
+        }
+
+        @Override public SetupHelpTopic helpTopic() {
+            return helpTopic;
         }
 
         @Override public boolean controlsCanExpand() {
@@ -566,6 +616,38 @@ public class ConfigQcDialogTest {
 
         @Override public void onLeave(ConfigQcContext context) {
             leaveCount++;
+        }
+    }
+
+    private static final class MethodSpecificRecordingStage extends RecordingStage {
+        private final RecordingMethodStore store;
+        private final String choice;
+
+        MethodSpecificRecordingStage(String title, RecordingMethodStore store, String choice) {
+            super(title);
+            this.store = store;
+            this.choice = choice;
+        }
+
+        @Override public boolean isApplicable(ConfigQcContext context) {
+            return choice.equals(store.getChoice());
+        }
+    }
+
+    private static final class RecordingMethodStore implements SegmentationMethodStage.MethodStore {
+        private String choice;
+
+        RecordingMethodStore(String choice) {
+            this.choice = choice;
+        }
+
+        @Override public String getChoice() {
+            return choice;
+        }
+
+        @Override public boolean selectChoice(String choice) {
+            this.choice = choice;
+            return true;
         }
     }
 

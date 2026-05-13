@@ -7,6 +7,8 @@ import flash.pipeline.bin.ChannelIdentities;
 import flash.pipeline.bin.ChannelIdentitiesIO;
 import flash.pipeline.analyses.wizard.IntensityPreset;
 import flash.pipeline.analyses.wizard.IntensityPresetIO;
+import flash.pipeline.analyses.wizard.IntensitySpatialConfig;
+import flash.pipeline.analyses.wizard.IntensitySpatialWizard;
 import flash.pipeline.analyses.wizard.IntensityWizard;
 import flash.pipeline.bin.BinField;
 import flash.pipeline.bin.BinSetupDispatcher;
@@ -21,13 +23,19 @@ import flash.pipeline.image.OrientationOps;
 import flash.pipeline.image.ParallelContext;
 import flash.pipeline.image.ThreadSafeMeasure;
 import flash.pipeline.io.BoundedImageLoader;
+import flash.pipeline.intensity.spatial.IntensitySpatialContext;
+import flash.pipeline.intensity.spatial.IntensitySpatialOutputKey;
+import flash.pipeline.intensity.spatial.IntensitySpatialOutputMode;
+import flash.pipeline.intensity.spatial.IntensitySpatialPairContext;
+import flash.pipeline.intensity.spatial.IntensitySpatialResult;
+import flash.pipeline.intensity.spatial.IntensitySpatialRunner;
+import flash.pipeline.io.CsvTableIO;
 import flash.pipeline.io.DeferredImageSupplier;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.FlashProjectLayout.AnalysisFolder;
 import flash.pipeline.io.ImageSourceDispatcher;
 import flash.pipeline.io.IoUtils;
 import flash.pipeline.io.SeriesMeta;
-import flash.pipeline.naming.ChannelFilenameCodec;
 import flash.pipeline.naming.ImageOrientationResolver;
 import flash.pipeline.naming.ImageNameParser;
 import flash.pipeline.naming.NameParts;
@@ -59,7 +67,12 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.EnumSet;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -91,6 +104,7 @@ public class IntensityAnalysisV2 implements Analysis {
     private boolean useDeconvolvedInput = true;
     private CLIConfig cliConfig = null;
     private int cliConfiguredMaskIndex1Based = -1;
+    private IntensitySpatialConfig intensitySpatialConfig = IntensitySpatialConfig.disabled();
 
     @Override
     public Set<BinField> requiredBinFields() {
@@ -103,6 +117,10 @@ public class IntensityAnalysisV2 implements Analysis {
     @Override
     public boolean benefitsFromRois() {
         return true;
+    }
+
+    IntensitySpatialConfig getIntensitySpatialConfigForTest() {
+        return intensitySpatialConfig;
     }
 
     @Override
@@ -259,6 +277,7 @@ public class IntensityAnalysisV2 implements Analysis {
             roiChannelChoice = channelNames[roiChannelIndex1Based - 1];
         }
         anyBinarize = anyTrue(binarization);
+        boolean runIntensitySpatial = intensitySpatialConfig != null && intensitySpatialConfig.isEnabled();
 
         int intensityStep = 0;
         while (!suppressDialogs && intensityStep >= 0) {
@@ -276,6 +295,7 @@ public class IntensityAnalysisV2 implements Analysis {
                 gd.addSubHeader("Analysis Options");
                 gd.addToggle("Use deconvolved stacks if available", useDeconvolvedInput);
                 gd.addToggle("ROI Analysis", anyRois);
+                gd.addToggle("Intensity-spatial analysis", runIntensitySpatial);
 
                 gd.addHeader("Filter Source (per channel)");
                 for (int i = 0; i < channelNames.length; i++) {
@@ -306,6 +326,7 @@ public class IntensityAnalysisV2 implements Analysis {
 
                 useDeconvolvedInput = gd.getNextBoolean();
                 roiAnalysis = anyRois && gd.getNextBoolean();
+                runIntensitySpatial = gd.getNextBoolean();
                 if (cliConfiguredMaskIndex1Based > 0 && cliConfiguredMaskIndex1Based <= channelNames.length) {
                     roiChannelIndex1Based = cliConfiguredMaskIndex1Based;
                     roiChannelChoice = channelNames[roiChannelIndex1Based - 1];
@@ -465,6 +486,34 @@ public class IntensityAnalysisV2 implements Analysis {
         if (suppressDialogs) {
             roiAnalysis = anyRois;
             anyBinarize = anyTrue(binarization);
+            int likelyStackDepth = likelyStackDepthForSpatialWizard(directory, cfg);
+            intensitySpatialConfig = intensitySpatialConfig.validateForChannelSetup(
+                    channelNames.length,
+                    binarization,
+                    likelyStackDepth > 0 ? Integer.valueOf(likelyStackDepth) : null,
+                    new IntensitySpatialConfig.LockLogger() {
+                        public void log(String message) {
+                            IJ.log("[FLASH] " + message);
+                        }
+                    });
+        } else {
+            if (runIntensitySpatial) {
+                IntensitySpatialWizard spatialWizard = IntensitySpatialWizard.analysisChooser(
+                        flash.pipeline.ui.wizard.WizardFlow.MainPanelBinding.NULL,
+                        channelNames,
+                        binarization,
+                        likelyStackDepthForSpatialWizard(directory, cfg),
+                        intensitySpatialConfig,
+                        false);
+                spatialWizard.run();
+                if (spatialWizard.wasCancelled()) {
+                    IJ.log("[FLASH] Intensity-spatial setup cancelled by user.");
+                    return;
+                }
+                intensitySpatialConfig = spatialWizard.deriveCurrentConfig();
+            } else {
+                intensitySpatialConfig = IntensitySpatialConfig.disabled();
+            }
         }
 
         // Log user selections
@@ -486,6 +535,13 @@ public class IntensityAnalysisV2 implements Analysis {
             for (int r = 0; r < roiZipNames.length; r++) {
                 IJ.log("  ROI set '" + roiZipNames[r] + "': " + (roiZipSelected[r] ? "selected" : "skipped"));
             }
+        }
+        IJ.log("  Intensity-spatial: " + intensitySpatialConfig.isEnabled());
+        if (intensitySpatialConfig.isEnabled()) {
+            IJ.log("  Intensity-spatial analyses: "
+                    + IntensitySpatialConfig.joinAnalysisTokens(intensitySpatialConfig.getEnabledAnalyses()));
+            IJ.log("  Intensity-spatial MIP: " + intensitySpatialConfig.isMipEnabled());
+            IJ.log("  Intensity-spatial native 3D: " + intensitySpatialConfig.isNative3dEnabled());
         }
 
         // Output directories
@@ -514,7 +570,12 @@ public class IntensityAnalysisV2 implements Analysis {
                         binDir, basicFilterMacro);
                 IntensityDetailsWriter.writePerChannel(analysisDetailsDir, binDir, channelNames[c], c + 1,
                         true, filterSourceLabel, actualMacroText, binarization[c], thresholds[c],
-                        roiAnalysis ? roiChannelChoice : null);
+                        roiAnalysis ? roiChannelChoice : null,
+                        intensitySpatialConfig,
+                        cfg.getZSliceConfig().summary(),
+                        new File(saveRoot, "Spatial Overlays").getAbsolutePath(),
+                        "Optional intensity-spatial dependencies are checked per family at run time.",
+                        "Failures are logged with image/channel/ROI/analysis context and written as NaN columns.");
                 IJ.log("  Analysis details written for: " + channelNames[c]);
             } catch (Exception e) {
                 IJ.log("  WARNING: failed writing intensity details for " + channelNames[c] + ": " + e.getMessage());
@@ -534,7 +595,9 @@ public class IntensityAnalysisV2 implements Analysis {
             qualityReport.addIntensityParams(channelNames, binarization, thresholds,
                     roiAnalysis, roiChannelChoice,
                     filterSummary.toString(),
-                    cfg.getZSliceConfig().summary());
+                    cfg.getZSliceConfig().summary(),
+                    intensitySpatialConfig,
+                    "Missing optional dependencies are logged and affected spatial metrics are written as NaN.");
         }
 
         // Preload all ROI sets directly from zip files — no RoiManager needed
@@ -579,6 +642,7 @@ public class IntensityAnalysisV2 implements Analysis {
         }
 
         IJ.log("Total images: " + totalImages);
+        int outputStackDepth = likelyStackDepthForSpatialWizard(directory, cfg);
         if (headless) hideAllImageWindows();
 
         // Strict mode: ensure each selected ROI set has exactly 2 ROIs per image
@@ -601,26 +665,18 @@ public class IntensityAnalysisV2 implements Analysis {
         }
 
         // Accumulate output tables (one per channel)
-        final ResultsTable[] totalTables = new ResultsTable[channelNames.length];
-        for (int c = 0; c < totalTables.length; c++) totalTables[c] = new ResultsTable();
-
-        // ── Skip-existing pre-scan: check output files BEFORE loading any pixels ──
-        if (skipExisting) {
-            boolean allCsvsExist = true;
-            for (int c = 0; c < channelNames.length; c++) {
-                if (!intensityOutputCsv(saveRoot, channelNames[c], roiAnalysis,
-                        roiChannelIndex1Based, channelNames).exists()) {
-                    allCsvsExist = false;
-                    break;
-                }
-            }
-            if (allCsvsExist) {
-                IJ.log("All intensity output CSVs already exist — skipping entire Intensity Analysis.");
-                IJ.showProgress(1.0);
-                IJ.showStatus("");
-                return;
-            }
+        final IntensityOutputPlan outputPlan = buildOutputPlan(saveRoot, channelNames,
+                roiAnalysis, roiChannelIndex1Based, intensitySpatialConfig,
+                outputStackDepth, skipExisting);
+        logOutputPlan(outputPlan);
+        if (skipExisting && outputPlan.allSelectedOutputsSkipped()) {
+            IJ.log("All selected intensity output CSVs already exist - skipping entire Intensity Analysis.");
+            IJ.showProgress(1.0);
+            IJ.showStatus("");
+            return;
         }
+
+        final IntensityOutputTables totalTables = outputPlan.newTables();
 
         long analysisStartTime = System.currentTimeMillis();
         IJ.log("__________________________________________________________");
@@ -653,27 +709,34 @@ public class IntensityAnalysisV2 implements Analysis {
             processImagesParallel(loader, directory, cfg, safeThreads, channelNames, binarization, thresholds,
                     roiAnalysis, roiZips, roiZipNames, roiZipSelected, roiChannelIndex1Based,
                     filterSources, binDir,
-                    basicFilterMacro, saveRoot, totalTables, analysisStartTime, preloadedRoiSets);
+                    basicFilterMacro, outputPlan, totalTables, analysisStartTime, preloadedRoiSets);
             compactLog = false;
         } else {
             compactLog = false;
             processImagesSequential(supplier, totalImages, directory, cfg, channelNames, binarization, thresholds,
                     roiAnalysis, roiZips, roiZipNames, roiZipSelected, roiChannelIndex1Based,
                     filterSources, binDir,
-                    basicFilterMacro, saveRoot, totalTables, analysisStartTime, preloadedRoiSets);
+                    basicFilterMacro, outputPlan, totalTables, analysisStartTime, preloadedRoiSets);
         }
 
-        // Export one CSV per channel
+        // Export selected CSVs.
         IJ.log("__________________________________________________________");
         IJ.log("Saving results...");
-        for (int c = 0; c < channelNames.length; c++) {
+        for (IntensitySpatialOutputKey key : outputPlan.selectedKeys()) {
+            if (outputPlan.isSkipped(key)) {
+                IJ.log("  Skipped existing: " + outputPlan.fileFor(key).getName());
+                continue;
+            }
             try {
-                File outCsv = intensityOutputCsv(saveRoot, channelNames[c], roiAnalysis,
-                        roiChannelIndex1Based, channelNames);
-                totalTables[c].save(outCsv.getAbsolutePath());
-                IJ.log("  Saved: " + outCsv.getName() + " (" + totalTables[c].size() + " rows)");
+                File outCsv = outputPlan.fileFor(key);
+                ResultsTable table = totalTables.table(key);
+                List<String> orderedColumns = buildOrderedIntensityColumns(key, table,
+                        channelNames, intensitySpatialConfig, binarization);
+                CsvTableIO.writeResultsTableCsv(outCsv, table, orderedColumns);
+                IJ.log("  Saved: " + outCsv.getName() + " (" + table.size() + " rows)");
             } catch (Exception e) {
-                IJ.log("  WARNING: failed saving intensity CSV for " + channelNames[c] + ": " + e.getMessage());
+                IJ.log("  WARNING: failed saving intensity CSV for "
+                        + key.channelName() + " " + key.mode() + ": " + e.getMessage());
             }
         }
 
@@ -705,8 +768,8 @@ public class IntensityAnalysisV2 implements Analysis {
             boolean roiAnalysis, List<File> roiZips, String[] roiZipNames,
             boolean[] roiZipSelected, int roiChannelIndex1Based,
             String[] filterSources, File binDir,
-            String basicFilterMacro, File saveRoot,
-            ResultsTable[] totalTables, long analysisStartTime, Roi[][] preloadedRoiSets
+            String basicFilterMacro, IntensityOutputPlan outputPlan,
+            IntensityOutputTables totalTables, long analysisStartTime, Roi[][] preloadedRoiSets
     ) {
         ExecutorService prefetcher = Executors.newSingleThreadExecutor();
         Future<ImagePlus> nextImage = null;
@@ -751,27 +814,6 @@ public class IntensityAnalysisV2 implements Analysis {
             ResolvedImageMetadata metadata = ImageOrientationResolver.resolve(
                     directory, imp.getTitle(), idx + 1);
             NameParts parts = metadata.toNameParts();
-
-            // Skip Existing check
-            if (skipExisting) {
-                boolean allExist = true;
-                for (int c = 0; c < channelNames.length; c++) {
-                    if (!intensityOutputCsv(saveRoot, channelNames[c], roiAnalysis,
-                            roiChannelIndex1Based, channelNames).exists()) {
-                        allExist = false;
-                        break;
-                    }
-                }
-                if (allExist) {
-                    IJ.log("__________________________________________________________");
-                    IJ.log("Image Stack " + (idx + 1) + "/" + totalImages + ": " + imp.getTitle());
-                    IJ.log("  Files exist, skipping...");
-                    imp.changes = false;
-                    imp.close();
-                    imp.flush();
-                    continue;
-                }
-            }
 
             long imageStartTime = verboseLogging ? System.currentTimeMillis() : 0;
 
@@ -819,7 +861,7 @@ public class IntensityAnalysisV2 implements Analysis {
                                 parts, chans, n,
                                 binarization, thresholds,
                                 channelNames, roiChannelIndex1Based,
-                                totalTables, idx + 1, roiZipNames[rSet],
+                                outputPlan, totalTables, idx + 1, roiZipNames[rSet],
                                 cfg, filterSources, binDir,
                                 basicFilterMacro, activeRoi);
                     }
@@ -828,7 +870,7 @@ public class IntensityAnalysisV2 implements Analysis {
                             parts, chans, n,
                             binarization, thresholds,
                             channelNames, -1,
-                            totalTables, idx + 1, null,
+                            outputPlan, totalTables, idx + 1, null,
                             cfg, filterSources, binDir,
                             basicFilterMacro, null);
                 }
@@ -876,8 +918,8 @@ public class IntensityAnalysisV2 implements Analysis {
             final boolean roiAnalysis, final List<File> roiZips, final String[] roiZipNames,
             final boolean[] roiZipSelected, final int roiChannelIndex1Based,
             final String[] filterSources, final File binDir,
-            final String basicFilterMacro, final File saveRoot,
-            final ResultsTable[] totalTables, final long analysisStartTime,
+            final String basicFilterMacro, final IntensityOutputPlan outputPlan,
+            final IntensityOutputTables totalTables, final long analysisStartTime,
             final Roi[][] preloadedRois
     ) {
         final int total = loader.totalToLoad();
@@ -924,23 +966,6 @@ public class IntensityAnalysisV2 implements Analysis {
                             IJ.log(workerTag + ": processing " + partLabel
                                     + " | " + chList.toString());
 
-                            // Skip Existing check
-                            if (skipExisting) {
-                                boolean allExist = true;
-                                for (int c = 0; c < channelNames.length; c++) {
-                                    if (!intensityOutputCsv(saveRoot, channelNames[c], roiAnalysis,
-                                            roiChannelIndex1Based, channelNames).exists()) {
-                                        allExist = false;
-                                        break;
-                                    }
-                                }
-                                if (allExist) {
-                                    IJ.log("[" + (idx + 1) + "/" + total + "] " + imp.getTitle() + " -- skipped (exists)");
-                                    completed.incrementAndGet();
-                                    continue;
-                                }
-                            }
-
                             long imageStartTime = System.currentTimeMillis();
 
                             if (!compactLog) {
@@ -954,8 +979,7 @@ public class IntensityAnalysisV2 implements Analysis {
                             int n = Math.min(chans.length, channelNames.length);
 
                             // Per-image local tables to collect results before merging
-                            ResultsTable[] localTables = new ResultsTable[channelNames.length];
-                            for (int c = 0; c < localTables.length; c++) localTables[c] = new ResultsTable();
+                            IntensityOutputTables localTables = outputPlan.newTables();
 
                             if (roiAnalysis) {
                                 for (int rSet = 0; rSet < roiZips.size(); rSet++) {
@@ -975,7 +999,7 @@ public class IntensityAnalysisV2 implements Analysis {
                                             parts, chans, n,
                                             binarization, thresholds,
                                             channelNames, roiChannelIndex1Based,
-                                            localTables, idx + 1, roiZipNames[rSet],
+                                            outputPlan, localTables, idx + 1, roiZipNames[rSet],
                                             cfg, filterSources, binDir,
                                             basicFilterMacro, activeRoi);
                                 }
@@ -984,32 +1008,14 @@ public class IntensityAnalysisV2 implements Analysis {
                                         parts, chans, n,
                                         binarization, thresholds,
                                         channelNames, -1,
-                                        localTables, idx + 1, null,
+                                        outputPlan, localTables, idx + 1, null,
                                         cfg, filterSources, binDir,
                                         basicFilterMacro, null);
                             }
 
                             // Merge local tables into master totalTables
                             synchronized (totalTables) {
-                                for (int c = 0; c < channelNames.length; c++) {
-                                    ResultsTable local = localTables[c];
-                                    ResultsTable master = totalTables[c];
-                                    for (int r = 0; r < local.size(); r++) {
-                                        master.incrementCounter();
-                                        int row = master.size() - 1;
-                                        String[] headings = local.getHeadings();
-                                        for (int h = 0; h < headings.length; h++) {
-                                            String heading = headings[h];
-                                            // Try string first for Animal Name
-                                            String sv = local.getStringValue(heading, r);
-                                            if (sv != null && !sv.isEmpty()) {
-                                                master.setValue(heading, row, sv);
-                                            } else {
-                                                master.setValue(heading, row, local.getValue(heading, r));
-                                            }
-                                        }
-                                    }
-                                }
+                                totalTables.mergeFrom(localTables);
                             }
 
                             int done = completed.incrementAndGet();
@@ -1077,7 +1083,8 @@ public class IntensityAnalysisV2 implements Analysis {
             String[] thresholds,
             String[] channelNames,
             int roiChannelIndex1Based,
-            ResultsTable[] totalTables,
+            IntensityOutputPlan outputPlan,
+            IntensityOutputTables totalTables,
             int scnIndex1Based,
             String roiSetName,
             final BinConfig cfg,
@@ -1135,15 +1142,30 @@ public class IntensityAnalysisV2 implements Analysis {
         int channelThreads = Math.min(channelCount, Math.max(1, parallelThreads));
 
         // Per-channel result holders (pre-allocated slots, one per channel — no contention)
-        final double[][] allSignalIntDen = new double[channelCount][];
-        final double[][] allAreaFrac = new double[channelCount][];
-        final double[][] allRawIntDen = new double[channelCount][];
+        final double[][] allIntDenFilteredFullRoi = new double[channelCount][];
+        final double[][] allAreaFractionFilteredFullRoi = new double[channelCount][];
+        final double[][] allIntDenUnfilteredFullRoi = new double[channelCount][];
+        final double[][] allIntDenBinarizedRawInMask = new double[channelCount][];
+        final double[][] allAreaFractionBinarized = new double[channelCount][];
+        final IntensitySpatialResult[][] allBaseSpatialResults = new IntensitySpatialResult[channelCount][];
+        final IntensitySpatialResult[] allMipSpatialResults = new IntensitySpatialResult[channelCount];
+        final IntensitySpatialResult[] allNativeSpatialResults = new IntensitySpatialResult[channelCount];
+        final ImagePlus[] allRawSpatialImages = new ImagePlus[channelCount];
+        final ImagePlus[] allBinarizedSpatialImages = new ImagePlus[channelCount];
+        final ImagePlus[] allBinarySpatialMasks = new ImagePlus[channelCount];
+
+        // scnIndex is folded into roiLabel (e.g. "SCN5") -- no separate SCN column.
+        String roiBase = roiSetName == null ? "" : roiSetName;
+        final String roiLabel = parts == null
+                ? (scnIndex1Based > 0 && !roiBase.matches(".*\\d$") ? roiBase + scnIndex1Based : roiBase)
+                : parts.analysisRegionLabel(roiBase, scnIndex1Based);
 
         // Capture effectively-final references for inner class access
         final ImagePlus finalMaskStack = maskStack;
         final Roi finalRoi = roi;
         final NameParts finalParts = parts;
         final boolean finalVerboseLogging = verboseLogging;
+        final String finalRoiLabel = roiLabel;
 
         if (channelThreads > 1) {
             // Parallel channel processing
@@ -1158,8 +1180,14 @@ public class IntensityAnalysisV2 implements Analysis {
                         processOneChannel(c, channelCount, chans, channelNames,
                                 binarization, thresholds,
                                 cfg, filterSources, binDir, basicFilterMacro,
-                                finalMaskStack, finalRoi, finalParts, finalVerboseLogging,
-                                allSignalIntDen, allAreaFrac, allRawIntDen);
+                                finalMaskStack, finalRoi, finalParts, finalRoiLabel,
+                                outputPlan, intensitySpatialConfig, finalVerboseLogging,
+                                allIntDenFilteredFullRoi, allAreaFractionFilteredFullRoi,
+                                allIntDenUnfilteredFullRoi, allIntDenBinarizedRawInMask,
+                                allAreaFractionBinarized,
+                                allBaseSpatialResults, allMipSpatialResults, allNativeSpatialResults,
+                                allRawSpatialImages, allBinarizedSpatialImages,
+                                allBinarySpatialMasks);
                     }
                 }));
             }
@@ -1179,35 +1207,58 @@ public class IntensityAnalysisV2 implements Analysis {
                 processOneChannel(c, channelCount, chans, channelNames,
                         binarization, thresholds,
                         cfg, filterSources, binDir, basicFilterMacro,
-                        finalMaskStack, finalRoi, finalParts, finalVerboseLogging,
-                        allSignalIntDen, allAreaFrac, allRawIntDen);
+                        finalMaskStack, finalRoi, finalParts, finalRoiLabel,
+                        outputPlan, intensitySpatialConfig, finalVerboseLogging,
+                        allIntDenFilteredFullRoi, allAreaFractionFilteredFullRoi,
+                        allIntDenUnfilteredFullRoi, allIntDenBinarizedRawInMask,
+                        allAreaFractionBinarized,
+                        allBaseSpatialResults, allMipSpatialResults, allNativeSpatialResults,
+                        allRawSpatialImages, allBinarizedSpatialImages,
+                        allBinarySpatialMasks);
             }
         }
 
-        // Compute ROI label matching ThreeDObjectAnalysis conventions so metadata
-        // columns are identical across analyses (Region, Hemisphere, ROI, Animal Name).
-        // scnIndex is folded into roiLabel (e.g. "SCN5") — no separate SCN column.
-        String roiBase = roiSetName == null ? "" : roiSetName;
-        String roiLabel = parts == null
-                ? (scnIndex1Based > 0 && !roiBase.matches(".*\\d$") ? roiBase + scnIndex1Based : roiBase)
-                : parts.analysisRegionLabel(roiBase, scnIndex1Based);
+        try {
+            measureCrossChannelSpatial(channelNames, channelCount, finalRoi, finalRoiLabel,
+                    finalParts, outputPlan, intensitySpatialConfig,
+                    allRawSpatialImages, allBinarizedSpatialImages, allBinarySpatialMasks,
+                    allBaseSpatialResults, allMipSpatialResults, allNativeSpatialResults);
+        } finally {
+            closeImages(allRawSpatialImages);
+            closeImages(allBinarizedSpatialImages);
+            closeImages(allBinarySpatialMasks);
+        }
 
         // Merge per-channel results into totalTables in order (single-threaded, no contention)
         for (int c = 0; c < channelCount; c++) {
-            if (allSignalIntDen[c] == null) continue; // channel failed
-            ResultsTable total = totalTables[c];
-            int len = allSignalIntDen[c].length;
-            for (int r = 0; r < len; r++) {
-                total.incrementCounter();
-                int row = total.size() - 1;
+            if (allIntDenFilteredFullRoi[c] == null) continue; // channel failed
+            IntensitySpatialOutputKey baseKey = outputPlan.baseKeyForChannel(channelNames[c]);
+            int len = allIntDenFilteredFullRoi[c].length;
+            if (outputPlan.shouldPopulate(baseKey)) {
+                ResultsTable total = totalTables.table(baseKey);
+                for (int r = 0; r < len; r++) {
+                    total.incrementCounter();
+                    int row = total.size() - 1;
 
-                total.setValue("Region", row, parts.csvRegion());
-                total.setValue("Hemisphere", row, parts.hemisphere);
-                total.setValue("ROI", row, roiLabel);
-                total.setValue("Animal Name", row, parts.animal);
-                writeMeasurementColumns(total, row, allSignalIntDen[c][r],
-                        allAreaFrac[c][r], allRawIntDen[c][r]);
+                    writeMetadataColumns(total, row, parts, roiLabel);
+                    writeMeasurementColumns(total, row,
+                            allIntDenFilteredFullRoi[c][r],
+                            allAreaFractionFilteredFullRoi[c][r],
+                            allIntDenUnfilteredFullRoi[c][r],
+                            binarization[c],
+                            allIntDenBinarizedRawInMask[c][r],
+                            allAreaFractionBinarized[c][r]);
+                    writeSpatialPlaceholderColumns(total, row, baseKey, channelNames,
+                            binarization, intensitySpatialConfig);
+                    writeSpatialResultColumns(total, row, allBaseSpatialResults[c], r);
+                }
             }
+            appendSpatialModeRow(outputPlan, totalTables, parts, roiLabel, channelNames[c],
+                    IntensitySpatialOutputMode.MIP, channelNames, binarization,
+                    intensitySpatialConfig, allMipSpatialResults[c]);
+            appendSpatialModeRow(outputPlan, totalTables, parts, roiLabel, channelNames[c],
+                    IntensitySpatialOutputMode.NATIVE_3D, channelNames, binarization,
+                    intensitySpatialConfig, allNativeSpatialResults[c]);
             if (!compactLog) IJ.log("    - Channel " + channelNames[c] + ": " + len + " rows merged to results table");
         }
 
@@ -1230,8 +1281,21 @@ public class IntensityAnalysisV2 implements Analysis {
             BinConfig cfg, String[] filterSources, File binDir,
             String basicFilterMacro,
             ImagePlus maskStack, Roi roi,
-            NameParts parts, boolean verbose,
-            double[][] outSignalIntDen, double[][] outAreaFrac, double[][] outRawIntDen
+            NameParts parts, String roiLabel,
+            IntensityOutputPlan outputPlan,
+            IntensitySpatialConfig spatialConfig,
+            boolean verbose,
+            double[][] outIntDenFilteredFullRoi,
+            double[][] outAreaFractionFilteredFullRoi,
+            double[][] outIntDenUnfilteredFullRoi,
+            double[][] outIntDenBinarizedRawInMask,
+            double[][] outAreaFractionBinarized,
+            IntensitySpatialResult[][] outBaseSpatialResults,
+            IntensitySpatialResult[] outMipSpatialResults,
+            IntensitySpatialResult[] outNativeSpatialResults,
+            ImagePlus[] outRawSpatialImages,
+            ImagePlus[] outBinarizedSpatialImages,
+            ImagePlus[] outBinarySpatialMasks
     ) {
         long chStart = verbose ? System.currentTimeMillis() : 0;
         if (!compactLog) IJ.log("  > Channel " + (c + 1) + "/" + n + ": " + channelNames[c]);
@@ -1266,11 +1330,11 @@ public class IntensityAnalysisV2 implements Analysis {
             if (!compactLog) IJ.log("    - Basic background and noise removal applied");
         }
 
-        ImagePlus ch = filtered;
-
         // Binary duplicate from already-filtered image (no need to re-filter)
         ImagePlus binary = ImageOps.duplicateThreadSafe(filtered);
         binary.setTitle(channelNames[c] + "_binary");
+        ImagePlus filteredMeasurement = filtered;
+        ImagePlus binarizedRawInMask = null;
 
         if (binarization[c]) {
             if (!compactLog) IJ.log("    - Binarization: applying threshold=" + thresholds[c]);
@@ -1287,11 +1351,8 @@ public class IntensityAnalysisV2 implements Analysis {
 
             ImagePlus and = ImageCalcOps.andStackThreadSafe(binary, raw);
             if (and != null) {
-                and.setTitle(channelNames[c]);
-                ch.changes = false;
-                ch.close();
-                ch.flush();
-                ch = and;
+                and.setTitle(channelNames[c] + "_binarized");
+                binarizedRawInMask = and;
                 if (!compactLog) IJ.log("    - Binarization AND applied with raw image");
             }
         } else {
@@ -1300,34 +1361,64 @@ public class IntensityAnalysisV2 implements Analysis {
 
         if (maskStack != null) {
             if (!compactLog) IJ.log("    - Applying ROI channel mask");
-            ImagePlus masked = applyRoiChannelMask(maskStack, ch);
-            if (masked != null) {
-                masked.setTitle(channelNames[c]);
-                ch.changes = false;
-                ch.close();
-                ch.flush();
-                ch = masked;
+            ImagePlus maskedFiltered = applyRoiChannelMask(maskStack, filteredMeasurement);
+            if (maskedFiltered != null) {
+                maskedFiltered.setTitle(channelNames[c] + "_filtered");
+                closeImage(filteredMeasurement);
+                filteredMeasurement = maskedFiltered;
+                if (binarizedRawInMask != null) {
+                    ImagePlus maskedBinarized = applyRoiChannelMask(maskStack, binarizedRawInMask);
+                    if (maskedBinarized != null) {
+                        maskedBinarized.setTitle(channelNames[c] + "_binarized");
+                        closeImage(binarizedRawInMask);
+                        binarizedRawInMask = maskedBinarized;
+                    }
+                }
                 if (!compactLog) IJ.log("    - ROI channel mask applied");
             }
         }
 
         // Thread-safe measurement using ThreadSafeMeasure
         Roi measureRoi = roi != null ? (Roi) roi.clone() : null;
-        ThreadSafeMeasure.SliceResult[] sliceResults = ThreadSafeMeasure.measureAllSlices(ch, raw, measureRoi);
-        double[] signalIntDen = new double[sliceResults.length];
-        double[] areaFrac = new double[sliceResults.length];
-        double[] rawIntDen = new double[sliceResults.length];
+        ThreadSafeMeasure.SliceResult[] sliceResults = ThreadSafeMeasure.measureAllSlices(
+                filteredMeasurement, raw, binarizedRawInMask, measureRoi);
+        double[] intDenFilteredFullRoi = new double[sliceResults.length];
+        double[] areaFractionFilteredFullRoi = new double[sliceResults.length];
+        double[] intDenUnfilteredFullRoi = new double[sliceResults.length];
+        double[] intDenBinarizedRawInMask = new double[sliceResults.length];
+        double[] areaFractionBinarized = new double[sliceResults.length];
         for (int sr = 0; sr < sliceResults.length; sr++) {
-            signalIntDen[sr] = sliceResults[sr].intDen;
-            areaFrac[sr] = sliceResults[sr].areaFraction;
-            rawIntDen[sr] = sliceResults[sr].rawIntDen;
+            intDenFilteredFullRoi[sr] = sliceResults[sr].intDenFilteredFullRoi;
+            areaFractionFilteredFullRoi[sr] = sliceResults[sr].areaFractionFilteredFullRoi;
+            intDenUnfilteredFullRoi[sr] = sliceResults[sr].intDenUnfilteredFullRoi;
+            intDenBinarizedRawInMask[sr] = sliceResults[sr].intDenBinarizedRawInMask;
+            areaFractionBinarized[sr] = sliceResults[sr].areaFractionBinarized;
         }
         if (!compactLog) IJ.log("    - Measured signal + raw: " + sliceResults.length + " slices");
 
         // Store results in pre-allocated array slots (no synchronization needed — one slot per channel)
-        outSignalIntDen[c] = signalIntDen;
-        outAreaFrac[c] = areaFrac;
-        outRawIntDen[c] = rawIntDen;
+        outIntDenFilteredFullRoi[c] = intDenFilteredFullRoi;
+        outAreaFractionFilteredFullRoi[c] = areaFractionFilteredFullRoi;
+        outIntDenUnfilteredFullRoi[c] = intDenUnfilteredFullRoi;
+        outIntDenBinarizedRawInMask[c] = intDenBinarizedRawInMask;
+        outAreaFractionBinarized[c] = areaFractionBinarized;
+
+        if (shouldRetainCrossChannelSpatialImages(outputPlan, spatialConfig, channelNames[c])) {
+            outRawSpatialImages[c] = ImageOps.duplicateThreadSafe(raw);
+            if (binarizedRawInMask != null) {
+                outBinarizedSpatialImages[c] = ImageOps.duplicateThreadSafe(binarizedRawInMask);
+            }
+            if (binarization[c]) {
+                outBinarySpatialMasks[c] = ImageOps.duplicateThreadSafe(binary);
+            }
+        }
+
+        ChannelSpatialResults spatialResults = measureChannelSpatial(
+                raw, binarizedRawInMask, channelNames[c], roi, roiLabel,
+                parts, outputPlan, spatialConfig);
+        outBaseSpatialResults[c] = spatialResults.baseResults;
+        outMipSpatialResults[c] = spatialResults.mipResult;
+        outNativeSpatialResults[c] = spatialResults.nativeResult;
 
         if (verbose) {
             IJ.log("    [DEBUG] Channel " + channelNames[c] + " processing time: "
@@ -1338,17 +1429,278 @@ public class IntensityAnalysisV2 implements Analysis {
         }
 
         // Clean up channel-local images
-        if (binary != null) {
-            binary.changes = false;
-            binary.close();
-            binary.flush();
+        closeImage(binary);
+        closeImage(raw);
+        closeImage(filteredMeasurement);
+        closeImage(binarizedRawInMask);
+    }
+
+    private void measureCrossChannelSpatial(String[] channelNames,
+                                            int channelCount,
+                                            Roi roi,
+                                            String roiLabel,
+                                            NameParts parts,
+                                            IntensityOutputPlan outputPlan,
+                                            IntensitySpatialConfig spatialConfig,
+                                            ImagePlus[] rawImages,
+                                            ImagePlus[] binarizedImages,
+                                            ImagePlus[] binaryMasks,
+                                            IntensitySpatialResult[][] baseResults,
+                                            IntensitySpatialResult[] mipResults,
+                                            IntensitySpatialResult[] nativeResults) {
+        boolean has2d = hasSelected2dCrossChannelAnalysis(spatialConfig);
+        boolean hasNative3d = hasSelectedNative3dCrossChannelAnalysis(spatialConfig);
+        if ((!has2d && !hasNative3d)
+                || channelNames == null || channelCount < 2
+                || rawImages == null) {
+            return;
         }
-        raw.changes = false;
-        raw.close();
-        raw.flush();
-        ch.changes = false;
-        ch.close();
-        ch.flush();
+
+        IntensitySpatialRunner runner = IntensitySpatialRunner.standard();
+        String imageId = parts == null ? "unknown" : parts.displayLabel();
+        for (int c = 0; c < channelCount; c++) {
+            ImagePlus sourceRaw = rawImages[c];
+            if (sourceRaw == null) continue;
+            String sourceName = channelNames[c];
+
+            IntensitySpatialOutputKey baseKey = outputPlan.baseKeyForChannel(sourceName);
+            boolean baseAllowed = outputPlan.shouldPopulate(baseKey)
+                    && baseKey != null
+                    && !baseKey.isChannelRoiMaskOutput();
+            if (has2d && baseAllowed) {
+                int slices = Math.max(1, sourceRaw.getStackSize());
+                baseResults[c] = ensureResultArray(baseResults[c], slices);
+                for (int p = 0; p < channelCount; p++) {
+                    if (p == c || rawImages[p] == null) continue;
+                    int pairSlices = Math.min(slices, Math.max(1, rawImages[p].getStackSize()));
+                    for (int s = 1; s <= pairSlices; s++) {
+                        IntensitySpatialResult result = runner.measurePair(new IntensitySpatialPairContext(
+                                spatialConfig,
+                                sourceRaw, imageAt(binarizedImages, c), imageAt(binaryMasks, c),
+                                rawImages[p], imageAt(binarizedImages, p), imageAt(binaryMasks, p),
+                                s, roi, IntensitySpatialOutputMode.BASE, imageId,
+                                sourceName, channelNames[p], roiLabel, null));
+                        baseResults[c][s - 1] = mergeSpatialResults(baseResults[c][s - 1], result);
+                    }
+                }
+            }
+
+            IntensitySpatialOutputKey mipKey = outputPlan.keyForChannelMode(sourceName,
+                    IntensitySpatialOutputMode.MIP);
+            if (has2d && outputPlan.shouldPopulate(mipKey)) {
+                for (int p = 0; p < channelCount; p++) {
+                    if (p == c || rawImages[p] == null) continue;
+                    ImagePlus sourceMip = null;
+                    ImagePlus sourceBinMip = null;
+                    ImagePlus sourceMaskMip = null;
+                    ImagePlus partnerMip = null;
+                    ImagePlus partnerBinMip = null;
+                    ImagePlus partnerMaskMip = null;
+                    try {
+                        sourceMip = IntensitySpatialRunner.maxIntensityProjection(
+                                sourceRaw, sourceName + "_raw_MIP");
+                        sourceBinMip = IntensitySpatialRunner.maxIntensityProjection(
+                                imageAt(binarizedImages, c), sourceName + "_binarized_MIP");
+                        sourceMaskMip = IntensitySpatialRunner.maxIntensityProjection(
+                                imageAt(binaryMasks, c), sourceName + "_mask_MIP");
+                        partnerMip = IntensitySpatialRunner.maxIntensityProjection(
+                                rawImages[p], channelNames[p] + "_raw_MIP");
+                        partnerBinMip = IntensitySpatialRunner.maxIntensityProjection(
+                                imageAt(binarizedImages, p), channelNames[p] + "_binarized_MIP");
+                        partnerMaskMip = IntensitySpatialRunner.maxIntensityProjection(
+                                imageAt(binaryMasks, p), channelNames[p] + "_mask_MIP");
+                        IntensitySpatialResult result = runner.measurePair(new IntensitySpatialPairContext(
+                                spatialConfig,
+                                sourceMip, sourceBinMip, sourceMaskMip,
+                                partnerMip, partnerBinMip, partnerMaskMip,
+                                1, roi, IntensitySpatialOutputMode.MIP, imageId,
+                                sourceName, channelNames[p], roiLabel, null));
+                        mipResults[c] = mergeSpatialResults(mipResults[c], result);
+                    } catch (RuntimeException ex) {
+                        IJ.log("[FLASH] Intensity-spatial cross-channel MIP skipped for "
+                                + imageId + " source " + sourceName
+                                + " partner " + channelNames[p] + ": " + ex.getMessage());
+                    } finally {
+                        closeImage(sourceMip);
+                        closeImage(sourceBinMip);
+                        closeImage(sourceMaskMip);
+                        closeImage(partnerMip);
+                        closeImage(partnerBinMip);
+                        closeImage(partnerMaskMip);
+                    }
+                }
+            }
+
+            IntensitySpatialOutputKey nativeKey = outputPlan.keyForChannelMode(sourceName,
+                    IntensitySpatialOutputMode.NATIVE_3D);
+            if (hasNative3d && outputPlan.shouldPopulate(nativeKey)) {
+                int sourceDepth = Math.max(1, sourceRaw.getStackSize());
+                if (sourceDepth < IntensitySpatialConfig.MIN_NATIVE_3D_SLICES) {
+                    IJ.log("[FLASH] Intensity-spatial native 3D skipped for "
+                            + imageId + " source " + sourceName
+                            + ": stack has fewer than "
+                            + IntensitySpatialConfig.MIN_NATIVE_3D_SLICES + " slices");
+                    continue;
+                }
+                for (int p = 0; p < channelCount; p++) {
+                    if (p == c || rawImages[p] == null) continue;
+                    int pairDepth = Math.min(sourceDepth, Math.max(1, rawImages[p].getStackSize()));
+                    if (pairDepth < IntensitySpatialConfig.MIN_NATIVE_3D_SLICES) {
+                        IJ.log("[FLASH] Intensity-spatial native 3D skipped for "
+                                + imageId + " source " + sourceName
+                                + " partner " + channelNames[p]
+                                + ": stack has fewer than "
+                                + IntensitySpatialConfig.MIN_NATIVE_3D_SLICES + " slices");
+                        continue;
+                    }
+                    IntensitySpatialResult result = runner.measurePair(new IntensitySpatialPairContext(
+                            spatialConfig,
+                            sourceRaw, imageAt(binarizedImages, c), imageAt(binaryMasks, c),
+                            rawImages[p], imageAt(binarizedImages, p), imageAt(binaryMasks, p),
+                            1, roi, IntensitySpatialOutputMode.NATIVE_3D, imageId,
+                            sourceName, channelNames[p], roiLabel, null));
+                    nativeResults[c] = mergeSpatialResults(nativeResults[c], result);
+                }
+            }
+        }
+    }
+
+    private static boolean shouldRetainCrossChannelSpatialImages(IntensityOutputPlan outputPlan,
+                                                                 IntensitySpatialConfig spatialConfig,
+                                                                 String channelName) {
+        boolean needs2d = hasSelected2dCrossChannelAnalysis(spatialConfig);
+        boolean needsNative3d = hasSelectedNative3dCrossChannelAnalysis(spatialConfig);
+        if ((!needs2d && !needsNative3d) || outputPlan == null) {
+            return false;
+        }
+        IntensitySpatialOutputKey baseKey = outputPlan.baseKeyForChannel(channelName);
+        if (baseKey == null || baseKey.isChannelRoiMaskOutput()) {
+            return false;
+        }
+        for (IntensitySpatialOutputKey selected : outputPlan.selectedKeys()) {
+            if (selected == null || selected.isChannelRoiMaskOutput()) continue;
+            if (needs2d
+                    && (selected.mode() == IntensitySpatialOutputMode.BASE
+                    || selected.mode() == IntensitySpatialOutputMode.MIP)
+                    && outputPlan.shouldPopulate(selected)) {
+                return true;
+            }
+            if (needsNative3d
+                    && selected.mode() == IntensitySpatialOutputMode.NATIVE_3D
+                    && outputPlan.shouldPopulate(selected)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasSelected2dCrossChannelAnalysis(IntensitySpatialConfig spatialConfig) {
+        if (spatialConfig == null || !spatialConfig.isEnabled()) return false;
+        Set<IntensitySpatialConfig.AnalysisKey> analyses = spatialConfig.getEnabledAnalyses();
+        return analyses != null
+                && (analyses.contains(IntensitySpatialConfig.AnalysisKey.CROSSMARK)
+                || analyses.contains(IntensitySpatialConfig.AnalysisKey.ENTROPY_MI)
+                || analyses.contains(IntensitySpatialConfig.AnalysisKey.DISTANCE_SHELL));
+    }
+
+    private static boolean hasSelectedNative3dCrossChannelAnalysis(IntensitySpatialConfig spatialConfig) {
+        if (spatialConfig == null || !spatialConfig.isEnabled()) return false;
+        Set<IntensitySpatialConfig.AnalysisKey> analyses = spatialConfig.getEnabledAnalyses();
+        return analyses != null
+                && (analyses.contains(IntensitySpatialConfig.AnalysisKey.CROSSMARK_3D)
+                || analyses.contains(IntensitySpatialConfig.AnalysisKey.DISTANCE_SHELL_3D));
+    }
+
+    private static IntensitySpatialResult[] ensureResultArray(IntensitySpatialResult[] results,
+                                                              int length) {
+        if (results == null) return new IntensitySpatialResult[length];
+        if (results.length >= length) return results;
+        return Arrays.copyOf(results, length);
+    }
+
+    private static IntensitySpatialResult mergeSpatialResults(IntensitySpatialResult existing,
+                                                              IntensitySpatialResult addition) {
+        if (addition == null || addition.isEmpty()) return existing;
+        return existing == null ? addition : existing.plus(addition);
+    }
+
+    private static ImagePlus imageAt(ImagePlus[] images, int index) {
+        return images == null || index < 0 || index >= images.length ? null : images[index];
+    }
+
+    private ChannelSpatialResults measureChannelSpatial(ImagePlus raw,
+                                                        ImagePlus binarizedRawInMask,
+                                                        String channelName,
+                                                        Roi roi,
+                                                        String roiLabel,
+                                                        NameParts parts,
+                                                        IntensityOutputPlan outputPlan,
+                                                        IntensitySpatialConfig spatialConfig) {
+        if (raw == null || spatialConfig == null || !spatialConfig.isEnabled()
+                || spatialConfig.getEnabledAnalyses().isEmpty()) {
+            return ChannelSpatialResults.empty();
+        }
+
+        IntensitySpatialRunner runner = IntensitySpatialRunner.standard();
+        String imageId = parts == null ? "unknown" : parts.displayLabel();
+        IntensitySpatialResult[] baseResults = null;
+        IntensitySpatialResult mipResult = null;
+        IntensitySpatialResult nativeResult = null;
+
+        IntensitySpatialOutputKey baseKey = outputPlan.baseKeyForChannel(channelName);
+        boolean baseAllowed = outputPlan.shouldPopulate(baseKey)
+                && baseKey != null
+                && !baseKey.isChannelRoiMaskOutput();
+        if (baseAllowed) {
+            int slices = Math.max(1, raw.getStackSize());
+            baseResults = new IntensitySpatialResult[slices];
+            for (int s = 1; s <= slices; s++) {
+                baseResults[s - 1] = runner.measure(new IntensitySpatialContext(
+                        spatialConfig, raw, binarizedRawInMask, s, roi,
+                        IntensitySpatialOutputMode.BASE, imageId, channelName, roiLabel, null));
+            }
+        }
+
+        IntensitySpatialOutputKey mipKey = outputPlan.keyForChannelMode(channelName,
+                IntensitySpatialOutputMode.MIP);
+        if (outputPlan.shouldPopulate(mipKey)) {
+            ImagePlus rawMip = null;
+            ImagePlus binarizedMip = null;
+            try {
+                rawMip = IntensitySpatialRunner.maxIntensityProjection(raw,
+                        channelName + "_raw_MIP");
+                if (binarizedRawInMask != null) {
+                    binarizedMip = IntensitySpatialRunner.maxIntensityProjection(
+                            binarizedRawInMask, channelName + "_binarized_MIP");
+                }
+                mipResult = runner.measure(new IntensitySpatialContext(
+                        spatialConfig, rawMip, binarizedMip, 1, roi,
+                        IntensitySpatialOutputMode.MIP, imageId, channelName, roiLabel, null));
+            } catch (RuntimeException ex) {
+                IJ.log("[FLASH] Intensity-spatial MIP skipped for " + imageId
+                        + " channel " + channelName + ": " + ex.getMessage());
+            } finally {
+                closeImage(rawMip);
+                closeImage(binarizedMip);
+            }
+        }
+
+        IntensitySpatialOutputKey nativeKey = outputPlan.keyForChannelMode(channelName,
+                IntensitySpatialOutputMode.NATIVE_3D);
+        if (outputPlan.shouldPopulate(nativeKey)) {
+            int stackDepth = Math.max(1, raw.getStackSize());
+            if (stackDepth < IntensitySpatialConfig.MIN_NATIVE_3D_SLICES) {
+                IJ.log("[FLASH] Intensity-spatial native 3D skipped for " + imageId
+                        + " channel " + channelName + ": stack has fewer than "
+                        + IntensitySpatialConfig.MIN_NATIVE_3D_SLICES + " slices");
+            } else {
+                nativeResult = runner.measure(new IntensitySpatialContext(
+                        spatialConfig, raw, binarizedRawInMask, 1, roi,
+                        IntensitySpatialOutputMode.NATIVE_3D, imageId, channelName, roiLabel, null));
+            }
+        }
+
+        return new ChannelSpatialResults(baseResults, mipResult, nativeResult);
     }
 
     /**
@@ -1405,15 +1757,690 @@ public class IntensityAnalysisV2 implements Analysis {
         return ImageCalcOps.andStackThreadSafe(maskStack, measurement);
     }
 
+    private static void closeImage(ImagePlus image) {
+        if (image == null) return;
+        image.changes = false;
+        image.close();
+        image.flush();
+    }
+
+    private static void closeImages(ImagePlus[] images) {
+        if (images == null) return;
+        for (int i = 0; i < images.length; i++) {
+            closeImage(images[i]);
+            images[i] = null;
+        }
+    }
+
+    private static void writeMetadataColumns(ResultsTable table, int row,
+                                             NameParts parts, String roiLabel) {
+        if (table == null) return;
+        table.setValue("Region", row, parts == null ? "" : parts.csvRegion());
+        table.setValue("Hemisphere", row, parts == null ? "" : parts.hemisphere);
+        table.setValue("ROI", row, roiLabel == null ? "" : roiLabel);
+        table.setValue("Animal Name", row, parts == null ? "" : parts.animal);
+    }
+
+    private void appendSpatialModeRow(IntensityOutputPlan outputPlan,
+                                      IntensityOutputTables totalTables,
+                                      NameParts parts,
+                                      String roiLabel,
+                                      String channelName,
+                                      IntensitySpatialOutputMode mode,
+                                      String[] channelNames,
+                                      boolean[] binarization,
+                                      IntensitySpatialConfig spatialConfig,
+                                      IntensitySpatialResult spatialResult) {
+        IntensitySpatialOutputKey key = outputPlan.keyForChannelMode(channelName, mode);
+        if (!outputPlan.shouldPopulate(key)) return;
+        if (mode == IntensitySpatialOutputMode.NATIVE_3D && spatialResult == null) return;
+        ResultsTable table = totalTables.table(key);
+        table.incrementCounter();
+        int row = table.size() - 1;
+        writeMetadataColumns(table, row, parts, roiLabel);
+        writeSpatialPlaceholderColumns(table, row, key, channelNames, binarization, spatialConfig);
+        writeSpatialResultColumns(table, row, spatialResult);
+    }
+
+    private static void writeSpatialResultColumns(ResultsTable table,
+                                                  int row,
+                                                  IntensitySpatialResult[] results,
+                                                  int resultIndex) {
+        if (results == null || resultIndex < 0 || resultIndex >= results.length) return;
+        writeSpatialResultColumns(table, row, results[resultIndex]);
+    }
+
+    private static void writeSpatialResultColumns(ResultsTable table,
+                                                  int row,
+                                                  IntensitySpatialResult result) {
+        if (result != null) {
+            result.writeTo(table, row);
+        }
+    }
+
+    private static void writeSpatialPlaceholderColumns(ResultsTable table,
+                                                       int row,
+                                                       IntensitySpatialOutputKey key,
+                                                       String[] channelNames,
+                                                       boolean[] binarization,
+                                                       IntensitySpatialConfig spatialConfig) {
+        for (String column : spatialColumnsForKey(key, channelNames, spatialConfig, binarization)) {
+            table.setValue(column, row, Double.NaN);
+        }
+    }
+
     static void writeMeasurementColumns(ResultsTable table,
                                         int row,
-                                        double signalIntDen,
+                                        double intDen,
                                         double areaFraction,
-                                        double rawIntDen) {
+                                        double intDenUnfiltered,
+                                        boolean binarized,
+                                        double intDenBinarized,
+                                        double areaFractionBinarized) {
         if (table == null) return;
-        table.setValue("IntDen", row, signalIntDen);
+        table.setValue("IntDen", row, intDen);
+        if (binarized) {
+            table.setValue("IntDen_binarized", row, intDenBinarized);
+        }
         table.setValue("%Area", row, areaFraction);
-        table.setValue("RawIntDen", row, rawIntDen);
+        if (binarized) {
+            table.setValue("%Area_binarized", row, areaFractionBinarized);
+        }
+        table.setValue("IntDen_Unfiltered", row, intDenUnfiltered);
+    }
+
+    static IntensityOutputPlan buildOutputPlan(File saveRoot,
+                                               String[] channelNames,
+                                               boolean roiAnalysis,
+                                               int roiChannelIndex1Based,
+                                               IntensitySpatialConfig spatialConfig,
+                                               int stackDepth,
+                                               boolean skipExisting) {
+        List<IntensitySpatialOutputKey> selected = new ArrayList<IntensitySpatialOutputKey>();
+        Map<IntensitySpatialOutputKey, File> files =
+                new LinkedHashMap<IntensitySpatialOutputKey, File>();
+        Map<String, IntensitySpatialOutputKey> baseByChannel =
+                new HashMap<String, IntensitySpatialOutputKey>();
+        Map<String, IntensitySpatialOutputKey> mipByChannel =
+                new HashMap<String, IntensitySpatialOutputKey>();
+        Map<String, IntensitySpatialOutputKey> nativeByChannel =
+                new HashMap<String, IntensitySpatialOutputKey>();
+
+        String roiMaskName = null;
+        if (roiAnalysis && roiChannelIndex1Based > 0
+                && channelNames != null
+                && roiChannelIndex1Based <= channelNames.length) {
+            roiMaskName = channelNames[roiChannelIndex1Based - 1];
+        }
+
+        for (String channelName : safeChannels(channelNames)) {
+            IntensitySpatialOutputKey base = roiMaskName == null
+                    ? IntensitySpatialOutputKey.base(channelName)
+                    : IntensitySpatialOutputKey.roiMaskBase(channelName, roiMaskName);
+            addOutputKey(selected, files, base, saveRoot);
+            baseByChannel.put(channelName, base);
+        }
+
+        boolean allowSpatialOutputs = roiMaskName == null
+                && spatialConfig != null
+                && spatialConfig.isEnabled()
+                && !spatialConfig.getEnabledAnalyses().isEmpty();
+        if (allowSpatialOutputs && shouldSelectMipOutput(spatialConfig, stackDepth)) {
+            for (String channelName : safeChannels(channelNames)) {
+                IntensitySpatialOutputKey key = IntensitySpatialOutputKey.of(
+                        channelName, IntensitySpatialOutputMode.MIP);
+                addOutputKey(selected, files, key, saveRoot);
+                mipByChannel.put(channelName, key);
+            }
+        }
+        if (allowSpatialOutputs && shouldSelectNative3dOutput(spatialConfig, stackDepth)) {
+            for (String channelName : safeChannels(channelNames)) {
+                IntensitySpatialOutputKey key = IntensitySpatialOutputKey.of(
+                        channelName, IntensitySpatialOutputMode.NATIVE_3D);
+                addOutputKey(selected, files, key, saveRoot);
+                nativeByChannel.put(channelName, key);
+            }
+        }
+
+        Set<IntensitySpatialOutputKey> skipped =
+                new HashSet<IntensitySpatialOutputKey>();
+        if (skipExisting) {
+            for (IntensitySpatialOutputKey key : selected) {
+                File file = files.get(key);
+                if (file != null && file.exists()) {
+                    skipped.add(key);
+                }
+            }
+        }
+
+        return new IntensityOutputPlan(selected, files, skipped,
+                baseByChannel, mipByChannel, nativeByChannel);
+    }
+
+    static List<String> buildOrderedIntensityColumns(IntensitySpatialOutputKey key,
+                                                     ResultsTable table,
+                                                     String[] channelNames,
+                                                     IntensitySpatialConfig spatialConfig,
+                                                     boolean[] binarization) {
+        LinkedHashSet<String> existing = new LinkedHashSet<String>();
+        if (table != null && table.getHeadings() != null) {
+            for (String heading : table.getHeadings()) {
+                if (heading != null && !heading.trim().isEmpty()) {
+                    existing.add(heading);
+                }
+            }
+        }
+
+        LinkedHashSet<String> ordered = new LinkedHashSet<String>();
+        ordered.add("Region");
+        ordered.add("Hemisphere");
+        ordered.add("ROI");
+        ordered.add("Animal Name");
+
+        if (key == null || key.mode() == IntensitySpatialOutputMode.BASE) {
+            ordered.add("IntDen");
+            if (existing.contains("IntDen_binarized") || isChannelBinarized(key, channelNames, binarization)) {
+                ordered.add("IntDen_binarized");
+            }
+            ordered.add("%Area");
+            if (existing.contains("%Area_binarized") || isChannelBinarized(key, channelNames, binarization)) {
+                ordered.add("%Area_binarized");
+            }
+            ordered.add("IntDen_Unfiltered");
+        }
+
+        ordered.addAll(spatialColumnsForKey(key, channelNames, spatialConfig, binarization));
+        ordered.addAll(existing);
+        return new ArrayList<String>(ordered);
+    }
+
+    static List<String> spatialColumnsForKey(IntensitySpatialOutputKey key,
+                                             String[] channelNames,
+                                             IntensitySpatialConfig spatialConfig,
+                                             boolean[] binarization) {
+        LinkedHashSet<String> columns = new LinkedHashSet<String>();
+        if (key == null || key.isChannelRoiMaskOutput()
+                || spatialConfig == null || !spatialConfig.isEnabled()) {
+            return new ArrayList<String>(columns);
+        }
+        Set<IntensitySpatialConfig.AnalysisKey> analyses = spatialConfig.getEnabledAnalyses();
+        if (analyses == null || analyses.isEmpty()) {
+            return new ArrayList<String>(columns);
+        }
+
+        for (IntensitySpatialConfig.AnalysisKey analysis : IntensitySpatialConfig.AnalysisKey.values()) {
+            if (!analyses.contains(analysis) || analysis.isCrossChannel()
+                    || !analysisBelongsInMode(analysis, key.mode())) {
+                continue;
+            }
+            LinkedHashSet<String> analysisColumns = new LinkedHashSet<String>();
+            addSameChannelColumns(analysisColumns, analysis, spatialConfig);
+            columns.addAll(analysisColumns);
+            if (isChannelBinarized(key, channelNames, binarization)
+                    && emitsBinarizedSameChannelColumns(analysis)) {
+                for (String column : analysisColumns) {
+                    columns.add(column + "_binarized");
+                }
+            }
+        }
+
+        for (String partner : safeChannels(channelNames)) {
+            if (partner.equals(key.channelName())) continue;
+            addCrossChannelColumnsForPartner(columns, analyses, key, partner,
+                    channelNames, spatialConfig, binarization);
+        }
+        return new ArrayList<String>(columns);
+    }
+
+    private static boolean shouldSelectMipOutput(IntensitySpatialConfig spatialConfig, int stackDepth) {
+        return spatialConfig != null
+                && spatialConfig.isMipEnabled()
+                && stackDepth != 1
+                && hasNonNativeSpatialAnalysis(spatialConfig);
+    }
+
+    private static boolean shouldSelectNative3dOutput(IntensitySpatialConfig spatialConfig, int stackDepth) {
+        return spatialConfig != null
+                && spatialConfig.isNative3dEnabled()
+                && (stackDepth < 0 || stackDepth >= IntensitySpatialConfig.MIN_NATIVE_3D_SLICES)
+                && hasNativeSpatialAnalysis(spatialConfig);
+    }
+
+    private static boolean hasNonNativeSpatialAnalysis(IntensitySpatialConfig spatialConfig) {
+        for (IntensitySpatialConfig.AnalysisKey key : spatialConfig.getEnabledAnalyses()) {
+            if (!key.isNative3d()) return true;
+        }
+        return false;
+    }
+
+    private static boolean hasNativeSpatialAnalysis(IntensitySpatialConfig spatialConfig) {
+        for (IntensitySpatialConfig.AnalysisKey key : spatialConfig.getEnabledAnalyses()) {
+            if (key.isNative3d()) return true;
+        }
+        return false;
+    }
+
+    private static boolean analysisBelongsInMode(IntensitySpatialConfig.AnalysisKey analysis,
+                                                 IntensitySpatialOutputMode mode) {
+        if (mode == IntensitySpatialOutputMode.NATIVE_3D) {
+            return analysis.isNative3d();
+        }
+        return !analysis.isNative3d();
+    }
+
+    private static boolean emitsBinarizedSameChannelColumns(IntensitySpatialConfig.AnalysisKey analysis) {
+        return analysis == IntensitySpatialConfig.AnalysisKey.PATCHINESS
+                || analysis == IntensitySpatialConfig.AnalysisKey.HOTSPOTSCAN
+                || analysis == IntensitySpatialConfig.AnalysisKey.GRANULARITY;
+    }
+
+    private static void addSameChannelColumns(LinkedHashSet<String> columns,
+                                              IntensitySpatialConfig.AnalysisKey analysis,
+                                              IntensitySpatialConfig spatialConfig) {
+        switch (analysis) {
+            case PATCHINESS:
+                for (double scale : spatialConfig.getTileScalesUm()) {
+                    columns.add("Intensity_PatchinessCV" + scaleToken(scale));
+                }
+                columns.add("Intensity_PatchinessGini");
+                for (double scale : spatialConfig.getTileScalesUm()) {
+                    columns.add("Intensity_Lacunarity" + scaleToken(scale));
+                }
+                break;
+            case HOTSPOTSCAN:
+                columns.add("Intensity_HotspotFraction");
+                columns.add("Intensity_HotspotMoransI");
+                columns.add("Intensity_HotspotP");
+                break;
+            case NULLMODEL:
+                columns.add("Intensity_NullModelP");
+                columns.add("Intensity_NullModelZ");
+                columns.add("Intensity_NullModelPass");
+                break;
+            case GRANULARITY:
+                columns.add("Intensity_GranularityPeak_um");
+                columns.add("Intensity_GranularityCentroid_um");
+                for (double scale : spatialConfig.getGranularityScalesUm()) {
+                    columns.add("Intensity_GranularityEnergy" + scaleToken(scale));
+                }
+                break;
+            case DEPTH_PROFILE:
+                addDepthColumns(columns, spatialConfig.getDepthBinWidthUm());
+                columns.add("Intensity_DepthSlope");
+                columns.add("Intensity_DepthPeak_um");
+                columns.add("Intensity_RimCoreRatio");
+                columns.add("Intensity_EdgeCouplingIdx");
+                break;
+            case ANISOTROPY:
+                columns.add("Intensity_AnisotropyCoherency");
+                columns.add("Intensity_AnisotropyAngle_deg");
+                columns.add("Intensity_AnisotropyEntropy");
+                break;
+            case PERIODICITY:
+                columns.add("Intensity_PeriodicityWavelength_um");
+                columns.add("Intensity_PeriodicityAngle_deg");
+                columns.add("Intensity_PeriodicityStripiness");
+                columns.add("Intensity_PeriodicityPeakPower");
+                break;
+            case GLCM:
+                columns.add("Intensity_GLCMContrast");
+                columns.add("Intensity_GLCMEntropy");
+                columns.add("Intensity_GLCMHomogeneity");
+                columns.add("Intensity_GLCMASM");
+                columns.add("Intensity_GLCMCorrelation");
+                break;
+            case TEXTURECLASS:
+                for (int i = 1; i <= spatialConfig.getTextureClassCount(); i++) {
+                    columns.add("Intensity_TextureClass" + i + "_fraction");
+                }
+                break;
+            case SCALEDIVERGENCE:
+                columns.add("Intensity_MultifractalDeltaAlpha");
+                columns.add("Intensity_MultifractalAsymmetry");
+                break;
+            case ANISOTROPY_3D:
+                columns.add("Intensity_Anisotropy3DCoherency");
+                columns.add("Intensity_Anisotropy3DAngle_deg");
+                columns.add("Intensity_Anisotropy3DEntropy");
+                break;
+            default:
+                break;
+        }
+    }
+
+    private static void addCrossChannelColumnsForPartner(LinkedHashSet<String> columns,
+                                                         Set<IntensitySpatialConfig.AnalysisKey> analyses,
+                                                         IntensitySpatialOutputKey key,
+                                                         String partner,
+                                                         String[] channelNames,
+                                                         IntensitySpatialConfig spatialConfig,
+                                                         boolean[] binarization) {
+        String source = key.channelName();
+        boolean sourceBinarized = isChannelBinarized(key, channelNames, binarization);
+        boolean partnerBinarized = isChannelNameBinarized(partner, channelNames, binarization);
+        if (key.mode() == IntensitySpatialOutputMode.NATIVE_3D) {
+            if (analyses.contains(IntensitySpatialConfig.AnalysisKey.CROSSMARK_3D)) {
+                addCrossChannel3dColumns(columns, IntensitySpatialConfig.AnalysisKey.CROSSMARK_3D,
+                        source, partner, sourceBinarized, partnerBinarized, spatialConfig);
+            }
+            if (analyses.contains(IntensitySpatialConfig.AnalysisKey.DISTANCE_SHELL_3D)
+                    && partnerBinarized) {
+                addCrossChannel3dColumns(columns, IntensitySpatialConfig.AnalysisKey.DISTANCE_SHELL_3D,
+                        source, partner, sourceBinarized, partnerBinarized, spatialConfig);
+            }
+            return;
+        }
+
+        if (analyses.contains(IntensitySpatialConfig.AnalysisKey.CROSSMARK)) {
+            addCrossMarkCoreColumns(columns, source, partner);
+        }
+        if (analyses.contains(IntensitySpatialConfig.AnalysisKey.ENTROPY_MI)) {
+            addEntropyMiColumns(columns, source, partner);
+        }
+        if (analyses.contains(IntensitySpatialConfig.AnalysisKey.CROSSMARK)) {
+            addCrossMarkColocColumns(columns, source, partner, sourceBinarized, partnerBinarized);
+        }
+        if (analyses.contains(IntensitySpatialConfig.AnalysisKey.DISTANCE_SHELL)
+                && partnerBinarized) {
+            addDistanceShellColumns(columns, source, partner, "DistShell",
+                    spatialConfig.getShellWidthUm(), spatialConfig.getShellCount());
+        }
+    }
+
+    private static void addCrossMarkCoreColumns(LinkedHashSet<String> columns,
+                                                String source,
+                                                String partner) {
+        String suffix = "_" + partner;
+        columns.add(source + "_Pearson" + suffix);
+        columns.add(source + "_CCFPeakDist_um" + suffix);
+        columns.add(source + "_CCFPeakAmp" + suffix);
+        columns.add(source + "_MarkCorrRadius_um" + suffix);
+        columns.add(source + "_MarkCorrStrength" + suffix);
+    }
+
+    private static void addEntropyMiColumns(LinkedHashSet<String> columns,
+                                            String source,
+                                            String partner) {
+        String suffix = "_" + partner;
+        columns.add(source + "_NMI" + suffix);
+        columns.add(source + "_MIPeakRadius_um" + suffix);
+        columns.add(source + "_MIPeakStrength" + suffix);
+    }
+
+    private static void addCrossMarkColocColumns(LinkedHashSet<String> columns,
+                                                 String source,
+                                                 String partner,
+                                                 boolean sourceBinarized,
+                                                 boolean partnerBinarized) {
+        String suffix = "_" + partner;
+        columns.add(source + "_CostesP" + suffix);
+        columns.add(source + "_CostesTa" + suffix);
+        columns.add(source + "_CostesTb" + suffix);
+        if (sourceBinarized && partnerBinarized) {
+            columns.add(source + "_CostesP" + suffix + "_binarized");
+        }
+        columns.add(source + "_MandersM1" + suffix);
+        columns.add(source + "_MandersM2" + suffix);
+        if (sourceBinarized && partnerBinarized) {
+            columns.add(source + "_MandersM1" + suffix + "_binarized");
+            columns.add(source + "_MandersM2" + suffix + "_binarized");
+        }
+    }
+
+    private static void addCrossChannel3dColumns(LinkedHashSet<String> columns,
+                                                  IntensitySpatialConfig.AnalysisKey analysis,
+                                                  String source,
+                                                  String partner,
+                                                  boolean sourceBinarized,
+                                                  boolean partnerBinarized,
+                                                  IntensitySpatialConfig spatialConfig) {
+        String suffix = "_" + partner;
+        switch (analysis) {
+            case CROSSMARK_3D:
+                columns.add(source + "_Pearson3D" + suffix);
+                columns.add(source + "_CostesP3D" + suffix);
+                columns.add(source + "_CostesTa3D" + suffix);
+                columns.add(source + "_CostesTb3D" + suffix);
+                if (sourceBinarized && partnerBinarized) {
+                    columns.add(source + "_CostesP3D" + suffix + "_binarized");
+                }
+                columns.add(source + "_MandersM13D" + suffix);
+                columns.add(source + "_MandersM23D" + suffix);
+                if (sourceBinarized && partnerBinarized) {
+                    columns.add(source + "_MandersM13D" + suffix + "_binarized");
+                    columns.add(source + "_MandersM23D" + suffix + "_binarized");
+                }
+                break;
+            case DISTANCE_SHELL_3D:
+                addDistanceShellColumns(columns, source, partner, "DistShell3D",
+                        spatialConfig.getShellWidthUm(), spatialConfig.getShellCount());
+                break;
+            default:
+                break;
+        }
+    }
+
+    private static void addDepthColumns(LinkedHashSet<String> columns, double binWidthUm) {
+        for (int i = 0; i < 3; i++) {
+            double start = i * binWidthUm;
+            double end = (i + 1) * binWidthUm;
+            columns.add("Intensity_DepthBin" + scaleToken(start) + "to" + scaleToken(end));
+        }
+    }
+
+    private static void addDistanceShellColumns(LinkedHashSet<String> columns,
+                                                String source,
+                                                String partner,
+                                                String token,
+                                                double shellWidthUm,
+                                                int shellCount) {
+        for (int i = 0; i < shellCount; i++) {
+            double start = i * shellWidthUm;
+            double end = (i + 1) * shellWidthUm;
+            columns.add(source + "_" + token + scaleToken(start) + "to"
+                    + scaleToken(end) + "_" + partner);
+        }
+        columns.add(source + "_" + token + "Slope_" + partner);
+        columns.add(source + "_" + token + "AUC_" + partner);
+    }
+
+    private static String scaleToken(double value) {
+        if (Double.compare(value, Math.rint(value)) == 0) {
+            return String.valueOf((long) value);
+        }
+        String text = String.format(Locale.ROOT, "%.6f", value);
+        while (text.contains(".") && text.endsWith("0")) {
+            text = text.substring(0, text.length() - 1);
+        }
+        if (text.endsWith(".")) {
+            text = text.substring(0, text.length() - 1);
+        }
+        return text.replace('.', 'p');
+    }
+
+    private static List<String> safeChannels(String[] channelNames) {
+        if (channelNames == null || channelNames.length == 0) {
+            return Collections.emptyList();
+        }
+        List<String> out = new ArrayList<String>();
+        for (String channelName : channelNames) {
+            if (channelName != null && !channelName.trim().isEmpty()) {
+                out.add(channelName);
+            }
+        }
+        return out;
+    }
+
+    private static boolean isChannelBinarized(IntensitySpatialOutputKey key,
+                                              String[] channelNames,
+                                              boolean[] binarization) {
+        if (key == null || channelNames == null || binarization == null) return false;
+        for (int i = 0; i < channelNames.length && i < binarization.length; i++) {
+            if (key.channelName().equals(channelNames[i])) {
+                return binarization[i];
+            }
+        }
+        return false;
+    }
+
+    private static boolean isChannelNameBinarized(String channelName,
+                                                  String[] channelNames,
+                                                  boolean[] binarization) {
+        if (channelName == null || channelNames == null || binarization == null) return false;
+        for (int i = 0; i < channelNames.length && i < binarization.length; i++) {
+            if (channelName.equals(channelNames[i])) {
+                return binarization[i];
+            }
+        }
+        return false;
+    }
+
+    private static void addOutputKey(List<IntensitySpatialOutputKey> selected,
+                                     Map<IntensitySpatialOutputKey, File> files,
+                                     IntensitySpatialOutputKey key,
+                                     File saveRoot) {
+        selected.add(key);
+        files.put(key, key.csvFile(saveRoot));
+    }
+
+    private static void logOutputPlan(IntensityOutputPlan outputPlan) {
+        IJ.log("Selected intensity outputs: " + outputPlan.selectedKeys().size());
+        for (IntensitySpatialOutputKey key : outputPlan.selectedKeys()) {
+            IJ.log("  - " + outputPlan.fileFor(key).getName()
+                    + (outputPlan.isSkipped(key) ? " (exists; read-only)" : ""));
+        }
+    }
+
+    private static final class ChannelSpatialResults {
+        final IntensitySpatialResult[] baseResults;
+        final IntensitySpatialResult mipResult;
+        final IntensitySpatialResult nativeResult;
+
+        ChannelSpatialResults(IntensitySpatialResult[] baseResults,
+                              IntensitySpatialResult mipResult,
+                              IntensitySpatialResult nativeResult) {
+            this.baseResults = baseResults;
+            this.mipResult = mipResult;
+            this.nativeResult = nativeResult;
+        }
+
+        static ChannelSpatialResults empty() {
+            return new ChannelSpatialResults(null, null, null);
+        }
+    }
+
+    static final class IntensityOutputPlan {
+        private final List<IntensitySpatialOutputKey> selectedKeys;
+        private final Map<IntensitySpatialOutputKey, File> files;
+        private final Set<IntensitySpatialOutputKey> skippedKeys;
+        private final Map<String, IntensitySpatialOutputKey> baseByChannel;
+        private final Map<String, IntensitySpatialOutputKey> mipByChannel;
+        private final Map<String, IntensitySpatialOutputKey> nativeByChannel;
+
+        private IntensityOutputPlan(List<IntensitySpatialOutputKey> selectedKeys,
+                                    Map<IntensitySpatialOutputKey, File> files,
+                                    Set<IntensitySpatialOutputKey> skippedKeys,
+                                    Map<String, IntensitySpatialOutputKey> baseByChannel,
+                                    Map<String, IntensitySpatialOutputKey> mipByChannel,
+                                    Map<String, IntensitySpatialOutputKey> nativeByChannel) {
+            this.selectedKeys = Collections.unmodifiableList(new ArrayList<IntensitySpatialOutputKey>(selectedKeys));
+            this.files = Collections.unmodifiableMap(new LinkedHashMap<IntensitySpatialOutputKey, File>(files));
+            this.skippedKeys = Collections.unmodifiableSet(new HashSet<IntensitySpatialOutputKey>(skippedKeys));
+            this.baseByChannel = Collections.unmodifiableMap(new HashMap<String, IntensitySpatialOutputKey>(baseByChannel));
+            this.mipByChannel = Collections.unmodifiableMap(new HashMap<String, IntensitySpatialOutputKey>(mipByChannel));
+            this.nativeByChannel = Collections.unmodifiableMap(new HashMap<String, IntensitySpatialOutputKey>(nativeByChannel));
+        }
+
+        List<IntensitySpatialOutputKey> selectedKeys() {
+            return selectedKeys;
+        }
+
+        Set<IntensitySpatialOutputKey> skippedKeys() {
+            return skippedKeys;
+        }
+
+        File fileFor(IntensitySpatialOutputKey key) {
+            return files.get(key);
+        }
+
+        boolean isSkipped(IntensitySpatialOutputKey key) {
+            return skippedKeys.contains(key);
+        }
+
+        boolean shouldPopulate(IntensitySpatialOutputKey key) {
+            return key != null && files.containsKey(key) && !skippedKeys.contains(key);
+        }
+
+        boolean allSelectedOutputsSkipped() {
+            return !selectedKeys.isEmpty() && skippedKeys.containsAll(selectedKeys);
+        }
+
+        IntensitySpatialOutputKey baseKeyForChannel(String channelName) {
+            return baseByChannel.get(channelName);
+        }
+
+        IntensitySpatialOutputKey keyForChannelMode(String channelName,
+                                                    IntensitySpatialOutputMode mode) {
+            if (mode == IntensitySpatialOutputMode.BASE) {
+                return baseByChannel.get(channelName);
+            }
+            if (mode == IntensitySpatialOutputMode.MIP) {
+                return mipByChannel.get(channelName);
+            }
+            if (mode == IntensitySpatialOutputMode.NATIVE_3D) {
+                return nativeByChannel.get(channelName);
+            }
+            return null;
+        }
+
+        IntensityOutputTables newTables() {
+            return new IntensityOutputTables(selectedKeys);
+        }
+    }
+
+    static final class IntensityOutputTables {
+        private final Map<IntensitySpatialOutputKey, ResultsTable> tables =
+                new LinkedHashMap<IntensitySpatialOutputKey, ResultsTable>();
+
+        private IntensityOutputTables(List<IntensitySpatialOutputKey> selectedKeys) {
+            for (IntensitySpatialOutputKey key : selectedKeys) {
+                tables.put(key, new ResultsTable());
+            }
+        }
+
+        ResultsTable table(IntensitySpatialOutputKey key) {
+            ResultsTable table = tables.get(key);
+            if (table == null) {
+                table = new ResultsTable();
+                tables.put(key, table);
+            }
+            return table;
+        }
+
+        void mergeFrom(IntensityOutputTables other) {
+            if (other == null) return;
+            for (Map.Entry<IntensitySpatialOutputKey, ResultsTable> entry : other.tables.entrySet()) {
+                copyRows(entry.getValue(), table(entry.getKey()));
+            }
+        }
+
+        private static void copyRows(ResultsTable source, ResultsTable destination) {
+            if (source == null || destination == null) return;
+            String[] headings = source.getHeadings();
+            if (headings == null) return;
+            for (int r = 0; r < source.size(); r++) {
+                destination.incrementCounter();
+                int row = destination.size() - 1;
+                for (String heading : headings) {
+                    String stringValue = source.getStringValue(heading, r);
+                    if (stringValue != null && !stringValue.isEmpty()) {
+                        destination.setValue(heading, row, stringValue);
+                    } else {
+                        destination.setValue(heading, row, source.getValue(heading, r));
+                    }
+                }
+            }
+        }
     }
 
     static File intensityWriteRoot(String directory) {
@@ -1427,21 +2454,58 @@ public class IntensityAnalysisV2 implements Analysis {
     static File intensityOutputCsv(File saveRoot, String channelName,
                                    boolean roiAnalysis, int roiChannelIndex1Based,
                                    String[] channelNames) {
-        String saveName = ChannelFilenameCodec.toSafe(channelName);
+        String roiMaskName = null;
         if (roiAnalysis && roiChannelIndex1Based > 0
                 && channelNames != null
                 && roiChannelIndex1Based <= channelNames.length) {
-            saveName = saveName + " in "
-                    + ChannelFilenameCodec.toSafe(channelNames[roiChannelIndex1Based - 1])
-                    + " ROI";
+            roiMaskName = channelNames[roiChannelIndex1Based - 1];
         }
-        return new File(saveRoot, saveName + ".csv");
+        return new IntensitySpatialOutputKey(channelName,
+                IntensitySpatialOutputMode.BASE, roiMaskName).csvFile(saveRoot);
+    }
+
+    static File intensityOutputCsv(File saveRoot, IntensitySpatialOutputKey key) {
+        return key.csvFile(saveRoot);
+    }
+
+    static File intensityOutputCsv(File saveRoot, String channelName,
+                                   IntensitySpatialOutputMode mode) {
+        return new IntensitySpatialOutputKey(channelName, mode, null).csvFile(saveRoot);
     }
 
     private static File activeConfigurationDir(String directory) {
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
         File existing = layout.existingConfigurationDir();
         return existing == null ? layout.configurationWriteDir() : existing;
+    }
+
+    private static int likelyStackDepthForSpatialWizard(String directory, BinConfig cfg) {
+        int configuredDepth = configuredZSliceDepth(cfg);
+        if (configuredDepth > 0) {
+            return configuredDepth;
+        }
+        try {
+            List<SeriesMeta> metas = ImageSourceDispatcher.readAllMetadata(directory);
+            if (metas != null && !metas.isEmpty()) {
+                return Math.max(1, metas.get(0).nSlices);
+            }
+        } catch (Exception e) {
+            IJ.log("[FLASH] Could not inspect z-stack depth for intensity-spatial setup: " + e.getMessage());
+        }
+        return -1;
+    }
+
+    private static int configuredZSliceDepth(BinConfig cfg) {
+        if (cfg == null || !cfg.usesZSliceSubset() || cfg.zSliceSelections.isEmpty()) {
+            return -1;
+        }
+        int minDepth = Integer.MAX_VALUE;
+        for (flash.pipeline.zslice.ZSliceSelection selection : cfg.zSliceSelections.values()) {
+            if (selection != null && selection.range != null) {
+                minDepth = Math.min(minDepth, selection.range.count());
+            }
+        }
+        return minDepth == Integer.MAX_VALUE ? -1 : minDepth;
     }
 
     private IntensityWizard.DerivedConfig loadIntensityPresetConfig(String directory,
@@ -1467,6 +2531,7 @@ public class IntensityAnalysisV2 implements Analysis {
                                                 boolean[] roiZipSelected,
                                                 String[] channelNames) {
         cliConfiguredMaskIndex1Based = -1;
+        intensitySpatialConfig = IntensitySpatialConfig.disabled();
         if (cliConfig == null || cliConfig.getIntensity() == null || !cliConfig.getIntensity().hasConfiguration()) {
             return;
         }
@@ -1480,6 +2545,14 @@ public class IntensityAnalysisV2 implements Analysis {
                     Collections.<String, Object>emptyMap(), roiSetNames);
         }
         applyCliIntensityOverrides(derived, intensity);
+        derived.spatialConfig = intensity.mergeSpatialConfig(derived.spatialConfig,
+                derived.binarization.length, derived.binarization,
+                new IntensitySpatialConfig.LockLogger() {
+                    public void log(String message) {
+                        IJ.log("[CLI] " + message);
+                    }
+                });
+        intensitySpatialConfig = derived.spatialConfig;
         applyIntensityDerivedConfig(derived, binarization,
                 thresholds, roiZipSelected, channelNames);
         cliConfiguredMaskIndex1Based = derived.maskChannelIndex + 1;

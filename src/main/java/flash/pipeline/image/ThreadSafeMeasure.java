@@ -24,69 +24,86 @@ public final class ThreadSafeMeasure {
 
     /** Result for a single slice measurement. */
     public static final class SliceResult {
-        public final double intDen;
-        public final double areaFraction;
-        public final double rawIntDen;
+        public final double intDenFilteredFullRoi;
+        public final double areaFractionFilteredFullRoi;
+        public final double intDenUnfilteredFullRoi;
+        public final double intDenBinarizedRawInMask;
+        public final double areaFractionBinarized;
+        public final boolean hasBinarizedMeasurement;
 
-        public SliceResult(double intDen, double areaFraction, double rawIntDen) {
-            this.intDen = intDen;
-            this.areaFraction = areaFraction;
-            this.rawIntDen = rawIntDen;
+        public SliceResult(double intDenFilteredFullRoi,
+                           double areaFractionFilteredFullRoi,
+                           double intDenUnfilteredFullRoi,
+                           double intDenBinarizedRawInMask,
+                           double areaFractionBinarized,
+                           boolean hasBinarizedMeasurement) {
+            this.intDenFilteredFullRoi = intDenFilteredFullRoi;
+            this.areaFractionFilteredFullRoi = areaFractionFilteredFullRoi;
+            this.intDenUnfilteredFullRoi = intDenUnfilteredFullRoi;
+            this.intDenBinarizedRawInMask = intDenBinarizedRawInMask;
+            this.areaFractionBinarized = areaFractionBinarized;
+            this.hasBinarizedMeasurement = hasBinarizedMeasurement;
         }
     }
 
     /**
-     * Measures IntDen and %Area on the filtered/signal channel, plus raw IntDen
-     * on the raw channel, for a single slice.
+     * Measures raw-first intensity values for a single slice.
      *
-     * @param signalImp  filtered (possibly binarized) channel image
-     * @param rawImp     raw (unfiltered) channel image
-     * @param slice      1-based slice index
-     * @param roi        optional ROI to restrict measurement (may be null)
+     * @param filteredImp              filtered full-ROI channel image
+     * @param rawImp                   raw (unfiltered) channel image
+     * @param binarizedRawInMaskImp    optional raw image after filter-threshold mask
+     * @param slice                    1-based slice index
+     * @param roi                      optional ROI to restrict measurement (may be null)
      * @return measurement result
      */
-    public static SliceResult measureSlice(ImagePlus signalImp, ImagePlus rawImp, int slice, Roi roi) {
-        // Signal channel: IntDen + %Area
-        ImageProcessor sigIp = signalImp.getStack().getProcessor(slice);
-        if (roi != null) sigIp.setRoi(roi);
-        int measurements = ij.measure.Measurements.INTEGRATED_DENSITY | ij.measure.Measurements.AREA_FRACTION;
-        Calibration sigCal = signalImp.getCalibration();
-        ImageStatistics sigStats = ImageStatistics.getStatistics(sigIp, measurements, sigCal);
-        double intDen = sigStats.area > 0 ? sigStats.mean * sigStats.area : 0.0;
-        double areaFraction = sigStats.areaFraction;
+    public static SliceResult measureSlice(ImagePlus filteredImp,
+                                           ImagePlus rawImp,
+                                           ImagePlus binarizedRawInMaskImp,
+                                           int slice,
+                                           Roi roi) {
+        IntegratedAreaResult filtered = measureIntegratedDensityAndAreaFraction(filteredImp, slice, roi);
 
-        // Raw channel: IntDen only
-        double rawIntDen = 0;
+        double intDenUnfiltered = 0.0;
         if (rawImp != null) {
-            ImageProcessor rawIp = rawImp.getStack().getProcessor(slice);
-            if (roi != null) rawIp.setRoi(roi);
-            int rawMeas = ij.measure.Measurements.INTEGRATED_DENSITY;
-            Calibration rawCal = rawImp.getCalibration();
-            ImageStatistics rawStats = ImageStatistics.getStatistics(rawIp, rawMeas, rawCal);
-            rawIntDen = rawStats.area > 0 ? rawStats.mean * rawStats.area : 0.0;
+            intDenUnfiltered = measureIntegratedDensity(rawImp, slice, roi);
         }
 
-        return new SliceResult(intDen, areaFraction, rawIntDen);
+        boolean hasBinarizedMeasurement = binarizedRawInMaskImp != null;
+        double intDenBinarized = Double.NaN;
+        double areaFractionBinarized = Double.NaN;
+        if (hasBinarizedMeasurement) {
+            IntegratedAreaResult binarized =
+                    measureIntegratedDensityAndAreaFraction(binarizedRawInMaskImp, slice, roi);
+            intDenBinarized = binarized.intDen;
+            areaFractionBinarized = binarized.areaFraction;
+        }
+
+        return new SliceResult(filtered.intDen, filtered.areaFraction, intDenUnfiltered,
+                intDenBinarized, areaFractionBinarized, hasBinarizedMeasurement);
     }
 
     /**
      * Measures all slices and returns arrays of results.
      *
-     * @param signalImp  filtered channel
-     * @param rawImp     raw channel
-     * @param roi        optional ROI (may be null)
+     * @param filteredImp            filtered full-ROI channel
+     * @param rawImp                 raw channel
+     * @param binarizedRawInMaskImp  optional raw image after filter-threshold mask
+     * @param roi                    optional ROI (may be null)
      * @return array of SliceResult, one per slice
      */
     /** Minimum number of slices to use parallel measurement. */
     private static final int PARALLEL_THRESHOLD = 4;
 
-    public static SliceResult[] measureAllSlices(ImagePlus signalImp, ImagePlus rawImp, Roi roi) {
-        int nSlices = signalImp.getNSlices();
+    public static SliceResult[] measureAllSlices(ImagePlus filteredImp,
+                                                 ImagePlus rawImp,
+                                                 ImagePlus binarizedRawInMaskImp,
+                                                 Roi roi) {
+        int nSlices = filteredImp.getNSlices();
         SliceResult[] results = new SliceResult[nSlices];
 
         if (nSlices < PARALLEL_THRESHOLD) {
             for (int s = 1; s <= nSlices; s++) {
-                results[s - 1] = measureSlice(signalImp, rawImp, s, roi);
+                results[s - 1] = measureSlice(filteredImp, rawImp, binarizedRawInMaskImp, s, roi);
             }
             return results;
         }
@@ -101,7 +118,8 @@ public final class ThreadSafeMeasure {
                 futures.add(exec.submit(new Runnable() {
                     @Override
                     public void run() {
-                        results[slice - 1] = measureSlice(signalImp, rawImp, slice, roiClone);
+                        results[slice - 1] = measureSlice(filteredImp, rawImp,
+                                binarizedRawInMaskImp, slice, roiClone);
                     }
                 }));
             }
@@ -116,5 +134,36 @@ public final class ThreadSafeMeasure {
             exec.shutdown();
         }
         return results;
+    }
+
+    private static IntegratedAreaResult measureIntegratedDensityAndAreaFraction(
+            ImagePlus imp, int slice, Roi roi) {
+        ImageProcessor ip = imp.getStack().getProcessor(slice);
+        if (roi != null) ip.setRoi(roi);
+        int measurements = ij.measure.Measurements.INTEGRATED_DENSITY
+                | ij.measure.Measurements.AREA_FRACTION;
+        Calibration cal = imp.getCalibration();
+        ImageStatistics stats = ImageStatistics.getStatistics(ip, measurements, cal);
+        double intDen = stats.area > 0 ? stats.mean * stats.area : 0.0;
+        return new IntegratedAreaResult(intDen, stats.areaFraction);
+    }
+
+    private static double measureIntegratedDensity(ImagePlus imp, int slice, Roi roi) {
+        ImageProcessor ip = imp.getStack().getProcessor(slice);
+        if (roi != null) ip.setRoi(roi);
+        int measurements = ij.measure.Measurements.INTEGRATED_DENSITY;
+        Calibration cal = imp.getCalibration();
+        ImageStatistics stats = ImageStatistics.getStatistics(ip, measurements, cal);
+        return stats.area > 0 ? stats.mean * stats.area : 0.0;
+    }
+
+    private static final class IntegratedAreaResult {
+        final double intDen;
+        final double areaFraction;
+
+        IntegratedAreaResult(double intDen, double areaFraction) {
+            this.intDen = intDen;
+            this.areaFraction = areaFraction;
+        }
     }
 }

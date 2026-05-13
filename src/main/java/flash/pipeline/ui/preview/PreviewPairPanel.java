@@ -80,6 +80,9 @@ public final class PreviewPairPanel extends JPanel {
     private ImagePlus largePreviewFirstImage;
     private ImagePlus largePreviewSecondImage;
     private ImagePlus largePreviewThirdImage;
+    private ImagePlus largePreviewOriginalSourceImage;
+    private ImagePlus largePreviewFilteredSourceImage;
+    private SourceMode largePreviewSourceMode = SourceMode.RAW;
     private ImagePlus generatedObjectOverlayImage;
     private String channelLutName = "Grays";
     private PreviewDisplaySettings displaySettings = PreviewDisplaySettings.defaultFor(channelLutName);
@@ -179,6 +182,7 @@ public final class PreviewPairPanel extends JPanel {
         largePreviewFirstImage = null;
         largePreviewSecondImage = null;
         largePreviewThirdImage = null;
+        clearLargePreviewSourceChoiceFields();
         displayControlImage = null;
         displaySettingsByImage.clear();
         displayRangeInitialized = false;
@@ -254,14 +258,50 @@ public final class PreviewPairPanel extends JPanel {
         updateLargeImages();
     }
 
+    public void setLargePreviewSourceChoices(ImagePlus originalSource, ImagePlus filteredSource) {
+        rememberCurrentDisplaySettings();
+        largePreviewOriginalSourceImage = originalSource;
+        largePreviewFilteredSourceImage = filteredSource;
+        largePreviewSourceMode = availableLargePreviewSourceMode(largePreviewSourceMode);
+        updateObjectOverlayControls();
+        applyDisplaySettings();
+        applyCurrentZ(currentZ);
+        updateLargeImages();
+    }
+
+    public void clearLargePreviewSourceChoices() {
+        rememberCurrentDisplaySettings();
+        forgetDisplaySettings(largePreviewOriginalSourceImage);
+        forgetDisplaySettings(largePreviewFilteredSourceImage);
+        clearLargePreviewSourceChoiceFields();
+        updateObjectOverlayControls();
+        applyDisplaySettings();
+        applyCurrentZ(currentZ);
+        updateLargeImages();
+    }
+
+    public void setLargePreviewSourceMode(SourceMode mode) {
+        SourceMode next = availableLargePreviewSourceMode(
+                mode == SourceMode.FILTERED ? SourceMode.FILTERED : SourceMode.RAW);
+        if (largePreviewSourceMode == next) return;
+        rememberCurrentDisplaySettings();
+        largePreviewSourceMode = next;
+        applyDisplaySettings();
+        applyCurrentZ(currentZ);
+        updateLargeImages();
+    }
+
     public void clearLargePreviewImages() {
         forgetDisplaySettings(largePreviewFirstImage);
         forgetDisplaySettings(largePreviewSecondImage);
         forgetDisplaySettings(largePreviewThirdImage);
+        forgetDisplaySettings(largePreviewOriginalSourceImage);
+        forgetDisplaySettings(largePreviewFilteredSourceImage);
         usingCustomLargePreviewImages = false;
         largePreviewFirstImage = null;
         largePreviewSecondImage = null;
         largePreviewThirdImage = null;
+        clearLargePreviewSourceChoiceFields();
         updateObjectOverlayControls();
         updateAdjustedPreviewImage();
         applyDisplaySettings();
@@ -446,6 +486,14 @@ public final class PreviewPairPanel extends JPanel {
     int largePreviewImageCountForTest() {
         if (!usingCustomLargePreviewImages) return 2;
         return largePreviewThirdImage == null ? 2 : 3;
+    }
+
+    ImagePlus largePreviewFirstImageForTest() {
+        return effectiveLargePreviewFirstImage();
+    }
+
+    SourceMode largePreviewSourceModeForTest() {
+        return availableLargePreviewSourceMode(largePreviewSourceMode);
     }
 
     void setDisplayRangeForTest(double min, double max) {
@@ -832,6 +880,11 @@ public final class PreviewPairPanel extends JPanel {
                 applyCurrentZ(zSlice);
             }
         });
+        largePreviewDialog.setSourceChoiceListener(new LargePreviewDialog.SourceChoiceListener() {
+            @Override public void sourceChoiceChanged(SourceMode mode) {
+                setLargePreviewSourceMode(mode);
+            }
+        });
     }
 
     private void applyCurrentZ(int requestedZ) {
@@ -883,8 +936,9 @@ public final class PreviewPairPanel extends JPanel {
             hasImage = true;
         }
         if (usingCustomLargePreviewImages) {
-            if (largePreviewFirstImage != null) {
-                int count = effectiveSliceCount(largePreviewFirstImage);
+            ImagePlus firstImage = effectiveLargePreviewFirstImage();
+            if (firstImage != null) {
+                int count = effectiveSliceCount(firstImage);
                 sharedMax = hasImage ? Math.min(sharedMax, count) : count;
                 hasImage = true;
             }
@@ -922,12 +976,23 @@ public final class PreviewPairPanel extends JPanel {
     private void updateLargeImages() {
         if (largePreviewDialog == null) return;
         if (usingCustomLargePreviewImages) {
+            if (hasLargePreviewSourceChoices()) {
+                largePreviewDialog.setSourceChoices(
+                        largePreviewOriginalSourceImage,
+                        displaySettingsForImage(largePreviewOriginalSourceImage),
+                        largePreviewFilteredSourceImage,
+                        displaySettingsForImage(largePreviewFilteredSourceImage),
+                        availableLargePreviewSourceMode(largePreviewSourceMode));
+            } else {
+                largePreviewDialog.clearSourceChoices();
+            }
             largePreviewDialog.setImages(
-                    largePreviewFirstImage,
+                    effectiveLargePreviewFirstImage(),
                     largePreviewSecondImage,
                     largePreviewThirdImage,
                     currentZ);
         } else {
+            largePreviewDialog.clearSourceChoices();
             largePreviewDialog.setImages(originalImage, adjustedImage, currentZ);
         }
         largePreviewDialog.setAdjustedStatusText(adjustedPreview.statusTextForTest());
@@ -985,6 +1050,10 @@ public final class PreviewPairPanel extends JPanel {
         boolean raw = sourceToggleVisible
                 ? sourceMode == SourceMode.RAW
                 : selected != null && "Raw image".equals(selected.toString());
+        if (hasLargePreviewSourceChoices()) {
+            ImagePlus source = largePreviewSourceImage(raw ? SourceMode.RAW : SourceMode.FILTERED);
+            if (source != null) return source;
+        }
         ImagePlus preferred = raw ? largePreviewFirstImage : largePreviewSecondImage;
         if (preferred != null) return preferred;
         return raw ? largePreviewSecondImage : largePreviewFirstImage;
@@ -1164,7 +1233,7 @@ public final class PreviewPairPanel extends JPanel {
 
     private PreviewDisplaySettings largeFirstDisplaySettings() {
         return usingCustomLargePreviewImages
-                ? displaySettingsForImage(largePreviewFirstImage)
+                ? displaySettingsForImage(effectiveLargePreviewFirstImage())
                 : displaySettingsForImage(originalImage);
     }
 
@@ -1176,7 +1245,51 @@ public final class PreviewPairPanel extends JPanel {
 
     private boolean roleAwareDisplaySettings() {
         return usingCustomLargePreviewImages
-                && (largePreviewFirstImage != null || largePreviewSecondImage != null);
+                && (effectiveLargePreviewFirstImage() != null || largePreviewSecondImage != null);
+    }
+
+    private ImagePlus effectiveLargePreviewFirstImage() {
+        if (hasLargePreviewSourceChoices()) {
+            ImagePlus source = largePreviewSourceImage(largePreviewSourceMode);
+            if (source != null) return source;
+        }
+        return largePreviewFirstImage;
+    }
+
+    private ImagePlus largePreviewSourceImage(SourceMode mode) {
+        SourceMode safeMode = mode == SourceMode.FILTERED ? SourceMode.FILTERED : SourceMode.RAW;
+        ImagePlus preferred = safeMode == SourceMode.FILTERED
+                ? largePreviewFilteredSourceImage
+                : largePreviewOriginalSourceImage;
+        if (preferred != null) return preferred;
+        return safeMode == SourceMode.FILTERED
+                ? largePreviewOriginalSourceImage
+                : largePreviewFilteredSourceImage;
+    }
+
+    private SourceMode availableLargePreviewSourceMode(SourceMode requestedMode) {
+        SourceMode safeMode = requestedMode == SourceMode.FILTERED
+                ? SourceMode.FILTERED
+                : SourceMode.RAW;
+        if (safeMode == SourceMode.FILTERED && largePreviewFilteredSourceImage != null) {
+            return SourceMode.FILTERED;
+        }
+        if (safeMode == SourceMode.RAW && largePreviewOriginalSourceImage != null) {
+            return SourceMode.RAW;
+        }
+        if (largePreviewOriginalSourceImage != null) return SourceMode.RAW;
+        if (largePreviewFilteredSourceImage != null) return SourceMode.FILTERED;
+        return safeMode;
+    }
+
+    private boolean hasLargePreviewSourceChoices() {
+        return largePreviewOriginalSourceImage != null || largePreviewFilteredSourceImage != null;
+    }
+
+    private void clearLargePreviewSourceChoiceFields() {
+        largePreviewOriginalSourceImage = null;
+        largePreviewFilteredSourceImage = null;
+        largePreviewSourceMode = SourceMode.RAW;
     }
 
     private Window currentOwner() {

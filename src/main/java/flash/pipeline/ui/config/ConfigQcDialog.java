@@ -1,11 +1,15 @@
 package flash.pipeline.ui.config;
 
+import flash.pipeline.help.SetupHelpDialog;
+import flash.pipeline.help.SetupHelpTopic;
+import flash.pipeline.ui.HelpButton;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import ij.ImagePlus;
 
 import javax.swing.AbstractAction;
 import javax.swing.ActionMap;
 import javax.swing.BorderFactory;
+import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.InputMap;
@@ -80,6 +84,7 @@ public final class ConfigQcDialog {
     private final JLabel channelLabel = new JLabel(" ");
     private final JLabel progressLabel = new JLabel(" ");
     private final JLabel statusLabel = new JLabel(" ");
+    private final JButton stageHelpButton = HelpButton.question("Stage help is not available yet.");
     private final JButton backButton = new JButton("Back");
     private final JButton previousImageButton = new JButton("Previous image");
     private final JButton restartButton = new JButton("Restart");
@@ -285,6 +290,7 @@ public final class ConfigQcDialog {
     }
 
     private void wireButtons() {
+        stageHelpButton.addActionListener(e -> showCurrentStageHelp());
         backButton.addActionListener(e -> goBack());
         previousImageButton.addActionListener(e -> previousImage());
         restartButton.addActionListener(e -> restartCurrentStage());
@@ -757,8 +763,34 @@ public final class ConfigQcDialog {
         } else {
             stagePathText = plain.toString();
         }
+        refreshStageHelpButton();
+        stageBreadcrumbPanel.add(Box.createHorizontalStrut(4));
+        stageBreadcrumbPanel.add(stageHelpButton);
         stageBreadcrumbPanel.revalidate();
         stageBreadcrumbPanel.repaint();
+    }
+
+    private void refreshStageHelpButton() {
+        SetupHelpTopic topic = currentHelpTopic();
+        String tooltip = topic == null
+                ? "Stage help is not available yet."
+                : "About " + topic.title;
+        stageHelpButton.setToolTipText(tooltip);
+        stageHelpButton.getAccessibleContext().setAccessibleName(tooltip);
+        stageHelpButton.setEnabled(topic != null);
+        stageHelpButton.setVisible(topic != null);
+    }
+
+    private void showCurrentStageHelp() {
+        SetupHelpTopic topic = currentHelpTopic();
+        if (topic != null) {
+            SetupHelpDialog.show(rootPanel, topic);
+        }
+    }
+
+    private SetupHelpTopic currentHelpTopic() {
+        ConfigQcStage stage = currentStage();
+        return stage == null ? null : stage.helpTopic();
     }
 
     private void styleStageBreadcrumbLabel(JLabel label, boolean active) {
@@ -958,6 +990,14 @@ public final class ConfigQcDialog {
 
     JButton cancelButtonForTest() {
         return cancelButton;
+    }
+
+    JButton stageHelpButtonForTest() {
+        return stageHelpButton;
+    }
+
+    SetupHelpTopic currentHelpTopicForTest() {
+        return currentHelpTopic();
     }
 
     JButton previousImageButtonForTest() {

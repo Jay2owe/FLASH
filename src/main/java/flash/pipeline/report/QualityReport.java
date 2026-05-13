@@ -1,5 +1,6 @@
 package flash.pipeline.report;
 
+import flash.pipeline.analyses.wizard.IntensitySpatialConfig;
 import flash.pipeline.naming.ChannelFilenameCodec;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.IoUtils;
@@ -154,10 +155,22 @@ public class QualityReport {
                                                   String[] thresholds, boolean roiAnalysis,
                                                   String roiChannelChoice, String filterDescription,
                                                   String zSliceSummary) {
+        addIntensityParams(channelNames, binarization, thresholds, roiAnalysis,
+                roiChannelChoice, filterDescription, zSliceSummary, null, null);
+    }
+
+    public synchronized void addIntensityParams(String[] channelNames, boolean[] binarization,
+                                                  String[] thresholds, boolean roiAnalysis,
+                                                  String roiChannelChoice, String filterDescription,
+                                                  String zSliceSummary,
+                                                  IntensitySpatialConfig spatialConfig,
+                                                  String dependencyWarnings) {
         if (!enabled) return;
         Map<String, String> params = new LinkedHashMap<String, String>();
         params.put("Filter", filterDescription != null ? filterDescription : "Basic background and noise removal");
         params.put("Z-Slice Subset", zSliceSummary != null ? zSliceSummary : "Full stack");
+        params.put("CSV Schema", "IntDen=filtered full ROI, %Area=filtered full ROI area fraction, "
+                + "IntDen_Unfiltered=raw full ROI; binarized channels also write IntDen_binarized and %Area_binarized");
         params.put("ROI Analysis", String.valueOf(roiAnalysis));
         if (roiAnalysis && roiChannelChoice != null && !"None".equals(roiChannelChoice)) {
             params.put("ROI Channel Mask", roiChannelChoice);
@@ -165,6 +178,21 @@ public class QualityReport {
         for (int i = 0; i < channelNames.length; i++) {
             String val = binarization[i] ? "Binarized (threshold=" + thresholds[i] + ")" : "No binarization";
             params.put("Channel: " + channelNames[i], val);
+        }
+        IntensitySpatialConfig safeSpatial = spatialConfig == null
+                ? IntensitySpatialConfig.disabled()
+                : spatialConfig;
+        params.put("Intensity Spatial", String.valueOf(safeSpatial.isEnabled()));
+        if (safeSpatial.isEnabled()) {
+            params.put("Spatial Families",
+                    IntensitySpatialConfig.joinAnalysisTokens(safeSpatial.getEnabledAnalyses()));
+            params.put("Spatial MIP", String.valueOf(safeSpatial.isMipEnabled()));
+            params.put("Spatial Native 3D", String.valueOf(safeSpatial.isNative3dEnabled()));
+            params.put("Spatial Overlays", String.valueOf(safeSpatial.isOverlaysEnabled()));
+            params.put("Spatial Dependency Warnings",
+                    dependencyWarnings == null || dependencyWarnings.trim().isEmpty()
+                            ? "None recorded at setup; run-time skips are logged and written as NaN."
+                            : dependencyWarnings.trim());
         }
         sections.add(new AnalysisSection("Fluorescence Intensity Analysis", params, System.currentTimeMillis()));
         writeReport();

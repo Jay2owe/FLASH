@@ -15,7 +15,7 @@ import java.util.Map;
  */
 public final class IntensityPreset implements Preset<IntensityPreset> {
 
-    public static final String CURRENT_LIBRARY_VERSION = "1";
+    public static final String CURRENT_LIBRARY_VERSION = "2";
 
     private final String name;
     private final String description;
@@ -26,6 +26,7 @@ public final class IntensityPreset implements Preset<IntensityPreset> {
     private final Map<String, String> thresholds;
     private final String maskChannelHint;
     private final List<String> roiSetNameHints;
+    private final IntensitySpatialConfig spatial;
 
     public IntensityPreset(String name,
                            String description,
@@ -36,6 +37,20 @@ public final class IntensityPreset implements Preset<IntensityPreset> {
                            Map<String, String> thresholds,
                            String maskChannelHint,
                            List<String> roiSetNameHints) {
+        this(name, description, libraryVersion, strategy, defaultMode, channelModes,
+                thresholds, maskChannelHint, roiSetNameHints, null);
+    }
+
+    public IntensityPreset(String name,
+                           String description,
+                           String libraryVersion,
+                           String strategy,
+                           String defaultMode,
+                           Map<String, String> channelModes,
+                           Map<String, String> thresholds,
+                           String maskChannelHint,
+                           List<String> roiSetNameHints,
+                           IntensitySpatialConfig spatial) {
         this.name = requireText("name", name);
         this.description = emptyToNull(description);
         this.libraryVersion = emptyToNull(libraryVersion) == null
@@ -49,6 +64,7 @@ public final class IntensityPreset implements Preset<IntensityPreset> {
         this.thresholds = immutableStringMap(thresholds);
         this.maskChannelHint = emptyToNull(maskChannelHint);
         this.roiSetNameHints = immutableStringList(roiSetNameHints);
+        this.spatial = spatial == null ? IntensitySpatialConfig.disabled() : spatial;
     }
 
     public String getName() { return name; }
@@ -61,6 +77,7 @@ public final class IntensityPreset implements Preset<IntensityPreset> {
     public Map<String, String> getThresholds() { return thresholds; }
     public String getMaskChannelHint() { return maskChannelHint; }
     public List<String> getRoiSetNameHints() { return roiSetNameHints; }
+    public IntensitySpatialConfig getSpatial() { return spatial; }
 
     public Map<String, Object> toJsonObject() {
         Map<String, Object> root = new LinkedHashMap<String, Object>();
@@ -73,6 +90,9 @@ public final class IntensityPreset implements Preset<IntensityPreset> {
         root.put("thresholds", new LinkedHashMap<String, String>(thresholds));
         if (maskChannelHint != null) root.put("maskChannelHint", maskChannelHint);
         root.put("roiSetNameHints", new ArrayList<String>(roiSetNameHints));
+        if (spatial != null && spatial.hasConfiguration()) {
+            root.put("spatial", spatial.toJsonObject());
+        }
         return root;
     }
 
@@ -95,7 +115,8 @@ public final class IntensityPreset implements Preset<IntensityPreset> {
                 stringMap(root.get("channelModes")),
                 stringMap(root.get("thresholds")),
                 JsonIO.stringValue(root.get("maskChannelHint")),
-                stringList(root.get("roiSetNameHints")));
+                stringList(root.get("roiSetNameHints")),
+                IntensitySpatialConfig.fromJsonObject(root.get("spatial")));
     }
 
     private static Map<String, String> stringMap(Object value) {

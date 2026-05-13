@@ -119,6 +119,18 @@ public final class FeatureDependencyGate {
         return check(id, analysisDisplayName, requirementDisplayName).isAllowed();
     }
 
+    public static boolean isAvailable(DependencyId id) {
+        DependencyStatus status = getStatus(id);
+        return status != null && status.isPresent();
+    }
+
+    public static DependencyStatus getStatus(DependencyId id) {
+        if (id == null) {
+            return null;
+        }
+        return currentDependencyService().getStatus(id);
+    }
+
     public static GateDecision check(DependencyId id, String analysisDisplayName, String requirementDisplayName) {
         DependencySpec spec = DependencyRegistry.get(id);
         String analysis = normalizeAnalysisName(analysisDisplayName);
