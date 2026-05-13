@@ -55,10 +55,7 @@ final class SandboxModel {
             Line line = lines.get(i);
             List<DagNode> nodes = new ArrayList<DagNode>();
             for (int j = 0; j < line.nodes.size(); j++) {
-                Node node = line.nodes.get(j);
-                DagNode dn = new DagNode(node.id, node.type, node.args, node.commandName, node.menuPath);
-                dn.disabled = node.disabled;
-                nodes.add(dn);
+                nodes.add(toDagNode(line.nodes.get(j)));
             }
             dagLines.add(new DagLine(line.id, nodes));
         }
@@ -82,7 +79,7 @@ final class SandboxModel {
                 List<DagNode> nodes = new ArrayList<DagNode>();
                 for (int j = 0; j < line.nodes.size(); j++) {
                     Node node = line.nodes.get(j);
-                    nodes.add(new DagNode(node.id, node.type, node.args));
+                    nodes.add(toDagNode(node));
                     if (node == selectedNode) break;
                 }
                 partialLines.add(new DagLine(line.id, nodes));
@@ -182,6 +179,7 @@ final class SandboxModel {
             DagLine line = dagLines.get(i);
             for (int j = 0; j < line.ops.size(); j++) {
                 DagNode node = line.ops.get(j);
+                if (node.disabled) continue;
                 if (node.commandName.length() > 0 || node.type == OpType.UNKNOWN) {
                     return "legacy";
                 }
@@ -223,8 +221,15 @@ final class SandboxModel {
         }
 
         boolean isLegacy() {
-            return commandName.length() > 0 || type == OpType.UNKNOWN;
+            return !disabled && (commandName.length() > 0 || type == OpType.UNKNOWN);
         }
+    }
+
+    private static DagNode toDagNode(Node node) {
+        DagNode out = new DagNode(node.id, node.type, node.args,
+                node.commandName, node.menuPath);
+        out.disabled = node.disabled;
+        return out;
     }
 
     static final class CombinerNode {

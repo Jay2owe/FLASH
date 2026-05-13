@@ -1,13 +1,18 @@
 package flash.pipeline.ui.sandbox;
 
 import flash.pipeline.image.dag.DagIR;
+import flash.pipeline.image.dag.DagLine;
+import flash.pipeline.image.dag.DagNode;
 import flash.pipeline.image.dag.IjmToDagLoader;
+import flash.pipeline.image.FilterMacroParser.OpType;
+import flash.pipeline.image.dag.Combiner;
 import ij.ImagePlus;
 import ij.ImageStack;
 import ij.process.ByteProcessor;
 import org.junit.Test;
 
 import java.util.List;
+import java.util.Collections;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.Assert.assertEquals;
@@ -152,6 +157,52 @@ public class FilterBuilderPanelTest {
         assertFalse(reloaded.lines.get(0).ops.isEmpty());
         assertTrue("Round-trip through embedded JSON must restore disabled=true",
                 reloaded.lines.get(0).ops.get(0).disabled);
+    }
+
+    @Test
+    public void disabledLegacyNodeDoesNotForceSandboxLegacyState() {
+        DagNode legacy = new DagNode("legacy", OpType.UNKNOWN, "raw",
+                "Plugin Filter", "Plugins > Filter");
+        legacy.disabled = true;
+        DagIR seed = new DagIR(
+                1,
+                Collections.singletonList(new DagLine("A", Collections.singletonList(legacy))),
+                Collections.<Combiner>emptyList(),
+                "A",
+                "native");
+
+        SandboxModel model = SandboxModel.fromDag(seed);
+
+        assertEquals("native", seed.executionTier);
+        assertEquals("native", model.toDag().executionTier);
+        assertFalse("disabled legacy node must not show the legacy banner",
+                model.hasLegacyNode());
+    }
+
+    @Test
+    public void partialDagPreservesDisabledStateAndLegacyMetadata() {
+        DagNode legacy = new DagNode("legacy", OpType.UNKNOWN, "raw",
+                "Plugin Filter", "Plugins > Filter");
+        legacy.disabled = true;
+        DagIR seed = new DagIR(
+                1,
+                Collections.singletonList(new DagLine("A", Collections.singletonList(legacy))),
+                Collections.<Combiner>emptyList(),
+                "A",
+                "native");
+        SandboxModel model = SandboxModel.fromDag(seed);
+        model.selected = model.lines.get(0).nodes.get(0);
+
+        DagIR partial = model.toPartialDag();
+        DagNode partialNode = partial.lines.get(0).ops.get(0);
+
+        assertEquals("native", partial.executionTier);
+        assertEquals("legacy", partialNode.id);
+        assertEquals(OpType.UNKNOWN, partialNode.type);
+        assertEquals("raw", partialNode.args);
+        assertEquals("Plugin Filter", partialNode.commandName);
+        assertEquals("Plugins > Filter", partialNode.menuPath);
+        assertTrue(partialNode.disabled);
     }
 
     @Test

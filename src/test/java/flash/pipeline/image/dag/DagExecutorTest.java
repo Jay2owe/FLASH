@@ -88,6 +88,40 @@ public class DagExecutorTest {
         actual.flush();
     }
 
+    @Test
+    public void disabledNativeNodeIsSkippedDuringDagExecution() throws Exception {
+        DagNode invert = new DagNode("disabledInvert", OpType.INVERT, "");
+        invert.disabled = true;
+        DagIR dag = new DagIR(
+                1,
+                Arrays.asList(new DagLine("A", Arrays.asList(invert))),
+                Arrays.<Combiner>asList(),
+                "A",
+                "native");
+
+        ImagePlus actual = FilterExecutor.runDagThreadSafe(makeBinaryStack("source", 1), dag);
+
+        assertSlicesEqual(makeBinaryStack("expected", 1), actual, 0.0);
+    }
+
+    @Test
+    public void disabledLegacyUnknownNodeDoesNotRejectNativeDag() throws Exception {
+        DagNode unknown = new DagNode("disabledUnknown", OpType.UNKNOWN, "",
+                "Plugin Filter", "Plugins > Filter");
+        unknown.disabled = true;
+        DagIR dag = new DagIR(
+                1,
+                Arrays.asList(new DagLine("A", Arrays.asList(unknown))),
+                Arrays.<Combiner>asList(),
+                "A",
+                "native");
+
+        assertEquals("native", dag.executionTier);
+        ImagePlus actual = FilterExecutor.runDagThreadSafe(makeByteStack("source", 1), dag);
+
+        assertSlicesEqual(makeByteStack("expected", 1), actual, 0.0);
+    }
+
     @Test(expected = DagRejectedException.class)
     public void unknownOpThrowsDagRejectedException() throws Exception {
         DagIR dag = new DagIR(

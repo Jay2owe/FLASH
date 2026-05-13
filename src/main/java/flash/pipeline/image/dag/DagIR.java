@@ -1,5 +1,7 @@
 package flash.pipeline.image.dag;
 
+import flash.pipeline.image.FilterMacroParser.OpType;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -72,7 +74,9 @@ public final class DagIR {
             if (line == null || line.ops == null) continue;
             for (int j = 0; j < line.ops.size(); j++) {
                 DagNode node = line.ops.get(j);
-                if (node != null && node.commandName.length() > 0) return true;
+                if (node == null || node.disabled) continue;
+                if (node.type == OpType.UNKNOWN) return true;
+                if (node.commandName.length() > 0) return true;
             }
         }
         return false;

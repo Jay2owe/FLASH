@@ -403,6 +403,7 @@ public final class FilterExecutor {
         for (DagLine line : dag.lines) {
             ImagePlus work = cloneStackPerSlice(source, line.id);
             for (DagNode node : line.ops) {
+                if (node.disabled) continue;
                 executeOpOnStack(work, new FilterMacroParser.Op(node.type, node.args));
             }
             bus.put(line.id, work);
@@ -474,8 +475,10 @@ public final class FilterExecutor {
         for (DagLine line : dag.lines) {
             if (line.id.length() == 0) throw new DagRejectedException("DAG line id is required");
             for (DagNode node : line.ops) {
-                if (node.type == FilterMacroParser.OpType.UNKNOWN) {
-                    throw new DagRejectedException("Unknown DAG op rejected: " + node.id);
+                if (node.disabled) continue;
+                if (node.commandName.length() > 0
+                        || node.type == FilterMacroParser.OpType.UNKNOWN) {
+                    throw new DagRejectedException("Legacy DAG op rejected: " + node.id);
                 }
             }
         }
