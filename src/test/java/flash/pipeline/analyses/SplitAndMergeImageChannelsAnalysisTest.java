@@ -1,6 +1,7 @@
 package flash.pipeline.analyses;
 
 import flash.pipeline.bin.BinConfigIO;
+import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinField;
 import flash.pipeline.bin.BinSetupChooser;
 import flash.pipeline.bin.BinSetupDispatcher;
@@ -9,6 +10,8 @@ import flash.pipeline.runtime.DependencyService;
 import flash.pipeline.runtime.DependencyStatus;
 import flash.pipeline.runtime.FeatureDependencyGate;
 import flash.pipeline.io.AsyncImageSaver;
+import flash.pipeline.io.BoundedImageLoader;
+import flash.pipeline.io.DeferredImageSupplier;
 import flash.pipeline.naming.NameParts;
 import ij.ImagePlus;
 import ij.ImageStack;
@@ -21,10 +24,13 @@ import javax.swing.JComboBox;
 import java.io.File;
 import java.awt.Color;
 import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.Collections;
 import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.List;
@@ -35,6 +41,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 public class SplitAndMergeImageChannelsAnalysisTest {
     @Rule
@@ -338,6 +345,42 @@ public class SplitAndMergeImageChannelsAnalysisTest {
     }
 
     @Test
+    public void parallelProcessingRethrowsWorkerFailuresAfterWorkersFinish() throws Exception {
+        File dir = temp.newFolder("parallelFailure");
+        File outRoot = new File(dir, "Images");
+        File tifDir = new File(dir, "OME-TIFF");
+        File detailsRoot = new File(dir, "Analysis Details");
+
+        ImageStack stack = new ImageStack(2, 2);
+        stack.addSlice("DAPI", new byte[]{1, 2, 3, 4});
+        ImagePlus imp = new ImagePlus("Experiment-Animal1_LH_Cortex", stack);
+        imp.setDimensions(1, 1, 1);
+        imp.setOpenAsHyperStack(true);
+
+        BoundedImageLoader loader = new BoundedImageLoader(
+                new SyntheticDeferredImageSupplier(imp),
+                Collections.singletonList(Integer.valueOf(0)),
+                1);
+        loader.start();
+
+        SplitAndMergeImageChannelsAnalysis analysis = new SplitAndMergeImageChannelsAnalysis();
+        Object dialogResult = newMainDialogResult(1);
+
+        try {
+            invokeProcessImagesParallel(analysis, loader, dir, null,
+                    new String[]{"DAPI"}, new String[0],
+                    outRoot, tifDir, detailsRoot, dialogResult, 1);
+            fail("Expected split/merge worker failure to be rethrown");
+        } catch (InvocationTargetException e) {
+            Throwable cause = e.getCause();
+            assertTrue(cause instanceof RuntimeException);
+            assertTrue(cause.getMessage(), cause.getMessage().contains("Split/Merge failed for 1 image(s)"));
+            assertEquals(1, cause.getSuppressed().length);
+            assertTrue(cause.getSuppressed()[0] instanceof ArrayIndexOutOfBoundsException);
+        }
+    }
+
+    @Test
     public void saveSaturationsWritesToActiveConfigurationFolder() throws Exception {
         File dir = temp.newFolder("saturations");
 
@@ -374,6 +417,59 @@ public class SplitAndMergeImageChannelsAnalysisTest {
                 "saveSaturations", String.class, String[].class, String[].class, double[].class);
         method.setAccessible(true);
         method.invoke(analysis, dir.getAbsolutePath(), channelNames, processMethodPerCh, saturationsPerCh);
+    }
+
+    private static void invokeProcessImagesParallel(SplitAndMergeImageChannelsAnalysis analysis,
+                                                    BoundedImageLoader loader,
+                                                    File dir,
+                                                    BinConfig cfg,
+                                                    String[] channelNames,
+                                                    String[] channelColors,
+                                                    File outRoot,
+                                                    File tifDir,
+                                                    File detailsRoot,
+                                                    Object dialogResult,
+                                                    int nThreads) throws Exception {
+        Method method = SplitAndMergeImageChannelsAnalysis.class.getDeclaredMethod(
+                "processImagesParallel",
+                BoundedImageLoader.class,
+                String.class,
+                BinConfig.class,
+                String[].class,
+                String[].class,
+                File.class,
+                File.class,
+                File.class,
+                dialogResult.getClass(),
+                int.class,
+                int.class);
+        method.setAccessible(true);
+        method.invoke(analysis, loader, dir.getAbsolutePath(), cfg, channelNames, channelColors,
+                outRoot, tifDir, detailsRoot, dialogResult, Integer.valueOf(nThreads), Integer.valueOf(1));
+    }
+
+    private static Object newMainDialogResult(int channelCount) throws Exception {
+        Class<?> type = Class.forName(
+                "flash.pipeline.analyses.SplitAndMergeImageChannelsAnalysis$MainDialogResult");
+        Constructor<?> constructor = type.getDeclaredConstructor();
+        constructor.setAccessible(true);
+        Object result = constructor.newInstance();
+        setField(result, "processMethodPerCh", fill(channelCount, "None"));
+        setField(result, "customMinMaxPerCh", fill(channelCount, "None"));
+        setField(result, "saturationsPerCh", fill(channelCount, 0.35));
+        setField(result, "createMerge", Boolean.FALSE);
+        setField(result, "saveOmeTiff", Boolean.FALSE);
+        setField(result, "additionalMergeSpec", "");
+        setField(result, "subtractBackground", Boolean.FALSE);
+        setField(result, "backgroundIndex", Integer.valueOf(-1));
+        setField(result, "subtractFromChannels", new boolean[channelCount]);
+        return result;
+    }
+
+    private static void setField(Object target, String fieldName, Object value) throws Exception {
+        Field field = target.getClass().getDeclaredField(fieldName);
+        field.setAccessible(true);
+        field.set(target, value);
     }
 
     private static void invokeProcessOneImage(SplitAndMergeImageChannelsAnalysis analysis,
@@ -447,6 +543,20 @@ public class SplitAndMergeImageChannelsAnalysisTest {
                 createMerge, saveOmeTiff, subtractBackground, backgroundIndex, subtractFromChannels, "",
                 fill(channelNames.length, "None"), fill(channelNames.length, "None"),
                 fill(channelNames.length, 0.35), parts);
+    }
+
+    private static final class SyntheticDeferredImageSupplier extends DeferredImageSupplier {
+        private final ImagePlus image;
+
+        private SyntheticDeferredImageSupplier(ImagePlus image) {
+            super(Collections.singletonList(new File("synthetic.tif")), "Synthetic");
+            this.image = image;
+        }
+
+        @Override
+        public ImagePlus openSeriesMaterialized(int seriesIndex) {
+            return image;
+        }
     }
 
     private static void assertFileWritten(File file) {

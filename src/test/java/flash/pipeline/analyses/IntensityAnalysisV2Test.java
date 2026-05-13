@@ -28,6 +28,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.PrintStream;
 import java.lang.reflect.Constructor;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
@@ -45,6 +46,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 public class IntensityAnalysisV2Test {
     @Rule
@@ -436,6 +438,62 @@ public class IntensityAnalysisV2Test {
         assertTrue(csv.contains("NaN"));
         assertTrue(log.contains("granularity skipped"));
         assertTrue(log.contains("missing dependency IMGLIB2_ALGORITHM_RUNTIME"));
+    }
+
+    @Test
+    public void parallelChannelThresholdFailureAbortsBeforePartialRowsAreMerged() throws Exception {
+        File dir = temp.newFolder("parallel-channel-failure");
+        File binDir = new File(dir, ".bin");
+        assertTrue(binDir.mkdirs());
+        File outputRoot = IntensityAnalysisV2.intensityWriteRoot(dir.getAbsolutePath());
+        assertTrue(outputRoot.mkdirs());
+
+        String[] channelNames = {"DAPI", "GFAP"};
+        boolean[] binarization = {true, true};
+        String[] thresholds = {"5", "not-a-number"};
+        String[] filterSources = {
+                "Basic background and noise removal",
+                "Basic background and noise removal"
+        };
+        IntensitySpatialConfig spatial = IntensitySpatialConfig.disabled();
+        IntensityAnalysisV2.IntensityOutputPlan plan = IntensityAnalysisV2.buildOutputPlan(
+                outputRoot, channelNames, false, -1, spatial, 1, false);
+        Object totalTables = newOutputTables(plan);
+
+        IntensityAnalysisV2 analysis = new IntensityAnalysisV2();
+        analysis.setParallelThreads(2);
+
+        try {
+            invokeRunIntensityMeasurementsForThisImage(
+                    analysis,
+                    new NameParts("", "SyntheticMouse", "LH", "SCN"),
+                    new ImagePlus[]{syntheticImage(8, 8), syntheticImage(8, 8)},
+                    2,
+                    binarization,
+                    thresholds,
+                    channelNames,
+                    -1,
+                    plan,
+                    totalTables,
+                    1,
+                    null,
+                    intensityConfig("DAPI", "5"),
+                    filterSources,
+                    binDir,
+                    "",
+                    null);
+            fail("Expected parallel channel threshold failure to abort intensity analysis");
+        } catch (InvocationTargetException e) {
+            Throwable cause = e.getCause();
+            assertTrue(cause instanceof RuntimeException);
+            assertTrue(cause.getMessage(), cause.getMessage().contains(
+                    "Intensity analysis failed for 1 channel(s)"));
+            assertEquals(1, cause.getSuppressed().length);
+            assertTrue(cause.getSuppressed()[0] instanceof NumberFormatException);
+        }
+
+        assertEquals(0, tableFor(totalTables, IntensitySpatialOutputKey.base("DAPI")).size());
+        assertEquals(0, tableFor(totalTables, IntensitySpatialOutputKey.base("GFAP")).size());
     }
 
     private static void installDispatcherChoice(final BinSetupChooser.Choice choice,

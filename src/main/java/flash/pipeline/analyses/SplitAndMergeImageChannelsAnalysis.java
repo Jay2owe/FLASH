@@ -715,6 +715,8 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
 
         ExecutorService pool = Executors.newFixedThreadPool(nThreads);
         List<Future<?>> futures = new ArrayList<Future<?>>();
+        final List<Throwable> failures =
+                Collections.synchronizedList(new ArrayList<Throwable>());
 
         for (int t = 0; t < nThreads; t++) {
             final int workerNum = t + 1;
@@ -775,14 +777,16 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                             try {
                                 IoUtils.mustMkdirs(perAnimalDir);
                             } catch (IOException e) {
+                                failures.add(e);
                                 IJ.log("[FLASH] Could not create per-animal directory "
                                         + perAnimalDir + ": " + e.getMessage()
-                                        + " — skipping " + imgTitle);
+                                        + " — failing " + imgTitle);
                                 imp.changes = false;
                                 imp.close();
                                 imp.flush();
                                 int done = completed.incrementAndGet();
                                 IJ.showProgress(done, scheduled);
+                                IJ.showStatus("Processing " + done + "/" + scheduled + " (failed)");
                                 continue;
                             }
 
@@ -818,9 +822,13 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                                 IJ.freeMemory();
                             }
                         } catch (Exception e) {
+                            failures.add(e);
                             String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
                             IJ.log("[" + (idx + 1) + "/" + scheduled + "] ERROR: " + msg);
                             e.printStackTrace();
+                            int done = completed.incrementAndGet();
+                            IJ.showProgress(done, scheduled);
+                            IJ.showStatus("Processing " + done + "/" + scheduled + " (failed)");
                         } finally {
                             imp.changes = false;
                             imp.close();
@@ -837,10 +845,34 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
             try {
                 f.get();
             } catch (Exception e) {
-                IJ.log("Parallel processing error: " + e.getMessage());
+                if (e instanceof InterruptedException) {
+                    Thread.currentThread().interrupt();
+                }
+                Throwable cause = e.getCause() == null ? e : e.getCause();
+                failures.add(cause);
+                String msg = cause.getMessage() != null
+                        ? cause.getMessage() : cause.getClass().getSimpleName();
+                IJ.log("Parallel processing error: " + msg);
             }
         }
         pool.shutdown();
+
+        if (!failures.isEmpty()) {
+            throw buildParallelFailure("Split/Merge failed for "
+                    + failures.size() + " image(s)", failures);
+        }
+    }
+
+    private static RuntimeException buildParallelFailure(String message, List<Throwable> failures) {
+        RuntimeException combined = new RuntimeException(message);
+        synchronized (failures) {
+            for (Throwable failure : failures) {
+                if (failure != null) {
+                    combined.addSuppressed(failure);
+                }
+            }
+        }
+        return combined;
     }
 
     // ── Main options dialog (PipelineDialog) ──

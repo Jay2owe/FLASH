@@ -1105,6 +1105,18 @@ public class IntensityAnalysisV2 implements Analysis {
         return t.getClass().getSimpleName() + ": " + message.trim();
     }
 
+    private static RuntimeException buildParallelFailure(String message, List<Throwable> failures) {
+        RuntimeException combined = new RuntimeException(message);
+        synchronized (failures) {
+            for (Throwable failure : failures) {
+                if (failure != null) {
+                    combined.addSuppressed(failure);
+                }
+            }
+        }
+        return combined;
+    }
+
     // ── Per-image measurement (thread-safe) ──
 
     private void runIntensityMeasurementsForThisImage(
@@ -1199,111 +1211,133 @@ public class IntensityAnalysisV2 implements Analysis {
         final boolean finalVerboseLogging = verboseLogging;
         final String finalRoiLabel = roiLabel;
 
-        if (channelThreads > 1) {
-            // Parallel channel processing
-            ExecutorService channelPool = Executors.newFixedThreadPool(channelThreads);
-            List<Future<?>> channelFutures = new ArrayList<Future<?>>();
+        try {
+            if (channelThreads > 1) {
+                // Parallel channel processing
+                ExecutorService channelPool = Executors.newFixedThreadPool(channelThreads);
+                List<Future<?>> channelFutures = new ArrayList<Future<?>>();
+                List<Throwable> channelFailures =
+                        Collections.synchronizedList(new ArrayList<Throwable>());
 
-            for (int ci = 0; ci < channelCount; ci++) {
-                final int c = ci;
-                channelFutures.add(channelPool.submit(new Runnable() {
-                    @Override
-                    public void run() {
-                        processOneChannel(c, channelCount, chans, channelNames,
-                                binarization, thresholds,
-                                cfg, filterSources, binDir, basicFilterMacro,
-                                finalMaskStack, finalRoi, finalParts, finalRoiLabel,
-                                outputPlan, intensitySpatialConfig, finalVerboseLogging,
-                                allIntDenFilteredFullRoi, allAreaFractionFilteredFullRoi,
-                                allIntDenUnfilteredFullRoi, allIntDenBinarizedRawInMask,
-                                allAreaFractionBinarized,
-                                allBaseSpatialResults, allMipSpatialResults, allNativeSpatialResults,
-                                allRawSpatialImages, allBinarizedSpatialImages,
-                                allBinarySpatialMasks);
-                    }
-                }));
-            }
-
-            // Wait for all channels to complete
-            for (Future<?> f : channelFutures) {
                 try {
-                    f.get();
-                } catch (Exception e) {
-                    IJ.log("    ERROR in parallel channel processing: " + e.getMessage());
+                    for (int ci = 0; ci < channelCount; ci++) {
+                        final int c = ci;
+                        channelFutures.add(channelPool.submit(new Runnable() {
+                            @Override
+                            public void run() {
+                                processOneChannel(c, channelCount, chans, channelNames,
+                                        binarization, thresholds,
+                                        cfg, filterSources, binDir, basicFilterMacro,
+                                        finalMaskStack, finalRoi, finalParts, finalRoiLabel,
+                                        outputPlan, intensitySpatialConfig, finalVerboseLogging,
+                                        allIntDenFilteredFullRoi, allAreaFractionFilteredFullRoi,
+                                        allIntDenUnfilteredFullRoi, allIntDenBinarizedRawInMask,
+                                        allAreaFractionBinarized,
+                                        allBaseSpatialResults, allMipSpatialResults, allNativeSpatialResults,
+                                        allRawSpatialImages, allBinarizedSpatialImages,
+                                        allBinarySpatialMasks);
+                            }
+                        }));
+                    }
+
+                    // Wait for all channels to complete
+                    for (Future<?> f : channelFutures) {
+                        try {
+                            f.get();
+                        } catch (Exception e) {
+                            if (e instanceof InterruptedException) {
+                                Thread.currentThread().interrupt();
+                            }
+                            Throwable cause = e.getCause() == null ? e : e.getCause();
+                            rethrowIfFatal(cause);
+                            channelFailures.add(cause);
+                            IJ.log("    ERROR in parallel channel processing: "
+                                    + describeThrowable(cause));
+                        }
+                    }
+                } finally {
+                    channelPool.shutdown();
+                }
+
+                if (!channelFailures.isEmpty()) {
+                    throw buildParallelFailure("Intensity analysis failed for "
+                            + channelFailures.size() + " channel(s)", channelFailures);
+                }
+            } else {
+                // Sequential channel processing (single thread)
+                for (int c = 0; c < channelCount; c++) {
+                    processOneChannel(c, channelCount, chans, channelNames,
+                            binarization, thresholds,
+                            cfg, filterSources, binDir, basicFilterMacro,
+                            finalMaskStack, finalRoi, finalParts, finalRoiLabel,
+                            outputPlan, intensitySpatialConfig, finalVerboseLogging,
+                            allIntDenFilteredFullRoi, allAreaFractionFilteredFullRoi,
+                            allIntDenUnfilteredFullRoi, allIntDenBinarizedRawInMask,
+                            allAreaFractionBinarized,
+                            allBaseSpatialResults, allMipSpatialResults, allNativeSpatialResults,
+                            allRawSpatialImages, allBinarizedSpatialImages,
+                            allBinarySpatialMasks);
                 }
             }
-            channelPool.shutdown();
-        } else {
-            // Sequential channel processing (single thread)
-            for (int c = 0; c < channelCount; c++) {
-                processOneChannel(c, channelCount, chans, channelNames,
-                        binarization, thresholds,
-                        cfg, filterSources, binDir, basicFilterMacro,
-                        finalMaskStack, finalRoi, finalParts, finalRoiLabel,
-                        outputPlan, intensitySpatialConfig, finalVerboseLogging,
-                        allIntDenFilteredFullRoi, allAreaFractionFilteredFullRoi,
-                        allIntDenUnfilteredFullRoi, allIntDenBinarizedRawInMask,
-                        allAreaFractionBinarized,
-                        allBaseSpatialResults, allMipSpatialResults, allNativeSpatialResults,
-                        allRawSpatialImages, allBinarizedSpatialImages,
-                        allBinarySpatialMasks);
-            }
-        }
 
-        try {
-            measureCrossChannelSpatial(channelNames, channelCount, finalRoi, finalRoiLabel,
-                    finalParts, outputPlan, intensitySpatialConfig,
-                    allRawSpatialImages, allBinarizedSpatialImages, allBinarySpatialMasks,
-                    allBaseSpatialResults, allMipSpatialResults, allNativeSpatialResults);
-        } catch (Throwable t) {
-            rethrowIfFatal(t);
-            IJ.log("[FLASH] Intensity-spatial cross-channel skipped for "
-                    + (finalParts == null ? "unknown" : finalParts.displayLabel())
-                    + roiLogSuffix(finalRoiLabel)
-                    + ": runtime class/dependency problem: " + safeThrowableMessage(t));
+            try {
+                measureCrossChannelSpatial(channelNames, channelCount, finalRoi, finalRoiLabel,
+                        finalParts, outputPlan, intensitySpatialConfig,
+                        allRawSpatialImages, allBinarizedSpatialImages, allBinarySpatialMasks,
+                        allBaseSpatialResults, allMipSpatialResults, allNativeSpatialResults);
+            } catch (Throwable t) {
+                rethrowIfFatal(t);
+                IJ.log("[FLASH] Intensity-spatial cross-channel skipped for "
+                        + (finalParts == null ? "unknown" : finalParts.displayLabel())
+                        + roiLogSuffix(finalRoiLabel)
+                        + ": runtime class/dependency problem: " + safeThrowableMessage(t));
+            }
+
+            // Merge per-channel results into totalTables in order (single-threaded, no contention)
+            for (int c = 0; c < channelCount; c++) {
+                if (allIntDenFilteredFullRoi[c] == null) {
+                    throw new IllegalStateException("Intensity analysis produced no results for channel "
+                            + channelNames[c]);
+                }
+                IntensitySpatialOutputKey baseKey = outputPlan.baseKeyForChannel(channelNames[c]);
+                int len = allIntDenFilteredFullRoi[c].length;
+                if (outputPlan.shouldPopulate(baseKey)) {
+                    ResultsTable total = totalTables.table(baseKey);
+                    for (int r = 0; r < len; r++) {
+                        total.incrementCounter();
+                        int row = total.size() - 1;
+
+                        writeMetadataColumns(total, row, parts, roiLabel);
+                        writeMeasurementColumns(total, row,
+                                allIntDenFilteredFullRoi[c][r],
+                                allAreaFractionFilteredFullRoi[c][r],
+                                allIntDenUnfilteredFullRoi[c][r],
+                                binarization[c],
+                                allIntDenBinarizedRawInMask[c][r],
+                                allAreaFractionBinarized[c][r]);
+                        writeSpatialPlaceholderColumns(total, row, baseKey, channelNames,
+                                binarization, intensitySpatialConfig);
+                        writeSpatialResultColumns(total, row, allBaseSpatialResults[c], r);
+                    }
+                }
+                appendSpatialModeRow(outputPlan, totalTables, parts, roiLabel, channelNames[c],
+                        IntensitySpatialOutputMode.MIP, channelNames, binarization,
+                        intensitySpatialConfig, allMipSpatialResults[c]);
+                appendSpatialModeRow(outputPlan, totalTables, parts, roiLabel, channelNames[c],
+                        IntensitySpatialOutputMode.NATIVE_3D, channelNames, binarization,
+                        intensitySpatialConfig, allNativeSpatialResults[c]);
+                if (!compactLog) IJ.log("    - Channel " + channelNames[c] + ": " + len + " rows merged to results table");
+            }
+
         } finally {
             closeImages(allRawSpatialImages);
             closeImages(allBinarizedSpatialImages);
             closeImages(allBinarySpatialMasks);
-        }
-
-        // Merge per-channel results into totalTables in order (single-threaded, no contention)
-        for (int c = 0; c < channelCount; c++) {
-            if (allIntDenFilteredFullRoi[c] == null) continue; // channel failed
-            IntensitySpatialOutputKey baseKey = outputPlan.baseKeyForChannel(channelNames[c]);
-            int len = allIntDenFilteredFullRoi[c].length;
-            if (outputPlan.shouldPopulate(baseKey)) {
-                ResultsTable total = totalTables.table(baseKey);
-                for (int r = 0; r < len; r++) {
-                    total.incrementCounter();
-                    int row = total.size() - 1;
-
-                    writeMetadataColumns(total, row, parts, roiLabel);
-                    writeMeasurementColumns(total, row,
-                            allIntDenFilteredFullRoi[c][r],
-                            allAreaFractionFilteredFullRoi[c][r],
-                            allIntDenUnfilteredFullRoi[c][r],
-                            binarization[c],
-                            allIntDenBinarizedRawInMask[c][r],
-                            allAreaFractionBinarized[c][r]);
-                    writeSpatialPlaceholderColumns(total, row, baseKey, channelNames,
-                            binarization, intensitySpatialConfig);
-                    writeSpatialResultColumns(total, row, allBaseSpatialResults[c], r);
-                }
+            if (maskStack != null) {
+                maskStack.changes = false;
+                maskStack.close();
+                maskStack.flush();
             }
-            appendSpatialModeRow(outputPlan, totalTables, parts, roiLabel, channelNames[c],
-                    IntensitySpatialOutputMode.MIP, channelNames, binarization,
-                    intensitySpatialConfig, allMipSpatialResults[c]);
-            appendSpatialModeRow(outputPlan, totalTables, parts, roiLabel, channelNames[c],
-                    IntensitySpatialOutputMode.NATIVE_3D, channelNames, binarization,
-                    intensitySpatialConfig, allNativeSpatialResults[c]);
-            if (!compactLog) IJ.log("    - Channel " + channelNames[c] + ": " + len + " rows merged to results table");
-        }
-
-        if (maskStack != null) {
-            maskStack.changes = false;
-            maskStack.close();
-            maskStack.flush();
         }
     }
 
@@ -1338,12 +1372,19 @@ public class IntensityAnalysisV2 implements Analysis {
         long chStart = verbose ? System.currentTimeMillis() : 0;
         if (!compactLog) IJ.log("  > Channel " + (c + 1) + "/" + n + ": " + channelNames[c]);
 
-        ImagePlus raw = ImageOps.duplicateThreadSafe(chans[c]);
+        ImagePlus raw = null;
+        ImagePlus binary = null;
+        ImagePlus filteredMeasurement = null;
+        ImagePlus binarizedRawInMask = null;
+
+        try {
+        raw = ImageOps.duplicateThreadSafe(chans[c]);
         raw.setTitle(channelNames[c] + "_raw");
 
         // Create single filtered copy — used for both measurement and binarization
         ImagePlus filtered = ImageOps.duplicateThreadSafe(chans[c]);
         filtered.setTitle(channelNames[c] + "_filtered");
+        filteredMeasurement = filtered;
 
         // Per-channel filter dispatch:
         //   "Bin filter"  → load Cn_Filters.ijm from .bin/, fall back to basic if missing
@@ -1369,10 +1410,8 @@ public class IntensityAnalysisV2 implements Analysis {
         }
 
         // Binary duplicate from already-filtered image (no need to re-filter)
-        ImagePlus binary = ImageOps.duplicateThreadSafe(filtered);
+        binary = ImageOps.duplicateThreadSafe(filtered);
         binary.setTitle(channelNames[c] + "_binary");
-        ImagePlus filteredMeasurement = filtered;
-        ImagePlus binarizedRawInMask = null;
 
         if (binarization[c]) {
             if (!compactLog) IJ.log("    - Binarization: applying threshold=" + thresholds[c]);
@@ -1466,11 +1505,12 @@ public class IntensityAnalysisV2 implements Analysis {
             IJ.log("    [DEBUG] ROI mask applied: " + (roi != null));
         }
 
-        // Clean up channel-local images
-        closeImage(binary);
-        closeImage(raw);
-        closeImage(filteredMeasurement);
-        closeImage(binarizedRawInMask);
+        } finally {
+            closeImage(binary);
+            closeImage(raw);
+            closeImage(filteredMeasurement);
+            closeImage(binarizedRawInMask);
+        }
     }
 
     private void measureCrossChannelSpatial(String[] channelNames,
