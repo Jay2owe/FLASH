@@ -1,5 +1,6 @@
 package flash.pipeline.ui.variations.strategy;
 
+import flash.pipeline.ui.config.StarDistParameterStage;
 import flash.pipeline.ui.variations.ParameterSweep;
 import flash.pipeline.ui.variations.VariationCache;
 import flash.pipeline.ui.variations.VariationEngineContext;
@@ -29,6 +30,22 @@ public final class VariationStrategyChooser {
                     cache,
                     context.classicalPreviewAdapter(),
                     Runtime.getRuntime().availableProcessors() - 1);
+        }
+        if (sweep.method() == ParameterSweep.Method.STARDIST
+                && StarDistFastNms.canHandle(sweep)) {
+            if (context.starDistPreviewAdapter() == null) {
+                throw new IllegalStateException(
+                        "StarDist variations require a StarDist preview adapter.");
+            }
+            if (!(context.baseParameters() instanceof StarDistParameterStage.Parameters)) {
+                throw new IllegalStateException(
+                        "StarDist variations require StarDist base parameters.");
+            }
+            return new StarDistFastNms(context.filteredSource(),
+                    sweep.cropSpec(),
+                    cache,
+                    context.starDistPreviewAdapter(),
+                    (StarDistParameterStage.Parameters) context.baseParameters());
         }
         throw new UnsupportedOperationException(
                 sweep.method().label() + " variations are not implemented yet.");
