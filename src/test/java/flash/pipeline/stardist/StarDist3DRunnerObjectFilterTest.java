@@ -2,6 +2,7 @@ package flash.pipeline.stardist;
 
 import ij.ImagePlus;
 import ij.ImageStack;
+import ij.measure.Calibration;
 import ij.measure.ResultsTable;
 import ij.process.ShortProcessor;
 import org.junit.Test;
@@ -29,6 +30,22 @@ public class StarDist3DRunnerObjectFilterTest {
         ImagePlus labels = labelImage(new int[] {1, 7, 7, 0});
 
         assertEquals(2, StarDist3DRunner.countLabels(labels));
+    }
+
+    @Test
+    public void duplicateInputForTrackMateReturnsDetachedTitledCopy() {
+        ImagePlus input = labelImage(new int[] {1, 2, 3, 4});
+        Calibration calibration = new Calibration();
+        calibration.pixelWidth = 0.5;
+        calibration.pixelHeight = 0.75;
+        input.setCalibration(calibration);
+
+        ImagePlus copy = StarDist3DRunner.duplicateInputForTrackMate(input);
+
+        assertEquals("StarDist_input", copy.getTitle());
+        assertEquals(0.5, copy.getCalibration().pixelWidth, 0.0);
+        copy.getProcessor().set(0, 0, 99);
+        assertEquals(1, input.getProcessor().get(0, 0));
     }
 
     private static ResultsTable objectStats() {

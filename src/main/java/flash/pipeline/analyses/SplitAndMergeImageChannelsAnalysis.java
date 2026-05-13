@@ -11,6 +11,7 @@ import flash.pipeline.cli.CLIConfig;
 import flash.pipeline.deconv.DeconvolvedInputResolver;
 import flash.pipeline.image.AdaptiveParallelism;
 import flash.pipeline.image.ImageCalcOps;
+import flash.pipeline.image.ImageOps;
 import flash.pipeline.image.OrientationOps;
 import flash.pipeline.image.ParallelContext;
 import flash.pipeline.image.ProcessingNotes;
@@ -1772,7 +1773,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
 
         ImagePlus backgroundStack = null;
         if (subtractBackground && backgroundIndex >= 0 && backgroundIndex < n) {
-            backgroundStack = chans[backgroundIndex].duplicate();
+            backgroundStack = ImageOps.duplicateThreadSafe(chans[backgroundIndex]);
             backgroundStack.setTitle("Background");
             if (!compactLog) IJ.log("  Background channel: " + channelNames[backgroundIndex] + " (duplicated for subtraction)");
         }
@@ -1799,7 +1800,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                 boolean doSubtract = c < subtractFromChannels.length && subtractFromChannels[c];
                 if (doSubtract && c != backgroundIndex) {
                     if (!compactLog) IJ.log("    - Background subtraction: subtracting " + channelNames[backgroundIndex] + " from " + channelNames[c]);
-                    ImagePlus temp = chStack.duplicate();
+                    ImagePlus temp = ImageOps.duplicateThreadSafe(chStack);
                     temp.setTitle(channelNames[c]);
                     ImagePlus subtracted = ImageCalcOps.subtractStackThreadSafe(temp, backgroundStack);
                     working = (subtracted != null) ? subtracted : temp;
@@ -1821,7 +1822,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
 
             maxProjs[c] = max;
 
-            ImagePlus maxForPng = max.duplicate();
+            ImagePlus maxForPng = ImageOps.duplicateThreadSafe(max);
             applyPseudoColor(maxForPng, channelColors[c]);
             String safeChannel = ChannelFilenameCodec.toSafe(channelNames[c]);
             String singleSaveName = safeChannel + (hemiRegion.isEmpty() ? "" : "_" + hemiRegion) + ".png";
@@ -1838,7 +1839,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                 ImagePlus rawMax = ZProjector.run(chStack, "max");
                 rawMax.setTitle(channelNames[c] + "_Raw");
                 applyProcessing(rawMax, method, customMM, saturation);
-                ImagePlus rawPng = rawMax.duplicate();
+                ImagePlus rawPng = ImageOps.duplicateThreadSafe(rawMax);
                 applyPseudoColor(rawPng, channelColors[c]);
                 String rawSaveName = safeChannel + "_Raw" + (hemiRegion.isEmpty() ? "" : "_" + hemiRegion) + ".png";
                 AsyncImageSaver.saveAsPngAsync(rawPng, new File(outDir, rawSaveName).getAbsolutePath());

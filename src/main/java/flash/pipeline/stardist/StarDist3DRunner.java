@@ -2,6 +2,7 @@ package flash.pipeline.stardist;
 
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.image.GpuConcurrency;
+import flash.pipeline.image.ImageOps;
 import ij.IJ;
 import ij.ImagePlus;
 import ij.ImageStack;
@@ -149,8 +150,7 @@ public class StarDist3DRunner {
             double safeGapClosingMaxDistance = Math.max(0, gapClosingMaxDistance);
             int safeMaxFrameGap = Math.max(0, maxFrameGap);
 
-            ImagePlus dup = input.duplicate();
-            dup.setTitle("StarDist_input");
+            ImagePlus dup = duplicateInputForTrackMate(input);
 
             // Remember original dimensions.
             int c = dup.getNChannels();
@@ -399,6 +399,12 @@ public class StarDist3DRunner {
             IJ.log("WARNING: " + StarDistDetector.getAvailabilityMessage());
             return null;
         }
+    }
+
+    static ImagePlus duplicateInputForTrackMate(ImagePlus input) {
+        ImagePlus dup = ImageOps.duplicateThreadSafe(input);
+        dup.setTitle("StarDist_input");
+        return dup;
     }
 
     /**

@@ -1,6 +1,7 @@
 package flash.pipeline.objects;
 
 import Utilities.Counter3D;
+import flash.pipeline.image.ImageOps;
 import ij.ImagePlus;
 import ij.ImageStack;
 import ij.Prefs;
@@ -227,7 +228,7 @@ public final class ObjectsCounter3DWrapper {
         // 5. Objects map
         ImagePlus objectsMap = null;
         if (wantObjectsMap) {
-            objectsMap = labelledImp.duplicate();
+            objectsMap = ImageOps.duplicateThreadSafe(labelledImp);
             objectsMap.setTitle("Objects map of " + img.getTitle());
         }
 
@@ -299,7 +300,7 @@ public final class ObjectsCounter3DWrapper {
             // Objects map
             ImagePlus objectsMap = null;
             if (wantObjectsMap) {
-                objectsMap = filteredLabelImage.duplicate();
+                objectsMap = ImageOps.duplicateThreadSafe(filteredLabelImage);
                 objectsMap.setTitle("Objects map of " + labelImage.getTitle());
             }
 
@@ -351,7 +352,7 @@ public final class ObjectsCounter3DWrapper {
         }
         if (labelsToRemove.isEmpty()) return labelImage;
 
-        ImagePlus filtered = labelImage.duplicate();
+        ImagePlus filtered = ImageOps.duplicateThreadSafe(labelImage);
         filtered.setTitle(labelImage.getTitle() + " size-filtered");
         ImageStack filteredStack = filtered.getStack();
         for (int slice = 1; slice <= filteredStack.getSize(); slice++) {
@@ -387,13 +388,13 @@ public final class ObjectsCounter3DWrapper {
      * thresholding behaviour so that ImageLabeller labels the correct foreground.
      */
     private static ImagePlus thresholdCopy(ImagePlus img, int threshold) {
-        ImagePlus dup = img.duplicate();
+        ImagePlus dup = ImageOps.duplicateThreadSafe(img);
         ImageStack stack = dup.getStack();
         for (int s = 1; s <= stack.size(); s++) {
             ImageProcessor ip = stack.getProcessor(s);
             for (int i = 0; i < ip.getPixelCount(); i++) {
-                if (ip.get(i) < threshold) {
-                    ip.set(i, 0);
+                if (ip.getf(i) < threshold) {
+                    ip.setf(i, 0f);
                 }
             }
         }
@@ -494,7 +495,7 @@ public final class ObjectsCounter3DWrapper {
      * This replicates Counter3D's "Masked image" output.
      */
     private static ImagePlus buildMaskedImage(ImagePlus redirectImage, ImagePlus labelledImage) {
-        ImagePlus masked = redirectImage.duplicate();
+        ImagePlus masked = ImageOps.duplicateThreadSafe(redirectImage);
         masked.setTitle("Masked image");
         ImageStack maskedStack = masked.getStack();
         ImageStack labelStack = labelledImage.getStack();

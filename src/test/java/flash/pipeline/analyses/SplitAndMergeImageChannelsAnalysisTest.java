@@ -301,6 +301,43 @@ public class SplitAndMergeImageChannelsAnalysisTest {
     }
 
     @Test
+    public void processOneImageWritesBackgroundSubtractedPngOutputs() throws Exception {
+        File dir = temp.newFolder("backgroundPngs");
+        File outDir = new File(dir, "Images/Animal1");
+        File tifDir = new File(dir, "OME-TIFF");
+        File detailsDir = new File(dir, "Analysis Details");
+        assertTrue(outDir.mkdirs());
+
+        ImageStack stack = new ImageStack(2, 2);
+        stack.addSlice("DAPI", new byte[]{10, 20, 30, 40});
+        stack.addSlice("GFAP", new byte[]{40, 50, 60, 70});
+        ImagePlus imp = new ImagePlus("Experiment-Animal1_LH_Cortex", stack);
+        imp.setDimensions(2, 1, 1);
+        imp.setOpenAsHyperStack(true);
+
+        invokeProcessOneImage(new SplitAndMergeImageChannelsAnalysis(),
+                imp,
+                new String[]{"DAPI", "GFAP"},
+                new String[]{"Blue", "Green"},
+                outDir,
+                tifDir,
+                detailsDir,
+                true,
+                false,
+                true,
+                0,
+                new boolean[]{false, true},
+                new NameParts("Experiment", "Animal1", "LH", "Cortex"));
+
+        AsyncImageSaver.waitForAll();
+        assertFileWritten(new File(outDir, "DAPI_LH_Cortex.png"));
+        assertFileWritten(new File(outDir, "DAPI_Raw_LH_Cortex.png"));
+        assertFileWritten(new File(outDir, "GFAP_LH_Cortex.png"));
+        assertFileWritten(new File(outDir, "Merge_LH_Cortex.png"));
+        assertFileWritten(new File(detailsDir, "DAPI_LH_Cortex_details.txt"));
+    }
+
+    @Test
     public void saveSaturationsWritesToActiveConfigurationFolder() throws Exception {
         File dir = temp.newFolder("saturations");
 
@@ -372,6 +409,49 @@ public class SplitAndMergeImageChannelsAnalysisTest {
                 createMerge, saveOmeTiff, false, -1, new boolean[channelNames.length], "",
                 fill(channelNames.length, "None"), fill(channelNames.length, "None"),
                 fill(channelNames.length, 0.35), parts);
+    }
+
+    private static void invokeProcessOneImage(SplitAndMergeImageChannelsAnalysis analysis,
+                                              ImagePlus imp,
+                                              String[] channelNames,
+                                              String[] channelColors,
+                                              File outDir,
+                                              File tifDir,
+                                              File detailsDir,
+                                              boolean createMerge,
+                                              boolean saveOmeTiff,
+                                              boolean subtractBackground,
+                                              int backgroundIndex,
+                                              boolean[] subtractFromChannels,
+                                              NameParts parts) throws Exception {
+        Method method = SplitAndMergeImageChannelsAnalysis.class.getDeclaredMethod(
+                "processOneImage",
+                ImagePlus.class,
+                String[].class,
+                String[].class,
+                File.class,
+                File.class,
+                File.class,
+                boolean.class,
+                boolean.class,
+                boolean.class,
+                int.class,
+                boolean[].class,
+                String.class,
+                String[].class,
+                String[].class,
+                double[].class,
+                NameParts.class);
+        method.setAccessible(true);
+        method.invoke(analysis, imp, channelNames, channelColors, outDir, tifDir, detailsDir,
+                createMerge, saveOmeTiff, subtractBackground, backgroundIndex, subtractFromChannels, "",
+                fill(channelNames.length, "None"), fill(channelNames.length, "None"),
+                fill(channelNames.length, 0.35), parts);
+    }
+
+    private static void assertFileWritten(File file) {
+        assertTrue(file.getAbsolutePath(), file.isFile());
+        assertTrue(file.getAbsolutePath(), file.length() > 0L);
     }
 
     private static String[] fill(int length, String value) {
