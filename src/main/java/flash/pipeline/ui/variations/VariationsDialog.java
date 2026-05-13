@@ -1,6 +1,7 @@
 package flash.pipeline.ui.variations;
 
 import flash.pipeline.ui.PipelineDialog;
+import flash.pipeline.ui.variations.strategy.VariationStrategyChooser;
 
 import ij.ImagePlus;
 
@@ -356,12 +357,20 @@ public final class VariationsDialog extends PipelineDialog {
         statusLabel.setText("Status: 0/" + combos.size() + " complete");
         suggestionLabel.setText("Suggested: pending");
 
-        VariationStrategy strategy = strategyForTest == null
-                ? new EchoStrategy()
-                : strategyForTest;
+        VariationCache runCache = new VariationCache(context.configContext());
+        VariationStrategy strategy;
+        try {
+            strategy = strategyForTest == null
+                    ? VariationStrategyChooser.choose(currentSweep, context, runCache)
+                    : strategyForTest;
+        } catch (RuntimeException e) {
+            showMessage(e.getMessage());
+            statusLabel.setText("Status: refused");
+            return;
+        }
         executor = new VariationExecutor(currentSweep,
                 strategy,
-                new VariationCache(context.configContext()),
+                runCache,
                 (result, index) -> handleResult(result, index.intValue()),
                 status -> setStatusText(status));
         executor.addPropertyChangeListener(evt -> {

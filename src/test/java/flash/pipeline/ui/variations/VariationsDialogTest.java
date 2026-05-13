@@ -39,6 +39,7 @@ public class VariationsDialogTest {
                             }
                         });
                 dialog.setSweepForTest(twoAxisSweep());
+                dialog.setStrategyForTest(new EchoStrategy());
                 dialog.start();
                 holder[0] = dialog;
             }
