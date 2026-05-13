@@ -36,6 +36,7 @@ import flash.pipeline.results.AnalysisDetailsWriter;
 import flash.pipeline.results.SplitAndMergeDetailsWriter;
 import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.FeatureDependencyGate;
+import flash.pipeline.ui.FlashIcons;
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.ToggleSwitch;
 import flash.pipeline.zslice.ZSliceOps;
@@ -1062,6 +1063,9 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
             CollapsibleOptionsPanel section = new CollapsibleOptionsPanel("Overview Tile");
             this.panel = section.panel;
             this.tileOrderPanel = new TileOrderPanel(defaultOrder);
+            previewButton.setFont(previewButton.getFont().deriveFont(Font.PLAIN, 11f));
+            previewButton.setMargin(new Insets(1, 8, 1, 8));
+            section.addHeaderComponent(previewButton);
             tileGroupBox.setSelectedItem("Animal");
             scaleBarPositionBox.setSelectedItem("Bottom right");
             annotationColorBox.setSelectedItem("White");
@@ -1085,8 +1089,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                     labelled("Label", labelModeBox),
                     labelled("Custom", customLabelField),
                     labelled("Font px", labelFontSizeField),
-                    labelled("Label position", labelPositionBox),
-                    previewButton));
+                    labelled("Label position", labelPositionBox)));
             section.add(tileOrderPanel.panel);
 
             annotateIndividualToggle.addChangeListener(new Runnable() {
@@ -1205,29 +1208,39 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
     }
 
     static final class CollapsibleOptionsPanel {
+        private static final Color SUBHEADER_COLOR = new Color(78, 93, 101);
+
         final JPanel panel = new JPanel();
+        private final JPanel header = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
         private final JPanel content = new JPanel();
         private final JLabel titleLabel;
+        private final String title;
 
         CollapsibleOptionsPanel(String title) {
+            this.title = title == null ? "" : title;
             panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
             panel.setOpaque(false);
             panel.setAlignmentX(Component.LEFT_ALIGNMENT);
-            panel.setBorder(BorderFactory.createEmptyBorder(2, 4, 6, 4));
+            panel.setBorder(BorderFactory.createEmptyBorder(6, 0, 3, 0));
 
-            JPanel header = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
             header.setOpaque(false);
             header.setAlignmentX(Component.LEFT_ALIGNMENT);
+            header.setBorder(BorderFactory.createEmptyBorder(0, 16, 0, 0));
             header.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-            titleLabel = new JLabel(collapsedTitle(title, false));
+            titleLabel = new JLabel(this.title);
             titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD, 12f));
-            titleLabel.setForeground(new Color(55, 71, 79));
+            titleLabel.setForeground(SUBHEADER_COLOR);
+            titleLabel.setIcon(FlashIcons.chevronRight(12, SUBHEADER_COLOR));
+            titleLabel.setIconTextGap(5);
+            if (titleLabel.getIcon() == null) {
+                titleLabel.setText("\u25B8 " + this.title);
+            }
             header.add(titleLabel);
 
             content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
             content.setOpaque(false);
             content.setVisible(false);
-            content.setBorder(BorderFactory.createEmptyBorder(4, 14, 2, 0));
+            content.setBorder(BorderFactory.createEmptyBorder(4, 30, 2, 0));
 
             java.awt.event.MouseAdapter listener = new java.awt.event.MouseAdapter() {
                 @Override
@@ -1247,20 +1260,25 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
             content.add(component);
         }
 
+        void addHeaderComponent(JComponent component) {
+            if (component == null) return;
+            component.setAlignmentX(Component.LEFT_ALIGNMENT);
+            header.add(Box.createHorizontalStrut(8));
+            header.add(component);
+        }
+
         private void setOpen(boolean open) {
             content.setVisible(open);
-            titleLabel.setText(collapsedTitle(titleText(), open));
+            titleLabel.setIcon(open
+                    ? FlashIcons.chevronDown(12, SUBHEADER_COLOR)
+                    : FlashIcons.chevronRight(12, SUBHEADER_COLOR));
+            if (titleLabel.getIcon() == null) {
+                titleLabel.setText((open ? "\u25BE " : "\u25B8 ") + title);
+            } else {
+                titleLabel.setText(title);
+            }
             panel.revalidate();
             panel.repaint();
-        }
-
-        private String titleText() {
-            String text = titleLabel.getText();
-            return text.length() > 2 ? text.substring(2) : text;
-        }
-
-        private static String collapsedTitle(String title, boolean open) {
-            return (open ? "\u25BE " : "\u25B8 ") + title;
         }
     }
 
