@@ -1,5 +1,6 @@
 package flash.pipeline.presentation;
 
+import flash.pipeline.io.CsvSupport;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -8,6 +9,7 @@ import javax.imageio.ImageIO;
 import java.awt.Color;
 import java.awt.image.BufferedImage;
 import java.io.File;
+import java.io.PrintWriter;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -57,6 +59,91 @@ public class PresentationTileWriterTest {
         Color firstCell = new Color(tile.getRGB(firstCellCenterX, firstCellCenterY), true);
         assertTrue("first requested column should be GFAP/green",
                 firstCell.getGreen() > 180 && firstCell.getRed() < 80);
+    }
+
+    @Test
+    public void duplicateLabelRecordsWithDifferentImageIdsSurviveManifestAndOverview() throws Exception {
+        File root = temp.newFolder("duplicate-labels");
+        File images = new File(root, "Images/Animal1");
+        assertTrue(images.mkdirs());
+
+        File first = new File(images, "DAPI_first.png");
+        File second = new File(images, "DAPI_second.png");
+        writeSolid(first, Color.RED);
+        writeSolid(second, Color.GREEN);
+
+        PresentationTileRecord firstRecord = new PresentationTileRecord(
+                first, "Animal1", "LH", "Cortex", "source-series-001",
+                "DAPI", "DAPI", 0, 40, 40, 1.0, 1.0);
+        PresentationTileRecord secondRecord = new PresentationTileRecord(
+                second, "Animal1", "LH", "Cortex", "source-series-002",
+                "DAPI", "DAPI", 0, 40, 40, 1.0, 1.0);
+        assertNotEquals(firstRecord.imageKey(), secondRecord.imageKey());
+        assertEquals(firstRecord.imageLabel(), secondRecord.imageLabel());
+
+        List<PresentationTileRecord> records = Arrays.asList(firstRecord, secondRecord);
+        Map<String, String> conditions = new LinkedHashMap<String, String>();
+        conditions.put("Animal1", "Control");
+
+        File manifest = new File(root, "Presentation_Image_Manifest.csv");
+        PresentationTileWriter.writeManifest(manifest, records, conditions);
+        List<PresentationTileRecord> readBack = PresentationTileWriter.readManifest(manifest);
+        assertEquals(2, readBack.size());
+        assertEquals("source-series-001", readBack.get(0).imageId());
+        assertEquals("source-series-002", readBack.get(1).imageId());
+
+        PresentationTileConfig config = PresentationTileConfig.builder()
+                .createOverviewTile(true)
+                .annotateOverviewTile(false)
+                .scaleBarEnabled(false)
+                .labelMode(PresentationTileConfig.LabelMode.NONE)
+                .cellSizePx(80)
+                .build();
+
+        File out = new File(root, "Tiles/overview.png");
+        PresentationTileWriter.writeOverviewTile(out, records, conditions, config);
+
+        BufferedImage tile = ImageIO.read(out);
+        assertEquals(282, tile.getHeight());
+        int cellCenterX = 18 + 190 + 40;
+        int firstRowCenterY = 18 + 46 + 30 + 40;
+        int secondRowCenterY = firstRowCenterY + 80 + 10;
+        Color firstCell = new Color(tile.getRGB(cellCenterX, firstRowCenterY), true);
+        Color secondCell = new Color(tile.getRGB(cellCenterX, secondRowCenterY), true);
+        assertTrue("first row should use the first source image",
+                firstCell.getRed() > 180 && firstCell.getGreen() < 80);
+        assertTrue("second row should use the second source image",
+                secondCell.getGreen() > 180 && secondCell.getRed() < 80);
+    }
+
+    @Test
+    public void readManifestAcceptsRowsWithoutSourceImageId() throws Exception {
+        File root = temp.newFolder("legacy-manifest");
+        File image = new File(root, "DAPI_LH_Cortex.png");
+        writeSolid(image, Color.BLUE);
+
+        File manifest = new File(root, "Presentation_Image_Manifest.csv");
+        PrintWriter pw = CsvSupport.newWriter(manifest);
+        try {
+            pw.println(CsvSupport.joinRow(Arrays.asList(
+                    "Animal", "Condition", "Hemisphere", "Region",
+                    "OutputName", "StainName", "ChannelIndex",
+                    "ImagePath", "AnnotatedImagePath",
+                    "WidthPx", "HeightPx", "PixelWidthUm", "PixelHeightUm")));
+            pw.println(CsvSupport.joinRow(Arrays.asList(
+                    "Animal1", "Control", "LH", "Cortex",
+                    "DAPI", "DAPI", "0",
+                    image.getAbsolutePath(), "",
+                    "40", "40", "1.0", "1.0")));
+        } finally {
+            pw.close();
+        }
+
+        List<PresentationTileRecord> records = PresentationTileWriter.readManifest(manifest);
+
+        assertEquals(1, records.size());
+        assertEquals("", records.get(0).imageId());
+        assertEquals("Animal1|LH|Cortex", records.get(0).imageKey());
     }
 
     @Test

@@ -13,6 +13,8 @@ import flash.pipeline.io.AsyncImageSaver;
 import flash.pipeline.io.BoundedImageLoader;
 import flash.pipeline.io.DeferredImageSupplier;
 import flash.pipeline.naming.NameParts;
+import flash.pipeline.presentation.PresentationTileRecord;
+import flash.pipeline.presentation.PresentationTileWriter;
 import ij.ImagePlus;
 import ij.ImageStack;
 import org.junit.After;
@@ -30,6 +32,7 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.EnumMap;
 import java.util.EnumSet;
@@ -345,6 +348,37 @@ public class SplitAndMergeImageChannelsAnalysisTest {
     }
 
     @Test
+    public void presentationManifestMergeKeepsDuplicateLabelsWhenImageIdsDiffer() throws Exception {
+        File splitMergeRoot = temp.newFolder("presentationMerge");
+        File images = new File(splitMergeRoot, "Images/Animal1");
+        assertTrue(images.mkdirs());
+
+        File existingImage = new File(images, "DAPI_existing.png");
+        File currentImage = new File(images, "DAPI_current.png");
+        assertTrue(existingImage.createNewFile());
+        assertTrue(currentImage.createNewFile());
+
+        PresentationTileRecord existing = new PresentationTileRecord(
+                existingImage, "Animal1", "LH", "Cortex", "source-series-001",
+                "DAPI", "DAPI", 0, 40, 40, 1.0, 1.0);
+        PresentationTileWriter.writeManifest(
+                new File(splitMergeRoot, "Presentation_Image_Manifest.csv"),
+                Collections.singletonList(existing),
+                Collections.<String, String>emptyMap());
+
+        PresentationTileRecord current = new PresentationTileRecord(
+                currentImage, "Animal1", "LH", "Cortex", "source-series-002",
+                "DAPI", "DAPI", 0, 40, 40, 1.0, 1.0);
+
+        List<PresentationTileRecord> merged = invokeMergeExistingPresentationManifest(
+                splitMergeRoot, Collections.singletonList(current));
+
+        assertEquals(2, merged.size());
+        assertEquals(Arrays.asList("source-series-001", "source-series-002"),
+                Arrays.asList(merged.get(0).imageId(), merged.get(1).imageId()));
+    }
+
+    @Test
     public void parallelProcessingRethrowsWorkerFailuresAfterWorkersFinish() throws Exception {
         File dir = temp.newFolder("parallelFailure");
         File outRoot = new File(dir, "Images");
@@ -499,12 +533,13 @@ public class SplitAndMergeImageChannelsAnalysisTest {
                 String[].class,
                 String[].class,
                 double[].class,
-                NameParts.class);
+                NameParts.class,
+                String.class);
         method.setAccessible(true);
         method.invoke(analysis, imp, channelNames, channelColors, outDir, tifDir, detailsDir,
                 createMerge, saveOmeTiff, false, -1, new boolean[channelNames.length], "",
                 fill(channelNames.length, "None"), fill(channelNames.length, "None"),
-                fill(channelNames.length, 0.35), parts);
+                fill(channelNames.length, 0.35), parts, "source-series-test");
     }
 
     private static void invokeProcessOneImage(SplitAndMergeImageChannelsAnalysis analysis,
@@ -537,12 +572,23 @@ public class SplitAndMergeImageChannelsAnalysisTest {
                 String[].class,
                 String[].class,
                 double[].class,
-                NameParts.class);
+                NameParts.class,
+                String.class);
         method.setAccessible(true);
         method.invoke(analysis, imp, channelNames, channelColors, outDir, tifDir, detailsDir,
                 createMerge, saveOmeTiff, subtractBackground, backgroundIndex, subtractFromChannels, "",
                 fill(channelNames.length, "None"), fill(channelNames.length, "None"),
-                fill(channelNames.length, 0.35), parts);
+                fill(channelNames.length, 0.35), parts, "source-series-test");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<PresentationTileRecord> invokeMergeExistingPresentationManifest(
+            File splitMergeRoot,
+            List<PresentationTileRecord> currentRecords) throws Exception {
+        Method method = SplitAndMergeImageChannelsAnalysis.class.getDeclaredMethod(
+                "mergeExistingPresentationManifest", File.class, List.class);
+        method.setAccessible(true);
+        return (List<PresentationTileRecord>) method.invoke(null, splitMergeRoot, currentRecords);
     }
 
     private static final class SyntheticDeferredImageSupplier extends DeferredImageSupplier {

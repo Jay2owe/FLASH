@@ -79,7 +79,8 @@ public final class PresentationTileWriter {
                     "Animal", "Condition", "Hemisphere", "Region",
                     "OutputName", "StainName", "ChannelIndex",
                     "ImagePath", "AnnotatedImagePath",
-                    "WidthPx", "HeightPx", "PixelWidthUm", "PixelHeightUm")));
+                    "WidthPx", "HeightPx", "PixelWidthUm", "PixelHeightUm",
+                    "SourceImageId")));
             for (PresentationTileRecord record : safeRecords(records)) {
                 pw.println(CsvSupport.joinRow(Arrays.asList(
                         record.animal(),
@@ -94,7 +95,8 @@ public final class PresentationTileWriter {
                         String.valueOf(record.widthPx()),
                         String.valueOf(record.heightPx()),
                         formatNumber(record.pixelWidthUm()),
-                        formatNumber(record.pixelHeightUm()))));
+                        formatNumber(record.pixelHeightUm()),
+                        record.imageId())));
             }
         } finally {
             pw.close();
@@ -126,6 +128,7 @@ public final class PresentationTileWriter {
                         field(row, columns, "Animal"),
                         field(row, columns, "Hemisphere"),
                         field(row, columns, "Region"),
+                        firstField(row, columns, "SourceImageId", "ImageId"),
                         field(row, columns, "OutputName"),
                         field(row, columns, "StainName"),
                         parseInt(field(row, columns, "ChannelIndex"), -1),
@@ -314,6 +317,7 @@ public final class PresentationTileWriter {
                 representative.animal(),
                 representative.hemisphere(),
                 representative.region(),
+                representative.imageId(),
                 representative.outputName(),
                 representative.stainName(),
                 representative.channelIndex(),
@@ -634,7 +638,9 @@ public final class PresentationTileWriter {
                 if (animal != 0) return animal;
                 int region = compareText(a.record.region(), b.record.region());
                 if (region != 0) return region;
-                return compareText(a.record.hemisphere(), b.record.hemisphere());
+                int hemisphere = compareText(a.record.hemisphere(), b.record.hemisphere());
+                if (hemisphere != 0) return hemisphere;
+                return compareText(a.record.imageId(), b.record.imageId());
             }
         });
         return out;
@@ -724,6 +730,12 @@ public final class PresentationTileWriter {
         Integer index = columns.get(name);
         if (index == null || index.intValue() < 0 || index.intValue() >= row.length) return "";
         return row[index.intValue()].trim();
+    }
+
+    private static String firstField(String[] row, Map<String, Integer> columns,
+                                     String primary, String fallback) {
+        String value = field(row, columns, primary);
+        return value.isEmpty() ? field(row, columns, fallback) : value;
     }
 
     private static int parseInt(String value, int fallback) {

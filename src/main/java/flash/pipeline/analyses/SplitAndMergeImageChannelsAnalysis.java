@@ -622,6 +622,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
             ResolvedImageMetadata metadata = ImageOrientationResolver.resolve(
                     directory, imgTitle, seriesIdx + 1);
             NameParts parts = metadata.toNameParts();
+            String sourceImageId = presentationSourceImageId(metadata, imgTitle, seriesIdx + 1);
 
             // Safety-net skip for series that could not be pre-filtered
             // (non-strict title matches or metadata read failure)
@@ -670,7 +671,8 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                     new File(detailsRoot, parts.animal),
                     mdr.createMerge, mdr.saveOmeTiff, mdr.subtractBackground, mdr.backgroundIndex,
                     mdr.subtractFromChannels, mdr.additionalMergeSpec,
-                    mdr.processMethodPerCh, mdr.customMinMaxPerCh, mdr.saturationsPerCh, parts);
+                    mdr.processMethodPerCh, mdr.customMinMaxPerCh, mdr.saturationsPerCh,
+                    parts, sourceImageId);
 
             imp.changes = false;
             imp.close();
@@ -743,6 +745,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                             ResolvedImageMetadata metadata = ImageOrientationResolver.resolve(
                                     directory, imgTitle, idx + 1);
                             NameParts parts = metadata.toNameParts();
+                            String sourceImageId = presentationSourceImageId(metadata, imgTitle, idx + 1);
 
                             // Worker start log with short name and channels
                             String workerTag = nThreads > 1
@@ -795,7 +798,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                                     mdr.createMerge, mdr.saveOmeTiff, mdr.subtractBackground, mdr.backgroundIndex,
                                     mdr.subtractFromChannels, mdr.additionalMergeSpec,
                                     mdr.processMethodPerCh, mdr.customMinMaxPerCh, mdr.saturationsPerCh,
-                                    parts);
+                                    parts, sourceImageId);
 
                             int done = completed.incrementAndGet();
                             long elapsed = System.currentTimeMillis() - startTime;
@@ -1786,7 +1789,8 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
             String[] processMethodPerCh,
             String[] customMinMaxPerCh,
             double[] saturationsPerCh,
-            NameParts parts
+            NameParts parts,
+            String sourceImageId
     ) {
         long splitStart = verboseLogging ? System.currentTimeMillis() : 0;
         ImagePlus[] chans = ChannelSplitter.split(imp);
@@ -1860,7 +1864,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
             String singleSaveName = safeChannel + (hemiRegion.isEmpty() ? "" : "_" + hemiRegion) + ".png";
             File singleOut = new File(outDir, singleSaveName);
             AsyncImageSaver.saveAsPngAsync(maxForPng, singleOut.getAbsolutePath());
-            recordPresentationImage(singleOut, parts, channelNames[c], channelNames[c], c,
+            recordPresentationImage(singleOut, parts, sourceImageId, channelNames[c], channelNames[c], c,
                     maxForPng.getWidth(), maxForPng.getHeight(), pixelWidthUm, pixelHeightUm);
             if (!compactLog) IJ.log("    - Saved: " + singleSaveName);
             maxForPng.changes = false;
@@ -1906,7 +1910,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                 String mergePngName = hemiRegion.isEmpty() ? "Merge.png" : "Merge_" + hemiRegion + ".png";
                 File mergeOut = new File(outDir, mergePngName);
                 AsyncImageSaver.saveAsPngAsync(mergedRgb, mergeOut.getAbsolutePath());
-                recordPresentationImage(mergeOut, parts, "Merge", "Merge", -1,
+                recordPresentationImage(mergeOut, parts, sourceImageId, "Merge", "Merge", -1,
                         mergedRgb.getWidth(), mergedRgb.getHeight(), pixelWidthUm, pixelHeightUm);
                 if (!compactLog) IJ.log("    - Saved merge PNG: " + mergePngName);
                 mergedRgb.changes = false;
@@ -1939,7 +1943,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
         if (additionalMergeSpec != null && !additionalMergeSpec.trim().isEmpty()) {
             if (!compactLog) IJ.log("  > Additional Merges: " + additionalMergeSpec);
             createAdditionalMerges(additionalMergeSpec, maxProjs, channelNames, channelColors,
-                    outDir, parts, pixelWidthUm, pixelHeightUm);
+                    outDir, parts, sourceImageId, pixelWidthUm, pixelHeightUm);
         }
 
         // Write per-image details file
@@ -1957,10 +1961,11 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
     }
 
     private void recordPresentationImage(File imageFile,
-                                         NameParts parts,
-                                         String outputName,
-                                         String stainName,
-                                         int channelIndex,
+                                          NameParts parts,
+                                          String sourceImageId,
+                                          String outputName,
+                                          String stainName,
+                                          int channelIndex,
                                          int widthPx,
                                          int heightPx,
                                          double pixelWidthUm,
@@ -1971,6 +1976,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                 parts.animal,
                 parts.hemisphere,
                 parts.region,
+                sourceImageId,
                 outputName,
                 stainName,
                 channelIndex,
@@ -2038,6 +2044,24 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
     private static String presentationRecordKey(PresentationTileRecord record) {
         if (record == null) return "";
         return record.imageKey() + "\n" + record.outputName();
+    }
+
+    private static String presentationSourceImageId(ResolvedImageMetadata metadata,
+                                                    String imageTitle,
+                                                    int seriesIndex) {
+        String manifestKey = metadata == null ? "" : trimToEmpty(metadata.imageKey);
+        if (!manifestKey.isEmpty()) return manifestKey;
+
+        int normalizedSeries = seriesIndex < 1 ? 1 : seriesIndex;
+        String title = trimToEmpty(imageTitle);
+        if (title.isEmpty()) {
+            return "series:" + normalizedSeries;
+        }
+        return "series:" + normalizedSeries + "|" + title;
+    }
+
+    private static String trimToEmpty(String value) {
+        return value == null ? "" : value.trim();
     }
 
     private static double calibratedPixelWidthUm(ImagePlus imp, boolean xAxis) {
@@ -2273,6 +2297,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
             String[] channelColors,
             File outDir,
             NameParts parts,
+            String sourceImageId,
             double pixelWidthUm,
             double pixelHeightUm
     ) {
@@ -2314,7 +2339,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                 File mergeOut = new File(outDir, mergeSaveName);
                 AsyncImageSaver.saveAsPngAsync(mergedRgb, mergeOut.getAbsolutePath());
                 String outputName = "Merge(" + namesTrim + ")";
-                recordPresentationImage(mergeOut, parts, outputName, outputName, -1,
+                recordPresentationImage(mergeOut, parts, sourceImageId, outputName, outputName, -1,
                         mergedRgb.getWidth(), mergedRgb.getHeight(), pixelWidthUm, pixelHeightUm);
                 if (!compactLog) IJ.log("    - Saved additional merge: " + mergeSaveName);
                 mergedRgb.changes = false;

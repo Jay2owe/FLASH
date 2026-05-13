@@ -12,6 +12,7 @@ public final class PresentationTileRecord {
     private final String animal;
     private final String hemisphere;
     private final String region;
+    private final String imageId;
     private final String outputName;
     private final String stainName;
     private final int channelIndex;
@@ -31,10 +32,28 @@ public final class PresentationTileRecord {
                                   int heightPx,
                                   double pixelWidthUm,
                                   double pixelHeightUm) {
+        this(imageFile, animal, hemisphere, region, "",
+                outputName, stainName, channelIndex, widthPx, heightPx,
+                pixelWidthUm, pixelHeightUm);
+    }
+
+    public PresentationTileRecord(File imageFile,
+                                  String animal,
+                                  String hemisphere,
+                                  String region,
+                                  String imageId,
+                                  String outputName,
+                                  String stainName,
+                                  int channelIndex,
+                                  int widthPx,
+                                  int heightPx,
+                                  double pixelWidthUm,
+                                  double pixelHeightUm) {
         this.imageFile = imageFile;
         this.animal = clean(animal, "Unknown");
         this.hemisphere = clean(hemisphere, "");
         this.region = clean(region, "");
+        this.imageId = clean(imageId, "");
         this.outputName = clean(outputName, "");
         this.stainName = clean(stainName, this.outputName);
         this.channelIndex = channelIndex;
@@ -75,6 +94,10 @@ public final class PresentationTileRecord {
         return region;
     }
 
+    public String imageId() {
+        return imageId;
+    }
+
     public String outputName() {
         return outputName;
     }
@@ -107,6 +130,7 @@ public final class PresentationTileRecord {
         StringBuilder sb = new StringBuilder(animal);
         if (!hemisphere.isEmpty()) sb.append('|').append(hemisphere);
         if (!region.isEmpty()) sb.append('|').append(region);
+        if (!imageId.isEmpty()) sb.append('|').append(imageId);
         return sb.toString();
     }
 
