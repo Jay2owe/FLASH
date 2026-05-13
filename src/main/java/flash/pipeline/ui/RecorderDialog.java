@@ -23,12 +23,14 @@ import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
+import java.awt.Dialog;
 import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.Frame;
 import java.awt.GraphicsEnvironment;
 import java.awt.SecondaryLoop;
 import java.awt.Toolkit;
+import java.awt.Window;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.util.List;
@@ -77,7 +79,22 @@ public final class RecorderDialog {
         return show(channelLabel, previewHandler, sampleSupplier, null);
     }
 
+    public static Result show(Window owner,
+                              String channelLabel,
+                              CustomFilterEntryDialog.PreviewHandler previewHandler,
+                              SampleSupplier sampleSupplier) {
+        return show(owner, channelLabel, previewHandler, sampleSupplier, null);
+    }
+
     public static Result show(String channelLabel,
+                              CustomFilterEntryDialog.PreviewHandler previewHandler,
+                              SampleSupplier sampleSupplier,
+                              String seedMacro) {
+        return show(null, channelLabel, previewHandler, sampleSupplier, seedMacro);
+    }
+
+    public static Result show(Window owner,
+                              String channelLabel,
                               CustomFilterEntryDialog.PreviewHandler previewHandler,
                               SampleSupplier sampleSupplier,
                               String seedMacro) {
@@ -88,7 +105,7 @@ public final class RecorderDialog {
             return Result.cancel();
         }
 
-        Session session = new Session(channelLabel, rec, previewHandler, sampleSupplier, seedMacro);
+        Session session = new Session(owner, channelLabel, rec, previewHandler, sampleSupplier, seedMacro);
         try {
             session.open();
             session.await();
@@ -135,7 +152,7 @@ public final class RecorderDialog {
         private Result result = Result.cancel();
         private boolean closed = false;
 
-        Session(String channelLabel, Recorder rec,
+        Session(Window owner, String channelLabel, Recorder rec,
                 CustomFilterEntryDialog.PreviewHandler previewHandler,
                 SampleSupplier sampleSupplier,
                 String seedMacro) {
@@ -149,7 +166,15 @@ public final class RecorderDialog {
             this.priorRecordInMacros = Recorder.recordInMacros;
             this.baseline = safeText();
 
-            this.dialog = new JDialog((Frame) null, "Record Filter - " + this.channelLabel, false);
+            this.dialog = owner == null
+                    ? new JDialog((Frame) null, "Record Filter - " + this.channelLabel, false)
+                    : new JDialog(owner, "Record Filter - " + this.channelLabel,
+                            Dialog.ModalityType.MODELESS);
+            try {
+                this.dialog.setModalExclusionType(Dialog.ModalExclusionType.APPLICATION_EXCLUDE);
+            } catch (RuntimeException ignored) {
+                // Best effort: the owner chain is the primary focus fix.
+            }
             this.dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
             this.dialog.setLayout(new BorderLayout(8, 8));
 

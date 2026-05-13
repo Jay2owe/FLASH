@@ -207,7 +207,7 @@ public final class SetupHelpCatalog {
                     "Diffuse Object: for faint diffuse staining.",
                     "Custom: use or create a custom macro instead of a bundled preset."),
             section("Controls",
-                    "Open in canvas...: opens the visual filter builder for custom macros or larger structural edits.",
+                    "Custom macro...: opens the custom macro chooser to build visually, record Fiji actions, or import a macro file.",
                     "+ Add filter...: adds another filter step.",
                     "Run Preview: applies the current filter to the selected QC image.",
                     "Reset: restores the saved filter.",

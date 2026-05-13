@@ -14,7 +14,7 @@ None.
 - `README.md` lines 1-82 for the setup workflow and build context.
 - `src/main/java/flash/pipeline/ui/sandbox/FilterCatalog.java` lines 179-199 for the current tier-two cache pattern.
 - `src/main/java/flash/pipeline/runtime/DependencyRegistry.java` lines 670-674 for an existing FLASH `Menus.getCommands()` lookup.
-- Reference only: `C:/Users/jamie/UK Dementia Research Institute Dropbox/Brancaccio Lab/Jamie/Experiments/ImageJAI/src/main/java/imagejai/engine/MenuCommandRegistry.java` lines 16-89 for a cached `Menus.getCommands()` snapshot pattern.
+- Reference only: an external ImageJAI `MenuCommandRegistry.java` implementation for a cached `Menus.getCommands()` snapshot pattern.
 
 ## Scope
 

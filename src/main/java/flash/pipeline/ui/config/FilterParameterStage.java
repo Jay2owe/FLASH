@@ -70,6 +70,11 @@ public final class FilterParameterStage implements ConfigQcStage {
     public interface CustomFilterBuilder {
         CustomFilterResult open(ConfigQcContext context, String currentPreset,
                                 String currentMacro) throws Exception;
+
+        default CustomFilterResult open(ConfigQcContext context, String currentPreset,
+                                        String currentMacro, Window owner) throws Exception {
+            return open(context, currentPreset, currentMacro);
+        }
     }
 
     public interface PresetDescriptionProvider {
@@ -91,9 +96,9 @@ public final class FilterParameterStage implements ConfigQcStage {
     private static final String CUSTOM_PRESET = "Custom";
     private static final String DEFAULT_PRESET = "Default";
     private static final String STALE_TEXT = "Preview is stale. Press Run Preview.";
-    private static final String EMPTY_TEXT = "Choose a filter preset or open the custom filter builder.";
+    private static final String EMPTY_TEXT = "Choose a filter preset or click Custom macro...";
     private static final String BRANCHED_BANNER_TEXT =
-            "⚠ This pipeline has branches — open in canvas to edit structure.";
+            "This pipeline has branches. Use Custom macro... to edit the visual structure.";
 
     private static final Pattern RUN_LINE_PATTERN = Pattern.compile(
             "run\\s*\\(\\s*\"[^\"]+\"\\s*,\\s*\"([^\"]*)\"\\s*\\)");
@@ -520,7 +525,8 @@ public final class FilterParameterStage implements ConfigQcStage {
         gbc.fill = GridBagConstraints.HORIZONTAL;
         row.add(presetCombo, gbc);
 
-        customBuilderButton = new JButton("Open in canvas…");
+        customBuilderButton = new JButton("Custom macro...");
+        customBuilderButton.setToolTipText("Build, record, or import a custom ImageJ macro.");
         customBuilderButton.addActionListener(e -> openCustomFilterBuilder());
         gbc.gridx = 2;
         gbc.weightx = 0.0;
@@ -1132,7 +1138,11 @@ public final class FilterParameterStage implements ConfigQcStage {
         }
         try {
             syncFieldBindings();
-            CustomFilterResult result = customFilterBuilder.open(activeContext, selectedPreset, currentMacro);
+            Window owner = customBuilderButton == null
+                    ? null
+                    : SwingUtilities.getWindowAncestor(customBuilderButton);
+            CustomFilterResult result = customFilterBuilder.open(
+                    activeContext, selectedPreset, currentMacro, owner);
             if (result == null || !result.applied) {
                 setStatus("Custom filter was not changed.");
                 return;
@@ -1149,7 +1159,7 @@ public final class FilterParameterStage implements ConfigQcStage {
                 updatingControls = false;
             }
             loadPreset(newName, newMacro);
-            markPreviewStale(hasMacro() ? "Custom filter saved. Press Run Preview." : EMPTY_TEXT);
+            markPreviewStale(hasMacro() ? "Custom macro loaded. Press Run Preview." : EMPTY_TEXT);
         } catch (Exception e) {
             setError("Custom filter builder failed: " + e.getMessage());
         }
@@ -1437,10 +1447,7 @@ public final class FilterParameterStage implements ConfigQcStage {
     private void updateBranchedBannerVisibility() {
         boolean showBanner = !linear;
         if (branchedBannerLabel != null) branchedBannerLabel.setVisible(showBanner);
-        // Per stage 04: hide the canvas button on linear presets and show it
-        // only when the DAG is branched. Reserved for branched pipelines —
-        // linear edits are inline.
-        if (customBuilderButton != null) customBuilderButton.setVisible(showBanner);
+        if (customBuilderButton != null) customBuilderButton.setVisible(true);
         setStructuralControlsEnabled(linear);
     }
 

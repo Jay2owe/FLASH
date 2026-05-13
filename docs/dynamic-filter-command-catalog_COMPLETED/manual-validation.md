@@ -1,7 +1,7 @@
 # Dynamic Filter Command Catalog Manual Validation
 
 Date: 2026-05-12
-Fiji path: C:\Users\jamie\UK Dementia Research Institute Dropbox\Brancaccio Lab\Jamie\Fiji.app
+Fiji path: local Fiji.app installation used for manual validation.
 FLASH jar/build: target\FLASH-4.0.0.jar from git a3fac63 before this validation stage commit
 
 ## Checks

@@ -99,6 +99,7 @@ import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
 import java.awt.Toolkit;
+import java.awt.Window;
 import java.io.File;
 import java.io.IOException;
 import java.net.URL;
@@ -6276,8 +6277,14 @@ public class CreateBinFileAnalysis implements Analysis {
                 new FilterParameterStage.CustomFilterBuilder() {
                     @Override public FilterParameterStage.CustomFilterResult open(
                             ConfigQcContext context, String currentPreset, String currentMacro) throws Exception {
+                        return open(context, currentPreset, currentMacro, null);
+                    }
+
+                    @Override public FilterParameterStage.CustomFilterResult open(
+                            ConfigQcContext context, String currentPreset, String currentMacro,
+                            Window owner) throws Exception {
                         return openCustomFilterBuilderFromFilterStage(
-                                images, cfg, binFolder, channelIndex, chLabel, currentMacro);
+                                owner, images, cfg, binFolder, channelIndex, chLabel, currentMacro);
                     }
                 },
                 new FilterParameterStage.PresetDescriptionProvider() {
@@ -6297,6 +6304,7 @@ public class CreateBinFileAnalysis implements Analysis {
     }
 
     private FilterParameterStage.CustomFilterResult openCustomFilterBuilderFromFilterStage(
+            final Window owner,
             final List<QcImageSelection> images,
             final BinUserConfig cfg,
             final File binFolder,
@@ -6314,9 +6322,10 @@ public class CreateBinFileAnalysis implements Analysis {
                 sampleSupplier.openSample();
             }
             CustomFilterEntryDialog.Result result = CustomFilterEntryDialog.show(
+                    owner,
                     chLabel,
                     createQcCustomFilterPreviewHandler(images, cfg, channelIndex, chLabel),
-                    createQcSandboxHandler(binFolder, cfg, channelIndex, chLabel, images,
+                    createQcSandboxHandler(owner, binFolder, cfg, channelIndex, chLabel, images,
                             seedMacro != null && seedMacro.trim().length() > 0),
                     sampleSupplier,
                     seedMacro);
@@ -7177,7 +7186,18 @@ public class CreateBinFileAnalysis implements Analysis {
                                                                           final int channelIndex,
                                                                           final String chLabel,
                                                                           final List<QcImageSelection> images) {
-        return createQcSandboxHandler(binFolder, cfg, channelIndex, chLabel, images, true);
+        return createQcSandboxHandler(null, binFolder, cfg, channelIndex, chLabel, images, true);
+    }
+
+    private CustomFilterEntryDialog.SandboxHandler createQcSandboxHandler(final Window owner,
+                                                                          final File binFolder,
+                                                                          final BinUserConfig cfg,
+                                                                          final int channelIndex,
+                                                                          final String chLabel,
+                                                                          final List<QcImageSelection> images,
+                                                                          final boolean startFromExisting) {
+        return createQcSandboxHandlerInternal(owner, binFolder, cfg, channelIndex, chLabel, images,
+                startFromExisting);
     }
 
     private CustomFilterEntryDialog.SandboxHandler createQcSandboxHandler(final File binFolder,
@@ -7186,6 +7206,17 @@ public class CreateBinFileAnalysis implements Analysis {
                                                                           final String chLabel,
                                                                           final List<QcImageSelection> images,
                                                                           final boolean startFromExisting) {
+        return createQcSandboxHandlerInternal(null, binFolder, cfg, channelIndex, chLabel, images,
+                startFromExisting);
+    }
+
+    private CustomFilterEntryDialog.SandboxHandler createQcSandboxHandlerInternal(final Window owner,
+                                                                                  final File binFolder,
+                                                                                  final BinUserConfig cfg,
+                                                                                  final int channelIndex,
+                                                                                  final String chLabel,
+                                                                                  final List<QcImageSelection> images,
+                                                                                  final boolean startFromExisting) {
         return new CustomFilterEntryDialog.SandboxHandler() {
             @Override public CustomFilterEntryDialog.Result openSandbox() {
                 String seedMacro = startFromExisting ? resolveFilterContent(binFolder, cfg, channelIndex) : null;
@@ -7193,7 +7224,7 @@ public class CreateBinFileAnalysis implements Analysis {
                     seedMacro = getFilterPresetContent("Default");
                 }
                 SandboxDialog.Result result = SandboxDialog.show(
-                        chLabel, binFolder, channelIndex, seedMacro,
+                        owner, chLabel, binFolder, channelIndex, seedMacro,
                         createQcSandboxPreviewHandler(cfg, channelIndex, chLabel, images));
                 if (result == null || result.dag == null) return CustomFilterEntryDialog.Result.cancel();
                 return CustomFilterEntryDialog.Result.sandbox(result.dag, result.ijmFallback);
