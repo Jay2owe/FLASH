@@ -125,6 +125,35 @@ target/FLASH-<version>.jar
 
 Do not deploy `*-sources.jar`, `*-tests.jar`, shaded jars, or `original-*` jars as Fiji plugins.
 
+## Testing And Runtime Validation
+
+Run the default Maven suite before committing or building a release:
+
+```powershell
+.\mvnw.cmd test "-Denforcer.skip=true"
+```
+
+In the 2026-05-13 codebase review, this command passed with 1539 tests, 0 failures, 0 errors, and 6 skipped. A green default suite does not prove every Fiji runtime path, because these runtime-sensitive test classes can be skipped on local machines without the required Fiji plugins, native/GPU dependencies, non-headless runtime, or LIF fixture:
+
+- `flash.pipeline.deconv.engine.Clij2FftEngineTest`
+- `flash.pipeline.deconv.engine.DeconvolutionLab2EngineTest`
+- `flash.pipeline.deconv.engine.IterativeDeconvolve3DEngineTest`
+- `flash.pipeline.deconv.psf.EpflPsfGeneratorAdapterIntegrationTest`
+- `flash.pipeline.image.FilterExecutorTest`
+- `flash.pipeline.integration.LifBaselineRegressionTest`
+
+Before deployment to lab Fiji installs or public update-site release, validate those areas in a real Fiji install:
+
+- Install the built `target/FLASH-<version>.jar` into Fiji or install FLASH from the update site, then confirm the plugin opens.
+- Open **Pipeline Dependencies** and confirm the Fiji runtime dependencies needed for the planned workflow are present or show clear repair guidance.
+- Run 3D deconvolution with each available engine: CLIJ2 FFT, DeconvolutionLab2, and Iterative Deconvolve 3D. Verify outputs keep the input dimensions and the result is visibly deconvolved.
+- Generate an EPFL PSF from the deconvolution workflow and verify a non-empty, centered PSF is produced.
+- Run a filter or threshold workflow that uses Fiji's Auto Local Threshold command and verify it produces output without a missing-command error.
+- Run a representative `.lif` project through image loading and split/merge, then verify series count, calibration metadata, and representative outputs match the expected baseline.
+- Record the Fiji version, Java version, operating system, GPU/native dependency state, and pass/fail notes for each runtime-sensitive area.
+
+There is currently no dedicated `pom.xml` profile or exact Maven command that runs all of these real-Fiji validations. Use the manual checklist above until a real-Fiji integration harness is added.
+
 ## Repository Layout
 
 ```text
