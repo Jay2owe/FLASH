@@ -7,6 +7,10 @@ import flash.pipeline.help.SetupHelpTopic;
 import flash.pipeline.objects.ObjectsCounter3DWrapper;
 import flash.pipeline.ui.preview.ObjectSizeFilterPreview;
 import flash.pipeline.ui.preview.PreviewPairPanel;
+import flash.pipeline.ui.variations.ParameterCombo;
+import flash.pipeline.ui.variations.ParameterId;
+import flash.pipeline.ui.variations.VariationEngineContext;
+import flash.pipeline.ui.variations.VariationsDialog;
 import ij.ImagePlus;
 import ij.measure.ResultsTable;
 
@@ -21,6 +25,7 @@ import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
+import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
@@ -151,6 +156,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
     private JButton previewButton;
     private JButton installGpuButton;
     private JButton resetButton;
+    private JButton variationsButton;
     private JLabel modelDescriptionLabel;
     private JLabel companionHelpLabel;
     private JLabel runtimeLabel;
@@ -289,8 +295,10 @@ public final class CellposeParameterStage implements ConfigQcStage {
             refreshSizeCutoffPanelOnly();
             refreshLargePreviewModel();
             setStatus(EMPTY_TEXT);
+            setVariationsButtonReady(true);
         } catch (Exception e) {
             closeImages();
+            setVariationsButtonReady(false);
             setError("Could not prepare Cellpose input: " + e.getMessage());
         }
     }
@@ -340,6 +348,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
             preview.clearLargePreviewImages();
         }
         closeImages();
+        setVariationsButtonReady(false);
         preview = null;
         activeContext = null;
     }
@@ -419,6 +428,10 @@ public final class CellposeParameterStage implements ConfigQcStage {
 
     int largePreviewPaneCountForTest() {
         return labelPreview == null ? 2 : 3;
+    }
+
+    void applyVariationComboForTest(ParameterCombo combo) {
+        applyVariationCombo(combo);
     }
 
     String modelHintTextForTest() {
@@ -595,6 +608,12 @@ public final class CellposeParameterStage implements ConfigQcStage {
         gbc.gridx++;
         gbc.insets = new Insets(0, 2, 0, 0);
         row.add(resetButton, gbc);
+        variationsButton = new JButton("Parameter Variations...");
+        variationsButton.addActionListener(e -> openVariationsDialog());
+        variationsButton.setEnabled(filteredSource != null);
+        variationsButton.setToolTipText("Run/prepare a preview before opening parameter variations.");
+        gbc.gridx++;
+        row.add(variationsButton, gbc);
         return row;
     }
 
@@ -879,6 +898,43 @@ public final class CellposeParameterStage implements ConfigQcStage {
         preview.setLargePreviewImages(rawSource, filteredSource, labelPreview);
     }
 
+    private void openVariationsDialog() {
+        if (filteredSource == null || activeContext == null) {
+            setStatus("Wait for the filtered input to finish preparing before opening variations.");
+            return;
+        }
+        VariationEngineContext ctx = VariationEngineContext.forCellpose(
+                activeContext.getChannelName(),
+                rawSource,
+                filteredSource,
+                activeContext,
+                collectParameters(),
+                previewAdapter);
+        VariationsDialog dialog = new VariationsDialog(
+                SwingUtilities.getWindowAncestor(preview != null ? preview : previewButton),
+                ctx,
+                this::applyVariationCombo);
+        dialog.showDialog();
+    }
+
+    private void applyVariationCombo(ParameterCombo combo) {
+        if (combo == null) return;
+        updatingControls = true;
+        try {
+            Object model = combo.get(ParameterId.MODEL);
+            if (model != null && modelCombo != null) {
+                modelCombo.setSelectedItem(CellposeModel.fromToken(String.valueOf(model)).displayName());
+            }
+            setNumberField(diameterField, combo, ParameterId.DIAMETER);
+            setNumberField(flowField, combo, ParameterId.FLOW_THRESHOLD);
+            setNumberField(cellprobField, combo, ParameterId.CELLPROB_THRESHOLD);
+        } finally {
+            updatingControls = false;
+        }
+        refreshCompanionState();
+        runPreviewOnWorker();
+    }
+
     private ImagePlus currentSourceImage() {
         return rawSourceSelected() && rawSource != null ? rawSource : filteredSource;
     }
@@ -1060,6 +1116,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
         if (previewButton != null) previewButton.setEnabled(enabled);
         if (installGpuButton != null) installGpuButton.setEnabled(enabled);
         if (resetButton != null) resetButton.setEnabled(enabled);
+        if (variationsButton != null) variationsButton.setEnabled(enabled && filteredSource != null);
         if (modelCombo != null) modelCombo.setEnabled(enabled);
         if (companionCombo != null) {
             companionCombo.setEnabled(enabled
@@ -1075,6 +1132,19 @@ public final class CellposeParameterStage implements ConfigQcStage {
         if (preview != null) {
             preview.setSourceModeEnabled(enabled);
             preview.setObjectOverlayEnabled(enabled);
+        }
+    }
+
+    private void setVariationsButtonReady(boolean ready) {
+        if (variationsButton != null) {
+            variationsButton.setEnabled(ready && filteredSource != null);
+        }
+    }
+
+    private static void setNumberField(JTextField field, ParameterCombo combo, ParameterId id) {
+        Object value = combo == null ? null : combo.get(id);
+        if (field != null && value instanceof Number) {
+            field.setText(String.valueOf(((Number) value).doubleValue()));
         }
     }
 
