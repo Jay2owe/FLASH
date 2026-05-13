@@ -69,6 +69,16 @@ public class PatchinessAnalysisTest {
         assertFalse(warnings.isEmpty());
     }
 
+    @Test
+    public void tileScaleUsesNanometerCalibrationAsMicrons() {
+        IntensitySpatialResult result = new PatchinessAnalysis().measure(context(
+                halfSplitImage(4, 4, 10.0f, 90.0f, 500.0, 500.0, "nm"), null,
+                singleScaleConfig()));
+
+        assertEquals(0.0, result.value("Intensity_PatchinessCV2"), 1e-9);
+        assertEquals(0.0, result.value("Intensity_Lacunarity2"), 1e-9);
+    }
+
     private static IntensitySpatialContext context(ImagePlus raw,
                                                    ImagePlus binarized,
                                                    IntensitySpatialConfig config) {
@@ -81,6 +91,14 @@ public class PatchinessAnalysisTest {
                 .enabled(true)
                 .addAnalysis(IntensitySpatialConfig.AnalysisKey.PATCHINESS)
                 .tileScalesUm(new double[]{2.0, 4.0})
+                .build();
+    }
+
+    private static IntensitySpatialConfig singleScaleConfig() {
+        return IntensitySpatialConfig.builder()
+                .enabled(true)
+                .addAnalysis(IntensitySpatialConfig.AnalysisKey.PATCHINESS)
+                .tileScalesUm(new double[]{2.0})
                 .build();
     }
 
@@ -104,13 +122,38 @@ public class PatchinessAnalysisTest {
         return image(width, height, pixels);
     }
 
+    private static ImagePlus halfSplitImage(int width,
+                                            int height,
+                                            float low,
+                                            float high,
+                                            double pixelWidth,
+                                            double pixelHeight,
+                                            String unit) {
+        float[] pixels = new float[width * height];
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                pixels[y * width + x] = x < width / 2 ? low : high;
+            }
+        }
+        return image(width, height, pixels, pixelWidth, pixelHeight, unit);
+    }
+
     private static ImagePlus image(int width, int height, float[] pixels) {
+        return image(width, height, pixels, 1.0, 1.0, "um");
+    }
+
+    private static ImagePlus image(int width,
+                                   int height,
+                                   float[] pixels,
+                                   double pixelWidth,
+                                   double pixelHeight,
+                                   String unit) {
         ImagePlus image = new ImagePlus("synthetic",
                 new FloatProcessor(width, height, pixels, null));
         Calibration calibration = new Calibration();
-        calibration.pixelWidth = 1.0;
-        calibration.pixelHeight = 1.0;
-        calibration.setUnit("um");
+        calibration.pixelWidth = pixelWidth;
+        calibration.pixelHeight = pixelHeight;
+        calibration.setUnit(unit);
         image.setCalibration(calibration);
         return image;
     }

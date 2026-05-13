@@ -2,7 +2,6 @@ package flash.pipeline.intensity.spatial;
 
 import ij.ImagePlus;
 import ij.gui.Roi;
-import ij.measure.Calibration;
 import ij.process.ImageProcessor;
 import net.imglib2.RandomAccessibleInterval;
 import net.imglib2.img.array.ArrayImgs;
@@ -188,14 +187,10 @@ final class PairVolume3D {
     }
 
     private static double pixelSize(ImagePlus image, Axis axis) {
-        Calibration cal = image == null ? null : image.getCalibration();
-        double value = 1.0;
-        if (cal != null) {
-            if (axis == Axis.X) value = cal.pixelWidth;
-            if (axis == Axis.Y) value = cal.pixelHeight;
-            if (axis == Axis.Z) value = cal.pixelDepth;
-        }
-        return value > 0.0 && isFinite(value) ? value : 1.0;
+        CalibrationUtil.Axis utilAxis = axis == Axis.X ? CalibrationUtil.Axis.X
+                : axis == Axis.Y ? CalibrationUtil.Axis.Y
+                : CalibrationUtil.Axis.Z;
+        return CalibrationUtil.pixelSizeUm(image, utilAxis);
     }
 
     private enum Axis {

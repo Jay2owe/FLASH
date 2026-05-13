@@ -2,7 +2,6 @@ package flash.pipeline.intensity.spatial;
 
 import ij.ImagePlus;
 import ij.gui.Roi;
-import ij.measure.Calibration;
 import ij.process.ImageProcessor;
 import net.imglib2.RandomAccessibleInterval;
 import net.imglib2.img.array.ArrayImgs;
@@ -281,9 +280,8 @@ final class PairPlane2D {
     }
 
     private static double pixelSize(ImagePlus image, boolean xAxis) {
-        Calibration cal = image == null ? null : image.getCalibration();
-        double value = cal == null ? 1.0 : (xAxis ? cal.pixelWidth : cal.pixelHeight);
-        return value > 0.0 && isFinite(value) ? value : 1.0;
+        return CalibrationUtil.pixelSizeUm(image,
+                xAxis ? CalibrationUtil.Axis.X : CalibrationUtil.Axis.Y);
     }
 
     static boolean isFinite(double value) {
