@@ -90,6 +90,28 @@ public class TilePanelTest {
     }
 
     @Test
+    public void gridReleasesOriginalVariantOutputAfterDisplayClone() {
+        assumeWindowAvailable();
+        CountingImagePlus raw = new CountingImagePlus("raw");
+        CountingImagePlus output = new CountingImagePlus("output");
+        VariantResult ok = new VariantResult(plan("ok"), output, null, 10);
+
+        VariantGridFrame frame = new VariantGridFrame("grid", raw,
+                Collections.singletonList(ok));
+        try {
+            assertEquals("original execution output should be released after display clone",
+                    1, output.flushCount);
+            assertEquals("raw display source remains owned by the grid",
+                    0, raw.flushCount);
+            assertEquals("display clone remains alive for the tile",
+                    0, output.lastDuplicate.flushCount);
+            assertSame(output.lastDuplicate, frame.tilesForTest().get(1).getScrubImp());
+        } finally {
+            frame.dispose();
+        }
+    }
+
+    @Test
     public void eliminatingTileKeepsRawVisibleAndUnregistersImage() {
         assumeWindowAvailable();
         VariantResult first = new VariantResult(plan("first"), stack("first", 3), null, 1);
@@ -199,6 +221,27 @@ public class TilePanelTest {
 
     private static VariantPlan plan(String label) {
         return new VariantPlan(label, dag(), null);
+    }
+
+    private static final class CountingImagePlus extends ImagePlus {
+        int flushCount;
+        CountingImagePlus lastDuplicate;
+
+        CountingImagePlus(String title) {
+            super(title, new FloatProcessor(8, 8));
+        }
+
+        @Override
+        public ImagePlus duplicate() {
+            lastDuplicate = new CountingImagePlus(getTitle() + "-copy");
+            return lastDuplicate;
+        }
+
+        @Override
+        public void flush() {
+            flushCount++;
+            super.flush();
+        }
     }
 
     private static DagIR dag() {

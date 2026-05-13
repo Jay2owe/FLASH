@@ -107,9 +107,16 @@ public final class VariantGridFrame extends JFrame {
                 grid.add(tile);
                 errors++;
             } else {
-                ImagePlus styled = DisplaySettingsCloner.cloneFrom(rawSource, result.output);
-                CaptionBaker.bakeAll(styled, caption);
-                addImageTile(styled, caption, false, plan);
+                ImagePlus styled = null;
+                try {
+                    styled = DisplaySettingsCloner.cloneFrom(rawSource, result.output);
+                    CaptionBaker.bakeAll(styled, caption);
+                    addImageTile(styled, caption, false, plan);
+                    styled = null;
+                } finally {
+                    if (styled != null) styled.flush();
+                    if (result.output != rawSource) result.output.flush();
+                }
             }
             kept++;
         }

@@ -352,6 +352,54 @@ public class CreateBinFileAnalysisTest {
     }
 
     @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    public void filterParameterLockInWritesPromotedDagSidecar() throws Exception {
+        File project = temp.newFolder("project-save-promoted-filter-stage");
+        File binFolder = configurationDir(project);
+        assertTrue(binFolder.mkdirs());
+        CreateBinFileAnalysis analysis = new CreateBinFileAnalysis();
+        CreateBinFileAnalysis.BinUserConfig cfg = oneChannelConfig("Custom");
+        DagIR stale = singleStepDag("sigma=1 stack");
+        DagIR initial = singleStepDag("sigma=2 stack");
+        DagIR promoted = dagWithDisabledLegacyAndUnknown("sigma=6 stack");
+
+        Files.write(new File(binFolder, "C1_Filters.ijm").toPath(),
+                DagToIjmEmitter.emit(initial).getBytes(StandardCharsets.UTF_8));
+        Files.write(new File(binFolder, "C1_Sandbox.dag.json").toPath(),
+                DagIRSerializer.toJson(stale).getBytes(StandardCharsets.UTF_8));
+
+        ConfigQcContext context = ConfigQcContext.fromImages(
+                project,
+                binFolder,
+                cfg,
+                Arrays.asList(byteImage("qc")),
+                cfg.names,
+                0);
+        FilterParameterStage stage = analysis.createFilterParameterStage(
+                (List) privateQcSelections(byteImage("qc")), cfg, binFolder, 0);
+
+        stage.buildControls(context, new NoopConfigQcActions());
+        stage.onEnter(context, new PreviewPairPanel("Original", "Adjusted"));
+        invokeStageTestMethod(stage, "simulatePromoteVariationForTest",
+                new Class<?>[]{DagIR.class, String.class},
+                new Object[]{promoted, "sigma=6"});
+
+        assertTrue(stage.lockIn(context));
+        stage.onLeave(context);
+
+        DagIR savedDag = DagIRSerializer.fromJson(new String(
+                Files.readAllBytes(new File(binFolder, "C1_Sandbox.dag.json").toPath()),
+                StandardCharsets.UTF_8));
+        String savedIjm = new String(
+                Files.readAllBytes(new File(binFolder, "C1_Filters.ijm").toPath()),
+                StandardCharsets.UTF_8);
+        assertEquals("Lock In must replace stale sandbox DAG sidecar", promoted, savedDag);
+        assertEquals(promoted, IjmToDagLoader.load(savedIjm));
+        assertTrue(savedIjm.contains("sigma=6"));
+        assertTrue(findNode(savedDag, "disabledLegacy").disabled);
+    }
+
+    @Test
     public void importedCustomFilterWritesMacroAndDemotedPreset() throws Exception {
         File project = temp.newFolder("project-import-custom-filter");
         File binFolder = configurationDir(project);

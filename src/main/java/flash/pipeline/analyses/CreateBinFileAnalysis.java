@@ -17,8 +17,10 @@ import flash.pipeline.image.FilterMacroEditorModel;
 import flash.pipeline.image.FilterExecutor;
 import flash.pipeline.image.WindowManagerLock;
 import flash.pipeline.image.NamedFilterLoader;
+import flash.pipeline.image.dag.DagIR;
 import flash.pipeline.image.dag.DagIRSerializer;
 import flash.pipeline.image.dag.DagToIjmEmitter;
+import flash.pipeline.image.dag.IjmToDagLoader;
 import flash.pipeline.image.variation.VariantPlan;
 import flash.pipeline.intelligence.AnalysisStatusScanner;
 import flash.pipeline.intelligence.EmptySliceSuggester;
@@ -6257,9 +6259,7 @@ public class CreateBinFileAnalysis implements Analysis {
                                 ? "Custom"
                                 : presetName.trim();
                         cfg.filterPresets.set(channelIndex, safePreset);
-                        Path filterPath = binFolder.toPath().resolve(
-                                "C" + channelNum + "_Filters.ijm");
-                        Files.write(filterPath, safe(macroContent).getBytes(StandardCharsets.UTF_8));
+                        saveFilterParameterMacro(binFolder, channelNum, macroContent);
                     }
 
                     @Override public void saveAsPreset(String presetName, String macroContent) throws Exception {
@@ -6315,6 +6315,20 @@ public class CreateBinFileAnalysis implements Analysis {
                     }
                 },
                 createVariationPresetWriter(binFolder));
+    }
+
+    private void saveFilterParameterMacro(File binFolder, int channelNum, String macroContent) throws IOException {
+        String macro = safe(macroContent);
+        Path filterPath = binFolder.toPath().resolve("C" + channelNum + "_Filters.ijm");
+        Files.write(filterPath, macro.getBytes(StandardCharsets.UTF_8));
+
+        Path dagPath = binFolder.toPath().resolve("C" + channelNum + "_Sandbox.dag.json");
+        DagIR embeddedDag = IjmToDagLoader.loadEmbeddedDag(macro);
+        if (embeddedDag != null) {
+            Files.write(dagPath, DagIRSerializer.toJson(embeddedDag).getBytes(StandardCharsets.UTF_8));
+        } else {
+            Files.deleteIfExists(dagPath);
+        }
     }
 
     private List<String> filterPresetOptionList(File binFolder, String selectedPreset) {
