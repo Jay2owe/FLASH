@@ -39,7 +39,8 @@ public final class VariationExecutor extends SwingWorker<Void, VariationResult> 
     @Override
     protected Void doInBackground() throws Exception {
         if (onStatus != null) {
-            onStatus.accept("Running parameter variations...");
+            onStatus.accept("Running " + strategy.getClass().getSimpleName()
+                    + " (" + sweep.cellCount() + " cells)...");
         }
         strategy.dispatch(sweep, this::publishResult, this::isCancelled);
         if (onStatus != null && !isCancelled()) {

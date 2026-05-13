@@ -14,6 +14,13 @@ public final class VariationStrategyChooser {
     public static VariationStrategy choose(ParameterSweep sweep,
                                            VariationEngineContext context,
                                            VariationCache cache) {
+        return choose(sweep, context, cache, null);
+    }
+
+    static VariationStrategy choose(ParameterSweep sweep,
+                                    VariationEngineContext context,
+                                    VariationCache cache,
+                                    Boolean fastNmsParityVerified) {
         if (sweep == null) {
             throw new IllegalArgumentException("sweep must not be null");
         }
@@ -31,8 +38,7 @@ public final class VariationStrategyChooser {
                     context.classicalPreviewAdapter(),
                     Runtime.getRuntime().availableProcessors() - 1);
         }
-        if (sweep.method() == ParameterSweep.Method.STARDIST
-                && StarDistFastNms.canHandle(sweep)) {
+        if (sweep.method() == ParameterSweep.Method.STARDIST) {
             if (context.starDistPreviewAdapter() == null) {
                 throw new IllegalStateException(
                         "StarDist variations require a StarDist preview adapter.");
@@ -41,11 +47,27 @@ public final class VariationStrategyChooser {
                 throw new IllegalStateException(
                         "StarDist variations require StarDist base parameters.");
             }
-            return new StarDistFastNms(context.filteredSource(),
+            StarDistParameterStage.Parameters params =
+                    (StarDistParameterStage.Parameters) context.baseParameters();
+            boolean fastEligible = fastNmsParityVerified == null
+                    ? StarDistFastNms.canHandle(sweep)
+                    : StarDistFastNms.canHandle(sweep, fastNmsParityVerified.booleanValue());
+            if (fastEligible) {
+                return new StarDistFastNms(context.filteredSource(),
+                        sweep.cropSpec(),
+                        cache,
+                        context.starDistPreviewAdapter(),
+                        params);
+            }
+            return new StarDistPerCell(context.filteredSource(),
                     sweep.cropSpec(),
                     cache,
                     context.starDistPreviewAdapter(),
-                    (StarDistParameterStage.Parameters) context.baseParameters());
+                    params);
+        }
+        if (sweep.method() == ParameterSweep.Method.CELLPOSE) {
+            throw new UnsupportedOperationException(
+                    "Cellpose strategy lands in step 07");
         }
         throw new UnsupportedOperationException(
                 sweep.method().label() + " variations are not implemented yet.");
