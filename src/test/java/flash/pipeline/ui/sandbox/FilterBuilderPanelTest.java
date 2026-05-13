@@ -70,6 +70,25 @@ public class FilterBuilderPanelTest {
     }
 
     @Test
+    public void replaceCurrentDagPreservesSavedBaselineAndMarksDirty() {
+        DagIR seed = IjmToDagLoader.load(SEED_MACRO);
+        FilterBuilderPanel panel = new FilterBuilderPanel(seed, null, noopRunner(), null);
+        AtomicInteger fired = new AtomicInteger(0);
+        panel.addChangeListener(new Runnable() {
+            @Override public void run() { fired.incrementAndGet(); }
+        });
+
+        panel.replaceCurrentDag(IjmToDagLoader.load(OTHER_MACRO), "Applied variation");
+
+        assertTrue("promotion must leave the builder dirty until Save is clicked",
+                panel.isDirty());
+        assertTrue("promoted DAG must become the current emitted filter",
+                panel.currentIjm().contains("sigma=4"));
+        assertTrue("promotion must notify hosts so Save/Cancel state can update",
+                fired.get() >= 1);
+    }
+
+    @Test
     public void constructorChangeListenerFiresOnLoadPreset() {
         DagIR seed = IjmToDagLoader.load(SEED_MACRO);
         AtomicInteger fired = new AtomicInteger(0);

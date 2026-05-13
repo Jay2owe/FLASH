@@ -6,6 +6,10 @@ import flash.pipeline.image.dag.DagIR;
 import flash.pipeline.image.dag.DagToIjmEmitter;
 import flash.pipeline.image.dag.IjmToDagLoader;
 import flash.pipeline.ui.preview.PreviewPairPanel;
+import flash.pipeline.ui.sandbox.variation.VariationActionsBinder;
+import flash.pipeline.ui.sandbox.variation.VariationLauncher;
+import flash.pipeline.ui.sandbox.variation.VariationPresetWriter;
+import flash.pipeline.ui.sandbox.variation.VariationSessionLog;
 import ij.IJ;
 import ij.ImagePlus;
 
@@ -85,13 +89,17 @@ public final class FilterBuilderPanel extends JPanel {
     private final JButton previewSelected = new JButton("Preview up to selected step");
     private final JButton previewFinal = new JButton("Preview full filter");
     private final JButton startFromPreset = new JButton("Start from a preset...");
+    private final JButton createVariations = new JButton("Create variations...");
+    private final JButton variationLogButton = new JButton("Variation log");
     private final JButton help = new JButton("?");
+    private final VariationSessionLog variationSessionLog = new VariationSessionLog();
 
     private String savedIjmSnapshot;
     private int savedNodeCount;
     private ImagePlus sourceImage;
     private ImagePlus previewImage;
     private boolean busy = false;
+    private VariationPresetWriter variationPresetWriter;
 
     public FilterBuilderPanel(DagIR seed,
                               PreviewPairPanel sharedPreview,
@@ -185,12 +193,7 @@ public final class FilterBuilderPanel extends JPanel {
     }
 
     public void loadPreset(DagIR seed, String label) {
-        SandboxModel fresh = SandboxModel.fromDag(seed);
-        model.lines.clear();
-        model.lines.addAll(fresh.lines);
-        model.combiners.clear();
-        model.combiners.addAll(fresh.combiners);
-        model.selected = model.lines.isEmpty() ? null : model.lines.get(0);
+        model.replaceWith(seed);
         savedIjmSnapshot = currentIjm();
         savedNodeCount = countNodes(model);
         canvas.rebuild();
@@ -201,9 +204,22 @@ public final class FilterBuilderPanel extends JPanel {
         notifyListeners();
     }
 
+    public void replaceCurrentDag(DagIR dag, String statusText) {
+        if (dag == null) return;
+        model.replaceWith(dag);
+        canvas.rebuild();
+        refreshEditors();
+        status.setText(statusText == null ? " " : statusText);
+        notifyListeners();
+    }
+
     public void markSaved() {
         savedIjmSnapshot = currentIjm();
         savedNodeCount = countNodes(model);
+    }
+
+    public void setVariationPresetWriter(VariationPresetWriter variationPresetWriter) {
+        this.variationPresetWriter = variationPresetWriter;
     }
 
     // ── Stage 04 structural-mutation API ─────────────────────────────────
@@ -475,6 +491,10 @@ public final class FilterBuilderPanel extends JPanel {
         gbc.gridx++;
         footer.add(startFromPreset, gbc);
         gbc.gridx++;
+        footer.add(createVariations, gbc);
+        gbc.gridx++;
+        footer.add(variationLogButton, gbc);
+        gbc.gridx++;
         footer.add(help, gbc);
 
         gbc.gridx++;
@@ -498,6 +518,9 @@ public final class FilterBuilderPanel extends JPanel {
         previewSelected.addActionListener(e -> preview(model.toPartialDag()));
         previewFinal.addActionListener(e -> preview(model.toDag()));
         startFromPreset.addActionListener(e -> startFromPreset());
+        createVariations.addActionListener(e -> openVariationsDialog());
+        variationLogButton.addActionListener(e -> variationSessionLog.showViewer(
+                SwingUtilities.getWindowAncestor(this)));
         help.setToolTipText("What do these buttons do?");
         help.addActionListener(e -> showSandboxHelp());
     }
@@ -603,6 +626,7 @@ public final class FilterBuilderPanel extends JPanel {
     private void setBusy(boolean busy, String message) {
         this.busy = busy;
         startFromPreset.setEnabled(!busy);
+        createVariations.setEnabled(!busy && runner != null && hasAnyNode(model));
         refreshPreviewButtons();
         status.setText(message == null ? " " : message);
     }
@@ -610,6 +634,7 @@ public final class FilterBuilderPanel extends JPanel {
     private void refreshPreviewButtons() {
         previewSelected.setEnabled(!busy && model.selected instanceof SandboxModel.Node);
         previewFinal.setEnabled(!busy && hasAnyNode(model));
+        createVariations.setEnabled(!busy && runner != null && hasAnyNode(model));
     }
 
     private static boolean hasAnyNode(SandboxModel model) {
@@ -671,6 +696,46 @@ public final class FilterBuilderPanel extends JPanel {
         }
         DagIR dag = IjmToDagLoader.load(content);
         loadPreset(dag, chosen);
+    }
+
+    private void openVariationsDialog() {
+        final Window owner = SwingUtilities.getWindowAncestor(this);
+        if (runner == null) {
+            JOptionPane.showMessageDialog(owner,
+                    "No preview image is available.",
+                    "Create variations",
+                    JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        VariationActionsBinder binder = new VariationActionsBinder(
+                new VariationActionsBinder.Target() {
+                    @Override public void promote(DagIR dag, String label) {
+                        replaceCurrentDag(dag, "Applied variation: " + safeLabel(label));
+                    }
+                },
+                this,
+                variationSessionLog,
+                variationPresetWriter,
+                sourceTitle(),
+                new VariationActionsBinder.StatusSink() {
+                    @Override public void setStatus(String text) {
+                        status.setText(text == null ? " " : text);
+                    }
+                });
+        VariationLauncher.open(owner,
+                "Filter variations",
+                currentDag(),
+                new VariationLauncher.SourceProvider() {
+                    @Override public ImagePlus createSource() throws Exception {
+                        return runner.createSource();
+                    }
+
+                    @Override public void close(ImagePlus image) {
+                        runner.close(image);
+                    }
+                },
+                binder,
+                variationSessionLog);
     }
 
     private boolean addCatalogNode(SandboxModel.Line line, FilterCatalog.Entry entry) {
@@ -745,6 +810,18 @@ public final class FilterBuilderPanel extends JPanel {
                 + "</body></html>";
         JOptionPane.showMessageDialog(owner, msg, "Filter Builder — Help",
                 JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    private String sourceTitle() {
+        if (sourceImage == null || sourceImage.getTitle() == null
+                || sourceImage.getTitle().trim().isEmpty()) {
+            return "source";
+        }
+        return sourceImage.getTitle();
+    }
+
+    private static String safeLabel(String label) {
+        return label == null || label.trim().isEmpty() ? "(unlabelled)" : label;
     }
 
     private void notifyListeners() {

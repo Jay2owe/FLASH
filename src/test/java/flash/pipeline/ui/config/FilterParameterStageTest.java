@@ -678,6 +678,16 @@ public class FilterParameterStageTest {
         return DagToIjmEmitter.emit(dag);
     }
 
+    private static DagIR singleStepDag(String args) {
+        DagLine line = new DagLine("line_A",
+                Collections.singletonList(new DagNode("node_1", OpType.GAUSSIAN_BLUR, args)));
+        return new DagIR(1,
+                Collections.singletonList(line),
+                Collections.<Combiner>emptyList(),
+                "line_A",
+                "native");
+    }
+
     @Test
     public void customMacroButtonIsVisibleOnLinearFilters() {
         RecordingMacroStore store = new RecordingMacroStore("Default", DEFAULT_MACRO);
@@ -691,6 +701,42 @@ public class FilterParameterStageTest {
                 stage.customBuilderButtonTextForTest().toLowerCase().contains("custom macro"));
         assertTrue("custom macro chooser must be visible in the linear embedded filter UI",
                 stage.isCustomBuilderButtonVisibleForTest());
+    }
+
+    @Test
+    public void createVariationsButtonIsAvailableFromMainQcStep() {
+        RecordingMacroStore store = new RecordingMacroStore("Default", DEFAULT_MACRO);
+        FilterParameterStage stage = new FilterParameterStage(
+                Arrays.asList("Default", "Custom"), store, new RecordingPreviewAdapter(), null, null);
+
+        stage.buildControls(context(), new RecordingActions());
+        stage.onEnter(context(), new PreviewPairPanel("Original", "Adjusted"));
+
+        assertEquals("Create variations...", stage.createVariationsButtonTextForTest());
+        assertTrue("main QC step must expose the variation workflow",
+                stage.createVariationsButtonEnabledForTest());
+    }
+
+    @Test
+    public void promotedVariationUpdatesQcMacroButSavesOnlyOnLockIn() {
+        RecordingMacroStore store = new RecordingMacroStore("Default", DEFAULT_MACRO);
+        FilterParameterStage stage = new FilterParameterStage(
+                Arrays.asList("Default", "Custom"), store, new RecordingPreviewAdapter(), null, null);
+        ConfigQcContext context = context();
+
+        stage.buildControls(context, new RecordingActions());
+        stage.onEnter(context, new PreviewPairPanel("Original", "Adjusted"));
+        stage.simulatePromoteVariationForTest(singleStepDag("sigma=6 stack"), "sigma=6");
+
+        assertTrue(stage.currentMacroForTest().contains("sigma=6"));
+        assertTrue("promotion must remain unsaved until Lock in", stage.isDirtyForTest());
+        assertTrue(stage.isPreviewStaleForTest());
+        assertEquals("", store.savedMacro);
+
+        assertTrue(stage.lockIn(context));
+
+        assertTrue("saved macro was: " + store.savedMacro,
+                store.savedMacro.contains("sigma=6"));
     }
 
     @Test

@@ -4,11 +4,16 @@ import flash.pipeline.help.SetupHelpCatalog;
 import flash.pipeline.help.SetupHelpTopic;
 import flash.pipeline.image.FilterMacroEditorModel;
 import flash.pipeline.image.dag.DagIR;
+import flash.pipeline.image.dag.DagNode;
 import flash.pipeline.image.dag.IjmToDagLoader;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import flash.pipeline.ui.sandbox.FilterBuilderPanel;
 import flash.pipeline.ui.sandbox.FilterCatalog;
 import flash.pipeline.ui.sandbox.RecorderParameterProbe;
+import flash.pipeline.ui.sandbox.variation.VariationActionsBinder;
+import flash.pipeline.ui.sandbox.variation.VariationLauncher;
+import flash.pipeline.ui.sandbox.variation.VariationPresetWriter;
+import flash.pipeline.ui.sandbox.variation.VariationSessionLog;
 import ij.ImagePlus;
 
 import javax.swing.BorderFactory;
@@ -129,6 +134,8 @@ public final class FilterParameterStage implements ConfigQcStage {
     private final PreviewAdapter previewAdapter;
     private final CustomFilterBuilder customFilterBuilder;
     private final PresetDescriptionProvider descriptionProvider;
+    private final VariationPresetWriter variationPresetWriter;
+    private final VariationSessionLog variationSessionLog = new VariationSessionLog();
 
     private final List<FilterFieldBinding> fieldBindings = new ArrayList<FilterFieldBinding>();
     private final List<CollapsibleSection> sectionPanels = new ArrayList<CollapsibleSection>();
@@ -149,6 +156,7 @@ public final class FilterParameterStage implements ConfigQcStage {
     private JComboBox<String> presetCombo;
     private JButton previewButton;
     private JButton customBuilderButton;
+    private JButton createVariationsButton;
     private JButton resetButton;
     private JButton saveAsButton;
     private JButton addFilterButton;
@@ -197,6 +205,16 @@ public final class FilterParameterStage implements ConfigQcStage {
                                 PreviewAdapter previewAdapter,
                                 CustomFilterBuilder customFilterBuilder,
                                 PresetDescriptionProvider descriptionProvider) {
+        this(presetOptions, macroStore, previewAdapter, customFilterBuilder,
+                descriptionProvider, null);
+    }
+
+    public FilterParameterStage(List<String> presetOptions,
+                                MacroStore macroStore,
+                                PreviewAdapter previewAdapter,
+                                CustomFilterBuilder customFilterBuilder,
+                                PresetDescriptionProvider descriptionProvider,
+                                VariationPresetWriter variationPresetWriter) {
         if (macroStore == null) {
             throw new IllegalArgumentException("macroStore must not be null");
         }
@@ -214,6 +232,7 @@ public final class FilterParameterStage implements ConfigQcStage {
         this.macroStore = macroStore;
         this.previewAdapter = previewAdapter;
         this.customFilterBuilder = customFilterBuilder;
+        this.variationPresetWriter = variationPresetWriter;
         this.descriptionProvider = descriptionProvider == null
                 ? new PresetDescriptionProvider() {
                     @Override public String describe(String presetName) {
@@ -390,6 +409,18 @@ public final class FilterParameterStage implements ConfigQcStage {
         return customBuilderButton == null ? "" : customBuilderButton.getText();
     }
 
+    String createVariationsButtonTextForTest() {
+        return createVariationsButton == null ? "" : createVariationsButton.getText();
+    }
+
+    boolean createVariationsButtonEnabledForTest() {
+        return createVariationsButton != null && createVariationsButton.isEnabled();
+    }
+
+    void simulatePromoteVariationForTest(DagIR dag, String label) {
+        applyPromotedVariationToCurrentMacro(dag, label);
+    }
+
     void setParameterForTest(String key, String value) {
         for (int i = 0; i < fieldBindings.size(); i++) {
             FilterFieldBinding binding = fieldBindings.get(i);
@@ -540,22 +571,28 @@ public final class FilterParameterStage implements ConfigQcStage {
         gbc.gridx = 3;
         row.add(addFilterButton, gbc);
 
+        createVariationsButton = new JButton("Create variations...");
+        createVariationsButton.addActionListener(e -> openVariationsFromQcStep());
+        createVariationsButton.setToolTipText("Try alternative settings or filter swaps on the current preview image.");
+        gbc.gridx = 4;
+        row.add(createVariationsButton, gbc);
+
         previewButton = new JButton("Run Preview");
         flash.pipeline.ui.FlashIcons.apply(previewButton, flash.pipeline.ui.FlashIcons.play());
         previewButton.addActionListener(e -> runPreviewOnWorker());
-        gbc.gridx = 4;
+        gbc.gridx = 5;
         row.add(previewButton, gbc);
 
         resetButton = new JButton("Reset");
         flash.pipeline.ui.FlashIcons.apply(resetButton, flash.pipeline.ui.FlashIcons.refresh());
         resetButton.addActionListener(e -> resetToSaved());
-        gbc.gridx = 5;
+        gbc.gridx = 6;
         row.add(resetButton, gbc);
 
         saveAsButton = new JButton("Save preset...");
         saveAsButton.setEnabled(false);
         saveAsButton.addActionListener(e -> onSaveAsClicked());
-        gbc.gridx = 6;
+        gbc.gridx = 7;
         row.add(saveAsButton, gbc);
 
         presetDescriptionLabel = new JLabel(descriptionProvider.describe(selectedPreset));
@@ -1173,6 +1210,94 @@ public final class FilterParameterStage implements ConfigQcStage {
         }
     }
 
+    private void openVariationsFromQcStep() {
+        syncFieldBindings();
+        if (!hasMacro()) {
+            setError("No filter macro is available to vary.");
+            return;
+        }
+        final DagIR baseline;
+        try {
+            baseline = currentDagForVariation();
+        } catch (RuntimeException ex) {
+            setError("Could not parse the current filter for variations: " + ex.getMessage());
+            return;
+        }
+
+        final Window owner = createVariationsButton == null
+                ? null
+                : SwingUtilities.getWindowAncestor(createVariationsButton);
+        VariationActionsBinder binder = new VariationActionsBinder(
+                new VariationActionsBinder.Target() {
+                    @Override public void promote(DagIR dag, String label) {
+                        applyPromotedVariationToCurrentMacro(dag, label);
+                    }
+                },
+                createVariationsButton,
+                variationSessionLog,
+                variationPresetWriter,
+                sourceTitleForVariations(),
+                new VariationActionsBinder.StatusSink() {
+                    @Override public void setStatus(String text) {
+                        FilterParameterStage.this.setStatus(text);
+                    }
+                });
+        VariationLauncher.open(owner,
+                "Filter variations - " + firstNonBlank(selectedPreset, "filter"),
+                baseline,
+                new VariationLauncher.SourceProvider() {
+                    @Override public ImagePlus createSource() throws Exception {
+                        return createVariationSource();
+                    }
+
+                    @Override public void close(ImagePlus image) {
+                        previewAdapter.close(image);
+                    }
+                },
+                binder,
+                variationSessionLog);
+    }
+
+    private DagIR currentDagForVariation() {
+        ensureHiddenBuilderInSyncWithCurrentMacro();
+        return hiddenBuilder.currentDag();
+    }
+
+    private ImagePlus createVariationSource() throws Exception {
+        if (sourceImage != null) {
+            ImagePlus duplicate = sourceImage.duplicate();
+            if (duplicate != null && sourceImage.getTitle() != null) {
+                duplicate.setTitle(sourceImage.getTitle());
+            }
+            return duplicate;
+        }
+        return previewAdapter.createSource(activeContext);
+    }
+
+    private void applyPromotedVariationToCurrentMacro(DagIR dag, String label) {
+        if (dag == null) return;
+        hiddenBuilder = new FilterBuilderPanel(dag, /*sharedPreview=*/null, /*runner=*/null, null);
+        structurallyMutated = true;
+        currentMacro = hiddenBuilder.currentIjm();
+        try {
+            currentDisplayMacro = dag.isLinear()
+                    ? hiddenBuilder.currentDisplayIjm()
+                    : currentMacro;
+        } catch (RuntimeException ex) {
+            currentDisplayMacro = currentMacro;
+        }
+        definition = FilterMacroEditorModel.parse(currentDisplayMacro);
+        rebuildAccordion();
+        refreshLinearityFlag();
+        updateBranchedBannerVisibility();
+        recomputeDirty();
+        clearAdjustedPreview();
+        markPreviewStale("Applied variation: " + safeVariationLabel(label)
+                + ". Press Run Preview.");
+        setStatus("Applied variation: " + safeVariationLabel(label));
+        refreshActionState();
+    }
+
     private void onSaveAsClicked() {
         Window owner = saveAsButton == null ? null
                 : SwingUtilities.getWindowAncestor(saveAsButton);
@@ -1429,18 +1554,57 @@ public final class FilterParameterStage implements ConfigQcStage {
         try {
             List<FilterBuilderPanel.NodeSummary> summaries = hiddenBuilder.nodeSummaries();
             String macroForArgs = currentDisplayMacro != null ? currentDisplayMacro : currentMacro;
-            Matcher m = RUN_LINE_PATTERN.matcher(safe(macroForArgs));
-            int idx = 0;
-            while (m.find() && idx < summaries.size()) {
-                hiddenBuilder.updateNodeArgs(summaries.get(idx).id, m.group(1));
-                idx++;
-            }
+            syncHiddenBuilderArgsFromMacro(macroForArgs, summaries);
         } catch (IllegalStateException nonLinear) {
             // Branched DAG slipped through; rebuild from scratch on the
             // current macro to keep going.
             DagIR seed = IjmToDagLoader.load(safe(currentDisplayMacro));
             hiddenBuilder = new FilterBuilderPanel(seed, null, null, null);
         }
+    }
+
+    private void syncHiddenBuilderArgsFromMacro(String macro,
+                                                List<FilterBuilderPanel.NodeSummary> summaries) {
+        if (summaries == null || summaries.isEmpty()) return;
+        if (syncHiddenBuilderArgsFromDag(macro, summaries)) return;
+
+        Matcher m = RUN_LINE_PATTERN.matcher(safe(macro));
+        int idx = 0;
+        while (m.find() && idx < summaries.size()) {
+            hiddenBuilder.updateNodeArgs(summaries.get(idx).id, m.group(1));
+            idx++;
+        }
+    }
+
+    private boolean syncHiddenBuilderArgsFromDag(String macro,
+                                                 List<FilterBuilderPanel.NodeSummary> summaries) {
+        DagIR dag;
+        try {
+            dag = IjmToDagLoader.load(safe(macro));
+        } catch (RuntimeException ex) {
+            return false;
+        }
+        if (dag == null || dag.lines == null || dag.lines.size() != 1
+                || dag.lines.get(0).ops == null) {
+            return false;
+        }
+        List<DagNode> nodes = dag.lines.get(0).ops;
+        for (int i = 0; i < summaries.size(); i++) {
+            FilterBuilderPanel.NodeSummary summary = summaries.get(i);
+            DagNode node = findDagNodeById(nodes, summary.id);
+            if (node == null && i < nodes.size()) node = nodes.get(i);
+            if (node != null) hiddenBuilder.updateNodeArgs(summary.id, node.args);
+        }
+        return true;
+    }
+
+    private static DagNode findDagNodeById(List<DagNode> nodes, String nodeId) {
+        if (nodes == null || nodeId == null) return null;
+        for (int i = 0; i < nodes.size(); i++) {
+            DagNode node = nodes.get(i);
+            if (node != null && nodeId.equals(node.id)) return node;
+        }
+        return null;
     }
 
     private void refreshLinearityFlag() {
@@ -1563,6 +1727,7 @@ public final class FilterParameterStage implements ConfigQcStage {
         if (previewButton != null) previewButton.setEnabled(canPreview());
         if (resetButton != null) resetButton.setEnabled(true);
         if (customBuilderButton != null) customBuilderButton.setEnabled(customFilterBuilder != null);
+        if (createVariationsButton != null) createVariationsButton.setEnabled(canPreview());
         if (saveAsButton != null) saveAsButton.setEnabled(dirty);
         if (addFilterButton != null) addFilterButton.setEnabled(linear);
     }
@@ -1571,6 +1736,7 @@ public final class FilterParameterStage implements ConfigQcStage {
         if (previewButton != null) previewButton.setEnabled(enabled && canPreview());
         if (resetButton != null) resetButton.setEnabled(enabled);
         if (customBuilderButton != null) customBuilderButton.setEnabled(enabled && customFilterBuilder != null);
+        if (createVariationsButton != null) createVariationsButton.setEnabled(enabled && canPreview());
         if (saveAsButton != null) saveAsButton.setEnabled(enabled && dirty);
         if (presetCombo != null) presetCombo.setEnabled(enabled);
         if (addFilterButton != null) addFilterButton.setEnabled(enabled && linear);
@@ -1712,6 +1878,18 @@ public final class FilterParameterStage implements ConfigQcStage {
 
     private static String firstNonBlank(String value, String fallback) {
         return value == null || value.trim().isEmpty() ? fallback : value.trim();
+    }
+
+    private String sourceTitleForVariations() {
+        if (sourceImage == null || sourceImage.getTitle() == null
+                || sourceImage.getTitle().trim().isEmpty()) {
+            return firstNonBlank(selectedPreset, "filter");
+        }
+        return sourceImage.getTitle();
+    }
+
+    private static String safeVariationLabel(String label) {
+        return label == null || label.trim().isEmpty() ? "(unlabelled)" : label.trim();
     }
 
     private static String trimToNull(String value) {

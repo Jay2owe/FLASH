@@ -4,6 +4,7 @@ import flash.pipeline.image.dag.DagIR;
 import flash.pipeline.image.dag.DagIRSerializer;
 import flash.pipeline.image.dag.DagToIjmEmitter;
 import flash.pipeline.image.dag.IjmToDagLoader;
+import flash.pipeline.ui.sandbox.variation.VariationPresetWriter;
 import ij.IJ;
 
 import javax.swing.BorderFactory;
@@ -63,9 +64,12 @@ public final class SandboxDialog extends JDialog {
     private SecondaryLoop loop;
     private Result result = Result.cancel();
 
-    private SandboxDialog(Window owner, String channelLabel, DagIR initialDag, PreviewHandler previewHandler) {
+    private SandboxDialog(Window owner, String channelLabel, DagIR initialDag,
+                          PreviewHandler previewHandler,
+                          VariationPresetWriter variationPresetWriter) {
         super(owner, "Filter Builder - " + safe(channelLabel), Dialog.ModalityType.MODELESS);
         this.panel = new FilterBuilderPanel(initialDag, /*sharedPreview=*/null, previewHandler, null);
+        this.panel.setVariationPresetWriter(variationPresetWriter);
 
         setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
         try {
@@ -84,14 +88,29 @@ public final class SandboxDialog extends JDialog {
 
     public static Result show(String channelLabel, File binFolder, int channelIndex,
                               String seedMacro, PreviewHandler previewHandler) {
-        return show(resolveActiveOwner(), channelLabel, binFolder, channelIndex, seedMacro, previewHandler);
+        return show(resolveActiveOwner(), channelLabel, binFolder, channelIndex, seedMacro,
+                previewHandler, null);
     }
 
     public static Result show(Window owner, String channelLabel, File binFolder, int channelIndex,
                               String seedMacro, PreviewHandler previewHandler) {
+        return show(owner, channelLabel, binFolder, channelIndex, seedMacro, previewHandler, null);
+    }
+
+    public static Result show(String channelLabel, File binFolder, int channelIndex,
+                              String seedMacro, PreviewHandler previewHandler,
+                              VariationPresetWriter variationPresetWriter) {
+        return show(resolveActiveOwner(), channelLabel, binFolder, channelIndex, seedMacro,
+                previewHandler, variationPresetWriter);
+    }
+
+    public static Result show(Window owner, String channelLabel, File binFolder, int channelIndex,
+                              String seedMacro, PreviewHandler previewHandler,
+                              VariationPresetWriter variationPresetWriter) {
         if (GraphicsEnvironment.isHeadless()) return Result.cancel();
         final DagIR initialDag = loadInitialDag(binFolder, channelIndex, seedMacro);
-        final SandboxDialog dialog = new SandboxDialog(owner, channelLabel, initialDag, previewHandler);
+        final SandboxDialog dialog = new SandboxDialog(owner, channelLabel, initialDag,
+                previewHandler, variationPresetWriter);
         dialog.setVisible(true);
         dialog.bringToFront();
 

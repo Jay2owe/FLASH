@@ -49,6 +49,16 @@ final class SandboxModel {
         return model;
     }
 
+    void replaceWith(DagIR dag) {
+        SandboxModel fresh = fromDag(dag);
+        lines.clear();
+        lines.addAll(fresh.lines);
+        combiners.clear();
+        combiners.addAll(fresh.combiners);
+        selected = lines.isEmpty() ? null : lines.get(0);
+        reseedCounters();
+    }
+
     DagIR toDag() {
         List<DagLine> dagLines = new ArrayList<DagLine>();
         for (int i = 0; i < lines.size(); i++) {

@@ -2,7 +2,13 @@ package flash.pipeline.analyses;
 
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinField;
+import flash.pipeline.image.FilterMacroParser.OpType;
 import flash.pipeline.image.NamedFilterLoader;
+import flash.pipeline.image.dag.Combiner;
+import flash.pipeline.image.dag.DagIR;
+import flash.pipeline.image.dag.DagLine;
+import flash.pipeline.image.dag.DagNode;
+import flash.pipeline.image.variation.VariantPlan;
 import flash.pipeline.io.SeriesMeta;
 import flash.pipeline.runtime.DependencyService;
 import flash.pipeline.runtime.FeatureDependencyGate;
@@ -19,6 +25,7 @@ import flash.pipeline.ui.config.DisplayRangeStage;
 import flash.pipeline.ui.config.FilterParameterStage;
 import flash.pipeline.ui.config.SegmentationMethodStage;
 import flash.pipeline.ui.preview.PreviewPairPanel;
+import flash.pipeline.ui.sandbox.variation.VariationPresetWriter;
 import flash.pipeline.zslice.ZSliceMode;
 import ij.ImagePlus;
 import ij.process.ByteProcessor;
@@ -277,6 +284,32 @@ public class CreateBinFileAnalysisTest {
         assertTrue(new File(project,
                 "FLASH/.settings/Presets/Custom Filter Presets/IBA1 cleanup filter.ijm").isFile());
         assertFalse(new File(binFolder, "Custom Filter Presets/IBA1 cleanup filter.ijm").exists());
+    }
+
+    @Test
+    public void variationPresetWriterWritesOnlyCustomFilterIjmPreset() throws Exception {
+        File project = temp.newFolder("project-save-variation-preset");
+        File binFolder = configurationDir(project);
+        assertTrue(binFolder.mkdirs());
+        CreateBinFileAnalysis analysis = new CreateBinFileAnalysis();
+        VariationPresetWriter writer = invokeCreateVariationPresetWriter(analysis, binFolder);
+
+        writer.savePreset("IBA1 variation", new VariantPlan(
+                "sigma=4",
+                singleStepDag("sigma=4 stack"),
+                Collections.singletonMap("node_1", "sigma=4 stack")));
+
+        File presetDir = new File(project, "FLASH/.settings/Presets/Custom Filter Presets");
+        File ijmPreset = new File(presetDir, "IBA1 variation.ijm");
+        assertTrue(ijmPreset.isFile());
+        assertTrue(new String(Files.readAllBytes(ijmPreset.toPath()), StandardCharsets.UTF_8)
+                .contains("sigma=4"));
+        assertFalse("save-variant must not create a Macro-Builder sidecar DAG",
+                new File(presetDir, "IBA1 variation.dag.json").exists());
+        assertFalse("save-variant must not alter the active channel filter file",
+                new File(binFolder, "C1_Filters.ijm").exists());
+        assertFalse("save-variant must not alter the active channel sandbox DAG",
+                new File(binFolder, "C1_Sandbox.dag.json").exists());
     }
 
     @Test
@@ -1022,6 +1055,24 @@ public class CreateBinFileAnalysisTest {
                 "saveCustomFilterPreset", File.class, String.class, String.class);
         method.setAccessible(true);
         method.invoke(analysis, binFolder, presetName, macroContent);
+    }
+
+    private static VariationPresetWriter invokeCreateVariationPresetWriter(
+            CreateBinFileAnalysis analysis, File binFolder) throws Exception {
+        Method method = CreateBinFileAnalysis.class.getDeclaredMethod(
+                "createVariationPresetWriter", File.class);
+        method.setAccessible(true);
+        return (VariationPresetWriter) method.invoke(analysis, binFolder);
+    }
+
+    private static DagIR singleStepDag(String args) {
+        DagNode node = new DagNode("node_1", OpType.GAUSSIAN_BLUR, args);
+        return new DagIR(1,
+                Collections.singletonList(new DagLine("line_A",
+                        Collections.singletonList(node))),
+                Collections.<Combiner>emptyList(),
+                "line_A",
+                "native");
     }
 
     private static boolean invokeApplyCustomFilterEntryResult(

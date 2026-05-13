@@ -18,6 +18,8 @@ import flash.pipeline.image.FilterExecutor;
 import flash.pipeline.image.WindowManagerLock;
 import flash.pipeline.image.NamedFilterLoader;
 import flash.pipeline.image.dag.DagIRSerializer;
+import flash.pipeline.image.dag.DagToIjmEmitter;
+import flash.pipeline.image.variation.VariantPlan;
 import flash.pipeline.intelligence.AnalysisStatusScanner;
 import flash.pipeline.intelligence.EmptySliceSuggester;
 import flash.pipeline.intelligence.MetadataDiagnostics;
@@ -62,6 +64,7 @@ import flash.pipeline.ui.config.SegmentationMethodStage;
 import flash.pipeline.ui.config.StarDistParameterStage;
 import flash.pipeline.ui.config.ZSliceSelectionStage;
 import flash.pipeline.ui.sandbox.SandboxDialog;
+import flash.pipeline.ui.sandbox.variation.VariationPresetWriter;
 import flash.pipeline.ui.wizard.MarkerAutoComplete;
 import flash.pipeline.zslice.ZSliceConfig;
 import flash.pipeline.zslice.ZSliceConfigIO;
@@ -2472,6 +2475,17 @@ public class CreateBinFileAnalysis implements Analysis {
         File target = resolveSavedCustomFilterPresetFile(binFolder, presetName, true);
         if (target == null) throw new IOException("Invalid custom filter preset name: " + presetName);
         Files.write(target.toPath(), macroContent.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private VariationPresetWriter createVariationPresetWriter(final File binFolder) {
+        return new VariationPresetWriter() {
+            @Override public void savePreset(String presetName, VariantPlan plan) throws Exception {
+                if (plan == null || plan.dag == null) {
+                    throw new IllegalArgumentException("Variation plan must include a DAG.");
+                }
+                saveCustomFilterPreset(binFolder, presetName, DagToIjmEmitter.emit(plan.dag));
+            }
+        };
     }
 
     private File resolveSavedCustomFilterPresetFile(File binFolder, String presetName, boolean forWrite) {
@@ -6299,7 +6313,8 @@ public class CreateBinFileAnalysis implements Analysis {
                     @Override public String describe(String presetName) {
                         return filterDescriptionFor(presetName);
                     }
-                });
+                },
+                createVariationPresetWriter(binFolder));
     }
 
     private List<String> filterPresetOptionList(File binFolder, String selectedPreset) {
@@ -7186,7 +7201,8 @@ public class CreateBinFileAnalysis implements Analysis {
                 String seedMacro = startFromExisting ? resolveFilterContent(binFolder, cfg, channelIndex) : null;
                 SandboxDialog.Result result = SandboxDialog.show(
                         chLabel, binFolder, channelIndex, seedMacro,
-                        createSandboxPreviewHandler(cfg, channelIndex, chLabel));
+                        createSandboxPreviewHandler(cfg, channelIndex, chLabel),
+                        createVariationPresetWriter(binFolder));
                 if (result == null || result.dag == null) return CustomFilterEntryDialog.Result.cancel();
                 return CustomFilterEntryDialog.Result.sandbox(result.dag, result.ijmFallback);
             }
@@ -7237,7 +7253,8 @@ public class CreateBinFileAnalysis implements Analysis {
                 }
                 SandboxDialog.Result result = SandboxDialog.show(
                         owner, chLabel, binFolder, channelIndex, seedMacro,
-                        createQcSandboxPreviewHandler(cfg, channelIndex, chLabel, images));
+                        createQcSandboxPreviewHandler(cfg, channelIndex, chLabel, images),
+                        createVariationPresetWriter(binFolder));
                 if (result == null || result.dag == null) return CustomFilterEntryDialog.Result.cancel();
                 return CustomFilterEntryDialog.Result.sandbox(result.dag, result.ijmFallback);
             }
