@@ -60,9 +60,20 @@ public class VariationStrategyChooserTest {
         assertTrue(strategy instanceof StarDistPerCell);
     }
 
-    @Test(expected = UnsupportedOperationException.class)
-    public void cellposeStillWaitsForStepSeven() {
-        VariationStrategyChooser.choose(cellposeSweep(), cellposeContext(), null);
+    @Test
+    public void cellposeWithoutModelSweepRoutesToPersistent() {
+        VariationStrategy strategy = VariationStrategyChooser.choose(
+                cellposeSweep(false), cellposeContext(), null);
+
+        assertTrue(strategy instanceof CellposePersistent);
+    }
+
+    @Test
+    public void cellposeModelSweepRoutesToOneShot() {
+        VariationStrategy strategy = VariationStrategyChooser.choose(
+                cellposeSweep(true), cellposeContext(), null);
+
+        assertTrue(strategy instanceof CellposeOneShot);
     }
 
     private static VariationEngineContext classicalContext() {
@@ -125,10 +136,13 @@ public class VariationStrategyChooserTest {
                 "hash");
     }
 
-    private static ParameterSweep cellposeSweep() {
+    private static ParameterSweep cellposeSweep(boolean sweepModel) {
         Map<ParameterId, ParameterValueList> values =
                 new LinkedHashMap<ParameterId, ParameterValueList>();
         values.put(ParameterId.DIAMETER, ParameterValueList.ofDoubles(20.0d, 30.0d));
+        if (sweepModel) {
+            values.put(ParameterId.MODEL, ParameterValueList.ofStrings("cyto3", "nuclei"));
+        }
         return new ParameterSweep(ParameterSweep.Method.CELLPOSE,
                 values,
                 CropSpec.full(),

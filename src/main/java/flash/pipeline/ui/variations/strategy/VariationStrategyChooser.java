@@ -1,5 +1,6 @@
 package flash.pipeline.ui.variations.strategy;
 
+import flash.pipeline.ui.config.CellposeParameterStage;
 import flash.pipeline.ui.config.StarDistParameterStage;
 import flash.pipeline.ui.variations.ParameterSweep;
 import flash.pipeline.ui.variations.VariationCache;
@@ -66,8 +67,31 @@ public final class VariationStrategyChooser {
                     params);
         }
         if (sweep.method() == ParameterSweep.Method.CELLPOSE) {
-            throw new UnsupportedOperationException(
-                    "Cellpose strategy lands in step 07");
+            if (context.cellposePreviewAdapter() == null) {
+                throw new IllegalStateException(
+                        "Cellpose variations require a Cellpose preview adapter.");
+            }
+            if (!(context.baseParameters() instanceof CellposeParameterStage.Parameters)) {
+                throw new IllegalStateException(
+                        "Cellpose variations require Cellpose base parameters.");
+            }
+            CellposeParameterStage.Parameters params =
+                    (CellposeParameterStage.Parameters) context.baseParameters();
+            if (CellposeOneShot.sweepsModel(sweep)) {
+                return new CellposeOneShot(context.filteredSource(),
+                        sweep.cropSpec(),
+                        cache,
+                        context.cellposePreviewAdapter(),
+                        params,
+                        context.configContext());
+            }
+            return new CellposePersistent(context.filteredSource(),
+                    sweep.cropSpec(),
+                    cache,
+                    context.cellposePreviewAdapter(),
+                    params,
+                    context.configContext(),
+                    context.channelName());
         }
         throw new UnsupportedOperationException(
                 sweep.method().label() + " variations are not implemented yet.");
