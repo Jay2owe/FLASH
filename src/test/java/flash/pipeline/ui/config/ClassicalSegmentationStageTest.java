@@ -200,6 +200,26 @@ public class ClassicalSegmentationStageTest {
     }
 
     @Test
+    public void objectPreviewRunsFullCandidateSetBeforeLiveSizeFiltering() throws Exception {
+        RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
+        RecordingActions actions = new RecordingActions();
+        ClassicalSegmentationStage stage = stage(
+                new RecordingThresholdStore("20"),
+                new RecordingSizeStore("3-Infinity"),
+                adapter);
+
+        stage.buildControls(context(), actions);
+        stage.onEnter(context(), new PreviewPairPanel("Original", "Objects"));
+        stage.runPreviewNowForTest();
+
+        assertEquals(0, adapter.lastMinSize);
+        assertEquals(4, adapter.lastMaxSize);
+        assertEquals("Objects: 1 kept; removed 1 small, 0 large. Threshold 20.",
+                actions.status);
+        assertRemovedLabelUsesCutoffColor(actions.adjustedPreview, 1, 0xe53935);
+    }
+
+    @Test
     public void lockInWritesThresholdAndSize() {
         RecordingThresholdStore thresholdStore = new RecordingThresholdStore("20");
         RecordingSizeStore sizeStore = new RecordingSizeStore("1-Infinity");

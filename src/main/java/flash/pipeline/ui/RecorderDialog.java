@@ -99,13 +99,16 @@ public final class RecorderDialog {
                               SampleSupplier sampleSupplier,
                               String seedMacro) {
         if (GraphicsEnvironment.isHeadless()) return Result.cancel();
+        boolean priorRecord = Recorder.record;
+        boolean priorRecordInMacros = Recorder.recordInMacros;
         Recorder rec = resolveRecorder();
         if (rec == null) {
             IJ.showMessage("Record Filter Macro", "Could not open the ImageJ Recorder.");
             return Result.cancel();
         }
 
-        Session session = new Session(owner, channelLabel, rec, previewHandler, sampleSupplier, seedMacro);
+        Session session = new Session(owner, channelLabel, rec, previewHandler, sampleSupplier,
+                seedMacro, priorRecord, priorRecordInMacros);
         try {
             session.open();
             session.await();
@@ -116,10 +119,12 @@ public final class RecorderDialog {
     }
 
     static Recorder resolveRecorder() {
+        Recorder existing = Recorder.getInstance();
+        if (existing != null) return existing;
         Frame frame = WindowManager.getFrame("Recorder");
         if (frame instanceof Recorder) return (Recorder) frame;
         try {
-            return new Recorder();
+            return new Recorder(false);
         } catch (Throwable t) {
             return null;
         }
@@ -155,15 +160,17 @@ public final class RecorderDialog {
         Session(Window owner, String channelLabel, Recorder rec,
                 CustomFilterEntryDialog.PreviewHandler previewHandler,
                 SampleSupplier sampleSupplier,
-                String seedMacro) {
+                String seedMacro,
+                boolean priorRecord,
+                boolean priorRecordInMacros) {
             this.channelLabel = channelLabel == null ? "" : channelLabel;
             this.rec = rec;
             this.previewHandler = previewHandler;
             this.sampleSupplier = sampleSupplier;
             this.seedMacro = seedMacro;
             this.hasSeed = seedMacro != null && !seedMacro.trim().isEmpty();
-            this.priorRecord = Recorder.record;
-            this.priorRecordInMacros = Recorder.recordInMacros;
+            this.priorRecord = priorRecord;
+            this.priorRecordInMacros = priorRecordInMacros;
             this.baseline = safeText();
 
             this.dialog = owner == null
@@ -185,11 +192,13 @@ public final class RecorderDialog {
         }
 
         void open() {
+            allowFijiRecordingInteraction(null);
             if (sampleSupplier != null) {
                 try {
                     ImagePlus sample = sampleSupplier.openSample();
                     if (sample != null) {
                         if (sample.getWindow() == null) sample.show();
+                        allowFijiRecordingInteraction(sample);
                         WindowManager.setCurrentWindow(sample.getWindow());
                     }
                 } catch (Throwable t) {
@@ -411,6 +420,7 @@ public final class RecorderDialog {
                 return;
             }
             if (sample.getWindow() == null) sample.show();
+            allowFijiRecordingInteraction(sample);
             WindowManager.setCurrentWindow(sample.getWindow());
             updateBannerVisibility();
         }
@@ -486,7 +496,7 @@ public final class RecorderDialog {
         }
 
         private boolean showSaveConfirmation(String captured, String combined, PresetMatcher.Match match) {
-            PipelineDialog confirm = new PipelineDialog("Save Recorded Filter - " + channelLabel);
+            PipelineDialog confirm = new PipelineDialog(dialog, "Save Recorded Filter - " + channelLabel);
             confirm.addHeader("Recorded Macro");
             confirm.addMessage("Captured " + lineCount(captured) + " new line(s) for " + channelLabel + ".");
             if (match != null) {
@@ -549,6 +559,23 @@ public final class RecorderDialog {
             String message = t.getMessage();
             if (message == null || message.trim().isEmpty()) return t.getClass().getSimpleName();
             return message;
+        }
+
+        private static void allowFijiRecordingInteraction(ImagePlus sample) {
+            allowWindowThroughModalBlock(IJ.getInstance());
+            if (sample != null) {
+                allowWindowThroughModalBlock(sample.getWindow());
+            }
+            allowWindowThroughModalBlock(WindowManager.getFrame("Recorder"));
+        }
+
+        private static void allowWindowThroughModalBlock(Window window) {
+            if (window == null) return;
+            try {
+                window.setModalExclusionType(Dialog.ModalExclusionType.APPLICATION_EXCLUDE);
+            } catch (RuntimeException ignored) {
+                // Best effort: recording still works where modal exclusion is unavailable.
+            }
         }
     }
 

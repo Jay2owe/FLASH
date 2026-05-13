@@ -479,13 +479,14 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
             return;
         }
         final int threshold;
-        final int minSize;
-        final int maxSize;
+        final int previewMinSize;
+        final int previewMaxSize;
         try {
             ParticleSizeStage.SizeToken token = collectSizeToken();
             threshold = currentThresholdValue();
-            minSize = ObjectsCounter3DWrapper.parseMinSizeVoxels(token.minText, 100);
-            maxSize = ObjectsCounter3DWrapper.parseMaxSizeVoxels(token.maxText, filteredSource);
+            validateSizeToken(token);
+            previewMinSize = previewMinSizeVoxels();
+            previewMaxSize = previewMaxSizeVoxels();
         } catch (RuntimeException e) {
             setError("Enter valid min and max voxel sizes.");
             return;
@@ -495,7 +496,7 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
         if (actions != null) actions.setPreviewButtonRunning(true);
         previewWorker = new SwingWorker<ObjectsCounter3DWrapper.Result, Void>() {
             @Override protected ObjectsCounter3DWrapper.Result doInBackground() throws Exception {
-                return previewAdapter.runPreview(filteredSource, threshold, minSize, maxSize);
+                return previewAdapter.runPreview(filteredSource, threshold, previewMinSize, previewMaxSize);
             }
 
             @Override protected void done() {
@@ -518,10 +519,23 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
         }
         ParticleSizeStage.SizeToken token = collectSizeToken();
         int threshold = currentThresholdValue();
-        int minSize = ObjectsCounter3DWrapper.parseMinSizeVoxels(token.minText, 100);
-        int maxSize = ObjectsCounter3DWrapper.parseMaxSizeVoxels(token.maxText, filteredSource);
+        validateSizeToken(token);
         setPreviewState(PreviewPairPanel.PreviewState.RUNNING, "Running object preview...");
-        installObjectPreview(previewAdapter.runPreview(filteredSource, threshold, minSize, maxSize));
+        installObjectPreview(previewAdapter.runPreview(filteredSource, threshold,
+                previewMinSizeVoxels(), previewMaxSizeVoxels()));
+    }
+
+    private void validateSizeToken(ParticleSizeStage.SizeToken token) {
+        ObjectsCounter3DWrapper.parseMinSizeVoxels(token.minText, 100);
+        ObjectsCounter3DWrapper.parseMaxSizeVoxels(token.maxText, filteredSource);
+    }
+
+    private int previewMinSizeVoxels() {
+        return 0;
+    }
+
+    private int previewMaxSizeVoxels() {
+        return ObjectsCounter3DWrapper.parseMaxSizeVoxels("Infinity", filteredSource);
     }
 
     private void installObjectPreview(ObjectsCounter3DWrapper.Result result) {

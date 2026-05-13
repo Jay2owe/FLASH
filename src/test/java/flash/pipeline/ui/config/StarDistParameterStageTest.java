@@ -94,8 +94,9 @@ public class StarDistParameterStageTest {
         assertContainsText(controls, "Area min");
         assertContainsText(controls, "Area max");
         assertContainsText(controls, "Quality min");
-        assertContainsText(controls, "Size min");
-        assertContainsText(controls, "Size max");
+        assertNotContainsText(controls, "Object size:");
+        assertNotContainsText(controls, "Size min");
+        assertNotContainsText(controls, "Size max");
         assertFalse("Area min belongs in Filters, not Detection.",
                 siblingContainerContains(controls, "Detection:", "Area min"));
         assertFalse("Area max belongs in Filters, not Detection.",
@@ -134,41 +135,12 @@ public class StarDistParameterStageTest {
     }
 
     @Test
-    public void sizeEditsAfterPreviewRelabelRemovedObjectsWithoutRerunning() throws Exception {
-        RecordingStore store = new RecordingStore("stardist:0.5:0.4");
-        RecordingSizeStore sizeStore = new RecordingSizeStore("0-Infinity");
-        RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
-        RecordingActions actions = new RecordingActions();
-        StarDistParameterStage stage = new StarDistParameterStage(store, sizeStore, adapter);
-
-        stage.buildControls(context(), actions);
-        stage.onEnter(context(), new PreviewPairPanel("Original", "Adjusted"));
-        stage.runPreviewNowForTest();
-        adapter.previewRuns = 0;
-
-        stage.setSizeMinForTest("2");
-
-        assertFalse(stage.isPreviewStaleForTest());
-        assertEquals("Size edits must reuse cached label sizes",
-                0, adapter.previewRuns);
-        assertEquals("Objects: 1 kept; removed 1 small, 0 large", actions.status);
-        assertEquals("Objects: 1 kept; removed 1 small, 0 large",
-                stage.sizeCutoffSummaryForTest());
-        assertFalse(actions.previewButtonStale);
-        assertRemovedLabelUsesCutoffColor(actions.adjustedPreview, 1, 0xe53935);
-
-        assertTrue(stage.lockIn(context()));
-        assertEquals("2-Infinity", sizeStore.token);
-    }
-
-    @Test
     public void starDistFilterEditsAfterPreviewRelabelRemovedObjectsWithoutRerunning() throws Exception {
         RecordingStore store = new RecordingStore(
                 "stardist:0.5:0.4:area=5.0-30.0:quality=0.5:intensity=50.0");
-        RecordingSizeStore sizeStore = new RecordingSizeStore("0-Infinity");
         RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
         RecordingActions actions = new RecordingActions();
-        StarDistParameterStage stage = new StarDistParameterStage(store, sizeStore, adapter);
+        StarDistParameterStage stage = new StarDistParameterStage(store, adapter);
 
         stage.buildControls(context(), actions);
         stage.onEnter(context(), new PreviewPairPanel("Original", "Adjusted"));
@@ -180,7 +152,7 @@ public class StarDistParameterStageTest {
         assertTrue(Double.isInfinite(adapter.lastPreviewParameters.areaMax));
         assertEquals(0.0, adapter.lastPreviewParameters.qualityMin, 0.001);
         assertEquals(0.0, adapter.lastPreviewParameters.intensityMin, 0.001);
-        assertEquals("Objects: 1 kept; removed 0 small, 0 large, 1 by StarDist filters",
+        assertEquals("Objects: 1 kept; removed 1 by StarDist filters",
                 actions.status);
         assertRemovedLabelUsesCutoffColor(actions.adjustedPreview, 1, 0xe53935);
 
@@ -190,7 +162,7 @@ public class StarDistParameterStageTest {
         assertFalse(stage.isPreviewStaleForTest());
         assertEquals("StarDist filter edits must reuse cached object metrics",
                 0, adapter.previewRuns);
-        assertEquals("Objects: 0 kept; removed 0 small, 0 large, 2 by StarDist filters",
+        assertEquals("Objects: 0 kept; removed 2 by StarDist filters",
                 actions.status);
         assertRemovedLabelUsesCutoffColor(actions.adjustedPreview, 2, 0xf9a825);
 
@@ -434,22 +406,6 @@ public class StarDistParameterStageTest {
 
         @Override public void close(ImagePlus image) {
             if (image != null) image.flush();
-        }
-    }
-
-    private static final class RecordingSizeStore implements StarDistParameterStage.SizeStore {
-        String token;
-
-        RecordingSizeStore(String token) {
-            this.token = token;
-        }
-
-        @Override public String get() {
-            return token;
-        }
-
-        @Override public void set(String token) {
-            this.token = token;
         }
     }
 

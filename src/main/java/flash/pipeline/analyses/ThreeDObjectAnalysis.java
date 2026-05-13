@@ -3372,12 +3372,9 @@ public class ThreeDObjectAnalysis implements Analysis {
                             + "): " + nObjects + " objects detected");
                 }
 
-                // Particle size — still parsed for any downstream use (e.g. process length)
-                String[] sizeParts = sizeToken.split("-");
-                String minSize = sizeParts.length > 0 ? sizeParts[0] : "100";
-                String maxSize = sizeParts.length > 1 ? sizeParts[1] : "Infinity";
-                int minSizeVox = ObjectsCounter3DWrapper.parseMinSizeVoxels(minSize, 100);
-                int maxSizeVox = ObjectsCounter3DWrapper.parseMaxSizeVoxels(maxSize, binaryMask);
+                // StarDist object filtering is controlled by StarDist area/quality/intensity parameters.
+                int minSizeVox = 0;
+                int maxSizeVox = Integer.MAX_VALUE;
 
                 return new ChannelFilterResult(c, channelName, ch, binaryMask,
                         null, minSizeVox, maxSizeVox, false, null,

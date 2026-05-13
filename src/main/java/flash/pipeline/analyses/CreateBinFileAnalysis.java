@@ -4550,7 +4550,7 @@ public class CreateBinFileAnalysis implements Analysis {
                 if (sdParams[8] > 0) sdMethod.append(":intensity=").append(sdParams[8]);
                 cfg.segmentationMethods.set(ch, sdMethod.toString());
                 cfg.objectThresholds.set(ch, "default");
-                cfg.sizes.set(ch, "100-Infinity");
+                cfg.sizes.set(ch, "0-Infinity");
 
                 // If the user did not also opt into the channel-threshold step,
                 // skip the unified Channel Threshold QC for this stardist channel.
@@ -5858,7 +5858,12 @@ public class CreateBinFileAnalysis implements Analysis {
 
         ConfigQcResult result = showEmbeddedConfigQcDialog(context, stages);
         if (result == ConfigQcResult.DONE || result == ConfigQcResult.SKIP_CURRENT_IMAGE) {
-            if (isStarDistSegmentation(cfg, channelIndex) || isCellposeSegmentation(cfg, channelIndex)) {
+            if (isStarDistSegmentation(cfg, channelIndex)) {
+                cfg.sizes.set(channelIndex, "0-Infinity");
+                if (!includeAiChannelThreshold) {
+                    cfg.objectThresholds.set(channelIndex, "default");
+                }
+            } else if (isCellposeSegmentation(cfg, channelIndex)) {
                 cfg.sizes.set(channelIndex, "100-Infinity");
                 if (!includeAiChannelThreshold) {
                     cfg.objectThresholds.set(channelIndex, "default");
@@ -5898,6 +5903,7 @@ public class CreateBinFileAnalysis implements Analysis {
                 context, Collections.<ConfigQcStage>singletonList(stage));
         if (result == ConfigQcResult.DONE || result == ConfigQcResult.SKIP_CURRENT_IMAGE) {
             cfg.objectThresholds.set(channelIndex, "default");
+            cfg.sizes.set(channelIndex, "0-Infinity");
             return "continue";
         }
         if (result == ConfigQcResult.BACK) {
@@ -5919,15 +5925,6 @@ public class CreateBinFileAnalysis implements Analysis {
 
                     @Override public void save(String methodToken) {
                         cfg.segmentationMethods.set(channelIndex, methodToken);
-                    }
-                },
-                new StarDistParameterStage.SizeStore() {
-                    @Override public String get() {
-                        return cfg.sizes.get(channelIndex);
-                    }
-
-                    @Override public void set(String token) {
-                        cfg.sizes.set(channelIndex, token);
                     }
                 },
                 new StarDistParameterStage.PreviewAdapter() {
@@ -6313,9 +6310,6 @@ public class CreateBinFileAnalysis implements Analysis {
         flash.pipeline.ui.RecorderDialog.SampleSupplier sampleSupplier =
                 createQcCustomFilterSampleSupplier(images, cfg, channelIndex, chLabel, sampleHolder);
         try {
-            if (sampleSupplier != null) {
-                sampleSupplier.openSample();
-            }
             CustomFilterEntryDialog.Result result = CustomFilterEntryDialog.show(
                     owner,
                     chLabel,
@@ -7038,9 +7032,6 @@ public class CreateBinFileAnalysis implements Analysis {
                 ? createCustomFilterSampleSupplier()
                 : createQcCustomFilterSampleSupplier(qcImages, cfg, channelIndex, chLabel, sampleHolder);
         try {
-            if (qcImages != null && sampleSupplier != null) {
-                sampleSupplier.openSample();
-            }
             CustomFilterEntryDialog.Result result = CustomFilterEntryDialog.show(
                     chLabel,
                     qcImages == null

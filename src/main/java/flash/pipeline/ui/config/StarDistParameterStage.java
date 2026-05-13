@@ -3,7 +3,6 @@ package flash.pipeline.ui.config;
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.help.SetupHelpCatalog;
 import flash.pipeline.help.SetupHelpTopic;
-import flash.pipeline.objects.ObjectsCounter3DWrapper;
 import flash.pipeline.stardist.StarDist3DRunner;
 import flash.pipeline.ui.preview.ObjectSizeFilterPreview;
 import flash.pipeline.ui.preview.PreviewPairPanel;
@@ -33,11 +32,6 @@ public final class StarDistParameterStage implements ConfigQcStage {
     public interface ParameterStore {
         String getMethodToken();
         void save(String methodToken);
-    }
-
-    public interface SizeStore {
-        String get();
-        void set(String token);
     }
 
     public interface PreviewAdapter {
@@ -97,7 +91,6 @@ public final class StarDistParameterStage implements ConfigQcStage {
     private static final String EMPTY_TEXT = "Filtered input is ready. Press Run Preview.";
 
     private final ParameterStore parameterStore;
-    private final SizeStore sizeStore;
     private final PreviewAdapter previewAdapter;
 
     private ConfigQcActions actions;
@@ -105,8 +98,6 @@ public final class StarDistParameterStage implements ConfigQcStage {
     private ConfigQcContext activeContext;
     private Parameters savedParameters = Parameters.defaults();
     private Parameters restartParameters;
-    private ParticleSizeStage.SizeToken savedSize = new ParticleSizeStage.SizeToken("100", "Infinity");
-    private ParticleSizeStage.SizeToken restartSize;
     private ImagePlus rawSource;
     private ImagePlus filteredSource;
     private ImagePlus labelPreview;
@@ -126,32 +117,18 @@ public final class StarDistParameterStage implements ConfigQcStage {
     private JTextField areaMaxField;
     private JTextField qualityMinField;
     private JTextField intensityMinField;
-    private JTextField sizeMinField;
-    private JTextField sizeMaxField;
     private JButton previewButton;
     private JButton resetButton;
-    private ObjectSizeCutoffPanel sizeCutoffPanel;
-    private ObjectSizeFilterPreview.Summary sizeSummary;
     private ObjectFilterSummary objectFilterSummary;
 
     public StarDistParameterStage(ParameterStore parameterStore, PreviewAdapter previewAdapter) {
-        this(parameterStore, defaultSizeStore(), previewAdapter);
-    }
-
-    public StarDistParameterStage(ParameterStore parameterStore,
-                                  SizeStore sizeStore,
-                                  PreviewAdapter previewAdapter) {
         if (parameterStore == null) {
             throw new IllegalArgumentException("parameterStore must not be null");
-        }
-        if (sizeStore == null) {
-            throw new IllegalArgumentException("sizeStore must not be null");
         }
         if (previewAdapter == null) {
             throw new IllegalArgumentException("previewAdapter must not be null");
         }
         this.parameterStore = parameterStore;
-        this.sizeStore = sizeStore;
         this.previewAdapter = previewAdapter;
     }
 
@@ -177,9 +154,6 @@ public final class StarDistParameterStage implements ConfigQcStage {
         this.savedParameters = restartParameters == null
                 ? parseMethod(parameterStore.getMethodToken())
                 : restartParameters;
-        this.savedSize = restartSize == null
-                ? ParticleSizeStage.parseSizeToken(sizeStore.get())
-                : restartSize;
 
         JPanel panel = new JPanel();
         panel.setOpaque(false);
@@ -193,14 +167,7 @@ public final class StarDistParameterStage implements ConfigQcStage {
                 new JTextField[]{linkingField, gapClosingField, frameGapField}));
         panel.add(Box.createVerticalStrut(4));
         panel.add(buildFilterActionRow());
-        panel.add(Box.createVerticalStrut(4));
-        panel.add(buildSizeRow());
-        panel.add(Box.createVerticalStrut(4));
-        sizeCutoffPanel = new ObjectSizeCutoffPanel();
-        panel.add(sizeCutoffPanel);
         loadFields(savedParameters);
-        loadSizeFields(savedSize);
-        refreshSizeCutoffPanelOnly();
         markPreviewStale(EMPTY_TEXT);
         return panel;
     }
@@ -239,7 +206,6 @@ public final class StarDistParameterStage implements ConfigQcStage {
                 preview.setAdjusted(null);
                 preview.setAdjustedState(PreviewPairPanel.PreviewState.STALE, EMPTY_TEXT);
             }
-            refreshSizeCutoffPanelOnly();
             refreshLargePreviewModel();
             setStatus(EMPTY_TEXT);
         } catch (Exception e) {
@@ -250,21 +216,12 @@ public final class StarDistParameterStage implements ConfigQcStage {
 
     @Override
     public boolean lockIn(ConfigQcContext context) {
-        try {
-            Parameters parameters = collectParameters();
-            ParticleSizeStage.SizeToken size = collectSizeToken();
-            parameterStore.save(formatMethod(parameters));
-            sizeStore.set(size.toToken());
-            savedParameters = parameters;
-            savedSize = size;
-            restartParameters = null;
-            restartSize = null;
-            setStatus("Locked StarDist parameters.");
-            return true;
-        } catch (RuntimeException e) {
-            setError("Enter valid min and max voxel sizes.");
-            return false;
-        }
+        Parameters parameters = collectParameters();
+        parameterStore.save(formatMethod(parameters));
+        savedParameters = parameters;
+        restartParameters = null;
+        setStatus("Locked StarDist parameters.");
+        return true;
     }
 
     @Override
@@ -275,11 +232,6 @@ public final class StarDistParameterStage implements ConfigQcStage {
     @Override
     public void restartStage(ConfigQcContext context) {
         restartParameters = collectParameters();
-        try {
-            restartSize = collectSizeToken();
-        } catch (RuntimeException ignored) {
-            // Keep the prior restart value if the current fields are invalid.
-        }
         setStatus("Restarting StarDist review from the first image.");
     }
 
@@ -340,20 +292,8 @@ public final class StarDistParameterStage implements ConfigQcStage {
         setTextForTest(intensityMinField, value);
     }
 
-    void setSizeMinForTest(String value) {
-        setTextForTest(sizeMinField, value);
-    }
-
-    void setSizeMaxForTest(String value) {
-        setTextForTest(sizeMaxField, value);
-    }
-
     void runPreviewNowForTest() throws Exception {
         runPreviewNow();
-    }
-
-    String sizeCutoffSummaryForTest() {
-        return sizeCutoffPanel == null ? "" : sizeCutoffPanel.summaryTextForTest();
     }
 
     void selectRawSourceForTest() {
@@ -392,19 +332,11 @@ public final class StarDistParameterStage implements ConfigQcStage {
         areaMaxField = createPostDetectionFilterField(5);
         qualityMinField = createPostDetectionFilterField(5);
         intensityMinField = createPostDetectionFilterField(5);
-        sizeMinField = createSizeField(6);
-        sizeMaxField = createSizeField(8);
     }
 
     private JTextField createNumberField(int columns) {
         JTextField field = new JTextField(columns);
         installFieldListener(field);
-        return field;
-    }
-
-    private JTextField createSizeField(int columns) {
-        JTextField field = new JTextField(columns);
-        installPostDetectionFilterListener(field);
         return field;
     }
 
@@ -501,39 +433,6 @@ public final class StarDistParameterStage implements ConfigQcStage {
         return row;
     }
 
-    private JComponent buildSizeRow() {
-        JPanel row = new JPanel(new GridBagLayout());
-        row.setOpaque(false);
-        row.setAlignmentX(JComponent.LEFT_ALIGNMENT);
-        row.setBorder(BorderFactory.createEmptyBorder(2, 0, 2, 0));
-
-        GridBagConstraints gbc = new GridBagConstraints();
-        gbc.gridy = 0;
-        gbc.insets = new Insets(0, 0, 0, 6);
-        gbc.anchor = GridBagConstraints.WEST;
-
-        gbc.gridx = 0;
-        JLabel heading = new JLabel("Object size:");
-        Font font = heading.getFont();
-        if (font != null) heading.setFont(font.deriveFont(Font.BOLD));
-        row.add(heading, gbc);
-
-        gbc.gridx++;
-        row.add(new JLabel("Size min"), gbc);
-        gbc.gridx++;
-        row.add(sizeMinField, gbc);
-        gbc.gridx++;
-        row.add(new JLabel("Size max"), gbc);
-        gbc.gridx++;
-        row.add(sizeMaxField, gbc);
-
-        gbc.gridx++;
-        gbc.weightx = 1.0;
-        gbc.fill = GridBagConstraints.HORIZONTAL;
-        row.add(Box.createHorizontalGlue(), gbc);
-        return row;
-    }
-
     private void installFieldListener(JTextField field) {
         field.getDocument().addDocumentListener(new DocumentListener() {
             @Override public void insertUpdate(DocumentEvent e) {
@@ -584,19 +483,6 @@ public final class StarDistParameterStage implements ConfigQcStage {
         }
     }
 
-    private void loadSizeFields(ParticleSizeStage.SizeToken token) {
-        updatingFields = true;
-        try {
-            ParticleSizeStage.SizeToken safe = token == null
-                    ? new ParticleSizeStage.SizeToken("100", "Infinity")
-                    : token;
-            if (sizeMinField != null) sizeMinField.setText(safe.minText);
-            if (sizeMaxField != null) sizeMaxField.setText(safe.maxText);
-        } finally {
-            updatingFields = false;
-        }
-    }
-
     private void fieldChanged() {
         if (updatingFields) return;
         markPreviewStale(STALE_TEXT);
@@ -611,7 +497,6 @@ public final class StarDistParameterStage implements ConfigQcStage {
 
     private void resetToSaved() {
         loadFields(savedParameters);
-        loadSizeFields(savedSize);
         if (!refreshObjectFilterPreview()) {
             markPreviewStale(STALE_TEXT);
         }
@@ -734,68 +619,34 @@ public final class StarDistParameterStage implements ConfigQcStage {
         if (objectFilterSummary != null && objectFilterSummary.totalCount > 0) {
             return objectFilterSummary.statusText();
         }
-        if (sizeSummary != null && sizeSummary.totalCount > 0) {
-            return sizeSummary.statusText();
-        }
         return lastObjectCount >= 0
                 ? "Objects: " + lastObjectCount + " ready"
                 : "Objects: not previewed";
     }
 
-    private ParticleSizeStage.SizeToken collectSizeToken() {
-        int min = ObjectsCounter3DWrapper.parseMinSizeVoxels(
-                sizeMinField == null ? null : sizeMinField.getText(), 100);
-        min = Math.max(0, min);
-        String max = normalizeMaxText(sizeMaxField == null ? null : sizeMaxField.getText());
-        return new ParticleSizeStage.SizeToken(String.valueOf(min), max);
-    }
-
     private boolean refreshObjectFilterPreview() {
         if (labelPreview == null || objectStats == null) {
-            refreshSizeCutoffPanelOnly();
             return false;
         }
         try {
             Parameters parameters = collectParameters();
-            ParticleSizeStage.SizeToken token = collectSizeToken();
-            int minSize = ObjectsCounter3DWrapper.parseMinSizeVoxels(token.minText, 100);
-            int maxSize = ObjectsCounter3DWrapper.parseMaxSizeVoxels(token.maxText, filteredSource);
-            boolean maxFinite = isFiniteMaxToken(token.maxText);
-            sizeSummary = ObjectSizeFilterPreview.summarize(
-                    objectStats, filteredSource, minSize, maxSize, maxFinite);
             Map<Integer, ObjectSizeFilterPreview.Classification> starDistClasses =
                     starDistFilterClassifications(objectStats, parameters);
             if (starDistClasses == null) {
                 return false;
             }
-            Map<Integer, ObjectSizeFilterPreview.Classification> additionalClasses =
-                    additionalStarDistClasses(objectStats, sizeSummary, starDistClasses);
-            objectFilterSummary = summarizeObjectFilters(objectStats, sizeSummary, additionalClasses);
-            ObjectSizeFilterPreview.applyClassifiedLut(labelPreview, sizeSummary, additionalClasses);
-            if (sizeCutoffPanel != null) sizeCutoffPanel.setSummary(sizeSummary);
+            ObjectSizeFilterPreview.Summary allObjectsSummary = ObjectSizeFilterPreview.summarize(
+                    objectStats, filteredSource, 0, 0, false);
+            objectFilterSummary = summarizeObjectFilters(objectStats, starDistClasses);
+            ObjectSizeFilterPreview.applyClassifiedLut(labelPreview, allObjectsSummary, starDistClasses);
             previewStale = false;
             refreshSourceAndOutputPreview();
             setStatus(objectFilterSummary.statusText());
             if (actions != null) actions.setPreviewButtonStale(false);
             return true;
         } catch (RuntimeException e) {
-            setError("Enter valid min and max voxel sizes.");
+            setError("Enter valid StarDist parameters.");
             return true;
-        }
-    }
-
-    private void refreshSizeCutoffPanelOnly() {
-        if (sizeCutoffPanel == null) return;
-        try {
-            ParticleSizeStage.SizeToken token = collectSizeToken();
-            int minSize = ObjectsCounter3DWrapper.parseMinSizeVoxels(token.minText, 100);
-            int maxSize = ObjectsCounter3DWrapper.parseMaxSizeVoxels(token.maxText, filteredSource);
-            boolean maxFinite = isFiniteMaxToken(token.maxText);
-            sizeSummary = ObjectSizeFilterPreview.summarize(
-                    null, filteredSource, minSize, maxSize, maxFinite);
-            sizeCutoffPanel.setSummary(sizeSummary);
-        } catch (RuntimeException e) {
-            sizeCutoffPanel.setSummary(null);
         }
     }
 
@@ -875,39 +726,13 @@ public final class StarDistParameterStage implements ConfigQcStage {
         return classes;
     }
 
-    private static Map<Integer, ObjectSizeFilterPreview.Classification> additionalStarDistClasses(
-            ResultsTable stats,
-            ObjectSizeFilterPreview.Summary sizeSummary,
-            Map<Integer, ObjectSizeFilterPreview.Classification> starDistClasses) {
-        Map<Integer, ObjectSizeFilterPreview.Classification> additional =
-                new HashMap<Integer, ObjectSizeFilterPreview.Classification>();
-        if (stats == null || starDistClasses == null || starDistClasses.isEmpty()) return additional;
-        for (int row = 0; row < stats.size(); row++) {
-            int label = labelForStatsRow(stats, row);
-            ObjectSizeFilterPreview.Classification sizeClass = sizeSummary == null
-                    ? ObjectSizeFilterPreview.Classification.KEPT
-                    : sizeSummary.classificationForLabel(label);
-            ObjectSizeFilterPreview.Classification starDistClass =
-                    starDistClasses.get(Integer.valueOf(label));
-            if (sizeClass == ObjectSizeFilterPreview.Classification.KEPT
-                    && starDistClass != null
-                    && starDistClass != ObjectSizeFilterPreview.Classification.KEPT) {
-                additional.put(Integer.valueOf(label), starDistClass);
-            }
-        }
-        return additional;
-    }
-
     private static ObjectFilterSummary summarizeObjectFilters(
             ResultsTable stats,
-            ObjectSizeFilterPreview.Summary sizeSummary,
-            Map<Integer, ObjectSizeFilterPreview.Classification> additionalClasses) {
+            Map<Integer, ObjectSizeFilterPreview.Classification> starDistClasses) {
         int total = stats == null ? 0 : stats.size();
-        int small = sizeSummary == null ? 0 : sizeSummary.belowMinCount;
-        int large = sizeSummary == null ? 0 : sizeSummary.aboveMaxCount;
-        int starDist = additionalClasses == null ? 0 : additionalClasses.size();
-        int kept = Math.max(0, total - small - large - starDist);
-        return new ObjectFilterSummary(total, kept, small, large, starDist);
+        int starDist = starDistClasses == null ? 0 : starDistClasses.size();
+        int kept = Math.max(0, total - starDist);
+        return new ObjectFilterSummary(total, kept, starDist);
     }
 
     private static Map<Integer, Integer> rowsByLabel(ResultsTable stats) {
@@ -1013,7 +838,6 @@ public final class StarDistParameterStage implements ConfigQcStage {
         ImagePlus old = labelPreview;
         labelPreview = null;
         objectStats = null;
-        sizeSummary = null;
         objectFilterSummary = null;
         previewStale = true;
         lastObjectCount = -1;
@@ -1040,8 +864,6 @@ public final class StarDistParameterStage implements ConfigQcStage {
         if (areaMaxField != null) areaMaxField.setEnabled(enabled);
         if (qualityMinField != null) qualityMinField.setEnabled(enabled);
         if (intensityMinField != null) intensityMinField.setEnabled(enabled);
-        if (sizeMinField != null) sizeMinField.setEnabled(enabled);
-        if (sizeMaxField != null) sizeMaxField.setEnabled(enabled);
         if (preview != null) {
             preview.setSourceModeEnabled(enabled);
             preview.setObjectOverlayEnabled(enabled);
@@ -1065,7 +887,6 @@ public final class StarDistParameterStage implements ConfigQcStage {
         ImagePlus raw = rawSource;
         labelPreview = null;
         objectStats = null;
-        sizeSummary = null;
         objectFilterSummary = null;
         rawSource = null;
         filteredSource = null;
@@ -1167,51 +988,16 @@ public final class StarDistParameterStage implements ConfigQcStage {
         return Math.max(0, (int) Math.round(value));
     }
 
-    private static String normalizeMaxText(String value) {
-        if (value == null) return "Infinity";
-        String trimmed = value.trim();
-        if (trimmed.isEmpty()
-                || "infinity".equalsIgnoreCase(trimmed)
-                || "inf".equalsIgnoreCase(trimmed)) {
-            return "Infinity";
-        }
-        double parsed = Double.parseDouble(trimmed);
-        if (!Double.isFinite(parsed)) return "Infinity";
-        return String.valueOf(Math.max(0, (int) Math.round(parsed)));
-    }
-
-    private static boolean isFiniteMaxToken(String value) {
-        String normalized = normalizeMaxText(value);
-        return !"Infinity".equals(normalized);
-    }
-
-    private static SizeStore defaultSizeStore() {
-        return new SizeStore() {
-            @Override public String get() {
-                return "0-Infinity";
-            }
-
-            @Override public void set(String token) {
-            }
-        };
-    }
-
     private static final class ObjectFilterSummary {
         final int totalCount;
         final int keptCount;
-        final int belowMinCount;
-        final int aboveMaxCount;
         final int starDistRemovedCount;
 
         ObjectFilterSummary(int totalCount,
                             int keptCount,
-                            int belowMinCount,
-                            int aboveMaxCount,
                             int starDistRemovedCount) {
             this.totalCount = totalCount;
             this.keptCount = keptCount;
-            this.belowMinCount = belowMinCount;
-            this.aboveMaxCount = aboveMaxCount;
             this.starDistRemovedCount = starDistRemovedCount;
         }
 
@@ -1219,16 +1005,11 @@ public final class StarDistParameterStage implements ConfigQcStage {
             if (totalCount <= 0) {
                 return "Objects: not previewed";
             }
-            int removed = belowMinCount + aboveMaxCount + starDistRemovedCount;
-            if (removed <= 0) {
+            if (starDistRemovedCount <= 0) {
                 return "Objects: " + keptCount + " ready";
             }
-            String text = "Objects: " + keptCount + " kept; removed "
-                    + belowMinCount + " small, " + aboveMaxCount + " large";
-            if (starDistRemovedCount > 0) {
-                text += ", " + starDistRemovedCount + " by StarDist filters";
-            }
-            return text;
+            return "Objects: " + keptCount + " kept; removed "
+                    + starDistRemovedCount + " by StarDist filters";
         }
     }
 }
