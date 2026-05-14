@@ -97,7 +97,7 @@ public final class ImagePreviewPanel extends JPanel {
                 }
             }
         });
-        refresh();
+        applyEmptyState(false);
     }
 
     public void setPreviewTitle(String title) {
@@ -208,12 +208,7 @@ public final class ImagePreviewPanel extends JPanel {
 
     public void refresh() {
         if (!hasUsableImage()) {
-            titleLabel.setText("No image selected.");
-            detailLabel.setText(" ");
-            setSliderState(1, 1, 1);
-            zSlider.setEnabled(false);
-            sliceLabel.setText(" ");
-            canvas.repaint();
+            applyEmptyState(true);
             return;
         }
 
@@ -256,6 +251,14 @@ public final class ImagePreviewPanel extends JPanel {
         return titleLabel.getText();
     }
 
+    String detailTextForTest() {
+        return detailLabel.getText();
+    }
+
+    String sliceTextForTest() {
+        return sliceLabel.getText();
+    }
+
     String previewTitleForTest() {
         return previewTitle;
     }
@@ -295,6 +298,21 @@ public final class ImagePreviewPanel extends JPanel {
                     && candidate.getStackSize() > 0;
         } catch (RuntimeException e) {
             return false;
+        }
+    }
+
+    private void applyEmptyState(boolean repaintCanvas) {
+        currentC = 1;
+        currentZ = 1;
+        currentT = 1;
+        titleLabel.setText("No image selected.");
+        detailLabel.setText(" ");
+        statusLabel.setText(" ");
+        setSliderState(1, 1, 1);
+        zSlider.setEnabled(false);
+        sliceLabel.setText(" ");
+        if (repaintCanvas) {
+            canvas.repaint();
         }
     }
 

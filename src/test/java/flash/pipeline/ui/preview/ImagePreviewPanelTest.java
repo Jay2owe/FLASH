@@ -34,6 +34,46 @@ public class ImagePreviewPanelTest {
         assertEquals(1, panel.getSliceCount());
         assertFalse(panel.isZSliderEnabledForTest());
         assertEquals("No image selected.", panel.titleTextForTest());
+        assertEquals(" ", panel.detailTextForTest());
+        assertEquals(" ", panel.statusTextForTest());
+        assertEquals(" ", panel.sliceTextForTest());
+        assertNull(panel.renderedProcessorForTest());
+    }
+
+    @Test
+    public void firstUsableImageUpdatesStateAndRenderedProcessor() {
+        ImagePreviewPanel panel = new ImagePreviewPanel("Preview");
+
+        panel.setImage(stack("first", 3));
+
+        assertTrue(panel.hasImageForTest());
+        assertEquals("first", panel.titleTextForTest());
+        assertTrue(panel.detailTextForTest().contains("Z=3"));
+        assertEquals(1, panel.getCurrentZ());
+        assertEquals(3, panel.getSliceCount());
+        assertTrue(panel.isZSliderEnabledForTest());
+        assertEquals("1/3", panel.sliceTextForTest());
+        assertEquals(1, panel.renderedProcessorForTest().get(1, 1));
+    }
+
+    @Test
+    public void setImageNullAfterImageClearsPreviewState() {
+        ImagePreviewPanel panel = new ImagePreviewPanel("Preview");
+        panel.setImage(stack("source", 3));
+        panel.setCurrentZ(3);
+        panel.setStatusText("Preview ready.");
+
+        panel.setImage(null);
+
+        assertFalse(panel.hasImageForTest());
+        assertEquals(1, panel.getCurrentZ());
+        assertEquals(1, panel.getSliceCount());
+        assertFalse(panel.isZSliderEnabledForTest());
+        assertEquals("No image selected.", panel.titleTextForTest());
+        assertEquals(" ", panel.detailTextForTest());
+        assertEquals(" ", panel.statusTextForTest());
+        assertEquals(" ", panel.sliceTextForTest());
+        assertNull(panel.renderedProcessorForTest());
     }
 
     @Test
