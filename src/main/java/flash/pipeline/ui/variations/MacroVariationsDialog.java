@@ -17,6 +17,7 @@ import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.ButtonGroup;
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JRadioButton;
@@ -75,6 +76,8 @@ public final class MacroVariationsDialog extends PipelineDialog {
     private final JToggleButton paramsButton = new JToggleButton("Params");
     private final JToggleButton stepsButton = new JToggleButton("Steps");
     private final JToggleButton presetsButton = new JToggleButton("Presets");
+    private final JCheckBox otsuOverlayCheckBox =
+            new JCheckBox("Show Otsu overlay");
     private final Map<String, VariationCellPanel> cellsByCombo =
             new HashMap<String, VariationCellPanel>();
     private final Map<String, Integer> cellIndexesByCombo =
@@ -94,6 +97,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
     private ParameterCombo selectedCombo;
     private FilterSweepStrategy selectedStrategy;
     private VariationCellPanel selectedCell;
+    private boolean showOtsuOverlay;
     private boolean suppressCropEvents;
     private int completedCount;
     private int failedCount;
@@ -169,6 +173,10 @@ public final class MacroVariationsDialog extends PipelineDialog {
 
     JButton runButtonForTest() {
         return runButton;
+    }
+
+    JCheckBox otsuOverlayCheckBoxForTest() {
+        return otsuOverlayCheckBox;
     }
 
     JLabel chainRibbonLabelForTest() {
@@ -354,6 +362,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
                     i);
             cell.setState("running");
             cell.setZ(zSlider.getValue());
+            cell.setOverlayMode(currentOverlayMode());
             cells.add(cell);
             cellsByCombo.put(combo.toCanonicalJson(), cell);
             cellIndexesByCombo.put(combo.toCanonicalJson(), Integer.valueOf(i));
@@ -397,8 +406,33 @@ public final class MacroVariationsDialog extends PipelineDialog {
         panel.add(Box.createHorizontalStrut(24));
         panel.add(new JLabel("Channel: " + safe(context.channelName())));
         panel.add(Box.createHorizontalGlue());
+        otsuOverlayCheckBox.setOpaque(false);
+        otsuOverlayCheckBox.setSelected(showOtsuOverlay);
+        otsuOverlayCheckBox.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                setShowOtsuOverlay(otsuOverlayCheckBox.isSelected());
+            }
+        });
+        panel.add(otsuOverlayCheckBox);
+        panel.add(Box.createHorizontalStrut(18));
         panel.add(cellsLabel);
         return panel;
+    }
+
+    private void setShowOtsuOverlay(boolean show) {
+        showOtsuOverlay = show;
+        VariationCellPanel.OverlayMode mode = currentOverlayMode();
+        for (VariationCellPanel cell : cellsByCombo.values()) {
+            if (cell != null) {
+                cell.setOverlayMode(mode);
+            }
+        }
+    }
+
+    private VariationCellPanel.OverlayMode currentOverlayMode() {
+        return showOtsuOverlay
+                ? VariationCellPanel.OverlayMode.OTSU_MASK
+                : VariationCellPanel.OverlayMode.NONE;
     }
 
     private JPanel modeToggleRow() {

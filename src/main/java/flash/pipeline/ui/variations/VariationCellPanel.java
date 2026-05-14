@@ -3,10 +3,12 @@ package flash.pipeline.ui.variations;
 import flash.pipeline.ui.FlashTheme;
 import flash.pipeline.ui.preview.ImagePreviewPanel;
 import flash.pipeline.ui.preview.ObjectOverlayRenderer;
+import flash.pipeline.ui.preview.ThresholdOverlayRenderer;
 
 import ij.ImagePlus;
 import ij.ImageStack;
 import ij.measure.ResultsTable;
+import ij.process.AutoThresholder;
 import ij.process.ByteProcessor;
 import ij.process.ImageProcessor;
 
@@ -53,6 +55,7 @@ public final class VariationCellPanel extends JPanel {
     private static final int UNKNOWN_DELTA = Integer.MIN_VALUE;
     private static final int PEEK_DELAY_MS = 120;
     private static final int PEEK_DRAG_CANCEL_PX = 4;
+    private static final int OTSU_HISTOGRAM_BINS = 256;
     private static final String ERROR_BADGE = "\u26a0";
 
     public enum BorderHint {
@@ -60,6 +63,11 @@ public final class VariationCellPanel extends JPanel {
         KNEE,
         STABLE,
         STABILITY
+    }
+
+    public enum OverlayMode {
+        NONE,
+        OTSU_MASK
     }
 
     private final ParameterCombo combo;
@@ -82,8 +90,12 @@ public final class VariationCellPanel extends JPanel {
     private ImagePlus cachedLabel;
     private ResultsTable cachedStats;
     private ImagePlus rawSourceImage;
+    private ImagePlus filteredImage;
+    private ImagePlus cachedOverlayImage;
     private ImagePlus displayedPreviewImage;
     private ImagePlus currentPreviewImage;
+    private OverlayMode overlayMode = OverlayMode.NONE;
+    private double cachedOtsuLower = Double.NaN;
     private long durationMs = -1L;
     private int objectCount = -1;
     private int deltaN = UNKNOWN_DELTA;
@@ -189,6 +201,8 @@ public final class VariationCellPanel extends JPanel {
     public void setState(String state) {
         showSegmentationFooter();
         clearRibbonLabelOverride();
+        filteredImage = null;
+        invalidateOverlayCache();
         errorState = false;
         errorText = "";
         acceptEnabled = false;
@@ -197,6 +211,7 @@ public final class VariationCellPanel extends JPanel {
         iouToNeighbours = Double.NaN;
         filterSnr = Double.NaN;
         filterBgSigma = Double.NaN;
+        setDisplayedPreviewImage(null);
         setStateText(state == null || state.trim().isEmpty() ? "pending" : state,
                 FOOTER_COLOR);
         refreshTooltip();
@@ -210,6 +225,7 @@ public final class VariationCellPanel extends JPanel {
         if (result == null) {
             return;
         }
+        invalidateOverlayCache();
         if (result.hasError()) {
             setError(result.error());
             return;
@@ -244,6 +260,8 @@ public final class VariationCellPanel extends JPanel {
         ImagePlus filtered = result.previewImage() == null
                 ? result.label()
                 : result.previewImage();
+        invalidateOverlayCache();
+        filteredImage = filtered;
         cachedLabel = null;
         cachedStats = null;
         objectCount = -1;
@@ -258,7 +276,7 @@ public final class VariationCellPanel extends JPanel {
         filterSnrLabel.setText("SNR " + formatOneDecimal(filterSnr));
         filterBgSigmaLabel.setText("bg \u03c3 " + formatInteger(filterBgSigma));
         showFilterFooter();
-        setDisplayedPreviewImage(filtered);
+        setDisplayedPreviewImage(previewImageForOverlayMode());
         refreshTooltip();
     }
 
@@ -272,6 +290,8 @@ public final class VariationCellPanel extends JPanel {
             return;
         }
         clearRibbonLabelOverride();
+        filteredImage = null;
+        invalidateOverlayCache();
         errorState = true;
         acceptEnabled = false;
         errorText = errorDetails(error);
@@ -284,6 +304,7 @@ public final class VariationCellPanel extends JPanel {
         filterSnr = Double.NaN;
         filterBgSigma = Double.NaN;
         durationMs = -1L;
+        setDisplayedPreviewImage(null);
         setStateText(ERROR_BADGE, ERROR_COLOR);
         refreshTooltip();
     }
@@ -301,6 +322,8 @@ public final class VariationCellPanel extends JPanel {
             return;
         }
         clearRibbonLabelOverride();
+        filteredImage = null;
+        invalidateOverlayCache();
         this.cachedLabel = label == null ? createPlaceholderLabel() : label;
         this.cachedStats = stats;
         this.objectCount = Math.max(0, nObjects);
@@ -324,6 +347,24 @@ public final class VariationCellPanel extends JPanel {
         }
         setDisplayedPreviewImage(rendered);
         refreshFooter();
+        refreshTooltip();
+    }
+
+    public void setOverlayMode(final OverlayMode mode) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setOverlayMode(mode);
+                }
+            });
+            return;
+        }
+        OverlayMode next = mode == null ? OverlayMode.NONE : mode;
+        if (overlayMode == next && cachedOverlayImage != null) {
+            return;
+        }
+        overlayMode = next;
+        setDisplayedPreviewImage(previewImageForOverlayMode());
         refreshTooltip();
     }
 
@@ -461,6 +502,14 @@ public final class VariationCellPanel extends JPanel {
 
     ImagePlus currentPreviewImageForTest() {
         return currentPreviewImage;
+    }
+
+    OverlayMode overlayModeForTest() {
+        return overlayMode;
+    }
+
+    double cachedOtsuLowerForTest() {
+        return cachedOtsuLower;
     }
 
     boolean isPeekingForTest() {
@@ -654,6 +703,38 @@ public final class VariationCellPanel extends JPanel {
         peeking = false;
         showPreviewImage(displayedPreviewImage);
         repaint();
+    }
+
+    private ImagePlus previewImageForOverlayMode() {
+        ImagePlus filtered = filteredImage;
+        if (overlayMode != OverlayMode.OTSU_MASK || filtered == null) {
+            return filtered;
+        }
+        if (cachedOverlayImage != null) {
+            return cachedOverlayImage;
+        }
+        Histogram histogram = histogramFor(filtered);
+        if (!histogram.hasValues()) {
+            return filtered;
+        }
+        int thresholdBin = new AutoThresholder().getThreshold(
+                AutoThresholder.Method.Otsu, histogram.counts);
+        double lower = histogram.foregroundLowerFor(thresholdBin);
+        ImagePlus rendered = ThresholdOverlayRenderer.render(filtered,
+                lower,
+                histogram.max,
+                ThresholdOverlayRenderer.MODE_RED_OVERLAY);
+        if (rendered == null) {
+            return filtered;
+        }
+        cachedOtsuLower = lower;
+        cachedOverlayImage = rendered;
+        return rendered;
+    }
+
+    private void invalidateOverlayCache() {
+        cachedOverlayImage = null;
+        cachedOtsuLower = Double.NaN;
     }
 
     private void setDisplayedPreviewImage(ImagePlus image) {
@@ -1021,6 +1102,83 @@ public final class VariationCellPanel extends JPanel {
         return sourceProcessor != null && labelProcessor != null;
     }
 
+    private static Histogram histogramFor(ImagePlus image) {
+        if (image == null) {
+            return Histogram.empty();
+        }
+        double min = Double.POSITIVE_INFINITY;
+        double max = Double.NEGATIVE_INFINITY;
+        boolean integral = true;
+        ImageStack stack = image.getStack();
+        int size = stack == null ? 1 : Math.max(1, stack.getSize());
+        for (int slice = 1; slice <= size; slice++) {
+            ImageProcessor processor = stack == null
+                    ? image.getProcessor()
+                    : stack.getProcessor(slice);
+            if (processor == null) {
+                continue;
+            }
+            for (int y = 0; y < processor.getHeight(); y++) {
+                for (int x = 0; x < processor.getWidth(); x++) {
+                    double value = processor.getPixelValue(x, y);
+                    if (!Double.isFinite(value)) {
+                        continue;
+                    }
+                    if (value < min) min = value;
+                    if (value > max) max = value;
+                    if (Math.abs(value - Math.rint(value)) > 0.000001d) {
+                        integral = false;
+                    }
+                }
+            }
+        }
+        if (!Double.isFinite(min) || !Double.isFinite(max)) {
+            return Histogram.empty();
+        }
+        boolean direct = integral && min >= 0.0d && max <= 65535.0d;
+        int bins = direct
+                ? (max <= 255.0d ? 256 : 65536)
+                : OTSU_HISTOGRAM_BINS;
+        int[] counts = new int[bins];
+        if (max <= min) {
+            int bin = direct ? (int) Math.round(min) : 0;
+            counts[Math.max(0, Math.min(counts.length - 1, bin))] = pixelCount(image);
+            return new Histogram(counts, min, max, direct, true);
+        }
+        for (int slice = 1; slice <= size; slice++) {
+            ImageProcessor processor = stack == null
+                    ? image.getProcessor()
+                    : stack.getProcessor(slice);
+            if (processor == null) {
+                continue;
+            }
+            for (int y = 0; y < processor.getHeight(); y++) {
+                for (int x = 0; x < processor.getWidth(); x++) {
+                    double value = processor.getPixelValue(x, y);
+                    if (!Double.isFinite(value)) {
+                        continue;
+                    }
+                    int bin = direct
+                            ? (int) Math.round(value)
+                            : (int) Math.floor(((value - min) / (max - min))
+                            * (bins - 1));
+                    counts[Math.max(0, Math.min(counts.length - 1, bin))]++;
+                }
+            }
+        }
+        return new Histogram(counts, min, max, direct, true);
+    }
+
+    private static int pixelCount(ImagePlus image) {
+        if (image == null) {
+            return 0;
+        }
+        int width = Math.max(1, image.getWidth());
+        int height = Math.max(1, image.getHeight());
+        int slices = Math.max(1, image.getStackSize());
+        return width * height * slices;
+    }
+
     private static String errorDetails(Throwable error) {
         if (error == null) {
             return "Unknown error";
@@ -1048,5 +1206,52 @@ public final class VariationCellPanel extends JPanel {
         return text.replace("&", "&amp;")
                 .replace("<", "&lt;")
                 .replace(">", "&gt;");
+    }
+
+    private static final class Histogram {
+        final int[] counts;
+        final double min;
+        final double max;
+        final boolean direct;
+        final boolean hasValues;
+
+        Histogram(int[] counts, double min, double max, boolean direct,
+                  boolean hasValues) {
+            this.counts = counts == null ? new int[0] : counts;
+            this.min = min;
+            this.max = max;
+            this.direct = direct;
+            this.hasValues = hasValues;
+        }
+
+        static Histogram empty() {
+            return new Histogram(new int[OTSU_HISTOGRAM_BINS], 0.0d, 0.0d,
+                    false, false);
+        }
+
+        boolean hasValues() {
+            return hasValues && counts.length > 0;
+        }
+
+        double foregroundLowerFor(int thresholdBin) {
+            if (max <= min) {
+                return max;
+            }
+            int clamped = Math.max(0, Math.min(counts.length - 1, thresholdBin));
+            int next = Math.min(counts.length - 1, clamped + 1);
+            return valueFor(next);
+        }
+
+        private double valueFor(int bin) {
+            int clamped = Math.max(0, Math.min(counts.length - 1, bin));
+            if (max <= min) {
+                return min;
+            }
+            if (direct) {
+                return clamped;
+            }
+            return min + ((double) clamped / (double) Math.max(1, counts.length - 1))
+                    * (max - min);
+        }
     }
 }
