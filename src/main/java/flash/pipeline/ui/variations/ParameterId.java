@@ -25,6 +25,12 @@ public enum ParameterId implements ParameterKey {
         public boolean orderable() {
             return false;
         }
+    },
+    MACRO {
+        @Override
+        public boolean orderable() {
+            return false;
+        }
     };
 
     @Override
@@ -45,6 +51,7 @@ public enum ParameterId implements ParameterKey {
         if (this == FLOW_THRESHOLD) return "flow_threshold";
         if (this == CELLPROB_THRESHOLD) return "cellprob_threshold";
         if (this == MODEL) return "model";
+        if (this == MACRO) return "macro";
         return name().toLowerCase(Locale.ROOT);
     }
 
@@ -66,16 +73,21 @@ public enum ParameterId implements ParameterKey {
         if (this == FLOW_THRESHOLD) return "flow threshold";
         if (this == CELLPROB_THRESHOLD) return "cellprob threshold";
         if (this == MODEL) return "model";
+        if (this == MACRO) return "macro";
         return name();
     }
 
     @Override
     public ValueKind valueKind() {
-        return this == MODEL ? ValueKind.STRING : ValueKind.NUMBER;
+        return this == MODEL || this == MACRO ? ValueKind.STRING : ValueKind.NUMBER;
     }
 
     public boolean orderable() {
         return true;
+    }
+
+    public boolean isMacroAxis() {
+        return this == MACRO;
     }
 
     public static ParameterId fromStableKey(String key) {

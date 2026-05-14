@@ -41,9 +41,11 @@ public final class VariationGridPanel extends JPanel implements Scrollable {
                     ParameterId.MAX_SIZE);
 
     private final List<VariationCellPanel> cells = new ArrayList<VariationCellPanel>();
-    private final LinkedHashMap<ParameterId, Object> activeFacets =
-            new LinkedHashMap<ParameterId, Object>();
+    private final LinkedHashMap<ParameterKey, Object> activeFacets =
+            new LinkedHashMap<ParameterKey, Object>();
     private final JPanel tilePanel = new JPanel();
+    private final List<CountCurveMini> rowCountCurves =
+            new ArrayList<CountCurveMini>();
 
     private ParameterSweep sweep;
     private ImagePlus rawSource;
@@ -74,6 +76,19 @@ public final class VariationGridPanel extends JPanel implements Scrollable {
         refreshLayout();
     }
 
+    public void setRowCountCurves(List<CountCurveMini> curves) {
+        rowCountCurves.clear();
+        if (curves != null) {
+            for (int i = 0; i < curves.size(); i++) {
+                CountCurveMini curve = curves.get(i);
+                if (curve != null) {
+                    rowCountCurves.add(curve);
+                }
+            }
+        }
+        refreshLayout();
+    }
+
     public void setRawSource(ImagePlus rawSource) {
         this.rawSource = rawSource;
         for (int i = 0; i < cells.size(); i++) {
@@ -85,12 +100,12 @@ public final class VariationGridPanel extends JPanel implements Scrollable {
         this.facetSelectionListener = listener;
     }
 
-    public Map<ParameterId, Object> activeFacetValues() {
-        return new LinkedHashMap<ParameterId, Object>(activeFacets);
+    public Map<ParameterKey, Object> activeFacetValues() {
+        return new LinkedHashMap<ParameterKey, Object>(activeFacets);
     }
 
-    public static List<ParameterId> pickSpatialAxes(ParameterSweep.Method method,
-                                                    ParameterSweep sweep) {
+    public static List<ParameterKey> pickSpatialAxes(ParameterSweep.Method method,
+                                                     ParameterSweep sweep) {
         ParameterSweep.Method resolvedMethod = method;
         if (resolvedMethod == null && sweep != null) {
             resolvedMethod = sweep.method();
@@ -108,6 +123,25 @@ public final class VariationGridPanel extends JPanel implements Scrollable {
                     CLASSICAL_SPATIAL_PRECEDENCE);
         }
         return sweptOrderableAxes(sweep);
+    }
+
+    public static FacetChipRow.ValueLabelProvider valueLabelProviderFor(
+            final ParameterSweep sweep) {
+        return new FacetChipRow.ValueLabelProvider() {
+            @Override public String labelFor(ParameterKey axis, Object value) {
+                if (axis == ParameterId.MACRO) {
+                    return macroLabel(sweep, value);
+                }
+                return value == null ? "" : String.valueOf(value);
+            }
+
+            @Override public String tooltipFor(ParameterKey axis, Object value) {
+                if (axis == ParameterId.MACRO) {
+                    return macroTooltip(sweep, value);
+                }
+                return null;
+            }
+        };
     }
 
     public void broadcastZ(int z) {
@@ -128,40 +162,45 @@ public final class VariationGridPanel extends JPanel implements Scrollable {
         return new ArrayList<VariationCellPanel>(cells);
     }
 
+    List<CountCurveMini> rowCountCurvesForTest() {
+        return new ArrayList<CountCurveMini>(rowCountCurves);
+    }
+
     private void refreshLayout() {
         removeAll();
         tilePanel.removeAll();
 
-        List<ParameterId> sweptAxes = sweptAxes();
-        List<ParameterId> spatialCandidates = pickSpatialAxes(
+        List<ParameterKey> sweptAxes = sweptAxes();
+        List<ParameterKey> spatialCandidates = pickSpatialAxes(
                 sweep == null ? null : sweep.method(), sweep);
-        List<ParameterId> spatialAxes = firstSpatialAxes(spatialCandidates);
-        List<ParameterId> facetAxes = facetAxes(sweptAxes, spatialAxes);
+        List<ParameterKey> spatialAxes = firstSpatialAxes(spatialCandidates);
+        List<ParameterKey> facetAxes = facetAxes(sweptAxes, spatialAxes);
         updateActiveFacets(facetAxes);
 
-        ParameterId xAxis = spatialAxes.size() > 0 ? spatialAxes.get(0) : null;
-        ParameterId yAxis = spatialAxes.size() > 1 ? spatialAxes.get(1) : null;
+        ParameterKey xAxis = spatialAxes.size() > 0 ? spatialAxes.get(0) : null;
+        ParameterKey yAxis = spatialAxes.size() > 1 ? spatialAxes.get(1) : null;
         boolean hasLeft = yAxis != null;
+        boolean hasRight = hasLeft && !rowCountCurves.isEmpty();
+        int columnCount = 1 + (hasLeft ? 1 : 0) + (hasRight ? 1 : 0);
         setLayout(new MigLayout("insets " + GAP + ", gap " + GAP + " " + GAP
                 + ", fillx",
-                hasLeft
-                        ? "[" + AxisGutterPanel.LEFT_WIDTH + "!][grow,fill]"
-                        : "[grow,fill]",
+                gridColumnConstraints(hasLeft, hasRight),
                 "[]"));
 
         if (!facetAxes.isEmpty()) {
             FacetChipRow row = new FacetChipRow(facetValues(facetAxes),
                     activeFacets,
                     new FacetChipRow.FacetSelectionListener() {
-                        @Override public void facetSelected(ParameterId axis, Object value) {
+                        @Override public void facetSelected(ParameterKey axis, Object value) {
                             activeFacets.put(axis, value);
                             if (facetSelectionListener != null) {
                                 facetSelectionListener.facetSelected(axis, value);
                             }
                             refreshLayout();
                         }
-                    });
-            add(row, hasLeft ? "span 2, growx, wrap" : "growx, wrap");
+                    },
+                    valueLabelProviderFor(sweep));
+            add(row, "span " + columnCount + ", growx, wrap");
         }
 
         if (xAxis != null) {
@@ -169,7 +208,11 @@ public final class VariationGridPanel extends JPanel implements Scrollable {
                     xAxis, valuesForAxis(xAxis));
             if (hasLeft) {
                 add(spacer(), "w " + AxisGutterPanel.LEFT_WIDTH + "!, h 1!");
-                add(top, "growx, wrap");
+                add(top, hasRight ? "growx" : "growx, wrap");
+                if (hasRight) {
+                    add(spacer(), "w " + CountCurveStrip.miniPreferredSize().width
+                            + "!, h 1!, wrap");
+                }
             } else {
                 add(top, "growx, wrap");
             }
@@ -180,7 +223,10 @@ public final class VariationGridPanel extends JPanel implements Scrollable {
             AxisGutterPanel left = new AxisGutterPanel(AxisGutterPanel.Mode.LEFT,
                     yAxis, valuesForAxis(yAxis));
             add(left, "growy, aligny top");
-            add(tilePanel, "growx, aligny top, wrap");
+            add(tilePanel, hasRight ? "growx, aligny top" : "growx, aligny top, wrap");
+            if (hasRight) {
+                add(rowCountCurvePanel(), "aligny top, wrap");
+            }
         } else {
             add(tilePanel, "growx, aligny top, wrap");
         }
@@ -188,9 +234,9 @@ public final class VariationGridPanel extends JPanel implements Scrollable {
         repaint();
     }
 
-    private void configureTilePanel(ParameterId xAxis,
-                                    ParameterId yAxis,
-                                    List<ParameterId> facetAxes) {
+    private void configureTilePanel(ParameterKey xAxis,
+                                    ParameterKey yAxis,
+                                    List<ParameterKey> facetAxes) {
         List<VariationCellPanel> ordered = orderedCells(xAxis, yAxis, facetAxes);
         int columns = xAxis == null
                 ? Math.max(1, ordered.size())
@@ -204,9 +250,9 @@ public final class VariationGridPanel extends JPanel implements Scrollable {
         }
     }
 
-    private List<VariationCellPanel> orderedCells(ParameterId xAxis,
-                                                  ParameterId yAxis,
-                                                  List<ParameterId> facetAxes) {
+    private List<VariationCellPanel> orderedCells(ParameterKey xAxis,
+                                                  ParameterKey yAxis,
+                                                  List<ParameterKey> facetAxes) {
         if (xAxis == null) {
             return cellsMatchingFacets(facetAxes);
         }
@@ -236,11 +282,11 @@ public final class VariationGridPanel extends JPanel implements Scrollable {
         return ordered;
     }
 
-    private VariationCellPanel findCell(ParameterId xAxis,
+    private VariationCellPanel findCell(ParameterKey xAxis,
                                         Object xValue,
-                                        ParameterId yAxis,
+                                        ParameterKey yAxis,
                                         Object yValue,
-                                        List<ParameterId> facetAxes) {
+                                        List<ParameterKey> facetAxes) {
         for (int i = 0; i < cells.size(); i++) {
             VariationCellPanel cell = cells.get(i);
             ParameterCombo combo = cell.combo();
@@ -258,7 +304,7 @@ public final class VariationGridPanel extends JPanel implements Scrollable {
         return null;
     }
 
-    private List<VariationCellPanel> cellsMatchingFacets(List<ParameterId> facetAxes) {
+    private List<VariationCellPanel> cellsMatchingFacets(List<ParameterKey> facetAxes) {
         List<VariationCellPanel> out = new ArrayList<VariationCellPanel>();
         for (int i = 0; i < cells.size(); i++) {
             VariationCellPanel cell = cells.get(i);
@@ -269,9 +315,9 @@ public final class VariationGridPanel extends JPanel implements Scrollable {
         return out;
     }
 
-    private boolean matchesFacets(ParameterCombo combo, List<ParameterId> facetAxes) {
+    private boolean matchesFacets(ParameterCombo combo, List<ParameterKey> facetAxes) {
         for (int i = 0; i < facetAxes.size(); i++) {
-            ParameterId axis = facetAxes.get(i);
+            ParameterKey axis = facetAxes.get(i);
             Object expected = activeFacets.get(axis);
             if (expected != null && !valueEquals(combo.get(axis), expected)) {
                 return false;
@@ -280,11 +326,11 @@ public final class VariationGridPanel extends JPanel implements Scrollable {
         return true;
     }
 
-    private void updateActiveFacets(List<ParameterId> facetAxes) {
-        LinkedHashMap<ParameterId, Object> next =
-                new LinkedHashMap<ParameterId, Object>();
+    private void updateActiveFacets(List<ParameterKey> facetAxes) {
+        LinkedHashMap<ParameterKey, Object> next =
+                new LinkedHashMap<ParameterKey, Object>();
         for (int i = 0; i < facetAxes.size(); i++) {
-            ParameterId axis = facetAxes.get(i);
+            ParameterKey axis = facetAxes.get(i);
             List<Object> values = valuesForAxis(axis);
             if (values.isEmpty()) {
                 continue;
@@ -296,19 +342,22 @@ public final class VariationGridPanel extends JPanel implements Scrollable {
         activeFacets.putAll(next);
     }
 
-    private List<ParameterId> firstSpatialAxes(List<ParameterId> candidates) {
-        List<ParameterId> out = new ArrayList<ParameterId>();
+    private List<ParameterKey> firstSpatialAxes(List<ParameterKey> candidates) {
+        List<ParameterKey> out = new ArrayList<ParameterKey>();
         for (int i = 0; i < candidates.size() && out.size() < 2; i++) {
-            out.add(candidates.get(i));
+            ParameterKey candidate = candidates.get(i);
+            if (candidate != null && !out.contains(candidate)) {
+                out.add(candidate);
+            }
         }
         return out;
     }
 
-    private List<ParameterId> facetAxes(List<ParameterId> sweptAxes,
-                                        List<ParameterId> spatialAxes) {
-        List<ParameterId> out = new ArrayList<ParameterId>();
+    private List<ParameterKey> facetAxes(List<ParameterKey> sweptAxes,
+                                         List<ParameterKey> spatialAxes) {
+        List<ParameterKey> out = new ArrayList<ParameterKey>();
         for (int i = 0; i < sweptAxes.size(); i++) {
-            ParameterId axis = sweptAxes.get(i);
+            ParameterKey axis = sweptAxes.get(i);
             if (!spatialAxes.contains(axis)) {
                 out.add(axis);
             }
@@ -316,35 +365,32 @@ public final class VariationGridPanel extends JPanel implements Scrollable {
         return out;
     }
 
-    private LinkedHashMap<ParameterId, List<?>> facetValues(List<ParameterId> facetAxes) {
-        LinkedHashMap<ParameterId, List<?>> out =
-                new LinkedHashMap<ParameterId, List<?>>();
+    private LinkedHashMap<ParameterKey, List<?>> facetValues(List<ParameterKey> facetAxes) {
+        LinkedHashMap<ParameterKey, List<?>> out =
+                new LinkedHashMap<ParameterKey, List<?>>();
         for (int i = 0; i < facetAxes.size(); i++) {
-            ParameterId axis = facetAxes.get(i);
+            ParameterKey axis = facetAxes.get(i);
             out.put(axis, valuesForAxis(axis));
         }
         return out;
     }
 
-    private List<ParameterId> sweptAxes() {
-        List<ParameterId> axes = new ArrayList<ParameterId>();
+    private List<ParameterKey> sweptAxes() {
+        List<ParameterKey> axes = new ArrayList<ParameterKey>();
         if (sweep == null) {
             return axes;
         }
         for (Map.Entry<ParameterKey, ParameterValueList> entry
                 : sweep.valueLists().entrySet()) {
-            if (!(entry.getKey() instanceof ParameterId)) {
-                continue;
-            }
             ParameterValueList values = entry.getValue();
             if (values != null && values.size() > 1) {
-                axes.add((ParameterId) entry.getKey());
+                axes.add(entry.getKey());
             }
         }
         return axes;
     }
 
-    private List<Object> valuesForAxis(ParameterId axis) {
+    private List<Object> valuesForAxis(ParameterKey axis) {
         List<Object> values = new ArrayList<Object>();
         if (sweep == null || axis == null) {
             return values;
@@ -357,29 +403,26 @@ public final class VariationGridPanel extends JPanel implements Scrollable {
         return values;
     }
 
-    private static List<ParameterId> sweptOrderableAxes(ParameterSweep sweep) {
-        List<ParameterId> axes = new ArrayList<ParameterId>();
+    private static List<ParameterKey> sweptOrderableAxes(ParameterSweep sweep) {
+        List<ParameterKey> axes = new ArrayList<ParameterKey>();
         if (sweep == null) {
             return axes;
         }
         for (Map.Entry<ParameterKey, ParameterValueList> entry
                 : sweep.valueLists().entrySet()) {
-            if (!(entry.getKey() instanceof ParameterId)) {
-                continue;
-            }
-            ParameterId id = (ParameterId) entry.getKey();
+            ParameterKey id = entry.getKey();
             ParameterValueList values = entry.getValue();
-            if (id.orderable() && values != null && values.size() > 1) {
+            if (isOrderable(id) && values != null && values.size() > 1) {
                 axes.add(id);
             }
         }
         return axes;
     }
 
-    private static List<ParameterId> sweptOrderableAxesByPrecedence(
+    private static List<ParameterKey> sweptOrderableAxesByPrecedence(
             ParameterSweep sweep,
             List<ParameterId> precedence) {
-        List<ParameterId> axes = new ArrayList<ParameterId>();
+        List<ParameterKey> axes = new ArrayList<ParameterKey>();
         if (sweep == null || precedence == null) {
             return axes;
         }
@@ -393,6 +436,48 @@ public final class VariationGridPanel extends JPanel implements Scrollable {
         return axes;
     }
 
+    private static boolean isOrderable(ParameterKey key) {
+        if (key instanceof ParameterId) {
+            // MODEL and MACRO are categorical, so orderable() keeps them in
+            // facet chips instead of top/left spatial gutters.
+            return ((ParameterId) key).orderable();
+        }
+        return key != null && key.valueKind() == ParameterKey.ValueKind.NUMBER;
+    }
+
+    private static String macroLabel(ParameterSweep sweep, Object value) {
+        String token = value == null ? "" : String.valueOf(value);
+        MacroVariationSet macros = sweep == null
+                ? MacroVariationSet.none()
+                : sweep.macroVariations();
+        String label = macros.displayNameFor(token);
+        return abbreviate(label == null ? token : label, 28);
+    }
+
+    private static String macroTooltip(ParameterSweep sweep, Object value) {
+        String token = value == null ? "" : String.valueOf(value);
+        MacroVariationSet macros = sweep == null
+                ? MacroVariationSet.none()
+                : sweep.macroVariations();
+        MacroVariation variation = macros.resolve(token);
+        if (variation == null) {
+            return token;
+        }
+        String hash = variation.normalizedScriptHash();
+        if (hash == null || hash.trim().isEmpty()) {
+            return variation.displayName();
+        }
+        return variation.displayName() + " (" + hash + ")";
+    }
+
+    private static String abbreviate(String text, int maxLength) {
+        String safe = text == null ? "" : text;
+        if (maxLength < 4 || safe.length() <= maxLength) {
+            return safe;
+        }
+        return safe.substring(0, maxLength - 3) + "...";
+    }
+
     private static boolean valueEquals(Object left, Object right) {
         return left == null ? right == null : left.equals(right);
     }
@@ -403,6 +488,30 @@ public final class VariationGridPanel extends JPanel implements Scrollable {
             sb.append("[grow,fill]");
         }
         return sb.toString();
+    }
+
+    private static String gridColumnConstraints(boolean hasLeft, boolean hasRight) {
+        StringBuilder out = new StringBuilder();
+        if (hasLeft) {
+            out.append("[").append(AxisGutterPanel.LEFT_WIDTH).append("!]");
+        }
+        out.append("[grow,fill]");
+        if (hasRight) {
+            out.append("[")
+                    .append(CountCurveStrip.miniPreferredSize().width)
+                    .append("!,fill]");
+        }
+        return out.toString();
+    }
+
+    private JPanel rowCountCurvePanel() {
+        JPanel panel = new JPanel(new MigLayout("insets 0, gap 0 " + GAP,
+                "[fill]", "[]"));
+        panel.setOpaque(false);
+        for (int i = 0; i < rowCountCurves.size(); i++) {
+            panel.add(rowCountCurves.get(i), "growx, wrap");
+        }
+        return panel;
     }
 
     private static JPanel spacer() {

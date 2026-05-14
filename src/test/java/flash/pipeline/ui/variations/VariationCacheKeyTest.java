@@ -71,4 +71,52 @@ public class VariationCacheKeyTest {
         assertNotEquals(VariationCache.keyFor(segmentation, segmentationCombo),
                 VariationCache.keyFor(filter, filterCombo));
     }
+
+    @Test
+    public void macroTokenIsPartOfCacheKey() {
+        MacroVariation blur = MacroVariation.pasted("Blur",
+                "run(\"Gaussian Blur...\", \"sigma=2 stack\");");
+        MacroVariation median = MacroVariation.pasted("Median",
+                "run(\"Median...\", \"radius=2 stack\");");
+        Map<ParameterId, ParameterValueList> values =
+                new LinkedHashMap<ParameterId, ParameterValueList>();
+        values.put(ParameterId.THRESHOLD, ParameterValueList.ofInts(128));
+        values.put(ParameterId.MACRO,
+                ParameterValueList.ofStrings(blur.token(), median.token()));
+        ParameterSweep sweep = new ParameterSweep(ParameterSweep.Method.CLASSICAL,
+                values, CropSpec.full(), "DAPI", "hash",
+                MacroVariationSet.of(blur, median));
+        ParameterCombo blurCombo = ParameterCombo.builder()
+                .put(ParameterId.THRESHOLD, Integer.valueOf(128))
+                .put(ParameterId.MACRO, blur.token())
+                .build();
+        ParameterCombo medianCombo = ParameterCombo.builder()
+                .put(ParameterId.THRESHOLD, Integer.valueOf(128))
+                .put(ParameterId.MACRO, median.token())
+                .build();
+
+        assertNotEquals(VariationCache.keyFor(sweep, blurCombo),
+                VariationCache.keyFor(sweep, medianCombo));
+    }
+
+    @Test
+    public void unusedMacroMetadataDoesNotChangeNonMacroKey() {
+        Map<ParameterId, ParameterValueList> values =
+                new LinkedHashMap<ParameterId, ParameterValueList>();
+        values.put(ParameterId.THRESHOLD, ParameterValueList.ofInts(128));
+        ParameterCombo combo = ParameterCombo.builder()
+                .put(ParameterId.THRESHOLD, Integer.valueOf(128))
+                .build();
+        ParameterSweep withoutMetadata = new ParameterSweep(
+                ParameterSweep.Method.CLASSICAL,
+                values, CropSpec.full(), "DAPI", "hash");
+        ParameterSweep withMetadata = new ParameterSweep(
+                ParameterSweep.Method.CLASSICAL,
+                values, CropSpec.full(), "DAPI", "hash", "",
+                MacroVariationSet.of(MacroVariation.pasted("Blur",
+                        "run(\"Gaussian Blur...\", \"sigma=2 stack\");")));
+
+        assertEquals(VariationCache.keyFor(withoutMetadata, combo),
+                VariationCache.keyFor(withMetadata, combo));
+    }
 }

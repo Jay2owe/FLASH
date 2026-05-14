@@ -36,13 +36,24 @@ public final class ParameterSweep {
     private final String channelName;
     private final String sourceImageHash;
     private final String cacheNamespace;
+    private final MacroVariationSet macroVariations;
 
     public ParameterSweep(Method method,
                           Map<? extends ParameterKey, ParameterValueList> valueLists,
                           CropSpec cropSpec,
                           String channelName,
                           String sourceImageHash) {
-        this(method, valueLists, cropSpec, channelName, sourceImageHash, "");
+        this(method, valueLists, cropSpec, channelName, sourceImageHash, "", null);
+    }
+
+    public ParameterSweep(Method method,
+                          Map<? extends ParameterKey, ParameterValueList> valueLists,
+                          CropSpec cropSpec,
+                          String channelName,
+                          String sourceImageHash,
+                          MacroVariationSet macroVariations) {
+        this(method, valueLists, cropSpec, channelName, sourceImageHash, "",
+                macroVariations);
     }
 
     public ParameterSweep(Method method,
@@ -51,6 +62,17 @@ public final class ParameterSweep {
                           String channelName,
                           String sourceImageHash,
                           String cacheNamespace) {
+        this(method, valueLists, cropSpec, channelName, sourceImageHash,
+                cacheNamespace, null);
+    }
+
+    public ParameterSweep(Method method,
+                          Map<? extends ParameterKey, ParameterValueList> valueLists,
+                          CropSpec cropSpec,
+                          String channelName,
+                          String sourceImageHash,
+                          String cacheNamespace,
+                          MacroVariationSet macroVariations) {
         if (method == null) {
             throw new IllegalArgumentException("method must not be null");
         }
@@ -63,6 +85,7 @@ public final class ParameterSweep {
         this.channelName = channelName == null ? "" : channelName;
         this.sourceImageHash = sourceImageHash == null ? "" : sourceImageHash;
         this.cacheNamespace = cacheNamespace == null ? "" : cacheNamespace.trim();
+        this.macroVariations = macroVariations;
     }
 
     public Method method() {
@@ -113,6 +136,18 @@ public final class ParameterSweep {
         return cacheNamespace;
     }
 
+    public MacroVariationSet macroVariations() {
+        return macroVariations == null ? MacroVariationSet.none() : macroVariations;
+    }
+
+    public MacroVariationSet getMacroVariations() {
+        return macroVariations();
+    }
+
+    public boolean hasMacroVariationSet() {
+        return macroVariations != null;
+    }
+
     public List<ParameterKey> parameterKeys() {
         return new ArrayList<ParameterKey>(valueLists.keySet());
     }
@@ -158,6 +193,9 @@ public final class ParameterSweep {
         }
         root.put("method", method.label());
         root.put("sourceImageHash", sourceImageHash);
+        if (macroVariations != null) {
+            root.put("macroVariations", macroVariations.toCanonicalObject());
+        }
         LinkedHashMap<String, Object> values = new LinkedHashMap<String, Object>();
         List<String> keys = new ArrayList<String>();
         Map<String, ParameterValueList> byName = new LinkedHashMap<String, ParameterValueList>();
@@ -220,9 +258,23 @@ public final class ParameterSweep {
             if (values == null) {
                 throw new IllegalArgumentException("value list must not be null for " + id);
             }
-            out.put(id, values);
+            out.put(id, normalizeValueListForKey(id, values));
         }
         return out;
+    }
+
+    private static ParameterValueList normalizeValueListForKey(ParameterKey key,
+                                                               ParameterValueList values) {
+        if (!(key instanceof ParameterId)
+                || !((ParameterId) key).isMacroAxis()
+                || values == null) {
+            return values;
+        }
+        List<Object> normalized = new ArrayList<Object>();
+        for (int i = 0; i < values.size(); i++) {
+            normalized.add(MacroToken.tokenString(values.get(i)));
+        }
+        return new ParameterValueList(normalized);
     }
 
     private static String canonicalJsonKey(ParameterKey key) {

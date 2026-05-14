@@ -6,6 +6,7 @@ import flash.pipeline.ui.config.CellposeParameterStage;
 import flash.pipeline.ui.config.ConfigQcContext;
 import flash.pipeline.ui.preview.ObjectSizeFilterPreview;
 import flash.pipeline.ui.variations.CropSpec;
+import flash.pipeline.ui.variations.MacroPreprocessor;
 import flash.pipeline.ui.variations.ParameterCombo;
 import flash.pipeline.ui.variations.ParameterId;
 import flash.pipeline.ui.variations.ParameterKey;
@@ -31,6 +32,7 @@ public final class CellposeOneShot implements VariationStrategy {
     private final CellposeParameterStage.PreviewAdapter previewAdapter;
     private final CellposeParameterStage.Parameters baseParams;
     private final ConfigQcContext configContext;
+    private final MacroPreprocessor macroPreprocessor = new MacroPreprocessor();
 
     public CellposeOneShot(ImagePlus filteredSource,
                            CropSpec crop,
@@ -84,7 +86,7 @@ public final class CellposeOneShot implements VariationStrategy {
                     publisher.accept(resultFor(combo, cached, cropped, 0L));
                     continue;
                 }
-                runOne(cropped, companionFor(parameters, companion), combo, cacheKey,
+                runOne(cropped, sweep, companionFor(parameters, companion), combo, cacheKey,
                         parameters, publisher, cancelCheck);
             }
         } finally {
@@ -106,6 +108,7 @@ public final class CellposeOneShot implements VariationStrategy {
     }
 
     private void runOne(ImagePlus cropped,
+                        ParameterSweep sweep,
                         ImagePlus companion,
                         ParameterCombo combo,
                         String cacheKey,
@@ -116,13 +119,15 @@ public final class CellposeOneShot implements VariationStrategy {
             return;
         }
         long started = System.currentTimeMillis();
+        ImagePlus input = null;
         try {
-            ImagePlus label = previewAdapter.runPreview(cropped, companion, parameters);
+            input = macroPreprocessor.prepare(cropped, sweep, combo);
+            ImagePlus label = previewAdapter.runPreview(input, companion, parameters);
             if (label == null) {
                 throw new IllegalStateException("Cellpose returned no label map.");
             }
             long durationMs = Math.max(1L, System.currentTimeMillis() - started);
-            VariationResult result = resultFor(combo, label, cropped, durationMs);
+            VariationResult result = resultFor(combo, label, input, durationMs);
             if (cache != null) {
                 cache.put(cacheKey, result.label());
             }
@@ -133,6 +138,8 @@ public final class CellposeOneShot implements VariationStrategy {
             if (!isCancelled(cancelCheck)) {
                 publisher.accept(VariationResult.failure(combo, t));
             }
+        } finally {
+            macroPreprocessor.closeIfOwned(input, cropped);
         }
     }
 

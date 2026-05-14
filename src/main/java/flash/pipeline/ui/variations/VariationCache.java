@@ -48,7 +48,8 @@ public final class VariationCache {
             raw += namespace.trim() + ":";
         }
         raw += sweep.cropSpec().toCanonicalJson()
-                + ":" + combo.toCanonicalJson();
+                + ":" + combo.toCanonicalJson()
+                + ":" + macroIdentityForCombo(sweep, combo);
         return sha256(raw).substring(0, 16);
     }
 
@@ -113,6 +114,25 @@ public final class VariationCache {
             return null;
         }
         return new File(cacheDir, key + ".tif");
+    }
+
+    private static String macroIdentityForCombo(ParameterSweep sweep,
+                                                ParameterCombo combo) {
+        if (sweep == null
+                || combo == null
+                || !sweep.valueLists().containsKey(ParameterId.MACRO)) {
+            return "macro:none";
+        }
+        Object value = combo.get(ParameterId.MACRO);
+        if (value == null) {
+            return "macro:none";
+        }
+        try {
+            return sweep.macroVariations().identityForToken(
+                    MacroToken.tokenString(value));
+        } catch (RuntimeException e) {
+            return "macro:invalid:" + String.valueOf(value);
+        }
     }
 
     private static String sha256(String value) {

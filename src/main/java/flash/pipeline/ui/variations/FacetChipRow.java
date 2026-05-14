@@ -22,7 +22,13 @@ import java.util.Map;
 public final class FacetChipRow extends JPanel {
 
     public interface FacetSelectionListener {
-        void facetSelected(ParameterId axis, Object value);
+        void facetSelected(ParameterKey axis, Object value);
+    }
+
+    public interface ValueLabelProvider {
+        String labelFor(ParameterKey axis, Object value);
+
+        String tooltipFor(ParameterKey axis, Object value);
     }
 
     private static final Color SKY_BLUE = new Color(0x56B4E9);
@@ -30,33 +36,54 @@ public final class FacetChipRow extends JPanel {
     private static final Color CHIP_SELECTED_FILL = new Color(236, 247, 253);
     private static final Color CHIP_BORDER = new Color(190, 198, 205);
     private static final Color TEXT = new Color(33, 33, 33);
+    private static final ValueLabelProvider DEFAULT_LABEL_PROVIDER =
+            new ValueLabelProvider() {
+                @Override public String labelFor(ParameterKey axis, Object value) {
+                    return valueText(value);
+                }
 
-    private final LinkedHashMap<ParameterId, List<Object>> valuesByAxis =
-            new LinkedHashMap<ParameterId, List<Object>>();
-    private final LinkedHashMap<ParameterId, Object> selectedValues =
-            new LinkedHashMap<ParameterId, Object>();
+                @Override public String tooltipFor(ParameterKey axis, Object value) {
+                    return null;
+                }
+            };
+
+    private final LinkedHashMap<ParameterKey, List<Object>> valuesByAxis =
+            new LinkedHashMap<ParameterKey, List<Object>>();
+    private final LinkedHashMap<ParameterKey, Object> selectedValues =
+            new LinkedHashMap<ParameterKey, Object>();
     private final FacetSelectionListener listener;
+    private final ValueLabelProvider labelProvider;
 
-    public FacetChipRow(Map<ParameterId, ? extends List<?>> facetValues,
-                        Map<ParameterId, ?> activeValues,
+    public FacetChipRow(Map<? extends ParameterKey, ? extends List<?>> facetValues,
+                        Map<? extends ParameterKey, ?> activeValues,
                         FacetSelectionListener listener) {
+        this(facetValues, activeValues, listener, null);
+    }
+
+    public FacetChipRow(Map<? extends ParameterKey, ? extends List<?>> facetValues,
+                        Map<? extends ParameterKey, ?> activeValues,
+                        FacetSelectionListener listener,
+                        ValueLabelProvider labelProvider) {
         super(new FlowLayout(FlowLayout.LEFT, 8, 2));
         this.listener = listener;
+        this.labelProvider = labelProvider == null
+                ? DEFAULT_LABEL_PROVIDER
+                : labelProvider;
         setOpaque(false);
         setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
         copyValues(facetValues, activeValues);
         rebuild();
     }
 
-    public Map<ParameterId, Object> selectedValues() {
-        return new LinkedHashMap<ParameterId, Object>(selectedValues);
+    public Map<ParameterKey, Object> selectedValues() {
+        return new LinkedHashMap<ParameterKey, Object>(selectedValues);
     }
 
-    public Object selectedValue(ParameterId axis) {
+    public Object selectedValue(ParameterKey axis) {
         return selectedValues.get(axis);
     }
 
-    public void setSelectedValue(ParameterId axis, Object value) {
+    public void setSelectedValue(ParameterKey axis, Object value) {
         if (axis == null || !valuesByAxis.containsKey(axis)) {
             return;
         }
@@ -68,13 +95,14 @@ public final class FacetChipRow extends JPanel {
         rebuild();
     }
 
-    private void copyValues(Map<ParameterId, ? extends List<?>> facetValues,
-                            Map<ParameterId, ?> activeValues) {
+    private void copyValues(Map<? extends ParameterKey, ? extends List<?>> facetValues,
+                            Map<? extends ParameterKey, ?> activeValues) {
         if (facetValues == null) {
             return;
         }
-        for (Map.Entry<ParameterId, ? extends List<?>> entry : facetValues.entrySet()) {
-            ParameterId axis = entry.getKey();
+        for (Map.Entry<? extends ParameterKey, ? extends List<?>> entry
+                : facetValues.entrySet()) {
+            ParameterKey axis = entry.getKey();
             List<?> sourceValues = entry.getValue();
             if (axis == null || sourceValues == null || sourceValues.isEmpty()) {
                 continue;
@@ -91,14 +119,14 @@ public final class FacetChipRow extends JPanel {
 
     private void rebuild() {
         removeAll();
-        for (Map.Entry<ParameterId, List<Object>> entry : valuesByAxis.entrySet()) {
+        for (Map.Entry<ParameterKey, List<Object>> entry : valuesByAxis.entrySet()) {
             add(groupFor(entry.getKey(), entry.getValue()));
         }
         revalidate();
         repaint();
     }
 
-    private JPanel groupFor(final ParameterId axis, List<Object> values) {
+    private JPanel groupFor(final ParameterKey axis, List<Object> values) {
         JPanel group = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
         group.setOpaque(false);
 
@@ -109,15 +137,20 @@ public final class FacetChipRow extends JPanel {
 
         for (int i = 0; i < values.size(); i++) {
             final Object value = values.get(i);
-            ChipButton chip = new ChipButton(valueText(value), value instanceof Number);
+            ChipButton chip = new ChipButton(labelFor(axis, value),
+                    value instanceof Number);
             chip.setSelected(value.equals(selectedValues.get(axis)));
+            String tooltip = tooltipFor(axis, value);
+            chip.setToolTipText(tooltip == null || tooltip.trim().isEmpty()
+                    ? null
+                    : tooltip);
             chip.addActionListener(e -> select(axis, value));
             group.add(chip);
         }
         return group;
     }
 
-    private void select(ParameterId axis, Object value) {
+    private void select(ParameterKey axis, Object value) {
         selectedValues.put(axis, value);
         rebuild();
         if (listener != null) {
@@ -127,6 +160,15 @@ public final class FacetChipRow extends JPanel {
 
     private static String valueText(Object value) {
         return value == null ? "" : String.valueOf(value);
+    }
+
+    private String labelFor(ParameterKey axis, Object value) {
+        String text = labelProvider.labelFor(axis, value);
+        return text == null ? valueText(value) : text;
+    }
+
+    private String tooltipFor(ParameterKey axis, Object value) {
+        return labelProvider.tooltipFor(axis, value);
     }
 
     private static final class ChipButton extends JButton {

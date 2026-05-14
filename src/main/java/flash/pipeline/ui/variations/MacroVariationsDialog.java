@@ -2,6 +2,7 @@ package flash.pipeline.ui.variations;
 
 import flash.pipeline.image.FilterMacroEditorModel;
 import flash.pipeline.ui.PipelineDialog;
+import flash.pipeline.ui.variations.strategy.FilterSweepStrategy;
 
 import ij.ImagePlus;
 
@@ -17,17 +18,23 @@ import javax.swing.JScrollPane;
 import javax.swing.JSlider;
 import javax.swing.JToggleButton;
 import javax.swing.ScrollPaneConstants;
+import javax.swing.SwingUtilities;
 import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Dimension;
+import java.awt.EventQueue;
+import java.awt.GraphicsEnvironment;
 import java.awt.Rectangle;
 import java.awt.Window;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 public final class MacroVariationsDialog extends PipelineDialog {
@@ -55,12 +62,24 @@ public final class MacroVariationsDialog extends PipelineDialog {
     private final JToggleButton paramsButton = new JToggleButton("Params");
     private final JToggleButton stepsButton = new JToggleButton("Steps");
     private final JToggleButton presetsButton = new JToggleButton("Presets");
+    private final Map<String, VariationCellPanel> cellsByCombo =
+            new HashMap<String, VariationCellPanel>();
+    private final Map<String, Integer> cellIndexesByCombo =
+            new HashMap<String, Integer>();
+    private final List<VariationCellPanel> cells = new ArrayList<VariationCellPanel>();
+    private final List<VariationResult> resultsByCell =
+            new ArrayList<VariationResult>();
 
     private JButton openLargeMontageButton;
     private JButton useComboButton;
+    private JButton runButton;
+    private VariationExecutor executor;
+    private ParameterSweep currentSweep;
     private Mode mode = Mode.PARAMS;
     private CropSpec currentCropSpec;
     private boolean suppressCropEvents;
+    private int completedCount;
+    private int failedCount;
 
     public MacroVariationsDialog(Window owner,
                                  FilterVariationEngineContext context,
@@ -79,6 +98,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
     }
 
     public void dispose() {
+        cancelExecutor();
         Window window = getWindow();
         if (window != null) {
             window.dispose();
@@ -126,8 +146,47 @@ public final class MacroVariationsDialog extends PipelineDialog {
         return useComboButton;
     }
 
+    JButton runButtonForTest() {
+        return runButton;
+    }
+
     JLabel chainRibbonLabelForTest() {
         return chainRibbonLabel;
+    }
+
+    int completedCountForTest() {
+        return completedCount;
+    }
+
+    int failedCountForTest() {
+        return failedCount;
+    }
+
+    List<VariationResult> resultsForTest() {
+        return new ArrayList<VariationResult>(resultsByCell);
+    }
+
+    void waitForDoneForTest(long timeoutMs) throws Exception {
+        VariationExecutor worker = executor;
+        if (worker != null) {
+            worker.get(timeoutMs, TimeUnit.MILLISECONDS);
+        }
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        while (System.currentTimeMillis() < deadline
+                && completedCount < cells.size()) {
+            EventQueue.invokeAndWait(new Runnable() {
+                @Override public void run() {
+                }
+            });
+            if (completedCount >= cells.size()) {
+                return;
+            }
+            Thread.sleep(10L);
+        }
+        EventQueue.invokeAndWait(new Runnable() {
+            @Override public void run() {
+            }
+        });
     }
 
     private void buildUi() {
@@ -147,6 +206,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
         JButton close = addRightFooterButton("Close");
         close.addActionListener(new ActionListener() {
             @Override public void actionPerformed(ActionEvent e) {
+                cancelExecutor();
                 dispose();
             }
         });
@@ -160,12 +220,116 @@ public final class MacroVariationsDialog extends PipelineDialog {
                 dispose();
             }
         });
+        runButton = addRightFooterButton("Run");
+        runButton.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                start();
+            }
+        });
 
         editor.addChangeListener(new ChangeListener() {
             @Override public void stateChanged(ChangeEvent e) {
                 refreshCellEstimate();
             }
         });
+    }
+
+    public void start() {
+        if (SwingUtilities.isEventDispatchThread()) {
+            startOnEdt();
+            return;
+        }
+        try {
+            SwingUtilities.invokeAndWait(new Runnable() {
+                @Override public void run() {
+                    startOnEdt();
+                }
+            });
+        } catch (Exception e) {
+            throw new IllegalStateException("Could not start macro variations", e);
+        }
+    }
+
+    private void startOnEdt() {
+        cancelExecutor();
+        try {
+            currentSweep = editor.currentSweep();
+        } catch (RuntimeException e) {
+            showMessage(e.getMessage());
+            setStatusTextNow("Choose at least one value for each selected parameter.");
+            return;
+        }
+        ImagePlus source = context.sourceImage();
+        ResourceGuard.Feasibility feasibility =
+                ResourceGuard.assessFeasibility(currentSweep, source);
+        if (!feasibility.ok) {
+            showMessage(feasibility.message);
+            setStatusTextNow("Refused");
+            return;
+        }
+
+        completedCount = 0;
+        failedCount = 0;
+        cells.clear();
+        cellsByCombo.clear();
+        cellIndexesByCombo.clear();
+        resultsByCell.clear();
+        if (runButton != null) {
+            runButton.setEnabled(false);
+        }
+        useComboButton.setEnabled(false);
+        openLargeMontageButton.setEnabled(false);
+
+        final ImagePlus croppedSource = currentSweep.cropSpec().apply(source);
+        List<ParameterCombo> combos = currentSweep.combos();
+        VariationCache runCache = new VariationCache(context.configContext());
+        final FilterSweepStrategy strategy = new FilterSweepStrategy(
+                context.baseMacro(),
+                context.previewAdapter(),
+                croppedSource,
+                runCache);
+
+        for (int i = 0; i < combos.size(); i++) {
+            ParameterCombo combo = combos.get(i);
+            VariationCellPanel cell = new VariationCellPanel(combo, croppedSource,
+                    new Consumer<ParameterCombo>() {
+                        @Override public void accept(ParameterCombo accepted) {
+                            acceptAndClose(accepted, strategy);
+                        }
+                    },
+                    null,
+                    i);
+            cell.setState("running");
+            cell.setZ(zSlider.getValue());
+            cells.add(cell);
+            cellsByCombo.put(combo.toCanonicalJson(), cell);
+            cellIndexesByCombo.put(combo.toCanonicalJson(), Integer.valueOf(i));
+            resultsByCell.add(null);
+        }
+
+        gridPanel.setSweep(currentSweep);
+        gridPanel.setRawSource(croppedSource);
+        gridPanel.setCells(cells);
+        setStatusTextNow(progressStatus());
+        setSuggestionText("Most stable: pending");
+        setStrategyText("Using Filter sweep (" + combos.size() + " cells)");
+
+        executor = new VariationExecutor(currentSweep,
+                strategy,
+                runCache,
+                new java.util.function.BiConsumer<VariationResult, Integer>() {
+                    @Override public void accept(VariationResult result, Integer index) {
+                        handleResult(result, index == null ? -1 : index.intValue());
+                    }
+                },
+                null);
+        executor.addPropertyChangeListener(evt -> {
+            if ("state".equals(evt.getPropertyName())
+                    && javax.swing.SwingWorker.StateValue.DONE == evt.getNewValue()) {
+                handleExecutorDone();
+            }
+        });
+        executor.execute();
     }
 
     private JPanel headerPanel() {
@@ -325,15 +489,169 @@ public final class MacroVariationsDialog extends PipelineDialog {
         try {
             ParameterSweep sweep = editor.currentSweep();
             cellsLabel.setText("Cells: " + sweep.cellCount());
-            statusLabel.setText(sweep.cellCount() + " cells, crop "
-                    + cropSummary(sweep.cropSpec()));
-            strategyLabel.setText(" ");
+            if (!isExecutorActive()) {
+                setStatusTextNow(sweep.cellCount() + " cells, crop "
+                        + cropSummary(sweep.cropSpec()));
+                setStrategyText(" ");
+            }
             gridPanel.setSweep(sweep);
         } catch (RuntimeException e) {
             cellsLabel.setText("Cells: ?");
-            statusLabel.setText("Choose at least one value for each selected parameter.");
-            strategyLabel.setText(" ");
+            if (!isExecutorActive()) {
+                setStatusTextNow("Choose at least one value for each selected parameter.");
+                setStrategyText(" ");
+            }
         }
+    }
+
+    private void handleResult(VariationResult result, int index) {
+        if (result == null) {
+            return;
+        }
+        String comboId = result.combo().toCanonicalJson();
+        VariationCellPanel cell = cellsByCombo.get(comboId);
+        Integer comboIndex = cellIndexesByCombo.get(comboId);
+        int targetIndex = comboIndex == null ? index : comboIndex.intValue();
+        if (cell == null && index >= 0 && index < cells.size()) {
+            cell = cells.get(index);
+            targetIndex = index;
+        }
+        if (cell == null) {
+            return;
+        }
+        boolean alreadyCompleted = targetIndex >= 0
+                && targetIndex < resultsByCell.size()
+                && resultsByCell.get(targetIndex) != null;
+        cell.setResult(result);
+        if (targetIndex >= 0 && targetIndex < resultsByCell.size()) {
+            resultsByCell.set(targetIndex, result);
+        }
+        if (!alreadyCompleted) {
+            completedCount++;
+        }
+        failedCount = countFailures();
+        setStatusTextNow(progressStatus());
+    }
+
+    private void handleExecutorDone() {
+        VariationExecutor worker = executor;
+        if (worker == null) {
+            return;
+        }
+        if (runButton != null) {
+            runButton.setEnabled(true);
+        }
+        if (worker.isCancelled()) {
+            setStatusTextNow("Cancelled");
+            markRunningCellsCancelled();
+            return;
+        }
+        try {
+            worker.get();
+            failedCount = countFailures();
+            setStatusTextNow(completionStatus());
+        } catch (Exception e) {
+            failedCount = countFailures();
+            setStatusTextNow("Error: " + safe(e.getMessage()));
+            showMessage(e.getMessage());
+        }
+    }
+
+    private void markRunningCellsCancelled() {
+        for (int i = 0; i < cells.size(); i++) {
+            String badge = cells.get(i).badgeText();
+            if ("running".equals(badge) || "pending".equals(badge)) {
+                cells.get(i).setState("cancelled");
+            }
+        }
+    }
+
+    private int countFailures() {
+        int failures = 0;
+        for (int i = 0; i < resultsByCell.size(); i++) {
+            VariationResult result = resultsByCell.get(i);
+            if (result != null && result.hasError()) {
+                failures++;
+            }
+        }
+        return failures;
+    }
+
+    private void acceptAndClose(ParameterCombo combo, FilterSweepStrategy strategy) {
+        if (onAccept != null && combo != null && strategy != null) {
+            onAccept.accept(strategy.renderMacroForCombo(combo));
+        }
+        dispose();
+    }
+
+    private void cancelExecutor() {
+        VariationExecutor worker = executor;
+        if (worker != null && !worker.isDone()) {
+            worker.cancel(false);
+        }
+    }
+
+    private boolean isExecutorActive() {
+        return executor != null && !executor.isDone();
+    }
+
+    private String progressStatus() {
+        int total = cells.isEmpty() ? estimatedCellCount() : cells.size();
+        String base = completedCount + "/" + Math.max(0, total);
+        if (failedCount > 0) {
+            return base + " (" + failedCount + " failed)";
+        }
+        return base;
+    }
+
+    private String completionStatus() {
+        int total = cells.isEmpty() ? estimatedCellCount() : cells.size();
+        if (failedCount > 0) {
+            return completedCount + "/" + Math.max(0, total)
+                    + " complete (" + failedCount + " failed)";
+        }
+        return completedCount + "/" + Math.max(0, total) + " complete";
+    }
+
+    private int estimatedCellCount() {
+        try {
+            long count = editor.currentSweep().cellCount();
+            return count > Integer.MAX_VALUE ? Integer.MAX_VALUE : Math.max(0, (int) count);
+        } catch (RuntimeException e) {
+            return 0;
+        }
+    }
+
+    private void setStatusTextNow(String text) {
+        statusLabel.setText(safe(text));
+    }
+
+    private void setSuggestionText(String text) {
+        suggestionLabel.setText(safe(text));
+    }
+
+    private void setStrategyText(String text) {
+        strategyLabel.setText(safe(text));
+    }
+
+    private void setStatusText(final String text) {
+        SwingUtilities.invokeLater(new Runnable() {
+            @Override public void run() {
+                setStatusTextNow(text);
+            }
+        });
+    }
+
+    private void showMessage(final String message) {
+        if (GraphicsEnvironment.isHeadless()) {
+            return;
+        }
+        SwingUtilities.invokeLater(new Runnable() {
+            @Override public void run() {
+                javax.swing.JOptionPane.showMessageDialog(getWindow(), safe(message),
+                        "Macro Variations", javax.swing.JOptionPane.WARNING_MESSAGE);
+            }
+        });
     }
 
     private String chainSummary() {

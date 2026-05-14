@@ -76,6 +76,7 @@ public final class VariationsDialog extends PipelineDialog {
     private final ParameterSweepEditor editor;
     private final VariationStateStore stateStore;
     private final VariationGridPanel gridPanel = new VariationGridPanel();
+    private final JPanel countCurveSlot = new JPanel(new BorderLayout());
     private final JLabel cellsLabel = new JLabel("Cells: 1");
     private final JLabel zLabel = new JLabel("1/1");
     private final JLabel suggestionLabel = new JLabel("Most stable: pending");
@@ -95,10 +96,13 @@ public final class VariationsDialog extends PipelineDialog {
     private final List<VariationCellPanel> cells = new ArrayList<VariationCellPanel>();
     private final List<VariationResult> resultsByCell =
             new ArrayList<VariationResult>();
+    private final List<Integer> mainCountCurveCellIndexes =
+            new ArrayList<Integer>();
     private final VariationComparisonSelection comparisonSelection;
 
     private VariationExecutor executor;
     private ParameterSweep currentSweep;
+    private CountCurveStrip mainCountCurve;
     private VariationState resumeState;
     private ComparisonPreviewDialog comparisonDialog;
     private VariationMontageDialog montageDialog;
@@ -181,6 +185,10 @@ public final class VariationsDialog extends PipelineDialog {
         return gridPanel;
     }
 
+    CountCurveStrip mainCountCurveForTest() {
+        return mainCountCurve;
+    }
+
     int cellCountForTest() {
         return cells.size();
     }
@@ -239,6 +247,7 @@ public final class VariationsDialog extends PipelineDialog {
         addComponent(editor);
         addComponent(rangeRow());
         addComponent(cropRow());
+        addComponent(countCurveSlot());
         addHeader("Preview grid");
         addComponent(gridScrollPane());
         addComponent(zRow());
@@ -251,6 +260,16 @@ public final class VariationsDialog extends PipelineDialog {
         cancel.addActionListener(e -> dispose());
         JButton start = addRightFooterButton("Start");
         start.addActionListener(e -> start());
+
+        gridPanel.setFacetSelectionListener(new FacetChipRow.FacetSelectionListener() {
+            @Override public void facetSelected(ParameterKey axis, Object value) {
+                SwingUtilities.invokeLater(new Runnable() {
+                    @Override public void run() {
+                        updateCountCurves();
+                    }
+                });
+            }
+        });
 
         editor.addChangeListener(new ChangeListener() {
             @Override public void stateChanged(ChangeEvent e) {
@@ -283,6 +302,12 @@ public final class VariationsDialog extends PipelineDialog {
         row.add(suggestButton);
         row.add(Box.createHorizontalGlue());
         return row;
+    }
+
+    private JPanel countCurveSlot() {
+        countCurveSlot.setOpaque(false);
+        countCurveSlot.setVisible(false);
+        return countCurveSlot;
     }
 
     private JPanel cropRow() {
@@ -468,6 +493,7 @@ public final class VariationsDialog extends PipelineDialog {
         failedCount = 0;
         stableCountStatus = "";
         stableMasksStatus = "";
+        clearCountCurves();
         setSuggestionText("Most stable: pending");
         runStartedAtMs = System.currentTimeMillis();
         ImagePlus croppedSource = currentSweep.cropSpec().apply(source);
@@ -531,6 +557,7 @@ public final class VariationsDialog extends PipelineDialog {
             updateTileMetrics();
             applyKneeHint();
             applyStabilityHint();
+            updateCountCurves();
             setStatusTextNow(completionStatus());
             stateStore.clear();
             return;
@@ -635,6 +662,7 @@ public final class VariationsDialog extends PipelineDialog {
         if (completedCount >= cells.size()) {
             applyKneeHint();
             applyStabilityHint();
+            updateCountCurves();
         }
     }
 
@@ -714,6 +742,7 @@ public final class VariationsDialog extends PipelineDialog {
             updateTileMetrics();
             applyKneeHint();
             applyStabilityHint();
+            updateCountCurves();
             failedCount = countFailures();
             setStatusTextNow(completionStatus());
             if (allCellsSuccessful()) {
@@ -730,23 +759,25 @@ public final class VariationsDialog extends PipelineDialog {
             cells.get(i).setKneeWinner(false);
         }
         ParameterId swept = singleNumericAxis();
-        if (swept == null || resultsByCell.size() != cells.size()) {
+        List<Integer> indexes = swept == null
+                ? Collections.<Integer>emptyList()
+                : visibleCompletedCountCurveIndexes(swept);
+        if (swept == null || indexes.size() < 3) {
             stableCountStatus = "";
             setSuggestionText(indicatorSummary());
             return;
         }
-        double[] xs = new double[cells.size()];
-        double[] ys = new double[cells.size()];
-        for (int i = 0; i < cells.size(); i++) {
-            Object value = cells.get(i).combo().get(swept);
+        double[] xs = new double[indexes.size()];
+        double[] ys = new double[indexes.size()];
+        for (int i = 0; i < indexes.size(); i++) {
+            int cellIndex = indexes.get(i).intValue();
+            VariationResult result = resultsByCell.get(cellIndex);
+            Object value = result.combo().get(swept);
             if (!(value instanceof Number)) {
                 return;
             }
             xs[i] = ((Number) value).doubleValue();
-            VariationResult result = resultsByCell.get(i);
-            ys[i] = result == null || result.hasError()
-                    ? Double.NaN
-                    : result.nObjects();
+            ys[i] = result.nObjects();
         }
         OptionalInt kneeIndex = KneeDetector.findKneeIndex(xs, ys);
         if (!kneeIndex.isPresent()) {
@@ -754,16 +785,234 @@ public final class VariationsDialog extends PipelineDialog {
             setSuggestionText(indicatorSummary());
             return;
         }
-        int index = kneeIndex.getAsInt();
-        if (index < 0 || index >= cells.size()) {
+        int pointIndex = kneeIndex.getAsInt();
+        if (pointIndex < 0 || pointIndex >= indexes.size()) {
             return;
         }
-        VariationCellPanel cell = cells.get(index);
+        int cellIndex = indexes.get(pointIndex).intValue();
+        if (cellIndex < 0 || cellIndex >= cells.size()) {
+            return;
+        }
+        VariationCellPanel cell = cells.get(cellIndex);
         cell.setBorderHint(VariationCellPanel.BorderHint.KNEE);
         stableCountStatus = "Most stable count at "
                 + ParameterLabels.shortKey(swept) + " = "
                 + formatValue(cell.combo().get(swept));
         setSuggestionText(indicatorSummary());
+    }
+
+    private void updateCountCurves() {
+        if (currentSweep == null) {
+            clearCountCurves();
+            return;
+        }
+        ParameterId driver = PrimaryAxisPicker.pickCountCurveDriver(currentSweep);
+        if (driver == null) {
+            clearCountCurves();
+            return;
+        }
+
+        CountCurveData mainData = countCurveData(driver,
+                visibleCompletedCountCurveIndexes(driver));
+        ensureMainCountCurve(mainData);
+        mainCountCurveCellIndexes.clear();
+        mainCountCurveCellIndexes.addAll(mainData.cellIndexes);
+
+        boolean visible = mainData.size() >= 2;
+        mainCountCurve.setVisible(visible);
+        countCurveSlot.setVisible(visible);
+        gridPanel.setRowCountCurves(rowCountCurves(driver));
+        countCurveSlot.revalidate();
+        countCurveSlot.repaint();
+        Window window = getWindow();
+        if (window != null) {
+            window.validate();
+        }
+    }
+
+    private void ensureMainCountCurve(CountCurveData data) {
+        if (mainCountCurve == null) {
+            mainCountCurve = new CountCurveStrip(data.xs, data.ys,
+                    data.stableCountIndex, data.plateauRange);
+            mainCountCurve.addChangeListener(new ChangeListener() {
+                @Override public void stateChanged(ChangeEvent e) {
+                    scrollToCountCurveSelection();
+                }
+            });
+            countCurveSlot.removeAll();
+            countCurveSlot.add(mainCountCurve, BorderLayout.CENTER);
+        } else {
+            mainCountCurve.setData(data.xs, data.ys,
+                    data.stableCountIndex, data.plateauRange);
+        }
+    }
+
+    private void clearCountCurves() {
+        mainCountCurve = null;
+        mainCountCurveCellIndexes.clear();
+        countCurveSlot.removeAll();
+        countCurveSlot.setVisible(false);
+        gridPanel.setRowCountCurves(Collections.<CountCurveMini>emptyList());
+        countCurveSlot.revalidate();
+        countCurveSlot.repaint();
+    }
+
+    private void scrollToCountCurveSelection() {
+        if (mainCountCurve == null || !mainCountCurve.selectedIndex().isPresent()) {
+            return;
+        }
+        int pointIndex = mainCountCurve.selectedIndex().getAsInt();
+        if (pointIndex < 0 || pointIndex >= mainCountCurveCellIndexes.size()) {
+            return;
+        }
+        int cellIndex = mainCountCurveCellIndexes.get(pointIndex).intValue();
+        if (cellIndex < 0 || cellIndex >= cells.size()) {
+            return;
+        }
+        VariationCellPanel cell = cells.get(cellIndex);
+        cell.scrollRectToVisible(new Rectangle(0, 0,
+                Math.max(1, cell.getWidth()), Math.max(1, cell.getHeight())));
+    }
+
+    private List<Integer> visibleCompletedCountCurveIndexes(ParameterId driver) {
+        Map<ParameterKey, Object> activeFacets = gridPanel.activeFacetValues();
+        List<Integer> indexes = new ArrayList<Integer>();
+        for (int i = 0; i < cells.size(); i++) {
+            if (!isCompletedCountCurveCell(i, driver)) {
+                continue;
+            }
+            if (!matchesActiveFacets(cells.get(i).combo(), activeFacets)) {
+                continue;
+            }
+            indexes.add(Integer.valueOf(i));
+        }
+        return indexes;
+    }
+
+    private List<CountCurveMini> rowCountCurves(ParameterId driver) {
+        if (sweptAxisCount(currentSweep) != 2) {
+            return Collections.emptyList();
+        }
+        List<ParameterKey> spatialAxes = VariationGridPanel.pickSpatialAxes(
+                currentSweep.method(), currentSweep);
+        if (spatialAxes.size() < 2) {
+            return Collections.emptyList();
+        }
+        ParameterKey yAxis = spatialAxes.get(1);
+        List<Object> rowValues = valuesForAxis(yAxis);
+        List<CountCurveData> rowData = new ArrayList<CountCurveData>();
+        double sharedYMax = 1.0d;
+        for (int i = 0; i < rowValues.size(); i++) {
+            CountCurveData data = countCurveData(driver,
+                    rowCompletedCountCurveIndexes(driver, yAxis, rowValues.get(i)));
+            rowData.add(data);
+            for (int y = 0; y < data.ys.length; y++) {
+                if (Double.isFinite(data.ys[y]) && data.ys[y] > sharedYMax) {
+                    sharedYMax = data.ys[y];
+                }
+            }
+        }
+
+        List<CountCurveMini> minis = new ArrayList<CountCurveMini>();
+        for (int i = 0; i < rowData.size(); i++) {
+            CountCurveData data = rowData.get(i);
+            CountCurveMini mini = new CountCurveMini(data.xs, data.ys,
+                    data.stableCountIndex, data.plateauRange, sharedYMax);
+            mini.setVisible(data.size() >= 2);
+            minis.add(mini);
+        }
+        return minis;
+    }
+
+    private List<Integer> rowCompletedCountCurveIndexes(ParameterId driver,
+                                                        ParameterKey yAxis,
+                                                        Object yValue) {
+        List<Integer> indexes = new ArrayList<Integer>();
+        for (int i = 0; i < cells.size(); i++) {
+            if (!isCompletedCountCurveCell(i, driver)) {
+                continue;
+            }
+            if (!valueEquals(cells.get(i).combo().get(yAxis), yValue)) {
+                continue;
+            }
+            indexes.add(Integer.valueOf(i));
+        }
+        return indexes;
+    }
+
+    private CountCurveData countCurveData(ParameterId driver, List<Integer> indexes) {
+        int size = indexes == null ? 0 : indexes.size();
+        double[] xs = new double[size];
+        double[] ys = new double[size];
+        List<Integer> cellIndexes = new ArrayList<Integer>(size);
+        for (int i = 0; i < size; i++) {
+            int cellIndex = indexes.get(i).intValue();
+            VariationResult result = resultsByCell.get(cellIndex);
+            Object value = result.combo().get(driver);
+            xs[i] = ((Number) value).doubleValue();
+            ys[i] = result.nObjects();
+            cellIndexes.add(Integer.valueOf(cellIndex));
+        }
+        return new CountCurveData(xs, ys,
+                KneeDetector.findKneeIndex(xs, ys),
+                KneeDetector.findPlateauRange(xs, ys),
+                cellIndexes);
+    }
+
+    private boolean isCompletedCountCurveCell(int index, ParameterId driver) {
+        if (driver == null || index < 0 || index >= resultsByCell.size()) {
+            return false;
+        }
+        VariationResult result = resultsByCell.get(index);
+        if (result == null || result.hasError()) {
+            return false;
+        }
+        Object value = result.combo().get(driver);
+        return value instanceof Number;
+    }
+
+    private boolean matchesActiveFacets(ParameterCombo combo,
+                                        Map<ParameterKey, Object> activeFacets) {
+        if (combo == null || activeFacets == null || activeFacets.isEmpty()) {
+            return true;
+        }
+        for (Map.Entry<ParameterKey, Object> entry : activeFacets.entrySet()) {
+            if (!valueEquals(combo.get(entry.getKey()), entry.getValue())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private int sweptAxisCount(ParameterSweep sweep) {
+        if (sweep == null) {
+            return 0;
+        }
+        int count = 0;
+        for (Map.Entry<ParameterKey, ParameterValueList> entry
+                : sweep.valueLists().entrySet()) {
+            ParameterValueList values = entry.getValue();
+            if (values != null && values.size() > 1) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private List<Object> valuesForAxis(ParameterKey axis) {
+        List<Object> values = new ArrayList<Object>();
+        if (currentSweep == null || axis == null) {
+            return values;
+        }
+        ParameterValueList valueList = currentSweep.valueLists().get(axis);
+        if (valueList != null) {
+            values.addAll(valueList.values());
+        }
+        return values;
+    }
+
+    private static boolean valueEquals(Object left, Object right) {
+        return left == null ? right == null : left.equals(right);
     }
 
     private void applyStabilityHint() {
@@ -777,6 +1026,9 @@ public final class VariationsDialog extends PipelineDialog {
             setSuggestionText(indicatorSummary());
             return;
         }
+        // Macro sweeps stay eligible for mask agreement: the topology only
+        // needs neighbouring completed tiles, while the 3-tile guard suppresses
+        // two-value macro-only sweeps.
         List<ParameterCombo> combos = new ArrayList<ParameterCombo>(cells.size());
         List<ImagePlus> labels = new ArrayList<ImagePlus>(cells.size());
         for (int i = 0; i < resultsByCell.size(); i++) {
@@ -821,28 +1073,10 @@ public final class VariationsDialog extends PipelineDialog {
         if (currentSweep == null) {
             return null;
         }
-        ParameterId swept = null;
-        for (Map.Entry<ParameterKey, ParameterValueList> entry
-                : currentSweep.valueLists().entrySet()) {
-            ParameterValueList values = entry.getValue();
-            int size = values == null ? 0 : values.size();
-            if (size <= 1) {
-                continue;
-            }
-            if (!(entry.getKey() instanceof ParameterId)) {
-                return null;
-            }
-            if (swept != null) {
-                return null;
-            }
-            for (int i = 0; i < size; i++) {
-                if (!(values.get(i) instanceof Number)) {
-                    return null;
-                }
-            }
-            swept = (ParameterId) entry.getKey();
-        }
-        return swept;
+        // STABLE COUNT is only meaningful for one swept numeric/orderable axis
+        // in the current facet slice; categorical MODEL/MACRO axes are facets.
+        List<ParameterId> axes = PrimaryAxisPicker.sweptNumericAxes(currentSweep);
+        return axes.size() == 1 ? axes.get(0) : null;
     }
 
     private void handleCompare(ParameterCombo combo, VariationCellPanel cell) {
@@ -1344,6 +1578,34 @@ public final class VariationsDialog extends PipelineDialog {
                         "Parameter Variations", JOptionPane.WARNING_MESSAGE);
             }
         });
+    }
+
+    private static final class CountCurveData {
+        final double[] xs;
+        final double[] ys;
+        final OptionalInt stableCountIndex;
+        final int[] plateauRange;
+        final List<Integer> cellIndexes;
+
+        CountCurveData(double[] xs,
+                       double[] ys,
+                       OptionalInt stableCountIndex,
+                       int[] plateauRange,
+                       List<Integer> cellIndexes) {
+            this.xs = xs == null ? new double[0] : xs;
+            this.ys = ys == null ? new double[0] : ys;
+            this.stableCountIndex = stableCountIndex == null
+                    ? OptionalInt.empty()
+                    : stableCountIndex;
+            this.plateauRange = plateauRange;
+            this.cellIndexes = cellIndexes == null
+                    ? Collections.<Integer>emptyList()
+                    : new ArrayList<Integer>(cellIndexes);
+        }
+
+        int size() {
+            return Math.min(xs.length, ys.length);
+        }
     }
 
     private static final class ProgressSliverPanel extends JPanel {

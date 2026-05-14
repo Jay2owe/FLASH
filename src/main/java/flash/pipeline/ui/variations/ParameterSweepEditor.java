@@ -12,6 +12,7 @@ import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
+import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.event.ChangeEvent;
@@ -32,6 +33,7 @@ public final class ParameterSweepEditor extends JPanel {
     private final String sourceImageHash;
     private final String cacheNamespace;
     private final int noUpperBoundMaxSize;
+    private final MacroVariationCatalog macroCatalog;
     private final List<Row> rows = new ArrayList<Row>();
     private final List<ChangeListener> listeners = new ArrayList<ChangeListener>();
     private final Preferences preferences =
@@ -46,7 +48,8 @@ public final class ParameterSweepEditor extends JPanel {
                 baseComboFor(context),
                 context == null ? "" : context.channelName(),
                 sourceHash(context == null ? null : context.filteredSource()),
-                maxPossibleVoxels(context == null ? null : context.filteredSource()));
+                maxPossibleVoxels(context == null ? null : context.filteredSource()),
+                MacroVariationCatalog.forContext(context));
     }
 
     public static ParameterSweepEditor forFilter(FilterVariationEngineContext context) {
@@ -65,7 +68,8 @@ public final class ParameterSweepEditor extends JPanel {
                                 ParameterCombo baseParameters,
                                 String channelName,
                                 String sourceImageHash) {
-        this(method, baseParameters, channelName, sourceImageHash, Integer.MAX_VALUE);
+        this(method, baseParameters, channelName, sourceImageHash, Integer.MAX_VALUE,
+                MacroVariationCatalog.empty());
     }
 
     private ParameterSweepEditor(ParameterSweep.Method method,
@@ -73,8 +77,18 @@ public final class ParameterSweepEditor extends JPanel {
                                  String channelName,
                                  String sourceImageHash,
                                  int noUpperBoundMaxSize) {
+        this(method, baseParameters, channelName, sourceImageHash, noUpperBoundMaxSize,
+                MacroVariationCatalog.empty());
+    }
+
+    private ParameterSweepEditor(ParameterSweep.Method method,
+                                 ParameterCombo baseParameters,
+                                 String channelName,
+                                 String sourceImageHash,
+                                 int noUpperBoundMaxSize,
+                                 MacroVariationCatalog macroCatalog) {
         this(method, channelName, sourceImageHash, noUpperBoundMaxSize,
-                sectionsFor(method, baseParameters), "");
+                sectionsFor(method, baseParameters), "", macroCatalog);
     }
 
     private ParameterSweepEditor(ParameterSweep.Method method,
@@ -83,6 +97,17 @@ public final class ParameterSweepEditor extends JPanel {
                                  int noUpperBoundMaxSize,
                                  ParameterSections sections,
                                  String cacheNamespace) {
+        this(method, channelName, sourceImageHash, noUpperBoundMaxSize, sections,
+                cacheNamespace, MacroVariationCatalog.empty());
+    }
+
+    private ParameterSweepEditor(ParameterSweep.Method method,
+                                 String channelName,
+                                 String sourceImageHash,
+                                 int noUpperBoundMaxSize,
+                                 ParameterSections sections,
+                                 String cacheNamespace,
+                                 MacroVariationCatalog macroCatalog) {
         super();
         this.method = method == null ? ParameterSweep.Method.CLASSICAL : method;
         this.channelName = channelName == null ? "" : channelName;
@@ -91,6 +116,9 @@ public final class ParameterSweepEditor extends JPanel {
         this.noUpperBoundMaxSize = noUpperBoundMaxSize <= 0
                 ? Integer.MAX_VALUE
                 : noUpperBoundMaxSize;
+        this.macroCatalog = macroCatalog == null
+                ? MacroVariationCatalog.empty()
+                : macroCatalog;
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
         setOpaque(false);
         setBorder(BorderFactory.createLineBorder(new Color(214, 220, 224)));
@@ -114,7 +142,7 @@ public final class ParameterSweepEditor extends JPanel {
             }
         }
         return new ParameterSweep(method, values, cropSpec, channelName,
-                sourceImageHash, cacheNamespace);
+                sourceImageHash, cacheNamespace, selectedMacroVariations());
     }
 
     public void setCropSpec(CropSpec cropSpec) {
@@ -132,6 +160,9 @@ public final class ParameterSweepEditor extends JPanel {
             Row row = rows.get(i);
             ParameterValueList values = valueLists.get(row.id);
             if (values != null) {
+                if (row.id == ParameterId.MACRO) {
+                    row.values.setMacroVariationSet(sweep.macroVariations());
+                }
                 row.values.setValues(values.values());
                 row.sweepBox.setSelected(values.size() > 1);
             }
@@ -285,9 +316,9 @@ public final class ParameterSweepEditor extends JPanel {
 
         ParameterValueList initial = new ParameterValueList(
                 Collections.singletonList(definition.baseValue));
-        ValueChipPanel chips = new ValueChipPanel(initial, definition.parser);
-        chips.setAlignmentX(LEFT_ALIGNMENT);
-        row.add(chips);
+        ValueControl chips = createValueControl(definition, initial);
+        chips.component().setAlignmentX(LEFT_ALIGNMENT);
+        row.add(chips.component());
         row.add(Box.createHorizontalGlue());
 
         final Row rowState = new Row(id, sweepBox, chips, advanced);
@@ -301,6 +332,10 @@ public final class ParameterSweepEditor extends JPanel {
         });
         chips.addChangeListener(new ChangeListener() {
             @Override public void stateChanged(ChangeEvent e) {
+                if (id == ParameterId.MACRO
+                        && rowState.values.currentValueList().size() > 1) {
+                    rowState.sweepBox.setSelected(true);
+                }
                 if (advanced && isAdvancedRowActive(rowState)) {
                     advancedExpanded = true;
                     updateAdvancedVisibility();
@@ -309,6 +344,14 @@ public final class ParameterSweepEditor extends JPanel {
             }
         });
         return row;
+    }
+
+    private ValueControl createValueControl(ParameterDefinition definition,
+                                            ParameterValueList initial) {
+        if (definition.id == ParameterId.MACRO) {
+            return new MacroValueControl(new MacroVariationChipPanel(initial, macroCatalog));
+        }
+        return new StandardValueControl(new ValueChipPanel(initial, definition.parser));
     }
 
     private Row rowFor(ParameterKey id) {
@@ -349,15 +392,18 @@ public final class ParameterSweepEditor extends JPanel {
             advanced.add(definitionFor(ParameterId.AREA_MAX, baseParameters));
             advanced.add(definitionFor(ParameterId.QUALITY_MIN, baseParameters));
             advanced.add(definitionFor(ParameterId.INTENSITY_MIN, baseParameters));
+            advanced.add(definitionFor(ParameterId.MACRO, baseParameters));
         } else if (method == ParameterSweep.Method.CELLPOSE) {
             primary.add(definitionFor(ParameterId.DIAMETER, baseParameters));
             primary.add(definitionFor(ParameterId.FLOW_THRESHOLD, baseParameters));
             primary.add(definitionFor(ParameterId.CELLPROB_THRESHOLD, baseParameters));
             advanced.add(definitionFor(ParameterId.MODEL, baseParameters));
+            advanced.add(definitionFor(ParameterId.MACRO, baseParameters));
         } else {
             primary.add(definitionFor(ParameterId.THRESHOLD, baseParameters));
             primary.add(definitionFor(ParameterId.MIN_SIZE, baseParameters));
             advanced.add(definitionFor(ParameterId.MAX_SIZE, baseParameters));
+            advanced.add(definitionFor(ParameterId.MACRO, baseParameters));
         }
         return new ParameterSections(primary, advanced);
     }
@@ -438,6 +484,7 @@ public final class ParameterSweepEditor extends JPanel {
         if (id == ParameterId.FLOW_THRESHOLD) return Double.valueOf(0.4d);
         if (id == ParameterId.CELLPROB_THRESHOLD) return Double.valueOf(0.0d);
         if (id == ParameterId.MODEL) return CellposeModel.CYTO3.token();
+        if (id == ParameterId.MACRO) return MacroToken.NONE_VALUE;
         return Integer.valueOf(0);
     }
 
@@ -567,6 +614,14 @@ public final class ParameterSweepEditor extends JPanel {
         return false;
     }
 
+    private MacroVariationSet selectedMacroVariations() {
+        Row row = rowFor(ParameterId.MACRO);
+        if (row == null) {
+            return null;
+        }
+        return row.values.selectedMacroVariationSet();
+    }
+
     private boolean isAdvancedRowActive(Row row) {
         if (row == null) {
             return false;
@@ -608,7 +663,7 @@ public final class ParameterSweepEditor extends JPanel {
             return;
         }
         String noun = advancedCount == 1 ? "parameter" : "parameters";
-        advancedToggle.setText((advancedExpanded ? "Hide " : "Show ")
+        advancedToggle.setText((advancedExpanded ? "\u25be Hide " : "\u25b8 Show ")
                 + advancedCount + " advanced " + noun);
     }
 
@@ -678,17 +733,89 @@ public final class ParameterSweepEditor extends JPanel {
     private static final class Row {
         final ParameterKey id;
         final JCheckBox sweepBox;
-        final ValueChipPanel values;
+        final ValueControl values;
         final boolean advanced;
 
         Row(ParameterKey id,
             JCheckBox sweepBox,
-            ValueChipPanel values,
+            ValueControl values,
             boolean advanced) {
             this.id = id;
             this.sweepBox = sweepBox;
             this.values = values;
             this.advanced = advanced;
+        }
+    }
+
+    private interface ValueControl {
+        JComponent component();
+        ParameterValueList currentValueList();
+        void setValues(List<?> values);
+        void addChangeListener(ChangeListener listener);
+        void setMacroVariationSet(MacroVariationSet macroVariationSet);
+        MacroVariationSet selectedMacroVariationSet();
+    }
+
+    private static final class StandardValueControl implements ValueControl {
+        private final ValueChipPanel panel;
+
+        StandardValueControl(ValueChipPanel panel) {
+            this.panel = panel;
+        }
+
+        @Override public JComponent component() {
+            return panel;
+        }
+
+        @Override public ParameterValueList currentValueList() {
+            return panel.currentValueList();
+        }
+
+        @Override public void setValues(List<?> values) {
+            panel.setValues(values);
+        }
+
+        @Override public void addChangeListener(ChangeListener listener) {
+            panel.addChangeListener(listener);
+        }
+
+        @Override public void setMacroVariationSet(MacroVariationSet macroVariationSet) {
+        }
+
+        @Override public MacroVariationSet selectedMacroVariationSet() {
+            return null;
+        }
+    }
+
+    private static final class MacroValueControl implements ValueControl {
+        private final MacroVariationChipPanel panel;
+
+        MacroValueControl(MacroVariationChipPanel panel) {
+            this.panel = panel;
+        }
+
+        @Override public JComponent component() {
+            return panel;
+        }
+
+        @Override public ParameterValueList currentValueList() {
+            return panel.currentValueList();
+        }
+
+        @Override public void setValues(List<?> values) {
+            panel.setValues(values);
+        }
+
+        @Override public void addChangeListener(ChangeListener listener) {
+            panel.addChangeListener(listener);
+        }
+
+        @Override public void setMacroVariationSet(MacroVariationSet macroVariationSet) {
+            panel.setMacroVariationSet(macroVariationSet);
+        }
+
+        @Override public MacroVariationSet selectedMacroVariationSet() {
+            return panel.selectedVariationSet();
         }
     }
 }

@@ -4,6 +4,7 @@ import flash.pipeline.stardist.StarDist3DRunner;
 import flash.pipeline.ui.config.StarDistParameterStage;
 import flash.pipeline.ui.preview.ObjectSizeFilterPreview;
 import flash.pipeline.ui.variations.CropSpec;
+import flash.pipeline.ui.variations.MacroPreprocessor;
 import flash.pipeline.ui.variations.ParameterCombo;
 import flash.pipeline.ui.variations.ParameterId;
 import flash.pipeline.ui.variations.ParameterSweep;
@@ -29,6 +30,7 @@ public final class StarDistPerCell implements VariationStrategy {
     private final VariationCache cache;
     private final StarDistParameterStage.PreviewAdapter previewAdapter;
     private final StarDistParameterStage.Parameters baseParams;
+    private final MacroPreprocessor macroPreprocessor = new MacroPreprocessor();
 
     public StarDistPerCell(ImagePlus filteredSource,
                            CropSpec crop,
@@ -81,7 +83,7 @@ public final class StarDistPerCell implements VariationStrategy {
                     publisher.accept(resultFor(combo, cached, cropped, parameters, 0L));
                     continue;
                 }
-                runOne(cropped, combo, cacheKey, parameters, publisher, cancelCheck);
+                runOne(cropped, sweep, combo, cacheKey, parameters, publisher, cancelCheck);
             }
         } finally {
             closeCroppedIfOwned(cropped);
@@ -89,6 +91,7 @@ public final class StarDistPerCell implements VariationStrategy {
     }
 
     private void runOne(ImagePlus cropped,
+                        ParameterSweep sweep,
                         ParameterCombo combo,
                         String cacheKey,
                         StarDistParameterStage.Parameters parameters,
@@ -98,14 +101,16 @@ public final class StarDistPerCell implements VariationStrategy {
             return;
         }
         long started = System.currentTimeMillis();
+        ImagePlus input = null;
         try {
-            ImagePlus label = previewAdapter.runPreview(cropped,
+            input = macroPreprocessor.prepare(cropped, sweep, combo);
+            ImagePlus label = previewAdapter.runPreview(input,
                     previewRunParameters(parameters));
             if (label == null) {
-                label = emptyLabelMapLike(cropped);
+                label = emptyLabelMapLike(input);
             }
             long durationMs = Math.max(1L, System.currentTimeMillis() - started);
-            VariationResult result = resultFor(combo, label, cropped, parameters, durationMs);
+            VariationResult result = resultFor(combo, label, input, parameters, durationMs);
             if (cache != null) {
                 cache.put(cacheKey, result.label());
             }
@@ -116,6 +121,8 @@ public final class StarDistPerCell implements VariationStrategy {
             if (!isCancelled(cancelCheck)) {
                 publisher.accept(VariationResult.failure(combo, t));
             }
+        } finally {
+            macroPreprocessor.closeIfOwned(input, cropped);
         }
     }
 

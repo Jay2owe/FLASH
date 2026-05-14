@@ -76,7 +76,7 @@ public final class ParameterCombo {
             if (id == null) {
                 throw new IllegalArgumentException("parameter id must not be null");
             }
-            out.put(id, ParameterValueList.normalizeValue(source.get(id)));
+            out.put(id, normalizeValueForKey(id, source.get(id)));
         }
         return out;
     }
@@ -103,6 +103,13 @@ public final class ParameterCombo {
             return ((ParameterId) key).name();
         }
         return key == null ? "" : key.stableKey();
+    }
+
+    private static Object normalizeValueForKey(ParameterKey key, Object value) {
+        if (key instanceof ParameterId && ((ParameterId) key).isMacroAxis()) {
+            return MacroToken.tokenString(value);
+        }
+        return ParameterValueList.normalizeValue(value);
     }
 
     @Override
@@ -134,7 +141,7 @@ public final class ParameterCombo {
             if (id == null) {
                 throw new IllegalArgumentException("id must not be null");
             }
-            values.put(id, ParameterValueList.normalizeValue(value));
+            values.put(id, normalizeValueForKey(id, value));
             return this;
         }
 

@@ -32,10 +32,14 @@ public final class AxisGutterPanel extends JPanel {
     private static final Color VALUE_COLOR = new Color(33, 33, 33);
 
     private final Mode mode;
-    private ParameterId axis;
+    private ParameterKey axis;
     private final List<Object> values = new ArrayList<Object>();
 
     public AxisGutterPanel(Mode mode, ParameterId axis, List<?> values) {
+        this(mode, (ParameterKey) axis, values);
+    }
+
+    public AxisGutterPanel(Mode mode, ParameterKey axis, List<?> values) {
         if (mode == null) {
             throw new IllegalArgumentException("mode must not be null");
         }
@@ -45,6 +49,10 @@ public final class AxisGutterPanel extends JPanel {
     }
 
     public void setAxis(ParameterId axis, List<?> newValues) {
+        setAxis((ParameterKey) axis, newValues);
+    }
+
+    public void setAxis(ParameterKey axis, List<?> newValues) {
         this.axis = axis;
         values.clear();
         if (newValues != null) {
@@ -135,7 +143,7 @@ public final class AxisGutterPanel extends JPanel {
     }
 
     private static Font titleFont() {
-        return FlashTheme.bodyMedium().deriveFont(Font.BOLD, 11f);
+        return FlashTheme.bodyMedium().deriveFont(11f);
     }
 
     private static Font valueFont() {

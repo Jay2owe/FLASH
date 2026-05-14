@@ -1,7 +1,10 @@
 package flash.pipeline.ui.variations.state;
 
 import flash.pipeline.ui.variations.ParameterCombo;
+import flash.pipeline.ui.variations.MacroToken;
+import flash.pipeline.ui.variations.MacroVariation;
 import flash.pipeline.ui.variations.ParameterKey;
+import flash.pipeline.ui.variations.ParameterId;
 import flash.pipeline.ui.variations.ParameterSweep;
 import flash.pipeline.ui.variations.ParameterValueList;
 
@@ -164,6 +167,32 @@ public final class VariationState {
         return new VariationState(version, sweep, copy, startedAt, updatedAt);
     }
 
+    public VariationState validatedForResume(ParameterSweep activeSweep) {
+        ParameterSweep targetSweep = activeSweep == null ? sweep : activeSweep;
+        if (!hasMacroAxis(sweep) && !hasMacroAxis(targetSweep)) {
+            return targetSweep == sweep
+                    ? this
+                    : new VariationState(version, targetSweep, completed,
+                    startedAt, updatedAt);
+        }
+        if (!hasMacroMetadata(sweep)
+                && !hasMacroMetadata(targetSweep)
+                && targetSweep == sweep) {
+            return this;
+        }
+        List<CompletedCell> valid = new ArrayList<CompletedCell>();
+        for (int i = 0; i < completed.size(); i++) {
+            CompletedCell cell = completed.get(i);
+            if (macroCellStillValid(cell, sweep, targetSweep)) {
+                valid.add(cell);
+            }
+        }
+        if (targetSweep == sweep && valid.size() == completed.size()) {
+            return this;
+        }
+        return new VariationState(version, targetSweep, valid, startedAt, updatedAt);
+    }
+
     public static String comboIdFor(ParameterSweep sweep, ParameterCombo combo) {
         if (sweep == null || combo == null) {
             return null;
@@ -201,6 +230,87 @@ public final class VariationState {
             }
         }
         return -1;
+    }
+
+    private static boolean macroCellStillValid(CompletedCell cell,
+                                               ParameterSweep savedSweep,
+                                               ParameterSweep activeSweep) {
+        if (cell == null || savedSweep == null || activeSweep == null) {
+            return false;
+        }
+        String savedToken = macroTokenForComboId(savedSweep, cell.comboId());
+        String activeToken = macroTokenForComboId(activeSweep, cell.comboId());
+        if (savedToken == null || activeToken == null) {
+            return false;
+        }
+        if (!savedToken.equals(activeToken)) {
+            return false;
+        }
+        if (MacroToken.NONE_VALUE.equals(savedToken)) {
+            return true;
+        }
+        MacroVariation saved = hasMacroMetadata(savedSweep)
+                ? savedSweep.macroVariations().resolve(savedToken)
+                : null;
+        MacroVariation active = hasMacroMetadata(activeSweep)
+                ? activeSweep.macroVariations().resolve(activeToken)
+                : null;
+        if (hasMacroMetadata(savedSweep) && saved == null) {
+            return false;
+        }
+        if (hasMacroMetadata(activeSweep) && active == null) {
+            return false;
+        }
+        if (saved != null && active != null
+                && !safe(saved.normalizedScriptHash()).equals(
+                safe(active.normalizedScriptHash()))) {
+            return false;
+        }
+        return true;
+    }
+
+    private static String macroTokenForComboId(ParameterSweep sweep, String comboId) {
+        if (sweep == null) {
+            return null;
+        }
+        if (!hasMacroAxis(sweep)) {
+            return MacroToken.NONE_VALUE;
+        }
+        String[] parts = comboId == null ? new String[0] : comboId.split("_");
+        int axis = 0;
+        for (Map.Entry<ParameterKey, ParameterValueList> entry
+                : sweep.valueLists().entrySet()) {
+            if (axis >= parts.length) {
+                return null;
+            }
+            int index;
+            try {
+                index = Integer.parseInt(parts[axis]);
+            } catch (NumberFormatException e) {
+                return null;
+            }
+            ParameterValueList values = entry.getValue();
+            if (index < 0 || values == null || index >= values.size()) {
+                return null;
+            }
+            if (entry.getKey() == ParameterId.MACRO) {
+                try {
+                    return MacroToken.tokenString(values.get(index));
+                } catch (RuntimeException e) {
+                    return null;
+                }
+            }
+            axis++;
+        }
+        return MacroToken.NONE_VALUE;
+    }
+
+    private static boolean hasMacroAxis(ParameterSweep sweep) {
+        return sweep != null && sweep.valueLists().containsKey(ParameterId.MACRO);
+    }
+
+    private static boolean hasMacroMetadata(ParameterSweep sweep) {
+        return sweep != null && sweep.hasMacroVariationSet();
     }
 
     private static List<CompletedCell> copyCompleted(List<CompletedCell> source) {

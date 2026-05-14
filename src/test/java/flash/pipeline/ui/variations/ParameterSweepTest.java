@@ -7,6 +7,8 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 public class ParameterSweepTest {
 
@@ -40,6 +42,49 @@ public class ParameterSweepTest {
                 values, CropSpec.full(), "DAPI", "abc");
 
         assertEquals(first.combos(), second.combos());
+    }
+
+    @Test
+    public void macroAxisUsesTokenValuesAndCanonicalMetadata() {
+        MacroVariation blur = MacroVariation.pasted("Blur",
+                "run(\"Gaussian Blur...\", \"sigma=2 stack\");");
+        MacroVariation median = MacroVariation.pasted("Median",
+                "run(\"Median...\", \"radius=2 stack\");");
+        MacroVariationSet macros = MacroVariationSet.of(blur, median);
+        Map<ParameterId, ParameterValueList> values =
+                new LinkedHashMap<ParameterId, ParameterValueList>();
+        values.put(ParameterId.THRESHOLD, ParameterValueList.ofInts(100));
+        values.put(ParameterId.MACRO,
+                ParameterValueList.ofStrings(blur.token(), median.token()));
+
+        ParameterSweep sweep = new ParameterSweep(ParameterSweep.Method.CLASSICAL,
+                values, CropSpec.full(), "DAPI", "abc", macros);
+
+        assertEquals(2L, sweep.cellCount());
+        assertEquals(blur.token(), sweep.combos().get(0).get(ParameterId.MACRO));
+        String json = sweep.toCanonicalJson();
+        assertTrue(json.contains("\"MACRO\""));
+        assertTrue(json.contains("\"macroVariations\""));
+        assertTrue(json.contains(blur.normalizedScriptHash()));
+        assertFalse(json.contains("Gaussian Blur"));
+        assertEquals(json, sweep.toCanonicalJson());
+    }
+
+    @Test
+    public void macroSweepValuesNormalizeRawScriptToToken() {
+        String script = "run(\"Gaussian Blur...\", \"sigma=2 stack\");";
+        String expectedToken = MacroToken.forScript(
+                MacroToken.SOURCE_PASTED, "", script).value();
+        Map<ParameterId, ParameterValueList> values =
+                new LinkedHashMap<ParameterId, ParameterValueList>();
+        values.put(ParameterId.MACRO, ParameterValueList.ofStrings(script));
+
+        ParameterSweep sweep = new ParameterSweep(ParameterSweep.Method.CLASSICAL,
+                values, CropSpec.full(), "DAPI", "abc");
+
+        assertEquals(expectedToken,
+                sweep.valueLists().get(ParameterId.MACRO).get(0));
+        assertFalse(sweep.toCanonicalJson().contains("Gaussian Blur"));
     }
 
     private static ParameterSweep sweepWithScrambledInputOrder() {

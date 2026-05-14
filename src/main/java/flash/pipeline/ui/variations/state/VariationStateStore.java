@@ -2,6 +2,9 @@ package flash.pipeline.ui.variations.state;
 
 import flash.pipeline.ui.variations.CropSpec;
 import flash.pipeline.ui.variations.FilterParameterId;
+import flash.pipeline.ui.variations.MacroToken;
+import flash.pipeline.ui.variations.MacroVariation;
+import flash.pipeline.ui.variations.MacroVariationSet;
 import flash.pipeline.ui.variations.ParameterCombo;
 import flash.pipeline.ui.variations.ParameterId;
 import flash.pipeline.ui.variations.ParameterKey;
@@ -36,12 +39,17 @@ public class VariationStateStore {
     }
 
     public synchronized Optional<VariationState> load() {
+        return load(null);
+    }
+
+    public synchronized Optional<VariationState> load(ParameterSweep activeSweep) {
         if (stateFile == null || !Files.isRegularFile(stateFile)) {
             return Optional.empty();
         }
         try {
             String json = new String(Files.readAllBytes(stateFile), StandardCharsets.UTF_8);
-            VariationState state = fromJson(JsonIO.parseObject(json));
+            VariationState state = fromJson(JsonIO.parseObject(json))
+                    .validatedForResume(activeSweep);
             activeState = state;
             return Optional.of(state);
         } catch (Exception ignored) {
@@ -135,6 +143,10 @@ public class VariationStateStore {
         root.put("method", state.methodLabel());
         root.put("cache_namespace", state.sweep().cacheNamespace());
         root.put("sweep", sweepObject(state.sweep()));
+        if (state.sweep().hasMacroVariationSet()) {
+            root.put("macro_variations",
+                    state.sweep().macroVariations().toCanonicalObject());
+        }
         root.put("crop", cropObject(state.sweep().cropSpec()));
         root.put("completed", completedList(state.completed()));
         root.put("started_at", state.startedAt());
@@ -200,8 +212,11 @@ public class VariationStateStore {
                 parseSweep(JsonIO.asObject(root.get("sweep")));
         CropSpec crop = parseCrop(JsonIO.asObject(root.get("crop")));
         String cacheNamespace = JsonIO.stringValue(root.get("cache_namespace"));
+        MacroVariationSet macroVariations =
+                parseMacroVariations(JsonIO.asObject(root.get("macro_variations")));
         ParameterSweep sweep = new ParameterSweep(method, values, crop, channel, imageHash,
-                cacheNamespace == null ? "" : cacheNamespace);
+                cacheNamespace == null ? "" : cacheNamespace,
+                macroVariations);
         List<VariationState.CompletedCell> completed =
                 parseCompleted(JsonIO.asList(root.get("completed")));
         return new VariationState(version, sweep, completed,
@@ -231,6 +246,33 @@ public class VariationStateStore {
             throw new IOException("Variation sweep has no known parameters.");
         }
         return values;
+    }
+
+    private static MacroVariationSet parseMacroVariations(
+            Map<String, Object> macroJson) {
+        if (macroJson == null || macroJson.isEmpty()) {
+            return null;
+        }
+        List<Object> rows = JsonIO.asList(macroJson.get("variations"));
+        List<MacroVariation> variations = new ArrayList<MacroVariation>();
+        for (int i = 0; i < rows.size(); i++) {
+            Map<String, Object> row = JsonIO.asObject(rows.get(i));
+            String token = JsonIO.stringValue(row.get("token"));
+            if (token == null || token.trim().isEmpty()) {
+                continue;
+            }
+            if (!MacroToken.NONE_VALUE.equals(token.trim())
+                    && !MacroToken.isMacroToken(token)) {
+                continue;
+            }
+            variations.add(MacroVariation.identityOnly(
+                    token,
+                    JsonIO.stringValue(row.get("displayName")),
+                    JsonIO.stringValue(row.get("sourceKind")),
+                    JsonIO.stringValue(row.get("sourceName")),
+                    JsonIO.stringValue(row.get("normalizedScriptHash"))));
+        }
+        return new MacroVariationSet(variations);
     }
 
     private static CropSpec parseCrop(Map<String, Object> cropJson) throws IOException {

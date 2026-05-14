@@ -50,6 +50,8 @@ public class ParameterSweepEditorTest {
         ParameterSweep sweep = editor.currentSweep();
 
         assertEquals(6L, sweep.cellCount());
+        assertEquals(MacroToken.NONE_VALUE,
+                sweep.valueLists().get(ParameterId.MACRO).get(0));
         assertEquals(Integer.valueOf(500),
                 sweep.combos().get(0).get(ParameterId.MAX_SIZE));
         assertEquals(Integer.valueOf(80),
@@ -74,8 +76,9 @@ public class ParameterSweepEditorTest {
         values.put(ParameterId.THRESHOLD, ParameterValueList.ofInts(80, 100, 120));
         values.put(ParameterId.MIN_SIZE, ParameterValueList.ofInts(20));
         values.put(ParameterId.MAX_SIZE, ParameterValueList.ofInts(500));
+        values.put(ParameterId.MACRO, ParameterValueList.ofStrings(MacroToken.NONE_VALUE));
         ParameterSweep sweep = new ParameterSweep(ParameterSweep.Method.CLASSICAL,
-                values, CropSpec.centre256(), "DAPI", "hash");
+                values, CropSpec.centre256(), "DAPI", "hash", MacroVariationSet.none());
 
         editor.setSweep(sweep);
         ParameterSweep roundTrip = editor.currentSweep();
@@ -84,5 +87,41 @@ public class ParameterSweepEditorTest {
         assertFalse(editor.isSweptForTest(ParameterId.MIN_SIZE));
         assertEquals(3, editor.valueCountForTest(ParameterId.THRESHOLD));
         assertEquals(sweep.toCanonicalJson(), roundTrip.toCanonicalJson());
+    }
+
+    @Test
+    public void macroRowAppearsForAllSegmentationMethods() {
+        ParameterSweepEditor classical = new ParameterSweepEditor(
+                ParameterSweep.Method.CLASSICAL,
+                ParameterCombo.builder().build(), "DAPI", "hash");
+        assertTrue(classical.parameterKeysForTest().contains(ParameterId.MACRO));
+
+        ParameterSweepEditor starDist = new ParameterSweepEditor(
+                ParameterSweep.Method.STARDIST,
+                ParameterCombo.builder().build(), "DAPI", "hash");
+        assertTrue(starDist.parameterKeysForTest().contains(ParameterId.MACRO));
+
+        ParameterSweepEditor cellpose = new ParameterSweepEditor(
+                ParameterSweep.Method.CELLPOSE,
+                ParameterCombo.builder().build(), "DAPI", "hash");
+        assertTrue(cellpose.parameterKeysForTest().contains(ParameterId.MACRO));
+        assertTrue(cellpose.parameterKeysForTest().indexOf(ParameterId.MACRO)
+                > cellpose.parameterKeysForTest().indexOf(ParameterId.MODEL));
+    }
+
+    @Test
+    public void currentSweepIncludesMacroVariationMetadata() {
+        ParameterSweepEditor editor = new ParameterSweepEditor(
+                ParameterSweep.Method.CLASSICAL,
+                ParameterCombo.builder().build(), "DAPI", "hash");
+
+        ParameterSweep sweep = editor.currentSweep();
+
+        assertTrue(sweep.valueLists().containsKey(ParameterId.MACRO));
+        assertEquals(MacroToken.NONE_VALUE,
+                sweep.valueLists().get(ParameterId.MACRO).get(0));
+        assertTrue(sweep.hasMacroVariationSet());
+        assertEquals(MacroToken.NONE_VALUE,
+                sweep.macroVariations().resolve(MacroToken.NONE_VALUE).token());
     }
 }

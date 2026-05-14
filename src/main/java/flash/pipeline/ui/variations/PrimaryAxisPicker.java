@@ -39,13 +39,13 @@ public final class PrimaryAxisPicker {
             return null;
         }
         if (sweep.method() == ParameterSweep.Method.STARDIST) {
-            return firstSwept(swept, STARDIST_COUNT_DRIVER_PRIORITY);
+            return orderableDriver(firstSwept(swept, STARDIST_COUNT_DRIVER_PRIORITY));
         }
         if (sweep.method() == ParameterSweep.Method.CELLPOSE) {
-            return firstSwept(swept, CELLPOSE_COUNT_DRIVER_PRIORITY);
+            return orderableDriver(firstSwept(swept, CELLPOSE_COUNT_DRIVER_PRIORITY));
         }
         if (sweep.method() == ParameterSweep.Method.CLASSICAL) {
-            return firstSwept(swept, CLASSICAL_COUNT_DRIVER_PRIORITY);
+            return orderableDriver(firstSwept(swept, CLASSICAL_COUNT_DRIVER_PRIORITY));
         }
         return null;
     }
@@ -63,6 +63,8 @@ public final class PrimaryAxisPicker {
             }
             ParameterId id = (ParameterId) key;
             ParameterValueList values = entry.getValue();
+            // MODEL and MACRO are categorical: orderable() excludes them from
+            // count-curve and STABLE COUNT eligibility even when swept.
             if (!id.orderable()
                     || values == null || values.size() <= 1
                     || !allNumeric(values)) {
@@ -91,5 +93,9 @@ public final class PrimaryAxisPicker {
             }
         }
         return null;
+    }
+
+    private static ParameterId orderableDriver(ParameterId driver) {
+        return driver != null && driver.orderable() ? driver : null;
     }
 }

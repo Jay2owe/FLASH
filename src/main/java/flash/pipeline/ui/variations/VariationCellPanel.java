@@ -20,6 +20,7 @@ import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import java.awt.BasicStroke;
 import java.awt.BorderLayout;
+import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
@@ -68,9 +69,13 @@ public final class VariationCellPanel extends JPanel {
     private final int placeholderIndex;
     private final ImagePreviewPanel preview = new ImagePreviewPanel("Variation");
     private final JPanel footerPanel = new JPanel();
+    private final JPanel segmentationFooterPanel = new JPanel();
+    private final JPanel filterFooterPanel = new JPanel();
     private final JLabel countLabel = new JLabel("pending", SwingConstants.CENTER);
     private final JLabel deltaLabel = new JLabel("", SwingConstants.CENTER);
     private final JLabel iouLabel = new JLabel("", SwingConstants.CENTER);
+    private final JLabel filterSnrLabel = new JLabel("", SwingConstants.CENTER);
+    private final JLabel filterBgSigmaLabel = new JLabel("", SwingConstants.CENTER);
     private final Timer haloTimer;
     private final Timer peekDelayTimer;
 
@@ -83,7 +88,10 @@ public final class VariationCellPanel extends JPanel {
     private int objectCount = -1;
     private int deltaN = UNKNOWN_DELTA;
     private double iouToNeighbours = Double.NaN;
+    private double filterSnr = Double.NaN;
+    private double filterBgSigma = Double.NaN;
     private String errorText = "";
+    private boolean filterFooterActive;
     private boolean hover;
     private boolean kneeWinner;
     private boolean stabilityWinner;
@@ -130,18 +138,31 @@ public final class VariationCellPanel extends JPanel {
         add(preview, BorderLayout.CENTER);
 
         footerPanel.setOpaque(false);
-        footerPanel.setLayout(new BoxLayout(footerPanel, BoxLayout.X_AXIS));
+        footerPanel.setLayout(new CardLayout());
         footerPanel.setBorder(BorderFactory.createEmptyBorder(0, 2, 0, 2));
+        segmentationFooterPanel.setOpaque(false);
+        segmentationFooterPanel.setLayout(new BoxLayout(segmentationFooterPanel,
+                BoxLayout.X_AXIS));
+        filterFooterPanel.setOpaque(false);
+        filterFooterPanel.setLayout(new BoxLayout(filterFooterPanel, BoxLayout.Y_AXIS));
         configureFooterLabel(countLabel, FlashTheme.mono(11f));
         configureFooterLabel(deltaLabel, FlashTheme.mono(11f));
         configureFooterLabel(iouLabel, FlashTheme.mono(11f));
-        footerPanel.add(Box.createHorizontalGlue());
-        footerPanel.add(countLabel);
-        footerPanel.add(Box.createHorizontalStrut(12));
-        footerPanel.add(deltaLabel);
-        footerPanel.add(Box.createHorizontalStrut(12));
-        footerPanel.add(iouLabel);
-        footerPanel.add(Box.createHorizontalGlue());
+        configureFooterLabel(filterSnrLabel, FlashTheme.mono(11f).deriveFont(Font.BOLD));
+        configureFooterLabel(filterBgSigmaLabel, FlashTheme.mono(10f));
+        filterSnrLabel.setAlignmentX(CENTER_ALIGNMENT);
+        filterBgSigmaLabel.setAlignmentX(CENTER_ALIGNMENT);
+        segmentationFooterPanel.add(Box.createHorizontalGlue());
+        segmentationFooterPanel.add(countLabel);
+        segmentationFooterPanel.add(Box.createHorizontalStrut(12));
+        segmentationFooterPanel.add(deltaLabel);
+        segmentationFooterPanel.add(Box.createHorizontalStrut(12));
+        segmentationFooterPanel.add(iouLabel);
+        segmentationFooterPanel.add(Box.createHorizontalGlue());
+        filterFooterPanel.add(filterSnrLabel);
+        filterFooterPanel.add(filterBgSigmaLabel);
+        footerPanel.add(segmentationFooterPanel, "segmentation");
+        footerPanel.add(filterFooterPanel, "filter");
         add(footerPanel, BorderLayout.SOUTH);
         installMouseHandlers();
         refreshFooter();
@@ -165,12 +186,15 @@ public final class VariationCellPanel extends JPanel {
     }
 
     public void setState(String state) {
+        showSegmentationFooter();
         errorState = false;
         errorText = "";
         acceptEnabled = false;
         objectCount = -1;
         deltaN = UNKNOWN_DELTA;
         iouToNeighbours = Double.NaN;
+        filterSnr = Double.NaN;
+        filterBgSigma = Double.NaN;
         setStateText(state == null || state.trim().isEmpty() ? "pending" : state,
                 FOOTER_COLOR);
         refreshTooltip();
@@ -188,10 +212,51 @@ public final class VariationCellPanel extends JPanel {
             setError(result.error());
             return;
         }
+        if (result.kind() == VariationResult.Kind.FILTER) {
+            setFilterResult(result);
+            return;
+        }
         setLabel(result.label(), result.stats(), result.nObjects(), result.durationMs());
         if (!Double.isNaN(result.meanNeighbourIou())) {
             setIouToNeighbours(result.meanNeighbourIou());
         }
+    }
+
+    public void setFilterResult(final VariationResult result) {
+        if (result == null) {
+            return;
+        }
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setFilterResult(result);
+                }
+            });
+            return;
+        }
+        if (result.hasError()) {
+            setError(result.error());
+            return;
+        }
+        ImagePlus filtered = result.previewImage() == null
+                ? result.label()
+                : result.previewImage();
+        cachedLabel = null;
+        cachedStats = null;
+        objectCount = -1;
+        deltaN = UNKNOWN_DELTA;
+        iouToNeighbours = Double.NaN;
+        durationMs = result.durationMs();
+        errorState = false;
+        errorText = "";
+        acceptEnabled = true;
+        filterSnr = result.snr();
+        filterBgSigma = result.bgSigma();
+        filterSnrLabel.setText("SNR " + formatOneDecimal(filterSnr));
+        filterBgSigmaLabel.setText("bg \u03c3 " + formatInteger(filterBgSigma));
+        showFilterFooter();
+        setDisplayedPreviewImage(filtered);
+        refreshTooltip();
     }
 
     public void setError(final Throwable error) {
@@ -206,11 +271,14 @@ public final class VariationCellPanel extends JPanel {
         errorState = true;
         acceptEnabled = false;
         errorText = errorDetails(error);
+        showSegmentationFooter();
         cachedLabel = createEmptyLabel();
         cachedStats = null;
         objectCount = -1;
         deltaN = UNKNOWN_DELTA;
         iouToNeighbours = Double.NaN;
+        filterSnr = Double.NaN;
+        filterBgSigma = Double.NaN;
         durationMs = -1L;
         setStateText(ERROR_BADGE, ERROR_COLOR);
         refreshTooltip();
@@ -235,6 +303,9 @@ public final class VariationCellPanel extends JPanel {
         this.errorState = false;
         this.errorText = "";
         this.acceptEnabled = true;
+        this.filterSnr = Double.NaN;
+        this.filterBgSigma = Double.NaN;
+        showSegmentationFooter();
 
         ImagePlus rendered = null;
         if (croppedSource != null && dimensionsMatch(croppedSource, cachedLabel)) {
@@ -344,7 +415,20 @@ public final class VariationCellPanel extends JPanel {
         return badgeText();
     }
 
+    String[] footerLinesForTest() {
+        if (filterFooterActive) {
+            return new String[] {
+                    filterSnrLabel.getText(),
+                    filterBgSigmaLabel.getText()
+            };
+        }
+        return new String[] { badgeText() };
+    }
+
     String badgeText() {
+        if (filterFooterActive) {
+            return filterSnrLabel.getText() + " " + filterBgSigmaLabel.getText();
+        }
         StringBuilder out = new StringBuilder(countLabel.getText());
         if (deltaLabel.isVisible() && deltaLabel.getText().length() > 0) {
             out.append(' ').append(deltaLabel.getText());
@@ -473,9 +557,13 @@ public final class VariationCellPanel extends JPanel {
         installMouseHandler(this, listener);
         installMouseHandler(preview, listener);
         installMouseHandler(footerPanel, listener);
+        installMouseHandler(segmentationFooterPanel, listener);
+        installMouseHandler(filterFooterPanel, listener);
         installMouseHandler(countLabel, listener);
         installMouseHandler(deltaLabel, listener);
         installMouseHandler(iouLabel, listener);
+        installMouseHandler(filterSnrLabel, listener);
+        installMouseHandler(filterBgSigmaLabel, listener);
     }
 
     private void installMouseHandler(Component component, MouseAdapter listener) {
@@ -604,6 +692,16 @@ public final class VariationCellPanel extends JPanel {
             setTooltips(sb.toString());
             return;
         }
+        if (filterFooterActive) {
+            sb.append("<br>").append(html(filterSnrLabel.getText()));
+            sb.append("<br>").append(html(filterBgSigmaLabel.getText()));
+            if (durationMs >= 0L) {
+                sb.append("<br>durationMs: ").append(durationMs).append(" ms");
+            }
+            sb.append("</html>");
+            setTooltips(sb.toString());
+            return;
+        }
         if (deltaN != UNKNOWN_DELTA) {
             sb.append("<br>").append("\u0394n vs neighbour: ")
                     .append(formatSigned(deltaN));
@@ -635,9 +733,13 @@ public final class VariationCellPanel extends JPanel {
         setToolTipText(text);
         preview.setToolTipText(text);
         footerPanel.setToolTipText(text);
+        segmentationFooterPanel.setToolTipText(text);
+        filterFooterPanel.setToolTipText(text);
         countLabel.setToolTipText(text);
         deltaLabel.setToolTipText(text);
         iouLabel.setToolTipText(text);
+        filterSnrLabel.setToolTipText(text);
+        filterBgSigmaLabel.setToolTipText(text);
     }
 
     private void setStateText(String text, Color color) {
@@ -648,6 +750,20 @@ public final class VariationCellPanel extends JPanel {
         deltaLabel.setVisible(false);
         iouLabel.setText("");
         iouLabel.setVisible(false);
+        footerPanel.revalidate();
+        footerPanel.repaint();
+    }
+
+    private void showSegmentationFooter() {
+        filterFooterActive = false;
+        CardLayout layout = (CardLayout) footerPanel.getLayout();
+        layout.show(footerPanel, "segmentation");
+    }
+
+    private void showFilterFooter() {
+        filterFooterActive = true;
+        CardLayout layout = (CardLayout) footerPanel.getLayout();
+        layout.show(footerPanel, "filter");
         footerPanel.revalidate();
         footerPanel.repaint();
     }
@@ -797,6 +913,16 @@ public final class VariationCellPanel extends JPanel {
 
     private static String formatDelta(int value) {
         return "\u0394" + formatSignedCompact(value);
+    }
+
+    private static String formatOneDecimal(double value) {
+        double safeValue = Double.isFinite(value) ? value : 0.0d;
+        return String.format(Locale.ROOT, "%.1f", Double.valueOf(safeValue));
+    }
+
+    private static String formatInteger(double value) {
+        double safeValue = Double.isFinite(value) ? value : 0.0d;
+        return String.format(Locale.ROOT, "%.0f", Double.valueOf(safeValue));
     }
 
     private static String formatSigned(int value) {

@@ -83,7 +83,8 @@ public class ClassicalVisualUpgradeIntegrationTest {
                     assertEquals(6, gutterValues(top).size());
                     assertSame(null, gutter(finished.grid, "LEFT"));
 
-                    CountCurveStrip strip = onlyMainCountCurve(finished.dialog);
+                    CountCurveStrip strip =
+                            onlyMainCountCurve(finished.dialog.getWindow());
                     assertTrue(strip.isVisible());
                     assertNotNull("Expected count plateau band",
                             field(strip, "plateauRange"));
@@ -121,8 +122,9 @@ public class ClassicalVisualUpgradeIntegrationTest {
                     assertEquals(ParameterId.MIN_SIZE, gutterAxis(left));
                     assertEquals(2, gutterValues(left).size());
 
-                    assertEquals(1, mainCountCurves(finished.dialog).size());
-                    assertEquals(2, visibleComponents(finished.dialog,
+                    assertEquals(1,
+                            mainCountCurves(finished.dialog.getWindow()).size());
+                    assertEquals(2, visibleComponents(finished.dialog.getWindow(),
                             CountCurveMini.class).size());
                 }
             });
@@ -145,7 +147,7 @@ public class ClassicalVisualUpgradeIntegrationTest {
             final DialogRun finished = run;
             onEdt(new CheckedRunnable() {
                 @Override public void run() throws Exception {
-                    JButton launcher = findButton(finished.dialog,
+                    JButton launcher = findButton(finished.dialog.getWindow(),
                             "Open in large montage");
                     assertNotNull(launcher);
                     assertTrue(launcher.isEnabled());

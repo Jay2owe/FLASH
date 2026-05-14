@@ -3,6 +3,7 @@ package flash.pipeline.ui.variations.strategy;
 import flash.pipeline.stardist.StarDistVariationRunner;
 import flash.pipeline.ui.config.StarDistParameterStage;
 import flash.pipeline.ui.variations.CropSpec;
+import flash.pipeline.ui.variations.MacroPreprocessor;
 import flash.pipeline.ui.variations.ParameterId;
 import flash.pipeline.ui.variations.ParameterKey;
 import flash.pipeline.ui.variations.ParameterSweep;
@@ -53,6 +54,9 @@ public final class StarDistFastNms implements VariationStrategy {
     static boolean canHandle(ParameterSweep sweep, boolean parityVerified) {
         if (!parityVerified || sweep == null
                 || sweep.method() != ParameterSweep.Method.STARDIST) {
+            return false;
+        }
+        if (MacroPreprocessor.hasActiveMacroValue(sweep)) {
             return false;
         }
         Map<ParameterKey, ParameterValueList> valueLists = sweep.valueLists();

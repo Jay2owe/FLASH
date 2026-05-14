@@ -5,6 +5,10 @@ public final class ParameterLabels {
     private ParameterLabels() {
     }
 
+    public static String labelFor(ParameterKey key) {
+        return editorLabel(key);
+    }
+
     public static String labelFor(ParameterId id) {
         return editorLabel(id);
     }
@@ -39,6 +43,7 @@ public final class ParameterLabels {
         if (id == ParameterId.FLOW_THRESHOLD) return "flow";
         if (id == ParameterId.CELLPROB_THRESHOLD) return "cellprob";
         if (id == ParameterId.MODEL) return "model";
+        if (id == ParameterId.MACRO) return "macro";
         return id == null ? "" : id.name();
     }
 
@@ -66,6 +71,7 @@ public final class ParameterLabels {
         if (id == ParameterId.FLOW_THRESHOLD) return "flow threshold";
         if (id == ParameterId.CELLPROB_THRESHOLD) return "cellprob threshold";
         if (id == ParameterId.MODEL) return "model";
+        if (id == ParameterId.MACRO) return "macro";
         return id == null ? "" : id.name();
     }
 }

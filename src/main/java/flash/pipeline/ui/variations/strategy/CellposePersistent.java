@@ -8,6 +8,7 @@ import flash.pipeline.ui.config.CellposeParameterStage;
 import flash.pipeline.ui.config.ConfigQcContext;
 import flash.pipeline.ui.preview.ObjectSizeFilterPreview;
 import flash.pipeline.ui.variations.CropSpec;
+import flash.pipeline.ui.variations.MacroPreprocessor;
 import flash.pipeline.ui.variations.ParameterCombo;
 import flash.pipeline.ui.variations.ParameterSweep;
 import flash.pipeline.ui.variations.VariationCache;
@@ -21,6 +22,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
@@ -48,6 +50,7 @@ public final class CellposePersistent implements VariationStrategy {
     private final ConfigQcContext configContext;
     private final String channelName;
     private final WorkerFactory workerFactory;
+    private final MacroPreprocessor macroPreprocessor = new MacroPreprocessor();
 
     public CellposePersistent(ImagePlus filteredSource,
                               CropSpec crop,
@@ -103,67 +106,110 @@ public final class CellposePersistent implements VariationStrategy {
         CropSpec activeCrop = sweep.cropSpec() == null ? crop : sweep.cropSpec();
         ImagePlus cropped = activeCrop.apply(filteredSource);
         ImagePlus companion = null;
-        WorkerState worker = null;
         List<ParameterCombo> ordered = SweepDispatchOrder.order(sweep);
-        int fallbackFrom = -1;
+        List<ParameterCombo> fallbackCombos = null;
         try {
             companion = createCroppedCompanion(activeCrop);
-            for (int i = 0; i < ordered.size(); i++) {
+            List<MacroGroup> groups = groupByMacro(ordered);
+            for (int i = 0; i < groups.size(); i++) {
                 if (isCancelled(cancelCheck)) {
                     return;
                 }
-                ParameterCombo combo = ordered.get(i);
-                String cacheKey = VariationCache.keyFor(sweep, combo);
-                ImagePlus cached = cache == null ? null : cache.get(cacheKey);
-                if (cached != null) {
-                    publisher.accept(resultFor(combo, cached, cropped, 0L));
-                    continue;
-                }
-                CellposeParameterStage.Parameters parameters =
-                        CellposeOneShot.overlay(baseParams, combo);
-                try {
-                    if (worker == null) {
-                        worker = openWorker(cropped, companion, parameters);
-                    }
-                    CellposeWorkerResult result = await(worker.worker.submit(
-                                    new CellposeWorkerRequest(requestId(i, cacheKey),
-                                            parameters.diameter,
-                                            parameters.flowThreshold,
-                                            parameters.cellprobThreshold)),
-                            cancelCheck);
-                    if (result == null || result.hasError()) {
-                        String message = result == null
-                                ? "Cellpose helper was cancelled."
-                                : result.errorText();
-                        throw new IllegalStateException(message);
-                    }
-                    VariationResult variationResult = resultFor(combo,
-                            result.labelImage(), cropped, result.durationMs());
-                    if (cache != null) {
-                        cache.put(cacheKey, variationResult.label());
-                    }
-                    if (!isCancelled(cancelCheck)) {
-                        publisher.accept(variationResult);
-                    }
-                } catch (Exception e) {
-                    fallbackFrom = i;
+                fallbackCombos = processGroup(sweep,
+                        cropped,
+                        companion,
+                        groups,
+                        i,
+                        publisher,
+                        cancelCheck);
+                if (fallbackCombos != null) {
                     break;
                 }
             }
         } finally {
-            if (worker != null) {
-                worker.close();
-            }
             closeIfOwned(companion, filteredSource, cropped);
             closeIfOwned(cropped, filteredSource, null);
         }
 
-        if (fallbackFrom >= 0 && !isCancelled(cancelCheck)) {
-            oneShot().dispatchCombos(sweep,
-                    new ArrayList<ParameterCombo>(ordered.subList(
-                            fallbackFrom, ordered.size())),
-                    publisher,
-                    cancelCheck);
+        if (fallbackCombos != null && !isCancelled(cancelCheck)) {
+            oneShot().dispatchCombos(sweep, fallbackCombos, publisher, cancelCheck);
+        }
+    }
+
+    private List<ParameterCombo> processGroup(ParameterSweep sweep,
+                                              ImagePlus cropped,
+                                              ImagePlus companion,
+                                              List<MacroGroup> groups,
+                                              int groupIndex,
+                                              Consumer<VariationResult> publisher,
+                                              BooleanSupplier cancelCheck)
+            throws Exception {
+        MacroGroup group = groups.get(groupIndex);
+        List<PendingCombo> pending = new ArrayList<PendingCombo>();
+        for (int i = 0; i < group.items.size(); i++) {
+            IndexedCombo item = group.items.get(i);
+            String cacheKey = VariationCache.keyFor(sweep, item.combo);
+            ImagePlus cached = cache == null ? null : cache.get(cacheKey);
+            if (cached != null) {
+                publisher.accept(resultFor(item.combo, cached, cropped, 0L));
+            } else {
+                pending.add(new PendingCombo(item.index, item.combo, cacheKey));
+            }
+        }
+        if (pending.isEmpty() || isCancelled(cancelCheck)) {
+            return null;
+        }
+
+        ImagePlus input = null;
+        WorkerState worker = null;
+        try {
+            input = macroPreprocessor.prepare(cropped, sweep, pending.get(0).combo);
+        } catch (Exception e) {
+            publishFailures(pending, e, publisher, cancelCheck);
+            return null;
+        }
+
+        int pendingIndex = 0;
+        try {
+            CellposeParameterStage.Parameters firstParameters =
+                    CellposeOneShot.overlay(baseParams, pending.get(0).combo);
+            worker = openWorker(input, companion, firstParameters);
+            for (pendingIndex = 0; pendingIndex < pending.size(); pendingIndex++) {
+                if (isCancelled(cancelCheck)) {
+                    return null;
+                }
+                PendingCombo item = pending.get(pendingIndex);
+                CellposeParameterStage.Parameters parameters =
+                        CellposeOneShot.overlay(baseParams, item.combo);
+                CellposeWorkerResult result = await(worker.worker.submit(
+                                new CellposeWorkerRequest(requestId(item.index, item.cacheKey),
+                                        parameters.diameter,
+                                        parameters.flowThreshold,
+                                        parameters.cellprobThreshold)),
+                        cancelCheck);
+                if (result == null || result.hasError()) {
+                    String message = result == null
+                            ? "Cellpose helper was cancelled."
+                            : result.errorText();
+                    throw new IllegalStateException(message);
+                }
+                VariationResult variationResult = resultFor(item.combo,
+                        result.labelImage(), input, result.durationMs());
+                if (cache != null) {
+                    cache.put(item.cacheKey, variationResult.label());
+                }
+                if (!isCancelled(cancelCheck)) {
+                    publisher.accept(variationResult);
+                }
+            }
+            return null;
+        } catch (Exception e) {
+            return fallbackCombos(groups, groupIndex, pending, pendingIndex);
+        } finally {
+            if (worker != null) {
+                worker.close();
+            }
+            macroPreprocessor.closeIfOwned(input, cropped);
         }
     }
 
@@ -276,6 +322,57 @@ public final class CellposePersistent implements VariationStrategy {
         return "v" + index + "_" + (cacheKey == null ? "cellpose" : cacheKey);
     }
 
+    private static List<MacroGroup> groupByMacro(List<ParameterCombo> ordered) {
+        LinkedHashMap<String, MacroGroup> byToken =
+                new LinkedHashMap<String, MacroGroup>();
+        if (ordered == null) {
+            return new ArrayList<MacroGroup>();
+        }
+        for (int i = 0; i < ordered.size(); i++) {
+            ParameterCombo combo = ordered.get(i);
+            String token = MacroPreprocessor.macroToken(combo);
+            MacroGroup group = byToken.get(token);
+            if (group == null) {
+                group = new MacroGroup();
+                byToken.put(token, group);
+            }
+            group.items.add(new IndexedCombo(i, combo));
+        }
+        return new ArrayList<MacroGroup>(byToken.values());
+    }
+
+    private static List<ParameterCombo> fallbackCombos(List<MacroGroup> groups,
+                                                       int groupIndex,
+                                                       List<PendingCombo> pending,
+                                                       int pendingIndex) {
+        List<ParameterCombo> out = new ArrayList<ParameterCombo>();
+        for (int i = Math.max(0, pendingIndex); pending != null && i < pending.size(); i++) {
+            out.add(pending.get(i).combo);
+        }
+        for (int i = groupIndex + 1; groups != null && i < groups.size(); i++) {
+            MacroGroup group = groups.get(i);
+            for (int j = 0; j < group.items.size(); j++) {
+                out.add(group.items.get(j).combo);
+            }
+        }
+        return out;
+    }
+
+    private static void publishFailures(List<PendingCombo> pending,
+                                        Throwable error,
+                                        Consumer<VariationResult> publisher,
+                                        BooleanSupplier cancelCheck) {
+        if (pending == null || publisher == null || isCancelled(cancelCheck)) {
+            return;
+        }
+        for (int i = 0; i < pending.size(); i++) {
+            if (isCancelled(cancelCheck)) {
+                return;
+            }
+            publisher.accept(VariationResult.failure(pending.get(i).combo, error));
+        }
+    }
+
     private void closeIfOwned(ImagePlus image,
                               ImagePlus firstOwner,
                               ImagePlus secondOwner) {
@@ -333,6 +430,35 @@ public final class CellposePersistent implements VariationStrategy {
                 previewAdapter.close(runtimeInput);
             }
             deleteRecursively(tempDir);
+        }
+    }
+
+    private static final class MacroGroup {
+        final List<IndexedCombo> items = new ArrayList<IndexedCombo>();
+
+        MacroGroup() {
+        }
+    }
+
+    private static final class IndexedCombo {
+        final int index;
+        final ParameterCombo combo;
+
+        IndexedCombo(int index, ParameterCombo combo) {
+            this.index = index;
+            this.combo = combo;
+        }
+    }
+
+    private static final class PendingCombo {
+        final int index;
+        final ParameterCombo combo;
+        final String cacheKey;
+
+        PendingCombo(int index, ParameterCombo combo, String cacheKey) {
+            this.index = index;
+            this.combo = combo;
+            this.cacheKey = cacheKey;
         }
     }
 

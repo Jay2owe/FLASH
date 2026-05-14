@@ -35,7 +35,6 @@ import javax.swing.SwingUtilities;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.GraphicsEnvironment;
-import java.awt.Window;
 import java.io.File;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -80,7 +79,7 @@ public class StarDistVisualUpgradeIntegrationTest {
                     assertEquals(0, ribbonCount(cells, "kneeWinner"));
                     assertTrue(ribbonCount(cells, "stabilityWinner") <= 1);
 
-                    List<CountCurveStrip> strips = descendants(dialog.getWindow(),
+                    List<CountCurveStrip> strips = exactDescendants(dialog.getWindow(),
                             CountCurveStrip.class);
                     assertFalse("Expected a count-curve strip above the StarDist grid.",
                             strips.isEmpty());
@@ -483,6 +482,12 @@ public class StarDistVisualUpgradeIntegrationTest {
         return out;
     }
 
+    private static <T> List<T> exactDescendants(Component root, Class<T> type) {
+        List<T> out = new ArrayList<T>();
+        collectExactDescendants(root, type, out);
+        return out;
+    }
+
     private static <T> void collectDescendants(Component component,
                                                Class<T> type,
                                                List<T> out) {
@@ -496,6 +501,23 @@ public class StarDistVisualUpgradeIntegrationTest {
             Component[] children = ((Container) component).getComponents();
             for (int i = 0; i < children.length; i++) {
                 collectDescendants(children[i], type, out);
+            }
+        }
+    }
+
+    private static <T> void collectExactDescendants(Component component,
+                                                    Class<T> type,
+                                                    List<T> out) {
+        if (component == null) {
+            return;
+        }
+        if (component.getClass().equals(type)) {
+            out.add(type.cast(component));
+        }
+        if (component instanceof Container) {
+            Component[] children = ((Container) component).getComponents();
+            for (int i = 0; i < children.length; i++) {
+                collectExactDescendants(children[i], type, out);
             }
         }
     }

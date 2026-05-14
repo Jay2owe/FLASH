@@ -6,6 +6,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 
 public class ParameterComboTest {
 
@@ -27,5 +28,20 @@ public class ParameterComboTest {
         assertEquals(first.toCanonicalJson(), second.toCanonicalJson());
         assertEquals("{\"MAX_SIZE\":100,\"MIN_SIZE\":10,\"THRESHOLD\":42.5}",
                 first.toCanonicalJson());
+    }
+
+    @Test
+    public void macroValueSerializesAsTokenNotRawScript() {
+        String script = "run(\"Gaussian Blur...\", \"sigma=2 stack\");";
+        String expectedToken = MacroToken.forScript(
+                MacroToken.SOURCE_PASTED, "", script).value();
+
+        ParameterCombo combo = ParameterCombo.builder()
+                .put(ParameterId.MACRO, script)
+                .build();
+
+        assertEquals("{\"MACRO\":\"" + expectedToken + "\"}",
+                combo.toCanonicalJson());
+        assertFalse(combo.toCanonicalJson().contains("Gaussian Blur"));
     }
 }

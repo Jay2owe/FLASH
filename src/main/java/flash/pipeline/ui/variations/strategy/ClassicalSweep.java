@@ -3,6 +3,7 @@ package flash.pipeline.ui.variations.strategy;
 import flash.pipeline.objects.ObjectsCounter3DWrapper;
 import flash.pipeline.ui.config.ClassicalSegmentationStage;
 import flash.pipeline.ui.variations.CropSpec;
+import flash.pipeline.ui.variations.MacroPreprocessor;
 import flash.pipeline.ui.variations.ParameterCombo;
 import flash.pipeline.ui.variations.ParameterId;
 import flash.pipeline.ui.variations.ParameterSweep;
@@ -33,6 +34,7 @@ public final class ClassicalSweep implements VariationStrategy {
     private final VariationCache cache;
     private final ClassicalSegmentationStage.PreviewAdapter previewAdapter;
     private final int parallelism;
+    private final MacroPreprocessor macroPreprocessor = new MacroPreprocessor();
 
     public ClassicalSweep(ImagePlus filteredSource,
                           CropSpec crop,
@@ -88,7 +90,7 @@ public final class ClassicalSweep implements VariationStrategy {
                 tasks.add(pool.submit(new Runnable() {
                     @Override
                     public void run() {
-                        runOne(cropped, combo, cacheKey, publisher, cancelCheck);
+                        runOne(cropped, sweep, combo, cacheKey, publisher, cancelCheck);
                     }
                 }));
             }
@@ -106,6 +108,7 @@ public final class ClassicalSweep implements VariationStrategy {
     }
 
     private void runOne(ImagePlus cropped,
+                        ParameterSweep sweep,
                         ParameterCombo combo,
                         String cacheKey,
                         Consumer<VariationResult> publisher,
@@ -114,17 +117,19 @@ public final class ClassicalSweep implements VariationStrategy {
             return;
         }
         long started = System.currentTimeMillis();
+        ImagePlus input = null;
         try {
+            input = macroPreprocessor.prepare(cropped, sweep, combo);
             int threshold = intParameter(combo, ParameterId.THRESHOLD, 0);
             int minSize = intParameter(combo, ParameterId.MIN_SIZE, 0);
             int maxSize = intParameter(combo, ParameterId.MAX_SIZE, Integer.MAX_VALUE);
             ObjectsCounter3DWrapper.Result preview =
-                    previewAdapter.runPreview(cropped, threshold, minSize, maxSize);
+                    previewAdapter.runPreview(input, threshold, minSize, maxSize);
             ImagePlus label = preview == null ? null : preview.getObjectsMap();
             ResultsTable stats = preview == null ? null : preview.getStatistics();
             int count = previewAdapter.countObjects(preview);
             if (label == null) {
-                label = emptyLabelMapLike(cropped);
+                label = emptyLabelMapLike(input);
             }
             if (cache != null) {
                 cache.put(cacheKey, label);
@@ -137,6 +142,8 @@ public final class ClassicalSweep implements VariationStrategy {
             if (!isCancelled(cancelCheck)) {
                 publisher.accept(VariationResult.failure(combo, t));
             }
+        } finally {
+            macroPreprocessor.closeIfOwned(input, cropped);
         }
     }
 
