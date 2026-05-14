@@ -9,6 +9,7 @@ import flash.pipeline.image.dag.DagNode;
 import flash.pipeline.image.dag.DagToIjmEmitter;
 import flash.pipeline.image.dag.IjmToDagLoader;
 import flash.pipeline.ui.PipelineDialog;
+import flash.pipeline.ui.preview.PipelineFigureExporter;
 import flash.pipeline.ui.sandbox.FilterAlternatives;
 import flash.pipeline.ui.sandbox.FilterAlternatives.Alternative;
 import flash.pipeline.ui.sandbox.FilterAlternatives.SlotRole;
@@ -16,6 +17,7 @@ import flash.pipeline.ui.variations.analysis.HistogramShapeStability;
 import flash.pipeline.ui.variations.strategy.FilterSweepStrategy;
 
 import ij.ImagePlus;
+import ij.io.FileInfo;
 
 import javax.swing.BorderFactory;
 import javax.swing.Box;
@@ -26,6 +28,7 @@ import javax.swing.DefaultListModel;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
+import javax.swing.JFileChooser;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JPanel;
@@ -51,6 +54,8 @@ import java.awt.Rectangle;
 import java.awt.Window;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
+import java.awt.image.BufferedImage;
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -110,6 +115,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
     private final DownstreamSegmenter.Resolution downstreamResolution;
 
     private JButton openLargeMontageButton;
+    private JButton exportPipelineFigureButton;
     private JButton useComboButton;
     private JButton runButton;
     private VariationExecutor executor;
@@ -127,6 +133,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
     private boolean showOtsuOverlay;
     private boolean suppressCropEvents;
     private boolean downstreamStartedForCurrentResults;
+    private File pipelineFigureExportFileForTest;
     private int completedCount;
     private int failedCount;
 
@@ -241,6 +248,14 @@ public final class MacroVariationsDialog extends PipelineDialog {
         return openLargeMontageButton;
     }
 
+    JButton exportPipelineFigureButtonForTest() {
+        return exportPipelineFigureButton;
+    }
+
+    void setPipelineFigureExportFileForTest(File file) {
+        pipelineFigureExportFileForTest = file;
+    }
+
     JButton useComboButtonForTest() {
         return useComboButton;
     }
@@ -345,6 +360,13 @@ public final class MacroVariationsDialog extends PipelineDialog {
 
         openLargeMontageButton = addFooterButton("Open large montage");
         openLargeMontageButton.setEnabled(false);
+        exportPipelineFigureButton = addFooterButton("Export pipeline figure");
+        exportPipelineFigureButton.setEnabled(false);
+        exportPipelineFigureButton.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                exportSelectedPipelineFigure();
+            }
+        });
         JButton close = addRightFooterButton("Close");
         close.addActionListener(new ActionListener() {
             @Override public void actionPerformed(ActionEvent e) {
@@ -445,6 +467,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
         }
         useComboButton.setEnabled(false);
         openLargeMontageButton.setEnabled(false);
+        exportPipelineFigureButton.setEnabled(false);
 
         final ImagePlus croppedSource = currentSweep.cropSpec().apply(source);
         currentBaselineCrop = croppedSource;
@@ -2102,7 +2125,103 @@ public final class MacroVariationsDialog extends PipelineDialog {
         if (useComboButton != null) {
             useComboButton.setEnabled(true);
         }
+        if (exportPipelineFigureButton != null) {
+            exportPipelineFigureButton.setEnabled(true);
+        }
         updateSelectedStatus(resultForCombo(combo));
+    }
+
+    private void exportSelectedPipelineFigure() {
+        if (selectedCombo == null || selectedStrategy == null) {
+            setStatusTextNow("Select a completed tile first.");
+            return;
+        }
+        ImagePlus source = currentBaselineCrop == null
+                ? context.sourceImage()
+                : currentBaselineCrop;
+        if (source == null) {
+            setStatusTextNow("No source image is available for export.");
+            return;
+        }
+        File out = choosePipelineFigureFile();
+        if (out == null) {
+            return;
+        }
+        try {
+            String macro = selectedStrategy.renderMacroForCombo(selectedCombo);
+            BufferedImage figure = PipelineFigureExporter.render(macro,
+                    source,
+                    context.previewAdapter(),
+                    currentRunCache);
+            PipelineFigureExporter.exportPNG(figure, out);
+            setStatusTextNow("Exported pipeline figure: " + out.getName());
+        } catch (Exception ex) {
+            setStatusTextNow("Export failed: " + safe(ex.getMessage()));
+            showMessage("Could not export pipeline figure: " + ex.getMessage());
+        }
+    }
+
+    private File choosePipelineFigureFile() {
+        if (pipelineFigureExportFileForTest != null) {
+            return withPngExtension(pipelineFigureExportFileForTest);
+        }
+        if (GraphicsEnvironment.isHeadless()) {
+            return null;
+        }
+        File directory = defaultExportDirectory();
+        JFileChooser chooser = new JFileChooser(directory);
+        chooser.setDialogTitle("Export pipeline figure");
+        chooser.setSelectedFile(new File(directory, defaultExportFileName()));
+        int choice = chooser.showSaveDialog(getWindow());
+        if (choice != JFileChooser.APPROVE_OPTION) {
+            return null;
+        }
+        return withPngExtension(chooser.getSelectedFile());
+    }
+
+    private File defaultExportDirectory() {
+        ImagePlus source = context.sourceImage();
+        if (source != null) {
+            FileInfo info = source.getOriginalFileInfo();
+            if (info != null && info.directory != null
+                    && info.directory.trim().length() > 0) {
+                File parent = new File(info.directory);
+                if (parent.isDirectory()) {
+                    return parent;
+                }
+            }
+        }
+        File bin = context.binFolder();
+        if (bin != null) {
+            return bin;
+        }
+        return new File(".");
+    }
+
+    private String defaultExportFileName() {
+        ImagePlus source = context.sourceImage();
+        String title = source == null ? "pipeline" : source.getTitle();
+        String base = title == null || title.trim().isEmpty()
+                ? "pipeline"
+                : title.trim();
+        base = base.replaceAll("[<>:\"/\\\\|?*\\p{Cntrl}]+", "_").trim();
+        if (base.length() == 0) {
+            base = "pipeline";
+        }
+        return base + "-pipeline-figure.png";
+    }
+
+    private static File withPngExtension(File file) {
+        if (file == null) {
+            return null;
+        }
+        String name = file.getName();
+        if (name != null && name.toLowerCase(java.util.Locale.ROOT).endsWith(".png")) {
+            return file;
+        }
+        File parent = file.getParentFile();
+        String path = file.getPath() + ".png";
+        return parent == null ? new File(path) : new File(parent, name + ".png");
     }
 
     private VariationResult resultForCombo(ParameterCombo combo) {
