@@ -1,6 +1,7 @@
 package flash.pipeline.ui.variations;
 
 import flash.pipeline.ui.PipelineDialog;
+import flash.pipeline.ui.variations.analysis.IouStability;
 import flash.pipeline.ui.variations.analysis.KneeDetector;
 import flash.pipeline.ui.variations.strategy.VariationStrategyChooser;
 
@@ -414,6 +415,7 @@ public final class VariationsDialog extends PipelineDialog {
         statusLabel.setText("Status: " + completedCount + "/" + cells.size() + " complete");
         if (completedCount >= cells.size()) {
             applyKneeHint();
+            applyStabilityHint();
         }
     }
 
@@ -435,6 +437,7 @@ public final class VariationsDialog extends PipelineDialog {
         try {
             worker.get();
             applyKneeHint();
+            applyStabilityHint();
             statusLabel.setText("Status: done");
         } catch (Exception e) {
             statusLabel.setText("Status: error");
@@ -473,6 +476,39 @@ public final class VariationsDialog extends PipelineDialog {
         cell.setBorderHint(VariationCellPanel.BorderHint.KNEE);
         suggestionLabel.setText("Suggested: knee at "
                 + swept.name() + " = " + safe(String.valueOf(cell.combo().get(swept))));
+    }
+
+    private void applyStabilityHint() {
+        if (currentSweep == null
+                || cells.size() < 3
+                || resultsByCell.size() != cells.size()) {
+            return;
+        }
+        List<ParameterCombo> combos = new ArrayList<ParameterCombo>(cells.size());
+        List<ImagePlus> labels = new ArrayList<ImagePlus>(cells.size());
+        for (int i = 0; i < resultsByCell.size(); i++) {
+            VariationResult result = resultsByCell.get(i);
+            if (result == null || result.hasError() || result.label() == null) {
+                return;
+            }
+            combos.add(result.combo());
+            labels.add(result.label());
+        }
+        OptionalInt stableIndex = IouStability.findMostStable(combos, labels);
+        if (!stableIndex.isPresent()) {
+            if ("Suggested: pending".equals(suggestionLabel.getText())) {
+                suggestionLabel.setText("Suggested: no stable cell");
+            }
+            return;
+        }
+        int index = stableIndex.getAsInt();
+        if (index < 0 || index >= cells.size()) {
+            return;
+        }
+        double mean = IouStability.meanNeighbourIou(combos, labels, index);
+        VariationCellPanel cell = cells.get(index);
+        cell.setStabilityWinner(true, mean);
+        suggestionLabel.setText("Suggested: stable cell " + (index + 1));
     }
 
     private ParameterId singleNumericAxis() {

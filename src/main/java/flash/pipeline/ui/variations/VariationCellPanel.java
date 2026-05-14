@@ -20,6 +20,7 @@ import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.util.Locale;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
@@ -33,6 +34,7 @@ public final class VariationCellPanel extends JPanel {
     public enum BorderHint {
         NONE,
         KNEE,
+        STABLE,
         STABILITY
     }
 
@@ -48,6 +50,7 @@ public final class VariationCellPanel extends JPanel {
     private ResultsTable cachedStats;
     private long durationMs = -1L;
     private int objectCount = -1;
+    private double meanNeighbourIou = Double.NaN;
     private boolean hover;
     private boolean kneeWinner;
     private boolean stabilityWinner;
@@ -160,7 +163,12 @@ public final class VariationCellPanel extends JPanel {
     }
 
     public void setStabilityWinner(boolean stabilityWinner) {
+        setStabilityWinner(stabilityWinner, Double.NaN);
+    }
+
+    public void setStabilityWinner(boolean stabilityWinner, double meanNeighbourIou) {
         this.stabilityWinner = stabilityWinner;
+        this.meanNeighbourIou = stabilityWinner ? meanNeighbourIou : Double.NaN;
         refreshFooter();
         refreshBorder();
         refreshTooltip();
@@ -170,9 +178,10 @@ public final class VariationCellPanel extends JPanel {
         if (hint == null || hint == BorderHint.NONE) {
             kneeWinner = false;
             stabilityWinner = false;
+            meanNeighbourIou = Double.NaN;
         } else if (hint == BorderHint.KNEE) {
             kneeWinner = true;
-        } else if (hint == BorderHint.STABILITY) {
+        } else if (hint == BorderHint.STABLE || hint == BorderHint.STABILITY) {
             stabilityWinner = true;
         }
         refreshFooter();
@@ -243,7 +252,7 @@ public final class VariationCellPanel extends JPanel {
         int thickness = 1;
         if (stabilityWinner) {
             color = STABILITY_BORDER;
-            thickness = 3;
+            thickness = 4;
         } else if (kneeWinner) {
             color = KNEE_BORDER;
             thickness = 3;
@@ -278,7 +287,13 @@ public final class VariationCellPanel extends JPanel {
         sb.append("<html>");
         sb.append(combo.toCanonicalJson());
         if (stabilityWinner) {
-            sb.append("<br>Most stable");
+            if (Double.isNaN(meanNeighbourIou)) {
+                sb.append("<br>Most stable");
+            } else {
+                sb.append("<br>Mean IoU with neighbours: ")
+                        .append(String.format(Locale.ROOT, "%.2f", meanNeighbourIou))
+                        .append(" (most stable)");
+            }
         } else if (kneeWinner) {
             sb.append("<br>Suggested knee");
         }
