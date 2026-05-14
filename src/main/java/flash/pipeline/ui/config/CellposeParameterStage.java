@@ -794,14 +794,8 @@ public final class CellposeParameterStage implements ConfigQcStage {
         }
         final WeakReference<CellposeParameterStage> stageRef =
                 new WeakReference<CellposeParameterStage>(this);
-        future.whenCompleteAsync(new java.util.function.BiConsumer<CellposeRuntime.Status, Throwable>() {
-            @Override public void accept(CellposeRuntime.Status status, Throwable throwable) {
-                CellposeParameterStage stage = stageRef.get();
-                if (stage != null) {
-                    stage.applyRuntimeProbeResult(requestId, status, throwable);
-                }
-            }
-        }, SwingUtilities::invokeLater);
+        future.whenCompleteAsync(new RuntimeProbeCallback(stageRef, requestId),
+                SwingUtilities::invokeLater);
     }
 
     private void applyRuntimeProbeResult(int requestId, CellposeRuntime.Status status, Throwable throwable) {
@@ -1373,6 +1367,24 @@ public final class CellposeParameterStage implements ConfigQcStage {
                 return new GpuInstallResult(false, "GPU install is not available here.", "");
             }
         };
+    }
+
+    static final class RuntimeProbeCallback
+            implements java.util.function.BiConsumer<CellposeRuntime.Status, Throwable> {
+        private final WeakReference<CellposeParameterStage> stageRef;
+        private final int requestId;
+
+        RuntimeProbeCallback(WeakReference<CellposeParameterStage> stageRef, int requestId) {
+            this.stageRef = stageRef;
+            this.requestId = requestId;
+        }
+
+        @Override public void accept(CellposeRuntime.Status status, Throwable throwable) {
+            CellposeParameterStage stage = stageRef == null ? null : stageRef.get();
+            if (stage != null) {
+                stage.applyRuntimeProbeResult(requestId, status, throwable);
+            }
+        }
     }
 
     private static double parse(JTextField field, double fallback) {

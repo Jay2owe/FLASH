@@ -18,6 +18,8 @@ import javax.swing.text.JTextComponent;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.image.IndexColorModel;
+import java.lang.ref.WeakReference;
+import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.concurrent.CompletableFuture;
 
@@ -315,6 +317,21 @@ public class CellposeParameterStageTest {
         flushEdt();
 
         assertEquals("Runtime: Checking Cellpose...", stage.runtimeHintTextForTest());
+    }
+
+    @Test
+    public void runtimeProbeCallbackDoesNotCaptureStageStrongly() throws Exception {
+        Field[] fields = CellposeParameterStage.RuntimeProbeCallback.class.getDeclaredFields();
+        boolean hasWeakStageReference = false;
+        for (int i = 0; i < fields.length; i++) {
+            Field field = fields[i];
+            assertFalse("Runtime probe callback must not retain the enclosing stage",
+                    "this$0".equals(field.getName()));
+            if ("stageRef".equals(field.getName())) {
+                hasWeakStageReference = WeakReference.class.equals(field.getType());
+            }
+        }
+        assertTrue(hasWeakStageReference);
     }
 
     @Test
