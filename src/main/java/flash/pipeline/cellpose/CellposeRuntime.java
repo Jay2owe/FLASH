@@ -43,13 +43,16 @@ public final class CellposeRuntime {
             return System.currentTimeMillis();
         }
     };
-    private static final ExecutorService PROBE_EXECUTOR = Executors.newSingleThreadExecutor(new ThreadFactory() {
-        @Override public Thread newThread(Runnable runnable) {
-            Thread thread = new Thread(runnable, "FLASH Cellpose runtime probe");
-            thread.setDaemon(true);
-            return thread;
-        }
-    });
+    private static volatile ExecutorService probeExecutor = newProbeExecutor();
+    private static ExecutorService newProbeExecutor() {
+        return Executors.newSingleThreadExecutor(new ThreadFactory() {
+            @Override public Thread newThread(Runnable runnable) {
+                Thread thread = new Thread(runnable, "FLASH Cellpose runtime probe");
+                thread.setDaemon(true);
+                return thread;
+            }
+        });
+    }
     private static volatile Status cached;
     private static volatile long cachedAtMs;
     private static volatile CompletableFuture<Status> inFlight;
@@ -216,7 +219,7 @@ public final class CellposeRuntime {
                 @Override public Status get() {
                     return probeBackend.probeConfigured();
                 }
-            }, PROBE_EXECUTOR);
+            }, probeExecutor);
             inFlight = future;
             future.whenComplete(new java.util.function.BiConsumer<Status, Throwable>() {
                 @Override public void accept(Status status, Throwable throwable) {
@@ -251,6 +254,7 @@ public final class CellposeRuntime {
             cached = null;
             cachedAtMs = 0L;
             inFlight = null;
+            resetProbeExecutorForTest();
         }
     }
 
@@ -261,6 +265,7 @@ public final class CellposeRuntime {
             cached = null;
             cachedAtMs = 0L;
             inFlight = null;
+            resetProbeExecutorForTest();
         }
     }
 
@@ -272,7 +277,12 @@ public final class CellposeRuntime {
             cached = null;
             cachedAtMs = 0L;
             inFlight = null;
+            resetProbeExecutorForTest();
         }
+    }
+
+    private static void resetProbeExecutorForTest() {
+        probeExecutor = newProbeExecutor();
     }
 
     private static boolean isFresh(Status status, long nowMs) {
