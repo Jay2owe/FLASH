@@ -3,12 +3,18 @@ package flash.pipeline.ui.config;
 import flash.pipeline.help.SetupHelpCatalog;
 import flash.pipeline.help.SetupHelpTopic;
 import flash.pipeline.image.FilterMacroEditorModel;
+import flash.pipeline.image.dag.Combiner;
 import flash.pipeline.image.dag.DagIR;
+import flash.pipeline.image.dag.DagLine;
+import flash.pipeline.image.dag.DagNode;
 import flash.pipeline.image.dag.IjmToDagLoader;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import flash.pipeline.ui.sandbox.FilterBuilderPanel;
 import flash.pipeline.ui.sandbox.FilterCatalog;
 import flash.pipeline.ui.sandbox.RecorderParameterProbe;
+import flash.pipeline.ui.variations.CropSpec;
+import flash.pipeline.ui.variations.FilterVariationEngineContext;
+import flash.pipeline.ui.variations.MacroVariationsDialog;
 import ij.ImagePlus;
 
 import javax.swing.BorderFactory;
@@ -152,6 +158,7 @@ public final class FilterParameterStage implements ConfigQcStage {
     private JComboBox<String> presetCombo;
     private JButton previewButton;
     private JButton customBuilderButton;
+    private JButton varyButton;
     private JButton resetButton;
     private JButton saveAsButton;
     private JButton addFilterButton;
@@ -489,12 +496,39 @@ public final class FilterParameterStage implements ConfigQcStage {
         return customBuilderButton != null && customBuilderButton.isVisible();
     }
 
+    boolean isVaryButtonEnabledForTest() {
+        return varyButton != null && varyButton.isEnabled();
+    }
+
+    String varyButtonTooltipForTest() {
+        return varyButton == null ? "" : varyButton.getToolTipText();
+    }
+
     boolean isLinearForTest() {
         return linear;
     }
 
+    String parameterFieldValueForTest(String key) {
+        for (int i = 0; i < fieldBindings.size(); i++) {
+            FilterFieldBinding binding = fieldBindings.get(i);
+            if (binding.parameter.key.equals(key)) {
+                return binding.field.getText();
+            }
+        }
+        return null;
+    }
+
+    boolean isSectionBodyEnabledForTest(int index) {
+        if (index < 0 || index >= sectionPanels.size()) return false;
+        return sectionPanels.get(index).getBody().isEnabled();
+    }
+
     void simulateOpenCustomFilterBuilderForTest() {
         openCustomFilterBuilder();
+    }
+
+    void simulateApplyAcceptedMacroForTest(String macroText) {
+        applyAcceptedMacro(macroText);
     }
 
     void runPreviewNowForTest() throws Exception {
@@ -570,28 +604,34 @@ public final class FilterParameterStage implements ConfigQcStage {
         gbc.fill = GridBagConstraints.NONE;
         row.add(customBuilderButton, gbc);
 
+        varyButton = new JButton("Vary Filter Parameters...");
+        varyButton.setToolTipText("Open parameter variations for this filter.");
+        varyButton.addActionListener(e -> openMacroVariationsDialog());
+        gbc.gridx = 3;
+        row.add(varyButton, gbc);
+
         addFilterButton = new JButton("+ Add filter...");
         addFilterButton.addActionListener(e -> onAddFilterClicked());
         addFilterButton.setEnabled(linear);
-        gbc.gridx = 3;
+        gbc.gridx = 4;
         row.add(addFilterButton, gbc);
 
         previewButton = new JButton("Run Preview");
         flash.pipeline.ui.FlashIcons.apply(previewButton, flash.pipeline.ui.FlashIcons.play());
         previewButton.addActionListener(e -> runPreviewOnWorker());
-        gbc.gridx = 4;
+        gbc.gridx = 5;
         row.add(previewButton, gbc);
 
         resetButton = new JButton("Reset");
         flash.pipeline.ui.FlashIcons.apply(resetButton, flash.pipeline.ui.FlashIcons.refresh());
         resetButton.addActionListener(e -> resetToSaved());
-        gbc.gridx = 5;
+        gbc.gridx = 6;
         row.add(resetButton, gbc);
 
         saveAsButton = new JButton("Save preset...");
         saveAsButton.setEnabled(false);
         saveAsButton.addActionListener(e -> onSaveAsClicked());
-        gbc.gridx = 6;
+        gbc.gridx = 7;
         row.add(saveAsButton, gbc);
 
         presetDescriptionLabel = new JLabel(descriptionProvider.describe(selectedPreset));
@@ -989,6 +1029,75 @@ public final class FilterParameterStage implements ConfigQcStage {
         return true;
     }
 
+    private static List<FilterMacroEditorModel.Entry> editableRows(
+            FilterMacroEditorModel.MacroDefinition macro) {
+        List<FilterMacroEditorModel.Entry> rows =
+                new ArrayList<FilterMacroEditorModel.Entry>();
+        if (macro == null) return rows;
+        List<FilterMacroEditorModel.Section> sections = macro.getSections();
+        for (int i = 0; i < sections.size(); i++) {
+            FilterMacroEditorModel.Section section = sections.get(i);
+            for (int j = 0; j < section.entries.size(); j++) {
+                FilterMacroEditorModel.Entry entry = section.entries.get(j);
+                if (shouldShowEntry(entry)) {
+                    rows.add(entry);
+                }
+            }
+        }
+        return rows;
+    }
+
+    private static boolean sameParameterKeys(FilterMacroEditorModel.Entry a,
+                                             FilterMacroEditorModel.Entry b) {
+        if (a == null || b == null) return false;
+        if (a.parameters.size() != b.parameters.size()) return false;
+        for (int i = 0; i < a.parameters.size(); i++) {
+            String left = a.parameters.get(i).key;
+            String right = b.parameters.get(i).key;
+            if (!safe(left).equalsIgnoreCase(safe(right))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static String dagTopologyKey(String macro) {
+        try {
+            DagIR dag = IjmToDagLoader.load(safe(macro));
+            StringBuilder sb = new StringBuilder();
+            sb.append("lines=").append(dag.lines.size())
+                    .append(";combiners=").append(dag.combiners.size())
+                    .append(";output=").append(dag.output)
+                    .append(';');
+            for (int i = 0; i < dag.lines.size(); i++) {
+                DagLine line = dag.lines.get(i);
+                sb.append("line[").append(i).append("]=")
+                        .append(line.ops.size()).append(':');
+                for (int j = 0; j < line.ops.size(); j++) {
+                    DagNode node = line.ops.get(j);
+                    sb.append(node.type)
+                            .append('|')
+                            .append(safe(node.commandName))
+                            .append('|')
+                            .append(node.disabled)
+                            .append(',');
+                }
+                sb.append(';');
+            }
+            for (int i = 0; i < dag.combiners.size(); i++) {
+                Combiner combiner = dag.combiners.get(i);
+                sb.append("combiner[").append(i).append("]=")
+                        .append(combiner.op)
+                        .append('|')
+                        .append(combiner.inputs)
+                        .append(';');
+            }
+            return sb.toString();
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
     /**
      * Run-style entries map 1:1 to SandboxModel nodes; assignment-only entries
      * (rare in our bundled presets) do not. We approximate the distinction by
@@ -1205,6 +1314,141 @@ public final class FilterParameterStage implements ConfigQcStage {
             previewAdapter.close(old);
         }
         setStatus("Filter preview complete.");
+    }
+
+    private void openMacroVariationsDialog() {
+        if (!linear) {
+            setError("Use Custom macro... to vary branched pipelines.");
+            return;
+        }
+        if (!canPreview() || activeContext == null) {
+            setError("Choose a filter and source image first.");
+            return;
+        }
+        try {
+            syncFieldBindings();
+            String macroForDialog = currentDisplayMacro != null
+                    ? currentDisplayMacro
+                    : currentMacro;
+            FilterMacroEditorModel.MacroDefinition parsed =
+                    FilterMacroEditorModel.parse(macroForDialog);
+            FilterVariationEngineContext context =
+                    new FilterVariationEngineContext(
+                            parsed,
+                            sourceImage,
+                            CropSpec.full(),
+                            activeContext.getChannelLabel(),
+                            activeContext,
+                            previewAdapter);
+            Window owner = varyButton == null
+                    ? null
+                    : SwingUtilities.getWindowAncestor(varyButton);
+            MacroVariationsDialog dialog = new MacroVariationsDialog(owner,
+                    context,
+                    acceptedMacro -> applyAcceptedMacro(acceptedMacro));
+            dialog.showDialog();
+        } catch (Exception e) {
+            setError("Macro variations failed: " + e.getMessage());
+        }
+    }
+
+    private void applyAcceptedMacro(String macroText) {
+        try {
+            String acceptedMacro = safe(macroText);
+            FilterMacroEditorModel.MacroDefinition accepted =
+                    FilterMacroEditorModel.parse(acceptedMacro);
+            if (reconcileAcceptedValuesInPlace(accepted, acceptedMacro)) {
+                currentDisplayMacro = definition.render();
+                if (structurallyMutated && hiddenBuilder != null) {
+                    ensureHiddenBuilderInSyncWithCurrentMacro();
+                    currentMacro = hiddenBuilder.currentIjm();
+                    currentDisplayMacro = hiddenBuilder.currentDisplayIjm();
+                } else {
+                    currentMacro = currentDisplayMacro;
+                }
+            } else {
+                rebuildFromAcceptedMacro(acceptedMacro);
+            }
+            recomputeDirty();
+            markPreviewStale(STALE_TEXT);
+            setStatus("Variation accepted; press Run Preview to confirm.");
+            refreshActionState();
+        } catch (RuntimeException e) {
+            setError("Could not apply variation: " + e.getMessage());
+        }
+    }
+
+    private boolean reconcileAcceptedValuesInPlace(
+            FilterMacroEditorModel.MacroDefinition accepted,
+            String acceptedMacro) {
+        if (definition == null || accepted == null) {
+            return false;
+        }
+        String currentTopology = dagTopologyKey(currentMacro);
+        String acceptedTopology = dagTopologyKey(acceptedMacro);
+        if (currentTopology != null
+                && acceptedTopology != null
+                && !currentTopology.equals(acceptedTopology)) {
+            return false;
+        }
+
+        List<FilterMacroEditorModel.Entry> currentEntries =
+                editableRows(definition);
+        List<FilterMacroEditorModel.Entry> acceptedEntries =
+                editableRows(accepted);
+        if (currentEntries.size() != acceptedEntries.size()) {
+            return false;
+        }
+        for (int i = 0; i < currentEntries.size(); i++) {
+            if (!sameParameterKeys(currentEntries.get(i), acceptedEntries.get(i))) {
+                return false;
+            }
+        }
+
+        updatingControls = true;
+        try {
+            for (int i = 0; i < currentEntries.size(); i++) {
+                FilterMacroEditorModel.Entry current = currentEntries.get(i);
+                FilterMacroEditorModel.Entry incoming = acceptedEntries.get(i);
+                for (int j = 0; j < current.parameters.size(); j++) {
+                    current.parameters.get(j).setValue(incoming.parameters.get(j).getValue());
+                }
+            }
+            for (int i = 0; i < fieldBindings.size(); i++) {
+                FilterFieldBinding binding = fieldBindings.get(i);
+                String value = binding.parameter.getValue();
+                if (!safe(value).equals(binding.field.getText())) {
+                    binding.field.setText(safe(value));
+                }
+            }
+        } finally {
+            updatingControls = false;
+        }
+        return true;
+    }
+
+    private void rebuildFromAcceptedMacro(String acceptedMacro) {
+        currentMacro = safe(acceptedMacro);
+        currentDisplayMacro = currentMacro;
+        hiddenBuilder = null;
+        structurallyMutated = false;
+        try {
+            DagIR seed = IjmToDagLoader.load(currentMacro);
+            hiddenBuilder = new FilterBuilderPanel(seed, /*sharedPreview=*/null,
+                    /*runner=*/null, null);
+            currentMacro = hiddenBuilder.currentIjm();
+            currentDisplayMacro = seed.isLinear()
+                    ? hiddenBuilder.currentDisplayIjm()
+                    : currentMacro;
+            structurallyMutated = seed.isLinear();
+        } catch (RuntimeException e) {
+            hiddenBuilder = null;
+            currentDisplayMacro = currentMacro;
+            structurallyMutated = false;
+        }
+        refreshLinearityFlag();
+        rebuildAccordion();
+        updateBranchedBannerVisibility();
     }
 
     private void openCustomFilterBuilder() {
@@ -1631,6 +1875,7 @@ public final class FilterParameterStage implements ConfigQcStage {
         if (previewButton != null) previewButton.setEnabled(canPreview());
         if (resetButton != null) resetButton.setEnabled(true);
         if (customBuilderButton != null) customBuilderButton.setEnabled(customFilterBuilder != null);
+        updateVaryButtonState(true);
         if (saveAsButton != null) saveAsButton.setEnabled(dirty);
         if (addFilterButton != null) addFilterButton.setEnabled(linear);
     }
@@ -1639,9 +1884,25 @@ public final class FilterParameterStage implements ConfigQcStage {
         if (previewButton != null) previewButton.setEnabled(enabled && canPreview());
         if (resetButton != null) resetButton.setEnabled(enabled);
         if (customBuilderButton != null) customBuilderButton.setEnabled(enabled && customFilterBuilder != null);
+        updateVaryButtonState(enabled);
         if (saveAsButton != null) saveAsButton.setEnabled(enabled && dirty);
         if (presetCombo != null) presetCombo.setEnabled(enabled);
         if (addFilterButton != null) addFilterButton.setEnabled(enabled && linear);
+    }
+
+    private void updateVaryButtonState(boolean controlsEnabled) {
+        if (varyButton == null) return;
+        boolean available = controlsEnabled && linear && canPreview();
+        varyButton.setEnabled(available);
+        if (!linear) {
+            varyButton.setToolTipText("Use Custom macro... to vary branched pipelines");
+        } else if (!canPreview()) {
+            varyButton.setToolTipText("Choose a filter and source image first.");
+        } else if (!controlsEnabled) {
+            varyButton.setToolTipText("Wait for the current preview to finish.");
+        } else {
+            varyButton.setToolTipText("Open parameter variations for this filter.");
+        }
     }
 
     private boolean canPreview() {

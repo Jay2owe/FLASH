@@ -91,6 +91,9 @@ public final class MacroVariationsDialog extends PipelineDialog {
     private HistogramShapeStrip histogramShapeStrip;
     private Mode mode = Mode.PARAMS;
     private CropSpec currentCropSpec;
+    private ParameterCombo selectedCombo;
+    private FilterSweepStrategy selectedStrategy;
+    private VariationCellPanel selectedCell;
     private boolean suppressCropEvents;
     private int completedCount;
     private int failedCount;
@@ -249,10 +252,11 @@ public final class MacroVariationsDialog extends PipelineDialog {
         useComboButton.setEnabled(false);
         useComboButton.addActionListener(new ActionListener() {
             @Override public void actionPerformed(ActionEvent e) {
-                if (onAccept != null) {
-                    onAccept.accept(context.baseMacro().render());
+                if (selectedCombo == null || selectedStrategy == null) {
+                    setStatusTextNow("Select a completed tile first.");
+                    return;
                 }
-                dispose();
+                acceptAndClose(selectedCombo, selectedStrategy);
             }
         });
         runButton = addRightFooterButton("Run");
@@ -311,6 +315,12 @@ public final class MacroVariationsDialog extends PipelineDialog {
 
         completedCount = 0;
         failedCount = 0;
+        selectedCombo = null;
+        selectedStrategy = null;
+        if (selectedCell != null) {
+            selectedCell.setSelectedForCompare(false);
+            selectedCell = null;
+        }
         clearHistogramShapeIndicator();
         cells.clear();
         cellsByCombo.clear();
@@ -337,7 +347,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
             VariationCellPanel cell = new VariationCellPanel(combo, croppedSource,
                     new Consumer<ParameterCombo>() {
                         @Override public void accept(ParameterCombo accepted) {
-                            acceptAndClose(accepted, strategy);
+                            selectCombo(accepted, strategy);
                         }
                     },
                     null,
@@ -744,6 +754,10 @@ public final class MacroVariationsDialog extends PipelineDialog {
         if (completedCount >= cells.size() && !cells.isEmpty()) {
             updateHistogramShapeIndicator();
         }
+        if (selectedCombo != null
+                && selectedCombo.toCanonicalJson().equals(comboId)) {
+            updateSelectedStatus(result);
+        }
     }
 
     private void handleExecutorDone() {
@@ -920,6 +934,49 @@ public final class MacroVariationsDialog extends PipelineDialog {
             onAccept.accept(strategy.renderMacroForCombo(combo));
         }
         dispose();
+    }
+
+    private void selectCombo(ParameterCombo combo, FilterSweepStrategy strategy) {
+        if (combo == null || strategy == null) {
+            return;
+        }
+        selectedCombo = combo;
+        selectedStrategy = strategy;
+        if (selectedCell != null) {
+            selectedCell.setSelectedForCompare(false);
+        }
+        selectedCell = cellsByCombo.get(combo.toCanonicalJson());
+        if (selectedCell != null) {
+            selectedCell.setSelectedForCompare(true);
+        }
+        if (useComboButton != null) {
+            useComboButton.setEnabled(true);
+        }
+        updateSelectedStatus(resultForCombo(combo));
+    }
+
+    private VariationResult resultForCombo(ParameterCombo combo) {
+        if (combo == null) return null;
+        Integer index = cellIndexesByCombo.get(combo.toCanonicalJson());
+        if (index == null) return null;
+        int i = index.intValue();
+        if (i < 0 || i >= resultsByCell.size()) return null;
+        return resultsByCell.get(i);
+    }
+
+    private void updateSelectedStatus(VariationResult result) {
+        if (result == null) {
+            setStatusTextNow("Selected tile pending.");
+        } else if (result.hasError()) {
+            setStatusTextNow("Selected tile failed.");
+        } else if (result.kind() == VariationResult.Kind.FILTER) {
+            setStatusTextNow("Selected tile: SNR "
+                    + formatOneDecimal(result.snr())
+                    + ", bg sigma "
+                    + formatOneDecimal(result.bgSigma()));
+        } else {
+            setStatusTextNow("Selected tile.");
+        }
     }
 
     private void cancelExecutor() {
@@ -1106,6 +1163,13 @@ public final class MacroVariationsDialog extends PipelineDialog {
             return text.replaceAll("0+$", "").replaceAll("\\.$", "");
         }
         return safe(value == null ? "" : String.valueOf(value));
+    }
+
+    private static String formatOneDecimal(double value) {
+        if (Double.isNaN(value) || Double.isInfinite(value)) {
+            return "n/a";
+        }
+        return String.format(java.util.Locale.ROOT, "%.1f", Double.valueOf(value));
     }
 
     private static String safe(String value) {
