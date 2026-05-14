@@ -87,16 +87,17 @@ public final class KneeDetector {
         }
         int n = Math.min(xs.length, ys.length);
         List<Point> points = new ArrayList<Point>(n);
-        double maxY = Double.NEGATIVE_INFINITY;
+        double maxAbsY = Double.NEGATIVE_INFINITY;
         for (int i = 0; i < n; i++) {
             if (isFinite(xs[i]) && isFinite(ys[i])) {
                 points.add(new Point(i, xs[i], ys[i]));
-                if (ys[i] > maxY) {
-                    maxY = ys[i];
+                double absY = Math.abs(ys[i]);
+                if (absY > maxAbsY) {
+                    maxAbsY = absY;
                 }
             }
         }
-        if (points.size() < 3 || !isFinite(maxY)) {
+        if (points.size() < 3 || !isFinite(maxAbsY)) {
             return null;
         }
         Collections.sort(points, new Comparator<Point>() {
@@ -105,7 +106,7 @@ public final class KneeDetector {
             }
         });
 
-        double tolerance = Math.max(1.0d, 0.05d * maxY);
+        double tolerance = Math.max(1.0d, 0.05d * maxAbsY);
         int end = points.size() - 1;
         int start = end;
         while (start > 0) {

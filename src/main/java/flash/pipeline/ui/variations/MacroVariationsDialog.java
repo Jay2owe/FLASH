@@ -2,6 +2,7 @@ package flash.pipeline.ui.variations;
 
 import flash.pipeline.image.FilterMacroEditorModel;
 import flash.pipeline.ui.PipelineDialog;
+import flash.pipeline.ui.variations.analysis.HistogramShapeStability;
 import flash.pipeline.ui.variations.strategy.FilterSweepStrategy;
 
 import ij.ImagePlus;
@@ -49,6 +50,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
     private final Consumer<String> onAccept;
     private final ParameterSweepEditor editor;
     private final VariationGridPanel gridPanel = new VariationGridPanel();
+    private final JPanel histogramShapeSlot = new JPanel(new BorderLayout());
     private final JLabel cellsLabel = new JLabel("Cells: 1");
     private final JLabel zLabel = new JLabel("1/1");
     private final JLabel suggestionLabel = new JLabel("Most stable: pending");
@@ -75,6 +77,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
     private JButton runButton;
     private VariationExecutor executor;
     private ParameterSweep currentSweep;
+    private HistogramShapeStrip histogramShapeStrip;
     private Mode mode = Mode.PARAMS;
     private CropSpec currentCropSpec;
     private boolean suppressCropEvents;
@@ -166,6 +169,18 @@ public final class MacroVariationsDialog extends PipelineDialog {
         return new ArrayList<VariationResult>(resultsByCell);
     }
 
+    List<VariationCellPanel> cellsForTest() {
+        return new ArrayList<VariationCellPanel>(cells);
+    }
+
+    HistogramShapeStrip histogramShapeStripForTest() {
+        return histogramShapeStrip;
+    }
+
+    JLabel suggestionLabelForTest() {
+        return suggestionLabel;
+    }
+
     void waitForDoneForTest(long timeoutMs) throws Exception {
         VariationExecutor worker = executor;
         if (worker != null) {
@@ -196,6 +211,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
         addHeader("Parameters to sweep");
         addComponent(editor);
         addComponent(cropRow());
+        addComponent(histogramShapeSlot());
         addHeader("Preview grid");
         addComponent(gridScrollPane());
         addComponent(zRow());
@@ -234,6 +250,12 @@ public final class MacroVariationsDialog extends PipelineDialog {
         });
     }
 
+    private JPanel histogramShapeSlot() {
+        histogramShapeSlot.setOpaque(false);
+        histogramShapeSlot.setVisible(false);
+        return histogramShapeSlot;
+    }
+
     public void start() {
         if (SwingUtilities.isEventDispatchThread()) {
             startOnEdt();
@@ -270,6 +292,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
 
         completedCount = 0;
         failedCount = 0;
+        clearHistogramShapeIndicator();
         cells.clear();
         cellsByCombo.clear();
         cellIndexesByCombo.clear();
@@ -531,6 +554,9 @@ public final class MacroVariationsDialog extends PipelineDialog {
         }
         failedCount = countFailures();
         setStatusTextNow(progressStatus());
+        if (completedCount >= cells.size() && !cells.isEmpty()) {
+            updateHistogramShapeIndicator();
+        }
     }
 
     private void handleExecutorDone() {
@@ -549,12 +575,137 @@ public final class MacroVariationsDialog extends PipelineDialog {
         try {
             worker.get();
             failedCount = countFailures();
+            updateHistogramShapeIndicator();
             setStatusTextNow(completionStatus());
         } catch (Exception e) {
             failedCount = countFailures();
             setStatusTextNow("Error: " + safe(e.getMessage()));
             showMessage(e.getMessage());
         }
+    }
+
+    private void updateHistogramShapeIndicator() {
+        clearStableShapeRibbons();
+        if (currentSweep == null
+                || cells.isEmpty()
+                || resultsByCell.size() != cells.size()
+                || completedCount < cells.size()
+                || !allCellsSuccessful()) {
+            clearHistogramShapeStrip();
+            setSuggestionText("No stable shape plateau detected");
+            return;
+        }
+
+        ParameterKey axis = singleNumericFilterAxis();
+        if (axis == null) {
+            clearHistogramShapeStrip();
+            setSuggestionText("No stable shape plateau detected");
+            return;
+        }
+
+        HistogramShapeStability.Result result =
+                HistogramShapeStability.detect(resultsByCell, axis);
+        if (result == null || !result.hasPlateau()) {
+            clearHistogramShapeStrip();
+            setSuggestionText("No stable shape plateau detected");
+            return;
+        }
+
+        ensureHistogramShapeStrip(result);
+        VariationCellPanel winner = cellsByCombo.get(
+                result.winnerCombo.toCanonicalJson());
+        if (winner != null) {
+            winner.setRibbonLabel("STABLE SHAPE");
+            winner.setBorderHint(VariationCellPanel.BorderHint.KNEE);
+        }
+        setSuggestionText("Most stable shape at "
+                + axisLabelForStatus(axis)
+                + " = "
+                + formatValue(result.winnerCombo.get(axis)));
+    }
+
+    private void ensureHistogramShapeStrip(HistogramShapeStability.Result result) {
+        if (histogramShapeStrip == null) {
+            histogramShapeStrip = new HistogramShapeStrip(result);
+            histogramShapeSlot.removeAll();
+            histogramShapeSlot.add(histogramShapeStrip, BorderLayout.CENTER);
+        } else {
+            histogramShapeStrip.setData(result);
+        }
+        histogramShapeStrip.setVisible(true);
+        histogramShapeSlot.setVisible(true);
+        histogramShapeSlot.revalidate();
+        histogramShapeSlot.repaint();
+        Window window = getWindow();
+        if (window != null) {
+            window.validate();
+        }
+    }
+
+    private void clearHistogramShapeIndicator() {
+        clearStableShapeRibbons();
+        clearHistogramShapeStrip();
+    }
+
+    private void clearStableShapeRibbons() {
+        for (int i = 0; i < cells.size(); i++) {
+            cells.get(i).setBorderHint(VariationCellPanel.BorderHint.NONE);
+        }
+    }
+
+    private void clearHistogramShapeStrip() {
+        histogramShapeStrip = null;
+        histogramShapeSlot.removeAll();
+        histogramShapeSlot.setVisible(false);
+        histogramShapeSlot.revalidate();
+        histogramShapeSlot.repaint();
+    }
+
+    private boolean allCellsSuccessful() {
+        if (resultsByCell.size() != cells.size() || resultsByCell.isEmpty()) {
+            return false;
+        }
+        for (int i = 0; i < resultsByCell.size(); i++) {
+            VariationResult result = resultsByCell.get(i);
+            if (result == null || result.hasError()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private ParameterKey singleNumericFilterAxis() {
+        if (currentSweep == null) {
+            return null;
+        }
+        List<ParameterKey> swept = new ArrayList<ParameterKey>();
+        for (Map.Entry<ParameterKey, ParameterValueList> entry
+                : currentSweep.valueLists().entrySet()) {
+            ParameterValueList values = entry.getValue();
+            if (values == null || values.size() <= 1) {
+                continue;
+            }
+            ParameterKey key = entry.getKey();
+            if (key == null
+                    || key.valueKind() != ParameterKey.ValueKind.NUMBER
+                    || !allNumeric(values)) {
+                return null;
+            }
+            swept.add(key);
+        }
+        return swept.size() == 1 ? swept.get(0) : null;
+    }
+
+    private static boolean allNumeric(ParameterValueList values) {
+        if (values == null) {
+            return false;
+        }
+        for (int i = 0; i < values.size(); i++) {
+            if (!(values.get(i) instanceof Number)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private void markRunningCellsCancelled() {
@@ -747,6 +898,27 @@ public final class MacroVariationsDialog extends PipelineDialog {
             slices = Math.max(1, source.getStackSize());
         }
         return slices;
+    }
+
+    private static String axisLabelForStatus(ParameterKey axis) {
+        if (axis instanceof FilterParameterId) {
+            return ((FilterParameterId) axis).paramKey();
+        }
+        return axis == null ? "" : axis.displayLabel();
+    }
+
+    private static String formatValue(Object value) {
+        if (value instanceof Number) {
+            double number = ((Number) value).doubleValue();
+            if (Math.abs(number - Math.rint(number)) < 0.0000001d
+                    && Math.abs(number) < 1000000000.0d) {
+                return String.valueOf((long) Math.rint(number));
+            }
+            String text = String.format(java.util.Locale.ROOT, "%.3f",
+                    Double.valueOf(number));
+            return text.replaceAll("0+$", "").replaceAll("\\.$", "");
+        }
+        return safe(value == null ? "" : String.valueOf(value));
     }
 
     private static String safe(String value) {

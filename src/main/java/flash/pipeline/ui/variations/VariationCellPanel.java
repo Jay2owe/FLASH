@@ -91,6 +91,7 @@ public final class VariationCellPanel extends JPanel {
     private double filterSnr = Double.NaN;
     private double filterBgSigma = Double.NaN;
     private String errorText = "";
+    private String ribbonLabelOverride;
     private boolean filterFooterActive;
     private boolean hover;
     private boolean kneeWinner;
@@ -187,6 +188,7 @@ public final class VariationCellPanel extends JPanel {
 
     public void setState(String state) {
         showSegmentationFooter();
+        clearRibbonLabelOverride();
         errorState = false;
         errorText = "";
         acceptEnabled = false;
@@ -238,6 +240,7 @@ public final class VariationCellPanel extends JPanel {
             setError(result.error());
             return;
         }
+        clearRibbonLabelOverride();
         ImagePlus filtered = result.previewImage() == null
                 ? result.label()
                 : result.previewImage();
@@ -268,6 +271,7 @@ public final class VariationCellPanel extends JPanel {
             });
             return;
         }
+        clearRibbonLabelOverride();
         errorState = true;
         acceptEnabled = false;
         errorText = errorDetails(error);
@@ -296,6 +300,7 @@ public final class VariationCellPanel extends JPanel {
             });
             return;
         }
+        clearRibbonLabelOverride();
         this.cachedLabel = label == null ? createPlaceholderLabel() : label;
         this.cachedStats = stats;
         this.objectCount = Math.max(0, nObjects);
@@ -381,6 +386,7 @@ public final class VariationCellPanel extends JPanel {
         if (hint == null || hint == BorderHint.NONE) {
             kneeWinner = false;
             stabilityWinner = false;
+            clearRibbonLabelOverride();
             resetHalo();
         } else if (hint == BorderHint.KNEE) {
             setKneeWinner(true);
@@ -392,6 +398,12 @@ public final class VariationCellPanel extends JPanel {
         refreshFooter();
         refreshBorder();
         refreshTooltip();
+    }
+
+    public void setRibbonLabel(String label) {
+        String safeLabel = label == null ? "" : label.trim();
+        ribbonLabelOverride = safeLabel.length() == 0 ? null : safeLabel;
+        repaint();
     }
 
     void setSelectedForCompare(boolean selectedForCompare) {
@@ -461,6 +473,10 @@ public final class VariationCellPanel extends JPanel {
 
     boolean suppressNextClickForTest() {
         return suppressNextClick;
+    }
+
+    String ribbonLabelForTest() {
+        return ribbonLabelOverride;
     }
 
     void firePeekDelayForTest() {
@@ -826,7 +842,10 @@ public final class VariationCellPanel extends JPanel {
 
     private void paintRibbons(Graphics g) {
         if (kneeWinner) {
-            paintRibbon(g, "STABLE COUNT", KNEE_BORDER, new Color(0x22, 0x22, 0x22),
+            String text = ribbonLabelOverride == null
+                    ? "STABLE COUNT"
+                    : ribbonLabelOverride;
+            paintRibbon(g, text, KNEE_BORDER, new Color(0x22, 0x22, 0x22),
                     true);
         }
         if (stabilityWinner) {
@@ -870,6 +889,10 @@ public final class VariationCellPanel extends JPanel {
             g2.drawString(text, 0, 0);
         }
         g2.dispose();
+    }
+
+    private void clearRibbonLabelOverride() {
+        ribbonLabelOverride = null;
     }
 
     private void startHalo(Color color) {
