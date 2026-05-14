@@ -11,11 +11,18 @@ import ij.ImagePlus;
 
 import java.io.File;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Locale;
 
 public final class FilterVariationEngineContext {
+
+    public interface PresetMacroLoader {
+        String loadPresetMacro(String presetName) throws Exception;
+    }
 
     private final FilterMacroEditorModel.MacroDefinition baseMacro;
     private final ImagePlus sourceImage;
@@ -23,6 +30,8 @@ public final class FilterVariationEngineContext {
     private final String channelName;
     private final ConfigQcContext configContext;
     private final FilterParameterStage.PreviewAdapter previewAdapter;
+    private final List<String> presetOptions;
+    private final PresetMacroLoader presetMacroLoader;
     private final ClassicalSegmentationStage.PreviewAdapter classicalPreviewAdapter;
     private final StarDistParameterStage.PreviewAdapter starDistPreviewAdapter;
     private final CellposeParameterStage.PreviewAdapter cellposePreviewAdapter;
@@ -36,7 +45,8 @@ public final class FilterVariationEngineContext {
                                         ConfigQcContext configContext,
                                         FilterParameterStage.PreviewAdapter previewAdapter) {
         this(baseMacro, sourceImage, initialCropSpec, channelName, configContext,
-                previewAdapter, null, null, null);
+                previewAdapter, Collections.<String>emptyList(), null,
+                null, null, null);
     }
 
     public FilterVariationEngineContext(FilterMacroEditorModel.MacroDefinition baseMacro,
@@ -45,6 +55,36 @@ public final class FilterVariationEngineContext {
                                         String channelName,
                                         ConfigQcContext configContext,
                                         FilterParameterStage.PreviewAdapter previewAdapter,
+                                        List<String> presetOptions,
+                                        PresetMacroLoader presetMacroLoader) {
+        this(baseMacro, sourceImage, initialCropSpec, channelName, configContext,
+                previewAdapter, presetOptions, presetMacroLoader,
+                null, null, null);
+    }
+
+    public FilterVariationEngineContext(FilterMacroEditorModel.MacroDefinition baseMacro,
+                                        ImagePlus sourceImage,
+                                        CropSpec initialCropSpec,
+                                        String channelName,
+                                        ConfigQcContext configContext,
+                                        FilterParameterStage.PreviewAdapter previewAdapter,
+                                        ClassicalSegmentationStage.PreviewAdapter classicalPreviewAdapter,
+                                        StarDistParameterStage.PreviewAdapter starDistPreviewAdapter,
+                                        CellposeParameterStage.PreviewAdapter cellposePreviewAdapter) {
+        this(baseMacro, sourceImage, initialCropSpec, channelName, configContext,
+                previewAdapter, Collections.<String>emptyList(), null,
+                classicalPreviewAdapter, starDistPreviewAdapter,
+                cellposePreviewAdapter);
+    }
+
+    public FilterVariationEngineContext(FilterMacroEditorModel.MacroDefinition baseMacro,
+                                        ImagePlus sourceImage,
+                                        CropSpec initialCropSpec,
+                                        String channelName,
+                                        ConfigQcContext configContext,
+                                        FilterParameterStage.PreviewAdapter previewAdapter,
+                                        List<String> presetOptions,
+                                        PresetMacroLoader presetMacroLoader,
                                         ClassicalSegmentationStage.PreviewAdapter classicalPreviewAdapter,
                                         StarDistParameterStage.PreviewAdapter starDistPreviewAdapter,
                                         CellposeParameterStage.PreviewAdapter cellposePreviewAdapter) {
@@ -66,6 +106,8 @@ public final class FilterVariationEngineContext {
         this.channelName = channelName == null ? "" : channelName;
         this.configContext = configContext;
         this.previewAdapter = previewAdapter;
+        this.presetOptions = copyPresetOptions(presetOptions);
+        this.presetMacroLoader = presetMacroLoader;
         this.classicalPreviewAdapter = classicalPreviewAdapter == null
                 ? adapterFromAttribute(configContext,
                 "classicalPreviewAdapter",
@@ -141,6 +183,22 @@ public final class FilterVariationEngineContext {
         return previewAdapter;
     }
 
+    public List<String> presetOptions() {
+        return presetOptions;
+    }
+
+    public List<String> getPresetOptions() {
+        return presetOptions;
+    }
+
+    public PresetMacroLoader presetMacroLoader() {
+        return presetMacroLoader;
+    }
+
+    public PresetMacroLoader getPresetMacroLoader() {
+        return presetMacroLoader;
+    }
+
     public ClassicalSegmentationStage.PreviewAdapter classicalPreviewAdapter() {
         return classicalPreviewAdapter;
     }
@@ -198,6 +256,20 @@ public final class FilterVariationEngineContext {
 
     private static String safe(String value) {
         return value == null ? "" : value;
+    }
+
+    private static List<String> copyPresetOptions(List<String> source) {
+        if (source == null || source.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<String> out = new ArrayList<String>();
+        for (int i = 0; i < source.size(); i++) {
+            String value = source.get(i);
+            if (value != null) {
+                out.add(value);
+            }
+        }
+        return Collections.unmodifiableList(out);
     }
 
     private static <T> T adapterFromAttribute(ConfigQcContext context,

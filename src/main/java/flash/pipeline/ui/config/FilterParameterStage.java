@@ -531,6 +531,11 @@ public final class FilterParameterStage implements ConfigQcStage {
         applyAcceptedMacro(macroText);
     }
 
+    FilterVariationEngineContext createVariationContextForTest() throws Exception {
+        syncFieldBindings();
+        return createMacroVariationContext();
+    }
+
     void runPreviewNowForTest() throws Exception {
         runPreviewNow();
     }
@@ -1327,19 +1332,7 @@ public final class FilterParameterStage implements ConfigQcStage {
         }
         try {
             syncFieldBindings();
-            String macroForDialog = currentDisplayMacro != null
-                    ? currentDisplayMacro
-                    : currentMacro;
-            FilterMacroEditorModel.MacroDefinition parsed =
-                    FilterMacroEditorModel.parse(macroForDialog);
-            FilterVariationEngineContext context =
-                    new FilterVariationEngineContext(
-                            parsed,
-                            sourceImage,
-                            CropSpec.full(),
-                            activeContext.getChannelLabel(),
-                            activeContext,
-                            previewAdapter);
+            FilterVariationEngineContext context = createMacroVariationContext();
             Window owner = varyButton == null
                     ? null
                     : SwingUtilities.getWindowAncestor(varyButton);
@@ -1350,6 +1343,27 @@ public final class FilterParameterStage implements ConfigQcStage {
         } catch (Exception e) {
             setError("Macro variations failed: " + e.getMessage());
         }
+    }
+
+    private FilterVariationEngineContext createMacroVariationContext() throws Exception {
+        String macroForDialog = currentDisplayMacro != null
+                ? currentDisplayMacro
+                : currentMacro;
+        FilterMacroEditorModel.MacroDefinition parsed =
+                FilterMacroEditorModel.parse(macroForDialog);
+        return new FilterVariationEngineContext(
+                parsed,
+                sourceImage,
+                CropSpec.full(),
+                activeContext.getChannelLabel(),
+                activeContext,
+                previewAdapter,
+                new ArrayList<String>(presetOptions),
+                new FilterVariationEngineContext.PresetMacroLoader() {
+                    @Override public String loadPresetMacro(String presetName) throws Exception {
+                        return macroStore.loadPresetMacro(presetName);
+                    }
+                });
     }
 
     private void applyAcceptedMacro(String macroText) {

@@ -21,21 +21,29 @@ import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.ButtonGroup;
+import javax.swing.DefaultListCellRenderer;
+import javax.swing.DefaultListModel;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
+import javax.swing.JComboBox;
 import javax.swing.JLabel;
+import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JRadioButton;
 import javax.swing.JScrollPane;
 import javax.swing.JSlider;
+import javax.swing.ListSelectionModel;
 import javax.swing.SwingWorker;
 import javax.swing.JToggleButton;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
+import javax.swing.event.ListSelectionEvent;
+import javax.swing.event.ListSelectionListener;
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.EventQueue;
 import java.awt.GraphicsEnvironment;
@@ -67,6 +75,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
     private final FilterVariationEngineContext context;
     private final Consumer<String> onAccept;
     private final ParameterSweepEditor editor;
+    private final PresetPickerPanel presetEditor;
     private final ChainRibbon chainRibbon;
     private final List<Integer> chainEntryLineIndexes;
     private final VariationGridPanel gridPanel = new VariationGridPanel();
@@ -131,6 +140,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
         this.context = context;
         this.onAccept = onAccept;
         this.editor = ParameterSweepEditor.forFilter(context);
+        this.presetEditor = new PresetPickerPanel(context);
         this.chainRibbon = new ChainRibbon(context.baseMacro());
         this.chainEntryLineIndexes = ChainRibbon.entryLineIndexes(context.baseMacro());
         this.downstreamResolution = DownstreamSegmenter.resolve(context);
@@ -153,28 +163,28 @@ public final class MacroVariationsDialog extends PipelineDialog {
 
     void setMode(Mode mode) {
         Mode requested = mode == null ? Mode.PARAMS : mode;
-        if (requested == Mode.PRESETS) {
-            presetsButton.setSelected(false);
-            modeButtonFor(this.mode).setSelected(true);
-            return;
-        }
         if (this.mode == requested) {
             modeButtonFor(requested).setSelected(true);
             if (requested == Mode.STEPS && chainRibbon.focusedStepIndex() < 0) {
                 defaultFocusFirstStepsSlot();
             }
+            refreshCellEstimate();
             return;
         }
         this.mode = requested;
         paramsButton.setSelected(requested == Mode.PARAMS);
         stepsButton.setSelected(requested == Mode.STEPS);
-        presetsButton.setSelected(false);
+        presetsButton.setSelected(requested == Mode.PRESETS);
+        updateModeEditorVisibility();
+        chainRibbon.setInteractionEnabled(requested != Mode.PRESETS);
         chainRibbon.setStepsMode(requested == Mode.STEPS);
         if (requested == Mode.STEPS) {
             configureStepsFocusability();
             if (!defaultFocusFirstStepsSlot()) {
                 refreshCellEstimate();
             }
+        } else if (requested == Mode.PRESETS) {
+            refreshCellEstimate();
         } else {
             refreshCellEstimate();
         }
@@ -196,6 +206,19 @@ public final class MacroVariationsDialog extends PipelineDialog {
 
     ParameterSweepEditor editorForTest() {
         return editor;
+    }
+
+    JPanel presetEditorPanelForTest() {
+        return presetEditor;
+    }
+
+    void configurePresetsForTest(List<String> selectedNames,
+                                 String xParamKey,
+                                 List<?> xValues) {
+        presetEditor.setSelectedNamesForTest(selectedNames);
+        presetEditor.setXParamForTest(xParamKey);
+        presetEditor.setXValuesForTest(xValues);
+        refreshCellEstimate();
     }
 
     VariationGridPanel gridPanelForTest() {
@@ -311,6 +334,8 @@ public final class MacroVariationsDialog extends PipelineDialog {
         addComponent(chainRibbonRow());
         addHeader("Parameters to sweep");
         addComponent(editor);
+        addComponent(presetEditor);
+        presetEditor.setVisible(false);
         addComponent(cropRow());
         addComponent(histogramShapeSlot());
         addHeader("Preview grid");
@@ -350,6 +375,11 @@ public final class MacroVariationsDialog extends PipelineDialog {
                 refreshCellEstimate();
             }
         });
+        presetEditor.addChangeListener(new ChangeListener() {
+            @Override public void stateChanged(ChangeEvent e) {
+                refreshCellEstimate();
+            }
+        });
     }
 
     private JPanel histogramShapeSlot() {
@@ -381,7 +411,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
             currentSweep = withChainCacheNamespace(currentSweepForMode());
         } catch (RuntimeException e) {
             showMessage(e.getMessage());
-            setStatusTextNow(mode == Mode.STEPS
+            setStatusTextNow(mode == Mode.STEPS || mode == Mode.PRESETS
                     ? safe(e.getMessage())
                     : "Choose at least one value for each selected parameter.");
             return;
@@ -426,7 +456,8 @@ public final class MacroVariationsDialog extends PipelineDialog {
                 context.previewAdapter(),
                 croppedSource,
                 runCache,
-                chainMacroPostProcessor());
+                chainMacroPostProcessor(),
+                context.presetMacroLoader());
 
         for (int i = 0; i < combos.size(); i++) {
             ParameterCombo combo = combos.get(i);
@@ -448,13 +479,14 @@ public final class MacroVariationsDialog extends PipelineDialog {
         }
 
         gridPanel.setSweep(currentSweep);
+        gridPanel.setPresetRowCaptions(mode == Mode.PRESETS
+                ? presetEditor.rowCaptionsForSelected()
+                : Collections.<String, String>emptyMap());
         gridPanel.setRawSource(croppedSource);
         gridPanel.setCells(cells);
         setStatusTextNow(progressStatus());
         setSuggestionText("Most stable: pending");
-        setStrategyText(mode == Mode.STEPS
-                ? "Using Filter substitution (" + combos.size() + " cells)"
-                : "Using Filter sweep (" + combos.size() + " cells)");
+        setStrategyText(strategyTextForMode(combos.size()));
 
         executor = new VariationExecutor(currentSweep,
                 strategy,
@@ -579,9 +611,9 @@ public final class MacroVariationsDialog extends PipelineDialog {
         group.add(presetsButton);
         paramsButton.setSelected(true);
         stepsButton.setEnabled(true);
-        presetsButton.setEnabled(false);
+        presetsButton.setEnabled(true);
         stepsButton.setToolTipText("Try native filter alternatives at one chain step");
-        presetsButton.setToolTipText("Coming soon");
+        presetsButton.setToolTipText("Compare readable filter presets");
 
         paramsButton.addActionListener(new ActionListener() {
             @Override public void actionPerformed(ActionEvent e) {
@@ -627,6 +659,9 @@ public final class MacroVariationsDialog extends PipelineDialog {
 
     private void handleChainStateChanged(int stepIndex,
                                          ChainRibbon.StepState newState) {
+        if (mode == Mode.PRESETS) {
+            return;
+        }
         if (mode == Mode.STEPS) {
             handleStepsChainStateChanged(stepIndex, newState);
             return;
@@ -642,6 +677,19 @@ public final class MacroVariationsDialog extends PipelineDialog {
             return;
         }
         start();
+    }
+
+    private void updateModeEditorVisibility() {
+        if (editor != null) {
+            editor.setVisible(mode != Mode.PRESETS);
+        }
+        if (presetEditor != null) {
+            presetEditor.setVisible(mode == Mode.PRESETS);
+        }
+        Window window = getWindow();
+        if (window != null) {
+            window.validate();
+        }
     }
 
     private void handleStepsChainStateChanged(int stepIndex,
@@ -664,6 +712,12 @@ public final class MacroVariationsDialog extends PipelineDialog {
     }
 
     private ParameterSweep currentSweepForMode() {
+        if (mode == Mode.PRESETS) {
+            return presetEditor.currentSweep(currentCropSpec,
+                    context.channelName(),
+                    context.sourceImageHash(),
+                    context.cacheNamespace() + ":presets");
+        }
         if (mode == Mode.STEPS) {
             int focused = chainRibbon.focusedStepIndex();
             if (focused < 0) {
@@ -677,6 +731,59 @@ public final class MacroVariationsDialog extends PipelineDialog {
                     focused);
         }
         return editor.currentSweep();
+    }
+
+    static ParameterSweep buildPresetsSweepForTest(List<String> presetNames,
+                                                   String xParamKey,
+                                                   List<?> xValues,
+                                                   CropSpec cropSpec,
+                                                   String channelName,
+                                                   String sourceImageHash,
+                                                   String cacheNamespace) {
+        return buildPresetsSweep(presetNames, xParamKey, xValues, cropSpec,
+                channelName, sourceImageHash, cacheNamespace);
+    }
+
+    private static ParameterSweep buildPresetsSweep(List<String> presetNames,
+                                                    String xParamKey,
+                                                    List<?> xValues,
+                                                    CropSpec cropSpec,
+                                                    String channelName,
+                                                    String sourceImageHash,
+                                                    String cacheNamespace) {
+        List<String> names = new ArrayList<String>();
+        if (presetNames != null) {
+            for (int i = 0; i < presetNames.size(); i++) {
+                String name = presetNames.get(i);
+                if (name != null && name.trim().length() > 0) {
+                    names.add(name.trim());
+                }
+            }
+        }
+        if (names.isEmpty()) {
+            throw new IllegalStateException("Choose at least one readable preset.");
+        }
+        String paramKey = xParamKey == null ? "" : xParamKey.trim();
+        if (paramKey.isEmpty()) {
+            throw new IllegalStateException("Choose a numeric X-axis parameter.");
+        }
+        if (xValues == null || xValues.isEmpty()) {
+            throw new IllegalStateException("Choose at least one X-axis value.");
+        }
+        LinkedHashMap<ParameterKey, ParameterValueList> values =
+                new LinkedHashMap<ParameterKey, ParameterValueList>();
+        values.put(PresetSweepKey.xValue(paramKey),
+                new ParameterValueList(xValues));
+        values.put(PresetSweepKey.presetName(),
+                new ParameterValueList(names));
+        values.put(PresetSweepKey.xParamKey(),
+                new ParameterValueList(Collections.singletonList(paramKey)));
+        return new ParameterSweep(ParameterSweep.Method.FILTER,
+                values,
+                cropSpec,
+                channelName,
+                sourceImageHash,
+                cacheNamespace);
     }
 
     private void configureStepsFocusability() {
@@ -839,7 +946,412 @@ public final class MacroVariationsDialog extends PipelineDialog {
         final Map<Integer, String> reasons = new LinkedHashMap<Integer, String>();
     }
 
+    private static final class PresetPickerPanel extends JPanel {
+        private final PresetEnumerator.Result enumeration;
+        private final DefaultListModel<PresetListItem> presetModel =
+                new DefaultListModel<PresetListItem>();
+        private final JList<PresetListItem> presetList =
+                new JList<PresetListItem>(presetModel);
+        private final JComboBox<String> xParamCombo = new JComboBox<String>();
+        private final ValueChipPanel xValues;
+        private final List<ChangeListener> listeners =
+                new ArrayList<ChangeListener>();
+        private boolean suppressSelectionEvents;
+
+        PresetPickerPanel(FilterVariationEngineContext context) {
+            super(new BorderLayout(8, 6));
+            setOpaque(false);
+            setBorder(BorderFactory.createLineBorder(new Color(214, 220, 224)));
+            enumeration = new PresetEnumerator(
+                    context == null ? Collections.<String>emptyList()
+                            : context.presetOptions(),
+                    context == null ? null : context.presetMacroLoader())
+                    .enumerate();
+            buildPresetModel();
+            String defaultParam = enumeration.defaultXParamKey();
+            List<String> params = orderedParamChoices(defaultParam);
+            for (int i = 0; i < params.size(); i++) {
+                xParamCombo.addItem(params.get(i));
+            }
+            if (defaultParam.length() > 0) {
+                xParamCombo.setSelectedItem(defaultParam);
+            }
+            xValues = new ValueChipPanel(new ParameterValueList(
+                    suggestedValues(defaultParam)), ValueChipPanel.doubleParser());
+            buildUi();
+            selectAllReadable();
+            installListeners();
+        }
+
+        void addChangeListener(ChangeListener listener) {
+            if (listener != null) {
+                listeners.add(listener);
+            }
+        }
+
+        ParameterSweep currentSweep(CropSpec cropSpec,
+                                    String channelName,
+                                    String sourceImageHash,
+                                    String cacheNamespace) {
+            List<PresetEnumerator.PresetInfo> selected = selectedReadablePresets();
+            if (selected.isEmpty()) {
+                throw new IllegalStateException(statusMessage());
+            }
+            String xParam = selectedXParam();
+            if (xParam.length() == 0) {
+                throw new IllegalStateException(statusMessage());
+            }
+            if (!anySelectedHasParam(selected, xParam)) {
+                throw new IllegalStateException(statusMessage());
+            }
+            return buildPresetsSweep(namesFor(selected),
+                    xParam,
+                    xValues.currentValueList().values(),
+                    cropSpec,
+                    channelName,
+                    sourceImageHash,
+                    cacheNamespace);
+        }
+
+        Map<String, String> rowCaptionsForSelected() {
+            LinkedHashMap<String, String> out = new LinkedHashMap<String, String>();
+            List<PresetEnumerator.PresetInfo> selected = selectedReadablePresets();
+            for (int i = 0; i < selected.size(); i++) {
+                PresetEnumerator.PresetInfo info = selected.get(i);
+                out.put(info.name(), info.chainSummary());
+            }
+            return out;
+        }
+
+        void setSelectedNamesForTest(List<String> names) {
+            Set<String> wanted = new LinkedHashSet<String>();
+            if (names != null) {
+                for (int i = 0; i < names.size(); i++) {
+                    String name = names.get(i);
+                    if (name != null) {
+                        wanted.add(name.trim().toLowerCase(java.util.Locale.ROOT));
+                    }
+                }
+            }
+            List<Integer> indexes = new ArrayList<Integer>();
+            for (int i = 0; i < presetModel.size(); i++) {
+                PresetListItem item = presetModel.getElementAt(i);
+                if (item.isReadable()
+                        && wanted.contains(item.name().toLowerCase(java.util.Locale.ROOT))) {
+                    indexes.add(Integer.valueOf(i));
+                }
+            }
+            int[] selected = new int[indexes.size()];
+            for (int i = 0; i < indexes.size(); i++) {
+                selected[i] = indexes.get(i).intValue();
+            }
+            presetList.setSelectedIndices(selected);
+            fireChanged();
+        }
+
+        void setXParamForTest(String paramKey) {
+            if (paramKey == null) {
+                return;
+            }
+            if (((javax.swing.DefaultComboBoxModel<String>) xParamCombo.getModel())
+                    .getIndexOf(paramKey) < 0) {
+                xParamCombo.addItem(paramKey);
+            }
+            xParamCombo.setSelectedItem(paramKey);
+            fireChanged();
+        }
+
+        void setXValuesForTest(List<?> values) {
+            xValues.setValues(values);
+            fireChanged();
+        }
+
+        private void buildUi() {
+            JPanel controls = new JPanel();
+            controls.setOpaque(false);
+            controls.setLayout(new BoxLayout(controls, BoxLayout.X_AXIS));
+            controls.setBorder(BorderFactory.createEmptyBorder(6, 8, 2, 8));
+            controls.add(new JLabel("X parameter: "));
+            controls.add(xParamCombo);
+            controls.add(Box.createHorizontalStrut(12));
+            controls.add(new JLabel("Values: "));
+            controls.add(xValues);
+            controls.add(Box.createHorizontalGlue());
+
+            presetList.setVisibleRowCount(Math.min(6,
+                    Math.max(3, presetModel.getSize())));
+            presetList.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
+            presetList.setCellRenderer(new PresetListRenderer());
+            JScrollPane scroller = new JScrollPane(presetList);
+            scroller.setBorder(BorderFactory.createEmptyBorder(2, 8, 8, 8));
+            scroller.setPreferredSize(new Dimension(420, 96));
+
+            add(controls, BorderLayout.NORTH);
+            add(scroller, BorderLayout.CENTER);
+        }
+
+        private void installListeners() {
+            presetList.addListSelectionListener(new ListSelectionListener() {
+                @Override public void valueChanged(ListSelectionEvent e) {
+                    if (!e.getValueIsAdjusting()) {
+                        removeSkippedSelections();
+                        fireChanged();
+                    }
+                }
+            });
+            xParamCombo.addActionListener(new ActionListener() {
+                @Override public void actionPerformed(ActionEvent e) {
+                    fireChanged();
+                }
+            });
+            xValues.addChangeListener(new ChangeListener() {
+                @Override public void stateChanged(ChangeEvent e) {
+                    fireChanged();
+                }
+            });
+        }
+
+        private void buildPresetModel() {
+            List<PresetEnumerator.PresetInfo> readable =
+                    enumeration.readablePresets();
+            for (int i = 0; i < readable.size(); i++) {
+                presetModel.addElement(PresetListItem.readable(readable.get(i)));
+            }
+            List<PresetEnumerator.SkippedPreset> skipped =
+                    enumeration.skippedPresets();
+            for (int i = 0; i < skipped.size(); i++) {
+                presetModel.addElement(PresetListItem.skipped(skipped.get(i)));
+            }
+        }
+
+        private void selectAllReadable() {
+            List<Integer> indexes = new ArrayList<Integer>();
+            for (int i = 0; i < presetModel.size(); i++) {
+                if (presetModel.getElementAt(i).isReadable()) {
+                    indexes.add(Integer.valueOf(i));
+                }
+            }
+            int[] selected = new int[indexes.size()];
+            for (int i = 0; i < indexes.size(); i++) {
+                selected[i] = indexes.get(i).intValue();
+            }
+            presetList.setSelectedIndices(selected);
+        }
+
+        private void removeSkippedSelections() {
+            if (suppressSelectionEvents) {
+                return;
+            }
+            int[] selected = presetList.getSelectedIndices();
+            List<Integer> readable = new ArrayList<Integer>();
+            boolean changed = false;
+            for (int i = 0; i < selected.length; i++) {
+                if (presetModel.getElementAt(selected[i]).isReadable()) {
+                    readable.add(Integer.valueOf(selected[i]));
+                } else {
+                    changed = true;
+                }
+            }
+            if (!changed) {
+                return;
+            }
+            int[] next = new int[readable.size()];
+            for (int i = 0; i < readable.size(); i++) {
+                next[i] = readable.get(i).intValue();
+            }
+            suppressSelectionEvents = true;
+            try {
+                presetList.setSelectedIndices(next);
+            } finally {
+                suppressSelectionEvents = false;
+            }
+        }
+
+        private List<PresetEnumerator.PresetInfo> selectedReadablePresets() {
+            int[] selected = presetList.getSelectedIndices();
+            List<PresetEnumerator.PresetInfo> out =
+                    new ArrayList<PresetEnumerator.PresetInfo>();
+            for (int i = 0; i < selected.length; i++) {
+                PresetListItem item = presetModel.getElementAt(selected[i]);
+                if (item.isReadable()) {
+                    out.add(item.info);
+                }
+            }
+            return out;
+        }
+
+        private String selectedXParam() {
+            Object selected = xParamCombo.getSelectedItem();
+            return selected == null ? "" : String.valueOf(selected).trim();
+        }
+
+        private String statusMessage() {
+            if (enumeration.readablePresets().isEmpty()) {
+                return enumeration.skippedPresets().isEmpty()
+                        ? "No preset options available."
+                        : "No readable presets available.";
+            }
+            List<PresetEnumerator.PresetInfo> selected = selectedReadablePresets();
+            if (selected.isEmpty()) {
+                return "Choose at least one readable preset.";
+            }
+            String xParam = selectedXParam();
+            if (xParam.length() == 0) {
+                return "Choose a numeric X-axis parameter.";
+            }
+            if (!anySelectedHasParam(selected, xParam)) {
+                return "No selected preset has numeric parameter " + xParam + ".";
+            }
+            return "";
+        }
+
+        private boolean anySelectedHasParam(List<PresetEnumerator.PresetInfo> selected,
+                                            String xParam) {
+            for (int i = 0; i < selected.size(); i++) {
+                if (selected.get(i).hasNumericParam(xParam)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private List<String> namesFor(List<PresetEnumerator.PresetInfo> selected) {
+            List<String> out = new ArrayList<String>();
+            for (int i = 0; i < selected.size(); i++) {
+                out.add(selected.get(i).name());
+            }
+            return out;
+        }
+
+        private List<String> orderedParamChoices(String defaultParam) {
+            List<String> out = new ArrayList<String>();
+            addIfPresent(out, defaultParam);
+            List<String> common = enumeration.commonNumericParamKeys();
+            for (int i = 0; i < common.size(); i++) {
+                addIfPresent(out, common.get(i));
+            }
+            List<String> all = enumeration.allNumericParamKeys();
+            for (int i = 0; i < all.size(); i++) {
+                addIfPresent(out, all.get(i));
+            }
+            return out;
+        }
+
+        private static void addIfPresent(List<String> out, String value) {
+            String safe = value == null ? "" : value.trim();
+            if (safe.length() == 0 || out.contains(safe)) {
+                return;
+            }
+            out.add(safe);
+        }
+
+        private List<Object> suggestedValues(String paramKey) {
+            double base = 1.0d;
+            List<PresetEnumerator.PresetInfo> readable =
+                    enumeration.readablePresets();
+            for (int i = 0; i < readable.size(); i++) {
+                PresetEnumerator.NumericParam param =
+                        readable.get(i).numericParam(paramKey);
+                if (param != null) {
+                    base = param.baseValue();
+                    break;
+                }
+            }
+            List<Object> values = new ArrayList<Object>();
+            if (Math.abs(base) < 0.0000001d) {
+                values.add(Double.valueOf(0.0d));
+                values.add(Double.valueOf(1.0d));
+                values.add(Double.valueOf(2.0d));
+            } else {
+                values.add(Double.valueOf(round(base * 0.5d)));
+                values.add(Double.valueOf(round(base)));
+                values.add(Double.valueOf(round(base * 2.0d)));
+            }
+            return values;
+        }
+
+        private void fireChanged() {
+            ChangeEvent event = new ChangeEvent(this);
+            for (int i = 0; i < listeners.size(); i++) {
+                listeners.get(i).stateChanged(event);
+            }
+        }
+
+        private static double round(double value) {
+            return Math.round(value * 1000.0d) / 1000.0d;
+        }
+
+        private static final class PresetListItem {
+            final PresetEnumerator.PresetInfo info;
+            final PresetEnumerator.SkippedPreset skipped;
+
+            private PresetListItem(PresetEnumerator.PresetInfo info,
+                                   PresetEnumerator.SkippedPreset skipped) {
+                this.info = info;
+                this.skipped = skipped;
+            }
+
+            static PresetListItem readable(PresetEnumerator.PresetInfo info) {
+                return new PresetListItem(info, null);
+            }
+
+            static PresetListItem skipped(PresetEnumerator.SkippedPreset skipped) {
+                return new PresetListItem(null, skipped);
+            }
+
+            boolean isReadable() {
+                return info != null;
+            }
+
+            String name() {
+                return isReadable() ? info.name() : skipped.name();
+            }
+
+            @Override public String toString() {
+                if (isReadable()) {
+                    return info.name();
+                }
+                return skipped.name() + " (unreadable)";
+            }
+        }
+
+        private static final class PresetListRenderer
+                extends DefaultListCellRenderer {
+            @Override public Component getListCellRendererComponent(
+                    JList<?> list,
+                    Object value,
+                    int index,
+                    boolean isSelected,
+                    boolean cellHasFocus) {
+                Component component = super.getListCellRendererComponent(
+                        list, value, index, isSelected, cellHasFocus);
+                if (!(component instanceof JLabel)
+                        || !(value instanceof PresetListItem)) {
+                    return component;
+                }
+                JLabel label = (JLabel) component;
+                PresetListItem item = (PresetListItem) value;
+                if (item.isReadable()) {
+                    label.setText(item.info.name());
+                    label.setToolTipText(item.info.chainSummary());
+                    label.setEnabled(true);
+                } else {
+                    label.setText(item.skipped.name() + " (unreadable)");
+                    label.setToolTipText(item.skipped.reason());
+                    label.setEnabled(false);
+                    if (!isSelected) {
+                        label.setForeground(new Color(130, 136, 142));
+                    }
+                }
+                return component;
+            }
+        }
+    }
+
     private FilterSweepStrategy.MacroPostProcessor chainMacroPostProcessor() {
+        if (mode == Mode.PRESETS) {
+            return null;
+        }
         final Set<Integer> disabled = chainRibbon.disabledStepIndexes();
         if (disabled.isEmpty()) {
             return null;
@@ -857,6 +1369,9 @@ public final class MacroVariationsDialog extends PipelineDialog {
     private ParameterSweep withChainCacheNamespace(ParameterSweep sweep) {
         if (sweep == null) {
             return null;
+        }
+        if (mode == Mode.PRESETS) {
+            return sweep;
         }
         String key = chainStateKey();
         if (key.length() == 0) {
@@ -1080,13 +1595,22 @@ public final class MacroVariationsDialog extends PipelineDialog {
                 setStrategyText(" ");
             }
             gridPanel.setSweep(sweep);
+            gridPanel.setPresetRowCaptions(mode == Mode.PRESETS
+                    ? presetEditor.rowCaptionsForSelected()
+                    : Collections.<String, String>emptyMap());
+            if (runButton != null && !isExecutorActive()) {
+                runButton.setEnabled(true);
+            }
         } catch (RuntimeException e) {
             cellsLabel.setText("Cells: ?");
             if (!isExecutorActive()) {
-                setStatusTextNow(mode == Mode.STEPS
+                setStatusTextNow(mode == Mode.STEPS || mode == Mode.PRESETS
                         ? safe(e.getMessage())
                         : "Choose at least one value for each selected parameter.");
                 setStrategyText(" ");
+            }
+            if (runButton != null && !isExecutorActive()) {
+                runButton.setEnabled(false);
             }
         }
     }
@@ -1160,6 +1684,10 @@ public final class MacroVariationsDialog extends PipelineDialog {
 
     private void updateHistogramShapeIndicator() {
         clearStableShapeRibbons();
+        if (mode == Mode.PRESETS) {
+            updatePresetHistogramShapeIndicator();
+            return;
+        }
         if (currentSweep == null
                 || cells.isEmpty()
                 || resultsByCell.size() != cells.size()
@@ -1196,6 +1724,129 @@ public final class MacroVariationsDialog extends PipelineDialog {
                 + axisLabelForStatus(axis)
                 + " = "
                 + formatValue(result.winnerCombo.get(axis)));
+    }
+
+    private void updatePresetHistogramShapeIndicator() {
+        if (currentSweep == null
+                || cells.isEmpty()
+                || resultsByCell.size() != cells.size()
+                || completedCount < cells.size()) {
+            clearHistogramShapeStrip();
+            setSuggestionText("No stable shape plateau detected");
+            return;
+        }
+        ParameterKey xAxis = presetXValueAxis();
+        ParameterKey presetAxis = presetNameAxis();
+        if (xAxis == null || presetAxis == null) {
+            clearHistogramShapeStrip();
+            setSuggestionText("No stable shape plateau detected");
+            return;
+        }
+
+        HistogramShapeStability.Result best = null;
+        double bestScore = Double.POSITIVE_INFINITY;
+        List<Object> presetNames = currentSweep.valueLists().get(presetAxis).values();
+        for (int i = 0; i < presetNames.size(); i++) {
+            List<VariationResult> row = successfulPresetResults(
+                    presetAxis, presetNames.get(i));
+            HistogramShapeStability.Result result =
+                    HistogramShapeStability.detect(row, xAxis);
+            if (result == null || !result.hasPlateau()) {
+                continue;
+            }
+            VariationCellPanel rowWinner = cellsByCombo.get(
+                    result.winnerCombo.toCanonicalJson());
+            if (rowWinner != null) {
+                rowWinner.setRibbonLabel("STABLE SHAPE");
+                rowWinner.setBorderHint(VariationCellPanel.BorderHint.KNEE);
+            }
+            double score = plateauScore(result);
+            if (score < bestScore) {
+                bestScore = score;
+                best = result;
+            }
+        }
+
+        if (best == null) {
+            clearHistogramShapeStrip();
+            setSuggestionText("No stable shape plateau detected");
+            return;
+        }
+
+        ensureHistogramShapeStrip(best);
+        PresetSweepCombo winner = PresetSweepCombo.from(best.winnerCombo);
+        String presetName = winner == null ? "" : winner.presetName();
+        setSuggestionText("Most stable shape: "
+                + presetName
+                + " at "
+                + axisLabelForStatus(xAxis)
+                + " = "
+                + formatValue(best.winnerCombo.get(xAxis)));
+    }
+
+    private List<VariationResult> successfulPresetResults(ParameterKey presetAxis,
+                                                          Object presetName) {
+        List<VariationResult> out = new ArrayList<VariationResult>();
+        for (int i = 0; i < resultsByCell.size(); i++) {
+            VariationResult result = resultsByCell.get(i);
+            if (result == null
+                    || result.hasError()
+                    || result.kind() != VariationResult.Kind.FILTER
+                    || !valueEquals(result.combo().get(presetAxis), presetName)) {
+                continue;
+            }
+            out.add(result);
+        }
+        return out;
+    }
+
+    private ParameterKey presetXValueAxis() {
+        if (currentSweep == null) {
+            return null;
+        }
+        for (ParameterKey key : currentSweep.valueLists().keySet()) {
+            if (key instanceof PresetSweepKey
+                    && ((PresetSweepKey) key).role() == PresetSweepKey.Role.X_VALUE) {
+                return key;
+            }
+        }
+        return null;
+    }
+
+    private ParameterKey presetNameAxis() {
+        if (currentSweep == null) {
+            return null;
+        }
+        for (ParameterKey key : currentSweep.valueLists().keySet()) {
+            if (key instanceof PresetSweepKey
+                    && ((PresetSweepKey) key).role() == PresetSweepKey.Role.PRESET_NAME) {
+                return key;
+            }
+        }
+        return null;
+    }
+
+    private static double plateauScore(HistogramShapeStability.Result result) {
+        if (result == null || result.distances.length == 0) {
+            return Double.POSITIVE_INFINITY;
+        }
+        int[] range = result.plateauRange();
+        if (range == null || range.length < 2) {
+            return Double.POSITIVE_INFINITY;
+        }
+        int start = Math.max(0, Math.min(range[0], range[1]));
+        int end = Math.min(result.distances.length - 1,
+                Math.max(range[0], range[1]) - 1);
+        if (end < start) {
+            return Double.POSITIVE_INFINITY;
+        }
+        double total = 0.0d;
+        int count = 0;
+        for (int i = start; i <= end; i++) {
+            total += result.distances[i];
+            count++;
+        }
+        return count == 0 ? Double.POSITIVE_INFINITY : total / count;
     }
 
     private void ensureHistogramShapeStrip(HistogramShapeStability.Result result) {
@@ -1509,7 +2160,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
 
     private int estimatedCellCount() {
         try {
-            long count = editor.currentSweep().cellCount();
+            long count = currentSweepForMode().cellCount();
             return count > Integer.MAX_VALUE ? Integer.MAX_VALUE : Math.max(0, (int) count);
         } catch (RuntimeException e) {
             return 0;
@@ -1526,6 +2177,16 @@ public final class MacroVariationsDialog extends PipelineDialog {
 
     private void setStrategyText(String text) {
         strategyLabel.setText(safe(text));
+    }
+
+    private String strategyTextForMode(int comboCount) {
+        if (mode == Mode.STEPS) {
+            return "Using Filter substitution (" + comboCount + " cells)";
+        }
+        if (mode == Mode.PRESETS) {
+            return "Using Filter presets (" + comboCount + " cells)";
+        }
+        return "Using Filter sweep (" + comboCount + " cells)";
     }
 
     private void setStatusText(final String text) {
@@ -1669,6 +2330,10 @@ public final class MacroVariationsDialog extends PipelineDialog {
             return "n/a";
         }
         return String.format(java.util.Locale.ROOT, "%.1f", Double.valueOf(value));
+    }
+
+    private static boolean valueEquals(Object left, Object right) {
+        return left == null ? right == null : left.equals(right);
     }
 
     private static String safe(String value) {

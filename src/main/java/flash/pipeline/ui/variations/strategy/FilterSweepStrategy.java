@@ -6,9 +6,11 @@ import flash.pipeline.image.dag.DagToIjmEmitter;
 import flash.pipeline.ui.config.FilterParameterStage;
 import flash.pipeline.ui.variations.CanonicalScale;
 import flash.pipeline.ui.variations.FilterParameterId;
+import flash.pipeline.ui.variations.FilterVariationEngineContext;
 import flash.pipeline.ui.variations.ParameterCombo;
 import flash.pipeline.ui.variations.ParameterKey;
 import flash.pipeline.ui.variations.ParameterSweep;
+import flash.pipeline.ui.variations.PresetSweepCombo;
 import flash.pipeline.ui.variations.SlotSubstitutionCombo;
 import flash.pipeline.ui.variations.VariationCache;
 import flash.pipeline.ui.variations.VariationResult;
@@ -37,6 +39,7 @@ public final class FilterSweepStrategy implements VariationStrategy {
     private final ImagePlus croppedSource;
     private final VariationCache cache;
     private final MacroPostProcessor macroPostProcessor;
+    private final FilterVariationEngineContext.PresetMacroLoader presetMacroLoader;
 
     public FilterSweepStrategy(FilterMacroEditorModel.MacroDefinition baseMacro,
                                FilterParameterStage.PreviewAdapter previewAdapter,
@@ -50,6 +53,16 @@ public final class FilterSweepStrategy implements VariationStrategy {
                                ImagePlus croppedSource,
                                VariationCache cache,
                                MacroPostProcessor macroPostProcessor) {
+        this(baseMacro, previewAdapter, croppedSource, cache, macroPostProcessor,
+                null);
+    }
+
+    public FilterSweepStrategy(FilterMacroEditorModel.MacroDefinition baseMacro,
+                               FilterParameterStage.PreviewAdapter previewAdapter,
+                               ImagePlus croppedSource,
+                               VariationCache cache,
+                               MacroPostProcessor macroPostProcessor,
+                               FilterVariationEngineContext.PresetMacroLoader presetMacroLoader) {
         if (baseMacro == null) {
             throw new IllegalArgumentException("baseMacro must not be null");
         }
@@ -64,6 +77,7 @@ public final class FilterSweepStrategy implements VariationStrategy {
         this.croppedSource = croppedSource;
         this.cache = cache;
         this.macroPostProcessor = macroPostProcessor;
+        this.presetMacroLoader = presetMacroLoader;
     }
 
     @Override
@@ -100,6 +114,10 @@ public final class FilterSweepStrategy implements VariationStrategy {
     }
 
     public String renderMacroForCombo(ParameterCombo combo) {
+        PresetSweepCombo presetCombo = PresetSweepCombo.from(combo);
+        if (presetCombo != null) {
+            return renderMacroForPresetCombo(presetCombo);
+        }
         SlotSubstitutionCombo substitution = SlotSubstitutionCombo.from(combo);
         if (substitution != null) {
             return renderMacroForSubstitution(substitution);
@@ -114,6 +132,35 @@ public final class FilterSweepStrategy implements VariationStrategy {
             }
             FilterParameterId id = (FilterParameterId) entry.getKey();
             setParameterValue(macro, id, entry.getValue());
+        }
+        String rendered = macro.render();
+        return macroPostProcessor == null
+                ? rendered
+                : macroPostProcessor.apply(rendered);
+    }
+
+    private String renderMacroForPresetCombo(PresetSweepCombo combo) {
+        if (presetMacroLoader == null) {
+            throw new IllegalStateException("No preset loader available.");
+        }
+        String presetMacro;
+        try {
+            presetMacro = presetMacroLoader.loadPresetMacro(combo.presetName());
+        } catch (Exception e) {
+            throw new IllegalStateException("Could not load preset "
+                    + combo.presetName() + ": " + e.getMessage(), e);
+        }
+        if (presetMacro == null || presetMacro.trim().isEmpty()) {
+            throw new PresetSweepCombo.IncompatiblePresetException(
+                    "Preset " + combo.presetName() + " has no macro content.");
+        }
+        FilterMacroEditorModel.MacroDefinition macro =
+                FilterMacroEditorModel.parse(presetMacro);
+        if (!setFirstMatchingParameterValue(macro, combo.xParamKey(),
+                combo.xValue())) {
+            throw new PresetSweepCombo.IncompatiblePresetException(
+                    "Preset " + combo.presetName() + " has no "
+                            + combo.xParamKey() + " parameter.");
         }
         String rendered = macro.render();
         return macroPostProcessor == null
@@ -208,6 +255,43 @@ public final class FilterSweepStrategy implements VariationStrategy {
         FilterMacroEditorModel.Parameter parameter =
                 entry.parameters.get(id.parameterIndex());
         parameter.setValue(String.valueOf(value));
+    }
+
+    private static boolean setFirstMatchingParameterValue(
+            FilterMacroEditorModel.MacroDefinition macro,
+            String paramKey,
+            Object value) {
+        String target = paramKey == null ? "" : paramKey.trim();
+        if (macro == null || target.isEmpty()) {
+            return false;
+        }
+        List<FilterMacroEditorModel.Section> sections = macro.getSections();
+        for (int i = 0; i < sections.size(); i++) {
+            FilterMacroEditorModel.Section section = sections.get(i);
+            for (int j = 0; j < section.entries.size(); j++) {
+                FilterMacroEditorModel.Entry entry = section.entries.get(j);
+                for (int k = 0; k < entry.parameters.size(); k++) {
+                    FilterMacroEditorModel.Parameter parameter =
+                            entry.parameters.get(k);
+                    if (parameter != null
+                            && target.equalsIgnoreCase(parameter.key)
+                            && isFiniteDouble(parameter.getValue())) {
+                        parameter.setValue(String.valueOf(value));
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean isFiniteDouble(String value) {
+        try {
+            double parsed = Double.parseDouble(value == null ? "" : value.trim());
+            return !Double.isNaN(parsed) && !Double.isInfinite(parsed);
+        } catch (RuntimeException e) {
+            return false;
+        }
     }
 
     private String replaceStep(String macroContent,

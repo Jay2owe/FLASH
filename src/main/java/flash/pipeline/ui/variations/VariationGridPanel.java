@@ -43,6 +43,8 @@ public final class VariationGridPanel extends JPanel implements Scrollable {
     private final List<VariationCellPanel> cells = new ArrayList<VariationCellPanel>();
     private final LinkedHashMap<ParameterKey, Object> activeFacets =
             new LinkedHashMap<ParameterKey, Object>();
+    private final LinkedHashMap<String, String> presetRowCaptions =
+            new LinkedHashMap<String, String>();
     private final JPanel tilePanel = new JPanel();
     private final List<CountCurveMini> rowCountCurves =
             new ArrayList<CountCurveMini>();
@@ -96,6 +98,14 @@ public final class VariationGridPanel extends JPanel implements Scrollable {
         }
     }
 
+    public void setPresetRowCaptions(Map<String, String> captions) {
+        presetRowCaptions.clear();
+        if (captions != null) {
+            presetRowCaptions.putAll(captions);
+        }
+        refreshLayout();
+    }
+
     public void setFacetSelectionListener(FacetChipRow.FacetSelectionListener listener) {
         this.facetSelectionListener = listener;
     }
@@ -121,6 +131,10 @@ public final class VariationGridPanel extends JPanel implements Scrollable {
         if (resolvedMethod == ParameterSweep.Method.CLASSICAL) {
             return sweptOrderableAxesByPrecedence(sweep,
                     CLASSICAL_SPATIAL_PRECEDENCE);
+        }
+        if (resolvedMethod == ParameterSweep.Method.FILTER
+                && hasPresetSweepAxes(sweep)) {
+            return presetSpatialAxes(sweep);
         }
         return sweptOrderableAxes(sweep);
     }
@@ -166,6 +180,10 @@ public final class VariationGridPanel extends JPanel implements Scrollable {
         return new ArrayList<CountCurveMini>(rowCountCurves);
     }
 
+    Map<String, String> presetRowCaptionsForTest() {
+        return new LinkedHashMap<String, String>(presetRowCaptions);
+    }
+
     private void refreshLayout() {
         removeAll();
         tilePanel.removeAll();
@@ -181,10 +199,11 @@ public final class VariationGridPanel extends JPanel implements Scrollable {
         ParameterKey yAxis = spatialAxes.size() > 1 ? spatialAxes.get(1) : null;
         boolean hasLeft = yAxis != null;
         boolean hasRight = hasLeft && !rowCountCurves.isEmpty();
+        int leftWidth = hasLeft ? AxisGutterPanel.leftWidthFor(yAxis) : 0;
         int columnCount = 1 + (hasLeft ? 1 : 0) + (hasRight ? 1 : 0);
         setLayout(new MigLayout("insets " + GAP + ", gap " + GAP + " " + GAP
                 + ", fillx",
-                gridColumnConstraints(hasLeft, hasRight),
+                gridColumnConstraints(hasLeft, hasRight, leftWidth),
                 "[]"));
 
         if (!facetAxes.isEmpty()) {
@@ -207,7 +226,7 @@ public final class VariationGridPanel extends JPanel implements Scrollable {
             AxisGutterPanel top = new AxisGutterPanel(AxisGutterPanel.Mode.TOP,
                     xAxis, valuesForAxis(xAxis));
             if (hasLeft) {
-                add(spacer(), "w " + AxisGutterPanel.LEFT_WIDTH + "!, h 1!");
+                add(spacer(), "w " + leftWidth + "!, h 1!");
                 add(top, hasRight ? "growx" : "growx, wrap");
                 if (hasRight) {
                     add(spacer(), "w " + CountCurveStrip.miniPreferredSize().width
@@ -222,6 +241,9 @@ public final class VariationGridPanel extends JPanel implements Scrollable {
         if (hasLeft) {
             AxisGutterPanel left = new AxisGutterPanel(AxisGutterPanel.Mode.LEFT,
                     yAxis, valuesForAxis(yAxis));
+            if (isPresetNameAxis(yAxis)) {
+                left.setValueCaptions(presetRowCaptions);
+            }
             add(left, "growy, aligny top");
             add(tilePanel, hasRight ? "growx, aligny top" : "growx, aligny top, wrap");
             if (hasRight) {
@@ -445,7 +467,54 @@ public final class VariationGridPanel extends JPanel implements Scrollable {
         if (key instanceof SlotSubstitutionKey) {
             return ((SlotSubstitutionKey) key).orderable();
         }
+        if (key instanceof PresetSweepKey) {
+            return ((PresetSweepKey) key).orderable();
+        }
         return key != null && key.valueKind() == ParameterKey.ValueKind.NUMBER;
+    }
+
+    private static boolean hasPresetSweepAxes(ParameterSweep sweep) {
+        if (sweep == null) {
+            return false;
+        }
+        boolean hasPreset = false;
+        boolean hasXValue = false;
+        for (ParameterKey key : sweep.valueLists().keySet()) {
+            if (!(key instanceof PresetSweepKey)) {
+                continue;
+            }
+            PresetSweepKey presetKey = (PresetSweepKey) key;
+            hasPreset |= presetKey.role() == PresetSweepKey.Role.PRESET_NAME;
+            hasXValue |= presetKey.role() == PresetSweepKey.Role.X_VALUE;
+        }
+        return hasPreset && hasXValue;
+    }
+
+    private static List<ParameterKey> presetSpatialAxes(ParameterSweep sweep) {
+        List<ParameterKey> axes = new ArrayList<ParameterKey>();
+        ParameterKey x = null;
+        ParameterKey preset = null;
+        for (Map.Entry<ParameterKey, ParameterValueList> entry
+                : sweep.valueLists().entrySet()) {
+            if (!(entry.getKey() instanceof PresetSweepKey)
+                    || entry.getValue() == null
+                    || entry.getValue().size() <= 1) {
+                continue;
+            }
+            PresetSweepKey key = (PresetSweepKey) entry.getKey();
+            if (key.role() == PresetSweepKey.Role.X_VALUE) {
+                x = key;
+            } else if (key.role() == PresetSweepKey.Role.PRESET_NAME) {
+                preset = key;
+            }
+        }
+        if (x != null) {
+            axes.add(x);
+        }
+        if (preset != null) {
+            axes.add(preset);
+        }
+        return axes;
     }
 
     private static String macroLabel(ParameterSweep sweep, Object value) {
@@ -493,10 +562,12 @@ public final class VariationGridPanel extends JPanel implements Scrollable {
         return sb.toString();
     }
 
-    private static String gridColumnConstraints(boolean hasLeft, boolean hasRight) {
+    private static String gridColumnConstraints(boolean hasLeft,
+                                                boolean hasRight,
+                                                int leftWidth) {
         StringBuilder out = new StringBuilder();
         if (hasLeft) {
-            out.append("[").append(AxisGutterPanel.LEFT_WIDTH).append("!]");
+            out.append("[").append(leftWidth).append("!]");
         }
         out.append("[grow,fill]");
         if (hasRight) {
@@ -521,6 +592,11 @@ public final class VariationGridPanel extends JPanel implements Scrollable {
         JPanel spacer = new JPanel();
         spacer.setOpaque(false);
         return spacer;
+    }
+
+    private static boolean isPresetNameAxis(ParameterKey axis) {
+        return axis instanceof PresetSweepKey
+                && ((PresetSweepKey) axis).role() == PresetSweepKey.Role.PRESET_NAME;
     }
 
     @Override public Dimension getPreferredScrollableViewportSize() {

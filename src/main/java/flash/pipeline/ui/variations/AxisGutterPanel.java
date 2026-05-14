@@ -12,7 +12,10 @@ import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.geom.AffineTransform;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 public final class AxisGutterPanel extends JPanel {
 
@@ -23,6 +26,7 @@ public final class AxisGutterPanel extends JPanel {
 
     public static final int TOP_HEIGHT = 42;
     public static final int LEFT_WIDTH = 92;
+    public static final int PRESET_LEFT_WIDTH = 190;
     public static final int DEFAULT_CELL_WIDTH = 360;
     public static final int DEFAULT_CELL_HEIGHT = 330;
 
@@ -34,6 +38,8 @@ public final class AxisGutterPanel extends JPanel {
     private final Mode mode;
     private ParameterKey axis;
     private final List<Object> values = new ArrayList<Object>();
+    private final Map<String, String> valueCaptions =
+            new LinkedHashMap<String, String>();
 
     public AxisGutterPanel(Mode mode, ParameterId axis, List<?> values) {
         this(mode, (ParameterKey) axis, values);
@@ -64,6 +70,23 @@ public final class AxisGutterPanel extends JPanel {
         repaint();
     }
 
+    public void setValueCaptions(Map<String, String> captions) {
+        valueCaptions.clear();
+        if (captions != null) {
+            valueCaptions.putAll(captions);
+        }
+        revalidate();
+        repaint();
+    }
+
+    public Map<String, String> valueCaptionsForTest() {
+        return Collections.unmodifiableMap(valueCaptions);
+    }
+
+    public static int leftWidthFor(ParameterKey axis) {
+        return isPresetNameAxis(axis) ? PRESET_LEFT_WIDTH : LEFT_WIDTH;
+    }
+
     @Override public Dimension getPreferredSize() {
         int count = Math.max(1, values.size());
         if (mode == Mode.TOP) {
@@ -71,7 +94,7 @@ public final class AxisGutterPanel extends JPanel {
             return new Dimension(width, TOP_HEIGHT);
         }
         int height = count * DEFAULT_CELL_HEIGHT + Math.max(0, count - 1) * GAP;
-        return new Dimension(LEFT_WIDTH, height);
+        return new Dimension(leftWidthFor(axis), height);
     }
 
     @Override protected void paintComponent(Graphics g) {
@@ -114,6 +137,10 @@ public final class AxisGutterPanel extends JPanel {
     }
 
     private void paintLeft(Graphics2D g2) {
+        if (isPresetNameAxis(axis)) {
+            paintPresetLeft(g2);
+            return;
+        }
         int count = Math.max(1, values.size());
         int slotHeight = slotHeight(getHeight(), count);
         int y = 0;
@@ -130,6 +157,39 @@ public final class AxisGutterPanel extends JPanel {
             int centerY = y + slotHeight / 2;
             drawRotatedCentered(g2, valueText(values.get(i)),
                     centerX, centerY, -Math.PI / 2.0d);
+            y += slotHeight + GAP;
+        }
+    }
+
+    private void paintPresetLeft(Graphics2D g2) {
+        int count = Math.max(1, values.size());
+        int slotHeight = slotHeight(getHeight(), count);
+        int y = 0;
+
+        g2.setFont(titleFont());
+        g2.setColor(TITLE_COLOR);
+        drawRotatedCentered(g2, "v " + ParameterLabels.labelFor(axis),
+                13, getHeight() / 2, -Math.PI / 2.0d);
+
+        int x = 28;
+        int textWidth = Math.max(1, getWidth() - x - 6);
+        for (int i = 0; i < values.size(); i++) {
+            Object value = values.get(i);
+            int top = y + Math.max(0, (slotHeight - 42) / 2);
+            String name = valueText(value);
+            String caption = valueCaptions.get(name);
+
+            g2.setFont(FlashTheme.body().deriveFont(Font.BOLD, 11f));
+            g2.setColor(VALUE_COLOR);
+            g2.drawString(ellipsize(name, textWidth, g2.getFontMetrics()),
+                    x, top + 16);
+
+            if (caption != null && caption.trim().length() > 0) {
+                g2.setFont(FlashTheme.mono(9f));
+                g2.setColor(new Color(112, 120, 126));
+                g2.drawString(ellipsize(caption, textWidth, g2.getFontMetrics()),
+                        x, top + 31);
+            }
             y += slotHeight + GAP;
         }
     }
@@ -182,5 +242,25 @@ public final class AxisGutterPanel extends JPanel {
 
     private static String valueText(Object value) {
         return value == null ? "" : String.valueOf(value);
+    }
+
+    private static boolean isPresetNameAxis(ParameterKey axis) {
+        return axis instanceof PresetSweepKey
+                && ((PresetSweepKey) axis).role() == PresetSweepKey.Role.PRESET_NAME;
+    }
+
+    private static String ellipsize(String text, int maxWidth, FontMetrics metrics) {
+        String safe = text == null ? "" : text;
+        if (metrics == null || metrics.stringWidth(safe) <= maxWidth) {
+            return safe;
+        }
+        String suffix = "...";
+        int suffixWidth = metrics.stringWidth(suffix);
+        int limit = Math.max(1, maxWidth - suffixWidth);
+        String out = safe;
+        while (out.length() > 0 && metrics.stringWidth(out) > limit) {
+            out = out.substring(0, out.length() - 1);
+        }
+        return out + suffix;
     }
 }

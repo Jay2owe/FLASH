@@ -49,10 +49,10 @@ public class MacroVariationsDialogTest {
                     assertTrue(dialog.paramsButtonForTest().isEnabled());
                     assertTrue(dialog.paramsButtonForTest().isSelected());
                     assertTrue(dialog.stepsButtonForTest().isEnabled());
-                    assertFalse(dialog.presetsButtonForTest().isEnabled());
+                    assertTrue(dialog.presetsButtonForTest().isEnabled());
                     assertEquals("Try native filter alternatives at one chain step",
                             dialog.stepsButtonForTest().getToolTipText());
-                    assertEquals("Coming soon",
+                    assertEquals("Compare readable filter presets",
                             dialog.presetsButtonForTest().getToolTipText());
                     assertNotNull(dialog.gridPanelForTest());
                     assertEquals(0, dialog.gridPanelForTest().cellCountForTest());

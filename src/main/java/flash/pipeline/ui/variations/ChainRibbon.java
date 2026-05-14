@@ -56,6 +56,7 @@ public final class ChainRibbon extends JPanel {
             new java.util.LinkedHashMap<Integer, String>();
     private boolean stepsMode;
     private boolean restrictFocusableSteps;
+    private boolean interactionEnabled = true;
 
     public ChainRibbon(FilterMacroEditorModel.MacroDefinition macro) {
         this(flattenSteps(macro));
@@ -101,6 +102,18 @@ public final class ChainRibbon extends JPanel {
 
     public boolean stepsMode() {
         return stepsMode;
+    }
+
+    public void setInteractionEnabled(boolean enabled) {
+        if (interactionEnabled == enabled) {
+            return;
+        }
+        interactionEnabled = enabled;
+        for (int i = 0; i < pills.size(); i++) {
+            pills.get(i).setCursor(Cursor.getPredefinedCursor(
+                    enabled ? Cursor.HAND_CURSOR : Cursor.DEFAULT_CURSOR));
+        }
+        updateTooltips();
     }
 
     public void setFocusableStepIndexes(Set<Integer> focusable,
@@ -325,6 +338,9 @@ public final class ChainRibbon extends JPanel {
         }
 
         void handleClick(int button) {
+            if (!interactionEnabled) {
+                return;
+            }
             if (stepsMode) {
                 if (button == MouseEvent.BUTTON1) {
                     focusStep(stepIndex, true);
@@ -420,6 +436,9 @@ public final class ChainRibbon extends JPanel {
         }
 
         private void showPopup(MouseEvent e) {
+            if (!interactionEnabled) {
+                return;
+            }
             JPopupMenu menu = new JPopupMenu();
             addStateMenuItem(menu, "Fixed", StepState.FIXED, true);
             addStateMenuItem(menu, "Swept", StepState.SWEPT, step.sweepable);
@@ -443,6 +462,10 @@ public final class ChainRibbon extends JPanel {
         }
 
         private void updateTooltip() {
+            if (!interactionEnabled) {
+                setToolTipText(step.fullLabel);
+                return;
+            }
             if (stepsMode && !ChainRibbon.this.isFocusable(stepIndex)) {
                 String reason = focusDisabledReasons.get(Integer.valueOf(stepIndex));
                 setToolTipText(reason == null || reason.trim().isEmpty()

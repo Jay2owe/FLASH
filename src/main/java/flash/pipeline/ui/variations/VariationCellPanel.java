@@ -298,7 +298,10 @@ public final class VariationCellPanel extends JPanel {
         filterSnr = result.snr();
         filterBgSigma = result.bgSigma();
         SlotSubstitutionCombo substitution = SlotSubstitutionCombo.from(result.combo());
-        String chip = substitution == null ? "" : substitution.displayLabel();
+        PresetSweepCombo presetCombo = PresetSweepCombo.from(result.combo());
+        String chip = presetCombo == null
+                ? (substitution == null ? "" : substitution.displayLabel())
+                : presetCombo.displayValue();
         filterChipLabel.setText(chip);
         filterChipLabel.setVisible(chip.length() > 0);
         filterSnrLabel.setText("SNR " + formatOneDecimal(filterSnr));
@@ -336,7 +339,11 @@ public final class VariationCellPanel extends JPanel {
         filterChipLabel.setVisible(false);
         durationMs = -1L;
         setDisplayedPreviewImage(null);
-        setStateText(ERROR_BADGE, ERROR_COLOR);
+        if (PresetSweepCombo.isIncompatible(error)) {
+            setStateText("N/A", DOWNSTREAM_NEUTRAL);
+        } else {
+            setStateText(ERROR_BADGE, ERROR_COLOR);
+        }
         refreshTooltip();
     }
 
