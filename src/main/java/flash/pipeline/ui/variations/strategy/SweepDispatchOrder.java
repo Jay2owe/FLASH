@@ -1,7 +1,7 @@
 package flash.pipeline.ui.variations.strategy;
 
 import flash.pipeline.ui.variations.ParameterCombo;
-import flash.pipeline.ui.variations.ParameterId;
+import flash.pipeline.ui.variations.ParameterKey;
 import flash.pipeline.ui.variations.ParameterSweep;
 import flash.pipeline.ui.variations.ParameterValueList;
 
@@ -48,7 +48,7 @@ public final class SweepDispatchOrder {
 
     private static int chebyshevDistance(ParameterSweep sweep, ParameterCombo combo) {
         int distance = 0;
-        for (Map.Entry<ParameterId, ParameterValueList> entry : sweep.valueLists().entrySet()) {
+        for (Map.Entry<ParameterKey, ParameterValueList> entry : sweep.valueLists().entrySet()) {
             ParameterValueList values = entry.getValue();
             if (values == null || values.size() <= 1) {
                 continue;

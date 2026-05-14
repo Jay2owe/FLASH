@@ -11,7 +11,8 @@ public final class ParameterSweep {
     public enum Method {
         CLASSICAL("Classical"),
         STARDIST("StarDist"),
-        CELLPOSE("Cellpose");
+        CELLPOSE("Cellpose"),
+        FILTER("Filter");
 
         private final String label;
 
@@ -30,16 +31,26 @@ public final class ParameterSweep {
     }
 
     private final Method method;
-    private final Map<ParameterId, ParameterValueList> valueLists;
+    private final Map<ParameterKey, ParameterValueList> valueLists;
     private final CropSpec cropSpec;
     private final String channelName;
     private final String sourceImageHash;
+    private final String cacheNamespace;
 
     public ParameterSweep(Method method,
-                          Map<ParameterId, ParameterValueList> valueLists,
+                          Map<? extends ParameterKey, ParameterValueList> valueLists,
                           CropSpec cropSpec,
                           String channelName,
                           String sourceImageHash) {
+        this(method, valueLists, cropSpec, channelName, sourceImageHash, "");
+    }
+
+    public ParameterSweep(Method method,
+                          Map<? extends ParameterKey, ParameterValueList> valueLists,
+                          CropSpec cropSpec,
+                          String channelName,
+                          String sourceImageHash,
+                          String cacheNamespace) {
         if (method == null) {
             throw new IllegalArgumentException("method must not be null");
         }
@@ -47,10 +58,11 @@ public final class ParameterSweep {
             throw new IllegalArgumentException("valueLists must not be null");
         }
         this.method = method;
-        this.valueLists = Collections.unmodifiableMap(copyInEnumOrder(valueLists));
+        this.valueLists = Collections.unmodifiableMap(copyInKeyOrder(valueLists));
         this.cropSpec = cropSpec == null ? CropSpec.full() : cropSpec;
         this.channelName = channelName == null ? "" : channelName;
         this.sourceImageHash = sourceImageHash == null ? "" : sourceImageHash;
+        this.cacheNamespace = cacheNamespace == null ? "" : cacheNamespace.trim();
     }
 
     public Method method() {
@@ -61,11 +73,11 @@ public final class ParameterSweep {
         return method;
     }
 
-    public Map<ParameterId, ParameterValueList> valueLists() {
+    public Map<ParameterKey, ParameterValueList> valueLists() {
         return valueLists;
     }
 
-    public Map<ParameterId, ParameterValueList> getValueLists() {
+    public Map<ParameterKey, ParameterValueList> getValueLists() {
         return valueLists;
     }
 
@@ -93,8 +105,26 @@ public final class ParameterSweep {
         return sourceImageHash;
     }
 
+    public String cacheNamespace() {
+        return cacheNamespace;
+    }
+
+    public String getCacheNamespace() {
+        return cacheNamespace;
+    }
+
+    public List<ParameterKey> parameterKeys() {
+        return new ArrayList<ParameterKey>(valueLists.keySet());
+    }
+
     public List<ParameterId> parameterIds() {
-        return new ArrayList<ParameterId>(valueLists.keySet());
+        List<ParameterId> out = new ArrayList<ParameterId>();
+        for (ParameterKey key : valueLists.keySet()) {
+            if (key instanceof ParameterId) {
+                out.add((ParameterId) key);
+            }
+        }
+        return out;
     }
 
     public long cellCount() {
@@ -113,9 +143,9 @@ public final class ParameterSweep {
         if (count > Integer.MAX_VALUE) {
             throw new IllegalStateException("too many parameter combinations: " + count);
         }
-        List<ParameterId> ids = new ArrayList<ParameterId>(valueLists.keySet());
+        List<ParameterKey> ids = new ArrayList<ParameterKey>(valueLists.keySet());
         List<ParameterCombo> out = new ArrayList<ParameterCombo>((int) count);
-        buildCombos(ids, 0, new LinkedHashMap<ParameterId, Object>(), out);
+        buildCombos(ids, 0, new LinkedHashMap<ParameterKey, Object>(), out);
         return out;
     }
 
@@ -123,14 +153,18 @@ public final class ParameterSweep {
         LinkedHashMap<String, Object> root = new LinkedHashMap<String, Object>();
         root.put("channelName", channelName);
         root.put("cropSpec", canonicalObject(cropSpec.toCanonicalJson()));
+        if (!cacheNamespace.isEmpty()) {
+            root.put("cacheNamespace", cacheNamespace);
+        }
         root.put("method", method.label());
         root.put("sourceImageHash", sourceImageHash);
         LinkedHashMap<String, Object> values = new LinkedHashMap<String, Object>();
         List<String> keys = new ArrayList<String>();
         Map<String, ParameterValueList> byName = new LinkedHashMap<String, ParameterValueList>();
-        for (Map.Entry<ParameterId, ParameterValueList> entry : valueLists.entrySet()) {
-            keys.add(entry.getKey().name());
-            byName.put(entry.getKey().name(), entry.getValue());
+        for (Map.Entry<ParameterKey, ParameterValueList> entry : valueLists.entrySet()) {
+            String key = canonicalJsonKey(entry.getKey());
+            keys.add(key);
+            byName.put(key, entry.getValue());
         }
         Collections.sort(keys);
         for (int i = 0; i < keys.size(); i++) {
@@ -149,15 +183,15 @@ public final class ParameterSweep {
         }
     }
 
-    private void buildCombos(List<ParameterId> ids,
+    private void buildCombos(List<ParameterKey> ids,
                              int index,
-                             LinkedHashMap<ParameterId, Object> current,
+                             LinkedHashMap<ParameterKey, Object> current,
                              List<ParameterCombo> out) {
         if (index >= ids.size()) {
             out.add(new ParameterCombo(current));
             return;
         }
-        ParameterId id = ids.get(index);
+        ParameterKey id = ids.get(index);
         ParameterValueList values = valueLists.get(id);
         for (int i = 0; i < values.size(); i++) {
             current.put(id, values.get(i));
@@ -166,14 +200,19 @@ public final class ParameterSweep {
         current.remove(id);
     }
 
-    private static Map<ParameterId, ParameterValueList> copyInEnumOrder(
-            Map<ParameterId, ParameterValueList> source) {
-        List<ParameterId> ids = new ArrayList<ParameterId>(source.keySet());
-        Collections.sort(ids);
-        LinkedHashMap<ParameterId, ParameterValueList> out =
-                new LinkedHashMap<ParameterId, ParameterValueList>();
+    private static Map<ParameterKey, ParameterValueList> copyInKeyOrder(
+            Map<? extends ParameterKey, ParameterValueList> source) {
+        List<ParameterKey> ids = new ArrayList<ParameterKey>(source.keySet());
+        Collections.sort(ids, new java.util.Comparator<ParameterKey>() {
+            @Override
+            public int compare(ParameterKey a, ParameterKey b) {
+                return compareStorageKeys(a, b);
+            }
+        });
+        LinkedHashMap<ParameterKey, ParameterValueList> out =
+                new LinkedHashMap<ParameterKey, ParameterValueList>();
         for (int i = 0; i < ids.size(); i++) {
-            ParameterId id = ids.get(i);
+            ParameterKey id = ids.get(i);
             if (id == null) {
                 throw new IllegalArgumentException("parameter id must not be null");
             }
@@ -184,5 +223,25 @@ public final class ParameterSweep {
             out.put(id, values);
         }
         return out;
+    }
+
+    private static String canonicalJsonKey(ParameterKey key) {
+        if (key instanceof ParameterId) {
+            return ((ParameterId) key).name();
+        }
+        return key == null ? "" : key.stableKey();
+    }
+
+    private static int compareStorageKeys(ParameterKey a, ParameterKey b) {
+        if (a instanceof ParameterId && b instanceof ParameterId) {
+            return ((ParameterId) a).compareTo((ParameterId) b);
+        }
+        String aKey = a == null ? "" : a.stableKey();
+        String bKey = b == null ? "" : b.stableKey();
+        int byStableKey = aKey.compareTo(bKey);
+        if (byStableKey != 0) {
+            return byStableKey;
+        }
+        return canonicalJsonKey(a).compareTo(canonicalJsonKey(b));
     }
 }

@@ -1,7 +1,7 @@
 package flash.pipeline.ui.variations.state;
 
 import flash.pipeline.ui.variations.ParameterCombo;
-import flash.pipeline.ui.variations.ParameterId;
+import flash.pipeline.ui.variations.ParameterKey;
 import flash.pipeline.ui.variations.ParameterSweep;
 import flash.pipeline.ui.variations.ParameterValueList;
 
@@ -169,7 +169,7 @@ public final class VariationState {
             return null;
         }
         StringBuilder out = new StringBuilder();
-        for (Map.Entry<ParameterId, ParameterValueList> entry
+        for (Map.Entry<ParameterKey, ParameterValueList> entry
                 : sweep.valueLists().entrySet()) {
             int index = indexOf(entry.getValue(), combo.get(entry.getKey()));
             if (index < 0) {

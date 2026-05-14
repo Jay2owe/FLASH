@@ -9,6 +9,7 @@ import ij.ImagePlus;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
+import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
@@ -23,31 +24,50 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.prefs.Preferences;
 
 public final class ParameterSweepEditor extends JPanel {
 
     private final ParameterSweep.Method method;
     private final String channelName;
     private final String sourceImageHash;
+    private final int noUpperBoundMaxSize;
     private final List<Row> rows = new ArrayList<Row>();
     private final List<ChangeListener> listeners = new ArrayList<ChangeListener>();
+    private final Preferences preferences =
+            Preferences.userNodeForPackage(ParameterSweepEditor.class);
+    private JPanel advancedPanel;
+    private JButton advancedToggle;
+    private boolean advancedExpanded;
     private CropSpec cropSpec = CropSpec.full();
 
     public ParameterSweepEditor(VariationEngineContext context) {
         this(context == null ? ParameterSweep.Method.CLASSICAL : context.method(),
                 baseComboFor(context),
                 context == null ? "" : context.channelName(),
-                sourceHash(context == null ? null : context.filteredSource()));
+                sourceHash(context == null ? null : context.filteredSource()),
+                maxPossibleVoxels(context == null ? null : context.filteredSource()));
     }
 
     public ParameterSweepEditor(ParameterSweep.Method method,
                                 ParameterCombo baseParameters,
                                 String channelName,
                                 String sourceImageHash) {
+        this(method, baseParameters, channelName, sourceImageHash, Integer.MAX_VALUE);
+    }
+
+    private ParameterSweepEditor(ParameterSweep.Method method,
+                                 ParameterCombo baseParameters,
+                                 String channelName,
+                                 String sourceImageHash,
+                                 int noUpperBoundMaxSize) {
         super();
         this.method = method == null ? ParameterSweep.Method.CLASSICAL : method;
         this.channelName = channelName == null ? "" : channelName;
         this.sourceImageHash = sourceImageHash == null ? "" : sourceImageHash;
+        this.noUpperBoundMaxSize = noUpperBoundMaxSize <= 0
+                ? Integer.MAX_VALUE
+                : noUpperBoundMaxSize;
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
         setOpaque(false);
         setBorder(BorderFactory.createLineBorder(new Color(214, 220, 224)));
@@ -80,7 +100,7 @@ public final class ParameterSweepEditor extends JPanel {
             return;
         }
         cropSpec = sweep.cropSpec();
-        Map<ParameterId, ParameterValueList> valueLists = sweep.valueLists();
+        Map<ParameterKey, ParameterValueList> valueLists = sweep.valueLists();
         for (int i = 0; i < rows.size(); i++) {
             Row row = rows.get(i);
             ParameterValueList values = valueLists.get(row.id);
@@ -89,6 +109,7 @@ public final class ParameterSweepEditor extends JPanel {
                 row.sweepBox.setSelected(values.size() > 1);
             }
         }
+        autoExpandAdvancedIfActive();
         fireChanged();
     }
 
@@ -103,6 +124,7 @@ public final class ParameterSweepEditor extends JPanel {
                 row.values.setValues(values.values());
             }
         }
+        autoExpandAdvancedIfActive();
         fireChanged();
     }
 
@@ -136,11 +158,29 @@ public final class ParameterSweepEditor extends JPanel {
         return row == null ? 0 : row.values.currentValueList().size();
     }
 
+    boolean advancedExpandedForTest() {
+        return advancedExpanded;
+    }
+
     private void build(ParameterCombo baseParameters) {
         add(headerRow());
-        List<ParameterId> ids = idsFor(method);
-        for (int i = 0; i < ids.size(); i++) {
-            add(rowPanel(ids.get(i), baseParameters));
+        ParameterSections sections = sectionsFor(method);
+        for (int i = 0; i < sections.primary.size(); i++) {
+            add(rowPanel(sections.primary.get(i), baseParameters, false));
+        }
+        if (!sections.advanced.isEmpty()) {
+            advancedExpanded = loadAdvancedExpanded();
+            add(advancedToggleRow(sections.advanced.size()));
+            advancedPanel = new JPanel();
+            advancedPanel.setOpaque(false);
+            advancedPanel.setLayout(new BoxLayout(advancedPanel, BoxLayout.Y_AXIS));
+            advancedPanel.setAlignmentX(LEFT_ALIGNMENT);
+            for (int i = 0; i < sections.advanced.size(); i++) {
+                advancedPanel.add(rowPanel(sections.advanced.get(i), baseParameters, true));
+            }
+            add(advancedPanel);
+            autoExpandAdvancedIfActive();
+            updateAdvancedVisibility();
         }
     }
 
@@ -164,7 +204,33 @@ public final class ParameterSweepEditor extends JPanel {
         return row;
     }
 
-    private JPanel rowPanel(final ParameterId id, ParameterCombo baseParameters) {
+    private JPanel advancedToggleRow(int advancedCount) {
+        JPanel row = new JPanel();
+        row.setOpaque(false);
+        row.setLayout(new BoxLayout(row, BoxLayout.X_AXIS));
+        row.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(1, 0, 0, 0, new Color(230, 234, 238)),
+                BorderFactory.createEmptyBorder(4, 8, 4, 8)));
+        row.setAlignmentX(LEFT_ALIGNMENT);
+        advancedToggle = new JButton();
+        advancedToggle.setFocusPainted(false);
+        advancedToggle.setBorder(BorderFactory.createEmptyBorder(3, 6, 3, 6));
+        advancedToggle.setContentAreaFilled(false);
+        advancedToggle.addActionListener(e -> {
+            advancedExpanded = !advancedExpanded;
+            storeAdvancedExpanded(advancedExpanded);
+            updateAdvancedVisibility();
+        });
+        row.add(Box.createHorizontalStrut(72));
+        row.add(advancedToggle);
+        row.add(Box.createHorizontalGlue());
+        updateAdvancedToggleText(advancedCount);
+        return row;
+    }
+
+    private JPanel rowPanel(final ParameterId id,
+                            ParameterCombo baseParameters,
+                            final boolean advanced) {
         JPanel row = new JPanel();
         row.setOpaque(false);
         row.setLayout(new BoxLayout(row, BoxLayout.X_AXIS));
@@ -179,7 +245,7 @@ public final class ParameterSweepEditor extends JPanel {
         sweepBox.setToolTipText("Sweep this parameter");
         row.add(sweepBox);
 
-        JLabel name = new JLabel(labelFor(id));
+        JLabel name = new JLabel(id.displayLabel());
         name.setPreferredSize(new Dimension(180, 24));
         row.add(name);
 
@@ -190,11 +256,21 @@ public final class ParameterSweepEditor extends JPanel {
         row.add(chips);
         row.add(Box.createHorizontalGlue());
 
-        final Row rowState = new Row(id, sweepBox, chips);
+        final Row rowState = new Row(id, sweepBox, chips, advanced);
         rows.add(rowState);
-        sweepBox.addActionListener(e -> fireChanged());
+        sweepBox.addActionListener(e -> {
+            if (advanced && rowState.sweepBox.isSelected()) {
+                advancedExpanded = true;
+                updateAdvancedVisibility();
+            }
+            fireChanged();
+        });
         chips.addChangeListener(new ChangeListener() {
             @Override public void stateChanged(ChangeEvent e) {
+                if (advanced && isAdvancedRowActive(rowState)) {
+                    advancedExpanded = true;
+                    updateAdvancedVisibility();
+                }
                 fireChanged();
             }
         });
@@ -225,58 +301,41 @@ public final class ParameterSweepEditor extends JPanel {
         return label;
     }
 
-    private static List<ParameterId> idsFor(ParameterSweep.Method method) {
-        List<ParameterId> ids = new ArrayList<ParameterId>();
+    private static ParameterSections sectionsFor(ParameterSweep.Method method) {
+        List<ParameterId> primary = new ArrayList<ParameterId>();
+        List<ParameterId> advanced = new ArrayList<ParameterId>();
         if (method == ParameterSweep.Method.STARDIST) {
-            ids.add(ParameterId.PROB_THRESH);
-            ids.add(ParameterId.NMS_THRESH);
-            ids.add(ParameterId.LINKING_MAX);
-            ids.add(ParameterId.GAP_CLOSING_MAX);
-            ids.add(ParameterId.FRAME_GAP);
-            ids.add(ParameterId.AREA_MIN);
-            ids.add(ParameterId.AREA_MAX);
-            ids.add(ParameterId.QUALITY_MIN);
-            ids.add(ParameterId.INTENSITY_MIN);
+            primary.add(ParameterId.PROB_THRESH);
+            primary.add(ParameterId.NMS_THRESH);
+            advanced.add(ParameterId.LINKING_MAX);
+            advanced.add(ParameterId.GAP_CLOSING_MAX);
+            advanced.add(ParameterId.FRAME_GAP);
+            advanced.add(ParameterId.AREA_MIN);
+            advanced.add(ParameterId.AREA_MAX);
+            advanced.add(ParameterId.QUALITY_MIN);
+            advanced.add(ParameterId.INTENSITY_MIN);
         } else if (method == ParameterSweep.Method.CELLPOSE) {
-            ids.add(ParameterId.DIAMETER);
-            ids.add(ParameterId.FLOW_THRESHOLD);
-            ids.add(ParameterId.CELLPROB_THRESHOLD);
-            ids.add(ParameterId.MODEL);
+            primary.add(ParameterId.DIAMETER);
+            primary.add(ParameterId.FLOW_THRESHOLD);
+            primary.add(ParameterId.CELLPROB_THRESHOLD);
+            advanced.add(ParameterId.MODEL);
         } else {
-            ids.add(ParameterId.THRESHOLD);
-            ids.add(ParameterId.MIN_SIZE);
-            ids.add(ParameterId.MAX_SIZE);
+            primary.add(ParameterId.THRESHOLD);
+            primary.add(ParameterId.MIN_SIZE);
+            advanced.add(ParameterId.MAX_SIZE);
         }
-        return ids;
-    }
-
-    private static String labelFor(ParameterId id) {
-        if (id == ParameterId.THRESHOLD) return "threshold";
-        if (id == ParameterId.MIN_SIZE) return "minimum size";
-        if (id == ParameterId.MAX_SIZE) return "maximum size";
-        if (id == ParameterId.PROB_THRESH) return "probability threshold";
-        if (id == ParameterId.NMS_THRESH) return "nms threshold";
-        if (id == ParameterId.LINKING_MAX) return "linking max distance";
-        if (id == ParameterId.GAP_CLOSING_MAX) return "gap closing max distance";
-        if (id == ParameterId.FRAME_GAP) return "frame gap";
-        if (id == ParameterId.AREA_MIN) return "area minimum";
-        if (id == ParameterId.AREA_MAX) return "area maximum";
-        if (id == ParameterId.QUALITY_MIN) return "quality minimum";
-        if (id == ParameterId.INTENSITY_MIN) return "intensity minimum";
-        if (id == ParameterId.DIAMETER) return "diameter";
-        if (id == ParameterId.FLOW_THRESHOLD) return "flow threshold";
-        if (id == ParameterId.CELLPROB_THRESHOLD) return "cellprob threshold";
-        if (id == ParameterId.MODEL) return "model";
-        return id.name();
+        return new ParameterSections(primary, advanced);
     }
 
     private static ValueChipPanel.ValueParser parserFor(ParameterId id) {
         if (id == ParameterId.MODEL) {
             return ValueChipPanel.stringParser();
         }
+        if (id == ParameterId.MAX_SIZE) {
+            return ValueChipPanel.maxSizeParser();
+        }
         if (id == ParameterId.THRESHOLD
                 || id == ParameterId.MIN_SIZE
-                || id == ParameterId.MAX_SIZE
                 || id == ParameterId.FRAME_GAP) {
             return ValueChipPanel.intParser();
         }
@@ -364,15 +423,140 @@ public final class ParameterSweepEditor extends JPanel {
         return value == null ? "" : value;
     }
 
+    private static int maxPossibleVoxels(ImagePlus image) {
+        if (image == null) {
+            return Integer.MAX_VALUE;
+        }
+        long voxels = (long) image.getWidth()
+                * (long) image.getHeight()
+                * (long) image.getNSlices();
+        return voxels > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) voxels;
+    }
+
+    private void autoExpandAdvancedIfActive() {
+        if (hasActiveAdvancedRows()) {
+            advancedExpanded = true;
+        }
+        updateAdvancedVisibility();
+    }
+
+    private boolean hasActiveAdvancedRows() {
+        for (int i = 0; i < rows.size(); i++) {
+            Row row = rows.get(i);
+            if (row.advanced && isAdvancedRowActive(row)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isAdvancedRowActive(Row row) {
+        if (row == null) {
+            return false;
+        }
+        ParameterValueList values = row.values.currentValueList();
+        return row.sweepBox.isSelected()
+                || values.size() > 1
+                || hasFiniteClassicalMaxCap(row.id, values);
+    }
+
+    private boolean hasFiniteClassicalMaxCap(ParameterId id, ParameterValueList values) {
+        if (method != ParameterSweep.Method.CLASSICAL
+                || id != ParameterId.MAX_SIZE
+                || values == null) {
+            return false;
+        }
+        for (int i = 0; i < values.size(); i++) {
+            Object value = values.get(i);
+            if (value instanceof Number
+                    && ((Number) value).doubleValue() < noUpperBoundMaxSize) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void updateAdvancedVisibility() {
+        if (advancedPanel == null || advancedToggle == null) {
+            return;
+        }
+        advancedPanel.setVisible(advancedExpanded);
+        updateAdvancedToggleText(countAdvancedRows());
+        revalidate();
+        repaint();
+    }
+
+    private void updateAdvancedToggleText(int advancedCount) {
+        if (advancedToggle == null) {
+            return;
+        }
+        String noun = advancedCount == 1 ? "parameter" : "parameters";
+        advancedToggle.setText((advancedExpanded ? "Hide " : "Show ")
+                + advancedCount + " advanced " + noun);
+    }
+
+    private int countAdvancedRows() {
+        int count = 0;
+        for (int i = 0; i < rows.size(); i++) {
+            if (rows.get(i).advanced) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private boolean loadAdvancedExpanded() {
+        try {
+            return preferences.getBoolean(preferenceKey(), false);
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    private void storeAdvancedExpanded(boolean expanded) {
+        try {
+            preferences.putBoolean(preferenceKey(), expanded);
+        } catch (RuntimeException e) {
+            // UI preference persistence should never block opening the editor.
+        }
+    }
+
+    private String preferenceKey() {
+        return "advancedExpanded." + method.name() + "." + safePreferenceKey(channelName);
+    }
+
+    private static String safePreferenceKey(String text) {
+        String raw = text == null ? "" : text.trim();
+        if (raw.isEmpty()) {
+            return "default";
+        }
+        return raw.replaceAll("[^A-Za-z0-9_.-]", "_");
+    }
+
+    private static final class ParameterSections {
+        final List<ParameterId> primary;
+        final List<ParameterId> advanced;
+
+        ParameterSections(List<ParameterId> primary, List<ParameterId> advanced) {
+            this.primary = primary;
+            this.advanced = advanced;
+        }
+    }
+
     private static final class Row {
         final ParameterId id;
         final JCheckBox sweepBox;
         final ValueChipPanel values;
+        final boolean advanced;
 
-        Row(ParameterId id, JCheckBox sweepBox, ValueChipPanel values) {
+        Row(ParameterId id,
+            JCheckBox sweepBox,
+            ValueChipPanel values,
+            boolean advanced) {
             this.id = id;
             this.sweepBox = sweepBox;
             this.values = values;
+            this.advanced = advanced;
         }
     }
 }

@@ -1,18 +1,29 @@
 package flash.pipeline.ui.variations;
 
+import flash.pipeline.ui.FlashTheme;
+
 import javax.swing.BorderFactory;
-import javax.swing.BoxLayout;
-import javax.swing.JButton;
+import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
 import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
+import java.awt.BasicStroke;
 import java.awt.Color;
+import java.awt.Cursor;
+import java.awt.Dimension;
 import java.awt.FlowLayout;
+import java.awt.Font;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 
 public final class ValueChipPanel extends JPanel {
 
@@ -21,10 +32,17 @@ public final class ValueChipPanel extends JPanel {
         String format(Object value);
     }
 
+    private static final Color CHIP_BG = new Color(0xF4, 0xF7, 0xFA);
+    private static final Color CHIP_FG = new Color(0x2F, 0x3A, 0x43);
+    private static final Color CHIP_BORDER = new Color(0xA8, 0xB3, 0xBD);
+    private static final Color CHIP_DISABLED_BG = new Color(0xE5, 0xE8, 0xEB);
+    private static final Color CHIP_DISABLED_FG = new Color(0x92, 0x98, 0x9E);
+    private static final Color ADD_BG = new Color(0xE8, 0xF4, 0xFB);
+    private static final Color ADD_BORDER = new Color(0x56, 0xB4, 0xE9);
+
     private final ValueParser parser;
     private final List<Object> values = new ArrayList<Object>();
     private final List<ChangeListener> listeners = new ArrayList<ChangeListener>();
-    private final JButton addButton = new JButton("[+]");
 
     public ValueChipPanel(ParameterValueList initialValues, ValueParser parser) {
         super(new FlowLayout(FlowLayout.LEFT, 4, 2));
@@ -37,8 +55,6 @@ public final class ValueChipPanel extends JPanel {
         setValues(initialValues == null
                 ? Collections.singletonList(Integer.valueOf(0))
                 : initialValues.values());
-        addButton.setToolTipText("Add value");
-        addButton.addActionListener(e -> promptAndAdd());
     }
 
     public static ValueParser doubleParser() {
@@ -66,6 +82,30 @@ public final class ValueChipPanel extends JPanel {
             }
 
             @Override public String format(Object value) {
+                return String.valueOf(value);
+            }
+        };
+    }
+
+    public static ValueParser maxSizeParser() {
+        return new ValueParser() {
+            @Override public Object parse(String text) {
+                String trimmed = text == null ? "" : text.trim();
+                String normalized = trimmed.toLowerCase(Locale.ROOT);
+                if ("infinity".equals(normalized)
+                        || "inf".equals(normalized)
+                        || "\u221e".equals(trimmed)
+                        || "max_value".equals(normalized)) {
+                    return Integer.valueOf(Integer.MAX_VALUE);
+                }
+                return Integer.valueOf(Integer.parseInt(trimmed));
+            }
+
+            @Override public String format(Object value) {
+                if (value instanceof Number
+                        && ((Number) value).intValue() == Integer.MAX_VALUE) {
+                    return "\u221e";
+                }
                 return String.valueOf(value);
             }
         };
@@ -179,7 +219,7 @@ public final class ValueChipPanel extends JPanel {
         for (int i = 0; i < values.size(); i++) {
             add(createChip(i));
         }
-        add(addButton);
+        add(createAddChip());
         revalidate();
         repaint();
     }
@@ -187,28 +227,50 @@ public final class ValueChipPanel extends JPanel {
     private JPanel createChip(final int index) {
         JPanel chip = new JPanel();
         chip.setOpaque(false);
-        chip.setLayout(new BoxLayout(chip, BoxLayout.X_AXIS));
+        chip.setLayout(new FlowLayout(FlowLayout.LEFT, 0, 0));
 
-        JButton valueButton = new JButton(parser.format(values.get(index)));
-        valueButton.setToolTipText("Edit value");
-        valueButton.setBackground(new Color(246, 248, 250));
-        valueButton.setFocusPainted(false);
-        valueButton.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(new Color(190, 198, 205)),
-                BorderFactory.createEmptyBorder(1, 6, 1, 6)));
-        valueButton.addActionListener(e -> promptAndEdit(index));
-        chip.add(valueButton);
+        Object value = values.get(index);
+        Chip valueChip = new Chip(parser.format(value), CHIP_BG, CHIP_FG, CHIP_BORDER);
+        valueChip.setFont(value instanceof Number
+                ? FlashTheme.mono(11f)
+                : FlashTheme.bodyMedium().deriveFont(11f));
+        valueChip.setToolTipText("Edit value");
+        valueChip.addMouseListener(new MouseAdapter() {
+            @Override public void mouseClicked(MouseEvent e) {
+                promptAndEdit(index);
+            }
+        });
+        chip.add(valueChip);
 
-        JButton removeButton = new JButton("x");
-        removeButton.setToolTipText("Remove value");
-        removeButton.setEnabled(values.size() > 1);
-        removeButton.setFocusPainted(false);
-        removeButton.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(new Color(210, 210, 210)),
-                BorderFactory.createEmptyBorder(1, 4, 1, 4)));
-        removeButton.addActionListener(e -> removeValue(index));
-        chip.add(removeButton);
+        boolean removable = values.size() > 1;
+        Chip removeChip = new Chip("x",
+                removable ? CHIP_BG : CHIP_DISABLED_BG,
+                removable ? CHIP_FG : CHIP_DISABLED_FG,
+                CHIP_BORDER);
+        removeChip.setFont(FlashTheme.bodyMedium().deriveFont(11f));
+        removeChip.setToolTipText(removable ? "Remove value" : "At least one value is required");
+        removeChip.setEnabled(removable);
+        if (removable) {
+            removeChip.addMouseListener(new MouseAdapter() {
+                @Override public void mouseClicked(MouseEvent e) {
+                    removeValue(index);
+                }
+            });
+        }
+        chip.add(removeChip);
         return chip;
+    }
+
+    private Chip createAddChip() {
+        Chip addChip = new Chip("+", ADD_BG, CHIP_FG, ADD_BORDER);
+        addChip.setFont(FlashTheme.bodyMedium().deriveFont(12f));
+        addChip.setToolTipText("Add value");
+        addChip.addMouseListener(new MouseAdapter() {
+            @Override public void mouseClicked(MouseEvent e) {
+                promptAndAdd();
+            }
+        });
+        return addChip;
     }
 
     private void showParseError(RuntimeException e) {
@@ -232,6 +294,53 @@ public final class ValueChipPanel extends JPanel {
         ChangeEvent event = new ChangeEvent(this);
         for (int i = 0; i < listeners.size(); i++) {
             listeners.get(i).stateChanged(event);
+        }
+    }
+
+    private static final class Chip extends JLabel {
+        private final Color bg;
+        private final Color fg;
+        private final Color border;
+
+        Chip(String text, Color bg, Color fg, Color border) {
+            super(text);
+            this.bg = bg;
+            this.fg = fg;
+            this.border = border;
+            setOpaque(false);
+            setForeground(fg);
+            setBorder(BorderFactory.createEmptyBorder(2, 8, 2, 8));
+            setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        }
+
+        @Override public void setEnabled(boolean enabled) {
+            super.setEnabled(enabled);
+            setCursor(enabled
+                    ? Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                    : Cursor.getDefaultCursor());
+        }
+
+        @Override public Dimension getPreferredSize() {
+            Dimension size = super.getPreferredSize();
+            return new Dimension(size.width, Math.max(22, size.height));
+        }
+
+        @Override protected void paintComponent(Graphics g) {
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                    RenderingHints.VALUE_ANTIALIAS_ON);
+            int w = getWidth();
+            int h = getHeight();
+            int arc = h;
+            g2.setColor(isEnabled() ? bg : CHIP_DISABLED_BG);
+            g2.fillRoundRect(0, 0, w - 1, h - 1, arc, arc);
+            g2.setColor(border);
+            g2.setStroke(new BasicStroke(1.5f));
+            g2.drawRoundRect(1, 1, Math.max(1, w - 3), Math.max(1, h - 3),
+                    Math.max(1, arc - 2), Math.max(1, arc - 2));
+            g2.dispose();
+            setForeground(isEnabled() ? fg : CHIP_DISABLED_FG);
+            super.paintComponent(g);
         }
     }
 }

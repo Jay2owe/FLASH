@@ -8,6 +8,7 @@ import flash.pipeline.ui.preview.ObjectSizeFilterPreview;
 import flash.pipeline.ui.variations.CropSpec;
 import flash.pipeline.ui.variations.ParameterCombo;
 import flash.pipeline.ui.variations.ParameterId;
+import flash.pipeline.ui.variations.ParameterKey;
 import flash.pipeline.ui.variations.ParameterSweep;
 import flash.pipeline.ui.variations.ParameterValueList;
 import flash.pipeline.ui.variations.VariationCache;
@@ -179,7 +180,7 @@ public final class CellposeOneShot implements VariationStrategy {
         if (sweep == null) {
             return false;
         }
-        Map<ParameterId, ParameterValueList> values = sweep.valueLists();
+        Map<ParameterKey, ParameterValueList> values = sweep.valueLists();
         ParameterValueList modelValues = values.get(ParameterId.MODEL);
         return modelValues != null && modelValues.size() > 1;
     }

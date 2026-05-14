@@ -1,8 +1,10 @@
 package flash.pipeline.ui.variations.state;
 
 import flash.pipeline.ui.variations.CropSpec;
+import flash.pipeline.ui.variations.FilterParameterId;
 import flash.pipeline.ui.variations.ParameterCombo;
 import flash.pipeline.ui.variations.ParameterId;
+import flash.pipeline.ui.variations.ParameterKey;
 import flash.pipeline.ui.variations.ParameterSweep;
 import flash.pipeline.ui.variations.ParameterValueList;
 import flash.pipeline.ui.wizard.JsonIO;
@@ -131,6 +133,7 @@ public class VariationStateStore {
         root.put("image_hash", state.imageHash());
         root.put("channel", state.channel());
         root.put("method", state.methodLabel());
+        root.put("cache_namespace", state.sweep().cacheNamespace());
         root.put("sweep", sweepObject(state.sweep()));
         root.put("crop", cropObject(state.sweep().cropSpec()));
         root.put("completed", completedList(state.completed()));
@@ -141,9 +144,9 @@ public class VariationStateStore {
 
     private static Map<String, Object> sweepObject(ParameterSweep sweep) {
         LinkedHashMap<String, Object> out = new LinkedHashMap<String, Object>();
-        for (Map.Entry<ParameterId, ParameterValueList> entry
+        for (Map.Entry<ParameterKey, ParameterValueList> entry
                 : sweep.valueLists().entrySet()) {
-            out.put(jsonKey(entry.getKey()),
+            out.put(entry.getKey().stableKey(),
                     new ArrayList<Object>(entry.getValue().values()));
         }
         return out;
@@ -193,10 +196,12 @@ public class VariationStateStore {
         String imageHash = requiredString(root, "image_hash");
         String channel = requiredString(root, "channel");
         ParameterSweep.Method method = parseMethod(requiredString(root, "method"));
-        Map<ParameterId, ParameterValueList> values =
+        Map<ParameterKey, ParameterValueList> values =
                 parseSweep(JsonIO.asObject(root.get("sweep")));
         CropSpec crop = parseCrop(JsonIO.asObject(root.get("crop")));
-        ParameterSweep sweep = new ParameterSweep(method, values, crop, channel, imageHash);
+        String cacheNamespace = JsonIO.stringValue(root.get("cache_namespace"));
+        ParameterSweep sweep = new ParameterSweep(method, values, crop, channel, imageHash,
+                cacheNamespace == null ? "" : cacheNamespace);
         List<VariationState.CompletedCell> completed =
                 parseCompleted(JsonIO.asList(root.get("completed")));
         return new VariationState(version, sweep, completed,
@@ -204,23 +209,23 @@ public class VariationStateStore {
                 requiredString(root, "updated_at"));
     }
 
-    private static Map<ParameterId, ParameterValueList> parseSweep(
+    private static Map<ParameterKey, ParameterValueList> parseSweep(
             Map<String, Object> sweepJson) throws IOException {
         if (sweepJson == null || sweepJson.isEmpty()) {
             throw new IOException("Variation sweep is missing.");
         }
-        LinkedHashMap<ParameterId, ParameterValueList> values =
-                new LinkedHashMap<ParameterId, ParameterValueList>();
+        LinkedHashMap<ParameterKey, ParameterValueList> values =
+                new LinkedHashMap<ParameterKey, ParameterValueList>();
         for (Map.Entry<String, Object> entry : sweepJson.entrySet()) {
-            ParameterId id = parameterId(entry.getKey());
-            if (id == null) {
+            ParameterKey key = parameterKey(entry.getKey());
+            if (key == null) {
                 continue;
             }
             List<Object> rawValues = JsonIO.asList(entry.getValue());
             if (rawValues.isEmpty()) {
                 throw new IOException("Variation sweep has an empty value list.");
             }
-            values.put(id, new ParameterValueList(rawValues));
+            values.put(key, new ParameterValueList(rawValues));
         }
         if (values.isEmpty()) {
             throw new IOException("Variation sweep has no known parameters.");
@@ -310,41 +315,14 @@ public class VariationStateStore {
         }
     }
 
-    private static ParameterId parameterId(String key) {
+    private static ParameterKey parameterKey(String key) {
         if (key == null) {
             return null;
         }
         String normalized = key.trim().toLowerCase(Locale.ROOT);
-        for (ParameterId id : ParameterId.values()) {
-            if (id.name().equals(key) || id.name().toLowerCase(Locale.ROOT).equals(normalized)
-                    || jsonKey(id).equals(normalized)) {
-                return id;
-            }
+        if (normalized.startsWith("filter.")) {
+            return FilterParameterId.parseStableKey(key);
         }
-        if ("prob_thresh".equals(normalized)) return ParameterId.PROB_THRESH;
-        if ("nms_thresh".equals(normalized)) return ParameterId.NMS_THRESH;
-        if ("linking_max".equals(normalized)) return ParameterId.LINKING_MAX;
-        if ("gap_closing_max".equals(normalized)) return ParameterId.GAP_CLOSING_MAX;
-        return null;
-    }
-
-    private static String jsonKey(ParameterId id) {
-        if (id == ParameterId.THRESHOLD) return "threshold";
-        if (id == ParameterId.MIN_SIZE) return "min_size";
-        if (id == ParameterId.MAX_SIZE) return "max_size";
-        if (id == ParameterId.PROB_THRESH) return "probability_threshold";
-        if (id == ParameterId.NMS_THRESH) return "nms_threshold";
-        if (id == ParameterId.LINKING_MAX) return "linking_max_distance";
-        if (id == ParameterId.GAP_CLOSING_MAX) return "gap_closing_max_distance";
-        if (id == ParameterId.FRAME_GAP) return "frame_gap";
-        if (id == ParameterId.AREA_MIN) return "area_min";
-        if (id == ParameterId.AREA_MAX) return "area_max";
-        if (id == ParameterId.QUALITY_MIN) return "quality_min";
-        if (id == ParameterId.INTENSITY_MIN) return "intensity_min";
-        if (id == ParameterId.DIAMETER) return "diameter";
-        if (id == ParameterId.FLOW_THRESHOLD) return "flow_threshold";
-        if (id == ParameterId.CELLPROB_THRESHOLD) return "cellprob_threshold";
-        if (id == ParameterId.MODEL) return "model";
-        return id.name().toLowerCase(Locale.ROOT);
+        return ParameterId.fromStableKey(key);
     }
 }

@@ -1,5 +1,6 @@
 package flash.pipeline.ui.variations;
 
+import flash.pipeline.ui.FlashTheme;
 import flash.pipeline.ui.preview.ImagePreviewPanel;
 import flash.pipeline.ui.preview.ObjectOverlayRenderer;
 
@@ -10,29 +11,43 @@ import ij.process.ByteProcessor;
 import ij.process.ImageProcessor;
 
 import javax.swing.BorderFactory;
+import javax.swing.Box;
+import javax.swing.BoxLayout;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
-import javax.swing.border.Border;
+import javax.swing.Timer;
+import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Dimension;
+import java.awt.Font;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.RadialGradientPaint;
+import java.awt.RenderingHints;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.awt.geom.Path2D;
+import java.awt.geom.RoundRectangle2D;
 import java.util.Locale;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 public final class VariationCellPanel extends JPanel {
 
-    private static final Color DEFAULT_BORDER = new Color(170, 176, 182);
-    private static final Color HOVER_BORDER = new Color(190, 64, 64);
-    private static final Color KNEE_BORDER = new Color(58, 150, 86);
-    private static final Color STABILITY_BORDER = new Color(210, 160, 30);
-    private static final Color COMPARE_BORDER = new Color(42, 105, 210);
-    private static final Color FOOTER_COLOR = new Color(65, 70, 75);
-    private static final Color ERROR_COLOR = new Color(185, 45, 45);
+    private static final Color CARD_BACKGROUND = new Color(0x26, 0x2A, 0x2E);
+    private static final Color DEFAULT_BORDER = new Color(0x5B, 0x62, 0x69);
+    private static final Color HOVER_BORDER = new Color(0, 0, 0, 20);
+    private static final Color KNEE_BORDER = new Color(0xF0, 0xE4, 0x42);
+    private static final Color STABILITY_BORDER = new Color(0x56, 0xB4, 0xE9);
+    private static final Color COMPARE_BORDER = Color.WHITE;
+    private static final Color FOOTER_COLOR = new Color(0xC0, 0xC5, 0xCA);
+    private static final Color ERROR_COLOR = new Color(0xE6, 0x9F, 0x00);
+    private static final Color RIBBON_RIM = new Color(0, 0, 0, 170);
+    private static final int CARD_RADIUS = 8;
+    private static final int UNKNOWN_DELTA = Integer.MIN_VALUE;
     private static final String ERROR_BADGE = "\u26a0";
 
     public enum BorderHint {
@@ -48,13 +63,18 @@ public final class VariationCellPanel extends JPanel {
     private final BiConsumer<ParameterCombo, VariationCellPanel> onCompare;
     private final int placeholderIndex;
     private final ImagePreviewPanel preview = new ImagePreviewPanel("Variation");
-    private final JLabel footer = new JLabel("pending", SwingConstants.CENTER);
+    private final JPanel footerPanel = new JPanel();
+    private final JLabel countLabel = new JLabel("pending", SwingConstants.CENTER);
+    private final JLabel deltaLabel = new JLabel("", SwingConstants.CENTER);
+    private final JLabel iouLabel = new JLabel("", SwingConstants.CENTER);
+    private final Timer haloTimer;
 
     private ImagePlus cachedLabel;
     private ResultsTable cachedStats;
     private long durationMs = -1L;
     private int objectCount = -1;
-    private double meanNeighbourIou = Double.NaN;
+    private int deltaN = UNKNOWN_DELTA;
+    private double iouToNeighbours = Double.NaN;
     private String errorText = "";
     private boolean hover;
     private boolean kneeWinner;
@@ -62,6 +82,10 @@ public final class VariationCellPanel extends JPanel {
     private boolean selectedForCompare;
     private boolean acceptEnabled;
     private boolean errorState;
+    private boolean showHalo;
+    private long haloStartNanos;
+    private float haloPhase;
+    private Color haloColor = KNEE_BORDER;
 
     public VariationCellPanel(ParameterCombo combo,
                               ImagePlus croppedSource,
@@ -81,18 +105,33 @@ public final class VariationCellPanel extends JPanel {
         this.onAccept = onAccept;
         this.onCompare = onCompare;
         this.placeholderIndex = Math.max(0, placeholderIndex);
+        this.haloTimer = new Timer(33, e -> advanceHalo());
+        this.haloTimer.setInitialDelay(0);
 
-        setOpaque(true);
-        setBackground(Color.WHITE);
+        setOpaque(false);
+        setBackground(CARD_BACKGROUND);
         setPreferredSize(new Dimension(360, 330));
+        setBorder(BorderFactory.createEmptyBorder(6, 6, 6, 6));
         preview.setSlim(true);
         preview.setZRowVisible(false);
         add(preview, BorderLayout.CENTER);
 
-        footer.setFont(footer.getFont().deriveFont(java.awt.Font.PLAIN, 11f));
-        footer.setForeground(FOOTER_COLOR);
-        add(footer, BorderLayout.SOUTH);
+        footerPanel.setOpaque(false);
+        footerPanel.setLayout(new BoxLayout(footerPanel, BoxLayout.X_AXIS));
+        footerPanel.setBorder(BorderFactory.createEmptyBorder(0, 2, 0, 2));
+        configureFooterLabel(countLabel, FlashTheme.mono(11f));
+        configureFooterLabel(deltaLabel, FlashTheme.mono(11f));
+        configureFooterLabel(iouLabel, FlashTheme.mono(11f));
+        footerPanel.add(Box.createHorizontalGlue());
+        footerPanel.add(countLabel);
+        footerPanel.add(Box.createHorizontalStrut(12));
+        footerPanel.add(deltaLabel);
+        footerPanel.add(Box.createHorizontalStrut(12));
+        footerPanel.add(iouLabel);
+        footerPanel.add(Box.createHorizontalGlue());
+        add(footerPanel, BorderLayout.SOUTH);
         installMouseHandlers();
+        refreshFooter();
         refreshBorder();
         refreshTooltip();
     }
@@ -109,8 +148,11 @@ public final class VariationCellPanel extends JPanel {
         errorState = false;
         errorText = "";
         acceptEnabled = false;
-        footer.setForeground(FOOTER_COLOR);
-        footer.setText(state == null || state.trim().isEmpty() ? "pending" : state);
+        objectCount = -1;
+        deltaN = UNKNOWN_DELTA;
+        iouToNeighbours = Double.NaN;
+        setStateText(state == null || state.trim().isEmpty() ? "pending" : state,
+                FOOTER_COLOR);
         refreshTooltip();
     }
 
@@ -127,6 +169,9 @@ public final class VariationCellPanel extends JPanel {
             return;
         }
         setLabel(result.label(), result.stats(), result.nObjects(), result.durationMs());
+        if (!Double.isNaN(result.meanNeighbourIou())) {
+            setIouToNeighbours(result.meanNeighbourIou());
+        }
     }
 
     public void setError(final Throwable error) {
@@ -144,9 +189,10 @@ public final class VariationCellPanel extends JPanel {
         cachedLabel = createEmptyLabel();
         cachedStats = null;
         objectCount = -1;
+        deltaN = UNKNOWN_DELTA;
+        iouToNeighbours = Double.NaN;
         durationMs = -1L;
-        footer.setForeground(ERROR_COLOR);
-        footer.setText(ERROR_BADGE);
+        setStateText(ERROR_BADGE, ERROR_COLOR);
         refreshTooltip();
     }
 
@@ -169,7 +215,6 @@ public final class VariationCellPanel extends JPanel {
         this.errorState = false;
         this.errorText = "";
         this.acceptEnabled = true;
-        footer.setForeground(FOOTER_COLOR);
 
         ImagePlus rendered = null;
         if (croppedSource != null && dimensionsMatch(croppedSource, cachedLabel)) {
@@ -190,8 +235,32 @@ public final class VariationCellPanel extends JPanel {
         preview.setCurrentZ(z);
     }
 
+    public void setDeltaN(int deltaN) {
+        this.deltaN = deltaN;
+        refreshFooter();
+        refreshTooltip();
+    }
+
+    public void clearDeltaN() {
+        this.deltaN = UNKNOWN_DELTA;
+        refreshFooter();
+        refreshTooltip();
+    }
+
+    public void setIouToNeighbours(double iouToNeighbours) {
+        this.iouToNeighbours = iouToNeighbours;
+        refreshFooter();
+        refreshTooltip();
+    }
+
     public void setKneeWinner(boolean kneeWinner) {
+        boolean start = kneeWinner && !this.kneeWinner;
         this.kneeWinner = kneeWinner;
+        if (start) {
+            startHalo(KNEE_BORDER);
+        } else if (!this.kneeWinner && !stabilityWinner) {
+            resetHalo();
+        }
         refreshFooter();
         refreshBorder();
         refreshTooltip();
@@ -202,8 +271,16 @@ public final class VariationCellPanel extends JPanel {
     }
 
     public void setStabilityWinner(boolean stabilityWinner, double meanNeighbourIou) {
+        boolean start = stabilityWinner && !this.stabilityWinner;
         this.stabilityWinner = stabilityWinner;
-        this.meanNeighbourIou = stabilityWinner ? meanNeighbourIou : Double.NaN;
+        if (!Double.isNaN(meanNeighbourIou)) {
+            this.iouToNeighbours = meanNeighbourIou;
+        }
+        if (start) {
+            startHalo(STABILITY_BORDER);
+        } else if (!kneeWinner && !this.stabilityWinner) {
+            resetHalo();
+        }
         refreshFooter();
         refreshBorder();
         refreshTooltip();
@@ -213,11 +290,13 @@ public final class VariationCellPanel extends JPanel {
         if (hint == null || hint == BorderHint.NONE) {
             kneeWinner = false;
             stabilityWinner = false;
-            meanNeighbourIou = Double.NaN;
+            resetHalo();
         } else if (hint == BorderHint.KNEE) {
-            kneeWinner = true;
+            setKneeWinner(true);
+            return;
         } else if (hint == BorderHint.STABLE || hint == BorderHint.STABILITY) {
-            stabilityWinner = true;
+            setStabilityWinner(true);
+            return;
         }
         refreshFooter();
         refreshBorder();
@@ -246,7 +325,14 @@ public final class VariationCellPanel extends JPanel {
     }
 
     String badgeText() {
-        return footer.getText();
+        StringBuilder out = new StringBuilder(countLabel.getText());
+        if (deltaLabel.isVisible() && deltaLabel.getText().length() > 0) {
+            out.append(' ').append(deltaLabel.getText());
+        }
+        if (iouLabel.isVisible() && iouLabel.getText().length() > 0) {
+            out.append(' ').append(iouLabel.getText());
+        }
+        return out.toString();
     }
 
     int currentZForTest() {
@@ -265,6 +351,33 @@ public final class VariationCellPanel extends JPanel {
         } else if (acceptEnabled && onAccept != null) {
             onAccept.accept(combo);
         }
+    }
+
+    @Override protected void paintComponent(Graphics g) {
+        super.paintComponent(g);
+        Graphics2D g2 = (Graphics2D) g.create();
+        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                RenderingHints.VALUE_ANTIALIAS_ON);
+        RoundRectangle2D card = cardShape();
+        g2.setColor(CARD_BACKGROUND);
+        g2.fill(card);
+        g2.setStroke(new BasicStroke(1f));
+        g2.setColor(selectedForCompare ? COMPARE_BORDER : DEFAULT_BORDER);
+        g2.draw(card);
+        g2.dispose();
+    }
+
+    @Override protected void paintChildren(Graphics g) {
+        super.paintChildren(g);
+        paintHoverTint(g);
+        paintHalo(g);
+        paintCompareBadge(g);
+        paintRibbons(g);
+    }
+
+    @Override public void removeNotify() {
+        haloTimer.stop();
+        super.removeNotify();
     }
 
     private void installMouseHandlers() {
@@ -291,45 +404,39 @@ public final class VariationCellPanel extends JPanel {
         };
         addMouseListener(listener);
         preview.addMouseListener(listener);
-        footer.addMouseListener(listener);
+        footerPanel.addMouseListener(listener);
+        countLabel.addMouseListener(listener);
+        deltaLabel.addMouseListener(listener);
+        iouLabel.addMouseListener(listener);
     }
 
     private void refreshBorder() {
-        Color color = DEFAULT_BORDER;
-        int thickness = 1;
-        if (stabilityWinner) {
-            color = STABILITY_BORDER;
-            thickness = 4;
-        } else if (kneeWinner) {
-            color = KNEE_BORDER;
-            thickness = 3;
-        }
-        if (selectedForCompare) {
-            color = COMPARE_BORDER;
-            thickness = 4;
-        }
-        if (hover) {
-            if (!selectedForCompare) {
-                color = HOVER_BORDER;
-                thickness = 2;
-            }
-        }
-        Border outer = BorderFactory.createLineBorder(color, thickness);
-        Border inner = BorderFactory.createEmptyBorder(5, 5, 5, 5);
-        setBorder(BorderFactory.createCompoundBorder(outer, inner));
+        repaint();
     }
 
     private void refreshFooter() {
         if (objectCount < 0) {
             return;
         }
-        String text = String.valueOf(objectCount);
-        if (stabilityWinner) {
-            text += " - Most stable";
-        } else if (kneeWinner) {
-            text += " - Suggested knee";
-        }
-        footer.setText(text);
+        countLabel.setText(String.valueOf(objectCount));
+        countLabel.setForeground(FOOTER_COLOR);
+        countLabel.setFont(FlashTheme.mono(11f));
+
+        deltaLabel.setText(deltaN == UNKNOWN_DELTA ? "" : formatDelta(deltaN));
+        deltaLabel.setVisible(deltaN != UNKNOWN_DELTA);
+        deltaLabel.setForeground(FOOTER_COLOR);
+        deltaLabel.setFont(FlashTheme.mono(11f).deriveFont(
+                kneeWinner ? Font.BOLD : Font.PLAIN));
+
+        boolean hasIou = !Double.isNaN(iouToNeighbours);
+        iouLabel.setText(hasIou ? "IoU "
+                + String.format(Locale.ROOT, "%.2f", Double.valueOf(iouToNeighbours)) : "");
+        iouLabel.setVisible(hasIou);
+        iouLabel.setForeground(FOOTER_COLOR);
+        iouLabel.setFont(FlashTheme.mono(11f).deriveFont(
+                stabilityWinner ? Font.BOLD : Font.PLAIN));
+        footerPanel.revalidate();
+        footerPanel.repaint();
     }
 
     private void refreshTooltip() {
@@ -340,32 +447,216 @@ public final class VariationCellPanel extends JPanel {
             sb.append("<br><b>Failed:</b> ")
                     .append(html(errorText).replace("\n", "<br>"));
             sb.append("</html>");
-            setToolTipText(sb.toString());
-            preview.setToolTipText(sb.toString());
-            footer.setToolTipText(sb.toString());
+            setTooltips(sb.toString());
             return;
         }
-        if (stabilityWinner) {
-            if (Double.isNaN(meanNeighbourIou)) {
-                sb.append("<br>Most stable");
-            } else {
-                sb.append("<br>Mean IoU with neighbours: ")
-                        .append(String.format(Locale.ROOT, "%.2f", meanNeighbourIou))
-                        .append(" (most stable)");
+        if (deltaN != UNKNOWN_DELTA) {
+            sb.append("<br>").append("\u0394n vs neighbour: ")
+                    .append(formatSigned(deltaN));
+        }
+        if (!Double.isNaN(iouToNeighbours)) {
+            sb.append("<br>Mean IoU with neighbours: ")
+                    .append(String.format(Locale.ROOT, "%.2f",
+                            Double.valueOf(iouToNeighbours)));
+            if (stabilityWinner) {
+                sb.append(" (most stable object masks)");
             }
-        } else if (kneeWinner) {
-            sb.append("<br>Suggested knee");
+        } else if (stabilityWinner) {
+            sb.append("<br>Most stable object masks");
+        }
+        if (kneeWinner) {
+            sb.append("<br>Most stable count");
         }
         if (durationMs >= 0L) {
-            sb.append("<br>").append(durationMs).append(" ms");
+            sb.append("<br>durationMs: ").append(durationMs).append(" ms");
         }
         if (cachedStats != null) {
             sb.append("<br>").append(cachedStats.size()).append(" stats rows");
         }
         sb.append("</html>");
-        setToolTipText(sb.toString());
-        preview.setToolTipText(sb.toString());
-        footer.setToolTipText(sb.toString());
+        setTooltips(sb.toString());
+    }
+
+    private void setTooltips(String text) {
+        setToolTipText(text);
+        preview.setToolTipText(text);
+        footerPanel.setToolTipText(text);
+        countLabel.setToolTipText(text);
+        deltaLabel.setToolTipText(text);
+        iouLabel.setToolTipText(text);
+    }
+
+    private void setStateText(String text, Color color) {
+        countLabel.setText(text);
+        countLabel.setForeground(color);
+        countLabel.setFont(FlashTheme.caption());
+        deltaLabel.setText("");
+        deltaLabel.setVisible(false);
+        iouLabel.setText("");
+        iouLabel.setVisible(false);
+        footerPanel.revalidate();
+        footerPanel.repaint();
+    }
+
+    private void paintHoverTint(Graphics g) {
+        if (!hover || selectedForCompare) {
+            return;
+        }
+        Graphics2D g2 = (Graphics2D) g.create();
+        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                RenderingHints.VALUE_ANTIALIAS_ON);
+        g2.setClip(cardShape());
+        g2.setColor(HOVER_BORDER);
+        g2.fillRect(0, 0, getWidth(), getHeight());
+        g2.dispose();
+    }
+
+    private void paintHalo(Graphics g) {
+        if (!showHalo) {
+            return;
+        }
+        Graphics2D g2 = (Graphics2D) g.create();
+        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                RenderingHints.VALUE_ANTIALIAS_ON);
+        g2.setClip(cardShape());
+        float alpha = 0.18f + 0.10f * (float) Math.sin(haloPhase);
+        int radius = Math.max(getWidth(), getHeight());
+        Color core = haloColor == null ? KNEE_BORDER : haloColor;
+        g2.setPaint(new RadialGradientPaint(
+                getWidth() / 2f,
+                getHeight() / 2f,
+                radius,
+                new float[] { 0f, 1f },
+                new Color[] {
+                        new Color(core.getRed(), core.getGreen(), core.getBlue(),
+                                Math.max(0, Math.min(255, (int) (alpha * 255f)))),
+                        new Color(core.getRed(), core.getGreen(), core.getBlue(), 0)
+                }));
+        g2.fillRect(0, 0, getWidth(), getHeight());
+        g2.dispose();
+    }
+
+    private void paintCompareBadge(Graphics g) {
+        if (!selectedForCompare) {
+            return;
+        }
+        Graphics2D g2 = (Graphics2D) g.create();
+        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                RenderingHints.VALUE_ANTIALIAS_ON);
+        int diameter = 10;
+        int x = Math.max(6, getWidth() - diameter - 10);
+        int y = Math.max(6, getHeight() - diameter - 10);
+        g2.setColor(STABILITY_BORDER);
+        g2.fillOval(x, y, diameter, diameter);
+        g2.setColor(RIBBON_RIM);
+        g2.setStroke(new BasicStroke(1f));
+        g2.drawOval(x, y, diameter, diameter);
+        g2.dispose();
+    }
+
+    private void paintRibbons(Graphics g) {
+        if (kneeWinner) {
+            paintRibbon(g, "STABLE COUNT", KNEE_BORDER, new Color(0x22, 0x22, 0x22),
+                    true);
+        }
+        if (stabilityWinner) {
+            paintRibbon(g, "STABLE MASKS", STABILITY_BORDER, Color.WHITE,
+                    !kneeWinner);
+        }
+    }
+
+    private void paintRibbon(Graphics g, String text, Color fill, Color textColor,
+                             boolean left) {
+        Graphics2D g2 = (Graphics2D) g.create();
+        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                RenderingHints.VALUE_ANTIALIAS_ON);
+        int side = 86;
+        Path2D.Double path = new Path2D.Double();
+        if (left) {
+            path.moveTo(0, 0);
+            path.lineTo(side, 0);
+            path.lineTo(0, side);
+        } else {
+            int w = getWidth();
+            path.moveTo(w, 0);
+            path.lineTo(w - side, 0);
+            path.lineTo(w, side);
+        }
+        path.closePath();
+        g2.setColor(fill);
+        g2.fill(path);
+        g2.setColor(RIBBON_RIM);
+        g2.setStroke(new BasicStroke(1f));
+        g2.draw(path);
+        g2.setFont(FlashTheme.bodyMedium().deriveFont(8.5f));
+        g2.setColor(textColor);
+        if (left) {
+            g2.translate(8, 55);
+            g2.rotate(-Math.PI / 4.0d);
+            g2.drawString(text, 0, 0);
+        } else {
+            g2.translate(getWidth() - 70, 6);
+            g2.rotate(Math.PI / 4.0d);
+            g2.drawString(text, 0, 0);
+        }
+        g2.dispose();
+    }
+
+    private void startHalo(Color color) {
+        haloColor = color;
+        haloStartNanos = System.nanoTime();
+        haloPhase = 0f;
+        showHalo = true;
+        if (!haloTimer.isRunning()) {
+            haloTimer.start();
+        }
+        repaint();
+    }
+
+    private void resetHalo() {
+        showHalo = false;
+        haloPhase = 0f;
+        haloTimer.stop();
+        repaint();
+    }
+
+    private void advanceHalo() {
+        long elapsedNanos = System.nanoTime() - haloStartNanos;
+        haloPhase = (elapsedNanos % 2_000_000_000L) / 2_000_000_000f
+                * (float) (Math.PI * 2.0d);
+        repaint();
+    }
+
+    private RoundRectangle2D cardShape() {
+        return new RoundRectangle2D.Double(0.5d, 0.5d,
+                Math.max(1, getWidth() - 1),
+                Math.max(1, getHeight() - 1),
+                CARD_RADIUS, CARD_RADIUS);
+    }
+
+    private static void configureFooterLabel(JLabel label, Font font) {
+        label.setFont(font);
+        label.setForeground(FOOTER_COLOR);
+        label.setHorizontalAlignment(SwingConstants.CENTER);
+        label.setOpaque(false);
+    }
+
+    private static String formatDelta(int value) {
+        return "\u0394" + formatSignedCompact(value);
+    }
+
+    private static String formatSigned(int value) {
+        return (value > 0 ? "+" : "") + value;
+    }
+
+    private static String formatSignedCompact(int value) {
+        String sign = value > 0 ? "+" : "";
+        int magnitude = Math.abs(value);
+        if (magnitude > 999) {
+            return sign + String.format(Locale.ROOT, "%.1fk",
+                    Double.valueOf(value / 1000.0d));
+        }
+        return sign + value;
     }
 
     private ImagePlus createPlaceholderLabel() {

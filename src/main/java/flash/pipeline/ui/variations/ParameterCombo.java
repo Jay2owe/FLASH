@@ -9,63 +9,100 @@ import java.util.Map;
 
 public final class ParameterCombo {
 
-    private final Map<ParameterId, Object> values;
+    private final Map<ParameterKey, Object> values;
 
-    public ParameterCombo(Map<ParameterId, ?> values) {
+    public ParameterCombo(Map<? extends ParameterKey, ?> values) {
         if (values == null) {
             throw new IllegalArgumentException("values must not be null");
         }
-        this.values = Collections.unmodifiableMap(copyInEnumOrder(values));
+        this.values = Collections.unmodifiableMap(copyInKeyOrder(values));
     }
 
     public static Builder builder() {
         return new Builder();
     }
 
+    public Object get(ParameterKey id) {
+        return values.get(id);
+    }
+
     public Object get(ParameterId id) {
         return values.get(id);
+    }
+
+    public boolean contains(ParameterKey id) {
+        return values.containsKey(id);
     }
 
     public boolean contains(ParameterId id) {
         return values.containsKey(id);
     }
 
-    public Map<ParameterId, Object> values() {
+    public Map<ParameterKey, Object> values() {
         return values;
     }
 
-    public Map<ParameterId, Object> getValues() {
+    public Map<ParameterKey, Object> getValues() {
         return values;
     }
 
     public String toCanonicalJson() {
         LinkedHashMap<String, Object> out = new LinkedHashMap<String, Object>();
-        List<ParameterId> ids = new ArrayList<ParameterId>(values.keySet());
-        Collections.sort(ids, new Comparator<ParameterId>() {
+        List<ParameterKey> ids = new ArrayList<ParameterKey>(values.keySet());
+        Collections.sort(ids, new Comparator<ParameterKey>() {
             @Override
-            public int compare(ParameterId a, ParameterId b) {
-                return a.name().compareTo(b.name());
+            public int compare(ParameterKey a, ParameterKey b) {
+                return compareStorageKeys(a, b);
             }
         });
         for (int i = 0; i < ids.size(); i++) {
-            ParameterId id = ids.get(i);
-            out.put(id.name(), values.get(id));
+            ParameterKey id = ids.get(i);
+            out.put(canonicalJsonKey(id), values.get(id));
         }
         return CanonicalJson.write(out);
     }
 
-    private static Map<ParameterId, Object> copyInEnumOrder(Map<ParameterId, ?> source) {
-        List<ParameterId> ids = new ArrayList<ParameterId>(source.keySet());
-        Collections.sort(ids);
-        LinkedHashMap<ParameterId, Object> out = new LinkedHashMap<ParameterId, Object>();
+    private static Map<ParameterKey, Object> copyInKeyOrder(Map<? extends ParameterKey, ?> source) {
+        List<ParameterKey> ids = new ArrayList<ParameterKey>(source.keySet());
+        Collections.sort(ids, new Comparator<ParameterKey>() {
+            @Override
+            public int compare(ParameterKey a, ParameterKey b) {
+                return compareKeys(a, b);
+            }
+        });
+        LinkedHashMap<ParameterKey, Object> out = new LinkedHashMap<ParameterKey, Object>();
         for (int i = 0; i < ids.size(); i++) {
-            ParameterId id = ids.get(i);
+            ParameterKey id = ids.get(i);
             if (id == null) {
                 throw new IllegalArgumentException("parameter id must not be null");
             }
             out.put(id, ParameterValueList.normalizeValue(source.get(id)));
         }
         return out;
+    }
+
+    private static int compareKeys(ParameterKey a, ParameterKey b) {
+        String aKey = a == null ? "" : a.stableKey();
+        String bKey = b == null ? "" : b.stableKey();
+        int byStableKey = aKey.compareTo(bKey);
+        if (byStableKey != 0) {
+            return byStableKey;
+        }
+        return canonicalJsonKey(a).compareTo(canonicalJsonKey(b));
+    }
+
+    private static int compareStorageKeys(ParameterKey a, ParameterKey b) {
+        if (a instanceof ParameterId && b instanceof ParameterId) {
+            return ((ParameterId) a).compareTo((ParameterId) b);
+        }
+        return compareKeys(a, b);
+    }
+
+    private static String canonicalJsonKey(ParameterKey key) {
+        if (key instanceof ParameterId) {
+            return ((ParameterId) key).name();
+        }
+        return key == null ? "" : key.stableKey();
     }
 
     @Override
@@ -87,18 +124,25 @@ public final class ParameterCombo {
     }
 
     public static final class Builder {
-        private final LinkedHashMap<ParameterId, Object> values =
-                new LinkedHashMap<ParameterId, Object>();
+        private final LinkedHashMap<ParameterKey, Object> values =
+                new LinkedHashMap<ParameterKey, Object>();
 
         private Builder() {
+        }
+
+        public Builder put(ParameterKey id, Object value) {
+            if (id == null) {
+                throw new IllegalArgumentException("id must not be null");
+            }
+            values.put(id, ParameterValueList.normalizeValue(value));
+            return this;
         }
 
         public Builder put(ParameterId id, Object value) {
             if (id == null) {
                 throw new IllegalArgumentException("id must not be null");
             }
-            values.put(id, ParameterValueList.normalizeValue(value));
-            return this;
+            return put((ParameterKey) id, value);
         }
 
         public ParameterCombo build() {

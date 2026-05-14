@@ -4,6 +4,7 @@ import flash.pipeline.stardist.StarDistVariationRunner;
 import flash.pipeline.ui.config.StarDistParameterStage;
 import flash.pipeline.ui.variations.CropSpec;
 import flash.pipeline.ui.variations.ParameterId;
+import flash.pipeline.ui.variations.ParameterKey;
 import flash.pipeline.ui.variations.ParameterSweep;
 import flash.pipeline.ui.variations.ParameterValueList;
 import flash.pipeline.ui.variations.VariationCache;
@@ -54,8 +55,8 @@ public final class StarDistFastNms implements VariationStrategy {
                 || sweep.method() != ParameterSweep.Method.STARDIST) {
             return false;
         }
-        Map<ParameterId, ParameterValueList> valueLists = sweep.valueLists();
-        for (Map.Entry<ParameterId, ParameterValueList> entry : valueLists.entrySet()) {
+        Map<ParameterKey, ParameterValueList> valueLists = sweep.valueLists();
+        for (Map.Entry<ParameterKey, ParameterValueList> entry : valueLists.entrySet()) {
             ParameterValueList values = entry.getValue();
             if (values == null) {
                 return false;
@@ -63,7 +64,11 @@ public final class StarDistFastNms implements VariationStrategy {
             if (values.size() <= 1) {
                 continue;
             }
-            ParameterId id = entry.getKey();
+            ParameterKey key = entry.getKey();
+            if (!(key instanceof ParameterId)) {
+                return false;
+            }
+            ParameterId id = (ParameterId) key;
             if (id != ParameterId.PROB_THRESH && id != ParameterId.NMS_THRESH) {
                 return false;
             }

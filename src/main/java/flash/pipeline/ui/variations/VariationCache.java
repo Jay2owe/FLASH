@@ -42,7 +42,12 @@ public final class VariationCache {
         }
         String raw = sweep.sourceImageHash()
                 + ":" + sweep.method().label()
-                + ":" + sweep.cropSpec().toCanonicalJson()
+                + ":";
+        String namespace = sweep.cacheNamespace();
+        if (namespace != null && !namespace.trim().isEmpty()) {
+            raw += namespace.trim() + ":";
+        }
+        raw += sweep.cropSpec().toCanonicalJson()
                 + ":" + combo.toCanonicalJson();
         return sha256(raw).substring(0, 16);
     }

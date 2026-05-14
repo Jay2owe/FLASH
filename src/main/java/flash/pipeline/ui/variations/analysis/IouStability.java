@@ -1,7 +1,7 @@
 package flash.pipeline.ui.variations.analysis;
 
 import flash.pipeline.ui.variations.ParameterCombo;
-import flash.pipeline.ui.variations.ParameterId;
+import flash.pipeline.ui.variations.ParameterKey;
 
 import ij.ImagePlus;
 
@@ -152,14 +152,14 @@ public final class IouStability {
         }
 
         static Topology from(List<ParameterCombo> combos) {
-            LinkedHashMap<ParameterId, List<Object>> valuesById =
-                    new LinkedHashMap<ParameterId, List<Object>>();
+            LinkedHashMap<ParameterKey, List<Object>> valuesById =
+                    new LinkedHashMap<ParameterKey, List<Object>>();
             for (int i = 0; i < combos.size(); i++) {
                 ParameterCombo combo = combos.get(i);
                 if (combo == null) {
                     return null;
                 }
-                for (Map.Entry<ParameterId, Object> entry : combo.values().entrySet()) {
+                for (Map.Entry<ParameterKey, Object> entry : combo.values().entrySet()) {
                     List<Object> values = valuesById.get(entry.getKey());
                     if (values == null) {
                         values = new ArrayList<Object>();
@@ -172,7 +172,7 @@ public final class IouStability {
             }
 
             List<Axis> axes = new ArrayList<Axis>();
-            for (Map.Entry<ParameterId, List<Object>> entry : valuesById.entrySet()) {
+            for (Map.Entry<ParameterKey, List<Object>> entry : valuesById.entrySet()) {
                 if (entry.getValue().size() > 1) {
                     axes.add(new Axis(entry.getKey(), entry.getValue()));
                 }
@@ -246,10 +246,10 @@ public final class IouStability {
     }
 
     private static final class Axis {
-        final ParameterId id;
+        final ParameterKey id;
         final List<Object> values;
 
-        Axis(ParameterId id, List<Object> values) {
+        Axis(ParameterKey id, List<Object> values) {
             this.id = id;
             this.values = values;
         }

@@ -81,6 +81,49 @@ public final class KneeDetector {
         return OptionalInt.of(points.get(kneeIndex).originalIndex);
     }
 
+    public static int[] findPlateauRange(double[] xs, double[] ys) {
+        if (xs == null || ys == null) {
+            return null;
+        }
+        int n = Math.min(xs.length, ys.length);
+        List<Point> points = new ArrayList<Point>(n);
+        double maxY = Double.NEGATIVE_INFINITY;
+        for (int i = 0; i < n; i++) {
+            if (isFinite(xs[i]) && isFinite(ys[i])) {
+                points.add(new Point(i, xs[i], ys[i]));
+                if (ys[i] > maxY) {
+                    maxY = ys[i];
+                }
+            }
+        }
+        if (points.size() < 3 || !isFinite(maxY)) {
+            return null;
+        }
+        Collections.sort(points, new Comparator<Point>() {
+            @Override public int compare(Point a, Point b) {
+                return Double.compare(a.x, b.x);
+            }
+        });
+
+        double tolerance = Math.max(1.0d, 0.05d * maxY);
+        int end = points.size() - 1;
+        int start = end;
+        while (start > 0) {
+            double delta = Math.abs(points.get(start).y - points.get(start - 1).y);
+            if (delta > tolerance) {
+                break;
+            }
+            start--;
+        }
+        if (start == end || start == 0) {
+            return null;
+        }
+        return new int[] {
+                points.get(start).originalIndex,
+                points.get(end).originalIndex
+        };
+    }
+
     private static boolean isFinite(double value) {
         return !Double.isNaN(value) && !Double.isInfinite(value);
     }
