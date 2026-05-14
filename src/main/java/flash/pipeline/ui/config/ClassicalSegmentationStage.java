@@ -7,6 +7,10 @@ import flash.pipeline.ui.preview.ObjectSizeFilterPreview;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import flash.pipeline.ui.preview.ThresholdControlPanel;
 import flash.pipeline.ui.preview.ThresholdOverlayRenderer;
+import flash.pipeline.ui.variations.ParameterCombo;
+import flash.pipeline.ui.variations.ParameterId;
+import flash.pipeline.ui.variations.VariationEngineContext;
+import flash.pipeline.ui.variations.VariationsDialog;
 import ij.ImagePlus;
 import ij.ImageStack;
 import ij.measure.ResultsTable;
@@ -20,6 +24,7 @@ import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
+import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
@@ -84,6 +89,7 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
     private JTextField maxField;
     private JButton previewButton;
     private JButton resetButton;
+    private JButton variationsButton;
     private JLabel feedbackLabel;
     private ObjectSizeCutoffPanel sizeCutoffPanel;
     private ObjectSizeFilterPreview.Summary sizeSummary;
@@ -217,8 +223,10 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
             updateThresholdPreview(false);
             refreshSizeCutoffPanelOnly();
             markObjectPreviewStale(EMPTY_TEXT);
+            setVariationsButtonReady(true);
         } catch (Exception e) {
             closeImages();
+            setVariationsButtonReady(false);
             setError("Could not prepare Classical segmentation preview: " + e.getMessage());
         }
     }
@@ -275,6 +283,7 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
             preview.clearLargePreviewImages();
         }
         closeImages();
+        setVariationsButtonReady(false);
         preview = null;
         activeContext = null;
     }
@@ -320,6 +329,10 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
 
     void runPreviewNowForTest() throws Exception {
         runPreviewNow();
+    }
+
+    void applyVariationComboForTest(ParameterCombo combo) {
+        applyVariationCombo(combo);
     }
 
     String sizeCutoffSummaryForTest() {
@@ -375,6 +388,12 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
         gbc.gridx++;
         gbc.insets = new Insets(0, 2, 0, 0);
         row.add(resetButton, gbc);
+        variationsButton = new JButton("Parameter Variations...");
+        variationsButton.addActionListener(e -> openVariationsDialog());
+        variationsButton.setEnabled(filteredSource != null);
+        variationsButton.setToolTipText("Run/prepare a preview before opening parameter variations.");
+        gbc.gridx++;
+        row.add(variationsButton, gbc);
         return row;
     }
 
@@ -618,6 +637,62 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
         preview.setLargePreviewImages(rawSource, thresholdPreview, labelPreview);
     }
 
+    private void openVariationsDialog() {
+        if (filteredSource == null || activeContext == null) {
+            setStatus("Wait for the filtered input to finish preparing before opening variations.");
+            return;
+        }
+        final ParameterCombo base;
+        try {
+            ParticleSizeStage.SizeToken token = collectSizeToken();
+            base = ParameterCombo.builder()
+                    .put(ParameterId.THRESHOLD, Integer.valueOf(currentThresholdValue()))
+                    .put(ParameterId.MIN_SIZE, Integer.valueOf(ObjectsCounter3DWrapper
+                            .parseMinSizeVoxels(token.minText, 100)))
+                    .put(ParameterId.MAX_SIZE, Integer.valueOf(ObjectsCounter3DWrapper
+                            .parseMaxSizeVoxels(token.maxText, filteredSource)))
+                    .build();
+        } catch (RuntimeException e) {
+            setError("Enter valid min and max voxel sizes before opening variations.");
+            return;
+        }
+        VariationEngineContext ctx = VariationEngineContext.forClassical(
+                activeContext.getChannelName(),
+                rawSource,
+                filteredSource,
+                activeContext,
+                base,
+                previewAdapter);
+        VariationsDialog dialog = new VariationsDialog(
+                SwingUtilities.getWindowAncestor(preview != null ? preview : previewButton),
+                ctx,
+                this::applyVariationCombo);
+        dialog.showDialog();
+    }
+
+    private void applyVariationCombo(ParameterCombo combo) {
+        if (combo == null) return;
+        Number threshold = numberValue(combo, ParameterId.THRESHOLD);
+        Number minSize = numberValue(combo, ParameterId.MIN_SIZE);
+        Number maxSize = numberValue(combo, ParameterId.MAX_SIZE);
+        if (threshold != null && thresholdControl != null) {
+            thresholdControl.setThreshold(threshold.doubleValue(), imageMaximum(filteredSource));
+        }
+        updatingFields = true;
+        try {
+            if (minSize != null && minField != null) {
+                minField.setText(String.valueOf(nonNegativeInt(minSize)));
+            }
+            if (maxSize != null && maxField != null) {
+                int max = nonNegativeInt(maxSize);
+                maxField.setText(max == Integer.MAX_VALUE ? "Infinity" : String.valueOf(max));
+            }
+        } finally {
+            updatingFields = false;
+        }
+        runPreviewOnWorker();
+    }
+
     private ImagePlus emptyLabelMapLike(ImagePlus source) {
         if (source == null || source.getStack() == null) return null;
         ImagePlus empty = source.duplicate();
@@ -729,12 +804,19 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
     private void setButtonsEnabled(boolean enabled) {
         if (previewButton != null) previewButton.setEnabled(enabled);
         if (resetButton != null) resetButton.setEnabled(enabled);
+        if (variationsButton != null) variationsButton.setEnabled(enabled && filteredSource != null);
         if (minField != null) minField.setEnabled(enabled);
         if (maxField != null) maxField.setEnabled(enabled);
         if (thresholdControl != null) thresholdControl.setEnabled(enabled);
         if (preview != null) {
             preview.setSourceModeEnabled(enabled);
             preview.setObjectOverlayEnabled(enabled);
+        }
+    }
+
+    private void setVariationsButtonReady(boolean ready) {
+        if (variationsButton != null) {
+            variationsButton.setEnabled(ready && filteredSource != null);
         }
     }
 
@@ -809,5 +891,15 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
     private static boolean isFiniteMaxToken(String value) {
         String normalized = normalizeMaxText(value);
         return !"Infinity".equals(normalized);
+    }
+
+    private static Number numberValue(ParameterCombo combo, ParameterId id) {
+        Object value = combo == null ? null : combo.get(id);
+        return value instanceof Number ? (Number) value : null;
+    }
+
+    private static int nonNegativeInt(Number value) {
+        if (value == null) return 0;
+        return Math.max(0, (int) Math.round(value.doubleValue()));
     }
 }

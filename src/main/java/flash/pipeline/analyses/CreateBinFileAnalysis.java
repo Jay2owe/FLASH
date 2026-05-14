@@ -5437,7 +5437,7 @@ public class CreateBinFileAnalysis implements Analysis {
                                                                     String inputTitle,
                                                                     String mapTitle) {
         if (filteredSource == null) return null;
-        ImagePlus input = filteredSource.duplicate();
+        ImagePlus input = flash.pipeline.image.ImageOps.duplicateThreadSafe(filteredSource);
         input.setTitle(inputTitle);
         try {
             ObjectsCounter3DWrapper wrapper = new ObjectsCounter3DWrapper();

@@ -3,6 +3,8 @@ package flash.pipeline.ui.config;
 import flash.pipeline.help.SetupHelpCatalog;
 import flash.pipeline.objects.ObjectsCounter3DWrapper;
 import flash.pipeline.ui.preview.PreviewPairPanel;
+import flash.pipeline.ui.variations.ParameterCombo;
+import flash.pipeline.ui.variations.ParameterId;
 import ij.ImagePlus;
 import ij.ImageStack;
 import ij.measure.ResultsTable;
@@ -12,6 +14,8 @@ import org.junit.Test;
 import javax.swing.AbstractButton;
 import javax.swing.JButton;
 import javax.swing.JLabel;
+import javax.swing.JComponent;
+import javax.swing.SwingUtilities;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.image.IndexColorModel;
@@ -40,6 +44,51 @@ public class ClassicalSegmentationStageTest {
         assertEquals(1, adapter.filteredSourceCreations);
         assertNotNull(stage.thresholdPreviewForTest());
         assertEquals(SetupHelpCatalog.CLASSICAL_OBJECT_SEGMENTATION, stage.helpTopic());
+    }
+
+    @Test
+    public void variationsButtonPresent_andDisabledWithoutPreview() {
+        RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
+        ClassicalSegmentationStage stage = stage(
+                new RecordingThresholdStore("20"),
+                new RecordingSizeStore("1-Infinity"),
+                adapter);
+
+        JComponent controls = stage.buildControls(context(), new RecordingActions());
+        JButton variations = findButton(controls, "Parameter Variations...");
+
+        assertNotNull(variations);
+        assertFalse(variations.isEnabled());
+        assertEquals("Run/prepare a preview before opening parameter variations.",
+                variations.getToolTipText());
+
+        stage.onEnter(context(), new PreviewPairPanel("Original", "Objects"));
+
+        assertTrue(variations.isEnabled());
+    }
+
+    @Test
+    public void applyCombo_writesFieldsAndTriggersRefresh() throws Exception {
+        RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
+        ClassicalSegmentationStage stage = stage(
+                new RecordingThresholdStore("20"),
+                new RecordingSizeStore("1-Infinity"),
+                adapter);
+
+        stage.buildControls(context(), new RecordingActions());
+        stage.onEnter(context(), new PreviewPairPanel("Original", "Objects"));
+        adapter.previewRuns = 0;
+
+        stage.applyVariationComboForTest(ParameterCombo.builder()
+                .put(ParameterId.THRESHOLD, Double.valueOf(45.0d))
+                .put(ParameterId.MIN_SIZE, Integer.valueOf(3))
+                .put(ParameterId.MAX_SIZE, Integer.valueOf(4))
+                .build());
+        waitForPreviewRuns(adapter, 1);
+
+        assertEquals("45", stage.currentThresholdTokenForTest());
+        assertEquals("3-4", stage.currentSizeTokenForTest());
+        assertEquals(45, adapter.lastThreshold);
     }
 
     @Test
@@ -316,6 +365,21 @@ public class ClassicalSegmentationStageTest {
         return false;
     }
 
+    private static JButton findButton(Container root, String text) {
+        if (root == null || text == null) return null;
+        for (Component component : root.getComponents()) {
+            if (component instanceof JButton
+                    && text.equals(((JButton) component).getText())) {
+                return (JButton) component;
+            }
+            if (component instanceof Container) {
+                JButton found = findButton((Container) component, text);
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
     private static final class RecordingThresholdStore
             implements ClassicalSegmentationStage.ThresholdStore {
         String token;
@@ -461,5 +525,18 @@ public class ClassicalSegmentationStageTest {
                 | (model.getGreen(index) << 8)
                 | model.getBlue(index);
         assertEquals(expectedRgb, actual);
+    }
+
+    private static void waitForPreviewRuns(RecordingPreviewAdapter adapter,
+                                           int expectedRuns) throws Exception {
+        long deadline = System.currentTimeMillis() + 3000L;
+        while (System.currentTimeMillis() < deadline && adapter.previewRuns < expectedRuns) {
+            Thread.sleep(10L);
+        }
+        SwingUtilities.invokeAndWait(new Runnable() {
+            @Override public void run() {
+            }
+        });
+        assertEquals(expectedRuns, adapter.previewRuns);
     }
 }

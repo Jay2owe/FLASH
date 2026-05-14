@@ -126,7 +126,7 @@ public final class Cellpose3DRunner {
         return (int) maxVal;
     }
 
-    static ImagePlus prepareRuntimeInput(ImagePlus primaryInput, ImagePlus companionInput, String channelName) {
+    public static ImagePlus prepareRuntimeInput(ImagePlus primaryInput, ImagePlus companionInput, String channelName) {
         if (primaryInput == null || companionInput == null) return primaryInput;
 
         String chTag = (channelName != null && !channelName.isEmpty()) ? " [" + channelName + "]" : "";
@@ -160,7 +160,7 @@ public final class Cellpose3DRunner {
                 && first.getStackSize() == second.getStackSize();
     }
 
-    static Path writeInputStack(ImagePlus input, Path tempDir) throws Exception {
+    public static Path writeInputStack(ImagePlus input, Path tempDir) throws Exception {
         Path inputStackPath = tempDir.resolve(INPUT_STACK_BASENAME + ".tif");
         FileSaver saver = new FileSaver(input);
         boolean saved = input.getStackSize() > 1
@@ -371,7 +371,7 @@ public final class Cellpose3DRunner {
         return Double.valueOf(pixelDepth / xy);
     }
 
-    private static String formatDiameterPixels(ImagePlus input, double diameterInUnits) {
+    static String formatDiameterPixels(ImagePlus input, double diameterInUnits) {
         if (diameterInUnits <= 0) return "0";
         double pixelWidth = input.getCalibration() == null ? 1.0 : input.getCalibration().pixelWidth;
         if (pixelWidth <= 0 || Double.isNaN(pixelWidth) || Double.isInfinite(pixelWidth)) {

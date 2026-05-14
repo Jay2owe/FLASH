@@ -6,6 +6,10 @@ import flash.pipeline.help.SetupHelpTopic;
 import flash.pipeline.stardist.StarDist3DRunner;
 import flash.pipeline.ui.preview.ObjectSizeFilterPreview;
 import flash.pipeline.ui.preview.PreviewPairPanel;
+import flash.pipeline.ui.variations.ParameterCombo;
+import flash.pipeline.ui.variations.ParameterId;
+import flash.pipeline.ui.variations.VariationEngineContext;
+import flash.pipeline.ui.variations.VariationsDialog;
 import ij.ImagePlus;
 import ij.measure.ResultsTable;
 
@@ -17,6 +21,7 @@ import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
+import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
@@ -119,6 +124,7 @@ public final class StarDistParameterStage implements ConfigQcStage {
     private JTextField intensityMinField;
     private JButton previewButton;
     private JButton resetButton;
+    private JButton variationsButton;
     private ObjectFilterSummary objectFilterSummary;
 
     public StarDistParameterStage(ParameterStore parameterStore, PreviewAdapter previewAdapter) {
@@ -208,8 +214,10 @@ public final class StarDistParameterStage implements ConfigQcStage {
             }
             refreshLargePreviewModel();
             setStatus(EMPTY_TEXT);
+            setVariationsButtonReady(true);
         } catch (Exception e) {
             closeImages();
+            setVariationsButtonReady(false);
             setError("Could not prepare StarDist input: " + e.getMessage());
         }
     }
@@ -244,6 +252,7 @@ public final class StarDistParameterStage implements ConfigQcStage {
             preview.clearLargePreviewImages();
         }
         closeImages();
+        setVariationsButtonReady(false);
         preview = null;
         activeContext = null;
     }
@@ -320,6 +329,10 @@ public final class StarDistParameterStage implements ConfigQcStage {
 
     int largePreviewPaneCountForTest() {
         return labelPreview == null ? 2 : 3;
+    }
+
+    void applyVariationComboForTest(ParameterCombo combo) {
+        applyVariationCombo(combo);
     }
 
     private void createParameterFields() {
@@ -430,6 +443,12 @@ public final class StarDistParameterStage implements ConfigQcStage {
         gbc.gridx++;
         gbc.insets = new Insets(0, 2, 0, 0);
         row.add(resetButton, gbc);
+        variationsButton = new JButton("Parameter Variations...");
+        variationsButton.addActionListener(e -> openVariationsDialog());
+        variationsButton.setEnabled(filteredSource != null);
+        variationsButton.setToolTipText("Run/prepare a preview before opening parameter variations.");
+        gbc.gridx++;
+        row.add(variationsButton, gbc);
         return row;
     }
 
@@ -595,6 +614,44 @@ public final class StarDistParameterStage implements ConfigQcStage {
     private void refreshLargePreviewModel() {
         if (preview == null) return;
         preview.setLargePreviewImages(rawSource, filteredSource, labelPreview);
+    }
+
+    private void openVariationsDialog() {
+        if (filteredSource == null || activeContext == null) {
+            setStatus("Wait for the filtered input to finish preparing before opening variations.");
+            return;
+        }
+        VariationEngineContext ctx = VariationEngineContext.forStarDist(
+                activeContext.getChannelName(),
+                rawSource,
+                filteredSource,
+                activeContext,
+                collectParameters(),
+                previewAdapter);
+        VariationsDialog dialog = new VariationsDialog(
+                SwingUtilities.getWindowAncestor(preview != null ? preview : previewButton),
+                ctx,
+                this::applyVariationCombo);
+        dialog.showDialog();
+    }
+
+    private void applyVariationCombo(ParameterCombo combo) {
+        if (combo == null) return;
+        updatingFields = true;
+        try {
+            setNumberField(probabilityField, combo, ParameterId.PROB_THRESH);
+            setNumberField(nmsField, combo, ParameterId.NMS_THRESH);
+            setNumberField(linkingField, combo, ParameterId.LINKING_MAX);
+            setNumberField(gapClosingField, combo, ParameterId.GAP_CLOSING_MAX);
+            setIntegerField(frameGapField, combo, ParameterId.FRAME_GAP);
+            setNumberField(areaMinField, combo, ParameterId.AREA_MIN);
+            setNumberField(areaMaxField, combo, ParameterId.AREA_MAX);
+            setNumberField(qualityMinField, combo, ParameterId.QUALITY_MIN);
+            setNumberField(intensityMinField, combo, ParameterId.INTENSITY_MIN);
+        } finally {
+            updatingFields = false;
+        }
+        runPreviewOnWorker();
     }
 
     private ImagePlus currentSourceImage() {
@@ -855,6 +912,7 @@ public final class StarDistParameterStage implements ConfigQcStage {
     private void setButtonsEnabled(boolean enabled) {
         if (previewButton != null) previewButton.setEnabled(enabled);
         if (resetButton != null) resetButton.setEnabled(enabled);
+        if (variationsButton != null) variationsButton.setEnabled(enabled && filteredSource != null);
         if (probabilityField != null) probabilityField.setEnabled(enabled);
         if (nmsField != null) nmsField.setEnabled(enabled);
         if (linkingField != null) linkingField.setEnabled(enabled);
@@ -870,8 +928,28 @@ public final class StarDistParameterStage implements ConfigQcStage {
         }
     }
 
+    private void setVariationsButtonReady(boolean ready) {
+        if (variationsButton != null) {
+            variationsButton.setEnabled(ready && filteredSource != null);
+        }
+    }
+
     private static void setTextForTest(JTextField field, String value) {
         if (field != null) field.setText(value);
+    }
+
+    private static void setNumberField(JTextField field, ParameterCombo combo, ParameterId id) {
+        Object value = combo == null ? null : combo.get(id);
+        if (field != null && value instanceof Number) {
+            field.setText(String.valueOf(((Number) value).doubleValue()));
+        }
+    }
+
+    private static void setIntegerField(JTextField field, ParameterCombo combo, ParameterId id) {
+        Object value = combo == null ? null : combo.get(id);
+        if (field != null && value instanceof Number) {
+            field.setText(String.valueOf(sanitizeFrameGap(((Number) value).doubleValue())));
+        }
     }
 
     private void closePreviewWorker() {
