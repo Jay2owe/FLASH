@@ -4,6 +4,7 @@ import flash.pipeline.FLASH_Pipeline;
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinConfigIO;
 import flash.pipeline.bin.BinField;
+import flash.pipeline.bin.BinMacroIndex;
 import flash.pipeline.bin.ChannelIdentities;
 import flash.pipeline.bin.ChannelIdentitiesIO;
 import flash.pipeline.cellpose.Cellpose3DRunner;
@@ -85,6 +86,7 @@ import javax.swing.JButton;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
+import javax.swing.DefaultComboBoxModel;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.Icon;
@@ -157,6 +159,13 @@ public class CreateBinFileAnalysis implements Analysis {
             new String[]{"Threshold", "Threshold..."};
     private static final String ACTION_SKIP_CURRENT_IMAGE = "skip_current_image";
     private static final String CUSTOM_FILTER_PRESET_DIR = FlashProjectLayout.CUSTOM_FILTER_PRESET_DIR;
+    private static final String LOADING_FILTERS_OPTION = "Loading filters...";
+    private static final String FILTER_OPTIONS_REFRESH_TOKEN_PROPERTY =
+            "flash.filterPresetOptionsRefreshToken";
+    private static final String FILTER_OPTIONS_UPDATING_PROPERTY =
+            "flash.filterPresetOptionsUpdating";
+    private static final String FILTER_OPTIONS_WAS_DISPLAYABLE_PROPERTY =
+            "flash.filterPresetOptionsWasDisplayable";
     static {
         String[] bundled = NamedFilterLoader.FILTER_NAMES;
         FILTER_PRESETS = new String[bundled.length + 1]; // bundled + Custom
@@ -546,10 +555,12 @@ public class CreateBinFileAnalysis implements Analysis {
                     filterPresetOptions(binFolder, defPreset), defPreset);
             final JLabel filterDesc = dialog.addHelpText(filterDescriptionFor(defPreset));
             installFilterDescriptionUpdater(combo, filterDesc);
+            installAsyncFilterPresetOptions(binFolder, combo, filterDesc, defPreset);
         }
         if (!dialog.showDialog()) return false;
         for (int i = 0; i < cfg.names.size(); i++) {
-            cfg.filterPresets.set(i, dialog.getNextChoice());
+            String previous = i < cfg.filterPresets.size() ? cfg.filterPresets.get(i) : "Custom";
+            cfg.filterPresets.set(i, safeFilterPresetSelection(dialog.getNextChoice(), previous));
         }
         applyHandledCustomDemotions(binFolder, cfg);
         return true;
@@ -1146,10 +1157,12 @@ public class CreateBinFileAnalysis implements Analysis {
                                 filterPresetOptions(binFolder, defaultPreset), defaultPreset);
                         final JLabel filterDesc = pd.addHelpText(filterDescriptionFor(defaultPreset));
                         installFilterDescriptionUpdater(filterCombo, filterDesc);
+                        installAsyncFilterPresetOptions(binFolder, filterCombo, filterDesc, defaultPreset);
                     }
                     if (!pd.showDialog()) return;
                     for (int i = 0; i < n; i++) {
-                        cfg.filterPresets.set(i, pd.getNextChoice());
+                        String previous = i < cfg.filterPresets.size() ? cfg.filterPresets.get(i) : "Custom";
+                        cfg.filterPresets.set(i, safeFilterPresetSelection(pd.getNextChoice(), previous));
                     }
                     applyHandledCustomDemotions(binFolder, cfg);
                     writeChannelFilters(binFolder, cfg);
@@ -2255,8 +2268,10 @@ public class CreateBinFileAnalysis implements Analysis {
                     valueAt(sourceForHiddenFields.names, i, "Channel" + (i + 1))));
             colors.add(comboText(bindings == null ? null : bindings.colorCombos[i],
                     valueAt(sourceForHiddenFields.colors, i, "Grays")));
-            filterPresets.add(comboText(bindings == null ? null : bindings.filterCombos[i],
-                    valueAt(sourceForHiddenFields.filterPresets, i, FILTER_PRESETS[0])));
+            String filterFallback = valueAt(sourceForHiddenFields.filterPresets, i, FILTER_PRESETS[0]);
+            filterPresets.add(safeFilterPresetSelection(
+                    comboText(bindings == null ? null : bindings.filterCombos[i], filterFallback),
+                    filterFallback));
             objThresholds.add(valueAt(sourceForHiddenFields.objectThresholds, i, "default"));
             sizes.add(valueAt(sourceForHiddenFields.sizes, i, "100-Infinity"));
             minmax.add(valueAt(sourceForHiddenFields.minmax, i, "None"));
@@ -2394,6 +2409,7 @@ public class CreateBinFileAnalysis implements Analysis {
                                                  final JLabel filterDesc) {
         filterCombo.addActionListener(new java.awt.event.ActionListener() {
             @Override public void actionPerformed(java.awt.event.ActionEvent e) {
+                if (isFilterComboUpdating(filterCombo)) return;
                 final String selected = (String) filterCombo.getSelectedItem();
                 filterDesc.setText(filterDescriptionFor(selected));
             }
@@ -2401,17 +2417,27 @@ public class CreateBinFileAnalysis implements Analysis {
     }
 
     private String[] filterPresetOptions(File binFolder, String selectedPreset) {
+        return filterPresetOptionsWithSaved(Collections.<String>emptyList(), selectedPreset, null);
+    }
+
+    private String[] filterPresetOptionsWithSaved(List<String> savedPresets,
+                                                  String selectedPreset,
+                                                  String currentSelection) {
         List<String> options = new ArrayList<String>();
         for (int i = 0; i < NamedFilterLoader.FILTER_NAMES.length; i++) {
             addUniqueOption(options, NamedFilterLoader.FILTER_NAMES[i]);
         }
-        List<String> saved = listSavedCustomFilterPresets(binFolder);
-        for (int i = 0; i < saved.size(); i++) {
-            addUniqueOption(options, saved.get(i));
+        if (savedPresets != null) {
+            for (int i = 0; i < savedPresets.size(); i++) {
+                addUniqueOption(options, savedPresets.get(i));
+            }
         }
         addUniqueOption(options, "Custom");
         if (selectedPreset != null && selectedPreset.trim().length() > 0) {
             addUniqueOption(options, selectedPreset.trim());
+        }
+        if (currentSelection != null && currentSelection.trim().length() > 0) {
+            addUniqueOption(options, currentSelection.trim());
         }
         return options.toArray(new String[options.size()]);
     }
@@ -2419,10 +2445,132 @@ public class CreateBinFileAnalysis implements Analysis {
     private void addUniqueOption(List<String> options, String value) {
         if (value == null || value.trim().length() == 0) return;
         String trimmed = value.trim();
+        if (isLoadingFilterOption(trimmed)) return;
         for (int i = 0; i < options.size(); i++) {
             if (options.get(i).equalsIgnoreCase(trimmed)) return;
         }
         options.add(trimmed);
+    }
+
+    private void installAsyncFilterPresetOptions(final File binFolder,
+                                                 final JComboBox<String> combo,
+                                                 final JLabel filterDesc,
+                                                 final String selectedPreset) {
+        if (combo == null) return;
+        final Object token = new Object();
+        combo.putClientProperty(FILTER_OPTIONS_REFRESH_TOKEN_PROPERTY, token);
+        combo.addHierarchyListener(new java.awt.event.HierarchyListener() {
+            @Override public void hierarchyChanged(java.awt.event.HierarchyEvent e) {
+                if ((e.getChangeFlags() & java.awt.event.HierarchyEvent.DISPLAYABILITY_CHANGED) != 0
+                        && combo.isDisplayable()) {
+                    combo.putClientProperty(FILTER_OPTIONS_WAS_DISPLAYABLE_PROPERTY, Boolean.TRUE);
+                }
+            }
+        });
+        BinMacroIndex.savedCustomFilterPresetNamesAsync(binFolder)
+                .whenComplete(new java.util.function.BiConsumer<List<String>, Throwable>() {
+                    @Override public void accept(final List<String> savedPresets, final Throwable error) {
+                        if (error != null) {
+                            IJ.log("Warning: could not scan saved custom filter presets: "
+                                    + error.getMessage());
+                            return;
+                        }
+                        SwingUtilities.invokeLater(new Runnable() {
+                            @Override public void run() {
+                                if (combo.getClientProperty(FILTER_OPTIONS_REFRESH_TOKEN_PROPERTY) != token) {
+                                    return;
+                                }
+                                if (Boolean.TRUE.equals(combo.getClientProperty(FILTER_OPTIONS_WAS_DISPLAYABLE_PROPERTY))
+                                        && !combo.isDisplayable()) {
+                                    return;
+                                }
+                                String currentSelection = safeFilterPresetSelection(
+                                        selectedComboValue(combo), selectedPreset);
+                                String[] options = filterPresetOptionsWithSaved(
+                                        savedPresets, selectedPreset, currentSelection);
+                                replaceFilterPresetModel(combo, options, currentSelection, selectedPreset);
+                                if (filterDesc != null) {
+                                    filterDesc.setText(filterDescriptionFor(selectedComboValue(combo)));
+                                }
+                            }
+                        });
+                    }
+                });
+    }
+
+    private void installAsyncFilterPresetOptions(final File binFolder,
+                                                 final FilterParameterStage stage,
+                                                 final String selectedPreset) {
+        if (stage == null) return;
+        final int generation = stage.beginPresetOptionsRefresh();
+        BinMacroIndex.savedCustomFilterPresetNamesAsync(binFolder)
+                .whenComplete(new java.util.function.BiConsumer<List<String>, Throwable>() {
+                    @Override public void accept(final List<String> savedPresets, final Throwable error) {
+                        if (error != null) {
+                            IJ.log("Warning: could not scan saved custom filter presets: "
+                                    + error.getMessage());
+                            return;
+                        }
+                        final List<String> options = filterPresetOptionListWithSaved(
+                                savedPresets, selectedPreset, null);
+                        stage.refreshPresetOptionsIfCurrent(generation, options, selectedPreset);
+                    }
+                });
+    }
+
+    private void replaceFilterPresetModel(JComboBox<String> combo, String[] options,
+                                          String selectedPreset, String fallbackPreset) {
+        String selection = safeFilterPresetSelection(selectedPreset, fallbackPreset);
+        if (!containsOption(options, selection)) {
+            selection = safeFilterPresetSelection(fallbackPreset, "Custom");
+        }
+        setFilterComboUpdating(combo, true);
+        try {
+            combo.setModel(new DefaultComboBoxModel<String>(options));
+            combo.setSelectedItem(selection);
+        } finally {
+            setFilterComboUpdating(combo, false);
+        }
+    }
+
+    private boolean containsOption(String[] options, String value) {
+        if (options == null || value == null) return false;
+        for (int i = 0; i < options.length; i++) {
+            if (value.equalsIgnoreCase(options[i])) return true;
+        }
+        return false;
+    }
+
+    private String selectedComboValue(JComboBox<String> combo) {
+        return combo == null || combo.getSelectedItem() == null
+                ? null
+                : String.valueOf(combo.getSelectedItem());
+    }
+
+    private void setFilterComboUpdating(JComboBox<String> combo, boolean updating) {
+        if (combo != null) {
+            combo.putClientProperty(FILTER_OPTIONS_UPDATING_PROPERTY, Boolean.valueOf(updating));
+        }
+    }
+
+    private boolean isFilterComboUpdating(JComboBox<String> combo) {
+        return combo != null && Boolean.TRUE.equals(combo.getClientProperty(FILTER_OPTIONS_UPDATING_PROPERTY));
+    }
+
+    private static String safeFilterPresetSelection(String value, String fallback) {
+        String trimmed = value == null ? "" : value.trim();
+        if (trimmed.length() > 0 && !isLoadingFilterOption(trimmed)) {
+            return trimmed;
+        }
+        String safeFallback = fallback == null ? "" : fallback.trim();
+        if (safeFallback.length() > 0 && !isLoadingFilterOption(safeFallback)) {
+            return safeFallback;
+        }
+        return "Custom";
+    }
+
+    private static boolean isLoadingFilterOption(String value) {
+        return value != null && LOADING_FILTERS_OPTION.equalsIgnoreCase(value.trim());
     }
 
     private BinUserConfig buildCustomFilterPromptConfig(int channelCount, int channelIndex,
@@ -2458,22 +2606,6 @@ public class CreateBinFileAnalysis implements Analysis {
         return layoutForBinFolder(binFolder).customFilterPresetWriteDir();
     }
 
-    private List<String> listSavedCustomFilterPresets(File binFolder) {
-        List<String> names = new ArrayList<String>();
-        List<File> dirs = layoutForBinFolder(binFolder).customFilterPresetReadDirs();
-        for (int d = 0; d < dirs.size(); d++) {
-            File dir = dirs.get(d);
-            File[] files = dir.listFiles((parent, name) -> name != null && name.toLowerCase(Locale.ROOT).endsWith(".ijm"));
-            if (files == null || files.length == 0) continue;
-            for (int i = 0; i < files.length; i++) {
-                String fileName = files[i].getName();
-                addUniqueOption(names, fileName.substring(0, fileName.length() - 4));
-            }
-        }
-        Collections.sort(names, String.CASE_INSENSITIVE_ORDER);
-        return names;
-    }
-
     private String loadSavedCustomFilterPreset(File binFolder, String presetName) {
         File file = resolveSavedCustomFilterPresetFile(binFolder, presetName, false);
         if (file == null || !file.isFile()) return null;
@@ -2494,6 +2626,7 @@ public class CreateBinFileAnalysis implements Analysis {
         File target = resolveSavedCustomFilterPresetFile(binFolder, presetName, true);
         if (target == null) throw new IOException("Invalid custom filter preset name: " + presetName);
         Files.write(target.toPath(), macroContent.getBytes(StandardCharsets.UTF_8));
+        BinMacroIndex.invalidate(binFolder);
     }
 
     private File resolveSavedCustomFilterPresetFile(File binFolder, String presetName, boolean forWrite) {
@@ -6250,7 +6383,7 @@ public class CreateBinFileAnalysis implements Analysis {
                                                     final int channelIndex) {
         final int channelNum = channelIndex + 1;
         final String chLabel = "C" + channelNum + " (" + cfg.names.get(channelIndex) + ")";
-        return new FilterParameterStage(
+        FilterParameterStage stage = new FilterParameterStage(
                 filterPresetOptionList(binFolder, cfg.filterPresets.get(channelIndex)),
                 new FilterParameterStage.MacroStore() {
                     @Override public String getInitialPreset() {
@@ -6269,9 +6402,8 @@ public class CreateBinFileAnalysis implements Analysis {
                     }
 
                     @Override public void save(String presetName, String macroContent) throws Exception {
-                        String safePreset = presetName == null || presetName.trim().isEmpty()
-                                ? "Custom"
-                                : presetName.trim();
+                        String safePreset = safeFilterPresetSelection(
+                                presetName, cfg.filterPresets.get(channelIndex));
                         cfg.filterPresets.set(channelIndex, safePreset);
                         Path filterPath = binFolder.toPath().resolve(
                                 "C" + channelNum + "_Filters.ijm");
@@ -6330,10 +6462,23 @@ public class CreateBinFileAnalysis implements Analysis {
                         return filterDescriptionFor(presetName);
                     }
                 });
+        installAsyncFilterPresetOptions(binFolder, stage, cfg.filterPresets.get(channelIndex));
+        return stage;
     }
 
     private List<String> filterPresetOptionList(File binFolder, String selectedPreset) {
         String[] values = filterPresetOptions(binFolder, selectedPreset);
+        List<String> options = new ArrayList<String>();
+        for (int i = 0; i < values.length; i++) {
+            options.add(values[i]);
+        }
+        return options;
+    }
+
+    private List<String> filterPresetOptionListWithSaved(List<String> savedPresets,
+                                                         String selectedPreset,
+                                                         String currentSelection) {
+        String[] values = filterPresetOptionsWithSaved(savedPresets, selectedPreset, currentSelection);
         List<String> options = new ArrayList<String>();
         for (int i = 0; i < values.length; i++) {
             options.add(values[i]);
@@ -6979,7 +7124,8 @@ public class CreateBinFileAnalysis implements Analysis {
         Path channelData = binFolder.toPath().resolve("Channel_Data.txt");
         List<String> filterPresetTokens = new ArrayList<String>();
         for (int i = 0; i < cfg.filterPresets.size(); i++) {
-            filterPresetTokens.add(BinConfigIO.encodeFilterPresetToken(cfg.filterPresets.get(i)));
+            filterPresetTokens.add(BinConfigIO.encodeFilterPresetToken(
+                    safeFilterPresetSelection(cfg.filterPresets.get(i), "Custom")));
         }
         List<String> lines = new ArrayList<String>(9);
         lines.add(String.join("\t", cfg.names));
@@ -7028,7 +7174,7 @@ public class CreateBinFileAnalysis implements Analysis {
 
     private void writeChannelFilters(File binFolder, BinUserConfig cfg) throws IOException {
         for (int c = 0; c < cfg.names.size(); c++) {
-            String preset = cfg.filterPresets.get(c);
+            String preset = safeFilterPresetSelection(cfg.filterPresets.get(c), "Custom");
             if (shouldSkipHandledCustomFilterWrite(binFolder, c, preset)) continue;
             Path p = binFolder.toPath().resolve("C" + (c + 1) + "_Filters.ijm");
             String content;

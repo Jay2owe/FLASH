@@ -20,6 +20,7 @@ import javax.swing.JLabel;
 import javax.swing.JScrollPane;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingConstants;
+import javax.swing.SwingUtilities;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
@@ -274,6 +275,58 @@ public class FilterParameterStageTest {
         assertEquals(CUSTOM_MACRO, stage.currentMacroForTest());
         assertEquals(1, store.initialMacroLoads);
         assertEquals(0, store.presetMacroLoads);
+    }
+
+    @Test
+    public void asyncPresetOptionRefreshKeepsSelectionAndDoesNotLoadMacro() throws Exception {
+        RecordingMacroStore store = new RecordingMacroStore(
+                "Default", DEFAULT_MACRO, CUSTOM_MACRO);
+        FilterParameterStage stage = new FilterParameterStage(
+                Arrays.asList("Default", "Custom"),
+                store,
+                new RecordingPreviewAdapter(),
+                null,
+                null);
+
+        stage.buildControls(context(), new RecordingActions());
+        store.presetMacroLoads = 0;
+        int generation = stage.beginPresetOptionsRefresh();
+
+        SwingUtilities.invokeAndWait(new Runnable() {
+            @Override public void run() {
+                stage.refreshPresetOptionsIfCurrent(generation,
+                        Arrays.asList("Default", "IBA1 cleanup filter", "Custom"), "Default");
+            }
+        });
+
+        assertEquals("Default", stage.selectedPresetForTest());
+        assertTrue(stage.hasPresetOptionForTest("IBA1 cleanup filter"));
+        assertEquals("model replacement must not fire presetChanged",
+                0, store.presetMacroLoads);
+    }
+
+    @Test
+    public void staleAsyncPresetOptionRefreshIsIgnoredAfterLeave() throws Exception {
+        RecordingMacroStore store = new RecordingMacroStore("Default", DEFAULT_MACRO);
+        FilterParameterStage stage = new FilterParameterStage(
+                Arrays.asList("Default", "Custom"),
+                store,
+                new RecordingPreviewAdapter(),
+                null,
+                null);
+        ConfigQcContext context = context();
+
+        stage.buildControls(context, new RecordingActions());
+        int generation = stage.beginPresetOptionsRefresh();
+        stage.onLeave(context);
+        SwingUtilities.invokeAndWait(new Runnable() {
+            @Override public void run() {
+                stage.refreshPresetOptionsIfCurrent(generation,
+                        Arrays.asList("Default", "Stale cleanup", "Custom"), "Default");
+            }
+        });
+
+        assertFalse(stage.hasPresetOptionForTest("Stale cleanup"));
     }
 
     @Test

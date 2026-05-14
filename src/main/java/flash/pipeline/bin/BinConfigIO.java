@@ -472,17 +472,7 @@ public class BinConfigIO {
     }
 
     private static File[] savedCustomPresetFiles(File binFolder) {
-        List<File> out = new ArrayList<File>();
-        List<File> dirs = layoutForBinFolder(binFolder).customFilterPresetReadDirs();
-        for (int i = 0; i < dirs.size(); i++) {
-            File dir = dirs.get(i);
-            File[] files = dir.listFiles((parent, name) -> name != null && name.toLowerCase(Locale.ROOT).endsWith(".ijm"));
-            if (files == null) continue;
-            for (int f = 0; f < files.length; f++) {
-                out.add(files[f]);
-            }
-        }
-        return out.toArray(new File[out.size()]);
+        return BinMacroIndex.listSavedCustomFilterPresetFiles(binFolder);
     }
 
     private static String loadSavedCustomFilterPreset(File binFolder, String presetName) {
