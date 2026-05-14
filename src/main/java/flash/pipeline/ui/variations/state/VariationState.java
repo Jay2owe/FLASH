@@ -152,7 +152,7 @@ public final class VariationState {
         for (int i = 0; i < completed.size(); i++) {
             CompletedCell existing = completed.get(i);
             if (existing.comboId().equals(completion.comboId())) {
-                copy.add(completion);
+                copy.add(mergeCompletion(existing, completion));
                 replaced = true;
             } else {
                 copy.add(existing);
@@ -162,6 +162,23 @@ public final class VariationState {
             copy.add(completion);
         }
         return new VariationState(version, sweep, copy, startedAt, updatedAt);
+    }
+
+    private static CompletedCell mergeCompletion(CompletedCell existing,
+                                                 CompletedCell completion) {
+        if (existing == null) {
+            return completion;
+        }
+        if (completion == null) {
+            return existing;
+        }
+        boolean sameCachedLabel = safe(existing.labelCacheKey())
+                .equals(safe(completion.labelCacheKey()));
+        if (sameCachedLabel && existing.durationMs() > 0L
+                && completion.durationMs() == 0L) {
+            return existing;
+        }
+        return completion;
     }
 
     public static String comboIdFor(ParameterSweep sweep, ParameterCombo combo) {

@@ -2,6 +2,13 @@ package flash.pipeline.ui.variations;
 
 import org.junit.Test;
 
+import flash.pipeline.objects.ObjectsCounter3DWrapper;
+import flash.pipeline.ui.config.ClassicalSegmentationStage;
+import flash.pipeline.ui.config.ConfigQcContext;
+
+import ij.ImagePlus;
+import ij.process.ByteProcessor;
+
 import java.util.Arrays;
 import java.util.List;
 
@@ -84,5 +91,56 @@ public class ParameterSweepEditorTest {
         assertFalse(editor.isSweptForTest(ParameterId.MIN_SIZE));
         assertEquals(3, editor.valueCountForTest(ParameterId.THRESHOLD));
         assertEquals(sweep.toCanonicalJson(), roundTrip.toCanonicalJson());
+    }
+
+    @Test
+    public void sourceHashChangesWhenPixelsChange() {
+        ParameterCombo base = ParameterCombo.builder()
+                .put(ParameterId.THRESHOLD, Integer.valueOf(100))
+                .put(ParameterId.MIN_SIZE, Integer.valueOf(50))
+                .put(ParameterId.MAX_SIZE, Integer.valueOf(500))
+                .build();
+        ParameterSweepEditor first = new ParameterSweepEditor(
+                VariationEngineContext.forClassical("DAPI",
+                        imageWithPixel(10), imageWithPixel(10), null, base,
+                        new NullPreviewAdapter()));
+        ParameterSweepEditor second = new ParameterSweepEditor(
+                VariationEngineContext.forClassical("DAPI",
+                        imageWithPixel(20), imageWithPixel(20), null, base,
+                        new NullPreviewAdapter()));
+
+        assertFalse(first.currentSweep().sourceImageHash()
+                .equals(second.currentSweep().sourceImageHash()));
+    }
+
+    private static ImagePlus imageWithPixel(int value) {
+        ByteProcessor processor = new ByteProcessor(2, 2);
+        processor.set(0, 0, value);
+        return new ImagePlus("same-title", processor);
+    }
+
+    private static final class NullPreviewAdapter
+            implements ClassicalSegmentationStage.PreviewAdapter {
+        @Override public ImagePlus createRawSource(ConfigQcContext context) {
+            return null;
+        }
+
+        @Override public ImagePlus createFilteredSource(ConfigQcContext context) {
+            return null;
+        }
+
+        @Override public ObjectsCounter3DWrapper.Result runPreview(ImagePlus filteredSource,
+                                                                   int threshold,
+                                                                   int minSize,
+                                                                   int maxSize) {
+            return null;
+        }
+
+        @Override public int countObjects(ObjectsCounter3DWrapper.Result result) {
+            return 0;
+        }
+
+        @Override public void close(ImagePlus image) {
+        }
     }
 }

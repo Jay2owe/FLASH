@@ -23,7 +23,6 @@ public final class VariationComparisonPreview {
         dialog.setSourceChoices(rawSource, rawSettings, filteredSource, filteredSettings);
         dialog.setImages(leftLabel, rightLabel, zSlice);
         dialog.setPreviewStatus(leftStatus, rightStatus);
-        dialog.setObjectSizeGuide(null);
         dialog.raiseForUser();
     }
 }

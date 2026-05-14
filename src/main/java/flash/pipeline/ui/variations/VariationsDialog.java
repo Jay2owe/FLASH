@@ -611,6 +611,9 @@ public final class VariationsDialog extends PipelineDialog {
         boolean alreadyCompleted = targetIndex >= 0
                 && targetIndex < resultsByCell.size()
                 && resultsByCell.get(targetIndex) != null;
+        if (alreadyCompleted && !result.hasError() && result.durationMs() == 0L) {
+            return;
+        }
         cell.setResult(result);
         if (targetIndex >= 0 && targetIndex < resultsByCell.size()) {
             resultsByCell.set(targetIndex, result);

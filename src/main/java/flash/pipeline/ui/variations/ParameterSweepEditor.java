@@ -343,21 +343,78 @@ public final class ParameterSweepEditor extends JPanel {
         if (image == null) {
             return "";
         }
-        String raw = safe(image.getTitle()) + ":"
-                + image.getWidth() + "x"
-                + image.getHeight() + "x"
-                + image.getStackSize();
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] bytes = digest.digest(raw.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            updateInt(digest, image.getWidth());
+            updateInt(digest, image.getHeight());
+            updateInt(digest, image.getStackSize());
+            ij.ImageStack stack = image.getStack();
+            int slices = stack == null ? 0 : stack.getSize();
+            for (int z = 1; z <= slices; z++) {
+                ij.process.ImageProcessor processor = stack.getProcessor(z);
+                updatePixels(digest, processor == null ? null : processor.getPixels(),
+                        processor == null ? 0 : processor.getPixelCount());
+            }
+            byte[] bytes = digest.digest();
             StringBuilder out = new StringBuilder(bytes.length * 2);
             for (int i = 0; i < bytes.length; i++) {
                 out.append(String.format("%02x", Integer.valueOf(bytes[i] & 0xff)));
             }
             return out.toString();
         } catch (NoSuchAlgorithmException e) {
-            return Integer.toHexString(raw.hashCode());
+            return Integer.toHexString((safe(image.getTitle()) + ":"
+                    + image.getWidth() + "x"
+                    + image.getHeight() + "x"
+                    + image.getStackSize()).hashCode());
         }
+    }
+
+    private static void updatePixels(MessageDigest digest, Object pixels, int pixelCount) {
+        if (pixels instanceof byte[]) {
+            digest.update((byte[]) pixels);
+            return;
+        }
+        if (pixels instanceof short[]) {
+            short[] values = (short[]) pixels;
+            for (int i = 0; i < values.length; i++) {
+                updateInt(digest, values[i] & 0xffff);
+            }
+            return;
+        }
+        if (pixels instanceof int[]) {
+            int[] values = (int[]) pixels;
+            for (int i = 0; i < values.length; i++) {
+                updateInt(digest, values[i]);
+            }
+            return;
+        }
+        if (pixels instanceof float[]) {
+            float[] values = (float[]) pixels;
+            for (int i = 0; i < values.length; i++) {
+                updateInt(digest, Float.floatToIntBits(values[i]));
+            }
+            return;
+        }
+        if (pixels instanceof double[]) {
+            double[] values = (double[]) pixels;
+            for (int i = 0; i < values.length; i++) {
+                updateLong(digest, Double.doubleToLongBits(values[i]));
+            }
+            return;
+        }
+        updateInt(digest, pixelCount);
+    }
+
+    private static void updateInt(MessageDigest digest, int value) {
+        digest.update((byte) ((value >>> 24) & 0xff));
+        digest.update((byte) ((value >>> 16) & 0xff));
+        digest.update((byte) ((value >>> 8) & 0xff));
+        digest.update((byte) (value & 0xff));
+    }
+
+    private static void updateLong(MessageDigest digest, long value) {
+        updateInt(digest, (int) (value >>> 32));
+        updateInt(digest, (int) value);
     }
 
     private static String safe(String value) {

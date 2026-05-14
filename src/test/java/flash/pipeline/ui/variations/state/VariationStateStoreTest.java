@@ -94,6 +94,27 @@ public class VariationStateStoreTest {
         assertTrue(state.isCompatible(ParameterSweep.Method.CELLPOSE, "DAPI", "old-image"));
     }
 
+    @Test
+    public void zeroDurationCacheHitDoesNotOverwriteSavedCompletionMetadata() {
+        ParameterSweep sweep = cellposeSweep("image-a");
+        ParameterCombo combo = sweep.combos().get(0);
+        String comboId = VariationState.comboIdFor(sweep, combo);
+        String cacheKey = VariationCache.keyFor(sweep, combo);
+        VariationState state = new VariationState(sweep,
+                Collections.singletonList(new VariationState.CompletedCell(
+                        comboId, cacheKey, 42, 4500L)),
+                "2026-05-13T11:14:00Z",
+                "2026-05-13T11:18:33Z");
+
+        VariationState updated = state.withCompletion(
+                new VariationState.CompletedCell(comboId, cacheKey, 99, 0L),
+                "2026-05-13T11:19:00Z");
+
+        assertEquals(1, updated.completed().size());
+        assertEquals(42, updated.completed().get(0).nObjects());
+        assertEquals(4500L, updated.completed().get(0).durationMs());
+    }
+
     private static ParameterSweep cellposeSweep(String imageHash) {
         Map<ParameterId, ParameterValueList> values =
                 new LinkedHashMap<ParameterId, ParameterValueList>();
