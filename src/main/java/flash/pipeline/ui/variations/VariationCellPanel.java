@@ -31,6 +31,9 @@ public final class VariationCellPanel extends JPanel {
     private static final Color KNEE_BORDER = new Color(58, 150, 86);
     private static final Color STABILITY_BORDER = new Color(210, 160, 30);
     private static final Color COMPARE_BORDER = new Color(42, 105, 210);
+    private static final Color FOOTER_COLOR = new Color(65, 70, 75);
+    private static final Color ERROR_COLOR = new Color(185, 45, 45);
+    private static final String ERROR_BADGE = "\u26a0";
 
     public enum BorderHint {
         NONE,
@@ -52,10 +55,13 @@ public final class VariationCellPanel extends JPanel {
     private long durationMs = -1L;
     private int objectCount = -1;
     private double meanNeighbourIou = Double.NaN;
+    private String errorText = "";
     private boolean hover;
     private boolean kneeWinner;
     private boolean stabilityWinner;
     private boolean selectedForCompare;
+    private boolean acceptEnabled;
+    private boolean errorState;
 
     public VariationCellPanel(ParameterCombo combo,
                               ImagePlus croppedSource,
@@ -84,7 +90,7 @@ public final class VariationCellPanel extends JPanel {
         add(preview, BorderLayout.CENTER);
 
         footer.setFont(footer.getFont().deriveFont(java.awt.Font.PLAIN, 11f));
-        footer.setForeground(new Color(65, 70, 75));
+        footer.setForeground(FOOTER_COLOR);
         add(footer, BorderLayout.SOUTH);
         installMouseHandlers();
         refreshBorder();
@@ -100,6 +106,10 @@ public final class VariationCellPanel extends JPanel {
     }
 
     public void setState(String state) {
+        errorState = false;
+        errorText = "";
+        acceptEnabled = false;
+        footer.setForeground(FOOTER_COLOR);
         footer.setText(state == null || state.trim().isEmpty() ? "pending" : state);
         refreshTooltip();
     }
@@ -113,11 +123,31 @@ public final class VariationCellPanel extends JPanel {
             return;
         }
         if (result.hasError()) {
-            footer.setText("error");
-            setToolTipText(result.error().getMessage());
+            setError(result.error());
             return;
         }
         setLabel(result.label(), result.stats(), result.nObjects(), result.durationMs());
+    }
+
+    public void setError(final Throwable error) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setError(error);
+                }
+            });
+            return;
+        }
+        errorState = true;
+        acceptEnabled = false;
+        errorText = errorDetails(error);
+        cachedLabel = createEmptyLabel();
+        cachedStats = null;
+        objectCount = -1;
+        durationMs = -1L;
+        footer.setForeground(ERROR_COLOR);
+        footer.setText(ERROR_BADGE);
+        refreshTooltip();
     }
 
     public void setLabel(final ImagePlus label,
@@ -136,6 +166,10 @@ public final class VariationCellPanel extends JPanel {
         this.cachedStats = stats;
         this.objectCount = Math.max(0, nObjects);
         this.durationMs = durationMs;
+        this.errorState = false;
+        this.errorText = "";
+        this.acceptEnabled = true;
+        footer.setForeground(FOOTER_COLOR);
 
         ImagePlus rendered = null;
         if (croppedSource != null && dimensionsMatch(croppedSource, cachedLabel)) {
@@ -228,7 +262,7 @@ public final class VariationCellPanel extends JPanel {
             if (onCompare != null) {
                 onCompare.accept(combo, this);
             }
-        } else if (onAccept != null) {
+        } else if (acceptEnabled && onAccept != null) {
             onAccept.accept(combo);
         }
     }
@@ -240,7 +274,7 @@ public final class VariationCellPanel extends JPanel {
                     if (onCompare != null) {
                         onCompare.accept(combo, VariationCellPanel.this);
                     }
-                } else if (onAccept != null) {
+                } else if (acceptEnabled && onAccept != null) {
                     onAccept.accept(combo);
                 }
             }
@@ -301,7 +335,16 @@ public final class VariationCellPanel extends JPanel {
     private void refreshTooltip() {
         StringBuilder sb = new StringBuilder();
         sb.append("<html>");
-        sb.append(combo.toCanonicalJson());
+        sb.append(html(combo.toCanonicalJson()));
+        if (errorState) {
+            sb.append("<br><b>Failed:</b> ")
+                    .append(html(errorText).replace("\n", "<br>"));
+            sb.append("</html>");
+            setToolTipText(sb.toString());
+            preview.setToolTipText(sb.toString());
+            footer.setToolTipText(sb.toString());
+            return;
+        }
         if (stabilityWinner) {
             if (Double.isNaN(meanNeighbourIou)) {
                 sb.append("<br>Most stable");
@@ -350,6 +393,27 @@ public final class VariationCellPanel extends JPanel {
         return label;
     }
 
+    private ImagePlus createEmptyLabel() {
+        int width = croppedSource == null ? 96 : Math.max(1, croppedSource.getWidth());
+        int height = croppedSource == null ? 96 : Math.max(1, croppedSource.getHeight());
+        int slices = croppedSource == null ? 1 : Math.max(1, croppedSource.getStackSize());
+        ImageStack stack = new ImageStack(width, height);
+        for (int z = 0; z < slices; z++) {
+            stack.addSlice("z" + (z + 1), new ByteProcessor(width, height));
+        }
+        ImagePlus label = new ImagePlus("failed-variation", stack);
+        if (croppedSource != null) {
+            int channels = Math.max(1, croppedSource.getNChannels());
+            int imageSlices = Math.max(1, croppedSource.getNSlices());
+            int frames = Math.max(1, croppedSource.getNFrames());
+            if (channels * imageSlices * frames == stack.getSize()) {
+                label.setDimensions(channels, imageSlices, frames);
+                label.setOpenAsHyperStack(croppedSource.isHyperStack());
+            }
+        }
+        return label;
+    }
+
     private static boolean dimensionsMatch(ImagePlus source, ImagePlus label) {
         if (source == null || label == null) {
             return false;
@@ -361,5 +425,34 @@ public final class VariationCellPanel extends JPanel {
         ImageProcessor sourceProcessor = source.getProcessor();
         ImageProcessor labelProcessor = label.getProcessor();
         return sourceProcessor != null && labelProcessor != null;
+    }
+
+    private static String errorDetails(Throwable error) {
+        if (error == null) {
+            return "Unknown error";
+        }
+        StringBuilder sb = new StringBuilder();
+        String message = error.getMessage();
+        sb.append(message == null || message.trim().isEmpty()
+                ? error.getClass().getSimpleName()
+                : message.trim());
+        Throwable cause = error.getCause();
+        if (cause != null && cause != error) {
+            String causeMessage = cause.getMessage();
+            sb.append("\nCaused by: ");
+            sb.append(causeMessage == null || causeMessage.trim().isEmpty()
+                    ? cause.getClass().getSimpleName()
+                    : causeMessage.trim());
+        }
+        return sb.toString();
+    }
+
+    private static String html(String text) {
+        if (text == null) {
+            return "";
+        }
+        return text.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;");
     }
 }

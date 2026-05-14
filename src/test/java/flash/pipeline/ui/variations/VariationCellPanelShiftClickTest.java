@@ -141,6 +141,48 @@ public class VariationCellPanelShiftClickTest {
         });
     }
 
+    @Test
+    public void failedCellBlocksAcceptButCanStillBeCompared() throws Exception {
+        final AtomicReference<ParameterCombo> accepted =
+                new AtomicReference<ParameterCombo>();
+        final AtomicReference<VariationCellPanel> openedLeft =
+                new AtomicReference<VariationCellPanel>();
+        final AtomicReference<VariationCellPanel> openedRight =
+                new AtomicReference<VariationCellPanel>();
+
+        SwingUtilities.invokeAndWait(new Runnable() {
+            @Override public void run() {
+                VariationComparisonSelection selection = new VariationComparisonSelection(
+                        status -> {
+                        },
+                        new VariationComparisonSelection.Opener() {
+                            @Override public void openComparison(VariationCellPanel left,
+                                                                 VariationCellPanel right) {
+                                openedLeft.set(left);
+                                openedRight.set(right);
+                            }
+                        });
+                VariationCellPanel failed = new VariationCellPanel(combo(1), source(),
+                        accepted::set,
+                        (clickedCombo, clickedCell) -> selection.handleShiftClick(clickedCell));
+                failed.setResult(VariationResult.failure(combo(1),
+                        new IllegalStateException("cellpose stderr: bad mask")));
+                VariationCellPanel success = renderedCell(combo(2), selection, accepted);
+
+                click(failed, false);
+                assertSame(null, accepted.get());
+                assertEquals("\u26a0", failed.footerTextForTest());
+                assertTrue(failed.getToolTipText().contains("cellpose stderr"));
+
+                click(failed, true);
+                click(success, true);
+
+                assertSame(failed, openedLeft.get());
+                assertSame(success, openedRight.get());
+            }
+        });
+    }
+
     private static VariationCellPanel renderedCell(
             final ParameterCombo combo,
             final VariationComparisonSelection selection,

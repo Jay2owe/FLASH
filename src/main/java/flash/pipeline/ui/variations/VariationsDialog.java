@@ -8,6 +8,11 @@ import flash.pipeline.ui.variations.analysis.IouStability;
 import flash.pipeline.ui.variations.analysis.KneeDetector;
 import flash.pipeline.ui.variations.state.VariationState;
 import flash.pipeline.ui.variations.state.VariationStateStore;
+import flash.pipeline.ui.variations.strategy.CellposeOneShot;
+import flash.pipeline.ui.variations.strategy.CellposePersistent;
+import flash.pipeline.ui.variations.strategy.ClassicalSweep;
+import flash.pipeline.ui.variations.strategy.StarDistFastNms;
+import flash.pipeline.ui.variations.strategy.StarDistPerCell;
 import flash.pipeline.ui.variations.strategy.VariationStrategyChooser;
 
 import ij.ImagePlus;
@@ -37,6 +42,7 @@ import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.EventQueue;
+import java.awt.Font;
 import java.awt.GraphicsEnvironment;
 import java.awt.Window;
 import java.awt.event.ActionEvent;
@@ -67,7 +73,8 @@ public final class VariationsDialog extends PipelineDialog {
     private final JLabel cellsLabel = new JLabel("Cells: 1");
     private final JLabel zLabel = new JLabel("1/1");
     private final JLabel suggestionLabel = new JLabel("Suggested: pending");
-    private final JLabel statusLabel = new JLabel("Status: idle");
+    private final JLabel statusLabel = new JLabel("Idle");
+    private final JLabel strategyLabel = new JLabel(" ");
     private final JSlider zSlider = new JSlider(1, 1, 1);
     private final JButton suggestButton = new JButton("Suggest ranges from image");
     private final JRadioButton fullCrop = new JRadioButton("full image");
@@ -89,6 +96,8 @@ public final class VariationsDialog extends PipelineDialog {
     private CropSpec currentCropSpec = CropSpec.centre256();
     private boolean suppressCropEvents;
     private int completedCount;
+    private int failedCount;
+    private long runStartedAtMs;
     private VariationStrategy strategyForTest;
 
     public VariationsDialog(Window owner,
@@ -221,7 +230,7 @@ public final class VariationsDialog extends PipelineDialog {
         addHeader("Preview grid");
         addComponent(gridScrollPane());
         addComponent(zRow());
-        addComponent(statusRow());
+        addComponent(statusPanel());
 
         JButton cancel = addRightFooterButton("Cancel");
         cancel.addActionListener(e -> dispose());
@@ -314,6 +323,17 @@ public final class VariationsDialog extends PipelineDialog {
         row.add(zSlider, BorderLayout.CENTER);
         row.add(zLabel, BorderLayout.EAST);
         return row;
+    }
+
+    private JPanel statusPanel() {
+        JPanel panel = new JPanel(new BorderLayout(0, 2));
+        panel.setOpaque(false);
+        panel.add(statusRow(), BorderLayout.CENTER);
+        strategyLabel.setForeground(new Color(110, 110, 110));
+        strategyLabel.setFont(strategyLabel.getFont().deriveFont(Font.ITALIC, 11f));
+        strategyLabel.setBorder(BorderFactory.createEmptyBorder(0, 4, 2, 4));
+        panel.add(strategyLabel, BorderLayout.SOUTH);
+        return panel;
     }
 
     private JPanel statusRow() {
@@ -424,7 +444,7 @@ public final class VariationsDialog extends PipelineDialog {
         editor.setSweep(state.sweep());
         selectCropButton(currentCropSpec);
         refreshCellEstimate();
-        statusLabel.setText("Status: resume ready ("
+        statusLabel.setText("Resume ready ("
                 + state.completed().size() + "/" + state.sweep().cellCount()
                 + " complete)");
     }
@@ -437,11 +457,14 @@ public final class VariationsDialog extends PipelineDialog {
                 ResourceGuard.assessFeasibility(currentSweep, source);
         if (!feasibility.ok) {
             showMessage(feasibility.message);
-            statusLabel.setText("Status: refused");
+            statusLabel.setText("Refused");
+            strategyLabel.setText(" ");
             return;
         }
 
         completedCount = 0;
+        failedCount = 0;
+        runStartedAtMs = System.currentTimeMillis();
         ImagePlus croppedSource = currentSweep.cropSpec().apply(source);
         List<ParameterCombo> combos = currentSweep.combos();
         VariationCache runCache = new VariationCache(context.configContext());
@@ -493,12 +516,12 @@ public final class VariationsDialog extends PipelineDialog {
         }
         gridPanel.setSweep(currentSweep);
         gridPanel.setCells(cells);
-        statusLabel.setText("Status: " + completedCount + "/" + combos.size() + " complete");
+        statusLabel.setText(progressStatus(combos.size(), false));
         suggestionLabel.setText("Suggested: pending");
         if (completedCount >= cells.size() && !cells.isEmpty()) {
             applyKneeHint();
             applyStabilityHint();
-            statusLabel.setText("Status: done");
+            statusLabel.setText(completionStatus());
             stateStore.clear();
             return;
         }
@@ -510,9 +533,11 @@ public final class VariationsDialog extends PipelineDialog {
                     : strategyForTest;
         } catch (RuntimeException e) {
             showMessage(e.getMessage());
-            statusLabel.setText("Status: refused");
+            statusLabel.setText("Refused");
+            strategyLabel.setText(" ");
             return;
         }
+        strategyLabel.setText(strategyDescription(strategy, combos.size()));
         String now = Instant.now().toString();
         String startedAt = activeResume == null ? now : activeResume.startedAt();
         stateStore.save(new VariationState(currentSweep, restoredCompleted, startedAt, now));
@@ -593,7 +618,8 @@ public final class VariationsDialog extends PipelineDialog {
         if (!alreadyCompleted) {
             completedCount++;
         }
-        statusLabel.setText("Status: " + completedCount + "/" + cells.size() + " complete");
+        failedCount = countFailures();
+        statusLabel.setText(progressStatus(cells.size(), false));
         if (completedCount >= cells.size()) {
             applyKneeHint();
             applyStabilityHint();
@@ -619,7 +645,7 @@ public final class VariationsDialog extends PipelineDialog {
             return;
         }
         if (worker.isCancelled()) {
-            statusLabel.setText("Status: cancelled");
+            statusLabel.setText("Cancelled");
             for (int i = 0; i < cells.size(); i++) {
                 if ("running".equals(cells.get(i).badgeText())
                         || "pending".equals(cells.get(i).badgeText())) {
@@ -632,12 +658,13 @@ public final class VariationsDialog extends PipelineDialog {
             worker.get();
             applyKneeHint();
             applyStabilityHint();
-            statusLabel.setText("Status: done");
+            failedCount = countFailures();
+            statusLabel.setText(completionStatus());
             if (allCellsSuccessful()) {
                 stateStore.clear();
             }
         } catch (Exception e) {
-            statusLabel.setText("Status: error");
+            statusLabel.setText(statusWithFailures("Error"));
             showMessage(e.getMessage());
         }
     }
@@ -780,7 +807,7 @@ public final class VariationsDialog extends PipelineDialog {
     private void setStatusText(final String text) {
         SwingUtilities.invokeLater(new Runnable() {
             @Override public void run() {
-                statusLabel.setText("Status: " + safe(text));
+                statusLabel.setText(safe(text));
             }
         });
     }
@@ -795,7 +822,7 @@ public final class VariationsDialog extends PipelineDialog {
         }
         suggestButton.setEnabled(false);
         suggestionLabel.setText("Suggested: working...");
-        statusLabel.setText("Status: suggesting ranges");
+        statusLabel.setText("Suggesting ranges");
         SwingWorker<Map<ParameterId, ParameterValueList>, Void> worker =
                 new SwingWorker<Map<ParameterId, ParameterValueList>, Void>() {
                     @Override protected Map<ParameterId, ParameterValueList> doInBackground() {
@@ -809,10 +836,10 @@ public final class VariationsDialog extends PipelineDialog {
                             refreshCellEstimate();
                             suggestionLabel.setText("Suggested: "
                                     + suggestions.size() + " rows updated");
-                            statusLabel.setText("Status: idle");
+                            statusLabel.setText(feasibilitySummary(editor.currentSweep()));
                         } catch (Exception e) {
                             suggestionLabel.setText("Suggested: failed");
-                            statusLabel.setText("Status: idle");
+                            statusLabel.setText(feasibilitySummary(draft));
                             showMessage(e.getMessage());
                         } finally {
                             suggestButton.setEnabled(true);
@@ -827,9 +854,119 @@ public final class VariationsDialog extends PipelineDialog {
             ParameterSweep sweep = editor.currentSweep();
             long count = sweep.cellCount();
             cellsLabel.setText("Cells: " + count);
+            if (!isExecutorActive()) {
+                statusLabel.setText(feasibilitySummary(sweep));
+                strategyLabel.setText(" ");
+            }
         } catch (RuntimeException e) {
             cellsLabel.setText("Cells: ?");
+            if (!isExecutorActive()) {
+                statusLabel.setText("Choose at least one value for each selected parameter.");
+                strategyLabel.setText(" ");
+            }
         }
+    }
+
+    private boolean isExecutorActive() {
+        return executor != null && !executor.isDone();
+    }
+
+    private int countFailures() {
+        int failures = 0;
+        for (int i = 0; i < resultsByCell.size(); i++) {
+            VariationResult result = resultsByCell.get(i);
+            if (result != null && result.hasError()) {
+                failures++;
+            }
+        }
+        return failures;
+    }
+
+    private String progressStatus(int total, boolean includeElapsed) {
+        String base = completedCount + "/" + Math.max(0, total) + " complete";
+        if (includeElapsed) {
+            base += " in " + elapsedText();
+        }
+        return statusWithFailures(base);
+    }
+
+    private String completionStatus() {
+        String base = completedCount + "/" + Math.max(0, cells.size())
+                + " complete in " + elapsedText()
+                + ". Click a tile to accept, shift-click to compare, or Cancel to keep current settings.";
+        return statusWithFailures(base);
+    }
+
+    private String statusWithFailures(String base) {
+        if (failedCount <= 0) {
+            return base;
+        }
+        return base + " - " + failedCount + " cell"
+                + (failedCount == 1 ? "" : "s")
+                + " failed (hover for details)";
+    }
+
+    private String elapsedText() {
+        long elapsed = runStartedAtMs <= 0L
+                ? 0L
+                : Math.max(0L, System.currentTimeMillis() - runStartedAtMs);
+        return formatDuration(elapsed);
+    }
+
+    private String feasibilitySummary(ParameterSweep sweep) {
+        if (sweep == null) {
+            return "Ready";
+        }
+        return sweep.cellCount() + " cells, crop " + cropSummary(sweep.cropSpec());
+    }
+
+    private String cropSummary(CropSpec spec) {
+        ImagePlus source = context.filteredSource();
+        if (source == null) {
+            return "unknown";
+        }
+        CropSpec active = spec == null ? CropSpec.full() : spec;
+        try {
+            Rectangle bounds = active.boundsFor(source);
+            return bounds.width + "x" + bounds.height + "x" + sourceSliceCount();
+        } catch (RuntimeException e) {
+            return "invalid";
+        }
+    }
+
+    private static String formatDuration(long elapsedMs) {
+        long totalSeconds = Math.max(0L, Math.round(elapsedMs / 1000.0d));
+        long hours = totalSeconds / 3600L;
+        long minutes = (totalSeconds % 3600L) / 60L;
+        long seconds = totalSeconds % 60L;
+        if (hours > 0L) {
+            return hours + "h " + minutes + "m " + seconds + "s";
+        }
+        if (minutes > 0L) {
+            return minutes + "m " + seconds + "s";
+        }
+        return seconds + "s";
+    }
+
+    private static String strategyDescription(VariationStrategy strategy, int cellCount) {
+        if (strategy instanceof StarDistFastNms) {
+            return "Using StarDist fast path (1 inference + parallel NMS for "
+                    + cellCount + " cells)";
+        }
+        if (strategy instanceof CellposePersistent) {
+            return "Using Cellpose persistent helper";
+        }
+        if (strategy instanceof CellposeOneShot) {
+            return "Using one-shot fallback";
+        }
+        if (strategy instanceof StarDistPerCell) {
+            return "Using StarDist per-cell fallback";
+        }
+        if (strategy instanceof ClassicalSweep) {
+            return "Using Classical CPU sweep (" + cellCount + " cells)";
+        }
+        return "Using " + (strategy == null ? "unknown strategy"
+                : strategy.getClass().getSimpleName()) + " (" + cellCount + " cells)";
     }
 
     private String currentImageHash() {
