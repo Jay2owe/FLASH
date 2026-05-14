@@ -7375,8 +7375,17 @@ public class CreateBinFileAnalysis implements Analysis {
                 if (images == null || images.isEmpty()) return null;
                 closeImageQuietly(sampleHolder[0]);
                 sampleHolder[0] = duplicateQcChannel(images.get(0), channelIndex,
-                        cfg.colors.get(channelIndex), "Custom Filter Sample | " + chLabel, true);
+                        channelColor(cfg, channelIndex), "Custom Filter Sample | " + chLabel, false);
                 return sampleHolder[0];
+            }
+
+            @Override public void afterSampleShown(ImagePlus sample) {
+                if (sample == null) return;
+                IJ.run(sample, toLutName(channelColor(cfg, channelIndex)), "");
+                positionImageLeft(sample);
+                if (sample.getWindow() != null) {
+                    WindowManager.setCurrentWindow(sample.getWindow());
+                }
             }
         };
     }

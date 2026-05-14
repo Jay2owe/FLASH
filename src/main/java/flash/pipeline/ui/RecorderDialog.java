@@ -18,6 +18,7 @@ import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
 import javax.swing.SwingUtilities;
+import javax.swing.SwingWorker;
 import javax.swing.WindowConstants;
 import java.awt.BorderLayout;
 import java.awt.Color;
@@ -28,13 +29,17 @@ import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.Frame;
 import java.awt.GraphicsEnvironment;
+import java.awt.Point;
+import java.awt.Rectangle;
 import java.awt.SecondaryLoop;
 import java.awt.Toolkit;
 import java.awt.Window;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+import java.lang.reflect.InvocationTargetException;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 
 /**
  * Embedded macro recorder for the Custom filter authoring flow.
@@ -53,8 +58,18 @@ import java.util.concurrent.CountDownLatch;
 public final class RecorderDialog {
 
     public interface SampleSupplier {
-        /** Returns a displayed ImagePlus for the user to operate on, or null if none could be opened. */
+        /**
+         * Prepares and returns an ImagePlus for the user to operate on, or null
+         * if none could be opened. This method may run on a worker thread and
+         * must not show windows or run recorder-visible setup commands.
+         */
         ImagePlus openSample();
+
+        /**
+         * Runs on the EDT after the sample window is shown but before this
+         * dialog starts recording. Use this for display-only setup such as LUTs.
+         */
+        default void afterSampleShown(ImagePlus sample) {}
     }
 
     public static final class Result {
@@ -106,6 +121,8 @@ public final class RecorderDialog {
             IJ.showMessage("Record Filter Macro", "Could not open the ImageJ Recorder.");
             return Result.cancel();
         }
+        Recorder.record = priorRecord;
+        Recorder.recordInMacros = priorRecordInMacros;
 
         Session session = new Session(owner, channelLabel, rec, previewHandler, sampleSupplier,
                 seedMacro, priorRecord, priorRecordInMacros);
@@ -139,13 +156,18 @@ public final class RecorderDialog {
         private final boolean hasSeed;
         private final boolean priorRecord;
         private final boolean priorRecordInMacros;
+        private final Window owner;
         private final CountDownLatch done = new CountDownLatch(1);
 
         private final JDialog dialog;
         private final JTextArea area = new JTextArea();
         private final JLabel summary = new JLabel(" ");
         private final JPanel banner = new JPanel(new BorderLayout(8, 0));
+        private final JLabel bannerMessage = new JLabel("You need a sample image to record on.");
         private JButton bannerOpenButton;
+        private JButton startOverButton;
+        private JButton previewButton;
+        private JButton cancelButton;
         private JButton saveButton;
         private final javax.swing.Timer timer;
 
@@ -156,6 +178,10 @@ public final class RecorderDialog {
         private SecondaryLoop loop;
         private Result result = Result.cancel();
         private boolean closed = false;
+        private boolean sampleLoading = false;
+        private SwingWorker<ImagePlus, Void> sampleWorker;
+        private volatile ImagePlus openedSample;
+        private volatile boolean closeRequested = false;
 
         Session(Window owner, String channelLabel, Recorder rec,
                 CustomFilterEntryDialog.PreviewHandler previewHandler,
@@ -163,6 +189,7 @@ public final class RecorderDialog {
                 String seedMacro,
                 boolean priorRecord,
                 boolean priorRecordInMacros) {
+            this.owner = owner;
             this.channelLabel = channelLabel == null ? "" : channelLabel;
             this.rec = rec;
             this.previewHandler = previewHandler;
@@ -192,22 +219,33 @@ public final class RecorderDialog {
         }
 
         void open() {
-            allowFijiRecordingInteraction(null);
-            if (sampleSupplier != null) {
-                try {
-                    ImagePlus sample = sampleSupplier.openSample();
-                    if (sample != null) {
-                        if (sample.getWindow() == null) sample.show();
-                        allowFijiRecordingInteraction(sample);
-                        WindowManager.setCurrentWindow(sample.getWindow());
-                    }
-                } catch (Throwable t) {
-                    IJ.log("Record Filter Macro: could not auto-open sample image: " + cleanMessage(t));
-                }
+            if (SwingUtilities.isEventDispatchThread()) {
+                openOnEdt();
+                return;
             }
+            try {
+                SwingUtilities.invokeAndWait(new Runnable() {
+                    @Override public void run() {
+                        openOnEdt();
+                    }
+                });
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException(ie);
+            } catch (InvocationTargetException ite) {
+                Throwable cause = ite.getCause();
+                if (cause instanceof RuntimeException) throw (RuntimeException) cause;
+                if (cause instanceof Error) throw (Error) cause;
+                throw new RuntimeException(cause);
+            }
+        }
+
+        private void openOnEdt() {
+            moveOwnerBehindRecordingWorkspace();
+            allowFijiRecordingInteraction(null);
+            sampleLoading = sampleSupplier != null;
+            setControlsEnabled(!sampleLoading);
             updateBannerVisibility();
-            Recorder.record = true;
-            Recorder.recordInMacros = true;
             dialog.addWindowListener(new WindowAdapter() {
                 @Override public void windowClosed(WindowEvent e) {
                     onClosed();
@@ -218,16 +256,137 @@ public final class RecorderDialog {
             int width = Math.max(580, pref.width);
             int height = Math.max(440, pref.height);
             dialog.setSize(width, height);
-            dialog.setLocationRelativeTo(null);
+            positionRecorderBesideSample(null);
             timer.start();
             dialog.setVisible(true);
             dialog.toFront();
             dialog.requestFocus();
+            if (sampleSupplier != null) {
+                launchSampleWorker();
+            } else {
+                startRecordingNow();
+                refocusEnabledControl();
+            }
+        }
+
+        private void launchSampleWorker() {
+            if (sampleSupplier == null || closeRequested || closed) return;
+            sampleLoading = true;
+            openedSample = null;
+            setControlsEnabled(false);
+            updateBannerVisibility();
+            sampleWorker = new SwingWorker<ImagePlus, Void>() {
+                @Override protected ImagePlus doInBackground() throws Exception {
+                    ImagePlus sample = null;
+                    try {
+                        sample = sampleSupplier.openSample();
+                        openedSample = sample;
+                        if (isCancelled() || closeRequested) {
+                            closeImageQuietly(sample);
+                            openedSample = null;
+                            return null;
+                        }
+                        return sample;
+                    } catch (Throwable t) {
+                        closeImageQuietly(sample);
+                        throw new RuntimeException(t);
+                    }
+                }
+
+                @Override protected void done() {
+                    finishSampleWorker(this);
+                }
+            };
+            sampleWorker.execute();
+            refocusEnabledControl();
+        }
+
+        private void finishSampleWorker(SwingWorker<ImagePlus, Void> worker) {
+            ImagePlus sample = null;
+            Throwable failure = null;
+            boolean cancelled = worker.isCancelled();
+            if (!cancelled) {
+                try {
+                    sample = worker.get();
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    failure = ie;
+                } catch (ExecutionException ee) {
+                    failure = ee.getCause() == null ? ee : ee.getCause();
+                }
+            } else {
+                sample = openedSample;
+            }
+
+            sampleLoading = false;
+            if (cancelled || closeRequested || closed || !dialog.isDisplayable()) {
+                closeImageQuietly(sample);
+                openedSample = null;
+                updateBannerVisibility();
+                return;
+            }
+
+            if (failure != null) {
+                IJ.log("Record Filter Macro: could not auto-open sample image: " + cleanMessage(failure));
+            } else if (sample == null) {
+                IJ.log("Record Filter Macro: could not auto-open sample image: no sample image returned");
+            } else {
+                try {
+                    displayPreparedSample(sample);
+                } catch (Throwable t) {
+                    IJ.log("Record Filter Macro: could not auto-open sample image: " + cleanMessage(t));
+                }
+            }
+
+            startRecordingNow();
+            setControlsEnabled(true);
+            updateBannerVisibility();
+            refocusEnabledControl();
+        }
+
+        private void displayPreparedSample(final ImagePlus sample) {
+            if (sample == null) return;
+            final boolean createdWindow = sample.getWindow() == null;
+            if (createdWindow) sample.show();
+            sampleSupplier.afterSampleShown(sample);
+            allowFijiRecordingInteraction(sample);
+            if (sample.getWindow() != null) {
+                WindowManager.setCurrentWindow(sample.getWindow());
+            }
+            positionRecorderBesideSample(sample);
+            if (createdWindow) {
+                SwingUtilities.invokeLater(new Runnable() {
+                    @Override public void run() {
+                        if (!closed && !closeRequested && dialog.isDisplayable()) {
+                            positionRecorderBesideSample(sample);
+                        }
+                    }
+                });
+            }
+            baseline = safeText();
+        }
+
+        private void startRecordingNow() {
+            baseline = safeText();
+            Recorder.record = true;
+            Recorder.recordInMacros = true;
+        }
+
+        private void setControlsEnabled(boolean enabled) {
+            if (startOverButton != null) startOverButton.setEnabled(enabled);
+            if (previewButton != null) previewButton.setEnabled(enabled && previewHandler != null);
+            if (saveButton != null) saveButton.setEnabled(enabled);
+        }
+
+        private void refocusEnabledControl() {
             SwingUtilities.invokeLater(new Runnable() {
                 @Override public void run() {
-                    JButton target = lastBannerVisible && bannerOpenButton != null
+                    JButton target = banner.isVisible() && bannerOpenButton != null
+                            && bannerOpenButton.isVisible() && bannerOpenButton.isEnabled()
                             ? bannerOpenButton
-                            : saveButton;
+                            : !sampleLoading && saveButton != null && saveButton.isEnabled()
+                                    ? saveButton
+                                    : cancelButton;
                     if (target != null) target.requestFocusInWindow();
                 }
             });
@@ -301,6 +460,9 @@ public final class RecorderDialog {
             JButton cancel = new JButton("Cancel");
             JButton preview = new JButton("Preview");
             JButton save = new JButton("Use this filter");
+            this.startOverButton = startOver;
+            this.previewButton = preview;
+            this.cancelButton = cancel;
             this.saveButton = save;
 
             help.setToolTipText("What do these buttons do?");
@@ -351,12 +513,11 @@ public final class RecorderDialog {
             banner.setBackground(new Color(255, 244, 204));
             banner.setOpaque(true);
             banner.setBorder(BorderFactory.createEmptyBorder(8, 12, 8, 12));
-            JLabel msg = new JLabel("You need a sample image to record on.");
             JButton open = new JButton("Open sample");
             flash.pipeline.ui.FlashIcons.apply(open, flash.pipeline.ui.FlashIcons.folderOpen());
             open.addActionListener(e -> onOpenSample());
             this.bannerOpenButton = open;
-            banner.add(msg, BorderLayout.CENTER);
+            banner.add(bannerMessage, BorderLayout.CENTER);
             banner.add(open, BorderLayout.EAST);
             banner.setMaximumSize(new Dimension(Integer.MAX_VALUE, banner.getPreferredSize().height + 16));
         }
@@ -382,9 +543,24 @@ public final class RecorderDialog {
         }
 
         private void updateBannerVisibility() {
-            boolean shouldShow = WindowManager.getCurrentImage() == null;
-            if (shouldShow == lastBannerVisible) return;
-            banner.setVisible(shouldShow);
+            if (!SwingUtilities.isEventDispatchThread()) {
+                SwingUtilities.invokeLater(new Runnable() {
+                    @Override public void run() {
+                        updateBannerVisibility();
+                    }
+                });
+                return;
+            }
+            bannerMessage.setText(sampleLoading
+                    ? "Loading sample image..."
+                    : "You need a sample image to record on.");
+            if (bannerOpenButton != null) {
+                bannerOpenButton.setVisible(!sampleLoading);
+                bannerOpenButton.setEnabled(!sampleLoading);
+            }
+            boolean shouldShow = sampleLoading || WindowManager.getCurrentImage() == null;
+            boolean changed = shouldShow != lastBannerVisible;
+            if (changed) banner.setVisible(shouldShow);
             lastBannerVisible = shouldShow;
             if (banner.getParent() != null) {
                 banner.getParent().revalidate();
@@ -399,30 +575,14 @@ public final class RecorderDialog {
         }
 
         private void onOpenSample() {
+            if (sampleLoading) return;
             if (sampleSupplier == null) {
                 IJ.showMessage("Record Filter Macro",
                         "No sample loader is available. Open an image manually through File > Open"
                                 + " or via Bio-Formats, then continue recording.");
                 return;
             }
-            ImagePlus sample;
-            try {
-                sample = sampleSupplier.openSample();
-            } catch (Throwable t) {
-                IJ.showMessage("Record Filter Macro",
-                        "Could not open a sample image:\n" + cleanMessage(t));
-                return;
-            }
-            if (sample == null) {
-                IJ.showMessage("Record Filter Macro",
-                        "No sample image is available for this channel. Open an image manually"
-                                + " through File > Open or via Bio-Formats, then continue recording.");
-                return;
-            }
-            if (sample.getWindow() == null) sample.show();
-            allowFijiRecordingInteraction(sample);
-            WindowManager.setCurrentWindow(sample.getWindow());
-            updateBannerVisibility();
+            launchSampleWorker();
         }
 
         private void onInlinePreview() {
@@ -529,9 +689,17 @@ public final class RecorderDialog {
         private void onClosed() {
             if (closed) return;
             closed = true;
+            closeRequested = true;
+            SwingWorker<ImagePlus, Void> worker = sampleWorker;
+            if (worker != null && !worker.isDone()) worker.cancel(true);
+            if (sampleLoading) {
+                closeImageQuietly(openedSample);
+                openedSample = null;
+            }
             timer.stop();
             Recorder.record = priorRecord;
             Recorder.recordInMacros = priorRecordInMacros;
+            restoreOwnerAfterRecording();
             done.countDown();
             if (loop != null) loop.exit();
         }
@@ -576,6 +744,64 @@ public final class RecorderDialog {
             } catch (RuntimeException ignored) {
                 // Best effort: recording still works where modal exclusion is unavailable.
             }
+        }
+
+        private static void closeImageQuietly(ImagePlus image) {
+            if (image == null) return;
+            try {
+                image.changes = false;
+                image.close();
+            } catch (Throwable ignored) {
+                // Best effort cleanup for cancelled background sample opens.
+            } finally {
+                try {
+                    image.flush();
+                } catch (Throwable ignored) {
+                    // Best effort cleanup for cancelled background sample opens.
+                }
+            }
+        }
+
+        private void moveOwnerBehindRecordingWorkspace() {
+            if (owner == null || !owner.isDisplayable()) return;
+            try {
+                owner.toBack();
+            } catch (RuntimeException ignored) {
+                // Best effort: the modeless QC shell no longer blocks image interaction.
+            }
+        }
+
+        private void restoreOwnerAfterRecording() {
+            if (owner == null || !owner.isDisplayable() || !owner.isShowing()) return;
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    try {
+                        owner.toFront();
+                        owner.requestFocus();
+                    } catch (RuntimeException ignored) {
+                        // Best effort only.
+                    }
+                }
+            });
+        }
+
+        private void positionRecorderBesideSample(ImagePlus sample) {
+            Window sampleWindow = sample == null ? null : sample.getWindow();
+            if (sampleWindow == null || !sampleWindow.isShowing()) {
+                dialog.setLocationRelativeTo(null);
+                return;
+            }
+            Point preferred = new Point(
+                    sampleWindow.getX() + sampleWindow.getWidth() + 20,
+                    sampleWindow.getY());
+            Rectangle bounds = GraphicsEnvironment.getLocalGraphicsEnvironment().getMaximumWindowBounds();
+            int x = Math.min(
+                    Math.max(bounds.x, preferred.x),
+                    Math.max(bounds.x, bounds.x + bounds.width - dialog.getWidth()));
+            int y = Math.min(
+                    Math.max(bounds.y, preferred.y),
+                    Math.max(bounds.y, bounds.y + bounds.height - dialog.getHeight()));
+            dialog.setLocation(x, y);
         }
     }
 
