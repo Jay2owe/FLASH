@@ -22,8 +22,10 @@ import java.awt.Dimension;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.prefs.Preferences;
 
 public final class ParameterSweepEditor extends JPanel {
@@ -42,6 +44,11 @@ public final class ParameterSweepEditor extends JPanel {
     private JButton advancedToggle;
     private boolean advancedExpanded;
     private CropSpec cropSpec = CropSpec.full();
+    private boolean chainStepFilterActive;
+    private Set<Integer> selectedChainStepIndexes =
+            Collections.<Integer>emptySet();
+    private Set<Integer> disabledChainStepIndexes =
+            Collections.<Integer>emptySet();
 
     public ParameterSweepEditor(VariationEngineContext context) {
         this(context == null ? ParameterSweep.Method.CLASSICAL : context.method(),
@@ -133,6 +140,9 @@ public final class ParameterSweepEditor extends JPanel {
                 new LinkedHashMap<ParameterKey, ParameterValueList>();
         for (int i = 0; i < rows.size(); i++) {
             Row row = rows.get(i);
+            if (!row.visibleForSweep()) {
+                continue;
+            }
             ParameterValueList current = row.values.currentValueList();
             if (row.sweepBox.isSelected()) {
                 values.put(row.id, current);
@@ -168,6 +178,19 @@ public final class ParameterSweepEditor extends JPanel {
             }
         }
         autoExpandAdvancedIfActive();
+        fireChanged();
+    }
+
+    public void setSelectedChainStepIndexes(Set<Integer> selectedStepIndexes) {
+        setChainStepFilter(selectedStepIndexes, Collections.<Integer>emptySet());
+    }
+
+    public void setChainStepFilter(Set<Integer> selectedStepIndexes,
+                                   Set<Integer> disabledStepIndexes) {
+        chainStepFilterActive = true;
+        selectedChainStepIndexes = copyNonNegative(selectedStepIndexes);
+        disabledChainStepIndexes = copyNonNegative(disabledStepIndexes);
+        applyChainStepFilter();
         fireChanged();
     }
 
@@ -217,6 +240,17 @@ public final class ParameterSweepEditor extends JPanel {
     }
 
     List<ParameterKey> parameterKeysForTest() {
+        List<ParameterKey> keys = new ArrayList<ParameterKey>();
+        for (int i = 0; i < rows.size(); i++) {
+            Row row = rows.get(i);
+            if (row.visibleForSweep()) {
+                keys.add(row.id);
+            }
+        }
+        return keys;
+    }
+
+    List<ParameterKey> allParameterKeysForTest() {
         List<ParameterKey> keys = new ArrayList<ParameterKey>();
         for (int i = 0; i < rows.size(); i++) {
             keys.add(rows.get(i).id);
@@ -321,7 +355,8 @@ public final class ParameterSweepEditor extends JPanel {
         row.add(chips.component());
         row.add(Box.createHorizontalGlue());
 
-        final Row rowState = new Row(id, sweepBox, chips, advanced);
+        final Row rowState = new Row(id, row, sweepBox, chips, advanced,
+                definition.chainStepIndex);
         rows.add(rowState);
         sweepBox.addActionListener(e -> {
             if (advanced && rowState.sweepBox.isSelected()) {
@@ -344,6 +379,45 @@ public final class ParameterSweepEditor extends JPanel {
             }
         });
         return row;
+    }
+
+    private void applyChainStepFilter() {
+        for (int i = 0; i < rows.size(); i++) {
+            Row row = rows.get(i);
+            row.panel.setVisible(shouldShowRow(row));
+        }
+        autoExpandAdvancedIfActive();
+        revalidate();
+        repaint();
+    }
+
+    private boolean shouldShowRow(Row row) {
+        if (row == null || !chainStepFilterActive || row.chainStepIndex < 0) {
+            return true;
+        }
+        if (disabledChainStepIndexes.contains(Integer.valueOf(row.chainStepIndex))) {
+            return false;
+        }
+        if (row.id == null || row.id.valueKind() != ParameterKey.ValueKind.NUMBER) {
+            return false;
+        }
+        if (!selectedChainStepIndexes.isEmpty()) {
+            return selectedChainStepIndexes.contains(Integer.valueOf(row.chainStepIndex));
+        }
+        return true;
+    }
+
+    private static Set<Integer> copyNonNegative(Set<Integer> source) {
+        if (source == null || source.isEmpty()) {
+            return Collections.<Integer>emptySet();
+        }
+        Set<Integer> out = new LinkedHashSet<Integer>();
+        for (Integer value : source) {
+            if (value != null && value.intValue() >= 0) {
+                out.add(value);
+            }
+        }
+        return Collections.unmodifiableSet(out);
     }
 
     private ValueControl createValueControl(ParameterDefinition definition,
@@ -410,13 +484,15 @@ public final class ParameterSweepEditor extends JPanel {
 
     private static ParameterDefinition definitionFor(ParameterId id,
                                                      ParameterCombo baseParameters) {
-        return new ParameterDefinition(id, baseValueFor(id, baseParameters), parserFor(id));
+        return new ParameterDefinition(id, baseValueFor(id, baseParameters),
+                parserFor(id), -1);
     }
 
     private static ParameterSections filterSectionsFor(FilterVariationEngineContext context) {
         List<ParameterDefinition> primary = new ArrayList<ParameterDefinition>();
         FilterMacroEditorModel.MacroDefinition macro = context.baseMacro();
         List<FilterMacroEditorModel.Section> sections = macro.getSections();
+        int stepIndex = 0;
         for (int i = 0; i < sections.size(); i++) {
             FilterMacroEditorModel.Section section = sections.get(i);
             for (int j = 0; j < section.entries.size(); j++) {
@@ -431,8 +507,9 @@ public final class ParameterSweepEditor extends JPanel {
                     FilterParameterId id = new FilterParameterId(i, j, k,
                             entry.label, parameter.key, kind);
                     primary.add(new ParameterDefinition(id, baseValue,
-                            parserForFilterValue(baseValue)));
+                            parserForFilterValue(baseValue), stepIndex));
                 }
+                stepIndex++;
             }
         }
         return new ParameterSections(primary,
@@ -720,30 +797,43 @@ public final class ParameterSweepEditor extends JPanel {
         final ParameterKey id;
         final Object baseValue;
         final ValueChipPanel.ValueParser parser;
+        final int chainStepIndex;
 
         ParameterDefinition(ParameterKey id,
                             Object baseValue,
-                            ValueChipPanel.ValueParser parser) {
+                            ValueChipPanel.ValueParser parser,
+                            int chainStepIndex) {
             this.id = id;
             this.baseValue = baseValue;
             this.parser = parser;
+            this.chainStepIndex = chainStepIndex;
         }
     }
 
     private static final class Row {
         final ParameterKey id;
+        final JPanel panel;
         final JCheckBox sweepBox;
         final ValueControl values;
         final boolean advanced;
+        final int chainStepIndex;
 
         Row(ParameterKey id,
+            JPanel panel,
             JCheckBox sweepBox,
             ValueControl values,
-            boolean advanced) {
+            boolean advanced,
+            int chainStepIndex) {
             this.id = id;
+            this.panel = panel;
             this.sweepBox = sweepBox;
             this.values = values;
             this.advanced = advanced;
+            this.chainStepIndex = chainStepIndex;
+        }
+
+        boolean visibleForSweep() {
+            return panel == null || panel.isVisible();
         }
     }
 

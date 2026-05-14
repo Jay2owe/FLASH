@@ -1,6 +1,11 @@
 package flash.pipeline.ui.variations;
 
 import flash.pipeline.image.FilterMacroEditorModel;
+import flash.pipeline.image.dag.DagIR;
+import flash.pipeline.image.dag.DagLine;
+import flash.pipeline.image.dag.DagNode;
+import flash.pipeline.image.dag.DagToIjmEmitter;
+import flash.pipeline.image.dag.IjmToDagLoader;
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.variations.analysis.HistogramShapeStability;
 import flash.pipeline.ui.variations.strategy.FilterSweepStrategy;
@@ -32,9 +37,13 @@ import java.awt.Window;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
@@ -49,6 +58,8 @@ public final class MacroVariationsDialog extends PipelineDialog {
     private final FilterVariationEngineContext context;
     private final Consumer<String> onAccept;
     private final ParameterSweepEditor editor;
+    private final ChainRibbon chainRibbon;
+    private final List<Integer> chainEntryLineIndexes;
     private final VariationGridPanel gridPanel = new VariationGridPanel();
     private final JPanel histogramShapeSlot = new JPanel(new BorderLayout());
     private final JLabel cellsLabel = new JLabel("Cells: 1");
@@ -94,6 +105,10 @@ public final class MacroVariationsDialog extends PipelineDialog {
         this.context = context;
         this.onAccept = onAccept;
         this.editor = ParameterSweepEditor.forFilter(context);
+        this.chainRibbon = new ChainRibbon(context.baseMacro());
+        this.chainEntryLineIndexes = ChainRibbon.entryLineIndexes(context.baseMacro());
+        this.editor.setChainStepFilter(Collections.<Integer>emptySet(),
+                Collections.<Integer>emptySet());
         this.currentCropSpec = context.initialCropSpec();
         setDefaultButtonsVisible(false);
         buildUi();
@@ -155,6 +170,10 @@ public final class MacroVariationsDialog extends PipelineDialog {
 
     JLabel chainRibbonLabelForTest() {
         return chainRibbonLabel;
+    }
+
+    ChainRibbon chainRibbonForTest() {
+        return chainRibbon;
     }
 
     int completedCountForTest() {
@@ -275,7 +294,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
     private void startOnEdt() {
         cancelExecutor();
         try {
-            currentSweep = editor.currentSweep();
+            currentSweep = withChainCacheNamespace(editor.currentSweep());
         } catch (RuntimeException e) {
             showMessage(e.getMessage());
             setStatusTextNow("Choose at least one value for each selected parameter.");
@@ -310,7 +329,8 @@ public final class MacroVariationsDialog extends PipelineDialog {
                 context.baseMacro(),
                 context.previewAdapter(),
                 croppedSource,
-                runCache);
+                runCache,
+                chainMacroPostProcessor());
 
         for (int i = 0; i < combos.size(); i++) {
             ParameterCombo combo = combos.get(i);
@@ -419,8 +439,175 @@ public final class MacroVariationsDialog extends PipelineDialog {
         row.setBorder(BorderFactory.createEmptyBorder(2, 4, 8, 4));
         chainRibbonLabel.setText("Chain: " + chainSummary());
         chainRibbonLabel.setForeground(new Color(78, 93, 101));
-        row.add(chainRibbonLabel, BorderLayout.CENTER);
+        chainRibbon.addListener(new ChainRibbon.Listener() {
+            @Override public void stepStateChanged(int stepIndex,
+                                                   ChainRibbon.StepState newState) {
+                handleChainStateChanged(stepIndex, newState);
+            }
+        });
+        row.add(chainRibbon, BorderLayout.CENTER);
         return row;
+    }
+
+    private void handleChainStateChanged(int stepIndex,
+                                         ChainRibbon.StepState newState) {
+        Set<Integer> swept = chainRibbon.stepIndexesInState(
+                ChainRibbon.StepState.SWEPT);
+        Set<Integer> disabled = chainRibbon.disabledStepIndexes();
+        editor.setChainStepFilter(swept, disabled);
+        refreshCellEstimate();
+        if (!disabled.isEmpty() && !isLinearMacro(context.baseMacro().render())) {
+            setStatusTextNow("Open the visual builder to vary branched macros.");
+            showMessage("Open the visual builder to vary branched macros.");
+            return;
+        }
+        start();
+    }
+
+    private FilterSweepStrategy.MacroPostProcessor chainMacroPostProcessor() {
+        final Set<Integer> disabled = chainRibbon.disabledStepIndexes();
+        if (disabled.isEmpty()) {
+            return null;
+        }
+        final List<Integer> entryLineIndexes =
+                new ArrayList<Integer>(chainEntryLineIndexes);
+        return new FilterSweepStrategy.MacroPostProcessor() {
+            @Override public String apply(String macroContent) {
+                return renderMacroWithDisabledSteps(macroContent, disabled,
+                        entryLineIndexes);
+            }
+        };
+    }
+
+    private ParameterSweep withChainCacheNamespace(ParameterSweep sweep) {
+        if (sweep == null) {
+            return null;
+        }
+        String key = chainStateKey();
+        if (key.length() == 0) {
+            return sweep;
+        }
+        String namespace = sweep.cacheNamespace();
+        String chainNamespace = (namespace == null || namespace.trim().isEmpty())
+                ? "chain:" + key
+                : namespace.trim() + ":chain:" + key;
+        return new ParameterSweep(sweep.method(), sweep.valueLists(),
+                sweep.cropSpec(), sweep.channelName(), sweep.sourceImageHash(),
+                chainNamespace, sweep.macroVariations());
+    }
+
+    private String chainStateKey() {
+        if (chainRibbon == null || chainRibbon.stepCount() == 0) {
+            return "";
+        }
+        StringBuilder out = new StringBuilder();
+        boolean anyNonFixed = false;
+        for (int i = 0; i < chainRibbon.stepCount(); i++) {
+            ChainRibbon.StepState state = chainRibbon.getStepState(i);
+            if (state != ChainRibbon.StepState.FIXED) {
+                anyNonFixed = true;
+            }
+            if (i > 0) {
+                out.append(',');
+            }
+            out.append(i).append('=').append(state.name());
+        }
+        return anyNonFixed ? out.toString() : "";
+    }
+
+    private static boolean isLinearMacro(String macroContent) {
+        try {
+            return IjmToDagLoader.load(macroContent).isLinear();
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    static String renderMacroWithDisabledStepsForTest(String macroContent,
+                                                      Set<Integer> disabledStepIndexes,
+                                                      List<Integer> entryLineIndexes) {
+        return renderMacroWithDisabledSteps(macroContent, disabledStepIndexes,
+                entryLineIndexes);
+    }
+
+    private static String renderMacroWithDisabledSteps(String macroContent,
+                                                       Set<Integer> disabledStepIndexes,
+                                                       List<Integer> entryLineIndexes) {
+        if (disabledStepIndexes == null || disabledStepIndexes.isEmpty()) {
+            return macroContent;
+        }
+        DagIR dag = IjmToDagLoader.load(macroContent);
+        if (!dag.isLinear()) {
+            throw new IllegalStateException(
+                    "Open the visual builder to vary branched macros.");
+        }
+        if (dag.lines.isEmpty()) {
+            return macroContent;
+        }
+        Set<Integer> disabledOps = disabledOpIndexes(macroContent,
+                disabledStepIndexes, entryLineIndexes);
+        DagLine line = dag.lines.get(0);
+        List<DagNode> clonedOps = new ArrayList<DagNode>();
+        for (int i = 0; i < line.ops.size(); i++) {
+            DagNode source = line.ops.get(i);
+            DagNode copy = new DagNode(source.id, source.type, source.args,
+                    source.commandName, source.menuPath);
+            copy.disabled = source.disabled || disabledOps.contains(Integer.valueOf(i));
+            clonedOps.add(copy);
+        }
+        DagIR modified = new DagIR(dag.version,
+                Collections.singletonList(new DagLine(line.id, clonedOps)),
+                dag.combiners,
+                dag.output,
+                dag.executionTier);
+        return DagToIjmEmitter.emit(modified);
+    }
+
+    private static Set<Integer> disabledOpIndexes(String macroContent,
+                                                  Set<Integer> disabledStepIndexes,
+                                                  List<Integer> entryLineIndexes) {
+        Set<Integer> disabledLines = new HashSet<Integer>();
+        if (entryLineIndexes != null) {
+            for (Integer stepIndex : disabledStepIndexes) {
+                if (stepIndex != null
+                        && stepIndex.intValue() >= 0
+                        && stepIndex.intValue() < entryLineIndexes.size()) {
+                    disabledLines.add(entryLineIndexes.get(stepIndex.intValue()));
+                }
+            }
+        }
+
+        Set<Integer> out = new LinkedHashSet<Integer>();
+        String[] lines = (macroContent == null ? "" : macroContent)
+                .replace("\r\n", "\n")
+                .replace('\r', '\n')
+                .split("\n", -1);
+        int opIndex = 0;
+        for (int lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+            if (!isDagOpLine(lines[lineIndex])) {
+                continue;
+            }
+            if (disabledLines.contains(Integer.valueOf(lineIndex))) {
+                out.add(Integer.valueOf(opIndex));
+            }
+            opIndex++;
+        }
+        if (out.size() < disabledStepIndexes.size()) {
+            for (Integer stepIndex : disabledStepIndexes) {
+                if (stepIndex != null && stepIndex.intValue() >= 0) {
+                    out.add(stepIndex);
+                }
+            }
+        }
+        return out;
+    }
+
+    private static boolean isDagOpLine(String line) {
+        String trimmed = line == null ? "" : line.trim();
+        return !trimmed.isEmpty()
+                && !trimmed.startsWith("//")
+                && !trimmed.startsWith("/*")
+                && !trimmed.startsWith("*");
     }
 
     private JPanel cropRow() {

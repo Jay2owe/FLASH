@@ -24,15 +24,28 @@ public final class FilterSweepStrategy implements VariationStrategy {
 
     private static final int HISTOGRAM_BINS = 256;
 
+    public interface MacroPostProcessor {
+        String apply(String macroContent);
+    }
+
     private final FilterMacroEditorModel.MacroDefinition baseMacro;
     private final FilterParameterStage.PreviewAdapter previewAdapter;
     private final ImagePlus croppedSource;
     private final VariationCache cache;
+    private final MacroPostProcessor macroPostProcessor;
 
     public FilterSweepStrategy(FilterMacroEditorModel.MacroDefinition baseMacro,
                                FilterParameterStage.PreviewAdapter previewAdapter,
                                ImagePlus croppedSource,
                                VariationCache cache) {
+        this(baseMacro, previewAdapter, croppedSource, cache, null);
+    }
+
+    public FilterSweepStrategy(FilterMacroEditorModel.MacroDefinition baseMacro,
+                               FilterParameterStage.PreviewAdapter previewAdapter,
+                               ImagePlus croppedSource,
+                               VariationCache cache,
+                               MacroPostProcessor macroPostProcessor) {
         if (baseMacro == null) {
             throw new IllegalArgumentException("baseMacro must not be null");
         }
@@ -46,6 +59,7 @@ public final class FilterSweepStrategy implements VariationStrategy {
         this.previewAdapter = previewAdapter;
         this.croppedSource = croppedSource;
         this.cache = cache;
+        this.macroPostProcessor = macroPostProcessor;
     }
 
     @Override
@@ -93,7 +107,10 @@ public final class FilterSweepStrategy implements VariationStrategy {
             FilterParameterId id = (FilterParameterId) entry.getKey();
             setParameterValue(macro, id, entry.getValue());
         }
-        return macro.render();
+        String rendered = macro.render();
+        return macroPostProcessor == null
+                ? rendered
+                : macroPostProcessor.apply(rendered);
     }
 
     private void publishCached(ParameterCombo combo,
