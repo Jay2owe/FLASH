@@ -1,6 +1,7 @@
 package flash.pipeline.analyses.wizard;
 
 import flash.pipeline.bin.BinConfig;
+import flash.pipeline.cellpose.CellposeRuntime;
 import flash.pipeline.intelligence.MetadataDiagnostics;
 import flash.pipeline.marker.MarkerLibrary;
 import flash.pipeline.ui.PipelineDialog;
@@ -40,15 +41,14 @@ public class ChannelSetupWizard extends WizardFlow {
 
     private final MetadataDiagnostics.SeriesInfo seriesInfo;
     private final MarkerLibrary library;
-    private final SegmentationEnginePicker.EngineAvailability availability;
+    private volatile SegmentationEnginePicker.EngineAvailability availability;
+    private volatile boolean cellposeAvailabilityUnknown;
 
     public ChannelSetupWizard(MainPanelBinding panel,
                               MetadataDiagnostics.SeriesInfo seriesInfo,
                               boolean headless) throws IOException {
         this(panel, seriesInfo, MarkerLibraryIO.loadBundled(),
-                new SegmentationEnginePicker.EngineAvailability(
-                        flash.pipeline.stardist.StarDistDetector.isAvailable(),
-                        flash.pipeline.cellpose.CellposeRuntime.probeConfigured().ready),
+                initialRuntimeAvailability(),
                 headless);
     }
 
@@ -57,18 +57,65 @@ public class ChannelSetupWizard extends WizardFlow {
                               MarkerLibrary library,
                               SegmentationEnginePicker.EngineAvailability availability,
                               boolean headless) {
+        this(panel, seriesInfo, library, new RuntimeAvailabilitySnapshot(availability, false), headless);
+    }
+
+    private ChannelSetupWizard(MainPanelBinding panel,
+                               MetadataDiagnostics.SeriesInfo seriesInfo,
+                               MarkerLibrary library,
+                               RuntimeAvailabilitySnapshot availability,
+                               boolean headless) {
         super("Channel Setup Helper", panel, headless);
         this.seriesInfo = seriesInfo;
         this.library = library;
-        this.availability = availability;
+        this.availability = availability.availability;
+        this.cellposeAvailabilityUnknown = availability.cellposeUnknown;
         register(new MarkerScreen());
         register(new SignalScreen());
         register(new CrowdingScreen());
         register(new ZSliceScreen());
+        if (availability.cellposeUnknown) {
+            refreshCellposeAvailabilityAsync();
+        }
     }
 
     public DerivedConfig deriveCurrentConfig() {
-        return deriveConfig(seriesInfo, currentAnswers(), library, availability);
+        AnswerMap answers = currentAnswers();
+        return deriveConfig(seriesInfo, answers, library, availabilityForDerivation(answers));
+    }
+
+    private static RuntimeAvailabilitySnapshot initialRuntimeAvailability() {
+        CellposeRuntime.Status cellpose = CellposeRuntime.cachedStatus();
+        CellposeRuntime.probeAsync();
+        return new RuntimeAvailabilitySnapshot(
+                new SegmentationEnginePicker.EngineAvailability(
+                        flash.pipeline.stardist.StarDistDetector.isAvailable(),
+                        cellpose != null && cellpose.ready),
+                cellpose != null && cellpose.unknown);
+    }
+
+    private void refreshCellposeAvailabilityAsync() {
+        CellposeRuntime.probeAsync().whenComplete(new java.util.function.BiConsumer<CellposeRuntime.Status, Throwable>() {
+            @Override public void accept(CellposeRuntime.Status status, Throwable throwable) {
+                if (throwable == null && status != null) {
+                    updateCellposeAvailability(status);
+                }
+            }
+        });
+    }
+
+    private SegmentationEnginePicker.EngineAvailability availabilityForDerivation(Map<String, Object> answers) {
+        if (cellposeAvailabilityUnknown && complexCrowdedRecommendationCouldUseCellpose(answers)) {
+            updateCellposeAvailability(CellposeRuntime.probeConfigured());
+        }
+        return availability;
+    }
+
+    private void updateCellposeAvailability(CellposeRuntime.Status status) {
+        SegmentationEnginePicker.EngineAvailability current = availability;
+        boolean starDist = current != null && current.isStarDistAvailable();
+        availability = new SegmentationEnginePicker.EngineAvailability(starDist, status != null && status.ready);
+        cellposeAvailabilityUnknown = status != null && status.unknown;
     }
 
     public static DerivedConfig deriveConfig(MetadataDiagnostics.SeriesInfo info,
@@ -152,6 +199,39 @@ public class ChannelSetupWizard extends WizardFlow {
 
         applyZSlice(info, answers, out);
         return out;
+    }
+
+    private boolean complexCrowdedRecommendationCouldUseCellpose(Map<String, Object> answers) {
+        MarkerLibrary safeLibrary = library;
+        try {
+            if (safeLibrary == null) safeLibrary = MarkerLibraryIO.loadBundled();
+        } catch (IOException e) {
+            return false;
+        }
+        int channels = channelCount(seriesInfo, answers);
+        Map<Integer, MarkerLibrary.Entry> autoDetected = autoDetectMarkers(seriesInfo, safeLibrary);
+        for (int c = 0; c < channels; c++) {
+            String markerId = answerString(answers, markerKey(c), null);
+            if (markerId == null && autoDetected.containsKey(Integer.valueOf(c))) {
+                markerId = autoDetected.get(Integer.valueOf(c)).getId();
+            }
+            if (markerId == null || markerId.trim().isEmpty() || MARKER_CUSTOM.equals(markerId)) {
+                continue;
+            }
+            MarkerLibrary.Entry entry = safeLibrary.byId(markerId);
+            if (entry == null && MARKER_AUTOFLUORESCENCE.equals(markerId)) {
+                entry = autofluorescenceEntry();
+            }
+            if (entry == null || !entry.isCrowdingSensitive()) {
+                continue;
+            }
+            String crowding = answerString(answers, crowdingKey(c), CROWDING_SPARSE);
+            if ("complex".equals(normalizeShape(entry.getShape()))
+                    && "crowded".equals(normalizeCrowding(crowding))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public static Map<Integer, MarkerLibrary.Entry> autoDetectMarkers(MetadataDiagnostics.SeriesInfo info,
@@ -239,6 +319,10 @@ public class ChannelSetupWizard extends WizardFlow {
         if (value.contains("crowd")) return "crowded";
         if (value.contains("sparse")) return "sparse";
         return value;
+    }
+
+    private static String normalizeShape(String shape) {
+        return shape == null ? "" : shape.trim().toLowerCase(Locale.ROOT).replace('-', '_').replace(' ', '_');
     }
 
     private static double baseObjectThreshold(MarkerLibrary.Entry entry) {
@@ -402,6 +486,19 @@ public class ChannelSetupWizard extends WizardFlow {
             this.entry = entry;
             this.position = position;
             this.priority = priority;
+        }
+    }
+
+    private static final class RuntimeAvailabilitySnapshot {
+        final SegmentationEnginePicker.EngineAvailability availability;
+        final boolean cellposeUnknown;
+
+        RuntimeAvailabilitySnapshot(SegmentationEnginePicker.EngineAvailability availability,
+                                    boolean cellposeUnknown) {
+            this.availability = availability == null
+                    ? new SegmentationEnginePicker.EngineAvailability(false, false)
+                    : availability;
+            this.cellposeUnknown = cellposeUnknown;
         }
     }
 
@@ -582,13 +679,13 @@ public class ChannelSetupWizard extends WizardFlow {
         }
 
         public void writeTo(MainPanelBinding panel, AnswerMap answers) {
-            DerivedConfig config = deriveConfig(seriesInfo, answers, library, availability);
+            DerivedConfig config = deriveConfig(seriesInfo, answers, library, availabilityForDerivation(answers));
             panel.setValue("zSlice.config", config);
         }
     }
 
     private void writeDerivedConfig(MainPanelBinding panel, AnswerMap answers) {
-        DerivedConfig config = deriveConfig(seriesInfo, answers, library, availability);
+        DerivedConfig config = deriveConfig(seriesInfo, answers, library, availabilityForDerivation(answers));
         for (int i = 0; i < config.names.size(); i++) {
             panel.setValue("channel" + (i + 1), config);
             panel.markRecommended("channel" + (i + 1));

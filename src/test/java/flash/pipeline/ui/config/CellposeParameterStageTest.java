@@ -1,5 +1,6 @@
 package flash.pipeline.ui.config;
 
+import flash.pipeline.cellpose.CellposeRuntime;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import flash.pipeline.ui.variations.ParameterCombo;
 import flash.pipeline.ui.variations.ParameterId;
@@ -18,6 +19,7 @@ import java.awt.Component;
 import java.awt.Container;
 import java.awt.image.IndexColorModel;
 import java.util.Arrays;
+import java.util.concurrent.CompletableFuture;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -131,7 +133,7 @@ public class CellposeParameterStageTest {
         assertContainsText(controls, "Object size:");
         assertContainsText(controls, "cyto3: Recommended first-pass model");
         assertContainsText(controls, "Companion: optional second channel");
-        assertContainsText(controls, "Runtime: Cellpose test runtime.");
+        assertContainsText(controls, "Runtime: Cellpose is not configured yet.");
         assertContainsText(controls, "Run Preview");
         assertFalse("Old duplicate help text should be removed",
                 containsText(controls, "Edit parameters, then press"));
@@ -166,7 +168,7 @@ public class CellposeParameterStageTest {
 
         assertTrue(stage.modelHintTextForTest().contains("cyto3"));
         assertTrue(stage.companionHintTextForTest().contains("optional second channel"));
-        assertEquals("Runtime: Cellpose test runtime.", stage.runtimeHintTextForTest());
+        assertEquals("Runtime: Cellpose is not configured yet.", stage.runtimeHintTextForTest());
 
         stage.setCompanionForTest("C2 (Companion)");
         assertTrue(stage.companionHintTextForTest().contains("using C2 (Companion)"));
@@ -267,6 +269,54 @@ public class CellposeParameterStageTest {
         assertTrue(stage.objectOverlaySelectedForTest());
     }
 
+    @Test(timeout = 1000L)
+    public void buildControlsReturnsBeforeRuntimeProbeFutureCompletes() {
+        CompletableFuture<CellposeRuntime.Status> runtimeFuture =
+                new CompletableFuture<CellposeRuntime.Status>();
+        CellposeParameterStage stage = stage(
+                new RecordingStore("cellpose:30.0:cyto3:0.4:0.0"),
+                new RecordingPreviewAdapter(),
+                new RecordingRuntimeAdapter(CellposeRuntime.Status.unknown(), runtimeFuture));
+
+        stage.buildControls(context(), new RecordingActions());
+
+        assertFalse(runtimeFuture.isDone());
+        assertEquals("Runtime: Checking Cellpose...", stage.runtimeHintTextForTest());
+    }
+
+    @Test
+    public void runtimeLabelUpdatesWhenAsyncProbeCompletes() throws Exception {
+        CompletableFuture<CellposeRuntime.Status> runtimeFuture =
+                new CompletableFuture<CellposeRuntime.Status>();
+        CellposeParameterStage stage = stage(
+                new RecordingStore("cellpose:30.0:cyto3:0.4:0.0"),
+                new RecordingPreviewAdapter(),
+                new RecordingRuntimeAdapter(CellposeRuntime.Status.unknown(), runtimeFuture));
+
+        stage.buildControls(context(), new RecordingActions());
+        runtimeFuture.complete(CellposeRuntime.probe(""));
+        flushEdt();
+
+        assertEquals("Runtime: Cellpose is not configured yet.", stage.runtimeHintTextForTest());
+    }
+
+    @Test
+    public void runtimeLabelDoesNotUpdateAfterStageLeaves() throws Exception {
+        CompletableFuture<CellposeRuntime.Status> runtimeFuture =
+                new CompletableFuture<CellposeRuntime.Status>();
+        CellposeParameterStage stage = stage(
+                new RecordingStore("cellpose:30.0:cyto3:0.4:0.0"),
+                new RecordingPreviewAdapter(),
+                new RecordingRuntimeAdapter(CellposeRuntime.Status.unknown(), runtimeFuture));
+
+        stage.buildControls(context(), new RecordingActions());
+        stage.onLeave(context());
+        runtimeFuture.complete(CellposeRuntime.probe(""));
+        flushEdt();
+
+        assertEquals("Runtime: Checking Cellpose...", stage.runtimeHintTextForTest());
+    }
+
     @Test
     public void restartKeepsCurrentEditedParametersAfterStageRebuild() {
         RecordingStore store = new RecordingStore("cellpose:30.0:cyto3:0.4:0.0:gpu=false");
@@ -293,11 +343,24 @@ public class CellposeParameterStageTest {
     private static CellposeParameterStage stage(RecordingStore store,
                                                 RecordingSizeStore sizeStore,
                                                 RecordingPreviewAdapter adapter) {
+        return stage(store, sizeStore, adapter, new RecordingRuntimeAdapter());
+    }
+
+    private static CellposeParameterStage stage(RecordingStore store,
+                                                RecordingPreviewAdapter adapter,
+                                                RecordingRuntimeAdapter runtimeAdapter) {
+        return stage(store, new RecordingSizeStore("0-Infinity"), adapter, runtimeAdapter);
+    }
+
+    private static CellposeParameterStage stage(RecordingStore store,
+                                                RecordingSizeStore sizeStore,
+                                                RecordingPreviewAdapter adapter,
+                                                RecordingRuntimeAdapter runtimeAdapter) {
         return new CellposeParameterStage(
                 store,
                 sizeStore,
                 adapter,
-                new RecordingRuntimeAdapter(),
+                runtimeAdapter,
                 Arrays.asList("Primary", "Companion", "Other"),
                 0,
                 false);
@@ -444,8 +507,26 @@ public class CellposeParameterStageTest {
     }
 
     private static final class RecordingRuntimeAdapter implements CellposeParameterStage.RuntimeAdapter {
-        @Override public String runtimeSummary() {
-            return "Cellpose test runtime.";
+        private final CellposeRuntime.Status cachedStatus;
+        private final CompletableFuture<CellposeRuntime.Status> runtimeFuture;
+
+        RecordingRuntimeAdapter() {
+            this(CellposeRuntime.probe(""),
+                    CompletableFuture.completedFuture(CellposeRuntime.probe("")));
+        }
+
+        RecordingRuntimeAdapter(CellposeRuntime.Status cachedStatus,
+                                CompletableFuture<CellposeRuntime.Status> runtimeFuture) {
+            this.cachedStatus = cachedStatus;
+            this.runtimeFuture = runtimeFuture;
+        }
+
+        @Override public CellposeRuntime.Status cachedRuntimeStatus() {
+            return cachedStatus;
+        }
+
+        @Override public CompletableFuture<CellposeRuntime.Status> probeRuntimeAsync() {
+            return runtimeFuture;
         }
 
         @Override public boolean nvidiaGpuLikelyAvailable() {
@@ -520,10 +601,14 @@ public class CellposeParameterStageTest {
         while (System.currentTimeMillis() < deadline && adapter.previewRuns < expectedRuns) {
             Thread.sleep(10L);
         }
+        flushEdt();
+        assertEquals(expectedRuns, adapter.previewRuns);
+    }
+
+    private static void flushEdt() throws Exception {
         SwingUtilities.invokeAndWait(new Runnable() {
             @Override public void run() {
             }
         });
-        assertEquals(expectedRuns, adapter.previewRuns);
     }
 }

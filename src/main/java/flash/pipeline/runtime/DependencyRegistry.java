@@ -914,7 +914,12 @@ public final class DependencyRegistry {
         return new DependencySpec.Probe() {
             @Override
             public DependencyStatus probe(ProbeContext context) {
-                Status status = CellposeRuntime.probeConfigured();
+                Status status = CellposeRuntime.cachedStatus();
+                if (status.unknown) {
+                    CellposeRuntime.probeAsync();
+                    return DependencyStatus.present("Cellpose runtime check is still running.");
+                }
+                CellposeRuntime.probeAsync();
                 if (status.ready) {
                     return DependencyStatus.present(status.summary());
                 }

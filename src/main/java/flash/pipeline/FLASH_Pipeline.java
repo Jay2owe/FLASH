@@ -14,6 +14,7 @@ import flash.pipeline.analyses.StatisticalAnalysis;
 import flash.pipeline.analyses.ThreeDObjectAnalysis;
 import flash.pipeline.audit.RunSettingsSnapshot;
 import flash.pipeline.bin.BinSetupDispatcher;
+import flash.pipeline.cellpose.CellposeRuntime;
 import flash.pipeline.cli.CLIArgumentParser;
 import flash.pipeline.cli.CLIConfig;
 import flash.pipeline.decontamination.SpectralDecontaminationAnalysis;
@@ -197,6 +198,7 @@ public class FLASH_Pipeline implements PlugIn {
         // overlaps with the directory picker / dependency check, not the
         // first DL inference.
         GpuConcurrency.initAsync();
+        CellposeRuntime.probeAsync();
 
         // ── CLI / Batch mode detection ──
         String macroOptions = Macro.getOptions();

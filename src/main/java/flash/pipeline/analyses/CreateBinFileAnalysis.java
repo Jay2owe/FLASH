@@ -568,8 +568,11 @@ public class CreateBinFileAnalysis implements Analysis {
         dialog.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
         dialog.addSetupHelpSubHeader("Segmentation Methods", SetupHelpCatalog.SEGMENTATION_METHOD);
         boolean starDistAvailable = StarDistDetector.isAvailable();
-        CellposeRuntime.Status cellposeStatus = CellposeRuntime.probeConfigured();
-        boolean cellposeReady = cellposeStatus != null && cellposeStatus.ready;
+        final CellposeRuntime.Status[] cellposeStatus =
+                new CellposeRuntime.Status[]{CellposeRuntime.cachedStatus()};
+        boolean cellposeReady = cellposeReadyOrUnknown(cellposeStatus[0]);
+        final List<JComboBox<String>> segmentationCombos = new ArrayList<JComboBox<String>>();
+        final List<JLabel> segmentationLabels = new ArrayList<JLabel>();
         for (int i = 0; i < cfg.names.size(); i++) {
             String defSegmentation = i < cfg.segmentationMethods.size()
                     ? segmentationChoiceForDialogDefault(
@@ -579,16 +582,35 @@ public class CreateBinFileAnalysis implements Analysis {
                     "C" + (i + 1) + " (" + cfg.names.get(i) + ")",
                     SEGMENTATION_OPTIONS, defSegmentation);
             final JLabel segmentationDesc = dialog.addHelpText(
-                    segmentationDescriptionFor(defSegmentation, starDistAvailable, cellposeStatus));
+                    segmentationDescriptionFor(defSegmentation, starDistAvailable, cellposeStatus[0]));
+            segmentationCombos.add(segmentationCombo);
+            segmentationLabels.add(segmentationDesc);
             segmentationCombo.addItemListener(new java.awt.event.ItemListener() {
                 @Override public void itemStateChanged(java.awt.event.ItemEvent e) {
                     if (e.getStateChange() == java.awt.event.ItemEvent.SELECTED) {
                         segmentationDesc.setText(segmentationDescriptionFor(
-                                (String) e.getItem(), starDistAvailable, cellposeStatus));
+                                (String) e.getItem(), starDistAvailable, cellposeStatus[0]));
                     }
                 }
             });
         }
+        CellposeRuntime.probeAsync().whenCompleteAsync(
+                new java.util.function.BiConsumer<CellposeRuntime.Status, Throwable>() {
+                    @Override public void accept(CellposeRuntime.Status status, Throwable throwable) {
+                        if (throwable != null || status == null) return;
+                        cellposeStatus[0] = status;
+                        for (int i = 0; i < segmentationLabels.size(); i++) {
+                            JComboBox<String> combo = segmentationCombos.get(i);
+                            JLabel label = segmentationLabels.get(i);
+                            Object selected = combo == null ? null : combo.getSelectedItem();
+                            label.setText(segmentationDescriptionFor(
+                                    selected == null ? SEGMENTATION_CLASSICAL : String.valueOf(selected),
+                                    starDistAvailable,
+                                    status));
+                        }
+                    }
+                },
+                SwingUtilities::invokeLater);
         if (!dialog.showDialog()) return false;
 
         List<String> selections = new ArrayList<String>();
@@ -4600,13 +4622,14 @@ public class CreateBinFileAnalysis implements Analysis {
                 if (!gateCellposeFeature("Cellpose segmentation")) {
                     return "back";
                 }
-                CellposeRuntime.Status runtimeStatus = CellposeRuntime.probeConfigured();
+                final CellposeRuntime.Status[] runtimeStatus =
+                        new CellposeRuntime.Status[]{CellposeRuntime.cachedStatus()};
                 String existingMethod = cfg.segmentationMethods.get(ch);
                 String modelToken = BinConfig.DEFAULT_CELLPOSE_MODEL;
                 double diameter = BinConfig.DEFAULT_CELLPOSE_DIAMETER;
                 double flowThreshold = BinConfig.DEFAULT_CELLPOSE_FLOW_THRESHOLD;
                 double cellprobThreshold = BinConfig.DEFAULT_CELLPOSE_CELLPROB_THRESHOLD;
-                boolean useGpu = runtimeStatus.ready ? runtimeStatus.gpuAvailable : BinConfig.DEFAULT_CELLPOSE_USE_GPU;
+                boolean useGpu = runtimeStatus[0].ready ? runtimeStatus[0].gpuAvailable : BinConfig.DEFAULT_CELLPOSE_USE_GPU;
                 int secondChannelIndex = -1;
                 if (existingMethod.startsWith("cellpose:")) {
                     String[] cpParts = existingMethod.split(":");
@@ -4732,10 +4755,17 @@ public class CreateBinFileAnalysis implements Analysis {
                         }).start();
                     });
                     cpDialog.addHelpText("Diameter uses the image calibration units when available; otherwise it is in pixels.");
-                    cpDialog.addHelpText(runtimeStatus.ready
-                            ? ("Configured runtime: Cellpose " + (runtimeStatus.cellposeVersion.isEmpty() ? "unknown" : runtimeStatus.cellposeVersion)
-                            + ", GPU available=" + runtimeStatus.gpuAvailable)
-                            : runtimeStatus.message);
+                    final JLabel runtimeHelp = cpDialog.addHelpText(cellposeRuntimeSummary(runtimeStatus[0]));
+                    CellposeRuntime.probeAsync().whenCompleteAsync(
+                            new java.util.function.BiConsumer<CellposeRuntime.Status, Throwable>() {
+                                @Override public void accept(CellposeRuntime.Status status, Throwable throwable) {
+                                    if (throwable == null && status != null) {
+                                        runtimeStatus[0] = status;
+                                        runtimeHelp.setText(cellposeRuntimeSummary(status));
+                                    }
+                                }
+                            },
+                            SwingUtilities::invokeLater);
 
                     JButton previewBtn = cpDialog.addFooterButton("Run Cellpose Preview");
                     addSkipCurrentImageButton(cpDialog);
@@ -6042,7 +6072,8 @@ public class CreateBinFileAnalysis implements Analysis {
                                                         final int channelIndex) {
         final int channelNum = channelIndex + 1;
         final String chLabel = "C" + channelNum + " (" + cfg.names.get(channelIndex) + ")";
-        CellposeRuntime.Status runtimeStatus = CellposeRuntime.probeConfigured();
+        CellposeRuntime.Status runtimeStatus = CellposeRuntime.cachedStatus();
+        CellposeRuntime.probeAsync();
         final boolean defaultUseGpu = runtimeStatus.ready
                 ? runtimeStatus.gpuAvailable
                 : BinConfig.DEFAULT_CELLPOSE_USE_GPU;
@@ -6116,13 +6147,12 @@ public class CreateBinFileAnalysis implements Analysis {
                     }
                 },
                 new CellposeParameterStage.RuntimeAdapter() {
-                    @Override public String runtimeSummary() {
-                        CellposeRuntime.Status status = CellposeRuntime.probeConfigured();
-                        return status.ready
-                                ? ("Configured runtime: Cellpose "
-                                + (status.cellposeVersion.isEmpty() ? "unknown" : status.cellposeVersion)
-                                + ", GPU available=" + status.gpuAvailable)
-                                : status.message;
+                    @Override public CellposeRuntime.Status cachedRuntimeStatus() {
+                        return CellposeRuntime.cachedStatus();
+                    }
+
+                    @Override public java.util.concurrent.CompletableFuture<CellposeRuntime.Status> probeRuntimeAsync() {
+                        return CellposeRuntime.probeAsync();
                     }
 
                     @Override public boolean nvidiaGpuLikelyAvailable() {
@@ -7656,6 +7686,24 @@ public class CreateBinFileAnalysis implements Analysis {
                 + "Use when objects are separated clearly enough that a single binary mask is a faithful outline.<br>"
                 + "Drawbacks: touching objects merge easily and results are sensitive to threshold choice."
                 + "</body></html>";
+    }
+
+    private static boolean cellposeReadyOrUnknown(CellposeRuntime.Status status) {
+        return status != null && (status.ready || status.unknown);
+    }
+
+    private static String cellposeRuntimeSummary(CellposeRuntime.Status status) {
+        if (status == null || status.unknown) {
+            return "Checking Cellpose...";
+        }
+        if (status.ready) {
+            return "Configured runtime: Cellpose "
+                    + (status.cellposeVersion.isEmpty() ? "unknown" : status.cellposeVersion)
+                    + ", GPU available=" + status.gpuAvailable;
+        }
+        return status.message == null || status.message.trim().isEmpty()
+                ? "Cellpose is not configured yet."
+                : status.message;
     }
 
     private static String segmentationChoiceForMethod(String method) {
