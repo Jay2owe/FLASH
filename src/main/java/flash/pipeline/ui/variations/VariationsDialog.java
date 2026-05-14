@@ -3,6 +3,8 @@ package flash.pipeline.ui.variations;
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.variations.analysis.IouStability;
 import flash.pipeline.ui.variations.analysis.KneeDetector;
+import flash.pipeline.ui.variations.state.VariationState;
+import flash.pipeline.ui.variations.state.VariationStateStore;
 import flash.pipeline.ui.variations.strategy.VariationStrategyChooser;
 
 import ij.ImagePlus;
@@ -27,16 +29,20 @@ import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.EventQueue;
+import java.awt.GraphicsEnvironment;
 import java.awt.Window;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.awt.Rectangle;
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
@@ -47,6 +53,7 @@ public final class VariationsDialog extends PipelineDialog {
     private final VariationEngineContext context;
     private final Consumer<ParameterCombo> onAccept;
     private final ParameterSweepEditor editor;
+    private final VariationStateStore stateStore;
     private final VariationGridPanel gridPanel = new VariationGridPanel();
     private final JLabel cellsLabel = new JLabel("Cells: 1");
     private final JLabel zLabel = new JLabel("1/1");
@@ -67,6 +74,7 @@ public final class VariationsDialog extends PipelineDialog {
 
     private VariationExecutor executor;
     private ParameterSweep currentSweep;
+    private VariationState resumeState;
     private ParameterCombo pendingCompareCombo;
     private VariationCellPanel pendingCompareCell;
     private CropSpec currentCropSpec = CropSpec.centre256();
@@ -84,10 +92,14 @@ public final class VariationsDialog extends PipelineDialog {
         this.context = context;
         this.onAccept = onAccept;
         this.editor = new ParameterSweepEditor(context);
+        this.stateStore = new VariationStateStore(context.binFolder() == null
+                ? null
+                : context.binFolder().toPath());
         setDefaultButtonsVisible(false);
         buildUi();
         installWindowCleanup();
         refreshCellEstimate();
+        offerResumeIfAvailable();
     }
 
     public void start() {
@@ -321,6 +333,57 @@ public final class VariationsDialog extends PipelineDialog {
         });
     }
 
+    private void offerResumeIfAvailable() {
+        Optional<VariationState> prior = stateStore.load();
+        if (!prior.isPresent()) {
+            return;
+        }
+        VariationState state = prior.get();
+        String currentImageHash = currentImageHash();
+        if (!safe(state.imageHash()).equals(safe(currentImageHash))) {
+            stateStore.clear();
+            return;
+        }
+        if (state.method() != context.method()
+                || !safe(state.channel()).equals(safe(context.channelName()))) {
+            return;
+        }
+        if (state.completed().isEmpty()) {
+            stateStore.clear();
+            return;
+        }
+        if (GraphicsEnvironment.isHeadless()) {
+            applyState(state);
+            return;
+        }
+        int completed = state.completed().size();
+        long total = state.sweep().cellCount();
+        int resume = JOptionPane.showConfirmDialog(getWindow(),
+                "A previous sweep is " + completed + "/" + total
+                        + " complete. Resume?",
+                "Resume Parameter Variations",
+                JOptionPane.YES_NO_CANCEL_OPTION);
+        if (resume == JOptionPane.YES_OPTION) {
+            applyState(state);
+        } else if (resume == JOptionPane.NO_OPTION) {
+            stateStore.clear();
+        }
+    }
+
+    private void applyState(VariationState state) {
+        if (state == null) {
+            return;
+        }
+        resumeState = state;
+        currentCropSpec = state.sweep().cropSpec();
+        editor.setSweep(state.sweep());
+        selectCropButton(currentCropSpec);
+        refreshCellEstimate();
+        statusLabel.setText("Status: resume ready ("
+                + state.completed().size() + "/" + state.sweep().cellCount()
+                + " complete)");
+    }
+
     private void startOnEdt() {
         cancelExecutor();
         currentSweep = editor.currentSweep();
@@ -336,6 +399,14 @@ public final class VariationsDialog extends PipelineDialog {
         completedCount = 0;
         ImagePlus croppedSource = currentSweep.cropSpec().apply(source);
         List<ParameterCombo> combos = currentSweep.combos();
+        VariationCache runCache = new VariationCache(context.configContext());
+        VariationState activeResume = compatibleResumeState(currentSweep);
+        Map<String, VariationState.CompletedCell> resumeCompleted =
+                activeResume == null
+                        ? Collections.<String, VariationState.CompletedCell>emptyMap()
+                        : activeResume.completedByComboId();
+        List<VariationState.CompletedCell> restoredCompleted =
+                new ArrayList<VariationState.CompletedCell>();
         cells.clear();
         cellsByCombo.clear();
         cellIndexesByCombo.clear();
@@ -361,14 +432,32 @@ public final class VariationsDialog extends PipelineDialog {
             cells.add(cell);
             cellsByCombo.put(combo.toCanonicalJson(), cell);
             cellIndexesByCombo.put(combo.toCanonicalJson(), Integer.valueOf(i));
-            resultsByCell.add(null);
+            VariationResult restored = restoredResult(combo, resumeCompleted, runCache);
+            if (restored == null) {
+                resultsByCell.add(null);
+            } else {
+                cell.setResult(restored);
+                resultsByCell.add(restored);
+                completedCount++;
+                VariationState.CompletedCell completed =
+                        resumeCompleted.get(VariationState.comboIdFor(currentSweep, combo));
+                if (completed != null) {
+                    restoredCompleted.add(completed);
+                }
+            }
         }
         gridPanel.setSweep(currentSweep);
         gridPanel.setCells(cells);
-        statusLabel.setText("Status: 0/" + combos.size() + " complete");
+        statusLabel.setText("Status: " + completedCount + "/" + combos.size() + " complete");
         suggestionLabel.setText("Suggested: pending");
+        if (completedCount >= cells.size() && !cells.isEmpty()) {
+            applyKneeHint();
+            applyStabilityHint();
+            statusLabel.setText("Status: done");
+            stateStore.clear();
+            return;
+        }
 
-        VariationCache runCache = new VariationCache(context.configContext());
         VariationStrategy strategy;
         try {
             strategy = strategyForTest == null
@@ -379,11 +468,15 @@ public final class VariationsDialog extends PipelineDialog {
             statusLabel.setText("Status: refused");
             return;
         }
+        String now = Instant.now().toString();
+        String startedAt = activeResume == null ? now : activeResume.startedAt();
+        stateStore.save(new VariationState(currentSweep, restoredCompleted, startedAt, now));
         executor = new VariationExecutor(currentSweep,
                 strategy,
                 runCache,
                 (result, index) -> handleResult(result, index.intValue()),
-                status -> setStatusText(status));
+                status -> setStatusText(status),
+                stateStore);
         executor.addPropertyChangeListener(evt -> {
             if ("state".equals(evt.getPropertyName())
                     && javax.swing.SwingWorker.StateValue.DONE == evt.getNewValue()) {
@@ -391,6 +484,44 @@ public final class VariationsDialog extends PipelineDialog {
             }
         });
         executor.execute();
+    }
+
+    private VariationState compatibleResumeState(ParameterSweep sweep) {
+        if (resumeState == null || sweep == null) {
+            return null;
+        }
+        if (!resumeState.isCompatible(sweep.method(),
+                sweep.channelName(),
+                sweep.sourceImageHash())) {
+            return null;
+        }
+        return resumeState;
+    }
+
+    private VariationResult restoredResult(ParameterCombo combo,
+                                           Map<String, VariationState.CompletedCell> completed,
+                                           VariationCache cache) {
+        if (currentSweep == null || combo == null || completed == null
+                || completed.isEmpty() || cache == null) {
+            return null;
+        }
+        String comboId = VariationState.comboIdFor(currentSweep, combo);
+        VariationState.CompletedCell saved = comboId == null
+                ? null
+                : completed.get(comboId);
+        if (saved == null) {
+            return null;
+        }
+        String expectedCacheKey = VariationCache.keyFor(currentSweep, combo);
+        if (!expectedCacheKey.equals(saved.labelCacheKey())) {
+            return null;
+        }
+        ImagePlus label = cache.get(saved.labelCacheKey());
+        if (label == null) {
+            return null;
+        }
+        return VariationResult.success(combo, label, saved.nObjects(),
+                saved.durationMs(), null);
     }
 
     private void handleResult(VariationResult result, int index) {
@@ -407,16 +538,34 @@ public final class VariationsDialog extends PipelineDialog {
         if (cell == null) {
             return;
         }
+        boolean alreadyCompleted = targetIndex >= 0
+                && targetIndex < resultsByCell.size()
+                && resultsByCell.get(targetIndex) != null;
         cell.setResult(result);
         if (targetIndex >= 0 && targetIndex < resultsByCell.size()) {
             resultsByCell.set(targetIndex, result);
         }
-        completedCount++;
+        if (!alreadyCompleted) {
+            completedCount++;
+        }
         statusLabel.setText("Status: " + completedCount + "/" + cells.size() + " complete");
         if (completedCount >= cells.size()) {
             applyKneeHint();
             applyStabilityHint();
         }
+    }
+
+    private boolean allCellsSuccessful() {
+        if (resultsByCell.size() != cells.size() || resultsByCell.isEmpty()) {
+            return false;
+        }
+        for (int i = 0; i < resultsByCell.size(); i++) {
+            VariationResult result = resultsByCell.get(i);
+            if (result == null || result.hasError()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private void handleExecutorDone() {
@@ -439,6 +588,9 @@ public final class VariationsDialog extends PipelineDialog {
             applyKneeHint();
             applyStabilityHint();
             statusLabel.setText("Status: done");
+            if (allCellsSuccessful()) {
+                stateStore.clear();
+            }
         } catch (Exception e) {
             statusLabel.setText("Status: error");
             showMessage(e.getMessage());
@@ -623,6 +775,14 @@ public final class VariationsDialog extends PipelineDialog {
             cellsLabel.setText("Cells: " + count);
         } catch (RuntimeException e) {
             cellsLabel.setText("Cells: ?");
+        }
+    }
+
+    private String currentImageHash() {
+        try {
+            return editor.currentSweep().sourceImageHash();
+        } catch (RuntimeException e) {
+            return "";
         }
     }
 
