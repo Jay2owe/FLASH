@@ -13,18 +13,55 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
+import java.util.function.LongSupplier;
 
 public final class CellposeRuntime {
     public static final String PREF_PYTHON_PATH = "flash.pipeline.cellpose.pythonPath";
     private static final long PROBE_TIMEOUT_SECONDS = 20;
     private static final long COMMAND_TIMEOUT_SECONDS = 1800;
+    static final long MISSING_TTL_MS = 30_000L;
+    static final long READY_TTL_MS = 5 * 60_000L;
+    private static final Object LOCK = new Object();
     // Pin moved to DependencyRegistry so all version pins live together.
     public static final String SUPPORTED_CELLPOSE_VERSION =
             DependencyRegistry.SUPPORTED_CELLPOSE_VERSION;
     private static final String SUPPORTED_CELLPOSE_PIP_SPEC = "cellpose==" + SUPPORTED_CELLPOSE_VERSION;
+    private static final ProbeBackend DEFAULT_PROBE_BACKEND = new ProbeBackend() {
+        @Override public Status probeConfigured() {
+            return probeConfiguredInternal();
+        }
+    };
+    private static final LongSupplier SYSTEM_CLOCK = new LongSupplier() {
+        @Override public long getAsLong() {
+            return System.currentTimeMillis();
+        }
+    };
+    private static final ExecutorService PROBE_EXECUTOR = Executors.newSingleThreadExecutor(new ThreadFactory() {
+        @Override public Thread newThread(Runnable runnable) {
+            Thread thread = new Thread(runnable, "FLASH Cellpose runtime probe");
+            thread.setDaemon(true);
+            return thread;
+        }
+    });
+    private static volatile Status cached;
+    private static volatile long cachedAtMs;
+    private static volatile CompletableFuture<Status> inFlight;
+    private static volatile ProbeBackend probeBackend = DEFAULT_PROBE_BACKEND;
+    private static volatile LongSupplier clock = SYSTEM_CLOCK;
+    private static long cacheGeneration;
 
     private CellposeRuntime() {}
+
+    interface ProbeBackend {
+        Status probeConfigured();
+    }
 
     public enum SetupResult {
         READY,
@@ -41,9 +78,17 @@ public final class CellposeRuntime {
         public final boolean gpuAvailable;
         public final String message;
         public final String details;
+        public final boolean unknown;
 
         Status(String pythonPath, boolean configured, boolean executableExists, boolean ready,
                String cellposeVersion, boolean gpuAvailable, String message, String details) {
+            this(pythonPath, configured, executableExists, ready, cellposeVersion, gpuAvailable,
+                    message, details, false);
+        }
+
+        Status(String pythonPath, boolean configured, boolean executableExists, boolean ready,
+               String cellposeVersion, boolean gpuAvailable, String message, String details,
+               boolean unknown) {
             this.pythonPath = pythonPath == null ? "" : pythonPath;
             this.configured = configured;
             this.executableExists = executableExists;
@@ -52,6 +97,18 @@ public final class CellposeRuntime {
             this.gpuAvailable = gpuAvailable;
             this.message = message == null ? "" : message;
             this.details = details == null ? "" : details;
+            this.unknown = unknown;
+        }
+
+        public static Status unknown() {
+            return new Status("", false, false, false, "", false,
+                    "Checking Cellpose...",
+                    "The Cellpose runtime probe has not completed yet.",
+                    true);
+        }
+
+        public boolean isUnknown() {
+            return unknown;
         }
 
         public String summary() {
@@ -113,10 +170,134 @@ public final class CellposeRuntime {
         String normalized = pythonPath == null ? "" : pythonPath.trim();
         Prefs.set(PREF_PYTHON_PATH, normalized);
         Prefs.savePreferences();
+        invalidateCache();
     }
 
     public static Status probeConfigured() {
+        Status status = cached;
+        if (isFresh(status, nowMs())) {
+            return status;
+        }
+        try {
+            return probeAsync().get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return new Status(getPythonPath(), true, false, false, "", false,
+                    "Cellpose probe was interrupted.",
+                    "The current thread was interrupted while waiting for Cellpose runtime status.");
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause() == null ? e : e.getCause();
+            return new Status(getPythonPath(), true, false, false, "", false,
+                    "Cellpose probe failed.",
+                    cause.getClass().getSimpleName() + ": " + cause.getMessage());
+        }
+    }
+
+    private static Status probeConfiguredInternal() {
         return probe(getPythonPath());
+    }
+
+    public static Status cachedStatus() {
+        Status status = cached;
+        return status == null ? Status.unknown() : status;
+    }
+
+    public static CompletableFuture<Status> probeAsync() {
+        final long now = nowMs();
+        synchronized (LOCK) {
+            if (isFresh(cached, now)) {
+                return CompletableFuture.completedFuture(cached);
+            }
+            if (inFlight != null) {
+                return inFlight;
+            }
+            final long generation = cacheGeneration;
+            final CompletableFuture<Status> future = CompletableFuture.supplyAsync(new Supplier<Status>() {
+                @Override public Status get() {
+                    return probeBackend.probeConfigured();
+                }
+            }, PROBE_EXECUTOR);
+            inFlight = future;
+            future.whenComplete(new java.util.function.BiConsumer<Status, Throwable>() {
+                @Override public void accept(Status status, Throwable throwable) {
+                    synchronized (LOCK) {
+                        if (cacheGeneration == generation && inFlight == future) {
+                            if (throwable == null && status != null && !status.unknown) {
+                                cached = status;
+                                cachedAtMs = nowMs();
+                            }
+                            inFlight = null;
+                        }
+                    }
+                }
+            });
+            return future;
+        }
+    }
+
+    public static void invalidateCache() {
+        synchronized (LOCK) {
+            cacheGeneration++;
+            cached = null;
+            cachedAtMs = 0L;
+            inFlight = null;
+        }
+    }
+
+    static void setProbeBackendForTest(ProbeBackend backend) {
+        synchronized (LOCK) {
+            probeBackend = backend == null ? DEFAULT_PROBE_BACKEND : backend;
+            cacheGeneration++;
+            cached = null;
+            cachedAtMs = 0L;
+            inFlight = null;
+        }
+    }
+
+    static void setClockForTest(LongSupplier testClock) {
+        synchronized (LOCK) {
+            clock = testClock == null ? SYSTEM_CLOCK : testClock;
+            cacheGeneration++;
+            cached = null;
+            cachedAtMs = 0L;
+            inFlight = null;
+        }
+    }
+
+    static void resetTestHooks() {
+        synchronized (LOCK) {
+            probeBackend = DEFAULT_PROBE_BACKEND;
+            clock = SYSTEM_CLOCK;
+            cacheGeneration++;
+            cached = null;
+            cachedAtMs = 0L;
+            inFlight = null;
+        }
+    }
+
+    private static boolean isFresh(Status status, long nowMs) {
+        if (status == null || status.unknown) return false;
+        long ageMs = Math.max(0L, nowMs - cachedAtMs);
+        long ttlMs = status.ready ? READY_TTL_MS : MISSING_TTL_MS;
+        return ageMs <= ttlMs;
+    }
+
+    private static long nowMs() {
+        LongSupplier supplier = clock;
+        return supplier == null ? System.currentTimeMillis() : supplier.getAsLong();
+    }
+
+    private static void updateCache(Status status) {
+        if (status == null || status.unknown) return;
+        String current = normalizeExecutablePath(getPythonPath());
+        String statusPath = normalizeExecutablePath(status.pythonPath);
+        if (!current.equalsIgnoreCase(statusPath)) return;
+        synchronized (LOCK) {
+            cacheGeneration++;
+            cached = status;
+            cachedAtMs = nowMs();
+            inFlight = null;
+        }
     }
 
     public static File getManagedEnvDir() {
@@ -291,7 +472,11 @@ public final class CellposeRuntime {
     }
 
     public static String defaultSetupLabel() {
-        Status status = probeConfigured();
+        Status status = cachedStatus();
+        if (status.unknown) {
+            probeAsync();
+            return "Checking Cellpose runtime...";
+        }
         if (status.ready) {
             return "Configured: Cellpose " + (status.cellposeVersion.isEmpty() ? "unknown" : status.cellposeVersion)
                     + ", GPU available=" + status.gpuAvailable;
@@ -378,6 +563,7 @@ public final class CellposeRuntime {
             }
 
             setPythonPath(managedPython);
+            updateCache(verify);
             return new InstallResult(true, managedPython,
                     "Cellpose CPU is ready.",
                     verify.summary());
@@ -426,6 +612,7 @@ public final class CellposeRuntime {
                         verify.summary());
             }
 
+            updateCache(verify);
             return new InstallResult(true, managedPython, "Cellpose GPU support is ready.", verify.summary());
         } catch (Exception e) {
             IJ.showStatus("");

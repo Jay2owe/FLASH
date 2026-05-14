@@ -2,6 +2,7 @@ package flash.pipeline.ui.config;
 
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.cellpose.CellposeModel;
+import flash.pipeline.cellpose.CellposeRuntime;
 import flash.pipeline.help.SetupHelpCatalog;
 import flash.pipeline.help.SetupHelpTopic;
 import flash.pipeline.objects.ObjectsCounter3DWrapper;
@@ -35,9 +36,11 @@ import java.awt.Font;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
+import java.lang.ref.WeakReference;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 public final class CellposeParameterStage implements ConfigQcStage {
 
@@ -64,7 +67,8 @@ public final class CellposeParameterStage implements ConfigQcStage {
     }
 
     public interface RuntimeAdapter {
-        String runtimeSummary();
+        CellposeRuntime.Status cachedRuntimeStatus();
+        CompletableFuture<CellposeRuntime.Status> probeRuntimeAsync();
         boolean nvidiaGpuLikelyAvailable();
         GpuInstallResult installGpuSupport();
     }
@@ -143,6 +147,10 @@ public final class CellposeParameterStage implements ConfigQcStage {
     private boolean previewStale = true;
     private boolean updatingControls;
     private boolean showRawSource;
+    private boolean savedMethodExplicitGpu;
+    private boolean gpuEdited;
+    private volatile boolean runtimeUiActive;
+    private volatile int runtimeProbeRequestId;
     private int lastObjectCount = -1;
 
     private JComboBox<String> modelCombo;
@@ -224,8 +232,13 @@ public final class CellposeParameterStage implements ConfigQcStage {
     public JComponent buildControls(ConfigQcContext context, ConfigQcActions actions) {
         this.actions = actions;
         this.activeContext = context;
+        String methodToken = parameterStore.getMethodToken();
+        this.savedMethodExplicitGpu = hasExplicitGpuOption(methodToken);
+        this.gpuEdited = false;
+        this.runtimeUiActive = true;
+        this.runtimeProbeRequestId++;
         this.savedParameters = restartParameters == null
-                ? parseMethod(parameterStore.getMethodToken(),
+                ? parseMethod(methodToken,
                 defaultUseGpu,
                 channelCount,
                 primaryChannelIndex)
@@ -340,6 +353,8 @@ public final class CellposeParameterStage implements ConfigQcStage {
 
     @Override
     public void onLeave(ConfigQcContext context) {
+        runtimeUiActive = false;
+        runtimeProbeRequestId++;
         closePreviewWorker();
         closeInstallWorker();
         if (preview != null) {
@@ -463,7 +478,10 @@ public final class CellposeParameterStage implements ConfigQcStage {
         companionCombo.addActionListener(e -> companionChanged());
         gpuCheckBox = new JCheckBox("Use GPU");
         gpuCheckBox.setOpaque(false);
-        gpuCheckBox.addActionListener(e -> fieldChanged());
+        gpuCheckBox.addActionListener(e -> {
+            if (!updatingControls) gpuEdited = true;
+            fieldChanged();
+        });
         installGpuButton = new JButton("Install GPU Support");
         installGpuButton.addActionListener(e -> installGpuSupport());
 
@@ -765,12 +783,68 @@ public final class CellposeParameterStage implements ConfigQcStage {
     }
 
     private void refreshRuntimeLabel() {
-        if (runtimeLabel != null) {
-            String summary = runtimeAdapter.runtimeSummary();
-            runtimeLabel.setText(summary == null || summary.trim().isEmpty()
-                    ? "Runtime: not checked."
-                    : "Runtime: " + summary);
+        if (runtimeLabel == null) {
+            return;
         }
+        runtimeLabel.setText(runtimeText(runtimeAdapter.cachedRuntimeStatus()));
+        final int requestId = ++runtimeProbeRequestId;
+        CompletableFuture<CellposeRuntime.Status> future = runtimeAdapter.probeRuntimeAsync();
+        if (future == null) {
+            return;
+        }
+        final WeakReference<CellposeParameterStage> stageRef =
+                new WeakReference<CellposeParameterStage>(this);
+        future.whenCompleteAsync(new java.util.function.BiConsumer<CellposeRuntime.Status, Throwable>() {
+            @Override public void accept(CellposeRuntime.Status status, Throwable throwable) {
+                CellposeParameterStage stage = stageRef.get();
+                if (stage != null) {
+                    stage.applyRuntimeProbeResult(requestId, status, throwable);
+                }
+            }
+        }, SwingUtilities::invokeLater);
+    }
+
+    private void applyRuntimeProbeResult(int requestId, CellposeRuntime.Status status, Throwable throwable) {
+        if (!runtimeUiActive || runtimeProbeRequestId != requestId || runtimeLabel == null) {
+            return;
+        }
+        if (throwable != null) {
+            runtimeLabel.setText("Runtime: Cellpose probe failed.");
+            return;
+        }
+        runtimeLabel.setText(runtimeText(status));
+        applyRuntimeGpuDefault(status);
+    }
+
+    private void applyRuntimeGpuDefault(CellposeRuntime.Status status) {
+        if (status == null || !status.ready || gpuCheckBox == null
+                || gpuEdited || savedMethodExplicitGpu) {
+            return;
+        }
+        if (gpuCheckBox.isSelected() == status.gpuAvailable) {
+            return;
+        }
+        updatingControls = true;
+        try {
+            gpuCheckBox.setSelected(status.gpuAvailable);
+        } finally {
+            updatingControls = false;
+        }
+        markPreviewStale(STALE_TEXT);
+    }
+
+    private static String runtimeText(CellposeRuntime.Status status) {
+        if (status == null || status.unknown) {
+            return "Runtime: Checking Cellpose...";
+        }
+        if (status.ready) {
+            return "Runtime: Configured runtime: Cellpose "
+                    + (status.cellposeVersion.isEmpty() ? "unknown" : status.cellposeVersion)
+                    + ", GPU available=" + status.gpuAvailable;
+        }
+        return status.message == null || status.message.trim().isEmpty()
+                ? "Runtime: not checked."
+                : "Runtime: " + status.message;
     }
 
     private void fieldChanged() {
@@ -1181,6 +1255,17 @@ public final class CellposeParameterStage implements ConfigQcStage {
         return parseMethod(method, BinConfig.DEFAULT_CELLPOSE_USE_GPU, 0, -1);
     }
 
+    static boolean hasExplicitGpuOption(String method) {
+        if (method == null || !method.startsWith("cellpose:")) return false;
+        String[] parts = method.split(":");
+        for (int i = 5; i < parts.length; i++) {
+            if (parts[i] != null && parts[i].trim().startsWith("gpu=")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public static Parameters parseMethod(String method, boolean fallbackUseGpu,
                                          int channelCount, int primaryChannelIndex) {
         Parameters defaults = Parameters.defaults(fallbackUseGpu);
@@ -1272,8 +1357,12 @@ public final class CellposeParameterStage implements ConfigQcStage {
 
     private static RuntimeAdapter noopRuntimeAdapter() {
         return new RuntimeAdapter() {
-            @Override public String runtimeSummary() {
-                return "";
+            @Override public CellposeRuntime.Status cachedRuntimeStatus() {
+                return CellposeRuntime.Status.unknown();
+            }
+
+            @Override public CompletableFuture<CellposeRuntime.Status> probeRuntimeAsync() {
+                return CompletableFuture.completedFuture(CellposeRuntime.Status.unknown());
             }
 
             @Override public boolean nvidiaGpuLikelyAvailable() {
