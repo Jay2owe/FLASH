@@ -19,6 +19,7 @@ import javax.swing.JSlider;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assume.assumeFalse;
@@ -46,6 +47,29 @@ public class PreviewPairPanelTest {
                 pair.adjustedPreviewForTest().canvasPreferredSizeForTest());
         assertEquals(2, pair.originalPreviewForTest().layoutVerticalGapForTest());
         assertEquals(2, pair.adjustedPreviewForTest().layoutVerticalGapForTest());
+    }
+
+    @Test
+    public void horizontalSlimStartsWithEmptyPreviewStateAndDisabledSharedZ() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted",
+                PreviewPairPanel.PreviewLayout.HORIZONTAL_SLIM);
+
+        assertFalse(pair.originalPreviewForTest().hasImageForTest());
+        assertFalse(pair.adjustedPreviewForTest().hasImageForTest());
+        assertEquals("No image selected.", pair.originalPreviewForTest().titleTextForTest());
+        assertEquals("No image selected.", pair.adjustedPreviewForTest().titleTextForTest());
+        assertEquals(1, pair.getCurrentZ());
+        assertEquals(1, pair.originalZForTest());
+        assertEquals(1, pair.adjustedZForTest());
+        assertNull(pair.originalPreviewForTest().renderedProcessorForTest());
+        assertNull(pair.adjustedPreviewForTest().renderedProcessorForTest());
+
+        JSlider slider = pair.sharedZSliderForTest();
+        assertEquals(1, slider.getMinimum());
+        assertEquals(1, slider.getMaximum());
+        assertEquals(1, slider.getValue());
+        assertFalse(slider.isEnabled());
+        assertEquals("1 / 1", pair.sharedZTextForTest());
     }
 
     @Test
