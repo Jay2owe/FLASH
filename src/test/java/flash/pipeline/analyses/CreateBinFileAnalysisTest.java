@@ -2,6 +2,7 @@ package flash.pipeline.analyses;
 
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinField;
+import flash.pipeline.bin.BinMacroIndex;
 import flash.pipeline.image.FilterMacroParser.OpType;
 import flash.pipeline.image.NamedFilterLoader;
 import flash.pipeline.image.dag.Combiner;
@@ -39,6 +40,7 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
+import javax.swing.JComboBox;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.GraphicsEnvironment;
@@ -55,6 +57,7 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -253,7 +256,7 @@ public class CreateBinFileAnalysisTest {
     }
 
     @Test
-    public void filterPresetOptions_includesSavedCustomFilterPresetNames() throws Exception {
+    public void filterPresetOptions_returnsFastBaseAndSelectedPresetWithoutSavedScan() throws Exception {
         File project = temp.newFolder("project-with-saved-filters");
         File binFolder = configurationDir(project);
         assertTrue(binFolder.mkdirs());
@@ -267,10 +270,11 @@ public class CreateBinFileAnalysisTest {
                 "run(\"Median...\", \"radius=3 stack\");\n".getBytes(StandardCharsets.UTF_8));
         CreateBinFileAnalysis analysis = new CreateBinFileAnalysis();
 
-        String[] options = invokeFilterPresetOptions(analysis, binFolder, "Default");
+        String[] options = invokeFilterPresetOptions(analysis, binFolder, "Missing saved filter");
 
-        assertTrue(contains(options, "IBA1 cleanup filter"));
-        assertTrue(contains(options, "Legacy cleanup filter"));
+        assertFalse(contains(options, "IBA1 cleanup filter"));
+        assertFalse(contains(options, "Legacy cleanup filter"));
+        assertTrue(contains(options, "Missing saved filter"));
         assertTrue(contains(options, "Custom"));
     }
 
@@ -397,6 +401,23 @@ public class CreateBinFileAnalysisTest {
         assertEquals(promoted, IjmToDagLoader.load(savedIjm));
         assertTrue(savedIjm.contains("sigma=6"));
         assertTrue(findNode(savedDag, "disabledLegacy").disabled);
+    }
+
+    @Test
+    public void saveCustomFilterPreset_invalidatesSharedAsyncIndex() throws Exception {
+        File project = temp.newFolder("project-save-custom-filter-invalidates");
+        File binFolder = configurationDir(project);
+        assertTrue(binFolder.mkdirs());
+        CreateBinFileAnalysis analysis = new CreateBinFileAnalysis();
+
+        assertFalse(BinMacroIndex.savedCustomFilterPresetNamesAsync(binFolder)
+                .get(5, TimeUnit.SECONDS).contains("IBA1 cleanup filter"));
+
+        invokeSaveCustomFilterPreset(analysis, binFolder, "IBA1 cleanup filter",
+                "run(\"Median...\", \"radius=2 stack\");\n");
+
+        assertTrue(BinMacroIndex.savedCustomFilterPresetNamesAsync(binFolder)
+                .get(5, TimeUnit.SECONDS).contains("IBA1 cleanup filter"));
     }
 
     @Test
@@ -577,6 +598,28 @@ public class CreateBinFileAnalysisTest {
         assertEquals(Arrays.asList("Puncta Resolve", "Custom"), result.filterPresets);
         assertEquals("classical", result.segmentationMethods.get(0));
         assertEquals("stardist:0.5:0.4", result.segmentationMethods.get(1));
+    }
+
+    @Test
+    public void buildConfigFromDialogDoesNotPersistLoadingFiltersPlaceholder() throws Exception {
+        CreateBinFileAnalysis analysis = new CreateBinFileAnalysis();
+        CreateBinFileAnalysis.BinUserConfig draft = twoChannelConfig();
+        draft.filterPresets.set(0, "Puncta Resolve");
+        Object bindings = newBinSetupBindings(2);
+        @SuppressWarnings("unchecked")
+        JComboBox<String>[] filterCombos = new JComboBox[]{
+                new JComboBox<String>(new String[]{"Loading filters..."}),
+                new JComboBox<String>(new String[]{"Custom"})
+        };
+        filterCombos[0].setSelectedItem("Loading filters...");
+        filterCombos[1].setSelectedItem("Custom");
+        copyBindingArray(bindings, "filterCombos", filterCombos);
+
+        CreateBinFileAnalysis.BinUserConfig result =
+                invokeBuildBinUserConfigFromDialog(analysis, 2, draft, bindings);
+
+        assertEquals("Puncta Resolve", result.filterPresets.get(0));
+        assertEquals("Custom", result.filterPresets.get(1));
     }
 
     @Test

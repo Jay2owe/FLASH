@@ -20,6 +20,7 @@ import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.DefaultListCellRenderer;
+import javax.swing.DefaultComboBoxModel;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
@@ -53,6 +54,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -100,6 +102,7 @@ public final class FilterParameterStage implements ConfigQcStage {
 
     private static final String CUSTOM_PRESET = "Custom";
     private static final String DEFAULT_PRESET = "Default";
+    private static final String LOADING_FILTERS_OPTION = "Loading filters...";
     private static final String STALE_TEXT = "Preview is stale. Press Run Preview.";
     private static final String EMPTY_TEXT = "Choose a filter preset or click Custom macro...";
     private static final String BRANCHED_BANNER_TEXT =
@@ -185,6 +188,7 @@ public final class FilterParameterStage implements ConfigQcStage {
     private FilterMacroEditorModel.MacroDefinition definition;
     private boolean previewStale;
     private boolean updatingControls;
+    private final AtomicInteger presetOptionsGeneration = new AtomicInteger();
     /**
      * Hidden host for the SandboxModel. Composed only for its DAG model;
      * never added to the layout. Created lazily on first need so the
@@ -221,7 +225,7 @@ public final class FilterParameterStage implements ConfigQcStage {
         if (previewAdapter == null) {
             throw new IllegalArgumentException("previewAdapter must not be null");
         }
-        this.presetOptions = Collections.unmodifiableList(copyOptions(presetOptions));
+        this.presetOptions = copyOptions(presetOptions);
         this.bundledPresetNames = new HashSet<String>();
         for (int i = 0; i < this.presetOptions.size(); i++) {
             String name = this.presetOptions.get(i);
@@ -240,6 +244,27 @@ public final class FilterParameterStage implements ConfigQcStage {
                     }
                 }
                 : descriptionProvider;
+    }
+
+    public int beginPresetOptionsRefresh() {
+        return presetOptionsGeneration.incrementAndGet();
+    }
+
+    public void refreshPresetOptionsIfCurrent(final int generation,
+                                              final List<String> options,
+                                              final String selectedFallback) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    refreshPresetOptionsIfCurrent(generation, options, selectedFallback);
+                }
+            });
+            return;
+        }
+        if (generation != presetOptionsGeneration.get()) {
+            return;
+        }
+        refreshPresetOptions(options, selectedFallback);
     }
 
     @Override
@@ -309,8 +334,10 @@ public final class FilterParameterStage implements ConfigQcStage {
         }
         syncFieldBindings();
         try {
-            macroStore.save(selectedPreset, currentMacro);
-            savedPreset = selectedPreset;
+            String safePreset = safePresetSelection(selectedPreset, savedPreset);
+            macroStore.save(safePreset, currentMacro);
+            savedPreset = safePreset;
+            selectedPreset = safePreset;
             savedMacro = currentMacro;
             restartPreset = null;
             restartMacro = null;
@@ -343,6 +370,7 @@ public final class FilterParameterStage implements ConfigQcStage {
 
     @Override
     public void onLeave(ConfigQcContext context) {
+        presetOptionsGeneration.incrementAndGet();
         closePreviewWorker();
         closeImages();
         preview = null;
@@ -436,6 +464,14 @@ public final class FilterParameterStage implements ConfigQcStage {
         if (presetCombo == null) return;
         addPresetOption(presetName);
         presetCombo.setSelectedItem(presetName);
+    }
+
+    boolean hasPresetOptionForTest(String presetName) {
+        if (presetCombo == null || presetName == null) return false;
+        for (int i = 0; i < presetCombo.getItemCount(); i++) {
+            if (presetName.equalsIgnoreCase(presetCombo.getItemAt(i))) return true;
+        }
+        return false;
     }
 
     void simulateSaveAsForTest(String presetName) {
@@ -627,6 +663,34 @@ public final class FilterParameterStage implements ConfigQcStage {
         return panel;
     }
 
+    private void refreshPresetOptions(List<String> options, String selectedFallback) {
+        String currentSelection = safePresetSelection(
+                presetCombo == null || presetCombo.getSelectedItem() == null
+                        ? selectedPreset
+                        : String.valueOf(presetCombo.getSelectedItem()),
+                selectedFallback);
+        List<String> merged = copyOptions(options);
+        addUnique(merged, safePresetSelection(selectedFallback, currentSelection));
+        addUnique(merged, currentSelection);
+        presetOptions.clear();
+        presetOptions.addAll(merged);
+        if (presetCombo == null) {
+            return;
+        }
+        updatingControls = true;
+        try {
+            presetCombo.setModel(new DefaultComboBoxModel<String>(
+                    merged.toArray(new String[merged.size()])));
+            presetCombo.setSelectedItem(currentSelection);
+        } finally {
+            updatingControls = false;
+        }
+        if (presetDescriptionLabel != null) {
+            presetDescriptionLabel.setText(descriptionProvider.describe(currentSelection));
+            updatePresetDescriptionVisibility();
+        }
+    }
+
     private JComponent buildParameterPanel() {
         parameterPanel = new JPanel();
         parameterPanel.setOpaque(false);
@@ -719,6 +783,10 @@ public final class FilterParameterStage implements ConfigQcStage {
         Object selected = presetCombo.getSelectedItem();
         if (selected == null) return;
         String name = selected.toString();
+        if (isLoadingPresetOption(name)) {
+            restorePresetSelection(safePresetSelection(selectedPreset, savedPreset));
+            return;
+        }
         try {
             String macro = safe(macroStore.loadPresetMacro(name));
             loadPreset(name, macro);
@@ -1772,10 +1840,22 @@ public final class FilterParameterStage implements ConfigQcStage {
     private void addPresetOption(String option) {
         if (presetCombo == null || option == null || option.trim().isEmpty()) return;
         String trimmed = option.trim();
+        if (isLoadingPresetOption(trimmed)) return;
         for (int i = 0; i < presetCombo.getItemCount(); i++) {
             if (trimmed.equalsIgnoreCase(presetCombo.getItemAt(i))) return;
         }
         presetCombo.addItem(trimmed);
+    }
+
+    private void restorePresetSelection(String presetName) {
+        if (presetCombo == null) return;
+        updatingControls = true;
+        try {
+            addPresetOption(presetName);
+            presetCombo.setSelectedItem(presetName);
+        } finally {
+            updatingControls = false;
+        }
     }
 
     private String firstPresetOption() {
@@ -1859,7 +1939,8 @@ public final class FilterParameterStage implements ConfigQcStage {
         if (source != null) {
             for (int i = 0; i < source.size(); i++) {
                 String value = source.get(i);
-                if (value != null && value.trim().length() > 0) {
+                if (value != null && value.trim().length() > 0
+                        && !isLoadingPresetOption(value.trim())) {
                     addUnique(copy, value.trim());
                 }
             }
@@ -1870,10 +1951,29 @@ public final class FilterParameterStage implements ConfigQcStage {
     }
 
     private static void addUnique(List<String> values, String value) {
+        if (value == null || value.trim().length() == 0) return;
+        String trimmed = value.trim();
+        if (isLoadingPresetOption(trimmed)) return;
         for (int i = 0; i < values.size(); i++) {
-            if (values.get(i).equalsIgnoreCase(value)) return;
+            if (values.get(i).equalsIgnoreCase(trimmed)) return;
         }
-        values.add(value);
+        values.add(trimmed);
+    }
+
+    private static String safePresetSelection(String value, String fallback) {
+        String trimmed = value == null ? "" : value.trim();
+        if (trimmed.length() > 0 && !isLoadingPresetOption(trimmed)) {
+            return trimmed;
+        }
+        String safeFallback = fallback == null ? "" : fallback.trim();
+        if (safeFallback.length() > 0 && !isLoadingPresetOption(safeFallback)) {
+            return safeFallback;
+        }
+        return CUSTOM_PRESET;
+    }
+
+    private static boolean isLoadingPresetOption(String value) {
+        return value != null && LOADING_FILTERS_OPTION.equalsIgnoreCase(value.trim());
     }
 
     private static String firstNonBlank(String value, String fallback) {
