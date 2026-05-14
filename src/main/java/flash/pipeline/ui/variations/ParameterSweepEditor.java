@@ -1,5 +1,6 @@
 package flash.pipeline.ui.variations;
 
+import flash.pipeline.image.FilterMacroEditorModel;
 import flash.pipeline.cellpose.CellposeModel;
 import flash.pipeline.ui.config.CellposeParameterStage;
 import flash.pipeline.ui.config.StarDistParameterStage;
@@ -17,8 +18,6 @@ import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
 import java.awt.Color;
 import java.awt.Dimension;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -31,6 +30,7 @@ public final class ParameterSweepEditor extends JPanel {
     private final ParameterSweep.Method method;
     private final String channelName;
     private final String sourceImageHash;
+    private final String cacheNamespace;
     private final int noUpperBoundMaxSize;
     private final List<Row> rows = new ArrayList<Row>();
     private final List<ChangeListener> listeners = new ArrayList<ChangeListener>();
@@ -49,6 +49,18 @@ public final class ParameterSweepEditor extends JPanel {
                 maxPossibleVoxels(context == null ? null : context.filteredSource()));
     }
 
+    public static ParameterSweepEditor forFilter(FilterVariationEngineContext context) {
+        if (context == null) {
+            throw new IllegalArgumentException("context must not be null");
+        }
+        return new ParameterSweepEditor(ParameterSweep.Method.FILTER,
+                context.channelName(),
+                context.sourceImageHash(),
+                Integer.MAX_VALUE,
+                filterSectionsFor(context),
+                context.cacheNamespace());
+    }
+
     public ParameterSweepEditor(ParameterSweep.Method method,
                                 ParameterCombo baseParameters,
                                 String channelName,
@@ -61,22 +73,36 @@ public final class ParameterSweepEditor extends JPanel {
                                  String channelName,
                                  String sourceImageHash,
                                  int noUpperBoundMaxSize) {
+        this(method, channelName, sourceImageHash, noUpperBoundMaxSize,
+                sectionsFor(method, baseParameters), "");
+    }
+
+    private ParameterSweepEditor(ParameterSweep.Method method,
+                                 String channelName,
+                                 String sourceImageHash,
+                                 int noUpperBoundMaxSize,
+                                 ParameterSections sections,
+                                 String cacheNamespace) {
         super();
         this.method = method == null ? ParameterSweep.Method.CLASSICAL : method;
         this.channelName = channelName == null ? "" : channelName;
         this.sourceImageHash = sourceImageHash == null ? "" : sourceImageHash;
+        this.cacheNamespace = cacheNamespace == null ? "" : cacheNamespace.trim();
         this.noUpperBoundMaxSize = noUpperBoundMaxSize <= 0
                 ? Integer.MAX_VALUE
                 : noUpperBoundMaxSize;
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
         setOpaque(false);
         setBorder(BorderFactory.createLineBorder(new Color(214, 220, 224)));
-        build(baseParameters == null ? ParameterCombo.builder().build() : baseParameters);
+        build(sections == null
+                ? new ParameterSections(Collections.<ParameterDefinition>emptyList(),
+                Collections.<ParameterDefinition>emptyList())
+                : sections);
     }
 
     public ParameterSweep currentSweep() {
-        LinkedHashMap<ParameterId, ParameterValueList> values =
-                new LinkedHashMap<ParameterId, ParameterValueList>();
+        LinkedHashMap<ParameterKey, ParameterValueList> values =
+                new LinkedHashMap<ParameterKey, ParameterValueList>();
         for (int i = 0; i < rows.size(); i++) {
             Row row = rows.get(i);
             ParameterValueList current = row.values.currentValueList();
@@ -87,7 +113,8 @@ public final class ParameterSweepEditor extends JPanel {
                         Collections.singletonList(current.get(0))));
             }
         }
-        return new ParameterSweep(method, values, cropSpec, channelName, sourceImageHash);
+        return new ParameterSweep(method, values, cropSpec, channelName,
+                sourceImageHash, cacheNamespace);
     }
 
     public void setCropSpec(CropSpec cropSpec) {
@@ -113,7 +140,7 @@ public final class ParameterSweepEditor extends JPanel {
         fireChanged();
     }
 
-    public void applySuggestedValues(Map<ParameterId, ParameterValueList> suggestions) {
+    public void applySuggestedValues(Map<? extends ParameterKey, ParameterValueList> suggestions) {
         if (suggestions == null || suggestions.isEmpty()) {
             return;
         }
@@ -134,39 +161,46 @@ public final class ParameterSweepEditor extends JPanel {
         }
     }
 
-    void setParameterValuesForTest(ParameterId id, List<?> values) {
+    void setParameterValuesForTest(ParameterKey id, List<?> values) {
         Row row = rowFor(id);
         if (row != null) {
             row.values.setValues(values);
         }
     }
 
-    void setSweptForTest(ParameterId id, boolean swept) {
+    void setSweptForTest(ParameterKey id, boolean swept) {
         Row row = rowFor(id);
         if (row != null) {
             row.sweepBox.setSelected(swept);
         }
     }
 
-    boolean isSweptForTest(ParameterId id) {
+    boolean isSweptForTest(ParameterKey id) {
         Row row = rowFor(id);
         return row != null && row.sweepBox.isSelected();
     }
 
-    int valueCountForTest(ParameterId id) {
+    int valueCountForTest(ParameterKey id) {
         Row row = rowFor(id);
         return row == null ? 0 : row.values.currentValueList().size();
+    }
+
+    List<ParameterKey> parameterKeysForTest() {
+        List<ParameterKey> keys = new ArrayList<ParameterKey>();
+        for (int i = 0; i < rows.size(); i++) {
+            keys.add(rows.get(i).id);
+        }
+        return keys;
     }
 
     boolean advancedExpandedForTest() {
         return advancedExpanded;
     }
 
-    private void build(ParameterCombo baseParameters) {
+    private void build(ParameterSections sections) {
         add(headerRow());
-        ParameterSections sections = sectionsFor(method);
         for (int i = 0; i < sections.primary.size(); i++) {
-            add(rowPanel(sections.primary.get(i), baseParameters, false));
+            add(rowPanel(sections.primary.get(i), false));
         }
         if (!sections.advanced.isEmpty()) {
             advancedExpanded = loadAdvancedExpanded();
@@ -176,7 +210,7 @@ public final class ParameterSweepEditor extends JPanel {
             advancedPanel.setLayout(new BoxLayout(advancedPanel, BoxLayout.Y_AXIS));
             advancedPanel.setAlignmentX(LEFT_ALIGNMENT);
             for (int i = 0; i < sections.advanced.size(); i++) {
-                advancedPanel.add(rowPanel(sections.advanced.get(i), baseParameters, true));
+                advancedPanel.add(rowPanel(sections.advanced.get(i), true));
             }
             add(advancedPanel);
             autoExpandAdvancedIfActive();
@@ -228,9 +262,9 @@ public final class ParameterSweepEditor extends JPanel {
         return row;
     }
 
-    private JPanel rowPanel(final ParameterId id,
-                            ParameterCombo baseParameters,
+    private JPanel rowPanel(final ParameterDefinition definition,
                             final boolean advanced) {
+        final ParameterKey id = definition.id;
         JPanel row = new JPanel();
         row.setOpaque(false);
         row.setLayout(new BoxLayout(row, BoxLayout.X_AXIS));
@@ -250,8 +284,8 @@ public final class ParameterSweepEditor extends JPanel {
         row.add(name);
 
         ParameterValueList initial = new ParameterValueList(
-                Collections.singletonList(baseValueFor(id, baseParameters)));
-        ValueChipPanel chips = new ValueChipPanel(initial, parserFor(id));
+                Collections.singletonList(definition.baseValue));
+        ValueChipPanel chips = new ValueChipPanel(initial, definition.parser);
         chips.setAlignmentX(LEFT_ALIGNMENT);
         row.add(chips);
         row.add(Box.createHorizontalGlue());
@@ -277,10 +311,10 @@ public final class ParameterSweepEditor extends JPanel {
         return row;
     }
 
-    private Row rowFor(ParameterId id) {
+    private Row rowFor(ParameterKey id) {
         for (int i = 0; i < rows.size(); i++) {
             Row row = rows.get(i);
-            if (row.id == id) {
+            if (row.id.equals(id)) {
                 return row;
             }
         }
@@ -301,30 +335,62 @@ public final class ParameterSweepEditor extends JPanel {
         return label;
     }
 
-    private static ParameterSections sectionsFor(ParameterSweep.Method method) {
-        List<ParameterId> primary = new ArrayList<ParameterId>();
-        List<ParameterId> advanced = new ArrayList<ParameterId>();
+    private static ParameterSections sectionsFor(ParameterSweep.Method method,
+                                                 ParameterCombo baseParameters) {
+        List<ParameterDefinition> primary = new ArrayList<ParameterDefinition>();
+        List<ParameterDefinition> advanced = new ArrayList<ParameterDefinition>();
         if (method == ParameterSweep.Method.STARDIST) {
-            primary.add(ParameterId.PROB_THRESH);
-            primary.add(ParameterId.NMS_THRESH);
-            advanced.add(ParameterId.LINKING_MAX);
-            advanced.add(ParameterId.GAP_CLOSING_MAX);
-            advanced.add(ParameterId.FRAME_GAP);
-            advanced.add(ParameterId.AREA_MIN);
-            advanced.add(ParameterId.AREA_MAX);
-            advanced.add(ParameterId.QUALITY_MIN);
-            advanced.add(ParameterId.INTENSITY_MIN);
+            primary.add(definitionFor(ParameterId.PROB_THRESH, baseParameters));
+            primary.add(definitionFor(ParameterId.NMS_THRESH, baseParameters));
+            advanced.add(definitionFor(ParameterId.LINKING_MAX, baseParameters));
+            advanced.add(definitionFor(ParameterId.GAP_CLOSING_MAX, baseParameters));
+            advanced.add(definitionFor(ParameterId.FRAME_GAP, baseParameters));
+            advanced.add(definitionFor(ParameterId.AREA_MIN, baseParameters));
+            advanced.add(definitionFor(ParameterId.AREA_MAX, baseParameters));
+            advanced.add(definitionFor(ParameterId.QUALITY_MIN, baseParameters));
+            advanced.add(definitionFor(ParameterId.INTENSITY_MIN, baseParameters));
         } else if (method == ParameterSweep.Method.CELLPOSE) {
-            primary.add(ParameterId.DIAMETER);
-            primary.add(ParameterId.FLOW_THRESHOLD);
-            primary.add(ParameterId.CELLPROB_THRESHOLD);
-            advanced.add(ParameterId.MODEL);
+            primary.add(definitionFor(ParameterId.DIAMETER, baseParameters));
+            primary.add(definitionFor(ParameterId.FLOW_THRESHOLD, baseParameters));
+            primary.add(definitionFor(ParameterId.CELLPROB_THRESHOLD, baseParameters));
+            advanced.add(definitionFor(ParameterId.MODEL, baseParameters));
         } else {
-            primary.add(ParameterId.THRESHOLD);
-            primary.add(ParameterId.MIN_SIZE);
-            advanced.add(ParameterId.MAX_SIZE);
+            primary.add(definitionFor(ParameterId.THRESHOLD, baseParameters));
+            primary.add(definitionFor(ParameterId.MIN_SIZE, baseParameters));
+            advanced.add(definitionFor(ParameterId.MAX_SIZE, baseParameters));
         }
         return new ParameterSections(primary, advanced);
+    }
+
+    private static ParameterDefinition definitionFor(ParameterId id,
+                                                     ParameterCombo baseParameters) {
+        return new ParameterDefinition(id, baseValueFor(id, baseParameters), parserFor(id));
+    }
+
+    private static ParameterSections filterSectionsFor(FilterVariationEngineContext context) {
+        List<ParameterDefinition> primary = new ArrayList<ParameterDefinition>();
+        FilterMacroEditorModel.MacroDefinition macro = context.baseMacro();
+        List<FilterMacroEditorModel.Section> sections = macro.getSections();
+        for (int i = 0; i < sections.size(); i++) {
+            FilterMacroEditorModel.Section section = sections.get(i);
+            for (int j = 0; j < section.entries.size(); j++) {
+                FilterMacroEditorModel.Entry entry = section.entries.get(j);
+                for (int k = 0; k < entry.parameters.size(); k++) {
+                    FilterMacroEditorModel.Parameter parameter =
+                            entry.parameters.get(k);
+                    Object baseValue = filterBaseValue(parameter);
+                    ParameterKey.ValueKind kind = baseValue instanceof String
+                            ? ParameterKey.ValueKind.STRING
+                            : ParameterKey.ValueKind.NUMBER;
+                    FilterParameterId id = new FilterParameterId(i, j, k,
+                            entry.label, parameter.key, kind);
+                    primary.add(new ParameterDefinition(id, baseValue,
+                            parserForFilterValue(baseValue)));
+                }
+            }
+        }
+        return new ParameterSections(primary,
+                Collections.<ParameterDefinition>emptyList());
     }
 
     private static ValueChipPanel.ValueParser parserFor(ParameterId id) {
@@ -337,6 +403,16 @@ public final class ParameterSweepEditor extends JPanel {
         if (id == ParameterId.THRESHOLD
                 || id == ParameterId.MIN_SIZE
                 || id == ParameterId.FRAME_GAP) {
+            return ValueChipPanel.intParser();
+        }
+        return ValueChipPanel.doubleParser();
+    }
+
+    private static ValueChipPanel.ValueParser parserForFilterValue(Object value) {
+        if (value instanceof String) {
+            return ValueChipPanel.stringParser();
+        }
+        if (value instanceof Integer) {
             return ValueChipPanel.intParser();
         }
         return ValueChipPanel.doubleParser();
@@ -363,6 +439,56 @@ public final class ParameterSweepEditor extends JPanel {
         if (id == ParameterId.CELLPROB_THRESHOLD) return Double.valueOf(0.0d);
         if (id == ParameterId.MODEL) return CellposeModel.CYTO3.token();
         return Integer.valueOf(0);
+    }
+
+    private static Object filterBaseValue(FilterMacroEditorModel.Parameter parameter) {
+        String value = parameter == null ? "" : firstNonBlank(
+                parameter.getValue(), parameter.defaultValue);
+        Double parsed = parseFiniteDouble(value);
+        if (parsed == null) {
+            return value == null || value.trim().isEmpty() ? "" : value.trim();
+        }
+        double number = parsed.doubleValue();
+        if (shouldUseIntegerFilterValue(parameter == null ? "" : parameter.key,
+                value, number)) {
+            return Integer.valueOf((int) Math.rint(number));
+        }
+        return Double.valueOf(number);
+    }
+
+    private static Double parseFiniteDouble(String value) {
+        try {
+            double parsed = Double.parseDouble(value == null ? "" : value.trim());
+            return Double.isNaN(parsed) || Double.isInfinite(parsed)
+                    ? null
+                    : Double.valueOf(parsed);
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    private static boolean shouldUseIntegerFilterValue(String key,
+                                                       String rawValue,
+                                                       double parsed) {
+        if (Math.rint(parsed) != parsed
+                || parsed < Integer.MIN_VALUE
+                || parsed > Integer.MAX_VALUE) {
+            return false;
+        }
+        String lowerKey = key == null ? "" : key.trim().toLowerCase(java.util.Locale.ROOT);
+        if (lowerKey.equals("sigma") || lowerKey.equals("x")
+                || lowerKey.equals("y") || lowerKey.equals("z")) {
+            return false;
+        }
+        if (lowerKey.equals("radius") || lowerKey.equals("rolling")
+                || lowerKey.equals("threshold") || lowerKey.equals("iterations")
+                || lowerKey.equals("count") || lowerKey.equals("frame")
+                || lowerKey.endsWith("_min") || lowerKey.endsWith("_max")
+                || lowerKey.indexOf("size") >= 0) {
+            return true;
+        }
+        String text = rawValue == null ? "" : rawValue.trim();
+        return text.matches("-?\\d+");
     }
 
     private static ParameterCombo baseComboFor(VariationEngineContext context) {
@@ -399,28 +525,19 @@ public final class ParameterSweepEditor extends JPanel {
     }
 
     private static String sourceHash(ImagePlus image) {
-        if (image == null) {
-            return "";
-        }
-        String raw = safe(image.getTitle()) + ":"
-                + image.getWidth() + "x"
-                + image.getHeight() + "x"
-                + image.getStackSize();
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] bytes = digest.digest(raw.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            StringBuilder out = new StringBuilder(bytes.length * 2);
-            for (int i = 0; i < bytes.length; i++) {
-                out.append(String.format("%02x", Integer.valueOf(bytes[i] & 0xff)));
-            }
-            return out.toString();
-        } catch (NoSuchAlgorithmException e) {
-            return Integer.toHexString(raw.hashCode());
-        }
+        return FilterVariationEngineContext.sourceImageHash(image);
     }
 
     private static String safe(String value) {
         return value == null ? "" : value;
+    }
+
+    private static String firstNonBlank(String value, String fallback) {
+        String trimmed = value == null ? "" : value.trim();
+        if (trimmed.length() > 0) {
+            return trimmed;
+        }
+        return fallback == null ? "" : fallback.trim();
     }
 
     private static int maxPossibleVoxels(ImagePlus image) {
@@ -460,7 +577,7 @@ public final class ParameterSweepEditor extends JPanel {
                 || hasFiniteClassicalMaxCap(row.id, values);
     }
 
-    private boolean hasFiniteClassicalMaxCap(ParameterId id, ParameterValueList values) {
+    private boolean hasFiniteClassicalMaxCap(ParameterKey id, ParameterValueList values) {
         if (method != ParameterSweep.Method.CLASSICAL
                 || id != ParameterId.MAX_SIZE
                 || values == null) {
@@ -534,22 +651,37 @@ public final class ParameterSweepEditor extends JPanel {
     }
 
     private static final class ParameterSections {
-        final List<ParameterId> primary;
-        final List<ParameterId> advanced;
+        final List<ParameterDefinition> primary;
+        final List<ParameterDefinition> advanced;
 
-        ParameterSections(List<ParameterId> primary, List<ParameterId> advanced) {
+        ParameterSections(List<ParameterDefinition> primary,
+                          List<ParameterDefinition> advanced) {
             this.primary = primary;
             this.advanced = advanced;
         }
     }
 
+    private static final class ParameterDefinition {
+        final ParameterKey id;
+        final Object baseValue;
+        final ValueChipPanel.ValueParser parser;
+
+        ParameterDefinition(ParameterKey id,
+                            Object baseValue,
+                            ValueChipPanel.ValueParser parser) {
+            this.id = id;
+            this.baseValue = baseValue;
+            this.parser = parser;
+        }
+    }
+
     private static final class Row {
-        final ParameterId id;
+        final ParameterKey id;
         final JCheckBox sweepBox;
         final ValueChipPanel values;
         final boolean advanced;
 
-        Row(ParameterId id,
+        Row(ParameterKey id,
             JCheckBox sweepBox,
             ValueChipPanel values,
             boolean advanced) {
