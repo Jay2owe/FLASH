@@ -82,6 +82,7 @@ public final class VariationCellPanel extends JPanel {
     private final JLabel countLabel = new JLabel("pending", SwingConstants.CENTER);
     private final JLabel deltaLabel = new JLabel("", SwingConstants.CENTER);
     private final JLabel iouLabel = new JLabel("", SwingConstants.CENTER);
+    private final JLabel filterChipLabel = new JLabel("", SwingConstants.CENTER);
     private final JLabel filterSnrLabel = new JLabel("", SwingConstants.CENTER);
     private final JLabel filterBgSigmaLabel = new JLabel("", SwingConstants.CENTER);
     private final Timer haloTimer;
@@ -161,8 +162,10 @@ public final class VariationCellPanel extends JPanel {
         configureFooterLabel(countLabel, FlashTheme.mono(11f));
         configureFooterLabel(deltaLabel, FlashTheme.mono(11f));
         configureFooterLabel(iouLabel, FlashTheme.mono(11f));
+        configureFooterLabel(filterChipLabel, FlashTheme.mono(10f).deriveFont(Font.BOLD));
         configureFooterLabel(filterSnrLabel, FlashTheme.mono(11f).deriveFont(Font.BOLD));
         configureFooterLabel(filterBgSigmaLabel, FlashTheme.mono(10f));
+        filterChipLabel.setAlignmentX(CENTER_ALIGNMENT);
         filterSnrLabel.setAlignmentX(CENTER_ALIGNMENT);
         filterBgSigmaLabel.setAlignmentX(CENTER_ALIGNMENT);
         segmentationFooterPanel.add(Box.createHorizontalGlue());
@@ -172,6 +175,7 @@ public final class VariationCellPanel extends JPanel {
         segmentationFooterPanel.add(Box.createHorizontalStrut(12));
         segmentationFooterPanel.add(iouLabel);
         segmentationFooterPanel.add(Box.createHorizontalGlue());
+        filterFooterPanel.add(filterChipLabel);
         filterFooterPanel.add(filterSnrLabel);
         filterFooterPanel.add(filterBgSigmaLabel);
         footerPanel.add(segmentationFooterPanel, "segmentation");
@@ -211,6 +215,8 @@ public final class VariationCellPanel extends JPanel {
         iouToNeighbours = Double.NaN;
         filterSnr = Double.NaN;
         filterBgSigma = Double.NaN;
+        filterChipLabel.setText("");
+        filterChipLabel.setVisible(false);
         setDisplayedPreviewImage(null);
         setStateText(state == null || state.trim().isEmpty() ? "pending" : state,
                 FOOTER_COLOR);
@@ -273,6 +279,10 @@ public final class VariationCellPanel extends JPanel {
         acceptEnabled = true;
         filterSnr = result.snr();
         filterBgSigma = result.bgSigma();
+        SlotSubstitutionCombo substitution = SlotSubstitutionCombo.from(result.combo());
+        String chip = substitution == null ? "" : substitution.displayLabel();
+        filterChipLabel.setText(chip);
+        filterChipLabel.setVisible(chip.length() > 0);
         filterSnrLabel.setText("SNR " + formatOneDecimal(filterSnr));
         filterBgSigmaLabel.setText("bg \u03c3 " + formatInteger(filterBgSigma));
         showFilterFooter();
@@ -303,6 +313,8 @@ public final class VariationCellPanel extends JPanel {
         iouToNeighbours = Double.NaN;
         filterSnr = Double.NaN;
         filterBgSigma = Double.NaN;
+        filterChipLabel.setText("");
+        filterChipLabel.setVisible(false);
         durationMs = -1L;
         setDisplayedPreviewImage(null);
         setStateText(ERROR_BADGE, ERROR_COLOR);
@@ -470,6 +482,13 @@ public final class VariationCellPanel extends JPanel {
 
     String[] footerLinesForTest() {
         if (filterFooterActive) {
+            if (filterChipLabel.isVisible()) {
+                return new String[] {
+                        filterChipLabel.getText(),
+                        filterSnrLabel.getText(),
+                        filterBgSigmaLabel.getText()
+                };
+            }
             return new String[] {
                     filterSnrLabel.getText(),
                     filterBgSigmaLabel.getText()
@@ -480,7 +499,11 @@ public final class VariationCellPanel extends JPanel {
 
     String badgeText() {
         if (filterFooterActive) {
-            return filterSnrLabel.getText() + " " + filterBgSigmaLabel.getText();
+            String prefix = filterChipLabel.isVisible()
+                    ? filterChipLabel.getText() + " "
+                    : "";
+            return prefix + filterSnrLabel.getText() + " "
+                    + filterBgSigmaLabel.getText();
         }
         StringBuilder out = new StringBuilder(countLabel.getText());
         if (deltaLabel.isVisible() && deltaLabel.getText().length() > 0) {
@@ -790,6 +813,9 @@ public final class VariationCellPanel extends JPanel {
             return;
         }
         if (filterFooterActive) {
+            if (filterChipLabel.isVisible()) {
+                sb.append("<br>").append(html(filterChipLabel.getText()));
+            }
             sb.append("<br>").append(html(filterSnrLabel.getText()));
             sb.append("<br>").append(html(filterBgSigmaLabel.getText()));
             if (durationMs >= 0L) {
@@ -835,6 +861,7 @@ public final class VariationCellPanel extends JPanel {
         countLabel.setToolTipText(text);
         deltaLabel.setToolTipText(text);
         iouLabel.setToolTipText(text);
+        filterChipLabel.setToolTipText(text);
         filterSnrLabel.setToolTipText(text);
         filterBgSigmaLabel.setToolTipText(text);
     }

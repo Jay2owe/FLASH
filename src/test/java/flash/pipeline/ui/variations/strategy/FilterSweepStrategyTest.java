@@ -9,6 +9,7 @@ import flash.pipeline.ui.variations.ParameterCombo;
 import flash.pipeline.ui.variations.ParameterKey;
 import flash.pipeline.ui.variations.ParameterSweep;
 import flash.pipeline.ui.variations.ParameterValueList;
+import flash.pipeline.ui.variations.SlotSubstitutionKey;
 import flash.pipeline.ui.variations.VariationResult;
 
 import ij.ImagePlus;
@@ -108,6 +109,24 @@ public class FilterSweepStrategyTest {
                         optionValue(rendered, "sigma"),
                         optionValue(rendered, "rolling")
                 });
+    }
+
+    @Test
+    public void renderMacroForComboCanSubstituteFocusedSlot() {
+        Map<ParameterKey, Object> values = new LinkedHashMap<ParameterKey, Object>();
+        values.put(SlotSubstitutionKey.filterAxis(0, "SMOOTHING"), "Median");
+        values.put(SlotSubstitutionKey.scaleAxis(0, "SMOOTHING"), "large");
+        FilterMacroEditorModel.MacroDefinition macro = FilterMacroEditorModel.parse(
+                "run(\"Gaussian Blur...\", \"sigma=1 stack\");\n"
+                        + "run(\"Subtract Background...\", \"rolling=4 stack\");\n");
+        FilterSweepStrategy strategy = new FilterSweepStrategy(macro,
+                new SyntheticPreviewAdapter(), sourceImage(), null);
+
+        String rendered = strategy.renderMacroForCombo(new ParameterCombo(values));
+
+        assertFalse(rendered.contains("Gaussian Blur"));
+        assertEquals("8", optionValue(rendered, "radius"));
+        assertEquals("4", optionValue(rendered, "rolling"));
     }
 
     private static ImagePlus sourceImage() {

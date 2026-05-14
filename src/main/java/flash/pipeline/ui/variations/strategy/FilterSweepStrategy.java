@@ -1,11 +1,15 @@
 package flash.pipeline.ui.variations.strategy;
 
 import flash.pipeline.image.FilterMacroEditorModel;
+import flash.pipeline.image.FilterMacroParser.OpType;
+import flash.pipeline.image.dag.DagToIjmEmitter;
 import flash.pipeline.ui.config.FilterParameterStage;
+import flash.pipeline.ui.variations.CanonicalScale;
 import flash.pipeline.ui.variations.FilterParameterId;
 import flash.pipeline.ui.variations.ParameterCombo;
 import flash.pipeline.ui.variations.ParameterKey;
 import flash.pipeline.ui.variations.ParameterSweep;
+import flash.pipeline.ui.variations.SlotSubstitutionCombo;
 import flash.pipeline.ui.variations.VariationCache;
 import flash.pipeline.ui.variations.VariationResult;
 import flash.pipeline.ui.variations.VariationStrategy;
@@ -96,6 +100,10 @@ public final class FilterSweepStrategy implements VariationStrategy {
     }
 
     public String renderMacroForCombo(ParameterCombo combo) {
+        SlotSubstitutionCombo substitution = SlotSubstitutionCombo.from(combo);
+        if (substitution != null) {
+            return renderMacroForSubstitution(substitution);
+        }
         FilterMacroEditorModel.MacroDefinition macro =
                 FilterMacroEditorModel.parse(baseMacro.render());
         for (Map.Entry<ParameterKey, Object> entry : combo.values().entrySet()) {
@@ -108,6 +116,16 @@ public final class FilterSweepStrategy implements VariationStrategy {
             setParameterValue(macro, id, entry.getValue());
         }
         String rendered = macro.render();
+        return macroPostProcessor == null
+                ? rendered
+                : macroPostProcessor.apply(rendered);
+    }
+
+    private String renderMacroForSubstitution(SlotSubstitutionCombo combo) {
+        String rendered = replaceStep(baseMacro.render(),
+                combo.stepIndex(),
+                combo.candidateType(),
+                combo.scaleValue());
         return macroPostProcessor == null
                 ? rendered
                 : macroPostProcessor.apply(rendered);
@@ -190,6 +208,88 @@ public final class FilterSweepStrategy implements VariationStrategy {
         FilterMacroEditorModel.Parameter parameter =
                 entry.parameters.get(id.parameterIndex());
         parameter.setValue(String.valueOf(value));
+    }
+
+    private String replaceStep(String macroContent,
+                               int stepIndex,
+                               OpType candidateType,
+                               CanonicalScale.ScaleValue scaleValue) {
+        int lineIndex = lineIndexForStep(baseMacro, stepIndex);
+        String normalized = macroContent == null ? "" : macroContent
+                .replace("\r\n", "\n")
+                .replace('\r', '\n');
+        String[] lines = normalized.split("\n", -1);
+        if (lineIndex < 0 || lineIndex >= lines.length) {
+            throw new IllegalArgumentException("Filter step line is out of bounds: "
+                    + stepIndex);
+        }
+        lines[lineIndex] = renderRunLine(candidateType, scaleValue);
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < lines.length; i++) {
+            if (i > 0) {
+                out.append('\n');
+            }
+            out.append(lines[i]);
+        }
+        return out.toString();
+    }
+
+    private static int lineIndexForStep(FilterMacroEditorModel.MacroDefinition macro,
+                                        int stepIndex) {
+        if (macro == null) {
+            throw new IllegalArgumentException("baseMacro must not be null");
+        }
+        int current = 0;
+        List<FilterMacroEditorModel.Section> sections = macro.getSections();
+        for (int i = 0; i < sections.size(); i++) {
+            FilterMacroEditorModel.Section section = sections.get(i);
+            for (int j = 0; j < section.entries.size(); j++) {
+                FilterMacroEditorModel.Entry entry = section.entries.get(j);
+                if (current == stepIndex) {
+                    return entry.lineIndex;
+                }
+                current++;
+            }
+        }
+        throw new IllegalArgumentException("Filter step index is out of bounds: "
+                + stepIndex);
+    }
+
+    private static String renderRunLine(OpType type,
+                                        CanonicalScale.ScaleValue scaleValue) {
+        String command = DagToIjmEmitter.commandFor(type);
+        if (command == null || command.trim().isEmpty()) {
+            throw new IllegalArgumentException("Unsupported substitution filter: "
+                    + type);
+        }
+        String args = argsFor(type, scaleValue);
+        if (args.trim().isEmpty()) {
+            return "run(\"" + escape(command) + "\");";
+        }
+        return "run(\"" + escape(command) + "...\", \"" + escape(args) + "\");";
+    }
+
+    private static String argsFor(OpType type,
+                                  CanonicalScale.ScaleValue scaleValue) {
+        CanonicalScale.ScaleValue safeValue = scaleValue == null
+                ? CanonicalScale.ScaleValue.none()
+                : scaleValue;
+        if (safeValue.isNone()) {
+            return "";
+        }
+        if (type == OpType.AUTO_LOCAL_THRESHOLD) {
+            return "method=Bernsen radius="
+                    + CanonicalScale.format(safeValue.value())
+                    + " parameter_1=0 parameter_2=0 white stack";
+        }
+        return safeValue.paramKey()
+                + "="
+                + CanonicalScale.format(safeValue.value())
+                + " stack";
+    }
+
+    private static String escape(String text) {
+        return text == null ? "" : text.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
     private ImagePlus copyImage(ImagePlus source) {

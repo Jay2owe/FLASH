@@ -442,6 +442,9 @@ public final class VariationGridPanel extends JPanel implements Scrollable {
             // facet chips instead of top/left spatial gutters.
             return ((ParameterId) key).orderable();
         }
+        if (key instanceof SlotSubstitutionKey) {
+            return ((SlotSubstitutionKey) key).orderable();
+        }
         return key != null && key.valueKind() == ParameterKey.ValueKind.NUMBER;
     }
 

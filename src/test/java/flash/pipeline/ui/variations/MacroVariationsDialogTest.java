@@ -48,9 +48,9 @@ public class MacroVariationsDialogTest {
                             dialog.modeForTest());
                     assertTrue(dialog.paramsButtonForTest().isEnabled());
                     assertTrue(dialog.paramsButtonForTest().isSelected());
-                    assertFalse(dialog.stepsButtonForTest().isEnabled());
+                    assertTrue(dialog.stepsButtonForTest().isEnabled());
                     assertFalse(dialog.presetsButtonForTest().isEnabled());
-                    assertEquals("Coming soon",
+                    assertEquals("Try native filter alternatives at one chain step",
                             dialog.stepsButtonForTest().getToolTipText());
                     assertEquals("Coming soon",
                             dialog.presetsButtonForTest().getToolTipText());

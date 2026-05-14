@@ -1,12 +1,17 @@
 package flash.pipeline.ui.variations;
 
 import flash.pipeline.image.FilterMacroEditorModel;
+import flash.pipeline.image.FilterMacroParser;
+import flash.pipeline.image.FilterMacroParser.OpType;
 import flash.pipeline.image.dag.DagIR;
 import flash.pipeline.image.dag.DagLine;
 import flash.pipeline.image.dag.DagNode;
 import flash.pipeline.image.dag.DagToIjmEmitter;
 import flash.pipeline.image.dag.IjmToDagLoader;
 import flash.pipeline.ui.PipelineDialog;
+import flash.pipeline.ui.sandbox.FilterAlternatives;
+import flash.pipeline.ui.sandbox.FilterAlternatives.Alternative;
+import flash.pipeline.ui.sandbox.FilterAlternatives.SlotRole;
 import flash.pipeline.ui.variations.analysis.HistogramShapeStability;
 import flash.pipeline.ui.variations.strategy.FilterSweepStrategy;
 
@@ -38,9 +43,11 @@ import java.awt.Window;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -131,12 +138,42 @@ public final class MacroVariationsDialog extends PipelineDialog {
     }
 
     void setMode(Mode mode) {
-        if (mode != Mode.PARAMS) {
-            paramsButton.setSelected(true);
+        Mode requested = mode == null ? Mode.PARAMS : mode;
+        if (requested == Mode.PRESETS) {
+            presetsButton.setSelected(false);
+            modeButtonFor(this.mode).setSelected(true);
             return;
         }
-        this.mode = Mode.PARAMS;
-        paramsButton.setSelected(true);
+        if (this.mode == requested) {
+            modeButtonFor(requested).setSelected(true);
+            if (requested == Mode.STEPS && chainRibbon.focusedStepIndex() < 0) {
+                defaultFocusFirstStepsSlot();
+            }
+            return;
+        }
+        this.mode = requested;
+        paramsButton.setSelected(requested == Mode.PARAMS);
+        stepsButton.setSelected(requested == Mode.STEPS);
+        presetsButton.setSelected(false);
+        chainRibbon.setStepsMode(requested == Mode.STEPS);
+        if (requested == Mode.STEPS) {
+            configureStepsFocusability();
+            if (!defaultFocusFirstStepsSlot()) {
+                refreshCellEstimate();
+            }
+        } else {
+            refreshCellEstimate();
+        }
+    }
+
+    private JToggleButton modeButtonFor(Mode value) {
+        if (value == Mode.STEPS) {
+            return stepsButton;
+        }
+        if (value == Mode.PRESETS) {
+            return presetsButton;
+        }
+        return paramsButton;
     }
 
     Mode modeForTest() {
@@ -306,10 +343,12 @@ public final class MacroVariationsDialog extends PipelineDialog {
     private void startOnEdt() {
         cancelExecutor();
         try {
-            currentSweep = withChainCacheNamespace(editor.currentSweep());
+            currentSweep = withChainCacheNamespace(currentSweepForMode());
         } catch (RuntimeException e) {
             showMessage(e.getMessage());
-            setStatusTextNow("Choose at least one value for each selected parameter.");
+            setStatusTextNow(mode == Mode.STEPS
+                    ? safe(e.getMessage())
+                    : "Choose at least one value for each selected parameter.");
             return;
         }
         ImagePlus source = context.sourceImage();
@@ -374,7 +413,9 @@ public final class MacroVariationsDialog extends PipelineDialog {
         gridPanel.setCells(cells);
         setStatusTextNow(progressStatus());
         setSuggestionText("Most stable: pending");
-        setStrategyText("Using Filter sweep (" + combos.size() + " cells)");
+        setStrategyText(mode == Mode.STEPS
+                ? "Using Filter substitution (" + combos.size() + " cells)"
+                : "Using Filter sweep (" + combos.size() + " cells)");
 
         executor = new VariationExecutor(currentSweep,
                 strategy,
@@ -446,9 +487,9 @@ public final class MacroVariationsDialog extends PipelineDialog {
         group.add(stepsButton);
         group.add(presetsButton);
         paramsButton.setSelected(true);
-        stepsButton.setEnabled(false);
+        stepsButton.setEnabled(true);
         presetsButton.setEnabled(false);
-        stepsButton.setToolTipText("Coming soon");
+        stepsButton.setToolTipText("Try native filter alternatives at one chain step");
         presetsButton.setToolTipText("Coming soon");
 
         paramsButton.addActionListener(new ActionListener() {
@@ -495,6 +536,10 @@ public final class MacroVariationsDialog extends PipelineDialog {
 
     private void handleChainStateChanged(int stepIndex,
                                          ChainRibbon.StepState newState) {
+        if (mode == Mode.STEPS) {
+            handleStepsChainStateChanged(stepIndex, newState);
+            return;
+        }
         Set<Integer> swept = chainRibbon.stepIndexesInState(
                 ChainRibbon.StepState.SWEPT);
         Set<Integer> disabled = chainRibbon.disabledStepIndexes();
@@ -506,6 +551,201 @@ public final class MacroVariationsDialog extends PipelineDialog {
             return;
         }
         start();
+    }
+
+    private void handleStepsChainStateChanged(int stepIndex,
+                                              ChainRibbon.StepState newState) {
+        configureStepsFocusability();
+        Set<Integer> disabled = chainRibbon.disabledStepIndexes();
+        if (!disabled.isEmpty() && !isLinearMacro(context.baseMacro().render())) {
+            setStatusTextNow("Open the visual builder to vary branched macros.");
+            showMessage("Open the visual builder to vary branched macros.");
+            return;
+        }
+        if (chainRibbon.focusedStepIndex() < 0) {
+            if (!defaultFocusFirstStepsSlot()) {
+                refreshCellEstimate();
+            }
+            return;
+        }
+        refreshCellEstimate();
+        start();
+    }
+
+    private ParameterSweep currentSweepForMode() {
+        if (mode == Mode.STEPS) {
+            int focused = chainRibbon.focusedStepIndex();
+            if (focused < 0) {
+                throw new IllegalStateException("Choose a focusable chain step.");
+            }
+            return buildStepsSubstitutionSweep(context.baseMacro(),
+                    currentCropSpec,
+                    context.channelName(),
+                    context.sourceImageHash(),
+                    context.cacheNamespace() + ":steps:" + focused,
+                    focused);
+        }
+        return editor.currentSweep();
+    }
+
+    private void configureStepsFocusability() {
+        StepFocusModel focusModel = stepsFocusModel(context.baseMacro(),
+                chainRibbon.disabledStepIndexes());
+        chainRibbon.setFocusableStepIndexes(focusModel.focusable,
+                focusModel.reasons);
+    }
+
+    private boolean defaultFocusFirstStepsSlot() {
+        configureStepsFocusability();
+        StepFocusModel focusModel = stepsFocusModel(context.baseMacro(),
+                chainRibbon.disabledStepIndexes());
+        if (focusModel.focusable.isEmpty()) {
+            setStatusTextNow("No native alternatives available for Steps mode.");
+            return false;
+        }
+        int focused = chainRibbon.focusedStepIndex();
+        if (focusModel.focusable.contains(Integer.valueOf(focused))) {
+            start();
+            return true;
+        }
+        chainRibbon.focusStep(focusModel.focusable.iterator().next().intValue());
+        return true;
+    }
+
+    static ParameterSweep buildStepsSubstitutionSweepForTest(
+            FilterMacroEditorModel.MacroDefinition macro,
+            CropSpec cropSpec,
+            String channelName,
+            String sourceImageHash,
+            String cacheNamespace,
+            int stepIndex) {
+        return buildStepsSubstitutionSweep(macro, cropSpec, channelName,
+                sourceImageHash, cacheNamespace, stepIndex);
+    }
+
+    private static ParameterSweep buildStepsSubstitutionSweep(
+            FilterMacroEditorModel.MacroDefinition macro,
+            CropSpec cropSpec,
+            String channelName,
+            String sourceImageHash,
+            String cacheNamespace,
+            int stepIndex) {
+        OpType focusedType = opTypeForStep(macro, stepIndex);
+        SlotRole role = FilterAlternatives.slotRoleFor(focusedType);
+        if (role == null || !FilterAlternatives.hasUsefulAlternatives(role)) {
+            throw new IllegalStateException("No native alternatives available");
+        }
+
+        List<Alternative> alternatives = FilterAlternatives.alternativesFor(role);
+        List<String> filterLabels = new ArrayList<String>();
+        for (int i = 0; i < alternatives.size(); i++) {
+            filterLabels.add(alternatives.get(i).label());
+        }
+
+        List<String> scaleLabels = scaleLabelsFor(alternatives);
+        LinkedHashMap<ParameterKey, ParameterValueList> values =
+                new LinkedHashMap<ParameterKey, ParameterValueList>();
+        values.put(SlotSubstitutionKey.filterAxis(stepIndex, role.name()),
+                new ParameterValueList(filterLabels));
+        values.put(SlotSubstitutionKey.scaleAxis(stepIndex, role.name()),
+                new ParameterValueList(scaleLabels));
+        return new ParameterSweep(ParameterSweep.Method.FILTER,
+                values,
+                cropSpec,
+                channelName,
+                sourceImageHash,
+                cacheNamespace);
+    }
+
+    private static StepFocusModel stepsFocusModel(
+            FilterMacroEditorModel.MacroDefinition macro,
+            Set<Integer> disabledStepIndexes) {
+        StepFocusModel model = new StepFocusModel();
+        List<OpType> types = opTypesForSteps(macro);
+        for (int i = 0; i < types.size(); i++) {
+            if (disabledStepIndexes != null
+                    && disabledStepIndexes.contains(Integer.valueOf(i))) {
+                model.reasons.put(Integer.valueOf(i), "Step is bypassed or off");
+                continue;
+            }
+            SlotRole role = FilterAlternatives.slotRoleFor(types.get(i));
+            if (role == null) {
+                model.reasons.put(Integer.valueOf(i),
+                        "No native alternatives available");
+                continue;
+            }
+            if (!FilterAlternatives.hasUsefulAlternatives(role)) {
+                model.reasons.put(Integer.valueOf(i),
+                        "No native alternatives available");
+                continue;
+            }
+            model.focusable.add(Integer.valueOf(i));
+        }
+        return model;
+    }
+
+    private static List<String> scaleLabelsFor(List<Alternative> alternatives) {
+        boolean anyScaled = false;
+        if (alternatives != null) {
+            for (int i = 0; i < alternatives.size(); i++) {
+                Alternative alternative = alternatives.get(i);
+                if (alternative != null
+                        && !CanonicalScale.isParameterless(alternative.type())) {
+                    anyScaled = true;
+                    break;
+                }
+            }
+        }
+        if (!anyScaled) {
+            return Collections.singletonList(SlotSubstitutionCombo.DEFAULT_SCALE_LABEL);
+        }
+        return Arrays.asList(CanonicalScale.SMALL.label(),
+                CanonicalScale.MEDIUM.label(),
+                CanonicalScale.LARGE.label());
+    }
+
+    private static OpType opTypeForStep(FilterMacroEditorModel.MacroDefinition macro,
+                                        int stepIndex) {
+        List<OpType> types = opTypesForSteps(macro);
+        if (stepIndex < 0 || stepIndex >= types.size()) {
+            throw new IllegalArgumentException("Filter step index is out of bounds: "
+                    + stepIndex);
+        }
+        return types.get(stepIndex);
+    }
+
+    private static List<OpType> opTypesForSteps(
+            FilterMacroEditorModel.MacroDefinition macro) {
+        List<OpType> out = new ArrayList<OpType>();
+        if (macro == null) {
+            return out;
+        }
+        String[] lines = macro.render()
+                .replace("\r\n", "\n")
+                .replace('\r', '\n')
+                .split("\n", -1);
+        List<FilterMacroEditorModel.Section> sections = macro.getSections();
+        for (int i = 0; i < sections.size(); i++) {
+            FilterMacroEditorModel.Section section = sections.get(i);
+            for (int j = 0; j < section.entries.size(); j++) {
+                FilterMacroEditorModel.Entry entry = section.entries.get(j);
+                OpType type = OpType.UNKNOWN;
+                if (entry.lineIndex >= 0 && entry.lineIndex < lines.length) {
+                    List<FilterMacroParser.Op> ops =
+                            FilterMacroParser.parseString(lines[entry.lineIndex]);
+                    if (!ops.isEmpty() && ops.get(0) != null) {
+                        type = ops.get(0).type;
+                    }
+                }
+                out.add(type);
+            }
+        }
+        return out;
+    }
+
+    private static final class StepFocusModel {
+        final Set<Integer> focusable = new LinkedHashSet<Integer>();
+        final Map<Integer, String> reasons = new LinkedHashMap<Integer, String>();
     }
 
     private FilterSweepStrategy.MacroPostProcessor chainMacroPostProcessor() {
@@ -741,7 +981,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
 
     private void refreshCellEstimate() {
         try {
-            ParameterSweep sweep = editor.currentSweep();
+            ParameterSweep sweep = currentSweepForMode();
             cellsLabel.setText("Cells: " + sweep.cellCount());
             if (!isExecutorActive()) {
                 setStatusTextNow(sweep.cellCount() + " cells, crop "
@@ -752,7 +992,9 @@ public final class MacroVariationsDialog extends PipelineDialog {
         } catch (RuntimeException e) {
             cellsLabel.setText("Cells: ?");
             if (!isExecutorActive()) {
-                setStatusTextNow("Choose at least one value for each selected parameter.");
+                setStatusTextNow(mode == Mode.STEPS
+                        ? safe(e.getMessage())
+                        : "Choose at least one value for each selected parameter.");
                 setStrategyText(" ");
             }
         }
