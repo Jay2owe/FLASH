@@ -1,6 +1,9 @@
 package flash.pipeline.ui.variations;
 
 import flash.pipeline.ui.PipelineDialog;
+import flash.pipeline.ui.preview.ComparisonPreviewDialog;
+import flash.pipeline.ui.preview.PreviewDisplaySettings;
+import flash.pipeline.ui.preview.VariationComparisonPreview;
 import flash.pipeline.ui.variations.analysis.IouStability;
 import flash.pipeline.ui.variations.analysis.KneeDetector;
 import flash.pipeline.ui.variations.state.VariationState;
@@ -12,14 +15,19 @@ import ij.ImagePlus;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
+import javax.swing.AbstractAction;
 import javax.swing.ButtonGroup;
 import javax.swing.JButton;
+import javax.swing.JComponent;
+import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JRadioButton;
+import javax.swing.JRootPane;
 import javax.swing.JScrollPane;
 import javax.swing.JSlider;
+import javax.swing.KeyStroke;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
@@ -45,6 +53,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.concurrent.TimeUnit;
+import java.awt.event.KeyEvent;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
@@ -71,12 +80,12 @@ public final class VariationsDialog extends PipelineDialog {
     private final List<VariationCellPanel> cells = new ArrayList<VariationCellPanel>();
     private final List<VariationResult> resultsByCell =
             new ArrayList<VariationResult>();
+    private final VariationComparisonSelection comparisonSelection;
 
     private VariationExecutor executor;
     private ParameterSweep currentSweep;
     private VariationState resumeState;
-    private ParameterCombo pendingCompareCombo;
-    private VariationCellPanel pendingCompareCell;
+    private ComparisonPreviewDialog comparisonDialog;
     private CropSpec currentCropSpec = CropSpec.centre256();
     private boolean suppressCropEvents;
     private int completedCount;
@@ -95,8 +104,21 @@ public final class VariationsDialog extends PipelineDialog {
         this.stateStore = new VariationStateStore(context.binFolder() == null
                 ? null
                 : context.binFolder().toPath());
+        this.comparisonSelection = new VariationComparisonSelection(
+                new Consumer<String>() {
+                    @Override public void accept(String status) {
+                        statusLabel.setText(status);
+                    }
+                },
+                new VariationComparisonSelection.Opener() {
+                    @Override public void openComparison(VariationCellPanel left,
+                                                         VariationCellPanel right) {
+                        VariationsDialog.this.openComparison(left, right);
+                    }
+                });
         setDefaultButtonsVisible(false);
         buildUi();
+        installCompareCancelKey();
         installWindowCleanup();
         refreshCellEstimate();
         offerResumeIfAvailable();
@@ -120,6 +142,10 @@ public final class VariationsDialog extends PipelineDialog {
 
     public void dispose() {
         cancelExecutor();
+        if (comparisonDialog != null) {
+            comparisonDialog.dispose();
+            comparisonDialog = null;
+        }
         Window window = getWindow();
         if (window != null) {
             window.dispose();
@@ -331,6 +357,25 @@ public final class VariationsDialog extends PipelineDialog {
                 cancelExecutor();
             }
         });
+    }
+
+    private void installCompareCancelKey() {
+        Window window = getWindow();
+        if (!(window instanceof JDialog)) {
+            return;
+        }
+        JRootPane root = ((JDialog) window).getRootPane();
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(
+                KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0),
+                "cancelVariationComparisonSelection");
+        root.getActionMap().put("cancelVariationComparisonSelection",
+                new AbstractAction() {
+                    @Override public void actionPerformed(ActionEvent e) {
+                        if (comparisonSelection.hasPendingSelection()) {
+                            comparisonSelection.cancelSelection();
+                        }
+                    }
+                });
     }
 
     private void offerResumeIfAvailable() {
@@ -689,27 +734,36 @@ public final class VariationsDialog extends PipelineDialog {
     }
 
     private void handleCompare(ParameterCombo combo, VariationCellPanel cell) {
-        if (pendingCompareCombo == null) {
-            pendingCompareCombo = combo;
-            pendingCompareCell = cell;
-            if (cell != null) {
-                cell.setSelectedForCompare(true);
-            }
-            System.out.println("Compare first: " + combo);
+        comparisonSelection.handleShiftClick(cell);
+    }
+
+    private void openComparison(VariationCellPanel left, VariationCellPanel right) {
+        if (left == null || right == null
+                || left.cachedLabel() == null || right.cachedLabel() == null) {
+            statusLabel.setText("Wait for both tiles to finish rendering.");
             return;
         }
-        System.out.println("Compare pair: " + pendingCompareCombo + " <> " + combo);
-        if (pendingCompareCell != null) {
-            pendingCompareCell.setSelectedForCompare(false);
+        if (comparisonDialog == null) {
+            comparisonDialog = new ComparisonPreviewDialog(
+                    SwingUtilities.getWindowAncestor(gridPanel));
         }
-        pendingCompareCombo = null;
-        pendingCompareCell = null;
-        if (cell != null) {
-            cell.setSelectedForCompare(false);
-        }
+        PreviewDisplaySettings settings =
+                PreviewDisplaySettings.defaultFor(context.channelName());
+        VariationComparisonPreview.showVariationComparison(
+                comparisonDialog,
+                left.cachedLabel(),
+                "Variation A " + comboSummary(left.combo()),
+                right.cachedLabel(),
+                "Variation B " + comboSummary(right.combo()),
+                croppedForComparison(context.rawSource()),
+                settings,
+                croppedForComparison(context.filteredSource()),
+                settings,
+                zSlider.getValue());
     }
 
     private void acceptAndClose(ParameterCombo combo) {
+        comparisonSelection.clearForAccept();
         if (onAccept != null) {
             onAccept.accept(combo);
         }
@@ -790,6 +844,21 @@ public final class VariationsDialog extends PipelineDialog {
         return currentCropSpec;
     }
 
+    private ImagePlus croppedForComparison(ImagePlus source) {
+        if (source == null) {
+            return null;
+        }
+        CropSpec spec = currentSweep == null ? currentCropSpec : currentSweep.cropSpec();
+        if (spec == null) {
+            return source;
+        }
+        try {
+            return spec.apply(source);
+        } catch (RuntimeException e) {
+            return source;
+        }
+    }
+
     private void handleCropSelection(JRadioButton selected) {
         if (suppressCropEvents) {
             return;
@@ -859,5 +928,9 @@ public final class VariationsDialog extends PipelineDialog {
 
     private static String safe(String value) {
         return value == null ? "" : value;
+    }
+
+    private static String comboSummary(ParameterCombo combo) {
+        return combo == null ? "" : combo.toCanonicalJson();
     }
 }

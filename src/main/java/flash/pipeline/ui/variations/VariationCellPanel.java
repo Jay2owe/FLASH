@@ -30,6 +30,7 @@ public final class VariationCellPanel extends JPanel {
     private static final Color HOVER_BORDER = new Color(190, 64, 64);
     private static final Color KNEE_BORDER = new Color(58, 150, 86);
     private static final Color STABILITY_BORDER = new Color(210, 160, 30);
+    private static final Color COMPARE_BORDER = new Color(42, 105, 210);
 
     public enum BorderHint {
         NONE,
@@ -194,6 +195,18 @@ public final class VariationCellPanel extends JPanel {
         refreshBorder();
     }
 
+    ImagePlus cachedLabel() {
+        return cachedLabel;
+    }
+
+    boolean hasCachedLabel() {
+        return cachedLabel != null;
+    }
+
+    boolean isSelectedForCompareForTest() {
+        return selectedForCompare;
+    }
+
     String footerTextForTest() {
         return badgeText();
     }
@@ -258,11 +271,14 @@ public final class VariationCellPanel extends JPanel {
             thickness = 3;
         }
         if (selectedForCompare) {
-            thickness = 3;
+            color = COMPARE_BORDER;
+            thickness = 4;
         }
         if (hover) {
-            color = HOVER_BORDER;
-            thickness = 2;
+            if (!selectedForCompare) {
+                color = HOVER_BORDER;
+                thickness = 2;
+            }
         }
         Border outer = BorderFactory.createLineBorder(color, thickness);
         Border inner = BorderFactory.createEmptyBorder(5, 5, 5, 5);
