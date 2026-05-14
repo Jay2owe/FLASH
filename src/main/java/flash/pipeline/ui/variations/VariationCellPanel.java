@@ -51,6 +51,11 @@ public final class VariationCellPanel extends JPanel {
     private static final Color FOOTER_COLOR = new Color(0xC0, 0xC5, 0xCA);
     private static final Color ERROR_COLOR = new Color(0xE6, 0x9F, 0x00);
     private static final Color RIBBON_RIM = new Color(0, 0, 0, 170);
+    private static final Color DOWNSTREAM_RIBBON = new Color(0x56, 0xB4, 0xE9);
+    private static final Color DOWNSTREAM_HELP = new Color(0xF0, 0xE4, 0x42);
+    private static final Color DOWNSTREAM_HURT = new Color(0xE6, 0x9F, 0x00);
+    private static final Color DOWNSTREAM_NEUTRAL = new Color(0x7A, 0x82, 0x89);
+    private static final Color CHIP_TEXT = new Color(0x22, 0x22, 0x22);
     private static final int CARD_RADIUS = 8;
     private static final int UNKNOWN_DELTA = Integer.MIN_VALUE;
     private static final int PEEK_DELAY_MS = 120;
@@ -83,6 +88,8 @@ public final class VariationCellPanel extends JPanel {
     private final JLabel deltaLabel = new JLabel("", SwingConstants.CENTER);
     private final JLabel iouLabel = new JLabel("", SwingConstants.CENTER);
     private final JLabel filterChipLabel = new JLabel("", SwingConstants.CENTER);
+    private final JLabel filterDownstreamDeltaLabel =
+            new JLabel("", SwingConstants.CENTER);
     private final JLabel filterSnrLabel = new JLabel("", SwingConstants.CENTER);
     private final JLabel filterBgSigmaLabel = new JLabel("", SwingConstants.CENTER);
     private final Timer haloTimer;
@@ -103,8 +110,10 @@ public final class VariationCellPanel extends JPanel {
     private double iouToNeighbours = Double.NaN;
     private double filterSnr = Double.NaN;
     private double filterBgSigma = Double.NaN;
+    private int downstreamDeltaN = UNKNOWN_DELTA;
     private String errorText = "";
     private String ribbonLabelOverride;
+    private String downstreamRibbonLabel;
     private boolean filterFooterActive;
     private boolean hover;
     private boolean kneeWinner;
@@ -163,9 +172,15 @@ public final class VariationCellPanel extends JPanel {
         configureFooterLabel(deltaLabel, FlashTheme.mono(11f));
         configureFooterLabel(iouLabel, FlashTheme.mono(11f));
         configureFooterLabel(filterChipLabel, FlashTheme.mono(10f).deriveFont(Font.BOLD));
+        configureFooterLabel(filterDownstreamDeltaLabel,
+                FlashTheme.mono(10f).deriveFont(Font.BOLD));
         configureFooterLabel(filterSnrLabel, FlashTheme.mono(11f).deriveFont(Font.BOLD));
         configureFooterLabel(filterBgSigmaLabel, FlashTheme.mono(10f));
         filterChipLabel.setAlignmentX(CENTER_ALIGNMENT);
+        filterDownstreamDeltaLabel.setAlignmentX(CENTER_ALIGNMENT);
+        filterDownstreamDeltaLabel.setBorder(BorderFactory.createEmptyBorder(1, 6, 1, 6));
+        filterDownstreamDeltaLabel.setOpaque(true);
+        filterDownstreamDeltaLabel.setVisible(false);
         filterSnrLabel.setAlignmentX(CENTER_ALIGNMENT);
         filterBgSigmaLabel.setAlignmentX(CENTER_ALIGNMENT);
         segmentationFooterPanel.add(Box.createHorizontalGlue());
@@ -176,6 +191,7 @@ public final class VariationCellPanel extends JPanel {
         segmentationFooterPanel.add(iouLabel);
         segmentationFooterPanel.add(Box.createHorizontalGlue());
         filterFooterPanel.add(filterChipLabel);
+        filterFooterPanel.add(filterDownstreamDeltaLabel);
         filterFooterPanel.add(filterSnrLabel);
         filterFooterPanel.add(filterBgSigmaLabel);
         footerPanel.add(segmentationFooterPanel, "segmentation");
@@ -215,6 +231,7 @@ public final class VariationCellPanel extends JPanel {
         iouToNeighbours = Double.NaN;
         filterSnr = Double.NaN;
         filterBgSigma = Double.NaN;
+        clearDownstreamVerdictState();
         filterChipLabel.setText("");
         filterChipLabel.setVisible(false);
         setDisplayedPreviewImage(null);
@@ -263,6 +280,7 @@ public final class VariationCellPanel extends JPanel {
             return;
         }
         clearRibbonLabelOverride();
+        clearDownstreamVerdictState();
         ImagePlus filtered = result.previewImage() == null
                 ? result.label()
                 : result.previewImage();
@@ -300,6 +318,7 @@ public final class VariationCellPanel extends JPanel {
             return;
         }
         clearRibbonLabelOverride();
+        clearDownstreamVerdictState();
         filteredImage = null;
         invalidateOverlayCache();
         errorState = true;
@@ -334,6 +353,7 @@ public final class VariationCellPanel extends JPanel {
             return;
         }
         clearRibbonLabelOverride();
+        clearDownstreamVerdictState();
         filteredImage = null;
         invalidateOverlayCache();
         this.cachedLabel = label == null ? createPlaceholderLabel() : label;
@@ -345,6 +365,7 @@ public final class VariationCellPanel extends JPanel {
         this.acceptEnabled = true;
         this.filterSnr = Double.NaN;
         this.filterBgSigma = Double.NaN;
+        clearDownstreamVerdictState();
         showSegmentationFooter();
 
         ImagePlus rendered = null;
@@ -394,6 +415,34 @@ public final class VariationCellPanel extends JPanel {
         this.deltaN = UNKNOWN_DELTA;
         refreshFooter();
         refreshTooltip();
+    }
+
+    public void setDownstreamDelta(final int deltaCells) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setDownstreamDelta(deltaCells);
+                }
+            });
+            return;
+        }
+        downstreamDeltaN = deltaCells;
+        refreshDownstreamChip();
+        refreshTooltip();
+    }
+
+    public void clearDownstreamVerdict() {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    clearDownstreamVerdict();
+                }
+            });
+            return;
+        }
+        clearDownstreamVerdictState();
+        refreshTooltip();
+        repaint();
     }
 
     public void setIouToNeighbours(double iouToNeighbours) {
@@ -455,8 +504,19 @@ public final class VariationCellPanel extends JPanel {
 
     public void setRibbonLabel(String label) {
         String safeLabel = label == null ? "" : label.trim();
+        if (safeLabel.toUpperCase(Locale.ROOT).contains("DOWNSTREAM")) {
+            setDownstreamRibbonLabel(safeLabel);
+            return;
+        }
         ribbonLabelOverride = safeLabel.length() == 0 ? null : safeLabel;
         repaint();
+    }
+
+    public void setDownstreamRibbonLabel(String label) {
+        String safeLabel = label == null ? "" : label.trim();
+        downstreamRibbonLabel = safeLabel.length() == 0 ? null : safeLabel;
+        repaint();
+        refreshTooltip();
     }
 
     void setSelectedForCompare(boolean selectedForCompare) {
@@ -483,16 +543,9 @@ public final class VariationCellPanel extends JPanel {
     String[] footerLinesForTest() {
         if (filterFooterActive) {
             if (filterChipLabel.isVisible()) {
-                return new String[] {
-                        filterChipLabel.getText(),
-                        filterSnrLabel.getText(),
-                        filterBgSigmaLabel.getText()
-                };
+                return filterLines(true);
             }
-            return new String[] {
-                    filterSnrLabel.getText(),
-                    filterBgSigmaLabel.getText()
-            };
+            return filterLines(false);
         }
         return new String[] { badgeText() };
     }
@@ -502,7 +555,10 @@ public final class VariationCellPanel extends JPanel {
             String prefix = filterChipLabel.isVisible()
                     ? filterChipLabel.getText() + " "
                     : "";
-            return prefix + filterSnrLabel.getText() + " "
+            String downstream = filterDownstreamDeltaLabel.isVisible()
+                    ? filterDownstreamDeltaLabel.getText() + " "
+                    : "";
+            return prefix + downstream + filterSnrLabel.getText() + " "
                     + filterBgSigmaLabel.getText();
         }
         StringBuilder out = new StringBuilder(countLabel.getText());
@@ -549,6 +605,10 @@ public final class VariationCellPanel extends JPanel {
 
     String ribbonLabelForTest() {
         return ribbonLabelOverride;
+    }
+
+    String downstreamRibbonLabelForTest() {
+        return downstreamRibbonLabel;
     }
 
     void firePeekDelayForTest() {
@@ -650,6 +710,8 @@ public final class VariationCellPanel extends JPanel {
         installMouseHandler(countLabel, listener);
         installMouseHandler(deltaLabel, listener);
         installMouseHandler(iouLabel, listener);
+        installMouseHandler(filterChipLabel, listener);
+        installMouseHandler(filterDownstreamDeltaLabel, listener);
         installMouseHandler(filterSnrLabel, listener);
         installMouseHandler(filterBgSigmaLabel, listener);
     }
@@ -816,6 +878,10 @@ public final class VariationCellPanel extends JPanel {
             if (filterChipLabel.isVisible()) {
                 sb.append("<br>").append(html(filterChipLabel.getText()));
             }
+            if (filterDownstreamDeltaLabel.isVisible()) {
+                sb.append("<br>").append(html(filterDownstreamDeltaLabel.getText()))
+                        .append(" vs no-filter downstream baseline");
+            }
             sb.append("<br>").append(html(filterSnrLabel.getText()));
             sb.append("<br>").append(html(filterBgSigmaLabel.getText()));
             if (durationMs >= 0L) {
@@ -862,6 +928,7 @@ public final class VariationCellPanel extends JPanel {
         deltaLabel.setToolTipText(text);
         iouLabel.setToolTipText(text);
         filterChipLabel.setToolTipText(text);
+        filterDownstreamDeltaLabel.setToolTipText(text);
         filterSnrLabel.setToolTipText(text);
         filterBgSigmaLabel.setToolTipText(text);
     }
@@ -956,9 +1023,13 @@ public final class VariationCellPanel extends JPanel {
             paintRibbon(g, text, KNEE_BORDER, new Color(0x22, 0x22, 0x22),
                     true);
         }
-        if (stabilityWinner) {
+        if (stabilityWinner && downstreamRibbonLabel == null) {
             paintRibbon(g, "STABLE MASKS", STABILITY_BORDER, Color.WHITE,
                     !kneeWinner);
+        }
+        if (downstreamRibbonLabel != null) {
+            paintRibbon(g, downstreamRibbonLabel, DOWNSTREAM_RIBBON, Color.WHITE,
+                    false);
         }
     }
 
@@ -1001,6 +1072,43 @@ public final class VariationCellPanel extends JPanel {
 
     private void clearRibbonLabelOverride() {
         ribbonLabelOverride = null;
+    }
+
+    private void clearDownstreamVerdictState() {
+        downstreamRibbonLabel = null;
+        downstreamDeltaN = UNKNOWN_DELTA;
+        filterDownstreamDeltaLabel.setText("");
+        filterDownstreamDeltaLabel.setVisible(false);
+    }
+
+    private void refreshDownstreamChip() {
+        if (downstreamDeltaN == UNKNOWN_DELTA) {
+            filterDownstreamDeltaLabel.setText("");
+            filterDownstreamDeltaLabel.setVisible(false);
+        } else {
+            filterDownstreamDeltaLabel.setText("delta "
+                    + formatSignedCompact(downstreamDeltaN));
+            filterDownstreamDeltaLabel.setForeground(CHIP_TEXT);
+            filterDownstreamDeltaLabel.setBackground(downstreamDeltaN > 0
+                    ? DOWNSTREAM_HELP
+                    : downstreamDeltaN < 0 ? DOWNSTREAM_HURT : DOWNSTREAM_NEUTRAL);
+            filterDownstreamDeltaLabel.setVisible(true);
+        }
+        footerPanel.revalidate();
+        footerPanel.repaint();
+    }
+
+    private String[] filterLines(boolean hasFilterChip) {
+        java.util.List<String> lines = new java.util.ArrayList<String>();
+        if (hasFilterChip) {
+            lines.add(filterChipLabel.getText());
+        }
+        if (filterDownstreamDeltaLabel.isVisible()) {
+            lines.add(filterDownstreamDeltaLabel.getText());
+        }
+        lines.add(filterSnrLabel.getText());
+        lines.add(filterBgSigmaLabel.getText());
+        return lines.toArray(new String[lines.size()]);
     }
 
     private void startHalo(Color color) {

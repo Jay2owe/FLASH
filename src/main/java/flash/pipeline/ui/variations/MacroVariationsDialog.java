@@ -28,6 +28,7 @@ import javax.swing.JPanel;
 import javax.swing.JRadioButton;
 import javax.swing.JScrollPane;
 import javax.swing.JSlider;
+import javax.swing.SwingWorker;
 import javax.swing.JToggleButton;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
@@ -85,6 +86,9 @@ public final class MacroVariationsDialog extends PipelineDialog {
     private final JToggleButton presetsButton = new JToggleButton("Presets");
     private final JCheckBox otsuOverlayCheckBox =
             new JCheckBox("Show Otsu overlay");
+    private final JCheckBox downstreamVerdictCheckBox =
+            new JCheckBox("Show downstream verdict");
+    private final JButton stopDownstreamButton = new JButton("Stop downstream");
     private final Map<String, VariationCellPanel> cellsByCombo =
             new HashMap<String, VariationCellPanel>();
     private final Map<String, Integer> cellIndexesByCombo =
@@ -92,12 +96,19 @@ public final class MacroVariationsDialog extends PipelineDialog {
     private final List<VariationCellPanel> cells = new ArrayList<VariationCellPanel>();
     private final List<VariationResult> resultsByCell =
             new ArrayList<VariationResult>();
+    private final Map<String, DownstreamVerdict.Verdict> downstreamVerdicts =
+            new HashMap<String, DownstreamVerdict.Verdict>();
+    private final DownstreamSegmenter.Resolution downstreamResolution;
 
     private JButton openLargeMontageButton;
     private JButton useComboButton;
     private JButton runButton;
     private VariationExecutor executor;
+    private SwingWorker<Map<ParameterCombo, DownstreamVerdict.Verdict>, Void>
+            downstreamWorker;
     private ParameterSweep currentSweep;
+    private VariationCache currentRunCache;
+    private ImagePlus currentBaselineCrop;
     private HistogramShapeStrip histogramShapeStrip;
     private Mode mode = Mode.PARAMS;
     private CropSpec currentCropSpec;
@@ -106,6 +117,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
     private VariationCellPanel selectedCell;
     private boolean showOtsuOverlay;
     private boolean suppressCropEvents;
+    private boolean downstreamStartedForCurrentResults;
     private int completedCount;
     private int failedCount;
 
@@ -121,6 +133,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
         this.editor = ParameterSweepEditor.forFilter(context);
         this.chainRibbon = new ChainRibbon(context.baseMacro());
         this.chainEntryLineIndexes = ChainRibbon.entryLineIndexes(context.baseMacro());
+        this.downstreamResolution = DownstreamSegmenter.resolve(context);
         this.editor.setChainStepFilter(Collections.<Integer>emptySet(),
                 Collections.<Integer>emptySet());
         this.currentCropSpec = context.initialCropSpec();
@@ -131,6 +144,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
 
     public void dispose() {
         cancelExecutor();
+        cancelDownstreamWorker();
         Window window = getWindow();
         if (window != null) {
             window.dispose();
@@ -216,6 +230,14 @@ public final class MacroVariationsDialog extends PipelineDialog {
         return otsuOverlayCheckBox;
     }
 
+    JCheckBox downstreamVerdictCheckBoxForTest() {
+        return downstreamVerdictCheckBox;
+    }
+
+    JButton stopDownstreamButtonForTest() {
+        return stopDownstreamButton;
+    }
+
     JLabel chainRibbonLabelForTest() {
         return chainRibbonLabel;
     }
@@ -264,6 +286,18 @@ public final class MacroVariationsDialog extends PipelineDialog {
                 return;
             }
             Thread.sleep(10L);
+        }
+        EventQueue.invokeAndWait(new Runnable() {
+            @Override public void run() {
+            }
+        });
+    }
+
+    void waitForDownstreamDoneForTest(long timeoutMs) throws Exception {
+        SwingWorker<Map<ParameterCombo, DownstreamVerdict.Verdict>, Void> worker =
+                downstreamWorker;
+        if (worker != null) {
+            worker.get(timeoutMs, TimeUnit.MILLISECONDS);
         }
         EventQueue.invokeAndWait(new Runnable() {
             @Override public void run() {
@@ -342,6 +376,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
 
     private void startOnEdt() {
         cancelExecutor();
+        cancelDownstreamWorker();
         try {
             currentSweep = withChainCacheNamespace(currentSweepForMode());
         } catch (RuntimeException e) {
@@ -362,6 +397,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
 
         completedCount = 0;
         failedCount = 0;
+        downstreamStartedForCurrentResults = false;
         selectedCombo = null;
         selectedStrategy = null;
         if (selectedCell != null) {
@@ -369,6 +405,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
             selectedCell = null;
         }
         clearHistogramShapeIndicator();
+        clearDownstreamVerdicts();
         cells.clear();
         cellsByCombo.clear();
         cellIndexesByCombo.clear();
@@ -380,8 +417,10 @@ public final class MacroVariationsDialog extends PipelineDialog {
         openLargeMontageButton.setEnabled(false);
 
         final ImagePlus croppedSource = currentSweep.cropSpec().apply(source);
+        currentBaselineCrop = croppedSource;
         List<ParameterCombo> combos = currentSweep.combos();
         VariationCache runCache = new VariationCache(context.configContext());
+        currentRunCache = runCache;
         final FilterSweepStrategy strategy = new FilterSweepStrategy(
                 context.baseMacro(),
                 context.previewAdapter(),
@@ -456,8 +495,60 @@ public final class MacroVariationsDialog extends PipelineDialog {
         });
         panel.add(otsuOverlayCheckBox);
         panel.add(Box.createHorizontalStrut(18));
+        configureDownstreamControls();
+        panel.add(downstreamVerdictCheckBox);
+        panel.add(Box.createHorizontalStrut(6));
+        panel.add(stopDownstreamButton);
+        panel.add(Box.createHorizontalStrut(18));
         panel.add(cellsLabel);
         return panel;
+    }
+
+    private void configureDownstreamControls() {
+        downstreamVerdictCheckBox.setOpaque(false);
+        downstreamVerdictCheckBox.setSelected(false);
+        if (!downstreamResolution.isAvailable()) {
+            downstreamVerdictCheckBox.setEnabled(false);
+            downstreamVerdictCheckBox.setToolTipText(
+                    downstreamResolution.unavailableReason());
+        } else {
+            downstreamVerdictCheckBox.setEnabled(true);
+            downstreamVerdictCheckBox.setToolTipText(
+                    "Runs the active segmenter on each filter output. May take 30-60 s.");
+        }
+        downstreamVerdictCheckBox.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                handleDownstreamToggle();
+            }
+        });
+        stopDownstreamButton.setEnabled(false);
+        stopDownstreamButton.setOpaque(false);
+        stopDownstreamButton.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                cancelDownstreamWorker();
+                setStatusTextNow("Downstream cancelled");
+            }
+        });
+    }
+
+    private void handleDownstreamToggle() {
+        if (!downstreamVerdictCheckBox.isSelected()) {
+            cancelDownstreamWorker();
+            downstreamStartedForCurrentResults = false;
+            clearDownstreamVerdicts();
+            setStatusTextNow(completionStatus());
+            return;
+        }
+        if (!downstreamResolution.isAvailable()) {
+            downstreamVerdictCheckBox.setSelected(false);
+            setStatusTextNow(downstreamResolution.unavailableReason());
+            return;
+        }
+        if (completedCount < cells.size() || cells.isEmpty()) {
+            setStatusTextNow("Downstream will run after the preview grid completes.");
+            return;
+        }
+        startDownstreamVerdict();
     }
 
     private void setShowOtsuOverlay(boolean show) {
@@ -1029,6 +1120,9 @@ public final class MacroVariationsDialog extends PipelineDialog {
         setStatusTextNow(progressStatus());
         if (completedCount >= cells.size() && !cells.isEmpty()) {
             updateHistogramShapeIndicator();
+            if (downstreamVerdictCheckBox.isSelected()) {
+                startDownstreamVerdict();
+            }
         }
         if (selectedCombo != null
                 && selectedCombo.toCanonicalJson().equals(comboId)) {
@@ -1054,6 +1148,9 @@ public final class MacroVariationsDialog extends PipelineDialog {
             failedCount = countFailures();
             updateHistogramShapeIndicator();
             setStatusTextNow(completionStatus());
+            if (downstreamVerdictCheckBox.isSelected()) {
+                startDownstreamVerdict();
+            }
         } catch (Exception e) {
             failedCount = countFailures();
             setStatusTextNow("Error: " + safe(e.getMessage()));
@@ -1203,6 +1300,132 @@ public final class MacroVariationsDialog extends PipelineDialog {
             }
         }
         return failures;
+    }
+
+    private void startDownstreamVerdict() {
+        if (!downstreamResolution.isAvailable()
+                || currentSweep == null
+                || currentBaselineCrop == null
+                || currentRunCache == null
+                || !allCellsSuccessful()
+                || downstreamStartedForCurrentResults
+                || isDownstreamActive()) {
+            return;
+        }
+        downstreamStartedForCurrentResults = true;
+        clearDownstreamVerdicts();
+        stopDownstreamButton.setEnabled(true);
+        setStatusTextNow("Downstream: starting");
+        final DownstreamSegmenter segmenter =
+                downstreamResolution.segmenter().forFilterSweep(currentSweep);
+        final List<VariationResult> snapshot =
+                new ArrayList<VariationResult>(resultsByCell);
+        final ImagePlus baseline = currentBaselineCrop;
+        final VariationCache cache = currentRunCache;
+        downstreamWorker = new SwingWorker<Map<ParameterCombo, DownstreamVerdict.Verdict>, Void>() {
+            @Override protected Map<ParameterCombo, DownstreamVerdict.Verdict>
+            doInBackground() {
+                return DownstreamVerdict.compute(snapshot,
+                        segmenter,
+                        baseline,
+                        cache,
+                        new java.util.function.BooleanSupplier() {
+                            @Override public boolean getAsBoolean() {
+                                return isCancelled();
+                            }
+                        },
+                        new Consumer<DownstreamVerdict.Progress>() {
+                            @Override public void accept(final DownstreamVerdict.Progress progress) {
+                                SwingUtilities.invokeLater(new Runnable() {
+                                    @Override public void run() {
+                                        handleDownstreamProgress(progress);
+                                    }
+                                });
+                            }
+                        });
+            }
+
+            @Override protected void done() {
+                stopDownstreamButton.setEnabled(false);
+                if (isCancelled()) {
+                    setStatusTextNow("Downstream cancelled");
+                    applyBestDownstreamRibbon();
+                    return;
+                }
+                try {
+                    get();
+                    applyBestDownstreamRibbon();
+                    setStatusTextNow("Downstream complete");
+                } catch (Exception e) {
+                    setStatusTextNow("Downstream error: " + safe(e.getMessage()));
+                }
+            }
+        };
+        downstreamWorker.execute();
+    }
+
+    private void handleDownstreamProgress(DownstreamVerdict.Progress progress) {
+        if (progress == null) {
+            return;
+        }
+        if (progress.combo != null && progress.verdict != null) {
+            downstreamVerdicts.put(progress.combo.toCanonicalJson(),
+                    progress.verdict);
+            VariationCellPanel cell = cellsByCombo.get(
+                    progress.combo.toCanonicalJson());
+            if (cell != null) {
+                cell.setDownstreamDelta(progress.verdict.deltaCells);
+            }
+            applyBestDownstreamRibbon();
+        }
+        if (progress.message != null && progress.message.trim().length() > 0) {
+            setStatusTextNow(progress.message);
+        }
+    }
+
+    private void applyBestDownstreamRibbon() {
+        VariationCellPanel bestCell = null;
+        int bestDelta = Integer.MIN_VALUE;
+        for (int i = 0; i < cells.size(); i++) {
+            cells.get(i).setDownstreamRibbonLabel(null);
+        }
+        for (Map.Entry<String, DownstreamVerdict.Verdict> entry
+                : downstreamVerdicts.entrySet()) {
+            DownstreamVerdict.Verdict verdict = entry.getValue();
+            if (verdict == null || !verdict.isHelp) {
+                continue;
+            }
+            if (verdict.deltaCells > bestDelta) {
+                VariationCellPanel cell = cellsByCombo.get(entry.getKey());
+                if (cell != null) {
+                    bestCell = cell;
+                    bestDelta = verdict.deltaCells;
+                }
+            }
+        }
+        if (bestCell != null) {
+            bestCell.setRibbonLabel("HELPS DOWNSTREAM");
+        }
+    }
+
+    private void clearDownstreamVerdicts() {
+        downstreamVerdicts.clear();
+        for (int i = 0; i < cells.size(); i++) {
+            cells.get(i).clearDownstreamVerdict();
+        }
+    }
+
+    private boolean isDownstreamActive() {
+        return downstreamWorker != null && !downstreamWorker.isDone();
+    }
+
+    private void cancelDownstreamWorker() {
+        SwingWorker<Map<ParameterCombo, DownstreamVerdict.Verdict>, Void> worker =
+                downstreamWorker;
+        if (worker != null && !worker.isDone()) {
+            worker.cancel(false);
+        }
+        stopDownstreamButton.setEnabled(false);
     }
 
     private void acceptAndClose(ParameterCombo combo, FilterSweepStrategy strategy) {

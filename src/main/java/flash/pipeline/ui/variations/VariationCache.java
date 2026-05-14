@@ -53,6 +53,24 @@ public final class VariationCache {
         return sha256(raw).substring(0, 16);
     }
 
+    public static String downstreamCacheNamespace(String filteredSourceKey,
+                                                  String downstreamMethodToken,
+                                                  String strategyCacheTag,
+                                                  CropSpec cropSpec,
+                                                  ParameterCombo downstreamCombo) {
+        String raw = "downstream:v1"
+                + ":filtered=" + safe(filteredSourceKey)
+                + ":method=" + safe(downstreamMethodToken)
+                + ":strategy=" + safe(strategyCacheTag)
+                + ":crop=" + (cropSpec == null
+                ? CropSpec.full().toCanonicalJson()
+                : cropSpec.toCanonicalJson())
+                + ":params=" + (downstreamCombo == null
+                ? "{}"
+                : downstreamCombo.toCanonicalJson());
+        return "downstream:" + sha256(raw).substring(0, 16);
+    }
+
     public synchronized ImagePlus get(String key) {
         if (key == null || key.trim().isEmpty()) {
             return null;
@@ -147,5 +165,9 @@ public final class VariationCache {
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 is unavailable", e);
         }
+    }
+
+    private static String safe(String value) {
+        return value == null ? "" : value.trim();
     }
 }

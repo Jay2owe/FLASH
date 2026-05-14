@@ -1,8 +1,11 @@
 package flash.pipeline.ui.variations;
 
 import flash.pipeline.image.FilterMacroEditorModel;
+import flash.pipeline.ui.config.CellposeParameterStage;
+import flash.pipeline.ui.config.ClassicalSegmentationStage;
 import flash.pipeline.ui.config.ConfigQcContext;
 import flash.pipeline.ui.config.FilterParameterStage;
+import flash.pipeline.ui.config.StarDistParameterStage;
 
 import ij.ImagePlus;
 
@@ -20,6 +23,9 @@ public final class FilterVariationEngineContext {
     private final String channelName;
     private final ConfigQcContext configContext;
     private final FilterParameterStage.PreviewAdapter previewAdapter;
+    private final ClassicalSegmentationStage.PreviewAdapter classicalPreviewAdapter;
+    private final StarDistParameterStage.PreviewAdapter starDistPreviewAdapter;
+    private final CellposeParameterStage.PreviewAdapter cellposePreviewAdapter;
     private final String sourceImageHash;
     private final String cacheNamespace;
 
@@ -29,6 +35,19 @@ public final class FilterVariationEngineContext {
                                         String channelName,
                                         ConfigQcContext configContext,
                                         FilterParameterStage.PreviewAdapter previewAdapter) {
+        this(baseMacro, sourceImage, initialCropSpec, channelName, configContext,
+                previewAdapter, null, null, null);
+    }
+
+    public FilterVariationEngineContext(FilterMacroEditorModel.MacroDefinition baseMacro,
+                                        ImagePlus sourceImage,
+                                        CropSpec initialCropSpec,
+                                        String channelName,
+                                        ConfigQcContext configContext,
+                                        FilterParameterStage.PreviewAdapter previewAdapter,
+                                        ClassicalSegmentationStage.PreviewAdapter classicalPreviewAdapter,
+                                        StarDistParameterStage.PreviewAdapter starDistPreviewAdapter,
+                                        CellposeParameterStage.PreviewAdapter cellposePreviewAdapter) {
         if (baseMacro == null) {
             throw new IllegalArgumentException("baseMacro must not be null");
         }
@@ -47,6 +66,21 @@ public final class FilterVariationEngineContext {
         this.channelName = channelName == null ? "" : channelName;
         this.configContext = configContext;
         this.previewAdapter = previewAdapter;
+        this.classicalPreviewAdapter = classicalPreviewAdapter == null
+                ? adapterFromAttribute(configContext,
+                "classicalPreviewAdapter",
+                ClassicalSegmentationStage.PreviewAdapter.class)
+                : classicalPreviewAdapter;
+        this.starDistPreviewAdapter = starDistPreviewAdapter == null
+                ? adapterFromAttribute(configContext,
+                "starDistPreviewAdapter",
+                StarDistParameterStage.PreviewAdapter.class)
+                : starDistPreviewAdapter;
+        this.cellposePreviewAdapter = cellposePreviewAdapter == null
+                ? adapterFromAttribute(configContext,
+                "cellposePreviewAdapter",
+                CellposeParameterStage.PreviewAdapter.class)
+                : cellposePreviewAdapter;
         this.sourceImageHash = sourceImageHash(sourceImage);
         this.cacheNamespace = "filter:" + sha256(baseMacro.render());
     }
@@ -107,6 +141,18 @@ public final class FilterVariationEngineContext {
         return previewAdapter;
     }
 
+    public ClassicalSegmentationStage.PreviewAdapter classicalPreviewAdapter() {
+        return classicalPreviewAdapter;
+    }
+
+    public StarDistParameterStage.PreviewAdapter starDistPreviewAdapter() {
+        return starDistPreviewAdapter;
+    }
+
+    public CellposeParameterStage.PreviewAdapter cellposePreviewAdapter() {
+        return cellposePreviewAdapter;
+    }
+
     public String sourceImageHash() {
         return sourceImageHash;
     }
@@ -152,5 +198,15 @@ public final class FilterVariationEngineContext {
 
     private static String safe(String value) {
         return value == null ? "" : value;
+    }
+
+    private static <T> T adapterFromAttribute(ConfigQcContext context,
+                                              String key,
+                                              Class<T> type) {
+        if (context == null || key == null || type == null) {
+            return null;
+        }
+        Object value = context.getAttribute(key);
+        return type.isInstance(value) ? type.cast(value) : null;
     }
 }
