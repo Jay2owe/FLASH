@@ -21,10 +21,12 @@ import javax.swing.Timer;
 import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.Point;
 import java.awt.RadialGradientPaint;
 import java.awt.RenderingHints;
 import java.awt.event.MouseAdapter;
@@ -48,6 +50,8 @@ public final class VariationCellPanel extends JPanel {
     private static final Color RIBBON_RIM = new Color(0, 0, 0, 170);
     private static final int CARD_RADIUS = 8;
     private static final int UNKNOWN_DELTA = Integer.MIN_VALUE;
+    private static final int PEEK_DELAY_MS = 120;
+    private static final int PEEK_DRAG_CANCEL_PX = 4;
     private static final String ERROR_BADGE = "\u26a0";
 
     public enum BorderHint {
@@ -68,9 +72,13 @@ public final class VariationCellPanel extends JPanel {
     private final JLabel deltaLabel = new JLabel("", SwingConstants.CENTER);
     private final JLabel iouLabel = new JLabel("", SwingConstants.CENTER);
     private final Timer haloTimer;
+    private final Timer peekDelayTimer;
 
     private ImagePlus cachedLabel;
     private ResultsTable cachedStats;
+    private ImagePlus rawSourceImage;
+    private ImagePlus displayedPreviewImage;
+    private ImagePlus currentPreviewImage;
     private long durationMs = -1L;
     private int objectCount = -1;
     private int deltaN = UNKNOWN_DELTA;
@@ -83,6 +91,9 @@ public final class VariationCellPanel extends JPanel {
     private boolean acceptEnabled;
     private boolean errorState;
     private boolean showHalo;
+    private boolean peeking;
+    private boolean suppressNextClick;
+    private Point pressPoint;
     private long haloStartNanos;
     private float haloPhase;
     private Color haloColor = KNEE_BORDER;
@@ -107,6 +118,8 @@ public final class VariationCellPanel extends JPanel {
         this.placeholderIndex = Math.max(0, placeholderIndex);
         this.haloTimer = new Timer(33, e -> advanceHalo());
         this.haloTimer.setInitialDelay(0);
+        this.peekDelayTimer = new Timer(PEEK_DELAY_MS, e -> beginPeek());
+        this.peekDelayTimer.setRepeats(false);
 
         setOpaque(false);
         setBackground(CARD_BACKGROUND);
@@ -142,6 +155,13 @@ public final class VariationCellPanel extends JPanel {
 
     public ImagePreviewPanel preview() {
         return preview;
+    }
+
+    public void setRawSource(ImagePlus src) {
+        this.rawSourceImage = src;
+        if (src == null) {
+            cancelPeek(true);
+        }
     }
 
     public void setState(String state) {
@@ -226,7 +246,7 @@ public final class VariationCellPanel extends JPanel {
         if (rendered == null) {
             rendered = cachedLabel;
         }
-        preview.setImage(rendered);
+        setDisplayedPreviewImage(rendered);
         refreshFooter();
         refreshTooltip();
     }
@@ -343,7 +363,31 @@ public final class VariationCellPanel extends JPanel {
         return cachedLabel;
     }
 
+    ImagePlus currentPreviewImageForTest() {
+        return currentPreviewImage;
+    }
+
+    boolean isPeekingForTest() {
+        return peeking;
+    }
+
+    boolean isPeekDelayRunningForTest() {
+        return peekDelayTimer.isRunning();
+    }
+
+    boolean suppressNextClickForTest() {
+        return suppressNextClick;
+    }
+
+    void firePeekDelayForTest() {
+        beginPeek();
+    }
+
     void clickForTest(boolean shift) {
+        if (suppressNextClick) {
+            suppressNextClick = false;
+            return;
+        }
         if (shift) {
             if (onCompare != null) {
                 onCompare.accept(combo, this);
@@ -370,19 +414,37 @@ public final class VariationCellPanel extends JPanel {
     @Override protected void paintChildren(Graphics g) {
         super.paintChildren(g);
         paintHoverTint(g);
-        paintHalo(g);
-        paintCompareBadge(g);
-        paintRibbons(g);
+        if (!peeking) {
+            paintHalo(g);
+            paintCompareBadge(g);
+            paintRibbons(g);
+        }
     }
 
     @Override public void removeNotify() {
+        cancelPeek(true);
         haloTimer.stop();
         super.removeNotify();
     }
 
     private void installMouseHandlers() {
         MouseAdapter listener = new MouseAdapter() {
+            @Override public void mousePressed(MouseEvent e) {
+                handleMousePressed(e);
+            }
+
+            @Override public void mouseReleased(MouseEvent e) {
+                handleMouseReleased();
+            }
+
             @Override public void mouseClicked(MouseEvent e) {
+                if (suppressNextClick) {
+                    suppressNextClick = false;
+                    if (e != null) {
+                        e.consume();
+                    }
+                    return;
+                }
                 if (e != null && e.isShiftDown()) {
                     if (onCompare != null) {
                         onCompare.accept(combo, VariationCellPanel.this);
@@ -399,15 +461,107 @@ public final class VariationCellPanel extends JPanel {
 
             @Override public void mouseExited(MouseEvent e) {
                 hover = false;
+                cancelPeek(true);
+                pressPoint = null;
                 refreshBorder();
             }
+
+            @Override public void mouseDragged(MouseEvent e) {
+                handleMouseDragged(e);
+            }
         };
-        addMouseListener(listener);
-        preview.addMouseListener(listener);
-        footerPanel.addMouseListener(listener);
-        countLabel.addMouseListener(listener);
-        deltaLabel.addMouseListener(listener);
-        iouLabel.addMouseListener(listener);
+        installMouseHandler(this, listener);
+        installMouseHandler(preview, listener);
+        installMouseHandler(footerPanel, listener);
+        installMouseHandler(countLabel, listener);
+        installMouseHandler(deltaLabel, listener);
+        installMouseHandler(iouLabel, listener);
+    }
+
+    private void installMouseHandler(Component component, MouseAdapter listener) {
+        component.addMouseListener(listener);
+        component.addMouseMotionListener(listener);
+    }
+
+    private void handleMousePressed(MouseEvent e) {
+        cancelPeek(true);
+        suppressNextClick = false;
+        pressPoint = null;
+        if (e == null || !SwingUtilities.isLeftMouseButton(e) || !canPeek()) {
+            return;
+        }
+        pressPoint = pointInCell(e);
+        peekDelayTimer.restart();
+    }
+
+    private void handleMouseReleased() {
+        cancelPeek(true);
+        pressPoint = null;
+    }
+
+    private void handleMouseDragged(MouseEvent e) {
+        if (pressPoint == null || e == null) {
+            return;
+        }
+        Point current = pointInCell(e);
+        if (current == null) {
+            return;
+        }
+        int dx = current.x - pressPoint.x;
+        int dy = current.y - pressPoint.y;
+        if (dx * dx + dy * dy > PEEK_DRAG_CANCEL_PX * PEEK_DRAG_CANCEL_PX) {
+            cancelPeek(true);
+            pressPoint = null;
+        }
+    }
+
+    private Point pointInCell(MouseEvent e) {
+        Object source = e.getSource();
+        if (source instanceof Component) {
+            return SwingUtilities.convertPoint((Component) source,
+                    e.getPoint(), this);
+        }
+        return e.getPoint();
+    }
+
+    private boolean canPeek() {
+        return rawSourceImage != null && displayedPreviewImage != null;
+    }
+
+    private void beginPeek() {
+        peekDelayTimer.stop();
+        if (pressPoint == null || !canPeek()) {
+            return;
+        }
+        peeking = true;
+        suppressNextClick = true;
+        showPreviewImage(rawSourceImage);
+        repaint();
+    }
+
+    private void cancelPeek(boolean restoreImage) {
+        peekDelayTimer.stop();
+        if (restoreImage && peeking) {
+            restorePeekImage();
+        }
+    }
+
+    private void restorePeekImage() {
+        peeking = false;
+        showPreviewImage(displayedPreviewImage);
+        repaint();
+    }
+
+    private void setDisplayedPreviewImage(ImagePlus image) {
+        displayedPreviewImage = image;
+        if (!peeking) {
+            showPreviewImage(image);
+        }
+    }
+
+    private void showPreviewImage(ImagePlus image) {
+        currentPreviewImage = image;
+        preview.setImage(image);
     }
 
     private void refreshBorder() {

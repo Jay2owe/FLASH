@@ -4,6 +4,7 @@ import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.preview.ComparisonPreviewDialog;
 import flash.pipeline.ui.preview.PreviewDisplaySettings;
 import flash.pipeline.ui.preview.VariationComparisonPreview;
+import flash.pipeline.ui.preview.VariationMontageDialog;
 import flash.pipeline.ui.variations.analysis.IouStability;
 import flash.pipeline.ui.variations.analysis.KneeDetector;
 import flash.pipeline.ui.variations.state.VariationState;
@@ -83,6 +84,7 @@ public final class VariationsDialog extends PipelineDialog {
     private final ProgressSliverPanel progressSliver = new ProgressSliverPanel();
     private final JSlider zSlider = new JSlider(1, 1, 1);
     private final JButton suggestButton = new JButton("Suggest ranges from image");
+    private JButton montageButton;
     private final JRadioButton fullCrop = new JRadioButton("full image");
     private final JRadioButton centreCrop = new JRadioButton("centered 256 x 256");
     private final JRadioButton customCrop = new JRadioButton("custom...");
@@ -99,6 +101,7 @@ public final class VariationsDialog extends PipelineDialog {
     private ParameterSweep currentSweep;
     private VariationState resumeState;
     private ComparisonPreviewDialog comparisonDialog;
+    private VariationMontageDialog montageDialog;
     private CropSpec currentCropSpec = CropSpec.centre256();
     private boolean suppressCropEvents;
     private int completedCount;
@@ -163,6 +166,7 @@ public final class VariationsDialog extends PipelineDialog {
             comparisonDialog.dispose();
             comparisonDialog = null;
         }
+        disposeMontageDialog();
         Window window = getWindow();
         if (window != null) {
             window.dispose();
@@ -240,6 +244,9 @@ public final class VariationsDialog extends PipelineDialog {
         addComponent(zRow());
         addComponent(statusPanel());
 
+        montageButton = addFooterButton("Open in large montage");
+        montageButton.setEnabled(false);
+        montageButton.addActionListener(e -> openMontage());
         JButton cancel = addRightFooterButton("Cancel");
         cancel.addActionListener(e -> dispose());
         JButton start = addRightFooterButton("Start");
@@ -363,10 +370,12 @@ public final class VariationsDialog extends PipelineDialog {
         window.addWindowListener(new WindowAdapter() {
             @Override public void windowClosing(WindowEvent e) {
                 cancelExecutor();
+                disposeMontageDialog();
             }
 
             @Override public void windowClosed(WindowEvent e) {
                 cancelExecutor();
+                disposeMontageDialog();
             }
         });
     }
@@ -439,6 +448,7 @@ public final class VariationsDialog extends PipelineDialog {
         setStatusTextNow("Resume ready ("
                 + state.completed().size() + "/" + state.sweep().cellCount()
                 + " complete)");
+        updateMontageButtonState();
     }
 
     private void startOnEdt() {
@@ -461,6 +471,7 @@ public final class VariationsDialog extends PipelineDialog {
         setSuggestionText("Most stable: pending");
         runStartedAtMs = System.currentTimeMillis();
         ImagePlus croppedSource = currentSweep.cropSpec().apply(source);
+        ImagePlus croppedRawSource = croppedRawSourceForPeek(currentSweep.cropSpec());
         List<ParameterCombo> combos = currentSweep.combos();
         VariationCache runCache = new VariationCache(context.configContext());
         VariationState activeResume = compatibleResumeState(currentSweep);
@@ -474,6 +485,7 @@ public final class VariationsDialog extends PipelineDialog {
         cellsByCombo.clear();
         cellIndexesByCombo.clear();
         resultsByCell.clear();
+        updateMontageButtonState();
         BiConsumer<ParameterCombo, VariationCellPanel> compare =
                 new BiConsumer<ParameterCombo, VariationCellPanel>() {
                     @Override public void accept(ParameterCombo combo, VariationCellPanel cell) {
@@ -509,7 +521,9 @@ public final class VariationsDialog extends PipelineDialog {
                 }
             }
         }
+        updateMontageButtonState();
         gridPanel.setSweep(currentSweep);
+        gridPanel.setRawSource(croppedRawSource);
         gridPanel.setCells(cells);
         setStatusTextNow(progressStatus(combos.size(), false));
         setSuggestionText("Most stable: pending");
@@ -616,6 +630,7 @@ public final class VariationsDialog extends PipelineDialog {
         }
         failedCount = countFailures();
         updateTileMetrics();
+        updateMontageButtonState();
         setStatusTextNow(progressStatus(cells.size(), false));
         if (completedCount >= cells.size()) {
             applyKneeHint();
@@ -857,6 +872,118 @@ public final class VariationsDialog extends PipelineDialog {
                 croppedForComparison(context.filteredSource()),
                 settings,
                 zSlider.getValue());
+    }
+
+    private void openMontage() {
+        List<VariationMontageDialog.MontageTile> montageTiles = buildMontageTiles();
+        if (montageTiles.isEmpty()) {
+            updateMontageButtonState();
+            showMessage("Wait for at least one successful tile before opening the montage.");
+            return;
+        }
+        VariationMontageDialog dialog = montageDialog();
+        dialog.setTiles(montageTiles, currentSweep, zSlider.getValue());
+        dialog.setSourceChoices(context.rawSource(), context.filteredSource());
+        PreviewDisplaySettings settings =
+                PreviewDisplaySettings.defaultFor(context.channelName());
+        dialog.setDisplaySettings(settings, settings);
+        dialog.setDisplayActionListener(new VariationMontageDialog.DisplayActionListener() {
+            @Override public void adjustBrightnessContrastRequested() {
+                showMontageDisplayActionStub("Brightness/Contrast");
+            }
+
+            @Override public void lutToggleRequested() {
+                showMontageDisplayActionStub("LUT");
+            }
+        });
+        dialog.setDisplayActionState("Grey LUT",
+                "Use the main preview controls for shared display adjustments.");
+        dialog.raiseForUser();
+    }
+
+    private VariationMontageDialog montageDialog() {
+        if (montageDialog == null || !montageDialog.isDisplayable()) {
+            montageDialog = new VariationMontageDialog(
+                    SwingUtilities.getWindowAncestor(gridPanel));
+        }
+        return montageDialog;
+    }
+
+    private List<VariationMontageDialog.MontageTile> buildMontageTiles() {
+        List<VariationResult> results = montageResults();
+        if (results.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<ParameterCombo> combos = new ArrayList<ParameterCombo>(results.size());
+        List<ImagePlus> labels = new ArrayList<ImagePlus>(results.size());
+        for (int i = 0; i < results.size(); i++) {
+            VariationResult result = results.get(i);
+            combos.add(result.combo());
+            labels.add(result.label());
+        }
+        List<VariationMontageDialog.MontageTile> tiles =
+                new ArrayList<VariationMontageDialog.MontageTile>(results.size());
+        for (int i = 0; i < results.size(); i++) {
+            VariationResult result = results.get(i);
+            double mean = result.meanNeighbourIou();
+            if (!Double.isFinite(mean)) {
+                mean = IouStability.meanNeighbourIou(combos, labels, i);
+            }
+            tiles.add(new VariationMontageDialog.MontageTile(
+                    result.combo(),
+                    result.label(),
+                    result.nObjects(),
+                    mean));
+        }
+        return tiles;
+    }
+
+    private List<VariationResult> montageResults() {
+        List<VariationResult> results = new ArrayList<VariationResult>();
+        for (int i = 0; i < resultsByCell.size(); i++) {
+            VariationResult result = resultsByCell.get(i);
+            if (isMontageResult(result)) {
+                results.add(result);
+            }
+        }
+        return results;
+    }
+
+    private void updateMontageButtonState() {
+        if (montageButton != null) {
+            montageButton.setEnabled(hasMontageResult());
+        }
+    }
+
+    private boolean hasMontageResult() {
+        for (int i = 0; i < resultsByCell.size(); i++) {
+            if (isMontageResult(resultsByCell.get(i))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isMontageResult(VariationResult result) {
+        return result != null && !result.hasError();
+    }
+
+    private void showMontageDisplayActionStub(String action) {
+        if (GraphicsEnvironment.isHeadless()) {
+            return;
+        }
+        JOptionPane.showMessageDialog(
+                montageDialog == null ? getWindow() : montageDialog,
+                action + " controls are not connected to this montage yet.",
+                "Variation montage",
+                JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    private void disposeMontageDialog() {
+        if (montageDialog != null) {
+            montageDialog.dispose();
+            montageDialog = null;
+        }
     }
 
     private void acceptAndClose(ParameterCombo combo) {
@@ -1137,6 +1264,18 @@ public final class VariationsDialog extends PipelineDialog {
             return spec.apply(source);
         } catch (RuntimeException e) {
             return source;
+        }
+    }
+
+    private ImagePlus croppedRawSourceForPeek(CropSpec spec) {
+        ImagePlus rawSource = context.rawSource();
+        if (rawSource == null || spec == null) {
+            return null;
+        }
+        try {
+            return spec.apply(rawSource);
+        } catch (RuntimeException e) {
+            return null;
         }
     }
 

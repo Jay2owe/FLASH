@@ -1,5 +1,7 @@
 package flash.pipeline.ui.variations;
 
+import ij.ImagePlus;
+
 import net.miginfocom.swing.MigLayout;
 
 import javax.swing.JPanel;
@@ -44,6 +46,7 @@ public final class VariationGridPanel extends JPanel implements Scrollable {
     private final JPanel tilePanel = new JPanel();
 
     private ParameterSweep sweep;
+    private ImagePlus rawSource;
     private FacetChipRow.FacetSelectionListener facetSelectionListener;
 
     public VariationGridPanel() {
@@ -63,11 +66,19 @@ public final class VariationGridPanel extends JPanel implements Scrollable {
             for (int i = 0; i < newCells.size(); i++) {
                 VariationCellPanel cell = newCells.get(i);
                 if (cell != null) {
+                    cell.setRawSource(rawSource);
                     cells.add(cell);
                 }
             }
         }
         refreshLayout();
+    }
+
+    public void setRawSource(ImagePlus rawSource) {
+        this.rawSource = rawSource;
+        for (int i = 0; i < cells.size(); i++) {
+            cells.get(i).setRawSource(rawSource);
+        }
     }
 
     public void setFacetSelectionListener(FacetChipRow.FacetSelectionListener listener) {

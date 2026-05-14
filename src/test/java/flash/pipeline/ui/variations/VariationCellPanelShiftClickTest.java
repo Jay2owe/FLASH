@@ -82,6 +82,33 @@ public class VariationCellPanelShiftClickTest {
     }
 
     @Test
+    public void shiftClickAfterShortRawPeekPressStillSelectsCell() throws Exception {
+        final AtomicReference<String> status = new AtomicReference<String>();
+
+        SwingUtilities.invokeAndWait(new Runnable() {
+            @Override public void run() {
+                VariationComparisonSelection selection = new VariationComparisonSelection(
+                        status::set,
+                        new VariationComparisonSelection.Opener() {
+                            @Override public void openComparison(VariationCellPanel left,
+                                                                 VariationCellPanel right) {
+                            }
+                        });
+                VariationCellPanel cell = renderedCell(combo(1), selection, null);
+                cell.setRawSource(source());
+
+                press(cell, true);
+                release(cell, true);
+                click(cell, true);
+
+                assertTrue(cell.isSelectedForCompareForTest());
+                assertFalse(cell.isPeekDelayRunningForTest());
+                assertEquals("Shift-click a second tile to compare.", status.get());
+            }
+        });
+    }
+
+    @Test
     public void nonShiftClickAcceptsAndClearsPendingSelection() throws Exception {
         final AtomicReference<String> status = new AtomicReference<String>();
         final AtomicReference<ParameterCombo> accepted =
@@ -213,6 +240,40 @@ public class VariationCellPanelShiftClickTest {
         MouseListener[] listeners = cell.getMouseListeners();
         for (int i = 0; i < listeners.length; i++) {
             listeners[i].mouseClicked(event);
+        }
+    }
+
+    private static void press(VariationCellPanel cell, boolean shiftDown) {
+        int modifiers = shiftDown ? InputEvent.SHIFT_DOWN_MASK : 0;
+        MouseEvent event = new MouseEvent(cell,
+                MouseEvent.MOUSE_PRESSED,
+                System.currentTimeMillis(),
+                modifiers,
+                8,
+                8,
+                1,
+                false,
+                MouseEvent.BUTTON1);
+        MouseListener[] listeners = cell.getMouseListeners();
+        for (int i = 0; i < listeners.length; i++) {
+            listeners[i].mousePressed(event);
+        }
+    }
+
+    private static void release(VariationCellPanel cell, boolean shiftDown) {
+        int modifiers = shiftDown ? InputEvent.SHIFT_DOWN_MASK : 0;
+        MouseEvent event = new MouseEvent(cell,
+                MouseEvent.MOUSE_RELEASED,
+                System.currentTimeMillis(),
+                modifiers,
+                8,
+                8,
+                1,
+                false,
+                MouseEvent.BUTTON1);
+        MouseListener[] listeners = cell.getMouseListeners();
+        for (int i = 0; i < listeners.length; i++) {
+            listeners[i].mouseReleased(event);
         }
     }
 
