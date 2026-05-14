@@ -45,7 +45,7 @@ public class CountCurveStrip extends JPanel {
     private static final Color POINT = new Color(0xFF, 0xFF, 0xFF);
     private static final Color POINT_BORDER = new Color(0x2F, 0x3A, 0x43);
     private static final Color STAR = new Color(0xF0, 0xE4, 0x42);
-    private static final Color PLATEAU_FILL = new Color(0xF0, 0xE4, 0x42, 0x33);
+    private static final Color PLATEAU_FILL = new Color(0xF0, 0xE4, 0x42, 33);
     private static final Color SELECTED_RING = new Color(0xE6, 0x9F, 0x00);
 
     private final List<ChangeListener> listeners = new ArrayList<ChangeListener>();

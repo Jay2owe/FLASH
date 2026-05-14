@@ -121,18 +121,19 @@ public class DownstreamSegmenter {
         }
         BinConfig binConfig = (BinConfig) config;
         int channel = configContext.getChannelIndex();
-        if (channel < 0 || channel >= binConfig.segmentationMethods.size()) {
+        List<String> methods = binConfig.segmentationMethods;
+        if (methods == null || channel < 0 || channel >= methods.size()) {
             return Resolution.unavailable(
                     "No segmentation method is saved for channel "
                             + (channel + 1) + ".");
         }
-        String methodToken = safe(binConfig.segmentationMethods.get(channel));
+        String methodToken = safe(methods.get(channel));
         if (methodToken.length() == 0) {
             return Resolution.unavailable(
                     "No segmentation method is saved for channel "
                             + (channel + 1) + ".");
         }
-        if (binConfig.isStarDist(channel)) {
+        if (isMethod(methodToken, "stardist")) {
             if (context.starDistPreviewAdapter() == null) {
                 return Resolution.unavailable(
                         "StarDist preview adapter is not available.");
@@ -155,7 +156,7 @@ public class DownstreamSegmenter {
                     null,
                     null));
         }
-        if (binConfig.isCellpose(channel)) {
+        if (isMethod(methodToken, "cellpose")) {
             if (context.cellposePreviewAdapter() == null) {
                 return Resolution.unavailable(
                         "Cellpose preview adapter is not available.");
@@ -448,6 +449,11 @@ public class DownstreamSegmenter {
 
     private static boolean isCancelled(BooleanSupplier cancelCheck) {
         return cancelCheck != null && cancelCheck.getAsBoolean();
+    }
+
+    private static boolean isMethod(String token, String prefix) {
+        String safeToken = safe(token).toLowerCase(java.util.Locale.ROOT);
+        return safeToken.startsWith(safe(prefix).toLowerCase(java.util.Locale.ROOT));
     }
 
     private static String safe(String value) {

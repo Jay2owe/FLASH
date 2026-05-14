@@ -10,6 +10,7 @@ import java.awt.Graphics2D;
 import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 public class ChainRibbonPaintTest {
@@ -48,6 +49,25 @@ public class ChainRibbonPaintTest {
                 ChainRibbon.BYPASSED_STROKE, 35);
         assertNear(sample(image, ribbon.stepBoundsForTest(3), 8, 0),
                 blend(ChainRibbon.FIXED_FILL, Color.WHITE, 102), 18);
+    }
+
+    @Test
+    public void emptyMacroRendersWithoutPillsOrException() {
+        ChainRibbon ribbon = new ChainRibbon(FilterMacroEditorModel.parse(""));
+        Dimension size = ribbon.getPreferredSize();
+        ribbon.setSize(Math.max(1, size.width), Math.max(1, size.height));
+        ribbon.doLayout();
+
+        BufferedImage image = new BufferedImage(Math.max(1, ribbon.getWidth()),
+                Math.max(1, ribbon.getHeight()), BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = image.createGraphics();
+        try {
+            ribbon.paint(g);
+        } finally {
+            g.dispose();
+        }
+
+        assertEquals(0, ribbon.stepCount());
     }
 
     private static Color sample(BufferedImage image,

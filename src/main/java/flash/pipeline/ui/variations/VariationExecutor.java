@@ -3,6 +3,7 @@ package flash.pipeline.ui.variations;
 import flash.pipeline.ui.variations.state.VariationStateStore;
 
 import javax.swing.SwingWorker;
+import javax.swing.SwingUtilities;
 import java.util.List;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -51,27 +52,31 @@ public final class VariationExecutor extends SwingWorker<Void, VariationResult> 
 
     @Override
     protected Void doInBackground() throws Exception {
-        if (onStatus != null) {
-            onStatus.accept("Running " + strategy.getClass().getSimpleName()
-                    + " (" + sweep.cellCount() + " cells)...");
-        }
+        postStatus("Running " + strategy.getClass().getSimpleName()
+                + " (" + sweep.cellCount() + " cells)...");
         strategy.dispatch(sweep, this::publishResult, this::isCancelled);
-        if (onStatus != null && !isCancelled()) {
-            onStatus.accept("Parameter variations complete.");
+        if (!isCancelled()) {
+            postStatus("Parameter variations complete.");
         }
         return null;
     }
 
     private void publishResult(VariationResult result) {
+        if (isCancelled() || result == null) {
+            return;
+        }
         publish(result);
     }
 
     @Override
     protected void process(List<VariationResult> chunks) {
-        if (chunks == null) {
+        if (chunks == null || isCancelled()) {
             return;
         }
         for (int i = 0; i < chunks.size(); i++) {
+            if (isCancelled()) {
+                return;
+            }
             VariationResult result = chunks.get(i);
             if (result != null) {
                 if (onResult != null) {
@@ -93,5 +98,20 @@ public final class VariationExecutor extends SwingWorker<Void, VariationResult> 
         String cacheKey = VariationCache.keyFor(sweep, result.combo());
         stateStore.recordCompletion(sweep, result.combo(), cacheKey,
                 result.nObjects(), result.durationMs());
+    }
+
+    private void postStatus(final String text) {
+        if (onStatus == null) {
+            return;
+        }
+        if (SwingUtilities.isEventDispatchThread()) {
+            onStatus.accept(text);
+            return;
+        }
+        SwingUtilities.invokeLater(new Runnable() {
+            @Override public void run() {
+                onStatus.accept(text);
+            }
+        });
     }
 }

@@ -15,6 +15,7 @@ import ij.process.ByteProcessor;
 import org.junit.Test;
 
 import java.io.File;
+import java.lang.reflect.Field;
 import java.util.Collections;
 
 import static org.junit.Assert.assertEquals;
@@ -81,6 +82,21 @@ public class DownstreamSegmenterResolverTest {
 
         assertFalse(resolution.isAvailable());
         assertTrue(resolution.unavailableReason().contains("BinConfig"));
+    }
+
+    @Test
+    public void nullSegmentationMethodsReportUnavailable() throws Exception {
+        BinConfig bin = binConfig("classical", "128", "7-99");
+        Field field = BinConfig.class.getDeclaredField("segmentationMethods");
+        field.setAccessible(true);
+        field.set(bin, null);
+
+        DownstreamSegmenter.Resolution resolution = DownstreamSegmenter.resolve(
+                context(bin, new ClassicalAdapter(), null, null));
+
+        assertFalse(resolution.isAvailable());
+        assertTrue(resolution.unavailableReason()
+                .contains("No segmentation method"));
     }
 
     private static FilterVariationEngineContext context(

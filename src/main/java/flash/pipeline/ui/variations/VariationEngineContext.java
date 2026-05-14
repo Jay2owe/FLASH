@@ -21,6 +21,7 @@ public final class VariationEngineContext {
     private final ClassicalSegmentationStage.PreviewAdapter classicalPreviewAdapter;
     private final StarDistParameterStage.PreviewAdapter starDistPreviewAdapter;
     private final CellposeParameterStage.PreviewAdapter cellposePreviewAdapter;
+    private MontageDisplayActionDelegate montageDisplayActionDelegate;
 
     private VariationEngineContext(ParameterSweep.Method method,
                                    String channelName,
@@ -30,7 +31,8 @@ public final class VariationEngineContext {
                                    Object baseParameters,
                                    ClassicalSegmentationStage.PreviewAdapter classicalPreviewAdapter,
                                    StarDistParameterStage.PreviewAdapter starDistPreviewAdapter,
-                                   CellposeParameterStage.PreviewAdapter cellposePreviewAdapter) {
+                                   CellposeParameterStage.PreviewAdapter cellposePreviewAdapter,
+                                   MontageDisplayActionDelegate montageDisplayActionDelegate) {
         this.method = method;
         this.channelName = channelName == null ? "" : channelName;
         this.rawSource = rawSource;
@@ -41,6 +43,7 @@ public final class VariationEngineContext {
         this.classicalPreviewAdapter = classicalPreviewAdapter;
         this.starDistPreviewAdapter = starDistPreviewAdapter;
         this.cellposePreviewAdapter = cellposePreviewAdapter;
+        this.montageDisplayActionDelegate = montageDisplayActionDelegate;
     }
 
     public static VariationEngineContext forClassical(String channelName,
@@ -49,9 +52,20 @@ public final class VariationEngineContext {
                                                       ConfigQcContext configContext,
                                                       ParameterCombo baseParameters,
                                                       ClassicalSegmentationStage.PreviewAdapter previewAdapter) {
+        return forClassical(channelName, rawSource, filteredSource, configContext,
+                baseParameters, previewAdapter, null);
+    }
+
+    public static VariationEngineContext forClassical(String channelName,
+                                                      ImagePlus rawSource,
+                                                      ImagePlus filteredSource,
+                                                      ConfigQcContext configContext,
+                                                      ParameterCombo baseParameters,
+                                                      ClassicalSegmentationStage.PreviewAdapter previewAdapter,
+                                                      MontageDisplayActionDelegate montageDisplayActionDelegate) {
         return new VariationEngineContext(ParameterSweep.Method.CLASSICAL, channelName,
                 rawSource, filteredSource, configContext, baseParameters,
-                previewAdapter, null, null);
+                previewAdapter, null, null, montageDisplayActionDelegate);
     }
 
     public static VariationEngineContext forStarDist(String channelName,
@@ -60,9 +74,20 @@ public final class VariationEngineContext {
                                                      ConfigQcContext configContext,
                                                      StarDistParameterStage.Parameters baseParameters,
                                                      StarDistParameterStage.PreviewAdapter previewAdapter) {
+        return forStarDist(channelName, rawSource, filteredSource, configContext,
+                baseParameters, previewAdapter, null);
+    }
+
+    public static VariationEngineContext forStarDist(String channelName,
+                                                     ImagePlus rawSource,
+                                                     ImagePlus filteredSource,
+                                                     ConfigQcContext configContext,
+                                                     StarDistParameterStage.Parameters baseParameters,
+                                                     StarDistParameterStage.PreviewAdapter previewAdapter,
+                                                     MontageDisplayActionDelegate montageDisplayActionDelegate) {
         return new VariationEngineContext(ParameterSweep.Method.STARDIST, channelName,
                 rawSource, filteredSource, configContext, baseParameters,
-                null, previewAdapter, null);
+                null, previewAdapter, null, montageDisplayActionDelegate);
     }
 
     public static VariationEngineContext forCellpose(String channelName,
@@ -71,9 +96,20 @@ public final class VariationEngineContext {
                                                      ConfigQcContext configContext,
                                                      CellposeParameterStage.Parameters baseParameters,
                                                      CellposeParameterStage.PreviewAdapter previewAdapter) {
+        return forCellpose(channelName, rawSource, filteredSource, configContext,
+                baseParameters, previewAdapter, null);
+    }
+
+    public static VariationEngineContext forCellpose(String channelName,
+                                                     ImagePlus rawSource,
+                                                     ImagePlus filteredSource,
+                                                     ConfigQcContext configContext,
+                                                     CellposeParameterStage.Parameters baseParameters,
+                                                     CellposeParameterStage.PreviewAdapter previewAdapter,
+                                                     MontageDisplayActionDelegate montageDisplayActionDelegate) {
         return new VariationEngineContext(ParameterSweep.Method.CELLPOSE, channelName,
                 rawSource, filteredSource, configContext, baseParameters,
-                null, null, previewAdapter);
+                null, null, previewAdapter, montageDisplayActionDelegate);
     }
 
     public ParameterSweep.Method method() {
@@ -142,5 +178,18 @@ public final class VariationEngineContext {
 
     public CellposeParameterStage.PreviewAdapter cellposePreviewAdapter() {
         return cellposePreviewAdapter;
+    }
+
+    public MontageDisplayActionDelegate montageDisplayActionDelegate() {
+        return montageDisplayActionDelegate;
+    }
+
+    public MontageDisplayActionDelegate getMontageDisplayActionDelegate() {
+        return montageDisplayActionDelegate;
+    }
+
+    public void setMontageDisplayActionDelegate(
+            MontageDisplayActionDelegate montageDisplayActionDelegate) {
+        this.montageDisplayActionDelegate = montageDisplayActionDelegate;
     }
 }

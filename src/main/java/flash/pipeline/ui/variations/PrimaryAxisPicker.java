@@ -38,16 +38,21 @@ public final class PrimaryAxisPicker {
         if (sweep == null || swept.isEmpty()) {
             return null;
         }
-        if (sweep.method() == ParameterSweep.Method.STARDIST) {
-            return orderableDriver(firstSwept(swept, STARDIST_COUNT_DRIVER_PRIORITY));
+        ParameterId[] priority;
+        switch (sweep.method()) {
+            case STARDIST:
+                priority = STARDIST_COUNT_DRIVER_PRIORITY;
+                break;
+            case CELLPOSE:
+                priority = CELLPOSE_COUNT_DRIVER_PRIORITY;
+                break;
+            case CLASSICAL:
+                priority = CLASSICAL_COUNT_DRIVER_PRIORITY;
+                break;
+            default:
+                return null;
         }
-        if (sweep.method() == ParameterSweep.Method.CELLPOSE) {
-            return orderableDriver(firstSwept(swept, CELLPOSE_COUNT_DRIVER_PRIORITY));
-        }
-        if (sweep.method() == ParameterSweep.Method.CLASSICAL) {
-            return orderableDriver(firstSwept(swept, CLASSICAL_COUNT_DRIVER_PRIORITY));
-        }
-        return null;
+        return orderableDriver(firstSwept(swept, priority));
     }
 
     public static List<ParameterId> sweptNumericAxes(ParameterSweep sweep) {

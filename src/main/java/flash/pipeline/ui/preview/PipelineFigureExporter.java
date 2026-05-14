@@ -405,13 +405,39 @@ public final class PipelineFigureExporter {
         if (source == null) {
             return null;
         }
+        int width = Math.max(1, source.getWidth());
+        int height = Math.max(1, source.getHeight());
         ImageStack stack = source.getStack();
-        if (stack == null) {
-            return source.duplicate();
+        int size = stack == null ? 1 : Math.max(1, stack.getSize());
+        ImageStack copyStack = new ImageStack(width, height);
+        for (int slice = 1; slice <= size; slice++) {
+            ImageProcessor processor = stack == null
+                    ? source.getProcessor()
+                    : stack.getProcessor(slice);
+            if (processor == null) {
+                continue;
+            }
+            processor.setRoi(0, 0, width, height);
+            try {
+                copyStack.addSlice(stack == null ? null : stack.getSliceLabel(slice),
+                        processor.crop());
+            } finally {
+                processor.resetRoi();
+            }
         }
-        ImagePlus duplicate = source.duplicate();
+        if (copyStack.getSize() == 0) {
+            return null;
+        }
+        ImagePlus duplicate = new ImagePlus(source.getTitle(), copyStack);
         if (source.getCalibration() != null) {
             duplicate.setCalibration(source.getCalibration().copy());
+        }
+        int channels = Math.max(1, source.getNChannels());
+        int slices = Math.max(1, source.getNSlices());
+        int frames = Math.max(1, source.getNFrames());
+        if (channels * slices * frames == copyStack.getSize()) {
+            duplicate.setDimensions(channels, slices, frames);
+            duplicate.setOpenAsHyperStack(source.isHyperStack());
         }
         return duplicate;
     }

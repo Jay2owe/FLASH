@@ -264,6 +264,10 @@ public final class MacroVariationsDialog extends PipelineDialog {
         return runButton;
     }
 
+    void cancelRunForTest() {
+        cancelExecutor();
+    }
+
     JCheckBox otsuOverlayCheckBoxForTest() {
         return otsuOverlayCheckBox;
     }
@@ -1639,6 +1643,14 @@ public final class MacroVariationsDialog extends PipelineDialog {
     }
 
     private void handleResult(VariationResult result, int index) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    handleResult(result, index);
+                }
+            });
+            return;
+        }
         if (result == null) {
             return;
         }
@@ -1678,6 +1690,14 @@ public final class MacroVariationsDialog extends PipelineDialog {
     }
 
     private void handleExecutorDone() {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    handleExecutorDone();
+                }
+            });
+            return;
+        }
         VariationExecutor worker = executor;
         if (worker == null) {
             return;
@@ -2039,6 +2059,14 @@ public final class MacroVariationsDialog extends PipelineDialog {
     }
 
     private void handleDownstreamProgress(DownstreamVerdict.Progress progress) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    handleDownstreamProgress(progress);
+                }
+            });
+            return;
+        }
         if (progress == null) {
             return;
         }
@@ -2097,7 +2125,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
         SwingWorker<Map<ParameterCombo, DownstreamVerdict.Verdict>, Void> worker =
                 downstreamWorker;
         if (worker != null && !worker.isDone()) {
-            worker.cancel(false);
+            worker.cancel(true);
         }
         stopDownstreamButton.setEnabled(false);
     }
@@ -2251,7 +2279,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
     private void cancelExecutor() {
         VariationExecutor worker = executor;
         if (worker != null && !worker.isDone()) {
-            worker.cancel(false);
+            worker.cancel(true);
         }
     }
 

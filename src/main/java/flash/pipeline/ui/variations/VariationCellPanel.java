@@ -47,7 +47,7 @@ public final class VariationCellPanel extends JPanel {
     private static final Color HOVER_BORDER = new Color(0, 0, 0, 20);
     private static final Color KNEE_BORDER = new Color(0xF0, 0xE4, 0x42);
     private static final Color STABILITY_BORDER = new Color(0x56, 0xB4, 0xE9);
-    private static final Color COMPARE_BORDER = Color.WHITE;
+    private static final Color COMPARE_BORDER = STABILITY_BORDER;
     private static final Color FOOTER_COLOR = new Color(0xC0, 0xC5, 0xCA);
     private static final Color ERROR_COLOR = new Color(0xE6, 0x9F, 0x00);
     private static final Color RIBBON_RIM = new Color(0, 0, 0, 170);
@@ -57,6 +57,10 @@ public final class VariationCellPanel extends JPanel {
     private static final Color DOWNSTREAM_NEUTRAL = new Color(0x7A, 0x82, 0x89);
     private static final Color CHIP_TEXT = new Color(0x22, 0x22, 0x22);
     private static final int CARD_RADIUS = 8;
+    private static final float DEFAULT_OUTLINE_WIDTH = 1f;
+    private static final float COMPARE_OUTLINE_WIDTH = 4f;
+    private static final float HALO_ALPHA_BASE = 0.14f;
+    private static final float HALO_ALPHA_AMPLITUDE = 0.08f;
     private static final int UNKNOWN_DELTA = Integer.MIN_VALUE;
     private static final int PEEK_DELAY_MS = 120;
     private static final int PEEK_DRAG_CANCEL_PX = 4;
@@ -211,14 +215,30 @@ public final class VariationCellPanel extends JPanel {
         return preview;
     }
 
-    public void setRawSource(ImagePlus src) {
+    public void setRawSource(final ImagePlus src) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setRawSource(src);
+                }
+            });
+            return;
+        }
         this.rawSourceImage = src;
         if (src == null) {
             cancelPeek(true);
         }
     }
 
-    public void setState(String state) {
+    public void setState(final String state) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setState(state);
+                }
+            });
+            return;
+        }
         showSegmentationFooter();
         clearRibbonLabelOverride();
         filteredImage = null;
@@ -408,17 +428,41 @@ public final class VariationCellPanel extends JPanel {
         refreshTooltip();
     }
 
-    public void setZ(int z) {
+    public void setZ(final int z) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setZ(z);
+                }
+            });
+            return;
+        }
         preview.setCurrentZ(z);
     }
 
-    public void setDeltaN(int deltaN) {
+    public void setDeltaN(final int deltaN) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setDeltaN(deltaN);
+                }
+            });
+            return;
+        }
         this.deltaN = deltaN;
         refreshFooter();
         refreshTooltip();
     }
 
     public void clearDeltaN() {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    clearDeltaN();
+                }
+            });
+            return;
+        }
         this.deltaN = UNKNOWN_DELTA;
         refreshFooter();
         refreshTooltip();
@@ -452,13 +496,29 @@ public final class VariationCellPanel extends JPanel {
         repaint();
     }
 
-    public void setIouToNeighbours(double iouToNeighbours) {
+    public void setIouToNeighbours(final double iouToNeighbours) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setIouToNeighbours(iouToNeighbours);
+                }
+            });
+            return;
+        }
         this.iouToNeighbours = iouToNeighbours;
         refreshFooter();
         refreshTooltip();
     }
 
-    public void setKneeWinner(boolean kneeWinner) {
+    public void setKneeWinner(final boolean kneeWinner) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setKneeWinner(kneeWinner);
+                }
+            });
+            return;
+        }
         boolean start = kneeWinner && !this.kneeWinner;
         this.kneeWinner = kneeWinner;
         if (start) {
@@ -475,7 +535,16 @@ public final class VariationCellPanel extends JPanel {
         setStabilityWinner(stabilityWinner, Double.NaN);
     }
 
-    public void setStabilityWinner(boolean stabilityWinner, double meanNeighbourIou) {
+    public void setStabilityWinner(final boolean stabilityWinner,
+                                   final double meanNeighbourIou) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setStabilityWinner(stabilityWinner, meanNeighbourIou);
+                }
+            });
+            return;
+        }
         boolean start = stabilityWinner && !this.stabilityWinner;
         this.stabilityWinner = stabilityWinner;
         if (!Double.isNaN(meanNeighbourIou)) {
@@ -491,7 +560,15 @@ public final class VariationCellPanel extends JPanel {
         refreshTooltip();
     }
 
-    public void setBorderHint(BorderHint hint) {
+    public void setBorderHint(final BorderHint hint) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setBorderHint(hint);
+                }
+            });
+            return;
+        }
         if (hint == null || hint == BorderHint.NONE) {
             kneeWinner = false;
             stabilityWinner = false;
@@ -509,7 +586,15 @@ public final class VariationCellPanel extends JPanel {
         refreshTooltip();
     }
 
-    public void setRibbonLabel(String label) {
+    public void setRibbonLabel(final String label) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setRibbonLabel(label);
+                }
+            });
+            return;
+        }
         String safeLabel = label == null ? "" : label.trim();
         if (safeLabel.toUpperCase(Locale.ROOT).contains("DOWNSTREAM")) {
             setDownstreamRibbonLabel(safeLabel);
@@ -519,14 +604,30 @@ public final class VariationCellPanel extends JPanel {
         repaint();
     }
 
-    public void setDownstreamRibbonLabel(String label) {
+    public void setDownstreamRibbonLabel(final String label) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setDownstreamRibbonLabel(label);
+                }
+            });
+            return;
+        }
         String safeLabel = label == null ? "" : label.trim();
         downstreamRibbonLabel = safeLabel.length() == 0 ? null : safeLabel;
         repaint();
         refreshTooltip();
     }
 
-    void setSelectedForCompare(boolean selectedForCompare) {
+    void setSelectedForCompare(final boolean selectedForCompare) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setSelectedForCompare(selectedForCompare);
+                }
+            });
+            return;
+        }
         this.selectedForCompare = selectedForCompare;
         refreshBorder();
     }
@@ -644,9 +745,12 @@ public final class VariationCellPanel extends JPanel {
         RoundRectangle2D card = cardShape();
         g2.setColor(CARD_BACKGROUND);
         g2.fill(card);
-        g2.setStroke(new BasicStroke(1f));
+        float outlineWidth = selectedForCompare
+                ? COMPARE_OUTLINE_WIDTH
+                : DEFAULT_OUTLINE_WIDTH;
+        g2.setStroke(new BasicStroke(outlineWidth));
         g2.setColor(selectedForCompare ? COMPARE_BORDER : DEFAULT_BORDER);
-        g2.draw(card);
+        g2.draw(cardShape(outlineWidth));
         g2.dispose();
     }
 
@@ -987,7 +1091,8 @@ public final class VariationCellPanel extends JPanel {
         g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
                 RenderingHints.VALUE_ANTIALIAS_ON);
         g2.setClip(cardShape());
-        float alpha = 0.18f + 0.10f * (float) Math.sin(haloPhase);
+        float alpha = HALO_ALPHA_BASE
+                + HALO_ALPHA_AMPLITUDE * (float) Math.sin(haloPhase);
         int radius = Math.max(getWidth(), getHeight());
         Color core = haloColor == null ? KNEE_BORDER : haloColor;
         g2.setPaint(new RadialGradientPaint(
@@ -1046,16 +1151,19 @@ public final class VariationCellPanel extends JPanel {
         g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
                 RenderingHints.VALUE_ANTIALIAS_ON);
         int side = 86;
+        int band = 18;
         Path2D.Double path = new Path2D.Double();
         if (left) {
-            path.moveTo(0, 0);
+            path.moveTo(0, band);
+            path.lineTo(band, 0);
             path.lineTo(side, 0);
             path.lineTo(0, side);
         } else {
             int w = getWidth();
-            path.moveTo(w, 0);
-            path.lineTo(w - side, 0);
+            path.moveTo(w - band, 0);
+            path.lineTo(w, band);
             path.lineTo(w, side);
+            path.lineTo(w - side, 0);
         }
         path.closePath();
         g2.setColor(fill);
@@ -1063,6 +1171,7 @@ public final class VariationCellPanel extends JPanel {
         g2.setColor(RIBBON_RIM);
         g2.setStroke(new BasicStroke(1f));
         g2.draw(path);
+        g2.setClip(path);
         g2.setFont(FlashTheme.bodyMedium().deriveFont(8.5f));
         g2.setColor(textColor);
         if (left) {
@@ -1144,9 +1253,14 @@ public final class VariationCellPanel extends JPanel {
     }
 
     private RoundRectangle2D cardShape() {
-        return new RoundRectangle2D.Double(0.5d, 0.5d,
-                Math.max(1, getWidth() - 1),
-                Math.max(1, getHeight() - 1),
+        return cardShape(DEFAULT_OUTLINE_WIDTH);
+    }
+
+    private RoundRectangle2D cardShape(float outlineWidth) {
+        double inset = Math.max(0.5d, outlineWidth / 2.0d);
+        return new RoundRectangle2D.Double(inset, inset,
+                Math.max(1.0d, getWidth() - 2.0d * inset),
+                Math.max(1.0d, getHeight() - 2.0d * inset),
                 CARD_RADIUS, CARD_RADIUS);
     }
 

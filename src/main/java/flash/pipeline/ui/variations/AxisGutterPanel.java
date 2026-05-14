@@ -203,7 +203,7 @@ public final class AxisGutterPanel extends JPanel {
     }
 
     private static Font titleFont() {
-        return FlashTheme.bodyMedium().deriveFont(11f);
+        return FlashTheme.bodyMedium().deriveFont(Font.BOLD, 11f);
     }
 
     private static Font valueFont() {

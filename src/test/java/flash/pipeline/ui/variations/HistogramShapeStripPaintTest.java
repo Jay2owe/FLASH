@@ -35,7 +35,7 @@ public class HistogramShapeStripPaintTest {
 
         int plateau = image.getRGB(220, 22);
         assertTrue("Expected yellow plateau alpha at sampled pixel.",
-                alpha(plateau) >= 45 && alpha(plateau) <= 60);
+                alpha(plateau) >= 28 && alpha(plateau) <= 38);
         assertTrue(red(plateau) > 200);
         assertTrue(green(plateau) > 180);
         assertTrue(blue(plateau) < 120);

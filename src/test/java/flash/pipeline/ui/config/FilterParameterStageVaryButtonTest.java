@@ -54,6 +54,25 @@ public class FilterParameterStageVaryButtonTest {
                 stage.varyButtonTooltipForTest());
     }
 
+    @Test
+    public void linearMacroWithoutSourceDisablesVaryButtonWithTooltip() {
+        ConfigQcContext context = context();
+        FilterParameterStage stage = new FilterParameterStage(
+                Arrays.asList("Default", "Custom"),
+                new MacroStore(THREE_STEP_MACRO),
+                new NoSourcePreviewAdapter(),
+                null,
+                null);
+
+        stage.buildControls(context, new RecordingActions());
+        stage.onEnter(context, new PreviewPairPanel("Original", "Adjusted"));
+
+        assertTrue(stage.isLinearForTest());
+        assertFalse(stage.isVaryButtonEnabledForTest());
+        assertEquals("No source image is available for parameter variations.",
+                stage.varyButtonTooltipForTest());
+    }
+
     private static FilterParameterStage stage(String macro) {
         return new FilterParameterStage(
                 Arrays.asList("Default", "Custom"),
@@ -130,6 +149,22 @@ public class FilterParameterStageVaryButtonTest {
 
         @Override public ImagePlus createFilteredPreview(ImagePlus source, String macroContent) {
             return source == null ? null : source.duplicate();
+        }
+
+        @Override public void close(ImagePlus image) {
+            if (image != null) image.flush();
+        }
+    }
+
+    private static final class NoSourcePreviewAdapter
+            implements FilterParameterStage.PreviewAdapter {
+        @Override public ImagePlus createSource(ConfigQcContext context) {
+            return null;
+        }
+
+        @Override public ImagePlus createFilteredPreview(ImagePlus source,
+                                                         String macroContent) {
+            return null;
         }
 
         @Override public void close(ImagePlus image) {

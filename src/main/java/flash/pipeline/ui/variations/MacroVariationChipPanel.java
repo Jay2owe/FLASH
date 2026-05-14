@@ -36,6 +36,8 @@ public final class MacroVariationChipPanel extends JPanel {
     private final MacroVariationCatalog catalog;
     private final LinkedHashMap<String, MacroVariation> variations =
             new LinkedHashMap<String, MacroVariation>();
+    private final LinkedHashMap<String, String> tokenReplacements =
+            new LinkedHashMap<String, String>();
     private final List<String> values = new ArrayList<String>();
     private final List<ChangeListener> listeners =
             new ArrayList<ChangeListener>();
@@ -47,6 +49,7 @@ public final class MacroVariationChipPanel extends JPanel {
         setOpaque(false);
         setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
         variations.put(MacroToken.NONE_VALUE, MacroVariation.none());
+        rememberCatalogChoices();
         setValues(initialValues == null
                 ? Collections.singletonList(MacroToken.NONE_VALUE)
                 : initialValues.values());
@@ -65,12 +68,16 @@ public final class MacroVariationChipPanel extends JPanel {
     }
 
     public void setMacroVariationSet(MacroVariationSet macroVariationSet) {
+        tokenReplacements.clear();
         if (macroVariationSet == null) {
             return;
         }
         List<MacroVariation> known = macroVariationSet.variations();
         for (int i = 0; i < known.size(); i++) {
-            remember(known.get(i));
+            MacroVariation saved = known.get(i);
+            MacroVariation live = rehydrateFromCatalog(saved);
+            remember(live);
+            rememberReplacement(saved, live);
         }
         rebuild();
     }
@@ -195,6 +202,7 @@ public final class MacroVariationChipPanel extends JPanel {
         if (token == null || token.trim().isEmpty()) {
             token = MacroToken.NONE_VALUE;
         }
+        token = replacementFor(token);
         if (!variations.containsKey(token)) {
             variations.put(token, placeholderFor(token));
         }
@@ -242,6 +250,86 @@ public final class MacroVariationChipPanel extends JPanel {
             return;
         }
         variations.put(token.trim(), variation);
+    }
+
+    private void rememberCatalogChoices() {
+        List<MacroVariation> choices = catalog.choices();
+        for (int i = 0; i < choices.size(); i++) {
+            remember(choices.get(i));
+        }
+    }
+
+    private MacroVariation rehydrateFromCatalog(MacroVariation saved) {
+        if (saved == null || MacroToken.NONE_VALUE.equals(saved.token())) {
+            return MacroVariation.none();
+        }
+        MacroVariation exact = variations.get(saved.token());
+        if (hasScript(exact)) {
+            return exact;
+        }
+        MacroVariation bySource = liveVariationForSameExternalSource(saved);
+        return bySource == null ? saved : bySource;
+    }
+
+    private MacroVariation liveVariationForSameExternalSource(MacroVariation saved) {
+        if (!isRefreshableExternalSource(saved)) {
+            return null;
+        }
+        for (MacroVariation candidate : variations.values()) {
+            if (!hasScript(candidate)
+                    || !safe(candidate.sourceKind()).equals(safe(saved.sourceKind()))) {
+                continue;
+            }
+            if (sameNonEmpty(candidate.sourceName(), saved.sourceName())
+                    || sameNonEmpty(candidate.displayName(), saved.displayName())) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private void rememberReplacement(MacroVariation saved, MacroVariation live) {
+        if (saved == null || live == null) {
+            return;
+        }
+        String savedToken = saved.token();
+        String liveToken = live.token();
+        if (savedToken == null || liveToken == null || savedToken.equals(liveToken)) {
+            return;
+        }
+        tokenReplacements.put(savedToken, liveToken);
+    }
+
+    private String replacementFor(String token) {
+        String safeToken = token == null ? "" : token.trim();
+        String replacement = tokenReplacements.get(safeToken);
+        return replacement == null ? safeToken : replacement;
+    }
+
+    private static boolean hasScript(MacroVariation variation) {
+        return variation != null
+                && variation.scriptText() != null
+                && !variation.scriptText().trim().isEmpty();
+    }
+
+    private static boolean isRefreshableExternalSource(MacroVariation variation) {
+        if (variation == null) {
+            return false;
+        }
+        String kind = safe(variation.sourceKind());
+        return MacroVariation.SOURCE_CURRENT_CHANNEL.equals(kind)
+                || MacroVariation.SOURCE_BUNDLED_PRESET.equals(kind)
+                || MacroVariation.SOURCE_SAVED_PRESET.equals(kind);
+    }
+
+    private static boolean sameNonEmpty(String left, String right) {
+        String safeLeft = safe(left);
+        String safeRight = safe(right);
+        return !safeLeft.isEmpty() && safeLeft.equals(safeRight);
+    }
+
+    private static String safe(String value) {
+        return value == null ? "" : value.trim();
     }
 
     private MacroVariation resolve(String token) {

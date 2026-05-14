@@ -58,6 +58,9 @@ public class MacroVariationsDialogTest {
                     assertEquals(0, dialog.gridPanelForTest().cellCountForTest());
                     assertFalse(dialog.openLargeMontageButtonForTest().isEnabled());
                     assertFalse(dialog.useComboButtonForTest().isEnabled());
+                    assertFalse(dialog.downstreamVerdictCheckBoxForTest().isEnabled());
+                    assertTrue(dialog.downstreamVerdictCheckBoxForTest()
+                            .getToolTipText().contains("BinConfig"));
                     assertTrue(dialog.chainRibbonLabelForTest().getText()
                             .contains("Gaussian Blur"));
                     assertEquals(ParameterSweep.Method.FILTER,

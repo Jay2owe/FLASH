@@ -17,6 +17,8 @@ import java.io.File;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
@@ -79,6 +81,60 @@ public class MacroVariationsDialogRunTest {
         }
     }
 
+    @Test
+    public void cancellingMidSweepReEnablesRunButtonAndMarksCellsCancelled()
+            throws Exception {
+        Assume.assumeFalse("PipelineDialog creates a JDialog in this codebase.",
+                GraphicsEnvironment.isHeadless());
+        final BlockingPreviewAdapter adapter = new BlockingPreviewAdapter();
+        final AtomicReference<MacroVariationsDialog> ref =
+                new AtomicReference<MacroVariationsDialog>();
+
+        SwingUtilities.invokeAndWait(new Runnable() {
+            @Override public void run() {
+                MacroVariationsDialog dialog = new MacroVariationsDialog(null,
+                        context(adapter), new Consumer<String>() {
+                            @Override public void accept(String macro) {
+                            }
+                        });
+                configureSweep(dialog.editorForTest());
+                dialog.runButtonForTest().doClick();
+                ref.set(dialog);
+            }
+        });
+
+        MacroVariationsDialog dialog = ref.get();
+        try {
+            assertTrue(adapter.awaitStarted());
+            SwingUtilities.invokeAndWait(new Runnable() {
+                @Override public void run() {
+                    ref.get().cancelRunForTest();
+                }
+            });
+
+            assertTrue(waitForRunButtonEnabled(dialog, 5000L));
+            SwingUtilities.invokeAndWait(new Runnable() {
+                @Override public void run() {
+                    MacroVariationsDialog d = ref.get();
+                    assertTrue(d.runButtonForTest().isEnabled());
+                    assertEquals(6, d.cellsForTest().size());
+                    for (VariationCellPanel cell : d.cellsForTest()) {
+                        assertEquals("cancelled", cell.footerTextForTest());
+                    }
+                }
+            });
+        } finally {
+            adapter.release();
+            SwingUtilities.invokeAndWait(new Runnable() {
+                @Override public void run() {
+                    if (ref.get() != null) {
+                        ref.get().dispose();
+                    }
+                }
+            });
+        }
+    }
+
     private static void configureSweep(ParameterSweepEditor editor) {
         List<ParameterKey> keys = editor.parameterKeysForTest();
         for (int i = 0; i < keys.size(); i++) {
@@ -102,7 +158,13 @@ public class MacroVariationsDialogRunTest {
     }
 
     private static FilterVariationEngineContext context() {
+        return context(new SyntheticPreviewAdapter());
+    }
+
+    private static FilterVariationEngineContext context(
+            FilterParameterStage.PreviewAdapter adapter) {
         ImagePlus source = image();
+        source.setTitle("source-" + System.nanoTime());
         FilterMacroEditorModel.MacroDefinition macro =
                 FilterMacroEditorModel.parse(macroText());
         ConfigQcContext config = ConfigQcContext.fromImages(new File("."),
@@ -110,7 +172,7 @@ public class MacroVariationsDialogRunTest {
                 null, Collections.singletonList(source),
                 Collections.singletonList("DAPI"), 0);
         return new FilterVariationEngineContext(macro, source, CropSpec.full(),
-                "DAPI", config, new SyntheticPreviewAdapter());
+                "DAPI", config, adapter);
     }
 
     private static String macroText() {
@@ -133,6 +195,24 @@ public class MacroVariationsDialogRunTest {
         Pattern pattern = Pattern.compile(key + "=([^\\s\";)]+)");
         Matcher matcher = pattern.matcher(macro);
         return matcher.find() ? matcher.group(1) : "0";
+    }
+
+    private static boolean waitForRunButtonEnabled(MacroVariationsDialog dialog,
+                                                   long timeoutMs) throws Exception {
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        while (System.currentTimeMillis() < deadline) {
+            final boolean[] enabled = new boolean[1];
+            SwingUtilities.invokeAndWait(new Runnable() {
+                @Override public void run() {
+                    enabled[0] = dialog.runButtonForTest().isEnabled();
+                }
+            });
+            if (enabled[0]) {
+                return true;
+            }
+            Thread.sleep(10L);
+        }
+        return false;
     }
 
     private static final class SyntheticPreviewAdapter
@@ -159,6 +239,45 @@ public class MacroVariationsDialogRunTest {
         }
 
         @Override public void close(ImagePlus image) {
+        }
+    }
+
+    private static final class BlockingPreviewAdapter
+            implements FilterParameterStage.PreviewAdapter {
+        private final CountDownLatch started = new CountDownLatch(1);
+        private final CountDownLatch release = new CountDownLatch(1);
+
+        @Override public ImagePlus createSource(ConfigQcContext context) {
+            return image();
+        }
+
+        @Override public ImagePlus createFilteredPreview(ImagePlus source,
+                                                         String macroContent)
+                throws Exception {
+            started.countDown();
+            try {
+                while (!release.await(1L, TimeUnit.SECONDS)) {
+                    // Wait until cancellation interrupts the worker.
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw e;
+            }
+            return source == null ? null : source.duplicate();
+        }
+
+        @Override public void close(ImagePlus image) {
+            if (image != null) {
+                image.flush();
+            }
+        }
+
+        boolean awaitStarted() throws InterruptedException {
+            return started.await(5L, TimeUnit.SECONDS);
+        }
+
+        void release() {
+            release.countDown();
         }
     }
 }

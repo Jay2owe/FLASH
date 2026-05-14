@@ -62,8 +62,17 @@ public final class DownstreamVerdict {
             }
 
             String sourceKey = segmenter.filteredSourceKey(result.combo());
-            int count = runCount(segmenter, image, result.combo(), sourceKey,
-                    cache, cancelCheck);
+            int count;
+            try {
+                count = runCount(segmenter, image, result.combo(), sourceKey,
+                        cache, cancelCheck);
+            } catch (RuntimeException e) {
+                publish(progress, new Progress(i + 1, total, baselineCount,
+                        result.combo(), null,
+                        status(i + 1, total) + " (skipped: "
+                                + safe(e.getMessage()) + ")"));
+                continue;
+            }
             if (isCancelled(cancelCheck)) {
                 return verdicts;
             }

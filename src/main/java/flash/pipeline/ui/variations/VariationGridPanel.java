@@ -120,23 +120,34 @@ public final class VariationGridPanel extends JPanel implements Scrollable {
         if (resolvedMethod == null && sweep != null) {
             resolvedMethod = sweep.method();
         }
-        if (resolvedMethod == ParameterSweep.Method.STARDIST) {
-            return sweptOrderableAxesByPrecedence(sweep,
-                    STARDIST_SPATIAL_PRECEDENCE);
+        List<ParameterKey> candidates;
+        if (resolvedMethod == null) {
+            candidates = sweptOrderableAxes(sweep);
+        } else {
+            switch (resolvedMethod) {
+                case STARDIST:
+                    candidates = sweptOrderableAxesByPrecedence(sweep,
+                            STARDIST_SPATIAL_PRECEDENCE);
+                    break;
+                case CELLPOSE:
+                    candidates = sweptOrderableAxesByPrecedence(sweep,
+                            CELLPOSE_SPATIAL_PRECEDENCE);
+                    break;
+                case CLASSICAL:
+                    candidates = sweptOrderableAxesByPrecedence(sweep,
+                            CLASSICAL_SPATIAL_PRECEDENCE);
+                    break;
+                case FILTER:
+                    candidates = hasPresetSweepAxes(sweep)
+                            ? presetSpatialAxes(sweep)
+                            : sweptOrderableAxes(sweep);
+                    break;
+                default:
+                    candidates = sweptOrderableAxes(sweep);
+                    break;
+            }
         }
-        if (resolvedMethod == ParameterSweep.Method.CELLPOSE) {
-            return sweptOrderableAxesByPrecedence(sweep,
-                    CELLPOSE_SPATIAL_PRECEDENCE);
-        }
-        if (resolvedMethod == ParameterSweep.Method.CLASSICAL) {
-            return sweptOrderableAxesByPrecedence(sweep,
-                    CLASSICAL_SPATIAL_PRECEDENCE);
-        }
-        if (resolvedMethod == ParameterSweep.Method.FILTER
-                && hasPresetSweepAxes(sweep)) {
-            return presetSpatialAxes(sweep);
-        }
-        return sweptOrderableAxes(sweep);
+        return firstSpatialAxes(candidates);
     }
 
     public static FacetChipRow.ValueLabelProvider valueLabelProviderFor(
@@ -364,7 +375,7 @@ public final class VariationGridPanel extends JPanel implements Scrollable {
         activeFacets.putAll(next);
     }
 
-    private List<ParameterKey> firstSpatialAxes(List<ParameterKey> candidates) {
+    private static List<ParameterKey> firstSpatialAxes(List<ParameterKey> candidates) {
         List<ParameterKey> out = new ArrayList<ParameterKey>();
         for (int i = 0; i < candidates.size() && out.size() < 2; i++) {
             ParameterKey candidate = candidates.get(i);

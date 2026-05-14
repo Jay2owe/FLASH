@@ -1906,12 +1906,17 @@ public final class FilterParameterStage implements ConfigQcStage {
 
     private void updateVaryButtonState(boolean controlsEnabled) {
         if (varyButton == null) return;
-        boolean available = controlsEnabled && linear && canPreview();
+        boolean hasMacro = hasMacro();
+        boolean hasSource = sourceImage != null;
+        boolean available = controlsEnabled && linear && hasMacro && hasSource;
         varyButton.setEnabled(available);
         if (!linear) {
             varyButton.setToolTipText("Use Custom macro... to vary branched pipelines");
-        } else if (!canPreview()) {
-            varyButton.setToolTipText("Choose a filter and source image first.");
+        } else if (!hasMacro) {
+            varyButton.setToolTipText("Choose a filter before varying parameters.");
+        } else if (!hasSource) {
+            varyButton.setToolTipText(
+                    "No source image is available for parameter variations.");
         } else if (!controlsEnabled) {
             varyButton.setToolTipText("Wait for the current preview to finish.");
         } else {

@@ -32,7 +32,7 @@ public final class HistogramShapeStrip extends JPanel {
     private static final Color HISTOGRAM_RIM = new Color(0x2F, 0x3A, 0x43, 0x90);
     private static final Color LABEL = new Color(0x4E, 0x5D, 0x65);
     private static final Color STAR = new Color(0xF0, 0xE4, 0x42);
-    private static final Color PLATEAU_FILL = new Color(0xF0, 0xE4, 0x42, 0x33);
+    private static final Color PLATEAU_FILL = new Color(0xF0, 0xE4, 0x42, 33);
 
     private double[] xs = new double[0];
     private int[][] histograms = new int[0][0];

@@ -241,6 +241,18 @@ public final class VariationsDialog extends PipelineDialog {
         });
     }
 
+    void openMontageForTest() {
+        openMontage();
+    }
+
+    VariationMontageDialog montageDialogForTest() {
+        return montageDialog;
+    }
+
+    ImagePlus croppedForComparisonForTest(ImagePlus source) {
+        return croppedForComparison(source);
+    }
+
     private void buildUi() {
         addComponent(headerPanel());
         addHeader("Parameters to sweep");
@@ -1117,22 +1129,50 @@ public final class VariationsDialog extends PipelineDialog {
         }
         VariationMontageDialog dialog = montageDialog();
         dialog.setTiles(montageTiles, currentSweep, zSlider.getValue());
-        dialog.setSourceChoices(context.rawSource(), context.filteredSource());
+        dialog.setSourceChoices(
+                croppedForComparison(context.rawSource()),
+                croppedForComparison(context.filteredSource()));
         PreviewDisplaySettings settings =
                 PreviewDisplaySettings.defaultFor(context.channelName());
         dialog.setDisplaySettings(settings, settings);
+        wireMontageDisplayActions(dialog, context.montageDisplayActionDelegate());
+        dialog.raiseForUser();
+    }
+
+    private void wireMontageDisplayActions(
+            final VariationMontageDialog dialog,
+            final MontageDisplayActionDelegate delegate) {
+        if (delegate == null) {
+            dialog.setDisplayActionListener(null);
+            dialog.setDisplayActionState("Grey LUT",
+                    "Display controls require an active main preview.");
+            dialog.setDisplayActionsEnabled(false,
+                    "Display controls require an active main preview.");
+            return;
+        }
         dialog.setDisplayActionListener(new VariationMontageDialog.DisplayActionListener() {
             @Override public void adjustBrightnessContrastRequested() {
-                showMontageDisplayActionStub("Brightness/Contrast");
+                delegate.adjustBrightnessContrast();
+                updateMontageDisplayActionState(dialog, delegate);
             }
 
             @Override public void lutToggleRequested() {
-                showMontageDisplayActionStub("LUT");
+                delegate.toggleGreyLut();
+                updateMontageDisplayActionState(dialog, delegate);
             }
         });
-        dialog.setDisplayActionState("Grey LUT",
-                "Use the main preview controls for shared display adjustments.");
-        dialog.raiseForUser();
+        updateMontageDisplayActionState(dialog, delegate);
+    }
+
+    private void updateMontageDisplayActionState(
+            VariationMontageDialog dialog,
+            MontageDisplayActionDelegate delegate) {
+        if (dialog == null || delegate == null) {
+            return;
+        }
+        dialog.setDisplayActionState(delegate.lutButtonText(),
+                delegate.lutButtonTooltip());
+        dialog.setDisplayActionsEnabled(true, delegate.lutButtonTooltip());
     }
 
     private VariationMontageDialog montageDialog() {
@@ -1200,17 +1240,6 @@ public final class VariationsDialog extends PipelineDialog {
 
     private static boolean isMontageResult(VariationResult result) {
         return result != null && !result.hasError();
-    }
-
-    private void showMontageDisplayActionStub(String action) {
-        if (GraphicsEnvironment.isHeadless()) {
-            return;
-        }
-        JOptionPane.showMessageDialog(
-                montageDialog == null ? getWindow() : montageDialog,
-                action + " controls are not connected to this montage yet.",
-                "Variation montage",
-                JOptionPane.INFORMATION_MESSAGE);
     }
 
     private void disposeMontageDialog() {
