@@ -191,7 +191,7 @@ public final class DeconvolutionLab2Engine implements DeconvolutionEngine {
             try {
                 int[] beforeIds = imageJRunner.getWindowIds();
                 imageJRunner.run(COMMAND_NAME, buildMacroOptions(stackFile, psfFile, params));
-                ImagePlus generated = findGeneratedImage(beforeIds, imageJRunner.getWindowIds());
+                ImagePlus generated = findGeneratedImage(beforeIds, imageJRunner.getWindowIds(), imageJRunner);
                 if (generated == null) {
                     throw new DeconvolutionException("DeconvolutionLab2 did not produce an output image.");
                 }
@@ -282,7 +282,7 @@ public final class DeconvolutionLab2Engine implements DeconvolutionEngine {
         }
     }
 
-    private static ImagePlus findGeneratedImage(int[] beforeIds, int[] afterIds) {
+    private static ImagePlus findGeneratedImage(int[] beforeIds, int[] afterIds, ImageJRunner imageJRunner) {
         if (afterIds == null || afterIds.length == 0) return null;
         Set<Integer> seen = new HashSet<Integer>();
         if (beforeIds != null) {
@@ -293,7 +293,7 @@ public final class DeconvolutionLab2Engine implements DeconvolutionEngine {
         for (int i = afterIds.length - 1; i >= 0; i--) {
             int id = afterIds[i];
             if (seen.contains(Integer.valueOf(id))) continue;
-            ImagePlus image = WindowManager.getImage(id);
+            ImagePlus image = imageJRunner.getImage(id);
             if (image != null) return image;
         }
         return null;
@@ -347,7 +347,7 @@ public final class DeconvolutionLab2Engine implements DeconvolutionEngine {
         return false;
     }
 
-    private interface AvailabilityProbe {
+    interface AvailabilityProbe {
         boolean isAvailable();
     }
 
@@ -442,14 +442,8 @@ public final class DeconvolutionLab2Engine implements DeconvolutionEngine {
                 if (!tempDir.mkdirs() && !tempDir.isDirectory()) {
                     throw new IOException("Could not create temporary directory " + tempDir.getAbsolutePath());
                 }
-                FileSaver stackSaver = new FileSaver(stack);
-                FileSaver psfSaver = new FileSaver(psf);
-                if (!stackSaver.saveAsTiffStack(stackFile.getAbsolutePath())) {
-                    throw new IOException("Failed to write stack TIFF for DeconvolutionLab2.");
-                }
-                if (!psfSaver.saveAsTiffStack(psfFile.getAbsolutePath())) {
-                    throw new IOException("Failed to write PSF TIFF for DeconvolutionLab2.");
-                }
+                saveTiff(stack, stackFile, "stack");
+                saveTiff(psf, psfFile, "PSF");
                 Object raw = method.invoke(
                         null,
                         stackFile.getAbsolutePath(),
@@ -467,6 +461,16 @@ public final class DeconvolutionLab2Engine implements DeconvolutionEngine {
             } finally {
                 deleteRecursively(tempDir.toPath());
             }
+        }
+    }
+
+    private static void saveTiff(ImagePlus image, File target, String label) throws IOException {
+        FileSaver saver = new FileSaver(image);
+        boolean ok = image.getStackSize() > 1
+                ? saver.saveAsTiffStack(target.getAbsolutePath())
+                : saver.saveAsTiff(target.getAbsolutePath());
+        if (!ok) {
+            throw new IOException("Failed to write " + label + " TIFF for DeconvolutionLab2.");
         }
     }
 

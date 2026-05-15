@@ -7,11 +7,70 @@ import org.junit.Assume;
 import org.junit.Test;
 
 import java.awt.GraphicsEnvironment;
+import java.io.File;
+import java.io.IOException;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 public class DeconvolutionLab2EngineTest {
+
+    @Test
+    public void macroFallbackFindsGeneratedImageThroughInjectedRunner() throws Exception {
+        final ImagePlus generated = syntheticVolume("generated", 4, 4, 2, 2.0f);
+        DeconvolutionLab2Engine engine = new DeconvolutionLab2Engine(
+                new DeconvolutionLab2Engine.AvailabilityProbe() {
+                    @Override
+                    public boolean isAvailable() {
+                        return true;
+                    }
+                },
+                new DeconvolutionLab2Engine.ImageJRunner() {
+                    private boolean runComplete = false;
+
+                    @Override
+                    public void run(String command, String options) {
+                        runComplete = true;
+                    }
+
+                    @Override
+                    public int[] getWindowIds() {
+                        return runComplete ? new int[]{11, 22} : new int[]{11};
+                    }
+
+                    @Override
+                    public ImagePlus getImage(int id) {
+                        return id == 22 ? generated : null;
+                    }
+
+                    @Override
+                    public ImagePlus getImage(String title) {
+                        return null;
+                    }
+
+                    @Override
+                    public void saveTiffStack(ImagePlus image, File target) throws IOException {}
+                },
+                null
+        );
+
+        ImagePlus stack = syntheticVolume("stack", 4, 4, 2, 1.0f);
+        ImagePlus psf = syntheticVolume("psf", 3, 3, 1, 1.0f);
+        ImagePlus result = null;
+        try {
+            result = engine.deconvolve(stack, psf, DeconvParams.builder(Algorithm.RL).build());
+
+            assertNotNull(result);
+            assertEquals(stack.getWidth(), result.getWidth());
+            assertEquals(stack.getHeight(), result.getHeight());
+            assertEquals(stack.getStackSize(), result.getStackSize());
+        } finally {
+            close(result);
+            close(stack);
+            close(psf);
+        }
+    }
 
     @Test
     public void deconvolveSharpensABlurredPointAndPreservesDimensions() throws Exception {
@@ -78,6 +137,18 @@ public class DeconvolutionLab2EngineTest {
                 planes[z][i] *= scale;
             }
             stack.addSlice(new FloatProcessor(width, height, planes[z], null));
+        }
+        return new ImagePlus(title, stack);
+    }
+
+    private static ImagePlus syntheticVolume(String title, int width, int height, int depth, float value) {
+        ImageStack stack = new ImageStack(width, height);
+        for (int z = 0; z < depth; z++) {
+            float[] pixels = new float[width * height];
+            for (int i = 0; i < pixels.length; i++) {
+                pixels[i] = value;
+            }
+            stack.addSlice(new FloatProcessor(width, height, pixels, null));
         }
         return new ImagePlus(title, stack);
     }

@@ -124,7 +124,7 @@ public final class IterativeDeconvolve3DEngine implements DeconvolutionEngine {
 
             rawResult = imageJRunner.getImage(outputTitle);
             if (rawResult == null) {
-                rawResult = findGeneratedImage(beforeIds, imageJRunner.getWindowIds());
+                rawResult = findGeneratedImage(beforeIds, imageJRunner.getWindowIds(), imageJRunner);
             }
             if (rawResult == null) {
                 throw new DeconvolutionException("Iterative Deconvolve 3D did not produce an output image.");
@@ -202,7 +202,7 @@ public final class IterativeDeconvolve3DEngine implements DeconvolutionEngine {
         }
     }
 
-    private static ImagePlus findGeneratedImage(int[] beforeIds, int[] afterIds) {
+    private static ImagePlus findGeneratedImage(int[] beforeIds, int[] afterIds, ImageJRunner imageJRunner) {
         if (afterIds == null || afterIds.length == 0) return null;
         Set<Integer> seen = new HashSet<Integer>();
         if (beforeIds != null) {
@@ -213,7 +213,7 @@ public final class IterativeDeconvolve3DEngine implements DeconvolutionEngine {
         for (int i = afterIds.length - 1; i >= 0; i--) {
             int id = afterIds[i];
             if (seen.contains(Integer.valueOf(id))) continue;
-            ImagePlus image = WindowManager.getImage(id);
+            ImagePlus image = imageJRunner.getImage(id);
             if (image != null) return image;
         }
         return null;
