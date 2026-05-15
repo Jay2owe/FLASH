@@ -114,6 +114,27 @@ public final class MorphometryDetailsWriter {
                 w.write("                Requires nearest-neighbor distances + CMS.\n");
                 w.write("</Spatial-Morphometric Indices>\n");
             }
+
+            w.write("\n<Per-Object Texture and Complexity>\n");
+            w.write("Optional Spatial Analysis metrics written under the MorphTexture_* prefix.\n");
+            w.write("These features are computed per segmented object, then aggregated by Master Aggregation.\n\n");
+            w.write("  MorphTexture_GLCMContrast      Grey-level co-occurrence matrix contrast.\n");
+            w.write("  MorphTexture_GLCMASM           Angular second moment, also called GLCM energy.\n");
+            w.write("  MorphTexture_GLCMCorrelation   GLCM correlation across neighbouring pixel values.\n");
+            w.write("  MorphTexture_GLCMEntropy       Texture disorder from the GLCM probability matrix.\n");
+            w.write("  MorphTexture_GLCMHomogeneity   Local grey-level similarity.\n");
+            w.write("                                 GLCM values use 2D per-slice ObjectTextureGLCM results averaged across slices.\n\n");
+            w.write("  MorphTexture_FractalDim        Box-counting fractal dimension from an XY object-mask projection.\n");
+            w.write("  MorphTexture_FractalDim_R2     Goodness-of-fit for the log-log box-counting regression.\n");
+            w.write("  MorphTexture_LacunarityMean    Mean gliding-box lacunarity across valid box scales.\n");
+            w.write("  MorphTexture_LacunaritySpread  Spread of lacunarity across valid box scales.\n");
+            w.write("                                 Fractal and lacunarity values are computed by ObjectFractal.\n\n");
+            w.write("  MorphTexture_ClassLabel        Integer texture class assigned by Gabor + wavelet k-means.\n");
+            w.write("  MorphTexture_ClassDistance     Distance to the assigned texture-class centroid.\n");
+            w.write("  MorphTexture_F1..F8            Gabor and wavelet feature-vector values used for texture classes.\n");
+            w.write("                                 Texture-class values use 2D per-slice ObjectTextureFeatures results averaged across slices.\n");
+            w.write("Native-3D texture metrics are not part of v1; the current implementation uses 2D slice/projection summaries.\n");
+            w.write("</Per-Object Texture and Complexity>\n");
         } catch (Exception e) {
             ij.IJ.log("Failed to write morphometry details: " + e.getMessage());
         }

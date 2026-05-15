@@ -71,6 +71,8 @@ The main dialog groups modules into setup, image preparation, display, image ana
 - **Fluorescence Intensity Analysis**: Measure fluorescence inside ROIs and masks.
 - **3D Object Analysis**: Segment, count, and measure 3D objects, with colocalisation and process-length workflows.
 - **Spatial Analysis**: Recompute nearest-neighbour, spatial statistics, heatmap, phenotyping, and morphometry outputs from object tables.
+
+  **Per-object texture and complexity.** Spatial Analysis can score each segmented object on its internal texture (2D per-slice GLCM Haralick features), morphological complexity (box-counting fractal dimension and lacunarity on an XY mask projection), or assign it to an auto-discovered texture class (2D per-slice Gabor and wavelet k-means). Columns appear under the `MorphTexture_*` prefix in per-channel output. Native-3D texture metrics are deferred. See `docs/how_tos/per-object-texture-*.md`.
 - **Combine results per condition / animal**: Aggregate per-image analysis CSVs into project-level master tables.
 - **Statistical Analysis**: Run configured group comparisons from aggregated result tables.
 - **Excel Summary Export**: Export formatted `.xlsx` workbooks from aggregated and statistical outputs.

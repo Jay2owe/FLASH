@@ -54,6 +54,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 
 /**
  * Aggregates per-object and per-intensity CSV data across all channels into
@@ -133,6 +134,7 @@ public class MasterAggregationAnalysis implements Analysis {
      */
     static boolean needsChannelPrefix(String header) {
         return CHANNEL_AGNOSTIC_MORPH_COLS.contains(header)
+                || header.startsWith("MorphTexture_")
                 || header.startsWith("Voronoi_")
                 || "Cluster".equals(header);
     }
@@ -1225,11 +1227,13 @@ public class MasterAggregationAnalysis implements Analysis {
                 for (int hi = 0; hi < header.length; hi++) {
                     String h = header[hi].trim();
                     String normalizedHeader = normalizeAggregationMetricHeader(h);
+                    boolean isTextureCol = normalizedHeader.startsWith("MorphTexture_");
                     boolean isSpatialCol = normalizedHeader.contains("_DistToClosest_")
                             || h.contains("_DistTo_")
                             || normalizedHeader.contains("_VolContains")
                             || normalizedHeader.startsWith("Voronoi_")
                             || CHANNEL_AGNOSTIC_MORPH_COLS.contains(normalizedHeader)
+                            || isTextureCol
                             || normalizedHeader.equals("Cluster")
                             || normalizedHeader.startsWith(channelName + "_Pearson_")
                             || normalizedHeader.startsWith(channelName + "_Manders_M1_")
@@ -1239,32 +1243,16 @@ public class MasterAggregationAnalysis implements Analysis {
                             || normalizedHeader.startsWith(channelName + "_Costes_p_");
                     if (!isSpatialCol) continue;
 
-                    // Compute mean across this animal's rows, skipping Infinity/NaN
-                    double sum = 0;
-                    int validCount = 0;
-                    for (String[] row : animalRows) {
-                        String raw = safeGet(row, hi).trim();
-                        if (raw.isEmpty()) continue;
-                        double v;
-                        try {
-                            v = Double.parseDouble(raw);
-                        } catch (NumberFormatException ex) {
-                            continue;
-                        }
-                        if (Double.isInfinite(v) || Double.isNaN(v)) continue;
-                        sum += v;
-                        validCount++;
-                    }
-
-                    double meanVal = (validCount > 0) ? sum / validCount : 0.0;
-
                     // Output column name: strip threshold digits from VolContains for clean aggregated names
                     String cleanH = normalizedHeader.replaceAll("(_VolContains)\\d+(_)", "$1$2");
+                    boolean modal = "MorphTexture_ClassLabel".equals(cleanH);
                     // Add channel prefix for columns that don't already contain it
-                    // (channel-agnostic Morph_, Voronoi_, Cluster — see needsChannelPrefix).
+                    // (channel-agnostic Morph_, MorphTexture_, Voronoi_, Cluster - see needsChannelPrefix).
                     boolean needsPrefix = needsChannelPrefix(cleanH);
-                    String outCol = (needsPrefix ? prefix : "") + cleanH + "Mean";
-                    metrics.put(outCol, meanVal);
+                    String outCol = (needsPrefix ? prefix : "") + cleanH + (modal ? "Mode" : "Mean");
+                    metrics.put(outCol, modal
+                            ? modalIntegerValue(animalRows, hi)
+                            : meanFiniteValue(animalRows, hi));
                 }
 
                 // numSections for this group (stored once, not per-channel)
@@ -2102,6 +2090,40 @@ public class MasterAggregationAnalysis implements Analysis {
             }
         }
         return n > 0 ? sum / n : Double.NaN;
+    }
+
+    private static double meanFiniteValue(List<String[]> rows, int columnIndex) {
+        double sum = 0.0;
+        int n = 0;
+        for (String[] row : rows) {
+            double value = parseDouble(safeGet(row, columnIndex));
+            if (!Double.isNaN(value)) {
+                sum += value;
+                n++;
+            }
+        }
+        return n > 0 ? sum / n : 0.0;
+    }
+
+    private static double modalIntegerValue(List<String[]> rows, int columnIndex) {
+        Map<Integer, Integer> counts = new TreeMap<Integer, Integer>();
+        for (String[] row : rows) {
+            double parsed = parseDouble(safeGet(row, columnIndex));
+            if (Double.isNaN(parsed)) continue;
+            Integer value = Integer.valueOf((int) Math.round(parsed));
+            Integer count = counts.get(value);
+            counts.put(value, Integer.valueOf(count == null ? 1 : count.intValue() + 1));
+        }
+
+        int bestValue = 0;
+        int bestCount = -1;
+        for (Map.Entry<Integer, Integer> entry : counts.entrySet()) {
+            if (entry.getValue().intValue() > bestCount) {
+                bestValue = entry.getKey().intValue();
+                bestCount = entry.getValue().intValue();
+            }
+        }
+        return bestCount < 0 ? 0.0 : (double) bestValue;
     }
 
     private static final class ClassifiedIntensityCsv {

@@ -241,6 +241,42 @@ public final class ExcelNameMap {
                 OBJ_COUNTER + "Mean Feret Eccentricity Vector magnitude per <ab> object. "
                 + "Feret/(2\u00D7MajorRadius). ~1 = smooth elongation, >>1 = dominant extension.");
 
+        // Per-object MorphTexture metrics. Raw MorphTexture_F1..F8 feature-vector
+        // columns are deliberately omitted from the default Excel export.
+        addRule("<ab>_MorphTexture_GLCMContrastMean",
+                "<ab> GLCM contrast",
+                OBJ_COUNTER + "Mean per-object GLCM contrast for <ab> objects.");
+        addRule("<ab>_MorphTexture_GLCMASMMean",
+                "<ab> GLCM energy",
+                OBJ_COUNTER + "Mean per-object GLCM angular second moment (energy) for <ab> objects.");
+        addRule("<ab>_MorphTexture_GLCMCorrelationMean",
+                "<ab> GLCM correlation",
+                OBJ_COUNTER + "Mean per-object GLCM correlation for <ab> objects.");
+        addRule("<ab>_MorphTexture_GLCMEntropyMean",
+                "<ab> GLCM entropy",
+                OBJ_COUNTER + "Mean per-object GLCM entropy for <ab> objects.");
+        addRule("<ab>_MorphTexture_GLCMHomogeneityMean",
+                "<ab> GLCM homogeneity",
+                OBJ_COUNTER + "Mean per-object GLCM homogeneity for <ab> objects.");
+        addRule("<ab>_MorphTexture_FractalDimMean",
+                "<ab> Fractal dimension",
+                OBJ_COUNTER + "Mean per-object box-counting fractal dimension for <ab> objects.");
+        addRule("<ab>_MorphTexture_FractalDim_R2Mean",
+                "<ab> Fractal fit R2",
+                OBJ_COUNTER + "Mean R2 goodness-of-fit for per-object fractal dimension estimates.");
+        addRule("<ab>_MorphTexture_LacunarityMeanMean",
+                "<ab> Lacunarity mean",
+                OBJ_COUNTER + "Mean per-object lacunarity averaged across box scales.");
+        addRule("<ab>_MorphTexture_LacunaritySpreadMean",
+                "<ab> Lacunarity spread",
+                OBJ_COUNTER + "Mean per-object spread of lacunarity across box scales.");
+        addRule("<ab>_MorphTexture_ClassLabelMode",
+                "<ab> Texture class mode",
+                OBJ_COUNTER + "Most common per-object texture class for <ab> objects in the aggregation group.");
+        addRule("<ab>_MorphTexture_ClassDistanceMean",
+                "<ab> Texture class distance",
+                OBJ_COUNTER + "Mean distance from each <ab> object to its assigned texture-class centroid.");
+
         // Sort rules so longer regex patterns match first (more specific)
         RULES.sort((a, b) -> Integer.compare(b.regex.pattern().length(), a.regex.pattern().length()));
     }
