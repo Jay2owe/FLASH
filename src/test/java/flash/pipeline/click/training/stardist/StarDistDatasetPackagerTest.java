@@ -1,0 +1,238 @@
+package flash.pipeline.click.training.stardist;
+
+import flash.pipeline.click.ClickStore;
+import flash.pipeline.click.training.ImagePlusProvider;
+import flash.pipeline.ui.wizard.JsonIO;
+import ij.ImagePlus;
+import ij.ImageStack;
+import ij.io.Opener;
+import ij.process.ShortProcessor;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
+
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.HashMap;
+import java.util.Map;
+
+import static org.junit.Assert.*;
+
+public class StarDistDatasetPackagerTest {
+    @Rule
+    public TemporaryFolder temp = new TemporaryFolder();
+
+    @Test
+    public void negativeClicksRemoveLabelsFromExportedMask() throws Exception {
+        Path root = temp.newFolder("negative").toPath();
+        Map<String, ImagePlus> raw = map("Image1", constantImage("raw", 4, 3, 1, 100));
+        Map<String, ImagePlus> labels = map("Image1", labelImage("labels", new int[][][] {
+                {{1, 1, 0, 2}, {1, 0, 2, 2}, {0, 0, 0, 0}}
+        }));
+        ClickStore clicks = new ClickStore();
+        clicks.add(click("Image1", 2, 2, ClickStore.Verdict.NEGATIVE));
+
+        StarDistDatasetPackager.PackagingResult result = new StarDistDatasetPackager()
+                .packageDataset(root, "session", 2, clicks,
+                        provider(raw), provider(labels));
+
+        assertEquals(1, result.imagesWritten);
+        assertEquals(1, result.negativeLabelsRemoved);
+        ImagePlus exported = open(result.outputDir.resolve("labels")
+                .resolve("Image1_C2_z001.tif"));
+        assertEquals(1, pixel(exported, 0, 0));
+        assertEquals(0, pixel(exported, 2, 1));
+        assertEquals(0, pixel(exported, 3, 1));
+    }
+
+    @Test
+    public void positiveClicksDoNotForceInclusionWhenAlreadyPresent() throws Exception {
+        Path root = temp.newFolder("positive").toPath();
+        Map<String, ImagePlus> raw = map("Image1", constantImage("raw", 4, 3, 1, 100));
+        Map<String, ImagePlus> labels = map("Image1", labelImage("labels", new int[][][] {
+                {{1, 1, 0, 2}, {1, 0, 2, 2}, {0, 0, 0, 0}}
+        }));
+        ClickStore clicks = new ClickStore();
+        clicks.add(click("Image1", 2, 2, ClickStore.Verdict.POSITIVE));
+
+        StarDistDatasetPackager.PackagingResult result = new StarDistDatasetPackager()
+                .packageDataset(root, "session", 2, clicks,
+                        provider(raw), provider(labels));
+
+        assertEquals(1, result.positiveLabelsRetained);
+        ImagePlus exported = open(result.outputDir.resolve("labels")
+                .resolve("Image1_C2_z001.tif"));
+        assertEquals(2, pixel(exported, 2, 1));
+        assertEquals(2, pixel(exported, 3, 1));
+    }
+
+    @Test
+    public void metadataJsonHasExpectedFields() throws Exception {
+        Path root = temp.newFolder("metadata").toPath();
+        writeChannelData(root, "DAPI\tIba1");
+        Map<String, ImagePlus> raw = map("Image1", constantImage("raw", 4, 3, 2, 100));
+        Map<String, ImagePlus> labels = map("Image1", labelImage("labels", new int[][][] {
+                {{1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}},
+                {{2, 2, 0, 0}, {2, 0, 0, 0}, {0, 0, 0, 0}}
+        }));
+        ClickStore clicks = new ClickStore();
+        clicks.add(click("Image1", 2, 1, ClickStore.Verdict.POSITIVE));
+        clicks.add(click("Image1", 2, 2, ClickStore.Verdict.NEGATIVE));
+
+        Path output = new StarDistDatasetPackager()
+                .packageDataset(root, "session", 2, clicks,
+                        provider(raw), provider(labels))
+                .outputDir;
+
+        Map<String, Object> json = JsonIO.parseObject(new String(
+                Files.readAllBytes(output.resolve("metadata.json")), StandardCharsets.UTF_8));
+        assertEquals(1, JsonIO.intValue(json.get("version"), -1));
+        assertEquals(2, JsonIO.intValue(json.get("channel"), -1));
+        assertEquals("Iba1", JsonIO.stringValue(json.get("channelName")));
+        assertTrue(((Number) json.get("createdAt")).longValue() > 0L);
+        assertEquals(1, JsonIO.intValue(json.get("imageCount"), -1));
+        assertEquals(2, JsonIO.intValue(json.get("sliceCount"), -1));
+        Map<String, Object> objectCount = JsonIO.asObject(json.get("objectCount"));
+        assertEquals(1, JsonIO.intValue(objectCount.get("positive"), -1));
+        assertEquals(1, JsonIO.intValue(objectCount.get("negative"), -1));
+        assertEquals("../../.bin/Clicks.json", JsonIO.stringValue(json.get("sourceClicksJsonPath")));
+        assertEquals(StarDistDatasetPackager.RECOMMENDED_NOTEBOOK,
+                JsonIO.stringValue(json.get("recommendedNotebook")));
+    }
+
+    @Test
+    public void imagesWithoutClicksAreSkipped() throws Exception {
+        Path root = temp.newFolder("skipped").toPath();
+        Map<String, ImagePlus> raw = new HashMap<String, ImagePlus>();
+        raw.put("Image1", constantImage("raw1", 4, 3, 1, 100));
+        raw.put("Image2", constantImage("raw2", 4, 3, 1, 200));
+        Map<String, ImagePlus> labels = new HashMap<String, ImagePlus>();
+        labels.put("Image1", labelImage("labels1", new int[][][] {
+                {{1, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}}
+        }));
+        labels.put("Image2", labelImage("labels2", new int[][][] {
+                {{2, 2, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}}
+        }));
+        ClickStore clicks = new ClickStore();
+        clicks.add(click("Image1", 2, 1, ClickStore.Verdict.POSITIVE));
+        clicks.add(click("Image2", 1, 2, ClickStore.Verdict.NEGATIVE));
+
+        StarDistDatasetPackager.PackagingResult result = new StarDistDatasetPackager()
+                .packageDataset(root, "session", 2, clicks,
+                        provider(raw), provider(labels));
+
+        assertEquals(1, result.imagesWritten);
+        assertTrue(Files.isRegularFile(result.outputDir.resolve("raw")
+                .resolve("Image1_C2_z001.tif")));
+        assertFalse(Files.exists(result.outputDir.resolve("raw")
+                .resolve("Image2_C2_z001.tif")));
+    }
+
+    @Test
+    public void outputDirIsAtomic() throws Exception {
+        Path root = temp.newFolder("atomic").toPath();
+        Path existing = root.resolve("Configuration")
+                .resolve("Training Datasets")
+                .resolve("StarDist")
+                .resolve("session");
+        Files.createDirectories(existing);
+        Files.write(existing.resolve("sentinel.txt"),
+                "keep".getBytes(StandardCharsets.UTF_8));
+
+        Map<String, ImagePlus> raw = map("Image1", constantImage("raw", 4, 3, 1, 100));
+        ClickStore clicks = new ClickStore();
+        clicks.add(click("Image1", 2, 1, ClickStore.Verdict.POSITIVE));
+
+        try {
+            new StarDistDatasetPackager().packageDataset(root, "session", 2, clicks,
+                    provider(raw),
+                    new ImagePlusProvider() {
+                        @Override
+                        public ImagePlus get(String imageName) {
+                            return null;
+                        }
+                    });
+            fail("Expected missing label image to fail.");
+        } catch (Exception expected) {
+            assertTrue(expected.getMessage().contains("StarDist label"));
+        }
+
+        assertEquals("keep", new String(Files.readAllBytes(existing.resolve("sentinel.txt")),
+                StandardCharsets.UTF_8));
+        assertFalse(Files.exists(existing.resolve("metadata.json")));
+    }
+
+    static ClickStore.Click click(String image,
+                                  int channel,
+                                  int label,
+                                  ClickStore.Verdict verdict) {
+        return new ClickStore.Click(image, channel, label, 1,
+                1.0, 1.0, verdict, 123L);
+    }
+
+    static ImagePlus constantImage(String title, int width, int height, int slices, int value) {
+        ImageStack stack = new ImageStack(width, height);
+        for (int z = 0; z < slices; z++) {
+            ShortProcessor sp = new ShortProcessor(width, height);
+            for (int i = 0; i < sp.getPixelCount(); i++) {
+                sp.set(i, value + z);
+            }
+            stack.addSlice(sp);
+        }
+        ImagePlus image = new ImagePlus(title, stack);
+        image.setDimensions(1, slices, 1);
+        return image;
+    }
+
+    static ImagePlus labelImage(String title, int[][][] values) {
+        int slices = values.length;
+        int height = values[0].length;
+        int width = values[0][0].length;
+        ImageStack stack = new ImageStack(width, height);
+        for (int z = 0; z < slices; z++) {
+            ShortProcessor sp = new ShortProcessor(width, height);
+            for (int y = 0; y < height; y++) {
+                for (int x = 0; x < width; x++) {
+                    sp.set(x, y, values[z][y][x]);
+                }
+            }
+            stack.addSlice(sp);
+        }
+        ImagePlus image = new ImagePlus(title, stack);
+        image.setDimensions(1, slices, 1);
+        return image;
+    }
+
+    static ImagePlus open(Path path) {
+        ImagePlus image = new Opener().openImage(path.toString());
+        assertNotNull("Could not open " + path, image);
+        return image;
+    }
+
+    static int pixel(ImagePlus image, int x, int y) {
+        return (int) Math.round(image.getProcessor().getPixelValue(x, y));
+    }
+
+    static ImagePlusProvider provider(final Map<String, ImagePlus> images) {
+        return new ImagePlusProvider() {
+            @Override
+            public ImagePlus get(String imageName) {
+                return images.get(imageName);
+            }
+        };
+    }
+
+    static Map<String, ImagePlus> map(String name, ImagePlus image) {
+        Map<String, ImagePlus> out = new HashMap<String, ImagePlus>();
+        out.put(name, image);
+        return out;
+    }
+
+    private static void writeChannelData(Path root, String firstLine) throws Exception {
+        Path bin = root.resolve("Configuration").resolve(".bin");
+        Files.createDirectories(bin);
+        String text = firstLine + "\nGrays\tGreen\n0\t0\n0-Infinity\t0-Infinity\n";
+        Files.write(bin.resolve("Channel_Data.txt"), text.getBytes(StandardCharsets.UTF_8));
+    }
+}
