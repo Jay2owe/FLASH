@@ -223,6 +223,13 @@
 			<scope>provided</scope>
 		</dependency>
 
+		<!-- Smile RF: in-process object classifier. LGPL-3.0; do not shade into FLASH without a license review. -->
+		<dependency>
+			<groupId>com.github.haifengl</groupId>
+			<artifactId>smile-core</artifactId>
+			<version>2.6.0</version>
+		</dependency>
+
 		<!-- MigLayout: provided by Fiji at runtime. -->
 		<dependency>
 			<groupId>com.miglayout</groupId>

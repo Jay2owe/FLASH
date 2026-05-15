@@ -57,6 +57,7 @@ import flash.pipeline.runtime.PluginInstallGuard;
 import flash.pipeline.roi.RoiIO;
 import flash.pipeline.roi.RoiOps;
 import flash.pipeline.segmentation.SegmentationMethod;
+import flash.pipeline.segmentation.SegmentationTokenParser;
 import flash.pipeline.zslice.ZSliceOps;
 
 import flash.pipeline.ui.PipelineDialog;
@@ -66,6 +67,8 @@ import flash.pipeline.objects.CpcUtils;
 import flash.pipeline.segmentation.EnhancedClassicalParameters;
 import flash.pipeline.segmentation.EnhancedClassicalRunner;
 import flash.pipeline.segmentation.MorphPredicate;
+import flash.pipeline.segmentation.TrainedRfParameters;
+import flash.pipeline.segmentation.TrainedRfRunner;
 
 import ij.IJ;
 import ij.ImagePlus;
@@ -2472,6 +2475,7 @@ public class ThreeDObjectAnalysis implements Analysis {
         final String[] filterFilenames = new String[n];
         final String[] thresholdTokens = new String[n];
         final String[] sizeTokens = new String[n];
+        final SegmentationMethod[] segmentationMethods = new SegmentationMethod[n];
         final boolean[] isEnhancedClassical = new boolean[n];
         @SuppressWarnings("unchecked")
         final List<MorphPredicate>[] enhancedMorphPredicates = new List[n];
@@ -2499,6 +2503,7 @@ public class ThreeDObjectAnalysis implements Analysis {
             thresholdTokens[c] = cfg.channelThresholds.get(c);
             sizeTokens[c] = cfg.channelSizes.get(c);
             SegmentationMethod segmentationMethod = cfg.segmentationMethod(c);
+            segmentationMethods[c] = segmentationMethod;
             isEnhancedClassical[c] = segmentationMethod.isEnhancedClassical();
             enhancedMorphPredicates[c] = isEnhancedClassical[c]
                     ? SegmentationMethod.morphPredicates(segmentationMethod)
@@ -2508,6 +2513,15 @@ public class ThreeDObjectAnalysis implements Analysis {
                 int maxSize = SegmentationMethod.maxSize(segmentationMethod);
                 sizeTokens[c] = SegmentationMethod.minSize(segmentationMethod) + "-"
                         + (maxSize == Integer.MAX_VALUE ? "Infinity" : String.valueOf(maxSize));
+            }
+            if (segmentationMethod.isTrainedRf()) {
+                SegmentationMethod base = SegmentationMethod.trainedRfBase(segmentationMethod);
+                if (base.isEnhancedClassical()) {
+                    thresholdTokens[c] = String.valueOf((int) Math.round(SegmentationMethod.threshold(base)));
+                    int maxSize = SegmentationMethod.maxSize(base);
+                    sizeTokens[c] = SegmentationMethod.minSize(base) + "-"
+                            + (maxSize == Integer.MAX_VALUE ? "Infinity" : String.valueOf(maxSize));
+                }
             }
             isStarDist[c] = cfg.isStarDist(c);
             isCellpose[c] = cfg.isCellpose(c);
@@ -2556,6 +2570,7 @@ public class ThreeDObjectAnalysis implements Analysis {
                                     ci, channelNames[ci], ch, binDir, filterFilenames[ci],
                                     thresholdTokens[ci], sizeTokens[ci],
                                     doExtractProcessLength, nucIdx, procChans, n,
+                                    segmentationMethods[ci],
                                     isEnhancedClassical[ci], enhancedMorphPredicates[ci],
                                     isStarDist[ci], sdProbThresh[ci], sdNmsThresh[ci],
                                     sdLinkingMaxDistance[ci], sdGapClosingMaxDistance[ci], sdMaxFrameGap[ci],
@@ -2591,6 +2606,7 @@ public class ThreeDObjectAnalysis implements Analysis {
                         c, channelNames[c], chans[c], binDir, filterFilenames[c],
                         thresholdTokens[c], sizeTokens[c],
                         extractProcessLength, nuclearMarkerIndex, processChannels, n,
+                        segmentationMethods[c],
                         isEnhancedClassical[c], enhancedMorphPredicates[c],
                         isStarDist[c], sdProbThresh[c], sdNmsThresh[c],
                         sdLinkingMaxDistance[c], sdGapClosingMaxDistance[c], sdMaxFrameGap[c],
@@ -2963,6 +2979,7 @@ public class ThreeDObjectAnalysis implements Analysis {
         final String[] filterFilenames = new String[n];
         final String[] thresholdTokens = new String[n];
         final String[] sizeTokens = new String[n];
+        final SegmentationMethod[] segmentationMethods = new SegmentationMethod[n];
         final boolean[] isEnhancedClassical = new boolean[n];
         @SuppressWarnings("unchecked")
         final List<MorphPredicate>[] enhancedMorphPredicates = new List[n];
@@ -2990,6 +3007,7 @@ public class ThreeDObjectAnalysis implements Analysis {
             thresholdTokens[c] = cfg.channelThresholds.get(c);
             sizeTokens[c] = cfg.channelSizes.get(c);
             SegmentationMethod segmentationMethod = cfg.segmentationMethod(c);
+            segmentationMethods[c] = segmentationMethod;
             isEnhancedClassical[c] = segmentationMethod.isEnhancedClassical();
             enhancedMorphPredicates[c] = isEnhancedClassical[c]
                     ? SegmentationMethod.morphPredicates(segmentationMethod)
@@ -2999,6 +3017,15 @@ public class ThreeDObjectAnalysis implements Analysis {
                 int maxSize = SegmentationMethod.maxSize(segmentationMethod);
                 sizeTokens[c] = SegmentationMethod.minSize(segmentationMethod) + "-"
                         + (maxSize == Integer.MAX_VALUE ? "Infinity" : String.valueOf(maxSize));
+            }
+            if (segmentationMethod.isTrainedRf()) {
+                SegmentationMethod base = SegmentationMethod.trainedRfBase(segmentationMethod);
+                if (base.isEnhancedClassical()) {
+                    thresholdTokens[c] = String.valueOf((int) Math.round(SegmentationMethod.threshold(base)));
+                    int maxSize = SegmentationMethod.maxSize(base);
+                    sizeTokens[c] = SegmentationMethod.minSize(base) + "-"
+                            + (maxSize == Integer.MAX_VALUE ? "Infinity" : String.valueOf(maxSize));
+                }
             }
             isStarDist[c] = cfg.isStarDist(c);
             isCellpose[c] = cfg.isCellpose(c);
@@ -3040,6 +3067,7 @@ public class ThreeDObjectAnalysis implements Analysis {
                                     ci, channelNames[ci], ch, binDir, filterFilenames[ci],
                                     thresholdTokens[ci], sizeTokens[ci],
                                     false, -1, null, n,  // no skeleton creation
+                                    segmentationMethods[ci],
                                     isEnhancedClassical[ci], enhancedMorphPredicates[ci],
                                     isStarDist[ci], sdProbThresh[ci], sdNmsThresh[ci],
                                     sdLinkingMaxDistance[ci], sdGapClosingMaxDistance[ci], sdMaxFrameGap[ci],
@@ -3070,6 +3098,7 @@ public class ThreeDObjectAnalysis implements Analysis {
                         c, channelNames[c], chans[c], binDir, filterFilenames[c],
                         thresholdTokens[c], sizeTokens[c],
                         false, -1, null, n,
+                        segmentationMethods[c],
                         isEnhancedClassical[c], enhancedMorphPredicates[c],
                         isStarDist[c], sdProbThresh[c], sdNmsThresh[c],
                         sdLinkingMaxDistance[c], sdGapClosingMaxDistance[c], sdMaxFrameGap[c],
@@ -3423,6 +3452,7 @@ public class ThreeDObjectAnalysis implements Analysis {
             String thrToken, String sizeToken,
             boolean extractProcessLength, int nuclearMarkerIndex, boolean[] processChannels,
             int totalChannels,
+            SegmentationMethod segmentationMethod,
             boolean isEnhancedClassical, List<MorphPredicate> enhancedMorphPredicates,
             boolean isStarDist, double starDistProbThresh, double starDistNmsThresh,
             double starDistLinkingMaxDistance, double starDistGapClosingMaxDistance, int starDistMaxFrameGap,
@@ -3779,6 +3809,86 @@ public class ThreeDObjectAnalysis implements Analysis {
                 croppedForSkeleton.changes = false;
                 croppedForSkeleton.close();
                 croppedForSkeleton.flush();
+            }
+
+            if (segmentationMethod != null && segmentationMethod.isTrainedRf()) {
+                ImagePlus labelImage = new TrainedRfRunner().run(
+                        filtered,
+                        TrainedRfParameters.fromMethod(
+                                segmentationMethod,
+                                projectRoot == null ? null : projectRoot.toPath(),
+                                ch,
+                                (int) Math.round(threshold),
+                                minSizeVox,
+                                maxSizeVox,
+                                0.5)
+                                .withWarningSink(new TrainedRfRunner.WarningSink() {
+                                    @Override
+                                    public void warn(String message) {
+                                        IJ.log(message);
+                                    }
+                                }));
+
+                if (labelImage == null) {
+                    String failureReason = "Trained RF segmentation failed";
+                    IJ.log("    - [Ch " + (c + 1) + "] WARNING: " + failureReason);
+                    return new ChannelFilterResult(c, channelName, ch, null,
+                            null, 0, 0, true, failureReason);
+                }
+
+                if (labelImage != null && (cropRoi != null || clearRoi != null)) {
+                    ij.gui.Roi filterRoi;
+                    if (classicalCentroidFilter) {
+                        filterRoi = (clearRoi != null) ? clearRoi : cropRoi;
+                    } else {
+                        filterRoi = (clearRoi != null)
+                                ? (ij.gui.Roi) clearRoi.clone()
+                                : (ij.gui.Roi) cropRoi.clone();
+                        if (cropRoi != null) {
+                            java.awt.Rectangle cropBounds = cropRoi.getBounds();
+                            filterRoi.setLocation(
+                                    filterRoi.getBounds().x - cropBounds.x,
+                                    filterRoi.getBounds().y - cropBounds.y);
+                        }
+                    }
+                    int beforeFilter = StarDist3DRunner.countLabels(labelImage);
+                    int removed = filterLabelsByCentroid(labelImage, filterRoi);
+                    int afterFilter = beforeFilter - removed;
+                    IJ.log("    Trained RF [" + channelName + "] ROI filter: " + beforeFilter
+                            + " -> " + afterFilter + " objects (" + removed + " outside "
+                            + roiSetName + " ROI removed)");
+
+                    if (classicalCentroidFilter) {
+                        RoiOps.removeNonRoiThreadSafe(filtered, cropRoi, clearRoi);
+                        RoiOps.removeNonRoiThreadSafe(ch, cropRoi, clearRoi);
+                        RoiOps.removeNonRoiThreadSafe(labelImage, cropRoi, clearRoi);
+                    }
+                }
+
+                ImagePlus binaryMask = ImageOps.duplicateThreadSafe(labelImage);
+                binaryMask.setTitle(channelName + "_filtered");
+                ij.ImageStack maskStack = binaryMask.getStack();
+                for (int s = 1; s <= maskStack.getSize(); s++) {
+                    ij.process.ImageProcessor ip = maskStack.getProcessor(s);
+                    for (int p = 0; p < ip.getPixelCount(); p++) {
+                        ip.set(p, ip.get(p) > 0 ? 255 : 0);
+                    }
+                }
+
+                int nObjects = StarDist3DRunner.countLabels(labelImage);
+                if (!compactLog) {
+                    IJ.log("    - [Ch " + (c + 1) + "] Trained RF segmentation (model="
+                            + SegmentationMethod.trainedRfModelKey(segmentationMethod)
+                            + ", base=" + SegmentationTokenParser.format(SegmentationMethod.trainedRfBase(segmentationMethod))
+                            + "): " + nObjects + " objects kept");
+                }
+
+                return new ChannelFilterResult(c, channelName, ch, binaryMask,
+                        null, minSizeVox, maxSizeVox, false, null,
+                        true, "Trained RF", labelImage,
+                        "Trained RF (model=" + SegmentationMethod.trainedRfModelKey(segmentationMethod)
+                                + ", base=" + SegmentationTokenParser.format(SegmentationMethod.trainedRfBase(segmentationMethod)) + ")",
+                        preDetection);
             }
 
             return new ChannelFilterResult(c, channelName, ch, filtered,
@@ -4463,6 +4573,12 @@ public class ThreeDObjectAnalysis implements Analysis {
                     + ", CellprobThreshold=" + cfg.getCellposeCellprobThreshold(channelIndex)
                     + ", UseGpu=" + cfg.getCellposeUseGpu(channelIndex)
                     + ", CompanionChannel=" + companionSummary;
+        }
+        if (cfg.isTrainedRf(channelIndex)) {
+            SegmentationMethod method = cfg.segmentationMethod(channelIndex);
+            return "Segmentation=Trained RF"
+                    + ", Model=" + SegmentationMethod.trainedRfModelKey(method)
+                    + ", Base=" + SegmentationTokenParser.format(SegmentationMethod.trainedRfBase(method));
         }
         if (cfg.isEnhancedClassical(channelIndex)) {
             List<MorphPredicate> predicates = cfg.getEnhancedClassicalMorphPredicates(channelIndex);

@@ -112,9 +112,14 @@ public class BinConfig {
         return segmentationMethod(channelIndex).isEnhancedClassical();
     }
 
-    /** Returns true if the channel produces a label image directly (StarDist or Cellpose). */
+    /** Returns true if the channel at the given 0-based index uses trained RF post-filter segmentation. */
+    public boolean isTrainedRf(int channelIndex) {
+        return segmentationMethod(channelIndex).isTrainedRf();
+    }
+
+    /** Returns true if the channel produces a label image directly. */
     public boolean usesLabelImageSegmentation(int channelIndex) {
-        return isStarDist(channelIndex) || isCellpose(channelIndex);
+        return isStarDist(channelIndex) || isCellpose(channelIndex) || isTrainedRf(channelIndex);
     }
 
     public int getEnhancedClassicalThreshold(int channelIndex) {
