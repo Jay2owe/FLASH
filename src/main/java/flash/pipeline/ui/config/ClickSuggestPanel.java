@@ -1,6 +1,9 @@
 package flash.pipeline.ui.config;
 
+import flash.pipeline.help.AnalysisHelpCatalog;
+import flash.pipeline.help.AnalysisHelpDialog;
 import flash.pipeline.ui.FlashTheme;
+import flash.pipeline.ui.HelpButton;
 import flash.pipeline.ui.ToggleSwitch;
 
 import javax.swing.Box;
@@ -158,6 +161,11 @@ final class ClickSuggestPanel extends JPanel {
         top.add(toggle, gbc);
         gbc.gridx++;
         top.add(toggleLabel, gbc);
+        gbc.gridx++;
+        JButton helpButton = HelpButton.question("About click-to-suggest filters.");
+        helpButton.addActionListener(e -> AnalysisHelpDialog.show(
+                ClickSuggestPanel.this, AnalysisHelpCatalog.CLICK_TO_SUGGEST_FILTERS));
+        top.add(helpButton, gbc);
         gbc.gridx++;
         gbc.weightx = 1.0;
         gbc.fill = GridBagConstraints.HORIZONTAL;

@@ -8,6 +8,7 @@ import flash.pipeline.deconv.engine.Algorithm;
 import flash.pipeline.deconv.engine.DeconvParams;
 import flash.pipeline.deconv.psf.PsfModel;
 import flash.pipeline.deconv.psf.ScopeModality;
+import flash.pipeline.segmentation.SegmentationTokenParser;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -402,6 +403,9 @@ public class CLIConfig {
     private void appendHeadlessBinField(List<String> parts, BinField field) {
         String value = getBinFieldValue(field);
         if (value == null || value.trim().isEmpty()) return;
+        if (field == BinField.SEGMENTATION_METHODS) {
+            value = canonicalSegmentationMethods(value);
+        }
         parts.add(binFieldCliKey(field) + "=" + value.trim());
     }
 
@@ -428,7 +432,32 @@ public class CLIConfig {
         if (values == null || values.isEmpty()) return;
         for (Map.Entry<Integer, String> entry : values.entrySet()) {
             if (entry.getKey() == null || entry.getValue() == null) continue;
-            parts.add(prefix + (entry.getKey().intValue() + 1) + suffix + "=" + entry.getValue());
+            String value = "_segmentation".equals(suffix)
+                    ? canonicalSegmentationToken(entry.getValue())
+                    : entry.getValue();
+            parts.add(prefix + (entry.getKey().intValue() + 1) + suffix + "=" + value);
+        }
+    }
+
+    private static String canonicalSegmentationMethods(String value) {
+        String safe = value == null ? "" : value.trim();
+        if (safe.isEmpty()) return safe;
+        String[] tokens = safe.split(",", -1);
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < tokens.length; i++) {
+            if (i > 0) sb.append(',');
+            sb.append(canonicalSegmentationToken(tokens[i]));
+        }
+        return sb.toString();
+    }
+
+    private static String canonicalSegmentationToken(String value) {
+        String safe = value == null ? "" : value.trim();
+        if (safe.isEmpty()) return safe;
+        try {
+            return SegmentationTokenParser.format(SegmentationTokenParser.parse(safe));
+        } catch (IllegalArgumentException e) {
+            return safe;
         }
     }
 

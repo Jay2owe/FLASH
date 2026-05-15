@@ -1,5 +1,7 @@
 package flash.pipeline.ui;
 
+import flash.pipeline.help.AnalysisHelpCatalog;
+import flash.pipeline.help.AnalysisHelpDialog;
 import flash.pipeline.segmentation.catalog.ModelCatalogIO;
 import flash.pipeline.segmentation.catalog.ModelEntry;
 import ij.IJ;
@@ -66,6 +68,7 @@ public final class SegmentationModelManagerDialog extends PipelineDialog {
 
         setDefaultButtonsVisible(false);
         addHeader("Segmentation Models");
+        addComponent(buildHelpRow());
 
         JPanel filters = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
         filters.setOpaque(false);
@@ -150,6 +153,21 @@ public final class SegmentationModelManagerDialog extends PipelineDialog {
         deleteButton.addActionListener(e -> deleteSelected());
 
         refreshTable(null);
+    }
+
+    private JPanel buildHelpRow() {
+        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        row.setOpaque(false);
+        JLabel label = new JLabel("Project model catalog");
+        label.setForeground(FlashTheme.TEXT_MUTED);
+        label.setFont(FlashTheme.captionItalic());
+        row.add(label);
+        row.add(javax.swing.Box.createHorizontalStrut(6));
+        JButton help = HelpButton.question("About the Custom Model Manager.");
+        help.addActionListener(e -> AnalysisHelpDialog.show(
+                getWindow(), AnalysisHelpCatalog.CUSTOM_MODEL_MANAGER));
+        row.add(help);
+        return row;
     }
 
     public static void showManager(Window owner,

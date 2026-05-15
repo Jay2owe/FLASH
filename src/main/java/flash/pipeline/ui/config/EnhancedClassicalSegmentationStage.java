@@ -1,5 +1,7 @@
 package flash.pipeline.ui.config;
 
+import flash.pipeline.help.AnalysisHelpCatalog;
+import flash.pipeline.help.AnalysisHelpDialog;
 import flash.pipeline.help.SetupHelpCatalog;
 import flash.pipeline.help.SetupHelpTopic;
 import flash.pipeline.objects.ObjectsCounter3DWrapper;
@@ -10,6 +12,7 @@ import flash.pipeline.segmentation.SegmentationMethod;
 import flash.pipeline.segmentation.SegmentationTokenCodec;
 import flash.pipeline.segmentation.SegmentationTokenParser;
 import flash.pipeline.ui.FlashTheme;
+import flash.pipeline.ui.HelpButton;
 import flash.pipeline.ui.ToggleSwitch;
 import ij.IJ;
 import ij.ImagePlus;
@@ -207,6 +210,10 @@ public final class EnhancedClassicalSegmentationStage implements ConfigQcStage {
     private JComponent buildMorphSection() {
         filterSection = new CollapsibleSection("Filter by morphology", false);
         filterSection.setAlignmentX(Component.LEFT_ALIGNMENT);
+        JButton help = HelpButton.question("About Enhanced Classical segmentation.");
+        help.addActionListener(e -> AnalysisHelpDialog.show(
+                filterSection, AnalysisHelpCatalog.ENHANCED_CLASSICAL_SEGMENTATION));
+        filterSection.getHeaderControls().add(help);
         rowsPanel = new JPanel();
         rowsPanel.setOpaque(false);
         rowsPanel.setLayout(new BoxLayout(rowsPanel, BoxLayout.Y_AXIS));

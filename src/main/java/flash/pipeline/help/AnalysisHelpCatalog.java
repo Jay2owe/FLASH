@@ -12,7 +12,17 @@ import java.util.Map;
  */
 public final class AnalysisHelpCatalog {
 
+    public static final AnalysisHelpTopic TRAIN_CUSTOM_SEGMENTATION_MODELS =
+            trainCustomSegmentationModelsTopic();
+    public static final AnalysisHelpTopic ENHANCED_CLASSICAL_SEGMENTATION =
+            enhancedClassicalSegmentationTopic();
+    public static final AnalysisHelpTopic CLICK_TO_SUGGEST_FILTERS =
+            clickToSuggestFiltersTopic();
+    public static final AnalysisHelpTopic CUSTOM_MODEL_MANAGER =
+            customModelManagerTopic();
+
     private static final Map<Integer, AnalysisHelpTopic> TOPICS = buildTopics();
+    private static final Map<String, AnalysisHelpTopic> AUXILIARY_TOPICS = buildAuxiliaryTopics();
 
     private AnalysisHelpCatalog() {
     }
@@ -25,8 +35,20 @@ public final class AnalysisHelpCatalog {
         return TOPICS.containsKey(Integer.valueOf(analysisIndex));
     }
 
+    public static AnalysisHelpTopic forKey(String key) {
+        if (key == null) return null;
+        for (AnalysisHelpTopic topic : TOPICS.values()) {
+            if (key.equals(topic.key)) return topic;
+        }
+        return AUXILIARY_TOPICS.get(key);
+    }
+
     public static Map<Integer, AnalysisHelpTopic> all() {
         return TOPICS;
+    }
+
+    public static Map<String, AnalysisHelpTopic> auxiliaryTopics() {
+        return AUXILIARY_TOPICS;
     }
 
     private static Map<Integer, AnalysisHelpTopic> buildTopics() {
@@ -45,8 +67,164 @@ public final class AnalysisHelpCatalog {
         return Collections.unmodifiableMap(topics);
     }
 
+    private static Map<String, AnalysisHelpTopic> buildAuxiliaryTopics() {
+        Map<String, AnalysisHelpTopic> topics = new LinkedHashMap<String, AnalysisHelpTopic>();
+        putAuxiliary(topics, TRAIN_CUSTOM_SEGMENTATION_MODELS);
+        putAuxiliary(topics, ENHANCED_CLASSICAL_SEGMENTATION);
+        putAuxiliary(topics, CLICK_TO_SUGGEST_FILTERS);
+        putAuxiliary(topics, CUSTOM_MODEL_MANAGER);
+        return Collections.unmodifiableMap(topics);
+    }
+
     private static void put(Map<Integer, AnalysisHelpTopic> topics, AnalysisHelpTopic topic) {
         topics.put(Integer.valueOf(topic.analysisIndex), topic);
+    }
+
+    private static void putAuxiliary(Map<String, AnalysisHelpTopic> topics, AnalysisHelpTopic topic) {
+        if (topics.put(topic.key, topic) != null) {
+            throw new IllegalStateException("Duplicate analysis helper key: " + topic.key);
+        }
+    }
+
+    private static AnalysisHelpTopic trainCustomSegmentationModelsTopic() {
+        return new AnalysisHelpTopic(
+                FLASH_Pipeline.IDX_CREATE_BIN,
+                "train-custom-segmentation-models",
+                "Train custom segmentation models",
+                "Use captured positive and negative clicks to either tune segmentation parameters or create a project-registered custom model.",
+                list(
+                        "Use this when stock Classical, Enhanced Classical, StarDist, or Cellpose settings are close but still miss a repeatable object class.",
+                        "Use click-to-suggest first when the current engine only needs better thresholds, size limits, or post-detection filters.",
+                        "Use Train Custom Engine when repeated click corrections should become a reusable project model entry."),
+                list(
+                        "Representative images opened in Set Up Configuration quality control.",
+                        "At least enough positive and negative clicks for the selected training route; the wizard enforces its minimum before training.",
+                        "For StarDist or Cellpose, an external training tool that can consume the packaged dataset and return a model file."),
+                list(
+                        "Click good objects and bad objects in the preview, then use the click-suggest toggle when you want parameter suggestions.",
+                        "Choose Train Custom Engine from the segmentation method picker when clicks should create a reusable model.",
+                        "Pick a base engine: Classical or Enhanced Classical trains an in-process Smile Random Forest, while StarDist and Cellpose package datasets for external training.",
+                        "Cellpose 4, Cellpose-SAM, and cpsam models are not supported by the pinned Cellpose 3 runtime."),
+                list(
+                        "Review captured clicks for the current channel and exclude weak training images if needed.",
+                        "Run the wizard training step; Classical and Enhanced Classical train in FLASH, while StarDist opens ZeroCostDL4Mic guidance and Cellpose writes a GUI/CLI-ready dataset.",
+                        "Import or choose the trained external StarDist or Cellpose model file, then save the new catalog entry.",
+                        "Apply the recommended segmentation token to the channel or keep the previous method."),
+                list(
+                        "A project model catalog entry under FLASH/.settings/Presets/Segmentation Models/.",
+                        "For Smile RF, a serialized Random Forest model and metadata with click counts and base engine.",
+                        "For StarDist and Cellpose, a packaged training dataset plus the imported model reference after external training.",
+                        "A stable segmentation token such as trained_rf:<modelKey>:base=<base> or model=<modelKey> on a deep-learning token."),
+                list(
+                        "Training on too few examples makes the model look precise on the preview but fail across the batch.",
+                        "Deep StarDist and Cellpose networks are not trained inside FLASH; FLASH packages data and registers the resulting model.",
+                        "A model entry is project scoped. Copy the project catalog with the project if another machine needs to replay it.",
+                        "Do not use Cellpose 4 / Cellpose-SAM outputs with this runtime until FLASH explicitly upgrades that backend."),
+                Collections.<AnalysisHelpTopic.HelpImage>emptyList());
+    }
+
+    private static AnalysisHelpTopic enhancedClassicalSegmentationTopic() {
+        return new AnalysisHelpTopic(
+                FLASH_Pipeline.IDX_CREATE_BIN,
+                "enhanced-classical-segmentation-method",
+                "Enhanced Classical segmentation method",
+                "Enhanced Classical starts with the normal threshold and voxel-size object detection, then filters candidate objects by measured morphology during segmentation.",
+                list(
+                        "Use this for threshold-friendly signal where debris, merged cells, or elongated artefacts still survive the basic size filter.",
+                        "Use it when the old filter-macro workflow needed several ImageJ commands before 3D Objects Counter to remove the same false positives.",
+                        "Skip it when the target needs instance separation from StarDist, Cellpose, or a trained model rather than post-detection object filtering."),
+                list(
+                        "A filtered channel preview, the raw source image, a signal threshold, and minimum and maximum voxel sizes.",
+                        "Optional morphology predicates defined in the Filter by morphology section.",
+                        "Object statistics produced during the preview run."),
+                list(
+                        "Supported features are volume, surface_area, sphericity, elongation, compactness, mean_intensity, max_intensity, and feret_diameter_max.",
+                        "Supported operators are >=, <=, >, and <.",
+                        "Each enabled row is combined with AND logic, so an object must pass every enabled predicate."),
+                list(
+                        "Run the normal object preview to create candidate objects.",
+                        "Enable morphology rows, choose a feature, operator, and value, then rerun the object preview.",
+                        "FLASH applies the morphology predicates inside the segmentation run before downstream counts and measurements are saved.",
+                        "Lock the stage to write a canonical enhanced_classical token with encoded morph predicates."),
+                list(
+                        "The saved segmentation method token records thresh, minSize, maxSize, and an encoded morph predicate list.",
+                        "Downstream object tables contain only objects that passed both the threshold/size gates and the morphology gates.",
+                        "The predicate summary shows how many preview objects survive each enabled filter."),
+                list(
+                        "Morphology filters are not a later cleanup step; changing them changes the segmented object set itself.",
+                        "Very strict filters can remove true objects that are dim, clipped, or partly outside the image.",
+                        "Predicates depend on the candidate labels produced by thresholding, so a bad threshold still gives bad morphology.",
+                        "Use the old three-command macro chain only when image preprocessing is the real problem; use Enhanced Classical when object-level filtering is the problem."),
+                Collections.<AnalysisHelpTopic.HelpImage>emptyList());
+    }
+
+    private static AnalysisHelpTopic clickToSuggestFiltersTopic() {
+        return new AnalysisHelpTopic(
+                FLASH_Pipeline.IDX_CREATE_BIN,
+                "click-to-suggest-filters",
+                "Click-to-suggest filters",
+                "Click-to-suggest uses bad-object clicks and current preview measurements to propose safer parameter changes without applying them automatically.",
+                list(
+                        "Use this after a preview has produced obvious false positives that can be clicked consistently.",
+                        "Use it before training a custom model when the current backend may only need better numeric settings.",
+                        "Skip it when no current preview labels exist or the problem is missing objects rather than bad objects."),
+                list(
+                        "At least three negative clicks on bad objects for the current channel.",
+                        "Optional positive clicks that help estimate collateral damage to likely true objects.",
+                        "A current preview label image and backend-specific object measurements."),
+                list(
+                        "Classical suggestions use intensity and object-size features to propose threshold, minimum size, and maximum size.",
+                        "StarDist suggestions use post-detection quality, area, and intensity measurements to propose quality, area, and intensity filters.",
+                        "Cellpose suggestions use object size and Cellpose probability information when available to propose cell probability and diameter changes."),
+                list(
+                        "Turn on Click bad objects to suggest filters.",
+                        "Click at least three bad objects in the preview, then press Suggest.",
+                        "Review the highlighted fields and the status message showing how many clicked bad objects would be removed.",
+                        "Press Apply to accept the suggestion or Revert to restore the previous values; FLASH never auto-applies suggestions."),
+                list(
+                        "Updated parameter fields only after Apply is pressed.",
+                        "A stale preview marker, so the preview is rerun with accepted settings before lock-in.",
+                        "No permanent click or parameter change when Revert is pressed."),
+                list(
+                        "Suggestions are local to the current channel and preview state; rerun preview after applying.",
+                        "Three negative clicks is the minimum, not a guarantee that the suggestion generalizes across the dataset.",
+                        "Positive clicks are useful because they reveal when a proposed filter would remove likely true objects.",
+                        "A suggestion can still be wrong if the clicked labels are poor examples or the preview segmentation is already badly broken."),
+                Collections.<AnalysisHelpTopic.HelpImage>emptyList());
+    }
+
+    private static AnalysisHelpTopic customModelManagerTopic() {
+        return new AnalysisHelpTopic(
+                FLASH_Pipeline.IDX_CREATE_BIN,
+                "custom-model-manager",
+                "Custom Model Manager",
+                "The Custom Model Manager lists stock and project-specific segmentation models and keeps stable model keys for reproducible saved methods.",
+                list(
+                        "Use this to import a Fiji-compatible StarDist model zip, add a Cellpose model file or registered name, inspect trained Smile RF entries, or clean up project models.",
+                        "Use it when a saved channel method references a missing model key and you need to restore or replace the project catalog entry.",
+                        "Skip it for bundled stock models unless you only need to inspect which model is selected."),
+                list(
+                        "The current project directory, because the catalog is project scoped.",
+                        "For StarDist, a TensorFlow SavedModel zip that the Fiji StarDist stack can load.",
+                        "For Cellpose, a model file copied into the project or a registered Cellpose model name available to the Cellpose 3 runtime."),
+                list(
+                        "Stock entries are read-only and come from FLASH resources or supported built-in Cellpose names.",
+                        "User-imported and user-trained entries can be renamed or deleted when the project owns them.",
+                        "Model keys are the stable identifiers saved in segmentation tokens; display names are for users."),
+                list(
+                        "Open the manager from a StarDist or Cellpose parameter stage, or after a training wizard run.",
+                        "Filter by engine or source, select an entry, and review its key, source, file/resource path, defaults, and metadata.",
+                        "Add or edit user entries, then return to the parameter stage and refresh the model list."),
+                list(
+                        "Catalog JSON and copied files under FLASH/.settings/Presets/Segmentation Models/.",
+                        "Project-relative file paths for portable replay and sharing.",
+                        "Stable model keys used by StarDist, Cellpose, and trained_rf segmentation method tokens."),
+                list(
+                        "Do not edit the same project catalog from two Fiji sessions at once; the most recent save wins.",
+                        "A project-relative path is required for portable replay. Avoid depending on machine-local absolute paths.",
+                        "Deleting a user model can make older bins or snapshots report a missing model key.",
+                        "The manager registers models; it does not validate every biological use case of a model."),
+                Collections.<AnalysisHelpTopic.HelpImage>emptyList());
     }
 
     private static AnalysisHelpTopic setupConfigurationTopic() {

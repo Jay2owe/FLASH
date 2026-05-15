@@ -83,6 +83,14 @@ Interactive configuration quality checks use an embedded FLASH preview screen in
 
 Display min/max and threshold controls update the preview live. Filter parameters, StarDist, Cellpose, and 3D object previews rerun only from their explicit preview buttons.
 
+### Segmentation Models And Click Training
+
+FLASH supports built-in and project-specific segmentation models. StarDist and Cellpose parameter stages can select model catalog entries, and the Custom Model Manager can register Fiji-compatible StarDist `.zip` exports, Cellpose model files, or Cellpose registered model names.
+
+Click-driven setup can mark good and bad preview objects, suggest safer filter parameters, and launch the Train Custom Engine wizard. Classical and Enhanced Classical training uses an in-process Smile Random Forest object classifier; StarDist and Cellpose workflows package click-derived datasets for external training and then register the trained model in the project catalog.
+
+Publication-oriented method notes live in [docs/methods/](docs/methods/), including [custom models and click training](docs/methods/Methodology%20-%20Custom%20Models%20and%20Click%20Training.md).
+
 ## Supported Inputs
 
 FLASH is designed for multi-channel fluorescence microscopy projects. It supports common Bio-Formats-readable microscopy containers and TIFF-based workflows through Fiji/Bio-Formats.

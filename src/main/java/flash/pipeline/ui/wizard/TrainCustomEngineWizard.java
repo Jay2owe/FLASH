@@ -3,8 +3,11 @@ package flash.pipeline.ui.wizard;
 import flash.pipeline.click.training.ObjectClassifierTrainer;
 import flash.pipeline.click.training.cellpose.CellposeDatasetPackager;
 import flash.pipeline.click.training.stardist.StarDistDatasetPackager;
+import flash.pipeline.help.AnalysisHelpCatalog;
+import flash.pipeline.help.AnalysisHelpDialog;
 import flash.pipeline.segmentation.catalog.ModelEntry;
 import flash.pipeline.ui.FlashTheme;
+import flash.pipeline.ui.HelpButton;
 import flash.pipeline.ui.PipelineDialog;
 
 import javax.swing.Box;
@@ -96,9 +99,16 @@ public final class TrainCustomEngineWizard {
                 TrainCustomEngineWorkflow.Base.CELLPOSE.label
         }, workflow.selectedBase().label);
         dialog.addHelpText("Classical and Enhanced Classical train an in-process Random Forest. StarDist and Cellpose package datasets for external training.");
-        JButton help = dialog.addButton("Learn more about training models");
-        help.setEnabled(false);
-        help.setToolTipText("Training help will be linked in a later setup-help stage.");
+        JPanel helpRow = new JPanel();
+        helpRow.setOpaque(false);
+        helpRow.setLayout(new BoxLayout(helpRow, BoxLayout.X_AXIS));
+        helpRow.add(new JLabel("Training help"));
+        helpRow.add(Box.createHorizontalStrut(6));
+        JButton help = HelpButton.question("About training custom segmentation models.");
+        help.addActionListener(e -> AnalysisHelpDialog.show(
+                dialog.getWindow(), AnalysisHelpCatalog.TRAIN_CUSTOM_SEGMENTATION_MODELS));
+        helpRow.add(help);
+        dialog.addComponent(helpRow);
 
         boolean ok = dialog.showDialog();
         if (!ok) {
