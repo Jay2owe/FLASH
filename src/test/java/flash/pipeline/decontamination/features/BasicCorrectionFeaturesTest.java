@@ -16,6 +16,7 @@ import java.util.List;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 
 public class BasicCorrectionFeaturesTest {
 
@@ -69,6 +70,35 @@ public class BasicCorrectionFeaturesTest {
                 state.getFeatureSummaries().get(0).getValues().get("weight_channel_2"));
         assertEquals(0.5, fittedWeight, 0.0001);
         assertEquals("2", state.getFeatureSummaries().get(0).getValues().get("fit_pixel_count"));
+    }
+
+    @Test
+    public void linearUnmixingFittedWeightsFallbackForIllConditionedContaminants() {
+        ImagePlus source = multiChannelImage(2, 1,
+                new int[]{100, 0},
+                new int[]{10000, 10000},
+                new int[]{10000, 10001});
+        SpectralDecontaminationConfig config = baseConfig();
+        config.setBleedThroughChannelIndexes(Arrays.asList(Integer.valueOf(1), Integer.valueOf(2)));
+
+        CorrectionPipeline pipeline = new CorrectionPipeline();
+        pipeline.setFeatureIds(strings(LinearUnmixingFeature.ID));
+
+        CorrectionPipeline.ExecutionState state = CorrectionPipeline.ExecutionState.create(source, config);
+        state.setFeatureSettings(LinearUnmixingFeature.ID,
+                new LinearUnmixingFeature.Settings()
+                        .setWeightMode(LinearUnmixingFeature.WeightMode.FITTED)
+                        .setFitPercentile(100.0)
+                        .toPipelineSettings());
+
+        pipeline.execute(registry, state);
+
+        double firstWeight = Double.parseDouble(
+                state.getFeatureSummaries().get(0).getValues().get("weight_channel_2"));
+        double secondWeight = Double.parseDouble(
+                state.getFeatureSummaries().get(0).getValues().get("weight_channel_3"));
+        assertTrue("ill-conditioned fit should not emit a huge first weight", firstWeight < 1.0);
+        assertTrue("ill-conditioned fit should not emit a huge second weight", secondWeight < 1.0);
     }
 
     @Test

@@ -19,6 +19,8 @@ public class GlobalRatioCorrectionFeature implements CorrectionPipeline.Executab
 
     private static final String QUIET_TARGET_PERCENTILE = "quiet_target_percentile";
     private static final double SATURATION_VALUE = 65535.0;
+    private static final double PIVOT_ABSOLUTE_TOLERANCE = 1e-12;
+    private static final double PIVOT_RELATIVE_TOLERANCE = 1e-8;
 
     private final Set<RequiredChannel> requiredChannels =
             Collections.singleton(RequiredChannel.AUTOFLUORESCENCE);
@@ -277,6 +279,7 @@ public class GlobalRatioCorrectionFeature implements CorrectionPipeline.Executab
         int n = rhs.length;
         double[][] a = new double[n][n];
         double[] b = new double[n];
+        double pivotTolerance = pivotTolerance(matrix);
         for (int row = 0; row < n; row++) {
             System.arraycopy(matrix[row], 0, a[row], 0, n);
             b[row] = rhs[row];
@@ -289,7 +292,7 @@ public class GlobalRatioCorrectionFeature implements CorrectionPipeline.Executab
                     bestRow = row;
                 }
             }
-            if (Math.abs(a[bestRow][pivot]) < 1e-12) {
+            if (Math.abs(a[bestRow][pivot]) <= pivotTolerance) {
                 return diagonalFallback(matrix, rhs);
             }
             if (bestRow != pivot) {
@@ -315,7 +318,7 @@ public class GlobalRatioCorrectionFeature implements CorrectionPipeline.Executab
 
         double[] solution = new double[n];
         for (int row = n - 1; row >= 0; row--) {
-            if (Math.abs(a[row][row]) < 1e-12) {
+            if (Math.abs(a[row][row]) <= pivotTolerance) {
                 return diagonalFallback(matrix, rhs);
             }
             double sum = b[row];
@@ -331,9 +334,25 @@ public class GlobalRatioCorrectionFeature implements CorrectionPipeline.Executab
         double[] solution = new double[rhs.length];
         for (int i = 0; i < rhs.length; i++) {
             double diagonal = matrix[i][i];
-            solution[i] = Math.abs(diagonal) < 1e-12 ? 0.0 : rhs[i] / diagonal;
+            solution[i] = Math.abs(diagonal) <= PIVOT_ABSOLUTE_TOLERANCE ? 0.0 : rhs[i] / diagonal;
         }
         return solution;
+    }
+
+    private static double pivotTolerance(double[][] matrix) {
+        double maxAbs = 0.0;
+        if (matrix != null) {
+            for (double[] row : matrix) {
+                if (row == null) continue;
+                for (double value : row) {
+                    double abs = Math.abs(value);
+                    if (abs > maxAbs) {
+                        maxAbs = abs;
+                    }
+                }
+            }
+        }
+        return Math.max(PIVOT_ABSOLUTE_TOLERANCE, maxAbs * PIVOT_RELATIVE_TOLERANCE);
     }
 
     private static void symmetrize(double[][] matrix) {

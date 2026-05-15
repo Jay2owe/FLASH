@@ -34,6 +34,8 @@ public class FullForwardModelFeature implements CorrectionPipeline.ExecutableFea
     private static final double WARNING_FALLBACK_FRACTION = 0.50;
     private static final double WARNING_SPLIT_ABS_DELTA = 0.15;
     private static final double WARNING_SPLIT_RELATIVE_DELTA = 0.60;
+    private static final double PIVOT_ABSOLUTE_TOLERANCE = 1e-12;
+    private static final double PIVOT_RELATIVE_TOLERANCE = 1e-8;
 
     private final Set<RequiredChannel> requiredChannels =
             Collections.unmodifiableSet(EnumSet.of(
@@ -945,6 +947,7 @@ public class FullForwardModelFeature implements CorrectionPipeline.ExecutableFea
                                              double[][] workMatrix,
                                              double[] workRhs) {
         int n = rhs.length;
+        double pivotTolerance = pivotTolerance(matrix);
         for (int row = 0; row < n; row++) {
             System.arraycopy(matrix[row], 0, workMatrix[row], 0, n);
             workRhs[row] = rhs[row];
@@ -957,7 +960,7 @@ public class FullForwardModelFeature implements CorrectionPipeline.ExecutableFea
                     bestRow = row;
                 }
             }
-            if (Math.abs(workMatrix[bestRow][pivot]) < 1e-12) {
+            if (Math.abs(workMatrix[bestRow][pivot]) <= pivotTolerance) {
                 return diagonalFallback(matrix, rhs, output);
             }
             if (bestRow != pivot) {
@@ -981,7 +984,7 @@ public class FullForwardModelFeature implements CorrectionPipeline.ExecutableFea
         }
 
         for (int row = n - 1; row >= 0; row--) {
-            if (Math.abs(workMatrix[row][row]) < 1e-12) {
+            if (Math.abs(workMatrix[row][row]) <= pivotTolerance) {
                 return diagonalFallback(matrix, rhs, output);
             }
             double sum = workRhs[row];
@@ -997,7 +1000,7 @@ public class FullForwardModelFeature implements CorrectionPipeline.ExecutableFea
         boolean informative = false;
         for (int i = 0; i < rhs.length; i++) {
             double diagonal = matrix[i][i];
-            if (Math.abs(diagonal) < 1e-12) {
+            if (Math.abs(diagonal) <= PIVOT_ABSOLUTE_TOLERANCE) {
                 output[i] = 0.0;
             } else {
                 output[i] = rhs[i] / diagonal;
@@ -1005,6 +1008,22 @@ public class FullForwardModelFeature implements CorrectionPipeline.ExecutableFea
             }
         }
         return informative;
+    }
+
+    private static double pivotTolerance(double[][] matrix) {
+        double maxAbs = 0.0;
+        if (matrix != null) {
+            for (double[] row : matrix) {
+                if (row == null) continue;
+                for (double value : row) {
+                    double abs = Math.abs(value);
+                    if (abs > maxAbs) {
+                        maxAbs = abs;
+                    }
+                }
+            }
+        }
+        return Math.max(PIVOT_ABSOLUTE_TOLERANCE, maxAbs * PIVOT_RELATIVE_TOLERANCE);
     }
 
     private static int pairCount(int channelCount) {

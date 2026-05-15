@@ -89,6 +89,34 @@ public class LocalAutofluorescenceFeaturesTest {
     }
 
     @Test
+    public void globalRatioFallsBackForIllConditionedAutofluorescenceChannels() {
+        ImagePlus source = multiChannelImage(2, 1,
+                new int[]{100, 0},
+                new int[]{10000, 10000},
+                new int[]{10000, 10001});
+        SpectralDecontaminationConfig config = autofluorescenceConfig();
+        config.setAutofluorescenceChannelIndexes(Arrays.asList(Integer.valueOf(1), Integer.valueOf(2)));
+
+        CorrectionPipeline pipeline = new CorrectionPipeline();
+        pipeline.setFeatureIds(strings(GlobalRatioCorrectionFeature.ID));
+
+        CorrectionPipeline.ExecutionState state = CorrectionPipeline.ExecutionState.create(source, config);
+        state.setFeatureSettings(GlobalRatioCorrectionFeature.ID,
+                new GlobalRatioCorrectionFeature.Settings()
+                        .setQuietTargetPercentile(100.0)
+                        .toPipelineSettings());
+
+        pipeline.execute(registry, state);
+
+        double firstCoefficient = Double.parseDouble(
+                state.getFeatureSummaries().get(0).getValues().get("coefficient_channel_2"));
+        double secondCoefficient = Double.parseDouble(
+                state.getFeatureSummaries().get(0).getValues().get("coefficient_channel_3"));
+        assertTrue("ill-conditioned fit should not emit a huge first coefficient", firstCoefficient < 1.0);
+        assertTrue("ill-conditioned fit should not emit a huge second coefficient", secondCoefficient < 1.0);
+    }
+
+    @Test
     public void localCorrelationVetoRemovesPixelsThatTrackAutofluorescence() {
         ImagePlus source = multiChannelImage(5, 1,
                 new int[]{10, 20, 30, 40, 50},
