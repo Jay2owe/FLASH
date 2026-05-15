@@ -11,7 +11,7 @@ import java.util.Map;
 
 /**
  * Centre-Particle Coincidence utilities — self-contained implementation
- * of centroid-based colocalization for use within the IHF Pipeline.
+ * of centroid-based colocalization for use within FLASH.
  */
 public final class CpcUtils {
 
@@ -38,6 +38,7 @@ public final class CpcUtils {
      * Each unique non-zero pixel value is treated as a separate object.
      */
     public static List<ObjectInfo> extractObjects(ImagePlus img) {
+        if (img == null || img.getStack() == null) return new ArrayList<ObjectInfo>();
         ImageStack stack = img.getStack();
         int w = img.getWidth();
         int h = img.getHeight();
@@ -48,7 +49,7 @@ public final class CpcUtils {
             ImageProcessor ip = stack.getProcessor(z + 1);
             for (int y = 0; y < h; y++) {
                 for (int x = 0; x < w; x++) {
-                    int label = (int) ip.getf(x, y);
+                    int label = labelFromPixel(ip.getf(x, y));
                     if (label <= 0) continue;
                     long[] s = stats.get(label);
                     if (s == null) {
@@ -67,7 +68,7 @@ public final class CpcUtils {
         for (Map.Entry<Integer, long[]> entry : stats.entrySet()) {
             ObjectInfo obj = new ObjectInfo(entry.getKey());
             long[] s = entry.getValue();
-            obj.voxelCount = (int) s[3];
+            obj.voxelCount = s[3] > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) s[3];
             obj.cx = (double) s[0] / s[3];
             obj.cy = (double) s[1] / s[3];
             obj.cz = (double) s[2] / s[3];
@@ -81,6 +82,7 @@ public final class CpcUtils {
      * at the object's centroid position. Sets {@code partnerLabel}.
      */
     public static void testCoincidence(List<ObjectInfo> objects, ImagePlus targetImage) {
+        if (objects == null || targetImage == null || targetImage.getStack() == null) return;
         ImageStack stack = targetImage.getStack();
         int w = targetImage.getWidth();
         int h = targetImage.getHeight();
@@ -92,13 +94,14 @@ public final class CpcUtils {
             int z = (int) Math.round(obj.cz);
 
             if (x >= 0 && x < w && y >= 0 && y < h && z >= 0 && z < nSlices) {
-                obj.partnerLabel = (int) stack.getProcessor(z + 1).getf(x, y);
+                obj.partnerLabel = labelFromPixel(stack.getProcessor(z + 1).getf(x, y));
             }
         }
     }
 
     /** Deep copy object list so each pairwise test gets its own partnerLabel state. */
     public static List<ObjectInfo> copyObjects(List<ObjectInfo> originals) {
+        if (originals == null) return new ArrayList<ObjectInfo>();
         List<ObjectInfo> copy = new ArrayList<ObjectInfo>(originals.size());
         for (ObjectInfo o : originals) {
             ObjectInfo c = new ObjectInfo(o.label);
@@ -109,5 +112,10 @@ public final class CpcUtils {
             copy.add(c);
         }
         return copy;
+    }
+
+    private static int labelFromPixel(float value) {
+        if (!Float.isFinite(value) || value <= 0f) return 0;
+        return value > Integer.MAX_VALUE ? 0 : Math.round(value);
     }
 }

@@ -7,6 +7,7 @@ import ij.process.FloatProcessor;
 import org.junit.Test;
 
 import java.lang.reflect.Method;
+import java.util.List;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assume.assumeTrue;
@@ -25,6 +26,7 @@ public class ObjectsCounter3DWrapperTest {
         assertEquals(60, ObjectsCounter3DWrapper.parseMaxSizeVoxels("Infinity", reference));
         assertEquals(60, ObjectsCounter3DWrapper.parseMaxSizeVoxels("inf", reference));
         assertEquals(8, ObjectsCounter3DWrapper.parseMaxSizeVoxels("7.6", reference));
+        assertEquals(100, ObjectsCounter3DWrapper.parseMinSizeVoxels("Infinity", 100));
     }
 
     @Test
@@ -61,6 +63,36 @@ public class ObjectsCounter3DWrapperTest {
         assertEquals(10.0f, thresholded.getProcessor().getf(1, 0), 0.0f);
         assertEquals(10.25f, thresholded.getProcessor().getf(2, 0), 0.0f);
         assertEquals(9.6f, source.getProcessor().getf(0, 0), 0.0f);
+    }
+
+    @Test
+    public void thresholdCopyZerosNonFinitePixels() throws Exception {
+        FloatProcessor pixels = new FloatProcessor(3, 1);
+        pixels.setf(0, 0, Float.NaN);
+        pixels.setf(1, 0, Float.POSITIVE_INFINITY);
+        pixels.setf(2, 0, 11.0f);
+        ImagePlus source = new ImagePlus("float-threshold", pixels);
+
+        ImagePlus thresholded = invokeThresholdCopy(source, 10);
+
+        assertEquals(0.0f, thresholded.getProcessor().getf(0, 0), 0.0f);
+        assertEquals(0.0f, thresholded.getProcessor().getf(1, 0), 0.0f);
+        assertEquals(11.0f, thresholded.getProcessor().getf(2, 0), 0.0f);
+    }
+
+    @Test
+    public void cpcExtractionIgnoresNonFiniteLabels() {
+        FloatProcessor pixels = new FloatProcessor(3, 1);
+        pixels.setf(0, 0, 1.0f);
+        pixels.setf(1, 0, Float.NaN);
+        pixels.setf(2, 0, Float.POSITIVE_INFINITY);
+        ImagePlus labels = new ImagePlus("labels", pixels);
+
+        List<CpcUtils.ObjectInfo> objects = CpcUtils.extractObjects(labels);
+
+        assertEquals(1, objects.size());
+        assertEquals(1, objects.get(0).label);
+        assertEquals(1, objects.get(0).voxelCount);
     }
 
     private static ImagePlus invokeThresholdCopy(ImagePlus source, int threshold) throws Exception {

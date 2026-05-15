@@ -39,6 +39,19 @@ public class StarDist3DRunnerObjectFilterTest {
     }
 
     @Test
+    public void countLabelsIgnoresNonFiniteFloatLabels() {
+        ij.process.FloatProcessor processor = new ij.process.FloatProcessor(3, 1);
+        processor.setf(0, 0, 1.0f);
+        processor.setf(1, 0, Float.NaN);
+        processor.setf(2, 0, Float.POSITIVE_INFINITY);
+        ImageStack stack = new ImageStack(3, 1);
+        stack.addSlice(processor);
+        ImagePlus labels = new ImagePlus("float-labels", stack);
+
+        assertEquals(1, StarDist3DRunner.countLabels(labels));
+    }
+
+    @Test
     public void duplicateInputForTrackMateReturnsDetachedTitledCopy() {
         ImagePlus input = labelImage(new int[] {1, 2, 3, 4});
         Calibration calibration = new Calibration();

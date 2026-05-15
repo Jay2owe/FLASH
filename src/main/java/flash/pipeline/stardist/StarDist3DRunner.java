@@ -478,7 +478,7 @@ public class StarDist3DRunner {
             ImageProcessor ip = labelImage.getStack().getProcessor(s);
             if (ip == null) continue;
             for (int i = 0; i < ip.getPixelCount(); i++) {
-                int label = Math.round(ip.getf(i));
+                int label = labelFromPixel(ip.getf(i));
                 if (label > 0) labels.add(Integer.valueOf(label));
             }
         }
@@ -548,7 +548,7 @@ public class StarDist3DRunner {
             ImageProcessor processor = stack.getProcessor(slice);
             if (processor == null) continue;
             for (int i = 0; i < processor.getPixelCount(); i++) {
-                int label = Math.round(processor.getf(i));
+                int label = labelFromPixel(processor.getf(i));
                 if (label > 0 && labelsToRemove.contains(Integer.valueOf(label))) {
                     processor.setf(i, 0f);
                 }
@@ -566,6 +566,11 @@ public class StarDist3DRunner {
             // Fall through to row order.
         }
         return row + 1;
+    }
+
+    private static int labelFromPixel(float value) {
+        if (!Float.isFinite(value) || value <= 0f) return 0;
+        return value > Integer.MAX_VALUE ? 0 : Math.round(value);
     }
 
     private static double metric(ResultsTable table, String column, int row) {

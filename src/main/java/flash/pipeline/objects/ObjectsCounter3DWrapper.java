@@ -334,11 +334,11 @@ public final class ObjectsCounter3DWrapper {
             ImageProcessor processor = stack.getProcessor(slice);
             if (processor == null) continue;
             for (int i = 0; i < processor.getPixelCount(); i++) {
-                int label = Math.round(processor.getf(i));
+                int label = labelFromPixel(processor.getf(i));
                 if (label <= 0) continue;
                 Integer previous = voxelsByLabel.get(Integer.valueOf(label));
                 voxelsByLabel.put(Integer.valueOf(label),
-                        Integer.valueOf(previous == null ? 1 : previous.intValue() + 1));
+                        Integer.valueOf(previous == null ? 1 : incrementVoxelCount(previous.intValue())));
             }
         }
         if (voxelsByLabel.isEmpty()) return labelImage;
@@ -359,7 +359,7 @@ public final class ObjectsCounter3DWrapper {
             ImageProcessor processor = filteredStack.getProcessor(slice);
             if (processor == null) continue;
             for (int i = 0; i < processor.getPixelCount(); i++) {
-                int label = Math.round(processor.getf(i));
+                int label = labelFromPixel(processor.getf(i));
                 if (label > 0 && labelsToRemove.contains(Integer.valueOf(label))) {
                     processor.setf(i, 0f);
                 }
@@ -394,6 +394,8 @@ public final class ObjectsCounter3DWrapper {
             ImageProcessor ip = stack.getProcessor(s);
             for (int i = 0; i < ip.getPixelCount(); i++) {
                 if (ip.getf(i) < threshold) {
+                    ip.setf(i, 0f);
+                } else if (!Float.isFinite(ip.getf(i))) {
                     ip.setf(i, 0f);
                 }
             }
@@ -522,20 +524,37 @@ public final class ObjectsCounter3DWrapper {
         String t = token.trim();
         if (t.isEmpty()) return maxPossibleVoxels(reference);
         if ("infinity".equalsIgnoreCase(t) || "inf".equalsIgnoreCase(t)) return maxPossibleVoxels(reference);
-        return (int) Math.round(Double.parseDouble(t));
+        return parseFiniteVoxelCount(t, maxPossibleVoxels(reference));
     }
 
     public static int parseMinSizeVoxels(String token, int fallback) {
         if (token == null) return fallback;
         String t = token.trim();
         if (t.isEmpty()) return fallback;
-        return (int) Math.round(Double.parseDouble(t));
+        return parseFiniteVoxelCount(t, fallback);
     }
 
     private static int maxPossibleVoxels(ImagePlus imp) {
         if (imp == null) return Integer.MAX_VALUE;
         long vox = (long) imp.getWidth() * (long) imp.getHeight() * (long) imp.getNSlices();
         return vox > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) vox;
+    }
+
+    private static int parseFiniteVoxelCount(String token, int fallback) {
+        double parsed = Double.parseDouble(token);
+        if (!Double.isFinite(parsed)) return fallback;
+        if (parsed <= 0) return 0;
+        if (parsed >= Integer.MAX_VALUE) return Integer.MAX_VALUE;
+        return (int) Math.round(parsed);
+    }
+
+    private static int incrementVoxelCount(int current) {
+        return current == Integer.MAX_VALUE ? Integer.MAX_VALUE : current + 1;
+    }
+
+    private static int labelFromPixel(float value) {
+        if (!Float.isFinite(value) || value <= 0f) return 0;
+        return value > Integer.MAX_VALUE ? 0 : Math.round(value);
     }
 
     private static ResultsTable copyOf(ResultsTable src) {
