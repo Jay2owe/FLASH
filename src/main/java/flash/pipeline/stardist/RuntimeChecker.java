@@ -58,7 +58,7 @@ public class RuntimeChecker {
         File fijiDir = getFijiDir();
         if (fijiDir == null) {
             if (force) {
-                IJ.showMessage("IHF Pipeline - StarDist Runtime Check",
+                IJ.showMessage("FLASH - StarDist Runtime Check",
                         "Could not determine the Fiji.app directory.\n\n"
                                 + "Open Fiji from its installed location and try again.");
                 return false;
@@ -107,12 +107,12 @@ public class RuntimeChecker {
                 @Override
                 public void run() {
                     JDialog dialog = new JDialog(IJ.getInstance(),
-                            "IHF Pipeline - StarDist Runtime Check", true);
+                            "FLASH - StarDist Runtime Check", true);
                     dialog.setLayout(new BorderLayout(10, 10));
 
                     JLabel header = new JLabel(
                             "<html><b>StarDist runtime needs repair</b><br>"
-                                    + "The following Java-side JARs don't match the versions required by IHF Pipeline:</html>");
+                                    + "The following Java-side JARs don't match the versions required by FLASH:</html>");
                     header.setBorder(BorderFactory.createEmptyBorder(10, 10, 0, 10));
                     dialog.add(header, BorderLayout.NORTH);
 
@@ -162,7 +162,7 @@ public class RuntimeChecker {
                                     }
                                 });
                             }
-                        }, "IHF-StarDist-Runtime-Repair").start();
+                        }, "FLASH-StarDist-Runtime-Repair").start();
                     });
 
                     buttons.add(skipBtn);
@@ -197,13 +197,13 @@ public class RuntimeChecker {
                 : "";
 
         if (hadFailure) {
-            IJ.showMessage("IHF Pipeline - Repair Incomplete",
+            IJ.showMessage("FLASH - Repair Incomplete",
                     "Some repairs failed:\n\n" + sb
                             + restoreGuidance
                             + "\nExit Fiji and run the repair script manually if the locked jar remains:\n"
                             + "scripts/repair-fiji-runtime.ps1");
         } else {
-            IJ.showMessage("IHF Pipeline - Repair Complete",
+            IJ.showMessage("FLASH - Repair Complete",
                     "Java-side StarDist jars fixed:\n\n" + sb
                             + restoreGuidance
                             + "\nPlease restart Fiji for changes to take effect.\n"
