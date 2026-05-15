@@ -36,6 +36,7 @@ public class BinConfig {
     public final List<String> channelFilterPresets = new ArrayList<>();
     public ZSliceMode zSliceMode = ZSliceMode.FULL;
     public boolean zSliceConfigPresent = false;
+    public boolean clickConfigPresent = false;
     public final Map<Integer, ZSliceSelection> zSliceSelections = new LinkedHashMap<Integer, ZSliceSelection>();
     private final List<SegmentationMethod> parsedSegmentationMethods = new ArrayList<SegmentationMethod>();
 
@@ -77,6 +78,10 @@ public class BinConfig {
 
     public boolean hasZSliceConfig() {
         return zSliceConfigPresent;
+    }
+
+    public boolean hasClickConfig() {
+        return clickConfigPresent;
     }
 
     private boolean hasCompleteNonEmptyChannelList(List<String> values) {

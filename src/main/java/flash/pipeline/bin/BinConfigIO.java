@@ -25,6 +25,9 @@ import java.util.Locale;
 public class BinConfigIO {
     private static final String CUSTOM_FILTER_PRESET_DIR = FlashProjectLayout.CUSTOM_FILTER_PRESET_DIR;
     private static final String CUSTOM_FILTER_TOKEN_PREFIX = "custom_filter:";
+    private static final String CLICKS_FILE_NAME = "Clicks.json";
+    private static final String CLICKS_PER_CHANNEL_TOKEN = "clicks:per_channel";
+    private static final String CLICKS_NONE_TOKEN = "clicks:none";
     private static final String TOKEN_DELIMITER = "\t";
     /** UTF-8 BOM as a Java char (U+FEFF). */
     static final char UTF8_BOM = '﻿';
@@ -43,6 +46,7 @@ public class BinConfigIO {
      * 7) segmentation_methods   (space-separated; optional, defaults to "classical")
      * 8) filter_presets         (space-separated; optional, inferred from C*_Filters.ijm for legacy bins)
      * 9) z-slice mode           (optional; e.g. zslice:full, zslice:per_image)
+     * 10) click capture         (optional; e.g. clicks:none, clicks:per_channel)
      */
     public static BinConfig readFromDirectory(String Directory) throws IOException {
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(Directory);
@@ -66,6 +70,8 @@ public class BinConfigIO {
         String[] segmentationMethods = (lines.size() > 6) ? splitTokens(lines.get(6)) : new String[0];
         String[] storedFilterPresets = (lines.size() > 7) ? splitTokens(lines.get(7)) : new String[0];
         ZSliceMode zSliceMode = (lines.size() > 8) ? ZSliceConfigIO.parseModeLine(lines.get(8)) : ZSliceMode.FULL;
+        boolean clickConfigPresent = (lines.size() > 9 && parseClickPresenceLine(lines.get(9)))
+                || clicksFileExists(binFolder);
         // Skip up-front inference when every channel has a stored preset token; resolveFilterPresetForChannel
         // will lazy-call inferFilterPreset only for channels whose stored token resolves to "Custom".
         String[] inferredFilterPresets = (storedFilterPresets.length >= names.length)
@@ -96,6 +102,7 @@ public class BinConfigIO {
 
         cfg.zSliceMode = zSliceMode;
         cfg.zSliceConfigPresent = lines.size() > 8;
+        cfg.clickConfigPresent = clickConfigPresent;
         try {
             cfg.zSliceSelections.putAll(ZSliceConfigIO.readSelections(binFolder));
             if (!cfg.zSliceSelections.isEmpty()) {
@@ -143,6 +150,8 @@ public class BinConfigIO {
             String[] segmentationMethods = (lines.size() > 6) ? splitTokens(lines.get(6)) : new String[0];
             boolean hasFilterPresetLine = lines.size() > 7;
             String[] storedFilterPresets = hasFilterPresetLine ? splitTokens(lines.get(7)) : new String[0];
+            boolean clickConfigPresent = (lines.size() > 9 && parseClickPresenceLine(lines.get(9)))
+                    || clicksFileExists(binFolder);
             // Skip up-front inference only when every channel already has a stored preset token; in that
             // case resolveFilterPresetForChannel lazy-calls inferFilterPreset for the channels that need it.
             String[] inferredFilterPresets = (hasFilterPresetLine && storedFilterPresets.length >= names.length)
@@ -173,6 +182,7 @@ public class BinConfigIO {
                 cfg.zSliceMode = ZSliceConfigIO.parseModeLine(lines.get(8));
                 cfg.zSliceConfigPresent = true;
             }
+            cfg.clickConfigPresent = clickConfigPresent;
             try {
                 cfg.zSliceSelections.putAll(ZSliceConfigIO.readSelections(binFolder));
                 if (!cfg.zSliceSelections.isEmpty()) {
@@ -225,6 +235,7 @@ public class BinConfigIO {
         }
         lines.add(joinTokens(filterPresetTokens));
         lines.add(ZSliceConfigIO.modeLine(safe.zSliceMode));
+        lines.add(clicksModeLine(clicksFileExists(binFolder)));
 
         writeAtomic(layout.channelDataWriteFile().toPath(), lines);
         ZSliceConfigIO.writeSelections(binFolder, new ZSliceConfig(safe.zSliceMode, safe.zSliceSelections));
@@ -316,6 +327,36 @@ public class BinConfigIO {
         writeAtomic(layout.channelDataWriteFile().toPath(), lines);
     }
 
+    public static void updateClickPresence(File binFolder, boolean present) throws IOException {
+        if (binFolder == null) return;
+        File channelData = new File(binFolder, FlashProjectLayout.CHANNEL_DATA_FILENAME);
+        if (!channelData.isFile()) return;
+
+        List<String> lines = Files.readAllLines(channelData.toPath(), StandardCharsets.UTF_8);
+        stripLeadingBom(lines);
+        while (lines.size() < 9) {
+            lines.add(lines.size() == 8 ? ZSliceConfigIO.modeLine(ZSliceMode.FULL) : "");
+        }
+        while (lines.size() < 10) {
+            lines.add("");
+        }
+        lines.set(9, clicksModeLine(present));
+
+        writeAtomic(channelData.toPath(), lines);
+    }
+
+    public static String clicksModeLine(boolean present) {
+        return present ? CLICKS_PER_CHANNEL_TOKEN : CLICKS_NONE_TOKEN;
+    }
+
+    public static boolean parseClickPresenceLine(String line) {
+        if (line == null) return false;
+        String token = line.trim().toLowerCase(Locale.ROOT);
+        if (CLICKS_PER_CHANNEL_TOKEN.equals(token)) return true;
+        if (CLICKS_NONE_TOKEN.equals(token)) return false;
+        return false;
+    }
+
     static String[] splitTokens(String line) {
         if (line == null) return new String[0];
         // Primary: tab. Falls back to any whitespace for legacy files written
@@ -387,6 +428,10 @@ public class BinConfigIO {
         for (int i = 0; i < tokens.length; i++) {
             target.add(tokens[i]);
         }
+    }
+
+    private static boolean clicksFileExists(File binFolder) {
+        return binFolder != null && new File(binFolder, CLICKS_FILE_NAME).isFile();
     }
 
     private static List<String> segmentationTokensForWrite(BinConfig cfg) {

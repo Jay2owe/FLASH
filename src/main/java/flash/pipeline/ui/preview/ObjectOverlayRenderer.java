@@ -42,6 +42,7 @@ public final class ObjectOverlayRenderer {
 
         ImagePlus result = new ImagePlus("Object overlay | " + safeTitle(source), out);
         copyDimensions(source, result);
+        copyOverlay(labelMap, result);
         return result;
     }
 
@@ -70,6 +71,7 @@ public final class ObjectOverlayRenderer {
                 ? "Object label preview"
                 : "Object label preview (no objects)", out);
         copyDimensions(labelMap, result);
+        copyOverlay(labelMap, result);
         return result;
     }
 
@@ -138,7 +140,7 @@ public final class ObjectOverlayRenderer {
         return (index << 16) | (index << 8) | index;
     }
 
-    private static int labelAt(ImageProcessor labels, int x, int y) {
+    public static int labelAt(ImageProcessor labels, int x, int y) {
         if (labels == null || x < 0 || y < 0
                 || x >= labels.getWidth() || y >= labels.getHeight()) {
             return 0;
@@ -248,5 +250,17 @@ public final class ObjectOverlayRenderer {
             result.setDimensions(channels, slices, frames);
         }
         result.setOpenAsHyperStack(source.isHyperStack());
+    }
+
+    private static void copyOverlay(ImagePlus source, ImagePlus result) {
+        if (source == null || result == null) return;
+        try {
+            ij.gui.Overlay overlay = source.getOverlay();
+            if (overlay != null) {
+                result.setOverlay(overlay.duplicate());
+            }
+        } catch (RuntimeException ignored) {
+            // Overlays are optional preview adornments.
+        }
     }
 }

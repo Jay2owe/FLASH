@@ -4,6 +4,9 @@ import flash.pipeline.ui.FlashTheme;
 
 import ij.ImagePlus;
 import ij.ImageStack;
+import ij.gui.Overlay;
+import ij.gui.Roi;
+import ij.process.FloatPolygon;
 import ij.process.ColorProcessor;
 import ij.process.ImageProcessor;
 
@@ -26,6 +29,8 @@ import java.awt.Graphics2D;
 import java.awt.Image;
 import java.awt.RenderingHints;
 import java.awt.Stroke;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.awt.image.ColorModel;
 import java.awt.image.IndexColorModel;
 
@@ -37,6 +42,12 @@ public final class ImagePreviewPanel extends JPanel {
 
     public interface ZSliceChangeListener {
         void zSliceChanged(ImagePreviewPanel source, int zSlice);
+    }
+
+    public interface PixelClickListener {
+        void pixelClicked(ImagePreviewPanel src,
+                          double imageX, double imageY,
+                          int z, int button, int modifiers);
     }
 
     private final JLabel titleLabel = new JLabel("No image selected.");
@@ -58,9 +69,15 @@ public final class ImagePreviewPanel extends JPanel {
     private boolean slim;
     private JLabel slimTitleLabel;
     private ZSliceChangeListener zSliceChangeListener;
+    private PixelClickListener pixelClickListener;
     private PreviewDisplaySettings displaySettings = PreviewDisplaySettings.defaultFor("Grays");
     private boolean displaySettingsEnabled = true;
     private ObjectSizeFilterPreview.Summary objectSizeGuide;
+    private double drawScale = 1.0;
+    private int drawOriginX;
+    private int drawOriginY;
+    private int imageW;
+    private int imageH;
 
     public ImagePreviewPanel(String title) {
         super(new BorderLayout(DEFAULT_PANEL_GAP, DEFAULT_PANEL_GAP));
@@ -216,6 +233,10 @@ public final class ImagePreviewPanel extends JPanel {
         this.zSliceChangeListener = listener;
     }
 
+    public void setPixelClickListener(PixelClickListener listener) {
+        this.pixelClickListener = listener;
+    }
+
     public void refresh() {
         if (!hasUsableImage()) {
             applyEmptyState(true);
@@ -289,6 +310,30 @@ public final class ImagePreviewPanel extends JPanel {
         return canvas.getPreferredSize();
     }
 
+    JPanel canvasForTest() {
+        return canvas;
+    }
+
+    double drawScaleForTest() {
+        return drawScale;
+    }
+
+    int drawOriginXForTest() {
+        return drawOriginX;
+    }
+
+    int drawOriginYForTest() {
+        return drawOriginY;
+    }
+
+    int renderedImageWidthForTest() {
+        return imageW;
+    }
+
+    int renderedImageHeightForTest() {
+        return imageH;
+    }
+
     int layoutVerticalGapForTest() {
         return ((BorderLayout) getLayout()).getVgap();
     }
@@ -319,6 +364,7 @@ public final class ImagePreviewPanel extends JPanel {
         currentC = 1;
         currentZ = 1;
         currentT = 1;
+        resetDrawMetrics();
         titleLabel.setText("No image selected.");
         detailLabel.setText(" ");
         statusLabel.setText(" ");
@@ -536,6 +582,26 @@ public final class ImagePreviewPanel extends JPanel {
         return new IndexColorModel(8, 256, red, green, blue);
     }
 
+    private void resetDrawMetrics() {
+        drawScale = 1.0;
+        drawOriginX = 0;
+        drawOriginY = 0;
+        imageW = 0;
+        imageH = 0;
+    }
+
+    private void handleCanvasClick(MouseEvent e) {
+        if (e == null || imageW <= 0 || imageH <= 0 || drawScale <= 0.0) return;
+        double imgX = (e.getX() - drawOriginX) / drawScale;
+        double imgY = (e.getY() - drawOriginY) / drawScale;
+        if (imgX < 0.0 || imgY < 0.0 || imgX >= imageW || imgY >= imageH) return;
+        PixelClickListener listener = pixelClickListener;
+        if (listener != null) {
+            listener.pixelClicked(ImagePreviewPanel.this,
+                    imgX, imgY, currentZ, e.getButton(), e.getModifiersEx());
+        }
+    }
+
     static int clamp(int value, int minimum, int maximum) {
         if (maximum < minimum) return minimum;
         if (value < minimum) return minimum;
@@ -548,6 +614,11 @@ public final class ImagePreviewPanel extends JPanel {
             setBackground(Color.BLACK);
             setOpaque(true);
             setMinimumSize(new Dimension(180, 160));
+            addMouseListener(new MouseAdapter() {
+                @Override public void mouseClicked(MouseEvent e) {
+                    handleCanvasClick(e);
+                }
+            });
         }
 
         @Override protected void paintComponent(Graphics g) {
@@ -556,11 +627,13 @@ public final class ImagePreviewPanel extends JPanel {
             try {
                 ImageProcessor processor = currentProcessor();
                 if (processor == null) {
+                    resetDrawMetrics();
                     drawCenteredText(g2, "No image selected");
                     return;
                 }
                 Image awtImage = processor.createImage();
                 if (awtImage == null) {
+                    resetDrawMetrics();
                     drawCenteredText(g2, "Preview unavailable");
                     return;
                 }
@@ -576,6 +649,11 @@ public final class ImagePreviewPanel extends JPanel {
                 int drawHeight = Math.max(1, (int) Math.round(imageHeight * scale));
                 int x = (getWidth() - drawWidth) / 2;
                 int y = (getHeight() - drawHeight) / 2;
+                imageW = imageWidth;
+                imageH = imageHeight;
+                drawScale = scale;
+                drawOriginX = x;
+                drawOriginY = y;
 
                 g2.setRenderingHint(
                         RenderingHints.KEY_INTERPOLATION,
@@ -583,10 +661,76 @@ public final class ImagePreviewPanel extends JPanel {
                 g2.drawImage(awtImage, x, y, drawWidth, drawHeight, null);
                 g2.setColor(new Color(120, 120, 120));
                 g2.drawRect(x, y, drawWidth - 1, drawHeight - 1);
+                drawImageOverlay(g2, x, y, scale);
                 drawObjectSizeGuide(g2, x, y, drawWidth, drawHeight, scale);
             } finally {
                 g2.dispose();
             }
+        }
+
+        private void drawImageOverlay(Graphics2D g2, int imageX, int imageY,
+                                      double imageScale) {
+            ImagePlus imp = image;
+            if (imp == null) return;
+            Overlay overlay;
+            try {
+                overlay = imp.getOverlay();
+            } catch (RuntimeException e) {
+                return;
+            }
+            if (overlay == null || overlay.size() == 0) return;
+            Stroke oldStroke = g2.getStroke();
+            g2.setStroke(new BasicStroke(2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+            for (int i = 0; i < overlay.size(); i++) {
+                Roi roi = overlay.get(i);
+                if (!matchesCurrentPosition(roi)) continue;
+                Color color = roi.getStrokeColor();
+                g2.setColor(color == null ? Color.YELLOW : color);
+                FloatPolygon points = roi.getFloatPolygon();
+                if (points == null || points.npoints == 0) {
+                    java.awt.Rectangle bounds = roi.getBounds();
+                    drawOverlayPoint(g2, imageX, imageY, imageScale,
+                            bounds.getCenterX(), bounds.getCenterY());
+                } else {
+                    for (int p = 0; p < points.npoints; p++) {
+                        drawOverlayPoint(g2, imageX, imageY, imageScale,
+                                points.xpoints[p], points.ypoints[p]);
+                    }
+                }
+            }
+            g2.setStroke(oldStroke);
+        }
+
+        private boolean matchesCurrentPosition(Roi roi) {
+            if (roi == null) return false;
+            int c = roi.getCPosition();
+            int z = roi.getZPosition();
+            int t = roi.getTPosition();
+            int pos = roi.getPosition();
+            int channelCount = 1;
+            try {
+                channelCount = image == null ? 1 : Math.max(1, image.getNChannels());
+            } catch (RuntimeException ignored) {
+                channelCount = 1;
+            }
+            return (c == 0 || c == currentC || channelCount == 1)
+                    && (z == 0 || z == currentZ)
+                    && (t == 0 || t == currentT)
+                    && (pos == 0 || pos == currentZ);
+        }
+
+        private void drawOverlayPoint(Graphics2D g2, int imageX, int imageY,
+                                      double imageScale, double px, double py) {
+            if (!Double.isFinite(px) || !Double.isFinite(py)) return;
+            Color markerColor = g2.getColor();
+            int sx = imageX + (int) Math.round(px * imageScale);
+            int sy = imageY + (int) Math.round(py * imageScale);
+            int radius = 5;
+            g2.setColor(new Color(0, 0, 0, 180));
+            g2.fillOval(sx - radius - 1, sy - radius - 1,
+                    (radius + 1) * 2, (radius + 1) * 2);
+            g2.setColor(markerColor);
+            g2.drawOval(sx - radius, sy - radius, radius * 2, radius * 2);
         }
 
         private void drawObjectSizeGuide(Graphics2D g2, int imageX, int imageY,

@@ -1,6 +1,12 @@
 package flash.pipeline.ui.preview;
 
+import flash.pipeline.click.ClickStore;
+import flash.pipeline.click.ClicksConfigIO;
+import ij.IJ;
 import ij.ImagePlus;
+import ij.gui.Overlay;
+import ij.gui.PointRoi;
+import ij.gui.Roi;
 
 import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
@@ -15,6 +21,7 @@ import javax.swing.JPanel;
 import javax.swing.JRadioButton;
 import javax.swing.JSlider;
 import javax.swing.SwingUtilities;
+import java.awt.Color;
 import java.awt.BorderLayout;
 import java.awt.Dialog;
 import java.awt.Dimension;
@@ -25,10 +32,27 @@ import java.awt.Rectangle;
 import java.awt.Window;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
+import java.io.File;
+import java.io.IOException;
 import java.util.IdentityHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
 
 public final class PreviewPairPanel extends JPanel {
+    private static final String CLICK_ROI_PREFIX = "flash-click:";
+    private static final Color CLICK_POSITIVE_COLOR = new Color(25, 180, 80);
+    private static final Color CLICK_NEGATIVE_COLOR = new Color(220, 55, 55);
+    private static final ExecutorService CLICK_WRITE_EXECUTOR =
+            Executors.newSingleThreadExecutor(new ThreadFactory() {
+                @Override public Thread newThread(Runnable r) {
+                    Thread thread = new Thread(r, "flash-click-config-writer");
+                    thread.setDaemon(true);
+                    return thread;
+                }
+            });
 
     public interface SharedZChangeListener {
         void zSliceChanged(int zSlice);
@@ -105,6 +129,10 @@ public final class PreviewPairPanel extends JPanel {
     private LargePreviewDialog largePreviewDialog;
     private ComparisonPreviewDialog comparisonPreviewDialog;
     private JDialog displayControlsDialog;
+    private File clickBinFolder;
+    private ClickStore clickStore;
+    private String clickImageName = "";
+    private int clickChannelOneBased;
     private SharedZChangeListener sharedZChangeListener;
     private DisplaySettingsChangeListener displaySettingsChangeListener;
     private SourceModeChangeListener sourceModeListener;
@@ -501,6 +529,25 @@ public final class PreviewPairPanel extends JPanel {
 
     public void setSourceModeChangeListener(SourceModeChangeListener listener) {
         sourceModeListener = listener;
+    }
+
+    public void setClickCapture(File binFolder, ClickStore store,
+                                String imageName, int channelOneBased) {
+        clickBinFolder = binFolder;
+        clickStore = store;
+        clickImageName = imageName == null ? "" : imageName;
+        clickChannelOneBased = Math.max(0, channelOneBased);
+        wireLargeObjectClickListener();
+        applyClickOverlayMarkers();
+    }
+
+    public void clearClickCapture() {
+        clearClickOverlaysFromKnownImages();
+        clickBinFolder = null;
+        clickStore = null;
+        clickImageName = "";
+        clickChannelOneBased = 0;
+        wireLargeObjectClickListener();
     }
 
     public boolean objectOverlaySelected() {
@@ -1083,7 +1130,22 @@ public final class PreviewPairPanel extends JPanel {
                 togglePreviewLutMode();
             }
         });
+        wireLargeObjectClickListener();
         updateLargeDialogDisplayActionState();
+    }
+
+    private void wireLargeObjectClickListener() {
+        if (largePreviewDialog == null) return;
+        if (!clickCaptureAvailable()) {
+            largePreviewDialog.setObjectClickListener(null);
+            return;
+        }
+        largePreviewDialog.setObjectClickListener(new LargePreviewDialog.ObjectClickListener() {
+            @Override public void objectClicked(int label, int z, double x, double y,
+                                                boolean positive, boolean clear) {
+                handleLargeObjectClick(label, z, x, y, positive, clear);
+            }
+        });
     }
 
     private void wireComparisonDialog() {
@@ -1199,6 +1261,7 @@ public final class PreviewPairPanel extends JPanel {
 
     private void updateLargeImages() {
         if (largePreviewDialog == null) return;
+        applyClickOverlayMarkers();
         if (usingCustomLargePreviewImages) {
             if (hasLargePreviewSourceChoices()) {
                 largePreviewDialog.setSourceChoices(
@@ -1223,6 +1286,7 @@ public final class PreviewPairPanel extends JPanel {
         largePreviewDialog.setAdjustedStatusText(adjustedPreview.statusTextForTest());
         largePreviewDialog.setDisplaySettings(largeFirstDisplaySettings(),
                 largeSecondDisplaySettings());
+        applyClickOverlayMarkers();
     }
 
     private void updateComparisonImages() {
@@ -1287,6 +1351,136 @@ public final class PreviewPairPanel extends JPanel {
         if (oldOverlay != null && oldOverlay != generatedObjectOverlayImage) {
             oldOverlay.flush();
         }
+        applyClickOverlayMarkers();
+    }
+
+    private void handleLargeObjectClick(int label, int z, double x, double y,
+                                        boolean positive, boolean clear) {
+        if (!clickCaptureAvailable() || label <= 0) return;
+        if (clear) {
+            clickStore.clearForObject(clickImageName, clickChannelOneBased, label);
+        } else {
+            ClickStore.Verdict verdict = positive
+                    ? ClickStore.Verdict.POSITIVE
+                    : ClickStore.Verdict.NEGATIVE;
+            clickStore.add(new ClickStore.Click(
+                    clickImageName,
+                    clickChannelOneBased,
+                    label,
+                    z,
+                    x,
+                    y,
+                    verdict,
+                    System.currentTimeMillis()));
+        }
+        scheduleClickWrite();
+        applyClickOverlayMarkers();
+        updateAdjustedPreviewImage();
+        updateLargeImages();
+        updateComparisonImages();
+    }
+
+    private boolean clickCaptureAvailable() {
+        return clickBinFolder != null
+                && clickStore != null
+                && clickChannelOneBased > 0
+                && clickImageName != null
+                && !clickImageName.trim().isEmpty();
+    }
+
+    private void scheduleClickWrite() {
+        final File binFolder = clickBinFolder;
+        final ClickStore store = clickStore;
+        if (binFolder == null || store == null) return;
+        CLICK_WRITE_EXECUTOR.execute(new Runnable() {
+            @Override public void run() {
+                try {
+                    ClicksConfigIO.write(binFolder, store);
+                } catch (IOException e) {
+                    IJ.log("[FLASH] Warning: could not write click selections to "
+                            + binFolder.getAbsolutePath() + ": " + e.getMessage());
+                }
+            }
+        });
+    }
+
+    private void applyClickOverlayMarkers() {
+        if (!clickCaptureAvailable()) return;
+        List<ClickStore.Click> clicks =
+                clickStore.forImageAndChannel(clickImageName, clickChannelOneBased);
+        Map<ImagePlus, Boolean> visited = new IdentityHashMap<ImagePlus, Boolean>();
+        applyClickOverlay(originalImage, clicks, visited);
+        applyClickOverlay(adjustedImage, clicks, visited);
+        applyClickOverlay(largePreviewFirstImage, clicks, visited);
+        applyClickOverlay(largePreviewSecondImage, clicks, visited);
+        applyClickOverlay(largePreviewThirdImage, clicks, visited);
+        applyClickOverlay(largePreviewOriginalSourceImage, clicks, visited);
+        applyClickOverlay(largePreviewFilteredSourceImage, clicks, visited);
+        applyClickOverlay(comparisonPreviousImage, clicks, visited);
+        applyClickOverlay(generatedObjectOverlayImage, clicks, visited);
+        repaintPreviews();
+    }
+
+    private void clearClickOverlaysFromKnownImages() {
+        Map<ImagePlus, Boolean> visited = new IdentityHashMap<ImagePlus, Boolean>();
+        applyClickOverlay(originalImage, null, visited);
+        applyClickOverlay(adjustedImage, null, visited);
+        applyClickOverlay(largePreviewFirstImage, null, visited);
+        applyClickOverlay(largePreviewSecondImage, null, visited);
+        applyClickOverlay(largePreviewThirdImage, null, visited);
+        applyClickOverlay(largePreviewOriginalSourceImage, null, visited);
+        applyClickOverlay(largePreviewFilteredSourceImage, null, visited);
+        applyClickOverlay(comparisonPreviousImage, null, visited);
+        applyClickOverlay(generatedObjectOverlayImage, null, visited);
+        repaintPreviews();
+    }
+
+    private void applyClickOverlay(ImagePlus image, List<ClickStore.Click> clicks,
+                                   Map<ImagePlus, Boolean> visited) {
+        if (image == null || visited.containsKey(image)) return;
+        visited.put(image, Boolean.TRUE);
+        Overlay overlay = image.getOverlay();
+        boolean hadOverlay = overlay != null;
+        if (overlay == null) {
+            overlay = new Overlay();
+        }
+        removeClickRois(overlay);
+        if (clicks != null) {
+            for (ClickStore.Click click : clicks) {
+                if (click == null) continue;
+                PointRoi roi = new PointRoi(click.x, click.y);
+                roi.setName(CLICK_ROI_PREFIX + click.channelOneBased + ":"
+                        + click.label + ":" + click.timestampMs);
+                roi.setStrokeColor(click.verdict == ClickStore.Verdict.POSITIVE
+                        ? CLICK_POSITIVE_COLOR
+                        : CLICK_NEGATIVE_COLOR);
+                roi.setPosition(click.channelOneBased, Math.max(1, click.z), 1);
+                overlay.add(roi);
+            }
+        }
+        if (overlay.size() == 0) {
+            image.setOverlay(null);
+        } else if (hadOverlay || clicks != null) {
+            image.setOverlay(overlay);
+        }
+    }
+
+    private void removeClickRois(Overlay overlay) {
+        if (overlay == null) return;
+        for (int i = overlay.size() - 1; i >= 0; i--) {
+            Roi roi = overlay.get(i);
+            String name = roi == null ? null : roi.getName();
+            if (name != null && name.startsWith(CLICK_ROI_PREFIX)) {
+                overlay.remove(i);
+            }
+        }
+    }
+
+    private void repaintPreviews() {
+        originalPreview.repaint();
+        adjustedPreview.repaint();
+        if (largePreviewDialog != null) largePreviewDialog.repaint();
+        if (comparisonPreviewDialog != null) comparisonPreviewDialog.repaint();
     }
 
     private void updateObjectOverlayControls() {

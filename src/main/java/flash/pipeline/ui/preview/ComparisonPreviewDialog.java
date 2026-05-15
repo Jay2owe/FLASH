@@ -1,5 +1,6 @@
 package flash.pipeline.ui.preview;
 
+import flash.pipeline.objects.LabelIndex;
 import ij.ImagePlus;
 
 import javax.swing.BorderFactory;
@@ -18,6 +19,7 @@ import java.awt.GraphicsEnvironment;
 import java.awt.GridLayout;
 import java.awt.Rectangle;
 import java.awt.Window;
+import java.awt.event.MouseEvent;
 
 public final class ComparisonPreviewDialog extends JDialog {
 
@@ -37,6 +39,11 @@ public final class ComparisonPreviewDialog extends JDialog {
         void restorePreviousRequested();
     }
 
+    public interface ObjectClickListener {
+        void objectClicked(int label, int z, double x, double y,
+                           boolean positive, boolean clear);
+    }
+
     private final ImagePreviewPanel currentPreview = new ImagePreviewPanel("Current preview");
     private final ImagePreviewPanel previousPreview = new ImagePreviewPanel("Previous preview");
     private final JPanel sourceControls = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
@@ -50,6 +57,7 @@ public final class ComparisonPreviewDialog extends JDialog {
     private SliceListener sliceListener;
     private DisplayActionListener displayActionListener;
     private RestoreActionListener restoreActionListener;
+    private ObjectClickListener objectClickListener;
     private boolean syncingSlices;
     private boolean updatingSourceControls;
     private ImagePlus rawSourceImage;
@@ -70,6 +78,7 @@ public final class ComparisonPreviewDialog extends JDialog {
         add(buildPreviews(), BorderLayout.CENTER);
         add(buildFooter(), BorderLayout.SOUTH);
         wireSliceSync();
+        wireObjectClicks();
         wireSourceControls();
         wireDisplayActionControls();
         wireRestoreActionControl();
@@ -89,6 +98,10 @@ public final class ComparisonPreviewDialog extends JDialog {
     void setRestoreActionListener(RestoreActionListener restoreActionListener) {
         this.restoreActionListener = restoreActionListener;
         updateRestoreButtonState();
+    }
+
+    public void setObjectClickListener(ObjectClickListener objectClickListener) {
+        this.objectClickListener = objectClickListener;
     }
 
     void setRestoreActionState(boolean available, String tooltip) {
@@ -295,6 +308,33 @@ public final class ComparisonPreviewDialog extends JDialog {
         };
         currentPreview.setZSliceChangeListener(listener);
         previousPreview.setZSliceChangeListener(listener);
+    }
+
+    private void wireObjectClicks() {
+        currentPreview.setPixelClickListener(new ImagePreviewPanel.PixelClickListener() {
+            @Override public void pixelClicked(ImagePreviewPanel src, double imageX, double imageY,
+                                               int z, int button, int modifiers) {
+                dispatchObjectClick(currentLabelImage, imageX, imageY, z, button, modifiers);
+            }
+        });
+        previousPreview.setPixelClickListener(new ImagePreviewPanel.PixelClickListener() {
+            @Override public void pixelClicked(ImagePreviewPanel src, double imageX, double imageY,
+                                               int z, int button, int modifiers) {
+                dispatchObjectClick(previousLabelImage, imageX, imageY, z, button, modifiers);
+            }
+        });
+    }
+
+    private void dispatchObjectClick(ImagePlus labelImage, double x, double y,
+                                     int z, int button, int modifiers) {
+        if (objectClickListener == null || labelImage == null) return;
+        int label = LabelIndex.getLabelAt(labelImage, (int) x, (int) y, z);
+        if (label <= 0) return;
+        boolean clear = button == MouseEvent.BUTTON3;
+        boolean left = button == MouseEvent.BUTTON1;
+        if (!clear && !left) return;
+        boolean positive = left && (modifiers & MouseEvent.SHIFT_DOWN_MASK) != 0;
+        objectClickListener.objectClicked(label, z, x, y, positive, clear);
     }
 
     private void wireSourceControls() {

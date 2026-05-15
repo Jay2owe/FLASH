@@ -7128,7 +7128,7 @@ public class CreateBinFileAnalysis implements Analysis {
             filterPresetTokens.add(BinConfigIO.encodeFilterPresetToken(
                     safeFilterPresetSelection(cfg.filterPresets.get(i), "Custom")));
         }
-        List<String> lines = new ArrayList<String>(9);
+        List<String> lines = new ArrayList<String>(10);
         lines.add(String.join("\t", cfg.names));
         lines.add(String.join("\t", cfg.colors));
         lines.add(String.join("\t", cfg.objectThresholds));
@@ -7138,6 +7138,7 @@ public class CreateBinFileAnalysis implements Analysis {
         lines.add(String.join("\t", cfg.segmentationMethods));
         lines.add(String.join("\t", filterPresetTokens));
         lines.add(ZSliceConfigIO.modeLine(cfg.zSliceMode));
+        lines.add(BinConfigIO.clicksModeLine(new File(binFolder, "Clicks.json").isFile()));
         BinConfigIO.writeAtomic(channelData, lines);
         ZSliceConfigIO.writeSelections(binFolder, cfg.getZSliceConfig());
         writeChannelIdentities(binFolder, cfg);

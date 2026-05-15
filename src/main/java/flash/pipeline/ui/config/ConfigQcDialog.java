@@ -365,6 +365,8 @@ public final class ConfigQcDialog {
         previewPair.setChannelLutName(context.getChannelLutName());
         previewPair.setDisplayControlsAvailable(stage.showPreviewDisplayControls());
         previewPair.resetStageToolstripState();
+        previewPair.setClickCapture(context.getBinFolder(), context.getClickStore(),
+                context.getCurrentImageDisplayName(), context.getChannelNumber());
         previewPair.resetZ();
         previewPair.setOriginal(context.getCurrentImagePlus());
         previewPair.setAdjusted(null);
@@ -698,6 +700,7 @@ public final class ConfigQcDialog {
     }
 
     private void detachPreviewImages() {
+        previewPair.clearClickCapture();
         previewPair.clearImages();
     }
 

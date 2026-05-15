@@ -1,5 +1,6 @@
 package flash.pipeline.ui.preview;
 
+import flash.pipeline.objects.LabelIndex;
 import ij.ImagePlus;
 
 import javax.swing.BorderFactory;
@@ -17,6 +18,7 @@ import java.awt.GraphicsEnvironment;
 import java.awt.GridLayout;
 import java.awt.Rectangle;
 import java.awt.Window;
+import java.awt.event.MouseEvent;
 
 public final class LargePreviewDialog extends JDialog {
 
@@ -36,6 +38,11 @@ public final class LargePreviewDialog extends JDialog {
         void lutToggleRequested();
     }
 
+    public interface ObjectClickListener {
+        void objectClicked(int label, int z, double x, double y,
+                           boolean positive, boolean clear);
+    }
+
     private final ImagePreviewPanel originalPreview = new ImagePreviewPanel("Original image");
     private final ImagePreviewPanel adjustedPreview = new ImagePreviewPanel("Adjusted preview");
     private final ImagePreviewPanel extraPreview = new ImagePreviewPanel("Object map");
@@ -50,6 +57,7 @@ public final class LargePreviewDialog extends JDialog {
     private SliceListener sliceListener;
     private SourceChoiceListener sourceChoiceListener;
     private DisplayActionListener displayActionListener;
+    private ObjectClickListener objectClickListener;
     private boolean syncingSlices;
     private boolean updatingSourceChoice;
     private boolean extraPreviewVisible;
@@ -75,6 +83,7 @@ public final class LargePreviewDialog extends JDialog {
         add(buildPreviews(), BorderLayout.CENTER);
         add(buildFooter(), BorderLayout.SOUTH);
         wireSliceSync();
+        wireObjectClicks();
         wireSourceControls();
         wireOverlayControls();
         wireDisplayActionControls();
@@ -93,6 +102,10 @@ public final class LargePreviewDialog extends JDialog {
 
     void setDisplayActionListener(DisplayActionListener displayActionListener) {
         this.displayActionListener = displayActionListener;
+    }
+
+    public void setObjectClickListener(ObjectClickListener objectClickListener) {
+        this.objectClickListener = objectClickListener;
     }
 
     void setDisplayActionState(String lutButtonText, String lutButtonTooltip) {
@@ -347,6 +360,29 @@ public final class LargePreviewDialog extends JDialog {
         originalPreview.setZSliceChangeListener(listener);
         adjustedPreview.setZSliceChangeListener(listener);
         extraPreview.setZSliceChangeListener(listener);
+    }
+
+    private void wireObjectClicks() {
+        ImagePreviewPanel.PixelClickListener listener = new ImagePreviewPanel.PixelClickListener() {
+            @Override public void pixelClicked(ImagePreviewPanel src, double imageX, double imageY,
+                                               int z, int button, int modifiers) {
+                dispatchObjectClick(imageX, imageY, z, button, modifiers);
+            }
+        };
+        originalPreview.setPixelClickListener(listener);
+        adjustedPreview.setPixelClickListener(listener);
+        extraPreview.setPixelClickListener(listener);
+    }
+
+    private void dispatchObjectClick(double x, double y, int z, int button, int modifiers) {
+        if (objectClickListener == null || objectLabelImage == null) return;
+        int label = LabelIndex.getLabelAt(objectLabelImage, (int) x, (int) y, z);
+        if (label <= 0) return;
+        boolean clear = button == MouseEvent.BUTTON3;
+        boolean left = button == MouseEvent.BUTTON1;
+        if (!clear && !left) return;
+        boolean positive = left && (modifiers & MouseEvent.SHIFT_DOWN_MASK) != 0;
+        objectClickListener.objectClicked(label, z, x, y, positive, clear);
     }
 
     private void wireSourceControls() {

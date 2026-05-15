@@ -1,6 +1,8 @@
 package flash.pipeline.ui.config;
 
 import flash.pipeline.bin.BinConfig;
+import flash.pipeline.click.ClickStore;
+import flash.pipeline.click.ClicksConfigIO;
 import flash.pipeline.naming.ImageNameParser;
 
 import ij.ImagePlus;
@@ -55,6 +57,7 @@ public final class ConfigQcContext {
     private final File projectDirectory;
     private final File binFolder;
     private final Object config;
+    private final ClickStore clickStore;
     private final List<ConfigQcImage> images;
     private final List<String> channelNames;
     private final Map<String, Object> attributes = new HashMap<String, Object>();
@@ -75,6 +78,7 @@ public final class ConfigQcContext {
         this.projectDirectory = projectDirectory;
         this.binFolder = binFolder;
         this.config = config;
+        this.clickStore = ClicksConfigIO.read(binFolder);
         this.images = Collections.unmodifiableList(copyImages(images));
         this.channelNames = Collections.unmodifiableList(copyStrings(channelNames));
         this.filteredStackCache = filteredStackCache == null
@@ -108,6 +112,10 @@ public final class ConfigQcContext {
 
     public Object getConfig() {
         return config;
+    }
+
+    public ClickStore getClickStore() {
+        return clickStore;
     }
 
     public List<ConfigQcImage> getImages() {
