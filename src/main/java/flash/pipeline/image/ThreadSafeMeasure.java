@@ -138,7 +138,7 @@ public final class ThreadSafeMeasure {
 
     private static IntegratedAreaResult measureIntegratedDensityAndAreaFraction(
             ImagePlus imp, int slice, Roi roi) {
-        ImageProcessor ip = imp.getStack().getProcessor(slice);
+        ImageProcessor ip = imp.getStack().getProcessor(slice).duplicate();
         if (roi != null) ip.setRoi(roi);
         int measurements = ij.measure.Measurements.INTEGRATED_DENSITY
                 | ij.measure.Measurements.AREA_FRACTION;
@@ -149,7 +149,7 @@ public final class ThreadSafeMeasure {
     }
 
     private static double measureIntegratedDensity(ImagePlus imp, int slice, Roi roi) {
-        ImageProcessor ip = imp.getStack().getProcessor(slice);
+        ImageProcessor ip = imp.getStack().getProcessor(slice).duplicate();
         if (roi != null) ip.setRoi(roi);
         int measurements = ij.measure.Measurements.INTEGRATED_DENSITY;
         Calibration cal = imp.getCalibration();

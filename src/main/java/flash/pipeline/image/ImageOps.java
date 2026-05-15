@@ -5,6 +5,8 @@ import ij.ImageStack;
 import ij.measure.Calibration;
 import ij.process.ImageProcessor;
 
+import java.awt.Rectangle;
+
 /**
  * Thread-safe image-plane operations.
  *
@@ -46,7 +48,15 @@ public final class ImageOps {
                 for (int c = firstC; c <= lastC; c++) {
                     int idx = src.getStackIndex(c, z, t);
                     ImageProcessor ip = inStack.getProcessor(idx);
-                    out.addSlice(inStack.getSliceLabel(idx), ip.crop());
+                    Rectangle oldRoi = ip.getRoi();
+                    ip.setRoi(0, 0, src.getWidth(), src.getHeight());
+                    ImageProcessor cropped = ip.crop();
+                    if (oldRoi != null) {
+                        ip.setRoi(oldRoi);
+                    } else {
+                        ip.resetRoi();
+                    }
+                    out.addSlice(inStack.getSliceLabel(idx), cropped);
                 }
             }
         }
