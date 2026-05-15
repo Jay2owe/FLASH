@@ -28,9 +28,16 @@ import flash.pipeline.help.SpatialHelpCatalog;
 import flash.pipeline.image.AdaptiveParallelism;
 import flash.pipeline.io.CalibrationIO;
 import flash.pipeline.io.CsvTableIO;
+import flash.pipeline.io.DeferredImageSupplier;
 import flash.pipeline.io.FlashProjectLayout;
+import flash.pipeline.io.ImageSourceDispatcher;
 import flash.pipeline.io.IoUtils;
 import flash.pipeline.io.CsvTableIO.ChannelData;
+import flash.pipeline.morphometry.ObjectFractal;
+import flash.pipeline.morphometry.ObjectPatch;
+import flash.pipeline.morphometry.ObjectPatchBuilder;
+import flash.pipeline.morphometry.ObjectTextureFeatures;
+import flash.pipeline.morphometry.ObjectTextureGLCM;
 import flash.pipeline.results.MorphometryDetailsWriter;
 import flash.pipeline.results.ObjectCsvColumnOrder;
 import flash.pipeline.runtime.DependencyId;
@@ -138,6 +145,31 @@ public class SpatialAnalysis implements Analysis {
             "Morph_TDR",
             "Morph_FEV_Mag"
     };
+    private static final String[] MORPH_TEXTURE_FRACTAL_COLUMNS = {
+            "MorphTexture_FractalDim",
+            "MorphTexture_FractalDim_R2",
+            "MorphTexture_LacunarityMean",
+            "MorphTexture_LacunaritySpread"
+    };
+    private static final String[] MORPH_TEXTURE_GLCM_COLUMNS = {
+            "MorphTexture_GLCMContrast",
+            "MorphTexture_GLCMASM",
+            "MorphTexture_GLCMCorrelation",
+            "MorphTexture_GLCMEntropy",
+            "MorphTexture_GLCMHomogeneity"
+    };
+    private static final String[] MORPH_TEXTURE_CLASS_COLUMNS = {
+            "MorphTexture_ClassLabel",
+            "MorphTexture_ClassDistance",
+            "MorphTexture_F1",
+            "MorphTexture_F2",
+            "MorphTexture_F3",
+            "MorphTexture_F4",
+            "MorphTexture_F5",
+            "MorphTexture_F6",
+            "MorphTexture_F7",
+            "MorphTexture_F8"
+    };
 
     private Map<String, Double> markerThresholds = new HashMap<String, Double>();
     private final Map<String, ScnParityFallbackSummary> scnParityFallbackCache =
@@ -187,11 +219,15 @@ public class SpatialAnalysis implements Analysis {
         private boolean doCompositeIndices;
         private boolean doPopMorphometrics;
         private boolean doSpatialMorphometrics;
+        private boolean doObjectGLCM;
+        private boolean doObjectFractal;
+        private boolean doObjectTextureClass;
         private boolean forceRerun;
         private SpatialArtifactStatus artifactStatus;
         private double heatmapBandwidth;
         private String heatmapLut;
         private int clusterK;
+        private int textureClassK;
     }
 
     static final class SpatialObjectDataAvailability {
@@ -205,6 +241,9 @@ public class SpatialAnalysis implements Analysis {
         private final Set<String> morphCompositeChannels = new LinkedHashSet<String>();
         private final Set<String> morphPopulationChannels = new LinkedHashSet<String>();
         private final Set<String> morphSpatialChannels = new LinkedHashSet<String>();
+        private final Set<String> morphTextureGlcmChannels = new LinkedHashSet<String>();
+        private final Set<String> morphTextureFractalChannels = new LinkedHashSet<String>();
+        private final Set<String> morphTextureClassChannels = new LinkedHashSet<String>();
         private final Set<String> distancePairs = new LinkedHashSet<String>();
         private final Set<String> volumetricOverlapPairs = new LinkedHashSet<String>();
         private final Set<String> volumetricFlagPairs = new LinkedHashSet<String>();
@@ -239,6 +278,9 @@ public class SpatialAnalysis implements Analysis {
                 if (hasUsableColumns(cd, MORPH_COMPOSITE_COLUMNS)) morphCompositeChannels.add(channelName);
                 if (hasUsableColumns(cd, MORPH_POPULATION_COLUMNS)) morphPopulationChannels.add(channelName);
                 if (hasUsableColumns(cd, MORPH_SPATIAL_COLUMNS)) morphSpatialChannels.add(channelName);
+                if (hasUsableColumns(cd, MORPH_TEXTURE_GLCM_COLUMNS)) morphTextureGlcmChannels.add(channelName);
+                if (hasUsableColumns(cd, MORPH_TEXTURE_FRACTAL_COLUMNS)) morphTextureFractalChannels.add(channelName);
+                if (hasUsableColumns(cd, MORPH_TEXTURE_CLASS_COLUMNS)) morphTextureClassChannels.add(channelName);
             }
 
             for (String source : channelNames) {
@@ -299,6 +341,9 @@ public class SpatialAnalysis implements Analysis {
             if (!morphCompositeChannels.isEmpty()) parts.add("complex shape columns");
             if (!morphPopulationChannels.isEmpty()) parts.add("population morphometric columns");
             if (!morphSpatialChannels.isEmpty()) parts.add("spatial-morphometric columns");
+            if (!morphTextureGlcmChannels.isEmpty()) parts.add("object GLCM texture columns");
+            if (!morphTextureFractalChannels.isEmpty()) parts.add("object fractal texture columns");
+            if (!morphTextureClassChannels.isEmpty()) parts.add("object texture-class columns");
             if (!processLengthChannels.isEmpty()) parts.add("process length data");
             if (parts.isEmpty()) {
                 return "No reusable morphometric columns were detected. Selected morphology outputs will be computed.";
@@ -365,6 +410,18 @@ public class SpatialAnalysis implements Analysis {
 
         boolean hasSpatialMorphometricsForAllChannels(List<String> names) {
             return allChannelsHave(morphSpatialChannels, names);
+        }
+
+        boolean hasObjectGLCMForAllChannels(List<String> names) {
+            return allChannelsHave(morphTextureGlcmChannels, names);
+        }
+
+        boolean hasObjectFractalForAllChannels(List<String> names) {
+            return allChannelsHave(morphTextureFractalChannels, names);
+        }
+
+        boolean hasObjectTextureClassForAllChannels(List<String> names) {
+            return allChannelsHave(morphTextureClassChannels, names);
         }
 
         private boolean hasDirectedDistance(String source, String partner) {
@@ -443,6 +500,9 @@ public class SpatialAnalysis implements Analysis {
             if (!morphCompositeChannels.isEmpty()) parts.add("complex shape");
             if (!morphPopulationChannels.isEmpty()) parts.add("population morphometrics");
             if (!morphSpatialChannels.isEmpty()) parts.add("spatial morphometrics");
+            if (!morphTextureGlcmChannels.isEmpty()) parts.add("object GLCM texture");
+            if (!morphTextureFractalChannels.isEmpty()) parts.add("object fractal texture");
+            if (!morphTextureClassChannels.isEmpty()) parts.add("object texture class");
             if (!processLengthChannels.isEmpty()) parts.add("process length");
             return joinSummary(parts);
         }
@@ -665,10 +725,14 @@ public class SpatialAnalysis implements Analysis {
         boolean doCompositeIndices = false;
         boolean doPopMorphometrics = false;
         boolean doSpatialMorphometrics = false;
+        boolean doObjectGLCM = false;
+        boolean doObjectFractal = false;
+        boolean doObjectTextureClass = false;
         boolean forceRerun = false;
         double heatmapBandwidth = 0; // 0 = auto (Scott's rule)
         String heatmapLut = DEFAULT_HEATMAP_LUT;
         int clusterK = 0; // 0 = auto-detect
+        int textureClassK = ObjectTextureFeatures.DEFAULT_K;
 
         SpatialAnalysisWizard.DerivedConfig effectiveOptions = configuredOptions;
         SpatialAnalysisWizard.DerivedConfig cliDerived = loadCliSpatialConfig(directory);
@@ -698,10 +762,14 @@ public class SpatialAnalysis implements Analysis {
             doCompositeIndices = effectiveOptions.doCompositeIndices;
             doPopMorphometrics = effectiveOptions.doPopMorphometrics;
             doSpatialMorphometrics = effectiveOptions.doSpatialMorphometrics;
+            doObjectGLCM = effectiveOptions.doObjectGLCM;
+            doObjectFractal = effectiveOptions.doObjectFractal;
+            doObjectTextureClass = effectiveOptions.doObjectTextureClass;
             forceRerun = effectiveOptions.forceRerun;
             heatmapBandwidth = effectiveOptions.kdeBandwidth;
             heatmapLut = effectiveOptions.heatmapLut;
             clusterK = effectiveOptions.clusterK;
+            textureClassK = Math.max(1, effectiveOptions.textureClassK);
             applyConfiguredMarkerThresholds(effectiveOptions, channelNames);
         }
 
@@ -753,6 +821,21 @@ public class SpatialAnalysis implements Analysis {
             do3DShapeFeatures = false;
             doCompositeIndices = false;
         }
+        if (!forceRerun && doObjectGLCM
+                && existingObjectData.hasObjectGLCMForAllChannels(channelNames)) {
+            IJ.log("--- Reusing existing object GLCM texture columns; skipping object GLCM texture ---");
+            doObjectGLCM = false;
+        }
+        if (!forceRerun && doObjectFractal
+                && existingObjectData.hasObjectFractalForAllChannels(channelNames)) {
+            IJ.log("--- Reusing existing object fractal texture columns; skipping object fractal texture ---");
+            doObjectFractal = false;
+        }
+        if (!forceRerun && doObjectTextureClass
+                && existingObjectData.hasObjectTextureClassForAllChannels(channelNames)) {
+            IJ.log("--- Reusing existing object texture-class columns; skipping object texture class ---");
+            doObjectTextureClass = false;
+        }
 
         RuntimeDependencyAction dependencyAction =
                 checkRuntimeDependencies(doVoronoi, do3DShapeFeatures);
@@ -782,11 +865,15 @@ public class SpatialAnalysis implements Analysis {
         context.doCompositeIndices = doCompositeIndices;
         context.doPopMorphometrics = doPopMorphometrics;
         context.doSpatialMorphometrics = doSpatialMorphometrics;
+        context.doObjectGLCM = doObjectGLCM;
+        context.doObjectFractal = doObjectFractal;
+        context.doObjectTextureClass = doObjectTextureClass;
         context.forceRerun = forceRerun;
         context.artifactStatus = artifactStatus;
         context.heatmapBandwidth = heatmapBandwidth;
         context.heatmapLut = heatmapLut;
         context.clusterK = clusterK;
+        context.textureClassK = textureClassK;
 
         if (doVolumetric) {
             refreshVolumetricColocFlags(channels, channelNames, context.existingObjectData);
@@ -869,13 +956,19 @@ public class SpatialAnalysis implements Analysis {
             run3DMorphometry(directory, context.channels, context.calibration,
                     context.doCompositeIndices, provider);
         }
+
+        if (context.doObjectGLCM || context.doObjectFractal || context.doObjectTextureClass) {
+            IJ.log("--- Object Texture and Complexity ---");
+            runObjectTexture(directory, context, provider);
+        }
     }
 
     private void logEarlyPhaseProviderPlan(String directory,
                                            SpatialExecutionContext context,
                                            LabelImageProvider provider) {
         if (!context.doCpc && !context.doHeatmaps
-                && !context.doMorphology && !context.do3DShapeFeatures) {
+                && !context.doMorphology && !context.do3DShapeFeatures
+                && !context.doObjectGLCM && !context.doObjectFractal && !context.doObjectTextureClass) {
             IJ.log("--- Spatial early phase: no object-dependent work selected ---");
             return;
         }
@@ -952,7 +1045,8 @@ public class SpatialAnalysis implements Analysis {
         // Write updated CSVs again if new columns were added
         if (context.doVoronoi || context.doPhenotyping || context.doMorphology
                 || context.do3DShapeFeatures || context.doPopMorphometrics
-                || context.doSpatialMorphometrics) {
+                || context.doSpatialMorphometrics
+                || context.doObjectGLCM || context.doObjectFractal || context.doObjectTextureClass) {
             reorderManagedSpatialColumns(context.channels, context.channelNames);
             writeUpdatedCsvs(context.objectsDir, context.channels, "--- Writing final updated CSVs ---");
         }
@@ -3921,6 +4015,518 @@ public class SpatialAnalysis implements Analysis {
             }
 
             IJ.log("  " + channelName + ": " + totalMeasured + " objects with 3D morphometry");
+        }
+    }
+
+    private void runObjectTexture(String directory,
+                                  SpatialExecutionContext context,
+                                  LabelImageProvider provider) {
+        if (context == null
+                || (!context.doObjectGLCM && !context.doObjectFractal && !context.doObjectTextureClass)) {
+            return;
+        }
+        IJ.log("  object texture and complexity: selected outputs will run unless complete columns are reused.");
+        File imageAnalysisRoot = objectImageOutputReadRoot(directory);
+        if (!imageAnalysisRoot.isDirectory()) {
+            IJ.log("  Object image-output directory not found. Cannot extract object texture.");
+            return;
+        }
+
+        RawTextureImageResolver rawResolver;
+        try {
+            rawResolver = new RawTextureImageResolver(directory, context.channelNames);
+        } catch (Exception e) {
+            IJ.log("  Raw intensity images could not be opened for object texture: "
+                    + e.getClass().getSimpleName() + " - " + e.getMessage());
+            return;
+        }
+
+        int channelCounter = 1;
+        int totalChannels = context.channels.size();
+        for (Map.Entry<String, ChannelData> entry : context.channels.entrySet()) {
+            String channelName = entry.getKey();
+            ChannelData cd = entry.getValue();
+            IJ.log("  [" + (channelCounter++) + "/" + totalChannels + "] Object texture: " + channelName);
+            if (!isForceRerunActive() && hasAllSelectedTextureColumns(cd, context)) {
+                IJ.log("  " + channelName + ": reusing existing object texture columns");
+                continue;
+            }
+
+            addSelectedTextureColumns(cd, context);
+            Map<SectionKey, List<Integer>> sections = groupByCpcSection(directory, channelName, cd);
+            Map<Integer, ObjectTextureFeatures.FeatureVector> vectorsByRow =
+                    context.doObjectTextureClass
+                            ? collectTextureFeatureVectors(channelName, cd, sections, rawResolver, provider)
+                            : null;
+            double[][] centroids = null;
+            if (context.doObjectTextureClass) {
+                centroids = loadOrFitTextureCentroids(directory, channelName,
+                        vectorsByRow == null
+                                ? new ArrayList<ObjectTextureFeatures.FeatureVector>()
+                                : new ArrayList<ObjectTextureFeatures.FeatureVector>(vectorsByRow.values()),
+                        context.textureClassK);
+            }
+
+            int totalMeasured = 0;
+            int invalidGlcm = 0;
+            int unreliableGlcm = 0;
+            int invalidFractal = 0;
+            int unreliableFractal = 0;
+            int invalidClass = 0;
+            int unreliableClass = 0;
+
+            for (Map.Entry<SectionKey, List<Integer>> se : sections.entrySet()) {
+                SectionKey section = se.getKey();
+                List<Integer> rowIndices = se.getValue();
+                if (rowIndices.isEmpty()) continue;
+
+                ImagePlus labelImg = provider.get(channelName, section);
+                if (labelImg == null) {
+                    IJ.log("    Label image not found: " + section.labelFileName(channelName));
+                    continue;
+                }
+                ImagePlus rawStack = null;
+                try {
+                    rawStack = rawResolver.open(channelName, cd, rowIndices);
+                    if (rawStack == null) {
+                        IJ.log("    Raw intensity stack not found for " + channelName + " / " + section);
+                        continue;
+                    }
+                    applyCalibration(rawStack, context.calibration);
+                    Map<Integer, mcib3d.geom2.Object3DInt> objMap = loadObjectMap(labelImg);
+                    boolean hasLabelCol = cd.colIdx.containsKey("Label");
+
+                    for (int rowIdx : rowIndices) {
+                        int label = resolveRowLabel(cd, rowIdx, hasLabelCol, labelImg);
+                        mcib3d.geom2.Object3DInt obj = objMap.get(Integer.valueOf(label));
+                        if (obj == null) continue;
+
+                        if (context.doObjectGLCM) {
+                            AveragedGLCMResult glcm = computeAverageSliceGLCM(obj, labelImg, rawStack);
+                            writeGLCM(cd, rowIdx, glcm);
+                            if (!glcm.valid) invalidGlcm++;
+                            else if (!glcm.reliable) unreliableGlcm++;
+                        }
+                        if (context.doObjectFractal) {
+                            ObjectFractal.Result fractal =
+                                    ObjectFractal.compute(ObjectPatchBuilder.buildMIP(obj, labelImg, rawStack));
+                            writeFractal(cd, rowIdx, fractal);
+                            if (!fractal.valid) invalidFractal++;
+                            else if (!fractal.reliable) unreliableFractal++;
+                        }
+                        if (context.doObjectTextureClass) {
+                            ObjectTextureFeatures.FeatureVector vector =
+                                    vectorsByRow == null ? null : vectorsByRow.get(Integer.valueOf(rowIdx));
+                            writeTextureClass(cd, rowIdx, vector, centroids);
+                            if (vector == null || !vector.valid || centroids == null || centroids.length == 0) {
+                                invalidClass++;
+                            } else if (!vector.reliable) {
+                                unreliableClass++;
+                            }
+                        }
+                        totalMeasured++;
+                    }
+                } catch (Exception e) {
+                    IJ.log("    Object texture failed for " + section.labelFileName(channelName)
+                            + ": " + e.getClass().getSimpleName() + " - " + e.getMessage());
+                } finally {
+                    closeImage(rawStack);
+                    closeLabelImage(labelImg, provider, channelName, section);
+                }
+            }
+
+            IJ.log("  " + channelName + ": " + totalMeasured + " objects with object texture");
+            logTextureReliability(channelName, invalidGlcm, unreliableGlcm,
+                    invalidFractal, unreliableFractal, invalidClass, unreliableClass);
+        }
+    }
+
+    private Map<Integer, ObjectTextureFeatures.FeatureVector> collectTextureFeatureVectors(
+            String channelName,
+            ChannelData cd,
+            Map<SectionKey, List<Integer>> sections,
+            RawTextureImageResolver rawResolver,
+            LabelImageProvider provider) {
+        Map<Integer, ObjectTextureFeatures.FeatureVector> vectors =
+                new LinkedHashMap<Integer, ObjectTextureFeatures.FeatureVector>();
+        for (Map.Entry<SectionKey, List<Integer>> se : sections.entrySet()) {
+            SectionKey section = se.getKey();
+            List<Integer> rowIndices = se.getValue();
+            if (rowIndices.isEmpty()) continue;
+
+            ImagePlus labelImg = provider.get(channelName, section);
+            if (labelImg == null) continue;
+            ImagePlus rawStack = null;
+            try {
+                rawStack = rawResolver.open(channelName, cd, rowIndices);
+                if (rawStack == null) continue;
+                Map<Integer, mcib3d.geom2.Object3DInt> objMap = loadObjectMap(labelImg);
+                boolean hasLabelCol = cd.colIdx.containsKey("Label");
+                for (int rowIdx : rowIndices) {
+                    int label = resolveRowLabel(cd, rowIdx, hasLabelCol, labelImg);
+                    mcib3d.geom2.Object3DInt obj = objMap.get(Integer.valueOf(label));
+                    if (obj == null) continue;
+                    vectors.put(Integer.valueOf(rowIdx),
+                            computeAverageSliceFeatures(obj, labelImg, rawStack));
+                }
+            } catch (Exception e) {
+                IJ.log("    Texture feature collection failed for " + section.labelFileName(channelName)
+                        + ": " + e.getClass().getSimpleName() + " - " + e.getMessage());
+            } finally {
+                closeImage(rawStack);
+                closeLabelImage(labelImg, provider, channelName, section);
+            }
+        }
+        return vectors;
+    }
+
+    private double[][] loadOrFitTextureCentroids(String directory,
+                                                 String channelName,
+                                                 List<ObjectTextureFeatures.FeatureVector> vectors,
+                                                 int k) {
+        File writeFile = textureCentroidsFile(directory, channelName);
+        double[][] centroids = loadTextureCentroids(directory, channelName);
+        if (centroids != null && centroids.length == k) {
+            IJ.log("    Loaded object texture centroids: " + writeFile.getName());
+            return centroids;
+        }
+
+        double[][] fitted = ObjectTextureFeatures.fitCentroids(vectors, k);
+        if (fitted.length == 0) {
+            IJ.log("    No valid texture feature vectors for " + channelName
+                    + "; texture class columns will be NaN.");
+            return fitted;
+        }
+        try {
+            ObjectTextureFeatures.CentroidsIO.save(writeFile, fitted);
+            IJ.log("    Fitted object texture centroids: " + writeFile.getName());
+        } catch (IOException e) {
+            IJ.log("    Could not save texture centroids for " + channelName + ": " + e.getMessage());
+        }
+        return fitted;
+    }
+
+    private double[][] loadTextureCentroids(String directory, String channelName) {
+        for (File candidate : textureCentroidReadFiles(directory, channelName)) {
+            try {
+                double[][] centroids = ObjectTextureFeatures.CentroidsIO.load(candidate,
+                        ObjectTextureFeatures.DEFAULT_FEATURE_DIM);
+                if (centroids != null) {
+                    return centroids;
+                }
+            } catch (Exception e) {
+                IJ.log("    Ignoring unreadable texture centroids "
+                        + candidate.getName() + ": " + e.getMessage());
+            }
+        }
+        return null;
+    }
+
+    private static File textureCentroidsFile(String directory, String channelName) {
+        FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
+        return new File(layout.configurationWriteDir(), textureCentroidsFileName(channelName, ".txt"));
+    }
+
+    private static List<File> textureCentroidReadFiles(String directory, String channelName) {
+        FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
+        List<File> out = new ArrayList<File>();
+        Set<String> seen = new LinkedHashSet<String>();
+        addUniqueFile(out, seen, textureCentroidsFile(directory, channelName));
+        for (File dir : layout.configurationReadDirs()) {
+            addUniqueFile(out, seen, new File(dir, textureCentroidsFileName(channelName, ".txt")));
+            addUniqueFile(out, seen, new File(dir, textureCentroidsFileName(channelName, ".bin")));
+        }
+        return out;
+    }
+
+    private static String textureCentroidsFileName(String channelName, String extension) {
+        return "morph_texture_centroids_" + ChannelFilenameCodec.toSafe(channelName) + extension;
+    }
+
+    private static void addUniqueFile(List<File> out, Set<String> seen, File file) {
+        if (file == null) return;
+        String path = file.getAbsolutePath();
+        if (seen.add(path)) {
+            out.add(file);
+        }
+    }
+
+    private boolean hasAllSelectedTextureColumns(ChannelData cd, SpatialExecutionContext context) {
+        if (cd == null || context == null) return false;
+        if (context.doObjectGLCM && !hasUsableColumns(cd, MORPH_TEXTURE_GLCM_COLUMNS)) return false;
+        if (context.doObjectFractal && !hasUsableColumns(cd, MORPH_TEXTURE_FRACTAL_COLUMNS)) return false;
+        if (context.doObjectTextureClass && !hasUsableColumns(cd, MORPH_TEXTURE_CLASS_COLUMNS)) return false;
+        return context.doObjectGLCM || context.doObjectFractal || context.doObjectTextureClass;
+    }
+
+    private void addSelectedTextureColumns(ChannelData cd, SpatialExecutionContext context) {
+        if (context.doObjectGLCM) {
+            for (String column : MORPH_TEXTURE_GLCM_COLUMNS) cd.addColumn(column);
+        }
+        if (context.doObjectFractal) {
+            for (String column : MORPH_TEXTURE_FRACTAL_COLUMNS) cd.addColumn(column);
+        }
+        if (context.doObjectTextureClass) {
+            for (String column : MORPH_TEXTURE_CLASS_COLUMNS) cd.addColumn(column);
+        }
+    }
+
+    private Map<Integer, mcib3d.geom2.Object3DInt> loadObjectMap(ImagePlus labelImg) {
+        mcib3d.image3d.ImageHandler labelIH = mcib3d.image3d.ImageHandler.wrap(labelImg);
+        mcib3d.geom2.Objects3DIntPopulation population =
+                new mcib3d.geom2.Objects3DIntPopulation(labelIH);
+        Map<Integer, mcib3d.geom2.Object3DInt> objMap =
+                new LinkedHashMap<Integer, mcib3d.geom2.Object3DInt>();
+        for (mcib3d.geom2.Object3DInt obj : population.getObjects3DInt()) {
+            objMap.put(Integer.valueOf((int) obj.getLabel()), obj);
+        }
+        return objMap;
+    }
+
+    private AveragedGLCMResult computeAverageSliceGLCM(mcib3d.geom2.Object3DInt obj,
+                                                       ImagePlus labelImg,
+                                                       ImagePlus rawStack) {
+        int zMin = ObjectPatchBuilder.zMin(obj, labelImg);
+        int zMax = ObjectPatchBuilder.zMax(obj, labelImg);
+        double contrast = 0.0;
+        double asm = 0.0;
+        double correlation = 0.0;
+        double entropy = 0.0;
+        double homogeneity = 0.0;
+        int validSlices = 0;
+        boolean reliable = true;
+        for (int z = zMin; z <= zMax; z++) {
+            ObjectPatch patch = ObjectPatchBuilder.buildSlice(obj, labelImg, rawStack, z);
+            if (patch.objectPixelCount() == 0) continue;
+            ObjectTextureGLCM.Result result = ObjectTextureGLCM.compute(patch);
+            if (!result.valid) {
+                reliable = false;
+                continue;
+            }
+            contrast += finiteOrZero(result.contrast);
+            asm += finiteOrZero(result.asm);
+            correlation += finiteOrZero(result.correlation);
+            entropy += finiteOrZero(result.entropy);
+            homogeneity += finiteOrZero(result.homogeneity);
+            reliable = reliable && result.reliable;
+            validSlices++;
+        }
+        if (validSlices == 0) {
+            return AveragedGLCMResult.invalid();
+        }
+        double n = validSlices;
+        return new AveragedGLCMResult(contrast / n, asm / n, correlation / n,
+                entropy / n, homogeneity / n, true, reliable);
+    }
+
+    private ObjectTextureFeatures.FeatureVector computeAverageSliceFeatures(mcib3d.geom2.Object3DInt obj,
+                                                                            ImagePlus labelImg,
+                                                                            ImagePlus rawStack) {
+        int zMin = ObjectPatchBuilder.zMin(obj, labelImg);
+        int zMax = ObjectPatchBuilder.zMax(obj, labelImg);
+        float[] sums = new float[ObjectTextureFeatures.DEFAULT_FEATURE_DIM];
+        int validSlices = 0;
+        boolean reliable = true;
+        for (int z = zMin; z <= zMax; z++) {
+            ObjectPatch patch = ObjectPatchBuilder.buildSlice(obj, labelImg, rawStack, z);
+            if (patch.objectPixelCount() == 0) continue;
+            ObjectTextureFeatures.FeatureVector vector = ObjectTextureFeatures.computeFeatures(patch);
+            if (!vector.valid || vector.features == null
+                    || vector.features.length != ObjectTextureFeatures.DEFAULT_FEATURE_DIM) {
+                reliable = false;
+                continue;
+            }
+            for (int i = 0; i < sums.length; i++) {
+                sums[i] += finiteOrZero(vector.features[i]);
+            }
+            reliable = reliable && vector.reliable;
+            validSlices++;
+        }
+        if (validSlices == 0) {
+            return new ObjectTextureFeatures.FeatureVector(
+                    new float[ObjectTextureFeatures.DEFAULT_FEATURE_DIM], false, false);
+        }
+        for (int i = 0; i < sums.length; i++) {
+            sums[i] /= validSlices;
+        }
+        return new ObjectTextureFeatures.FeatureVector(sums, true, reliable);
+    }
+
+    private void writeGLCM(ChannelData cd, int rowIdx, AveragedGLCMResult result) {
+        if (result == null || !result.valid) {
+            writeNaN(cd, rowIdx, MORPH_TEXTURE_GLCM_COLUMNS);
+            return;
+        }
+        cd.set(rowIdx, "MorphTexture_GLCMContrast", formatStat(result.contrast));
+        cd.set(rowIdx, "MorphTexture_GLCMASM", formatStat(result.asm));
+        cd.set(rowIdx, "MorphTexture_GLCMCorrelation", formatStat(result.correlation));
+        cd.set(rowIdx, "MorphTexture_GLCMEntropy", formatStat(result.entropy));
+        cd.set(rowIdx, "MorphTexture_GLCMHomogeneity", formatStat(result.homogeneity));
+    }
+
+    private void writeFractal(ChannelData cd, int rowIdx, ObjectFractal.Result result) {
+        if (result == null || !result.valid) {
+            writeNaN(cd, rowIdx, MORPH_TEXTURE_FRACTAL_COLUMNS);
+            return;
+        }
+        cd.set(rowIdx, "MorphTexture_FractalDim", formatStat(finiteOrZero(result.fractalDim)));
+        cd.set(rowIdx, "MorphTexture_FractalDim_R2", formatStat(finiteOrZero(result.fractalDim_R2)));
+        cd.set(rowIdx, "MorphTexture_LacunarityMean", formatStat(finiteOrZero(result.lacunarityMean)));
+        cd.set(rowIdx, "MorphTexture_LacunaritySpread", formatStat(finiteOrZero(result.lacunaritySpread)));
+    }
+
+    private void writeTextureClass(ChannelData cd,
+                                   int rowIdx,
+                                   ObjectTextureFeatures.FeatureVector vector,
+                                   double[][] centroids) {
+        if (vector == null || !vector.valid || vector.features == null
+                || vector.features.length != ObjectTextureFeatures.DEFAULT_FEATURE_DIM
+                || centroids == null || centroids.length == 0) {
+            writeNaN(cd, rowIdx, MORPH_TEXTURE_CLASS_COLUMNS);
+            return;
+        }
+        ObjectTextureFeatures.ClassAssignment assignment =
+                ObjectTextureFeatures.assignToCentroids(vector, centroids);
+        cd.set(rowIdx, "MorphTexture_ClassLabel", String.valueOf(assignment.classLabel));
+        cd.set(rowIdx, "MorphTexture_ClassDistance",
+                formatStat(vector.reliable ? assignment.classDistance : Double.POSITIVE_INFINITY));
+        for (int i = 0; i < vector.features.length; i++) {
+            cd.set(rowIdx, "MorphTexture_F" + (i + 1), formatStat(finiteOrZero(vector.features[i])));
+        }
+    }
+
+    private void writeNaN(ChannelData cd, int rowIdx, String[] columns) {
+        for (String column : columns) {
+            cd.set(rowIdx, column, "NaN");
+        }
+    }
+
+    private void logTextureReliability(String channelName,
+                                       int invalidGlcm,
+                                       int unreliableGlcm,
+                                       int invalidFractal,
+                                       int unreliableFractal,
+                                       int invalidClass,
+                                       int unreliableClass) {
+        if (invalidGlcm + unreliableGlcm + invalidFractal + unreliableFractal
+                + invalidClass + unreliableClass == 0) {
+            return;
+        }
+        IJ.log("    " + channelName + " texture quality flags: "
+                + "GLCM invalid=" + invalidGlcm + ", GLCM unreliable=" + unreliableGlcm
+                + ", fractal invalid=" + invalidFractal + ", fractal unreliable=" + unreliableFractal
+                + ", class invalid=" + invalidClass + ", class unreliable=" + unreliableClass);
+    }
+
+    private static double finiteOrZero(double value) {
+        return Double.isNaN(value) || Double.isInfinite(value) ? 0.0 : value;
+    }
+
+    private static void applyCalibration(ImagePlus image, CalibrationIO.PixelCalibration cal) {
+        if (image == null || cal == null || !cal.isCalibrated()) {
+            return;
+        }
+        Calibration ijCal = new Calibration(image);
+        ijCal.pixelWidth = cal.pixelWidth;
+        ijCal.pixelHeight = cal.pixelHeight;
+        ijCal.pixelDepth = cal.pixelDepth;
+        ijCal.setUnit(cal.unit);
+        image.setCalibration(ijCal);
+    }
+
+    private static void closeImage(ImagePlus image) {
+        if (image == null) return;
+        image.changes = false;
+        image.close();
+        image.flush();
+    }
+
+    private static final class AveragedGLCMResult {
+        final double contrast;
+        final double asm;
+        final double correlation;
+        final double entropy;
+        final double homogeneity;
+        final boolean valid;
+        final boolean reliable;
+
+        private AveragedGLCMResult(double contrast,
+                                   double asm,
+                                   double correlation,
+                                   double entropy,
+                                   double homogeneity,
+                                   boolean valid,
+                                   boolean reliable) {
+            this.contrast = contrast;
+            this.asm = asm;
+            this.correlation = correlation;
+            this.entropy = entropy;
+            this.homogeneity = homogeneity;
+            this.valid = valid;
+            this.reliable = reliable;
+        }
+
+        static AveragedGLCMResult invalid() {
+            return new AveragedGLCMResult(Double.NaN, Double.NaN, Double.NaN,
+                    Double.NaN, Double.NaN, false, false);
+        }
+    }
+
+    private static final class RawTextureImageResolver {
+        private final DeferredImageSupplier supplier;
+        private final List<String> channelNames;
+        private final ChannelIdentities identities;
+
+        private RawTextureImageResolver(String directory, List<String> channelNames) throws Exception {
+            this.supplier = ImageSourceDispatcher.createSupplier(directory);
+            this.channelNames = channelNames == null
+                    ? new ArrayList<String>()
+                    : new ArrayList<String>(channelNames);
+            this.identities = ChannelIdentitiesIO.read(new File(directory, ".bin"));
+        }
+
+        ImagePlus open(String channelName, ChannelData cd, List<Integer> rowIndices) throws Exception {
+            int seriesIndex = seriesIndex(cd, rowIndices);
+            int channelIndex = channelIndex(channelName);
+            return supplier.openSeriesMaterializedChannel(seriesIndex, channelIndex);
+        }
+
+        private int seriesIndex(ChannelData cd, List<Integer> rowIndices) {
+            if (cd == null || rowIndices == null || rowIndices.isEmpty()) {
+                return 0;
+            }
+            Integer scn = parseScnInteger(cell(cd, rowIndices.get(0).intValue(), "SCN"));
+            return scn == null ? 0 : Math.max(0, scn.intValue() - 1);
+        }
+
+        private int channelIndex(String channelName) {
+            if (identities != null) {
+                for (ChannelIdentities.Entry entry : identities.getEntries()) {
+                    String marker = entry.getMarkerId();
+                    if (channelNameMatches(channelName, marker)) {
+                        return Math.max(0, entry.getChannelIndex());
+                    }
+                }
+            }
+            for (int i = 0; i < channelNames.size(); i++) {
+                if (channelNameMatches(channelName, channelNames.get(i))) {
+                    return i;
+                }
+            }
+            return 0;
+        }
+
+        private boolean channelNameMatches(String channelName, String candidate) {
+            if (channelName == null || candidate == null) return false;
+            return channelName.equals(candidate)
+                    || channelName.equals(ChannelFilenameCodec.toRaw(candidate))
+                    || ChannelFilenameCodec.toSafe(channelName).equals(candidate);
+        }
+
+        private static String cell(ChannelData cd, int row, String column) {
+            if (cd == null || column == null || !cd.colIdx.containsKey(column)) return "";
+            String value = cd.get(row, column);
+            return value == null ? "" : value.trim();
         }
     }
 

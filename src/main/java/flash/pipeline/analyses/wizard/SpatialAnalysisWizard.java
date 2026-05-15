@@ -360,15 +360,20 @@ public class SpatialAnalysisWizard extends WizardFlow {
         public boolean doCompositeIndices;
         public boolean doPopMorphometrics;
         public boolean doSpatialMorphometrics;
+        public boolean doObjectGLCM;
+        public boolean doObjectFractal;
+        public boolean doObjectTextureClass;
         public boolean forceRerun;
         public double kdeBandwidth = 0.0;
         public String heatmapLut = "Fire";
         public int clusterK = 0;
+        public int textureClassK = 4;
         public double colocThresholdPercent = 30.0;
         public final Map<String, Double> markerThresholds = new LinkedHashMap<String, Double>();
 
         public boolean anyEarlyPhaseToggleOn() {
-            return forceRerun || doCpc || doHeatmaps || do2DMorphology || do3DMorphology;
+            return forceRerun || doCpc || doHeatmaps || do2DMorphology || do3DMorphology
+                    || doObjectGLCM || doObjectFractal || doObjectTextureClass;
         }
     }
 

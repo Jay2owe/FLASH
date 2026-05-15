@@ -84,6 +84,27 @@ public final class ObjectCsvColumnOrder {
             "Morph_TDR",
             "Morph_FEV_Mag"
     );
+    private static final Map<String, Integer> MORPH_TEXTURE_ORDER = fixedOrder(
+            "MorphTexture_GLCMContrast",
+            "MorphTexture_GLCMASM",
+            "MorphTexture_GLCMCorrelation",
+            "MorphTexture_GLCMEntropy",
+            "MorphTexture_GLCMHomogeneity",
+            "MorphTexture_FractalDim",
+            "MorphTexture_FractalDim_R2",
+            "MorphTexture_LacunarityMean",
+            "MorphTexture_LacunaritySpread",
+            "MorphTexture_ClassLabel",
+            "MorphTexture_ClassDistance",
+            "MorphTexture_F1",
+            "MorphTexture_F2",
+            "MorphTexture_F3",
+            "MorphTexture_F4",
+            "MorphTexture_F5",
+            "MorphTexture_F6",
+            "MorphTexture_F7",
+            "MorphTexture_F8"
+    );
 
     private ObjectCsvColumnOrder() {}
 
@@ -228,6 +249,9 @@ public final class ObjectCsvColumnOrder {
         exact = MORPH_SPATIAL_ORDER.get(col);
         if (exact != null) return new ColumnKey(14, exact, 0, "", originalIndex);
         if (col.startsWith("Morph_")) return new ColumnKey(15, 0, 0, col, originalIndex);
+        exact = MORPH_TEXTURE_ORDER.get(col);
+        if (exact != null) return new ColumnKey(16, exact, 0, "", originalIndex);
+        if (col.startsWith("MorphTexture_")) return new ColumnKey(17, 0, 0, col, originalIndex);
 
         return new ColumnKey(100, 0, 0, "", originalIndex);
     }
