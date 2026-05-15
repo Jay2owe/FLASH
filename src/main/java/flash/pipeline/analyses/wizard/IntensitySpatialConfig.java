@@ -276,6 +276,7 @@ public final class IntensitySpatialConfig implements Serializable {
         }
 
         return builder(this)
+                .enabled(enabled && !adjusted.isEmpty())
                 .enabledAnalyses(adjusted)
                 .spatialSourceMode(sourceMode)
                 .native3dEnabled(native3d)

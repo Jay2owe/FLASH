@@ -114,6 +114,19 @@ public class IntensitySpatialWizardTest {
     }
 
     @Test
+    public void validationDisablesConfigWhenEverySelectedAnalysisIsLockedOut() {
+        IntensitySpatialConfig config = IntensitySpatialConfig.builder()
+                .enabled(true)
+                .addAnalysis(IntensitySpatialConfig.AnalysisKey.CROSSMARK)
+                .addAnalysis(IntensitySpatialConfig.AnalysisKey.DISTANCE_SHELL)
+                .build()
+                .validateForChannelSetup(1, new boolean[]{false});
+
+        assertFalse(config.isEnabled());
+        assertTrue(config.getEnabledAnalyses().isEmpty());
+    }
+
+    @Test
     public void native3dSelectionsRequireNativeModeAndEnoughSlices() {
         IntensitySpatialConfig nativeOff = IntensitySpatialConfig.builder()
                 .enabled(true)
