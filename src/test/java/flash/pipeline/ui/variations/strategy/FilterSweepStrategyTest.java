@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
@@ -127,6 +128,61 @@ public class FilterSweepStrategyTest {
         assertFalse(rendered.contains("Gaussian Blur"));
         assertEquals("8", optionValue(rendered, "radius"));
         assertEquals("4", optionValue(rendered, "rolling"));
+    }
+
+    @Test
+    public void renderMacroForComboSubstitutesFocusedDuplicateFilterSlot() {
+        Map<ParameterKey, Object> values = new LinkedHashMap<ParameterKey, Object>();
+        values.put(SlotSubstitutionKey.filterAxis(2, "SMOOTHING"), "Mean");
+        values.put(SlotSubstitutionKey.scaleAxis(2, "SMOOTHING"), "large");
+        FilterMacroEditorModel.MacroDefinition macro = FilterMacroEditorModel.parse(
+                "run(\"Gaussian Blur...\", \"sigma=1 stack\");\n"
+                        + "run(\"Median...\", \"radius=2 stack\");\n"
+                        + "run(\"Gaussian Blur...\", \"sigma=3 stack\");\n");
+        FilterSweepStrategy strategy = new FilterSweepStrategy(macro,
+                new SyntheticPreviewAdapter(), sourceImage(), null);
+
+        String[] lines = strategy.renderMacroForCombo(new ParameterCombo(values))
+                .split("\\n");
+
+        assertEquals("run(\"Gaussian Blur...\", \"sigma=1 stack\");", lines[0]);
+        assertEquals("run(\"Median...\", \"radius=2 stack\");", lines[1]);
+        assertEquals("run(\"Mean...\", \"radius=8 stack\");", lines[2]);
+    }
+
+    @Test
+    public void dispatchStopsImmediatelyWhenThreadIsInterrupted() {
+        FilterParameterId sigma =
+                new FilterParameterId(0, 0, 0, "Gaussian Blur", "sigma");
+        Map<ParameterKey, ParameterValueList> values =
+                new LinkedHashMap<ParameterKey, ParameterValueList>();
+        values.put(sigma, ParameterValueList.ofDoubles(1.0d, 2.0d));
+        ParameterSweep sweep = new ParameterSweep(ParameterSweep.Method.FILTER,
+                values, CropSpec.full(), "DAPI", "image-a", "filter:macrohash");
+        FilterMacroEditorModel.MacroDefinition macro = FilterMacroEditorModel.parse(
+                "run(\"Gaussian Blur...\", \"sigma=1\");\n");
+        final AtomicInteger published = new AtomicInteger();
+        FilterSweepStrategy strategy = new FilterSweepStrategy(macro,
+                new SyntheticPreviewAdapter(), sourceImage(), null);
+
+        Thread.currentThread().interrupt();
+        try {
+            strategy.dispatch(sweep,
+                    new Consumer<VariationResult>() {
+                        @Override public void accept(VariationResult result) {
+                            published.incrementAndGet();
+                        }
+                    },
+                    new BooleanSupplier() {
+                        @Override public boolean getAsBoolean() {
+                            return false;
+                        }
+                    });
+        } finally {
+            Thread.interrupted();
+        }
+
+        assertEquals(0, published.get());
     }
 
     private static ImagePlus sourceImage() {

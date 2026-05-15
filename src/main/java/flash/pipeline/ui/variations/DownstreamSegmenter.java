@@ -448,7 +448,8 @@ public class DownstreamSegmenter {
     }
 
     private static boolean isCancelled(BooleanSupplier cancelCheck) {
-        return cancelCheck != null && cancelCheck.getAsBoolean();
+        return Thread.currentThread().isInterrupted()
+                || (cancelCheck != null && cancelCheck.getAsBoolean());
     }
 
     private static boolean isMethod(String token, String prefix) {

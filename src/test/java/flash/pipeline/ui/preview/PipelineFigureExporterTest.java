@@ -10,8 +10,14 @@ import ij.process.ByteProcessor;
 import org.junit.Test;
 
 import javax.imageio.ImageIO;
+import javax.imageio.ImageReader;
+import javax.imageio.metadata.IIOMetadata;
+import javax.imageio.stream.ImageInputStream;
 import java.awt.image.BufferedImage;
 import java.io.File;
+import java.util.Iterator;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotEquals;
@@ -49,6 +55,38 @@ public class PipelineFigureExporterTest {
         assertNotNull(roundTrip);
         assertEquals(figure.getWidth(), roundTrip.getWidth());
         assertEquals(figure.getHeight(), roundTrip.getHeight());
+        assertEquals(PipelineFigureExporter.EXPORT_DPI, pngDpi(out));
+        assertEquals(0, out.getParentFile().listFiles((dir, name) ->
+                name.startsWith(out.getName() + ".") && name.endsWith(".tmp")).length);
+    }
+
+    private static int pngDpi(File file) throws Exception {
+        Iterator<ImageReader> readers = ImageIO.getImageReadersByFormatName("png");
+        assertTrue(readers.hasNext());
+        ImageReader reader = readers.next();
+        ImageInputStream input = ImageIO.createImageInputStream(file);
+        try {
+            reader.setInput(input);
+            IIOMetadata metadata = reader.getImageMetadata(0);
+            Node tree = metadata.getAsTree("javax_imageio_png_1.0");
+            NodeList nodes = tree.getChildNodes();
+            for (int i = 0; i < nodes.getLength(); i++) {
+                Node node = nodes.item(i);
+                if ("pHYs".equals(node.getNodeName())) {
+                    Node x = node.getAttributes().getNamedItem("pixelsPerUnitXAxis");
+                    Node unit = node.getAttributes().getNamedItem("unitSpecifier");
+                    assertEquals("meter", unit.getNodeValue());
+                    int pixelsPerMeter = Integer.parseInt(x.getNodeValue());
+                    return (int) Math.round(pixelsPerMeter * 0.0254d);
+                }
+            }
+            return 0;
+        } finally {
+            reader.dispose();
+            if (input != null) {
+                input.close();
+            }
+        }
     }
 
     private static int centreGrey(BufferedImage figure, int tileIndex) {

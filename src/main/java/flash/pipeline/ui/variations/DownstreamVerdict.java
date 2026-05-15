@@ -123,7 +123,8 @@ public final class DownstreamVerdict {
     }
 
     private static boolean isCancelled(BooleanSupplier cancelCheck) {
-        return cancelCheck != null && cancelCheck.getAsBoolean();
+        return Thread.currentThread().isInterrupted()
+                || (cancelCheck != null && cancelCheck.getAsBoolean());
     }
 
     private static String status(int done, int total) {

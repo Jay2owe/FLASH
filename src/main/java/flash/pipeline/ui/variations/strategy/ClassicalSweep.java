@@ -175,7 +175,8 @@ public final class ClassicalSweep implements VariationStrategy {
     }
 
     private static boolean isCancelled(BooleanSupplier cancelCheck) {
-        return cancelCheck != null && cancelCheck.getAsBoolean();
+        return Thread.currentThread().isInterrupted()
+                || (cancelCheck != null && cancelCheck.getAsBoolean());
     }
 
     private static int effectiveParallelism(int requested) {

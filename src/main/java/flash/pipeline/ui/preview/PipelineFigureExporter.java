@@ -15,6 +15,12 @@ import ij.ImageStack;
 import ij.process.ImageProcessor;
 
 import javax.imageio.ImageIO;
+import javax.imageio.ImageTypeSpecifier;
+import javax.imageio.ImageWriteParam;
+import javax.imageio.ImageWriter;
+import javax.imageio.metadata.IIOMetadata;
+import javax.imageio.metadata.IIOMetadataNode;
+import javax.imageio.stream.ImageOutputStream;
 import java.awt.Color;
 import java.awt.Font;
 import java.awt.FontMetrics;
@@ -23,11 +29,15 @@ import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 
@@ -37,6 +47,7 @@ public final class PipelineFigureExporter {
     static final int LABEL_HEIGHT = 22;
     static final int PADDING = 10;
     static final int GAP = 12;
+    static final int EXPORT_DPI = 300;
 
     private static final Color BACKGROUND = Color.WHITE;
     private static final Color TILE_BACKGROUND = new Color(0x18, 0x1B, 0x1F);
@@ -84,8 +95,69 @@ public final class PipelineFigureExporter {
                 throw new IOException("Could not create " + parent.getAbsolutePath());
             }
         }
-        if (!ImageIO.write(img, "png", out)) {
+        File temp = File.createTempFile(out.getName() + ".", ".tmp", parent);
+        boolean moved = false;
+        try {
+            writePNGWithDpi(img, temp, EXPORT_DPI);
+            try {
+                Files.move(temp.toPath(), out.toPath(),
+                        StandardCopyOption.REPLACE_EXISTING,
+                        StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException e) {
+                Files.move(temp.toPath(), out.toPath(),
+                        StandardCopyOption.REPLACE_EXISTING);
+            }
+            moved = true;
+        } finally {
+            if (!moved) {
+                Files.deleteIfExists(temp.toPath());
+            }
+        }
+    }
+
+    private static void writePNGWithDpi(BufferedImage img, File out, int dpi)
+            throws IOException {
+        Iterator<ImageWriter> writers = ImageIO.getImageWritersByFormatName("png");
+        if (!writers.hasNext()) {
             throw new IOException("No PNG writer is available.");
+        }
+        ImageWriter writer = writers.next();
+        ImageOutputStream output = null;
+        try {
+            output = ImageIO.createImageOutputStream(out);
+            if (output == null) {
+                throw new IOException("Could not open " + out.getAbsolutePath());
+            }
+            writer.setOutput(output);
+            ImageWriteParam param = writer.getDefaultWriteParam();
+            IIOMetadata metadata = writer.getDefaultImageMetadata(
+                    ImageTypeSpecifier.createFromBufferedImageType(img.getType()), param);
+            setPngDpi(metadata, dpi);
+            writer.write(null, new javax.imageio.IIOImage(img, null, metadata), param);
+        } finally {
+            writer.dispose();
+            if (output != null) {
+                output.close();
+            }
+        }
+    }
+
+    private static void setPngDpi(IIOMetadata metadata, int dpi) throws IOException {
+        if (metadata == null || metadata.isReadOnly()) {
+            return;
+        }
+        int pixelsPerMeter = Math.max(1,
+                (int) Math.round(dpi / 0.0254d));
+        IIOMetadataNode root = new IIOMetadataNode("javax_imageio_png_1.0");
+        IIOMetadataNode phys = new IIOMetadataNode("pHYs");
+        phys.setAttribute("pixelsPerUnitXAxis", String.valueOf(pixelsPerMeter));
+        phys.setAttribute("pixelsPerUnitYAxis", String.valueOf(pixelsPerMeter));
+        phys.setAttribute("unitSpecifier", "meter");
+        root.appendChild(phys);
+        try {
+            metadata.mergeTree("javax_imageio_png_1.0", root);
+        } catch (RuntimeException e) {
+            throw new IOException("Could not write PNG DPI metadata.", e);
         }
     }
 

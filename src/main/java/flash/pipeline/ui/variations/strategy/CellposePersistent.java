@@ -383,7 +383,8 @@ public final class CellposePersistent implements VariationStrategy {
     }
 
     private static boolean isCancelled(BooleanSupplier cancelCheck) {
-        return cancelCheck != null && cancelCheck.getAsBoolean();
+        return Thread.currentThread().isInterrupted()
+                || (cancelCheck != null && cancelCheck.getAsBoolean());
     }
 
     private static WorkerFactory defaultWorkerFactory() {
