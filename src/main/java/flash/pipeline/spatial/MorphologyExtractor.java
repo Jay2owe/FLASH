@@ -81,7 +81,7 @@ public final class MorphologyExtractor {
      */
     public static List<ObjectMorphology> extract(ImagePlus labelImage, double pixelSize) {
         if (labelImage == null) return new ArrayList<ObjectMorphology>();
-        if (pixelSize <= 0) pixelSize = 1.0;
+        if (pixelSize <= 0 || Double.isNaN(pixelSize) || Double.isInfinite(pixelSize)) pixelSize = 1.0;
 
         int w = labelImage.getWidth();
         int h = labelImage.getHeight();
@@ -98,7 +98,7 @@ public final class MorphologyExtractor {
             ImageProcessor ip = stack.getProcessor(z);
             for (int y = 0; y < h; y++) {
                 for (int x = 0; x < w; x++) {
-                    int label = (int) ip.getf(x, y);
+                    int label = labelFromPixel(ip.getf(x, y));
                     if (label <= 0) continue;
                     Set<Long> set = footprints.get(label);
                     if (set == null) {
@@ -125,6 +125,11 @@ public final class MorphologyExtractor {
             results.add(measureObject(label, pixels, w, h, pixelSize));
         }
         return results;
+    }
+
+    private static int labelFromPixel(float value) {
+        if (!Float.isFinite(value) || value <= 0f) return 0;
+        return value > Integer.MAX_VALUE ? 0 : Math.round(value);
     }
 
     private static ObjectMorphology measureObject(int label, List<int[]> pixels,

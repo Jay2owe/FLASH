@@ -30,25 +30,29 @@ public final class DensityHeatmapGenerator {
      */
     public static ImagePlus generate(double[][] centroids, int imgWidth, int imgHeight,
                                      double pixelSize, double bandwidth) {
-        if (centroids == null || centroids.length == 0 || imgWidth <= 0 || imgHeight <= 0) {
+        if (centroids == null || centroids.length == 0 || !validImageSize(imgWidth, imgHeight)) {
             return null;
         }
 
-        if (pixelSize <= 0) pixelSize = 1.0;
+        if (!Double.isFinite(pixelSize) || pixelSize <= 0) pixelSize = 1.0;
 
         // Auto bandwidth via Scott's rule: h = n^(-1/5) * sigma
-        if (bandwidth <= 0 || Double.isNaN(bandwidth)) {
+        if (!Double.isFinite(bandwidth) || bandwidth <= 0) {
             bandwidth = scottsRule(centroids);
             if (bandwidth <= 0) bandwidth = pixelSize * 10; // fallback
         }
 
         double bwPx = bandwidth / pixelSize;
-        int kernelRadius = (int) Math.ceil(3.0 * bwPx);
+        if (!Double.isFinite(bwPx) || bwPx <= 0) bwPx = 10.0;
+        int kernelRadius = kernelRadius(bwPx, imgWidth, imgHeight);
 
         float[] pixels = new float[imgWidth * imgHeight];
 
         // Stamp Gaussian kernel at each centroid
+        int validPoints = 0;
         for (double[] pt : centroids) {
+            if (!validPoint(pt)) continue;
+            validPoints++;
             int cx = (int) Math.round(pt[0] / pixelSize);
             int cy = (int) Math.round(pt[1] / pixelSize);
 
@@ -69,7 +73,8 @@ public final class DensityHeatmapGenerator {
         }
 
         // Normalize by n and kernel normalization constant
-        double norm = centroids.length * 2.0 * Math.PI * bwPx * bwPx;
+        if (validPoints == 0) return null;
+        double norm = validPoints * 2.0 * Math.PI * bwPx * bwPx;
         if (norm > 0) {
             for (int i = 0; i < pixels.length; i++) {
                 pixels[i] /= (float) norm;
@@ -97,20 +102,24 @@ public final class DensityHeatmapGenerator {
                                              double pixelSize, double bandwidth) {
         if (centroids == null || centroids.length == 0 || weights == null) return null;
         if (centroids.length != weights.length) return null;
+        if (!validImageSize(imgWidth, imgHeight)) return null;
 
-        if (pixelSize <= 0) pixelSize = 1.0;
-        if (bandwidth <= 0 || Double.isNaN(bandwidth)) {
+        if (!Double.isFinite(pixelSize) || pixelSize <= 0) pixelSize = 1.0;
+        if (!Double.isFinite(bandwidth) || bandwidth <= 0) {
             bandwidth = scottsRule(centroids);
             if (bandwidth <= 0) bandwidth = pixelSize * 10;
         }
 
         double bwPx = bandwidth / pixelSize;
-        int kernelRadius = (int) Math.ceil(3.0 * bwPx);
+        if (!Double.isFinite(bwPx) || bwPx <= 0) bwPx = 10.0;
+        int kernelRadius = kernelRadius(bwPx, imgWidth, imgHeight);
         float[] pixels = new float[imgWidth * imgHeight];
 
+        int validPoints = 0;
         for (int p = 0; p < centroids.length; p++) {
             double w = weights[p];
-            if (Double.isNaN(w) || w <= 0) continue;
+            if (!validPoint(centroids[p]) || !Double.isFinite(w) || w <= 0) continue;
+            validPoints++;
 
             int cx = (int) Math.round(centroids[p][0] / pixelSize);
             int cy = (int) Math.round(centroids[p][1] / pixelSize);
@@ -131,7 +140,8 @@ public final class DensityHeatmapGenerator {
             }
         }
 
-        double norm = centroids.length * 2.0 * Math.PI * bwPx * bwPx;
+        if (validPoints == 0) return null;
+        double norm = validPoints * 2.0 * Math.PI * bwPx * bwPx;
         if (norm > 0) {
             for (int i = 0; i < pixels.length; i++) pixels[i] /= (float) norm;
         }
@@ -196,19 +206,44 @@ public final class DensityHeatmapGenerator {
         if (centroids.length < 2) return 0;
 
         double sumX = 0, sumY = 0;
-        for (double[] pt : centroids) { sumX += pt[0]; sumY += pt[1]; }
-        double meanX = sumX / centroids.length;
-        double meanY = sumY / centroids.length;
+        int n = 0;
+        for (double[] pt : centroids) {
+            if (!validPoint(pt)) continue;
+            sumX += pt[0];
+            sumY += pt[1];
+            n++;
+        }
+        if (n < 2) return 0;
+        double meanX = sumX / n;
+        double meanY = sumY / n;
 
         double varX = 0, varY = 0;
         for (double[] pt : centroids) {
+            if (!validPoint(pt)) continue;
             varX += (pt[0] - meanX) * (pt[0] - meanX);
             varY += (pt[1] - meanY) * (pt[1] - meanY);
         }
-        varX /= (centroids.length - 1);
-        varY /= (centroids.length - 1);
+        varX /= (n - 1);
+        varY /= (n - 1);
 
         double sigma = (Math.sqrt(varX) + Math.sqrt(varY)) / 2.0;
-        return Math.pow(centroids.length, -0.2) * sigma;
+        return Double.isFinite(sigma) ? Math.pow(n, -0.2) * sigma : 0;
+    }
+
+    private static boolean validImageSize(int width, int height) {
+        if (width <= 0 || height <= 0) return false;
+        return (long) width * (long) height <= Integer.MAX_VALUE;
+    }
+
+    private static boolean validPoint(double[] point) {
+        return point != null && point.length >= 2
+                && Double.isFinite(point[0]) && Double.isFinite(point[1]);
+    }
+
+    private static int kernelRadius(double bwPx, int imgWidth, int imgHeight) {
+        double requested = Math.ceil(3.0 * bwPx);
+        int maxUseful = Math.max(imgWidth, imgHeight);
+        if (!Double.isFinite(requested) || requested > maxUseful) return maxUseful;
+        return Math.max(1, (int) requested);
     }
 }

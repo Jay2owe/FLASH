@@ -53,7 +53,10 @@ public final class CellClustering {
             return new ClusterResult(new int[0], new double[0][0], 0, 0);
         }
         int n = features.length;
-        int d = features[0].length;
+        int d = features[0] == null ? 0 : features[0].length;
+        if (d == 0) {
+            return new ClusterResult(new int[n], new double[0][0], 0, 0);
+        }
         k = Math.min(k, n);
 
         // Z-score normalize
@@ -238,19 +241,29 @@ public final class CellClustering {
 
         for (int j = 0; j < d; j++) {
             double sum = 0, sumSq = 0;
+            int count = 0;
             for (int i = 0; i < n; i++) {
-                sum += features[i][j];
-                sumSq += features[i][j] * features[i][j];
+                double value = valueAt(features, i, j);
+                if (!Double.isFinite(value)) continue;
+                sum += value;
+                sumSq += value * value;
+                count++;
             }
-            double mean = sum / n;
-            double std = Math.sqrt(sumSq / n - mean * mean);
-            if (std < 1e-10) std = 1.0;
+            double mean = count == 0 ? 0.0 : sum / count;
+            double std = count == 0 ? 1.0 : Math.sqrt(Math.max(0.0, sumSq / count - mean * mean));
+            if (!Double.isFinite(std) || std < 1e-10) std = 1.0;
 
             for (int i = 0; i < n; i++) {
-                result[i][j] = (features[i][j] - mean) / std;
+                double value = valueAt(features, i, j);
+                result[i][j] = Double.isFinite(value) ? (value - mean) / std : 0.0;
             }
         }
         return result;
+    }
+
+    private static double valueAt(double[][] features, int row, int col) {
+        if (features[row] == null || col >= features[row].length) return Double.NaN;
+        return features[row][col];
     }
 
     private static double euclidean(double[] a, double[] b) {

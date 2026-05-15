@@ -102,4 +102,25 @@ public class SpatialStatisticsTest {
             }
         }
     }
+
+    @Test
+    public void heatmapSkipsNonFiniteCentroidsAndWeights() {
+        double[][] centroids = new double[][]{
+                {2.0, 2.0},
+                {Double.NaN, 1.0},
+                {1.0, Double.POSITIVE_INFINITY}
+        };
+        double[] weights = new double[]{1.0, 5.0, Double.POSITIVE_INFINITY};
+
+        assertNotNull(DensityHeatmapGenerator.generate(centroids, 8, 8, 1.0, Double.POSITIVE_INFINITY));
+        assertNotNull(DensityHeatmapGenerator.generateWeighted(centroids, weights, 8, 8, 1.0, Double.NaN));
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void ripleysKRejectsNonFiniteCentroids() {
+        SpatialStatistics.computeRipleysK(
+                new double[][]{{0.0, 0.0}, {Double.POSITIVE_INFINITY, 1.0}},
+                new SpatialStatistics.RectangularWindow(0.0, 0.0, 2.0, 2.0),
+                new double[]{0.5});
+    }
 }

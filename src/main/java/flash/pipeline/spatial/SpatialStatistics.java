@@ -22,7 +22,9 @@ public final class SpatialStatistics {
         public final double maxY;
 
         public RectangularWindow(double minX, double minY, double maxX, double maxY) {
-            if (!(maxX > minX) || !(maxY > minY)) {
+            if (!Double.isFinite(minX) || !Double.isFinite(minY)
+                    || !Double.isFinite(maxX) || !Double.isFinite(maxY)
+                    || !(maxX > minX) || !(maxY > minY)) {
                 throw new IllegalArgumentException("Window bounds must define a positive-area rectangle.");
             }
             this.minX = minX;
@@ -321,6 +323,9 @@ public final class SpatialStatistics {
             if (centroids[i] == null || centroids[i].length < 2) {
                 throw new IllegalArgumentException("Each centroid must contain at least x and y values.");
             }
+            if (!Double.isFinite(centroids[i][0]) || !Double.isFinite(centroids[i][1])) {
+                throw new IllegalArgumentException("Centroid coordinates must be finite real numbers.");
+            }
         }
     }
 
@@ -329,7 +334,7 @@ public final class SpatialStatistics {
             throw new IllegalArgumentException("radii must not be null");
         }
         for (int i = 0; i < radii.length; i++) {
-            if (radii[i] < 0.0 || Double.isNaN(radii[i])) {
+            if (radii[i] < 0.0 || !Double.isFinite(radii[i])) {
                 throw new IllegalArgumentException("radii must be non-negative real numbers.");
             }
         }

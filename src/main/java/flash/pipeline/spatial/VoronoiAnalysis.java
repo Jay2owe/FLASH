@@ -71,8 +71,11 @@ public final class VoronoiAnalysis {
      */
     public static VoronoiResult[] compute(double[][] centroids,
                                           SpatialStatistics.RectangularWindow window) {
-        if (centroids == null || centroids.length < 2) {
+        if (centroids == null || centroids.length < 2 || window == null) {
             return new VoronoiResult[0];
+        }
+        for (double[] pt : centroids) {
+            if (!validPoint(pt)) return new VoronoiResult[0];
         }
 
         GeometryFactory factory = new GeometryFactory();
@@ -167,10 +170,17 @@ public final class VoronoiAnalysis {
                                                               String[] objectTypes,
                                                               int nPermutations,
                                                               long seed) {
+        if (results == null || objectTypes == null) {
+            return new InteractionMatrix(new int[0][0], new double[0][0], new String[0]);
+        }
         // Collect unique types in encounter order
         List<String> typeList = new ArrayList<String>();
         Map<String, Integer> typeIndex = new LinkedHashMap<String, Integer>();
-        for (String t : objectTypes) {
+        String[] safeTypes = new String[objectTypes.length];
+        for (int i = 0; i < objectTypes.length; i++) {
+            String t = objectTypes[i];
+            if (t == null) t = "";
+            safeTypes[i] = t;
             if (!typeIndex.containsKey(t)) {
                 typeIndex.put(t, typeList.size());
                 typeList.add(t);
@@ -180,14 +190,14 @@ public final class VoronoiAnalysis {
         String[] types = typeList.toArray(new String[0]);
 
         // Observed counts
-        int[][] observed = countInteractions(results, objectTypes, typeIndex, nTypes);
+        int[][] observed = countInteractions(results, safeTypes, typeIndex, nTypes);
 
         // Permutation test
         double[][] pValues = new double[nTypes][nTypes];
         if (nPermutations > 0 && results.length > 1) {
             int[][] exceedCount = new int[nTypes][nTypes];
             Random rng = new Random(seed);
-            String[] shuffled = Arrays.copyOf(objectTypes, objectTypes.length);
+            String[] shuffled = Arrays.copyOf(safeTypes, safeTypes.length);
 
             for (int p = 0; p < nPermutations; p++) {
                 // Fisher-Yates shuffle
@@ -222,6 +232,7 @@ public final class VoronoiAnalysis {
                                               Map<String, Integer> typeIndex, int nTypes) {
         int[][] counts = new int[nTypes][nTypes];
         for (VoronoiResult r : results) {
+            if (r == null || r.index < 0 || r.index >= types.length) continue;
             int typeA = typeIndex.get(types[r.index]);
             for (int neighborIdx : r.neighborIndices) {
                 if (neighborIdx >= types.length) continue;
@@ -249,5 +260,10 @@ public final class VoronoiAnalysis {
             }
         }
         return best;
+    }
+
+    private static boolean validPoint(double[] point) {
+        return point != null && point.length >= 2
+                && Double.isFinite(point[0]) && Double.isFinite(point[1]);
     }
 }
