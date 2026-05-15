@@ -348,6 +348,42 @@ public class SplitAndMergeImageChannelsAnalysisTest {
     }
 
     @Test
+    public void processOneImageDefaultsMissingChannelColorsToGrays() throws Exception {
+        File dir = temp.newFolder("missingColors");
+        File outDir = new File(dir, "Images/Animal1");
+        File tifDir = new File(dir, "OME-TIFF");
+        File detailsDir = new File(dir, "Analysis Details");
+        assertTrue(outDir.mkdirs());
+
+        ImageStack stack = new ImageStack(2, 2);
+        stack.addSlice("DAPI", new byte[]{10, 20, 30, 40});
+        stack.addSlice("GFAP", new byte[]{40, 50, 60, 70});
+        ImagePlus imp = new ImagePlus("Experiment-Animal1_LH_Cortex", stack);
+        imp.setDimensions(2, 1, 1);
+        imp.setOpenAsHyperStack(true);
+
+        invokeProcessOneImage(new SplitAndMergeImageChannelsAnalysis(),
+                imp,
+                new String[]{"DAPI", "GFAP"},
+                new String[]{"Blue"},
+                outDir,
+                tifDir,
+                detailsDir,
+                true,
+                false,
+                new NameParts("Experiment", "Animal1", "LH", "Cortex"));
+
+        AsyncImageSaver.waitForAll();
+        assertFileWritten(new File(outDir, "DAPI_LH_Cortex.png"));
+        assertFileWritten(new File(outDir, "GFAP_LH_Cortex.png"));
+        assertFileWritten(new File(outDir, "Merge_LH_Cortex.png"));
+        String details = new String(Files.readAllBytes(
+                new File(detailsDir, "DAPI_LH_Cortex_details.txt").toPath()), StandardCharsets.UTF_8);
+        assertTrue(details.contains("C2 GFAP"));
+        assertTrue(details.contains("Grays"));
+    }
+
+    @Test
     public void presentationManifestMergeKeepsDuplicateLabelsWhenImageIdsDiffer() throws Exception {
         File splitMergeRoot = temp.newFolder("presentationMerge");
         File images = new File(splitMergeRoot, "Images/Animal1");
@@ -384,6 +420,7 @@ public class SplitAndMergeImageChannelsAnalysisTest {
         File outRoot = new File(dir, "Images");
         File tifDir = new File(dir, "OME-TIFF");
         File detailsRoot = new File(dir, "Analysis Details");
+        assertTrue(outRoot.createNewFile());
 
         ImageStack stack = new ImageStack(2, 2);
         stack.addSlice("DAPI", new byte[]{1, 2, 3, 4});
@@ -402,7 +439,7 @@ public class SplitAndMergeImageChannelsAnalysisTest {
 
         try {
             invokeProcessImagesParallel(analysis, loader, dir, null,
-                    new String[]{"DAPI"}, new String[0],
+                    new String[]{"DAPI"}, new String[]{"Blue"},
                     outRoot, tifDir, detailsRoot, dialogResult, 1);
             fail("Expected split/merge worker failure to be rethrown");
         } catch (InvocationTargetException e) {
@@ -410,7 +447,7 @@ public class SplitAndMergeImageChannelsAnalysisTest {
             assertTrue(cause instanceof RuntimeException);
             assertTrue(cause.getMessage(), cause.getMessage().contains("Split/Merge failed for 1 image(s)"));
             assertEquals(1, cause.getSuppressed().length);
-            assertTrue(cause.getSuppressed()[0] instanceof ArrayIndexOutOfBoundsException);
+            assertTrue(cause.getSuppressed()[0] instanceof java.io.IOException);
         }
     }
 

@@ -1772,6 +1772,17 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
         return String.valueOf(value);
     }
 
+    private static String stringAt(String[] values, int index, String fallback) {
+        if (values == null || index < 0 || index >= values.length) return fallback;
+        String value = values[index];
+        return value == null ? fallback : value;
+    }
+
+    private static double doubleAt(double[] values, int index, double fallback) {
+        if (values == null || index < 0 || index >= values.length) return fallback;
+        return values[index];
+    }
+
     // ── Processing loop ──
 
     private void processOneImage(
@@ -1799,6 +1810,11 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
             IJ.error("No channels found in " + imp.getTitle());
             return;
         }
+        if (channelNames == null || channelNames.length == 0) {
+            IJ.error("No channel names configured for " + imp.getTitle());
+            closeImageArray(chans);
+            return;
+        }
 
         int n = Math.min(chans.length, channelNames.length);
         if (!compactLog) IJ.log("  Channels split: " + n + " channels extracted");
@@ -1820,13 +1836,14 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
         double pixelHeightUm = calibratedPixelWidthUm(imp, false);
 
         for (int c = 0; c < n; c++) {
-            String method = c < processMethodPerCh.length ? processMethodPerCh[c] : METHOD_NONE;
-            String customMM = c < customMinMaxPerCh.length ? customMinMaxPerCh[c] : NONE_OPTION;
-            double saturation = c < saturationsPerCh.length ? saturationsPerCh[c] : DEFAULT_SATURATION;
+            String method = stringAt(processMethodPerCh, c, METHOD_NONE);
+            String customMM = stringAt(customMinMaxPerCh, c, NONE_OPTION);
+            double saturation = doubleAt(saturationsPerCh, c, DEFAULT_SATURATION);
+            String channelColor = stringAt(channelColors, c, "Grays");
 
             if (!compactLog) {
                 IJ.log("  > Channel " + (c + 1) + "/" + n + ": " + channelNames[c]);
-                IJ.log("    - Color: " + channelColors[c]);
+                IJ.log("    - Color: " + channelColor);
                 IJ.log("    - Processing method: " + method);
             }
 
@@ -1860,7 +1877,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
             maxProjs[c] = max;
 
             ImagePlus maxForPng = ImageOps.duplicateThreadSafe(max);
-            applyPseudoColor(maxForPng, channelColors[c]);
+            applyPseudoColor(maxForPng, channelColor);
             String safeChannel = ChannelFilenameCodec.toSafe(channelNames[c]);
             String singleSaveName = safeChannel + (hemiRegion.isEmpty() ? "" : "_" + hemiRegion) + ".png";
             File singleOut = new File(outDir, singleSaveName);
@@ -1877,7 +1894,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                 rawMax.setTitle(channelNames[c] + "_Raw");
                 applyProcessing(rawMax, method, customMM, saturation);
                 ImagePlus rawPng = ImageOps.duplicateThreadSafe(rawMax);
-                applyPseudoColor(rawPng, channelColors[c]);
+                applyPseudoColor(rawPng, channelColor);
                 String rawSaveName = safeChannel + "_Raw" + (hemiRegion.isEmpty() ? "" : "_" + hemiRegion) + ".png";
                 AsyncImageSaver.saveAsPngAsync(rawPng, new File(outDir, rawSaveName).getAbsolutePath());
                 if (!compactLog) IJ.log("    - Saved raw (unsubtracted): " + rawSaveName);
@@ -1957,6 +1974,18 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                 mp.changes = false;
                 mp.close();
                 mp.flush();
+            }
+        }
+        closeImageArray(chans);
+    }
+
+    private static void closeImageArray(ImagePlus[] images) {
+        if (images == null) return;
+        for (ImagePlus image : images) {
+            if (image != null) {
+                image.changes = false;
+                image.close();
+                image.flush();
             }
         }
     }
@@ -2120,14 +2149,14 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
 
             w.write("Channels:\n");
             for (int c = 0; c < nCh; c++) {
-                String method = c < processMethodPerCh.length ? processMethodPerCh[c] : "None";
-                String color = c < channelColors.length ? channelColors[c] : "?";
+                String method = stringAt(processMethodPerCh, c, "None");
+                String color = stringAt(channelColors, c, "Grays");
                 StringBuilder methodDesc = new StringBuilder();
                 if (METHOD_AUTOMATIC.equals(method)) {
-                    double sat = c < saturationsPerCh.length ? saturationsPerCh[c] : DEFAULT_SATURATION;
+                    double sat = doubleAt(saturationsPerCh, c, DEFAULT_SATURATION);
                     methodDesc.append("Automatic (sat=").append(sat).append(")");
                 } else if (METHOD_CUSTOM.equals(method)) {
-                    String mm = c < customMinMaxPerCh.length ? customMinMaxPerCh[c] : "?";
+                    String mm = stringAt(customMinMaxPerCh, c, "?");
                     methodDesc.append("Custom Min-Max (").append(mm).append(")");
                 } else {
                     methodDesc.append(method);
@@ -2331,7 +2360,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
             for (int i = 0; i < idxs.size(); i++) {
                 int idx = idxs.get(i);
                 sub[i] = maxProjs[idx];
-                subColors[i] = channelColors[idx];
+                subColors[i] = stringAt(channelColors, idx, "Grays");
             }
 
             ImagePlus mergedRgb = mergePseudoColorsToRgb(sub, subColors);
