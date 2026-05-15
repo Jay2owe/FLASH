@@ -23,6 +23,7 @@ import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
 public final class Cellpose3DRunner {
+    public static final String CELLPROB_IMAGE_PROPERTY = "flash.cellpose.cellprobImage";
     private static final String INPUT_STACK_BASENAME = "cellpose_input";
     private static final String MASK_SUFFIX = "_cp_masks.tif";
     private static final long CELLPOSE_TIMEOUT_SECONDS = 1800L;
@@ -60,6 +61,20 @@ public final class Cellpose3DRunner {
                                 boolean useGpu,
                                 String channelName,
                                 File projectRoot) {
+        return run(input, companionInput, model, diameter, flowThreshold,
+                cellprobThreshold, useGpu, channelName, projectRoot, false);
+    }
+
+    public static ImagePlus run(ImagePlus input,
+                                ImagePlus companionInput,
+                                String model,
+                                double diameter,
+                                double flowThreshold,
+                                double cellprobThreshold,
+                                boolean useGpu,
+                                String channelName,
+                                File projectRoot,
+                                boolean dumpCellprob) {
         if (input == null) {
             IJ.log("WARNING: Cellpose input image is null.");
             return null;
@@ -93,12 +108,19 @@ public final class Cellpose3DRunner {
                 runCellposeCommand(runtime.pythonPath, inputStackPath, tempDir, model, runtimeInput,
                         runtimeInput != null && runtimeInput.getNChannels() > 1,
                         diameter, flowThreshold, cellprobThreshold, useGpu, channelName,
-                        projectRoot);
+                        projectRoot, dumpCellprob);
             } finally {
                 GpuConcurrency.gpuSemaphore().release();
             }
 
-            return readMaskImage(expectedMaskPath(tempDir), input, channelName);
+            ImagePlus labelImage = readMaskImage(expectedMaskPath(tempDir), input, channelName);
+            if (labelImage != null && dumpCellprob) {
+                ImagePlus cellprobImage = readCellprobImage(expectedCellprobPath(tempDir));
+                if (cellprobImage != null) {
+                    labelImage.setProperty(CELLPROB_IMAGE_PROPERTY, cellprobImage);
+                }
+            }
+            return labelImage;
         } catch (Exception e) {
             IJ.log("WARNING: Cellpose failed: " + e.getClass().getSimpleName() + " - " + e.getMessage());
             java.io.StringWriter sw = new java.io.StringWriter();
@@ -234,11 +256,12 @@ public final class Cellpose3DRunner {
                                            double cellprobThreshold,
                                            boolean useGpu,
                                            String channelName,
-                                           File projectRoot) throws Exception {
+                                           File projectRoot,
+                                           boolean dumpCellprob) throws Exception {
         List<String> command = buildCellposeCommand(
                 pythonPath, inputStackPath, outputDir, model,
                 readCatalog(projectRoot), input, hasSecondChannel, diameter,
-                flowThreshold, cellprobThreshold, useGpu);
+                flowThreshold, cellprobThreshold, useGpu, dumpCellprob);
 
         String chTag = (channelName != null && !channelName.isEmpty()) ? " [" + channelName + "]" : "";
         IJ.log("    Cellpose" + chTag + " command: " + String.join(" ", command));
@@ -326,7 +349,7 @@ public final class Cellpose3DRunner {
                                              boolean useGpu) {
         return buildCellposeCommand(pythonPath, inputStackPath, outputDir, model,
                 readCatalog(null), input, hasSecondChannel, diameter,
-                flowThreshold, cellprobThreshold, useGpu);
+                flowThreshold, cellprobThreshold, useGpu, false);
     }
 
     static List<String> buildCellposeCommand(String pythonPath,
@@ -340,6 +363,23 @@ public final class Cellpose3DRunner {
                                              double flowThreshold,
                                              double cellprobThreshold,
                                              boolean useGpu) {
+        return buildCellposeCommand(pythonPath, inputStackPath, outputDir, model,
+                catalog, input, hasSecondChannel, diameter, flowThreshold,
+                cellprobThreshold, useGpu, false);
+    }
+
+    static List<String> buildCellposeCommand(String pythonPath,
+                                             Path inputStackPath,
+                                             Path outputDir,
+                                             String model,
+                                             ModelCatalog catalog,
+                                             ImagePlus input,
+                                             boolean hasSecondChannel,
+                                             double diameter,
+                                             double flowThreshold,
+                                             double cellprobThreshold,
+                                             boolean useGpu,
+                                             boolean dumpCellprob) {
         String pretrainedModelArgument = resolvePretrainedModelArgument(model, catalog);
         List<String> command = new ArrayList<String>();
         command.add(CellposeRuntime.normalizeExecutablePath(pythonPath));
@@ -370,6 +410,9 @@ public final class Cellpose3DRunner {
         command.add(String.valueOf(cellprobThreshold));
         if (useGpu) {
             command.add("--use_gpu");
+        }
+        if (dumpCellprob) {
+            command.add("--save_flows");
         }
 
         if (input != null && input.getNSlices() > 1) {
@@ -553,6 +596,10 @@ public final class Cellpose3DRunner {
 
     static Path expectedMaskPath(Path outputDir) {
         return outputDir.resolve(INPUT_STACK_BASENAME + MASK_SUFFIX);
+    }
+
+    static Path expectedCellprobPath(Path outputDir) {
+        return outputDir.resolve(INPUT_STACK_BASENAME + "_cellprob.tif");
     }
 
     static Double computeAnisotropy(ImagePlus input) {

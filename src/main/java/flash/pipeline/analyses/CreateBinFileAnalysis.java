@@ -6325,7 +6325,8 @@ public class CreateBinFileAnalysis implements Analysis {
                                     parameters.cellprobThreshold,
                                     parameters.useGpu,
                                     cfg.names.get(channelIndex),
-                                    projectRootForConfigurationDir(binFolder));
+                                    projectRootForConfigurationDir(binFolder),
+                                    parameters.dumpCellprob);
                         } finally {
                             closeImageQuietly(input);
                             closeImageQuietly(companion);
