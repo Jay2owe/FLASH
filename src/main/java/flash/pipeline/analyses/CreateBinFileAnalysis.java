@@ -10,6 +10,8 @@ import flash.pipeline.bin.ChannelIdentitiesIO;
 import flash.pipeline.cellpose.Cellpose3DRunner;
 import flash.pipeline.cellpose.CellposeModel;
 import flash.pipeline.cellpose.CellposeRuntime;
+import flash.pipeline.click.ClickStore;
+import flash.pipeline.click.training.ImagePlusProvider;
 import flash.pipeline.analyses.wizard.BinPreset;
 import flash.pipeline.analyses.wizard.BinPresetIO;
 import flash.pipeline.analyses.wizard.ChannelSetupWizard;
@@ -43,6 +45,8 @@ import flash.pipeline.qc.QcMinMaxPerConditionSelector;
 import flash.pipeline.qc.QcSelectionChannel;
 import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.FeatureDependencyGate;
+import flash.pipeline.segmentation.EnhancedClassicalParameters;
+import flash.pipeline.segmentation.EnhancedClassicalRunner;
 import flash.pipeline.segmentation.SegmentationMethod;
 import flash.pipeline.segmentation.SegmentationTokenParser;
 import flash.pipeline.stardist.StarDist3DRunner;
@@ -68,6 +72,8 @@ import flash.pipeline.ui.config.StarDistParameterStage;
 import flash.pipeline.ui.config.ZSliceSelectionStage;
 import flash.pipeline.ui.sandbox.SandboxDialog;
 import flash.pipeline.ui.wizard.MarkerAutoComplete;
+import flash.pipeline.ui.wizard.TrainCustomEngineWizard;
+import flash.pipeline.ui.wizard.TrainCustomEngineWorkflow;
 import flash.pipeline.zslice.ZSliceConfig;
 import flash.pipeline.zslice.ZSliceConfigIO;
 import flash.pipeline.zslice.ZSliceMode;
@@ -6064,7 +6070,8 @@ public class CreateBinFileAnalysis implements Analysis {
                 channelIndex,
                 setupFilteredStackCache);
         List<ConfigQcStage> stages = new ArrayList<ConfigQcStage>();
-        stages.add(new SegmentationMethodStage(methodStore));
+        stages.add(new SegmentationMethodStage(methodStore,
+                createTrainCustomEngineLauncher(cfg, binFolder, channelIndex)));
         stages.add(new ConditionalConfigQcStage(
                 withSegmentationMethodSwitcher(createClassicalSegmentationStage(cfg, binFolder, channelIndex),
                         methodStore),
@@ -6133,6 +6140,388 @@ public class CreateBinFileAnalysis implements Analysis {
     private ConfigQcStage withSegmentationMethodSwitcher(ConfigQcStage delegate,
                                                          SegmentationMethodStage.MethodStore methodStore) {
         return new SegmentationMethodSwitchingStage(delegate, methodStore);
+    }
+
+    private SegmentationMethodStage.TrainCustomEngineLauncher createTrainCustomEngineLauncher(
+            final BinUserConfig cfg,
+            final File binFolder,
+            final int channelIndex) {
+        return new SegmentationMethodStage.TrainCustomEngineLauncher() {
+            @Override public boolean launch(final ConfigQcContext context,
+                                            final SegmentationMethodStage.MethodStore methodStore) {
+                if (context == null || methodStore == null) {
+                    return false;
+                }
+
+                final TrainCustomEngineWorkflow[] workflowRef =
+                        new TrainCustomEngineWorkflow[1];
+                ImagePlusProvider rawProvider = new ImagePlusProvider() {
+                    @Override public ImagePlus get(String imageName) {
+                        return createTrainingRawImage(context, cfg, channelIndex, imageName);
+                    }
+                };
+                ImagePlusProvider labelProvider = new ImagePlusProvider() {
+                    @Override public ImagePlus get(String imageName) {
+                        TrainCustomEngineWorkflow workflow = workflowRef[0];
+                        return workflow == null ? null
+                                : createTrainingLabelImage(workflow, context, cfg, binFolder,
+                                channelIndex, imageName);
+                    }
+                };
+
+                TrainCustomEngineWorkflow.ChannelMethodStore channelMethodStore =
+                        new TrainCustomEngineWorkflow.ChannelMethodStore() {
+                            @Override public String getMethodToken() {
+                                return methodStore.getMethodToken();
+                            }
+
+                            @Override public void setMethodToken(String token) {
+                                methodStore.setMethodToken(token);
+                            }
+                        };
+
+                File projectRootFile = context.getProjectDirectory() == null
+                        ? projectRootForConfigurationDir(binFolder)
+                        : context.getProjectDirectory();
+                Path projectRoot = projectRootFile == null
+                        ? new File(".").toPath()
+                        : projectRootFile.toPath();
+                TrainCustomEngineWorkflow.Services services =
+                        new TrainCustomEngineWorkflow.Services(
+                                TrainCustomEngineWorkflow.ImageTrainingServices.rf(
+                                        rawProvider, labelProvider, 17),
+                                TrainCustomEngineWorkflow.ImageTrainingServices.starDist(
+                                        projectRoot, channelIndex + 1,
+                                        context.getClickStore(), rawProvider, labelProvider),
+                                TrainCustomEngineWorkflow.ImageTrainingServices.cellpose(
+                                        projectRoot, channelIndex + 1,
+                                        context.getClickStore(), rawProvider, labelProvider),
+                                null,
+                                null,
+                                null);
+                TrainCustomEngineWorkflow workflow = new TrainCustomEngineWorkflow(
+                        projectRoot,
+                        channelIndex + 1,
+                        channelNameForTraining(cfg, channelIndex),
+                        context.getClickStore(),
+                        channelMethodStore,
+                        services);
+                workflow.setBaseToken(TrainCustomEngineWorkflow.Base.CLASSICAL, "classical");
+                workflow.setBaseToken(TrainCustomEngineWorkflow.Base.ENHANCED_CLASSICAL,
+                        enhancedBaseTokenForTraining(cfg, channelIndex));
+                workflow.setBaseToken(TrainCustomEngineWorkflow.Base.STARDIST,
+                        starDistBaseTokenForTraining(cfg, channelIndex));
+                workflow.setBaseToken(TrainCustomEngineWorkflow.Base.CELLPOSE,
+                        cellposeBaseTokenForTraining(cfg, channelIndex));
+                workflowRef[0] = workflow;
+
+                return TrainCustomEngineWizard.show(null, workflow);
+            }
+        };
+    }
+
+    private ImagePlus createTrainingRawImage(ConfigQcContext context,
+                                             BinUserConfig cfg,
+                                             int channelIndex,
+                                             String imageName) {
+        int previous = context == null ? 0 : context.getCurrentImageIndex();
+        try {
+            selectContextImage(context, imageName);
+            int channelNum = channelIndex + 1;
+            ImagePlus source = duplicateCurrentChannel(context, channelNum);
+            if (source == null) return null;
+            source.setTitle("Training raw input | C" + channelNum + " | " + safe(imageName));
+            return applyPreviewLut(source, channelColor(cfg, channelIndex));
+        } finally {
+            if (context != null) context.setCurrentImageIndex(previous);
+        }
+    }
+
+    private ImagePlus createTrainingLabelImage(TrainCustomEngineWorkflow workflow,
+                                               ConfigQcContext context,
+                                               BinUserConfig cfg,
+                                               File binFolder,
+                                               int channelIndex,
+                                               String imageName) {
+        int previous = context == null ? 0 : context.getCurrentImageIndex();
+        try {
+            selectContextImage(context, imageName);
+            TrainCustomEngineWorkflow.Base base = workflow.selectedBase();
+            if (base == TrainCustomEngineWorkflow.Base.CLASSICAL) {
+                return createClassicalTrainingLabels(context, cfg, binFolder, channelIndex, imageName);
+            }
+            if (base == TrainCustomEngineWorkflow.Base.ENHANCED_CLASSICAL) {
+                return createEnhancedClassicalTrainingLabels(
+                        workflow, context, cfg, binFolder, channelIndex, imageName);
+            }
+            if (base == TrainCustomEngineWorkflow.Base.STARDIST) {
+                return createStarDistTrainingLabels(
+                        workflow, context, cfg, binFolder, channelIndex, imageName);
+            }
+            return createCellposeTrainingLabels(
+                    workflow, context, cfg, binFolder, channelIndex, imageName);
+        } finally {
+            if (context != null) context.setCurrentImageIndex(previous);
+        }
+    }
+
+    private ImagePlus createClassicalTrainingLabels(ConfigQcContext context,
+                                                    BinUserConfig cfg,
+                                                    File binFolder,
+                                                    int channelIndex,
+                                                    String imageName) {
+        ImagePlus filtered = createFilteredSetupSource(context, cfg, binFolder,
+                channelIndex, "Training classical filtered input");
+        try {
+            if (filtered == null) return null;
+            int threshold = trainingThreshold(cfg, channelIndex, filtered);
+            int minSize = trainingMinSize(cfg, channelIndex);
+            int maxSize = trainingMaxSize(cfg, channelIndex, filtered);
+            ObjectsCounter3DWrapper.Result result = runObjectsCounterPreview(
+                    filtered,
+                    threshold,
+                    minSize,
+                    maxSize,
+                    "Training classical input | " + safe(imageName),
+                    "Training classical labels | " + safe(imageName));
+            ImagePlus labels = result == null ? null : result.getObjectsMap();
+            if (labels != null) {
+                labels.setTitle("Training classical labels | " + safe(imageName));
+            }
+            return labels;
+        } finally {
+            closeImageQuietly(filtered);
+        }
+    }
+
+    private ImagePlus createEnhancedClassicalTrainingLabels(TrainCustomEngineWorkflow workflow,
+                                                            ConfigQcContext context,
+                                                            BinUserConfig cfg,
+                                                            File binFolder,
+                                                            int channelIndex,
+                                                            String imageName) {
+        ImagePlus filtered = createFilteredSetupSource(context, cfg, binFolder,
+                channelIndex, "Training enhanced classical filtered input");
+        ImagePlus raw = createTrainingRawImage(context, cfg, channelIndex, imageName);
+        try {
+            if (filtered == null) return null;
+            SegmentationMethod method =
+                    SegmentationTokenParser.parseLenient(workflow.baseToken(
+                            TrainCustomEngineWorkflow.Base.ENHANCED_CLASSICAL));
+            EnhancedClassicalParameters params = new EnhancedClassicalParameters(
+                    (int) Math.round(SegmentationMethod.threshold(method)),
+                    SegmentationMethod.minSize(method),
+                    SegmentationMethod.maxSize(method),
+                    SegmentationMethod.morphPredicates(method),
+                    raw,
+                    new EnhancedClassicalParameters.WarningSink() {
+                        @Override public void warn(String message) {
+                            IJ.log(message);
+                        }
+                    });
+            ImagePlus labels = new EnhancedClassicalRunner().run(filtered, params);
+            if (labels != null) {
+                labels.setTitle("Training enhanced classical labels | " + safe(imageName));
+            }
+            return labels;
+        } finally {
+            closeImageQuietly(filtered);
+            closeImageQuietly(raw);
+        }
+    }
+
+    private ImagePlus createStarDistTrainingLabels(TrainCustomEngineWorkflow workflow,
+                                                   ConfigQcContext context,
+                                                   BinUserConfig cfg,
+                                                   File binFolder,
+                                                   int channelIndex,
+                                                   String imageName) {
+        ImagePlus filtered = createFilteredSetupSource(context, cfg, binFolder,
+                channelIndex, "Training StarDist filtered input");
+        try {
+            if (filtered == null) return null;
+            SegmentationMethod method =
+                    SegmentationTokenParser.parseLenient(workflow.baseToken(
+                            TrainCustomEngineWorkflow.Base.STARDIST));
+            ImagePlus labels = StarDist3DRunner.run(
+                    filtered,
+                    method,
+                    channelNameForTraining(cfg, channelIndex),
+                    projectRootForConfigurationDir(binFolder));
+            if (labels != null) {
+                labels.setTitle("Training StarDist labels | " + safe(imageName));
+            }
+            return labels;
+        } finally {
+            closeImageQuietly(filtered);
+        }
+    }
+
+    private ImagePlus createCellposeTrainingLabels(TrainCustomEngineWorkflow workflow,
+                                                   ConfigQcContext context,
+                                                   BinUserConfig cfg,
+                                                   File binFolder,
+                                                   int channelIndex,
+                                                   String imageName) {
+        ImagePlus filtered = createFilteredSetupSource(context, cfg, binFolder,
+                channelIndex, "Training Cellpose filtered input");
+        ImagePlus companion = null;
+        try {
+            if (filtered == null) return null;
+            SegmentationMethod method =
+                    SegmentationTokenParser.parseLenient(workflow.baseToken(
+                            TrainCustomEngineWorkflow.Base.CELLPOSE));
+            int companionIndex = SegmentationMethod.cellposeChan2(method);
+            if (companionIndex >= 0 && companionIndex != channelIndex
+                    && companionIndex < cfg.names.size()) {
+                companion = createFilteredSetupSource(context, cfg, binFolder,
+                        companionIndex, "Training Cellpose companion input");
+            }
+            ImagePlus labels = Cellpose3DRunner.run(
+                    filtered,
+                    companion,
+                    SegmentationMethod.cellposeModelKey(method),
+                    SegmentationMethod.cellposeDiameter(method),
+                    SegmentationMethod.cellposeFlow(method),
+                    SegmentationMethod.cellposeCellprob(method),
+                    SegmentationMethod.cellposeUseGpu(method),
+                    channelNameForTraining(cfg, channelIndex),
+                    projectRootForConfigurationDir(binFolder));
+            if (labels != null) {
+                labels.setTitle("Training Cellpose labels | " + safe(imageName));
+            }
+            return labels;
+        } finally {
+            closeImageQuietly(filtered);
+            closeImageQuietly(companion);
+        }
+    }
+
+    private void selectContextImage(ConfigQcContext context, String imageName) {
+        if (context == null) return;
+        List<ConfigQcContext.ConfigQcImage> images = context.getImages();
+        String target = safe(imageName);
+        for (int i = 0; i < images.size(); i++) {
+            ConfigQcContext.ConfigQcImage image = images.get(i);
+            if (image != null && target.equals(image.getDisplayName())) {
+                context.setCurrentImageIndex(i);
+                return;
+            }
+        }
+    }
+
+    private int trainingThreshold(BinUserConfig cfg, int channelIndex, ImagePlus filtered) {
+        String token = cfg != null && channelIndex >= 0 && channelIndex < cfg.objectThresholds.size()
+                ? cfg.objectThresholds.get(channelIndex)
+                : null;
+        if (token != null && !"default".equalsIgnoreCase(token.trim())) {
+            try {
+                return (int) Math.round(Double.parseDouble(token.trim()));
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        return autoThreshold(filtered);
+    }
+
+    private int trainingMinSize(BinUserConfig cfg, int channelIndex) {
+        String token = cfg != null && channelIndex >= 0 && channelIndex < cfg.sizes.size()
+                ? cfg.sizes.get(channelIndex)
+                : "100-Infinity";
+        String[] parts = splitSizeToken(token);
+        return ObjectsCounter3DWrapper.parseMinSizeVoxels(parts[0], 100);
+    }
+
+    private int trainingMaxSize(BinUserConfig cfg, int channelIndex, ImagePlus reference) {
+        String token = cfg != null && channelIndex >= 0 && channelIndex < cfg.sizes.size()
+                ? cfg.sizes.get(channelIndex)
+                : "100-Infinity";
+        String[] parts = splitSizeToken(token);
+        return ObjectsCounter3DWrapper.parseMaxSizeVoxels(parts[1], reference);
+    }
+
+    private String enhancedBaseTokenForTraining(BinUserConfig cfg, int channelIndex) {
+        String current = cfg != null && channelIndex >= 0 && channelIndex < cfg.segmentationMethods.size()
+                ? cfg.segmentationMethods.get(channelIndex)
+                : null;
+        if (current != null && current.trim().startsWith("enhanced_classical")) {
+            return SegmentationTokenParser.format(SegmentationTokenParser.parseLenient(current));
+        }
+        String threshold = enhancedThresholdOrFallback(cfg, channelIndex);
+        String size = enhancedSizeOrFallback(cfg, channelIndex);
+        String[] parts = splitSizeToken(size);
+        Map<String, String> params = new LinkedHashMap<String, String>();
+        params.put("thresh", String.valueOf(parseIntegerLike(threshold, 0)));
+        params.put("minSize", String.valueOf(parseIntegerLike(parts[0], 100)));
+        params.put("maxSize", String.valueOf(parseMaxSizeToken(parts[1])));
+        return SegmentationTokenParser.format(new SegmentationMethod(
+                SegmentationMethod.Engine.ENHANCED_CLASSICAL,
+                params,
+                ""));
+    }
+
+    private String starDistBaseTokenForTraining(BinUserConfig cfg, int channelIndex) {
+        String current = cfg != null && channelIndex >= 0 && channelIndex < cfg.segmentationMethods.size()
+                ? cfg.segmentationMethods.get(channelIndex)
+                : null;
+        if (current != null && current.trim().startsWith("stardist")) {
+            return SegmentationTokenParser.format(SegmentationTokenParser.parseLenient(current));
+        }
+        return "stardist:" + BinConfig.DEFAULT_STARDIST_PROB_THRESH
+                + ":" + BinConfig.DEFAULT_STARDIST_NMS_THRESH;
+    }
+
+    private String cellposeBaseTokenForTraining(BinUserConfig cfg, int channelIndex) {
+        String current = cfg != null && channelIndex >= 0 && channelIndex < cfg.segmentationMethods.size()
+                ? cfg.segmentationMethods.get(channelIndex)
+                : null;
+        if (current != null && current.trim().startsWith("cellpose")) {
+            return SegmentationTokenParser.format(SegmentationTokenParser.parseLenient(current));
+        }
+        return defaultCellposeMethod(BinConfig.DEFAULT_CELLPOSE_USE_GPU);
+    }
+
+    private static String channelNameForTraining(BinUserConfig cfg, int channelIndex) {
+        if (cfg != null && channelIndex >= 0 && channelIndex < cfg.names.size()) {
+            String name = cfg.names.get(channelIndex);
+            if (name != null && !name.trim().isEmpty()) {
+                return name.trim();
+            }
+        }
+        return "C" + (channelIndex + 1);
+    }
+
+    private static String[] splitSizeToken(String token) {
+        String value = token == null ? "" : token.trim();
+        String[] parts = value.split("-", 2);
+        String min = parts.length > 0 && parts[0] != null && !parts[0].trim().isEmpty()
+                ? parts[0].trim()
+                : "100";
+        String max = parts.length > 1 && parts[1] != null && !parts[1].trim().isEmpty()
+                ? parts[1].trim()
+                : "Infinity";
+        return new String[] {min, max};
+    }
+
+    private static int parseIntegerLike(String token, int fallback) {
+        if (token == null) return fallback;
+        try {
+            double parsed = Double.parseDouble(token.trim());
+            if (!Double.isFinite(parsed)) return fallback;
+            if (parsed <= 0) return 0;
+            if (parsed >= Integer.MAX_VALUE) return Integer.MAX_VALUE;
+            return (int) Math.round(parsed);
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
+    private static int parseMaxSizeToken(String token) {
+        if (token == null || token.trim().isEmpty()
+                || "Infinity".equalsIgnoreCase(token.trim())
+                || "Inf".equalsIgnoreCase(token.trim())) {
+            return Integer.MAX_VALUE;
+        }
+        return parseIntegerLike(token, Integer.MAX_VALUE);
     }
 
     private String runEmbeddedStarDistParameterQC(List<QcImageSelection> images, BinUserConfig cfg,
@@ -8280,6 +8669,21 @@ public class CreateBinFileAnalysis implements Analysis {
 
         @Override public String getChoice() {
             return segmentationChoiceForMethod(currentToken());
+        }
+
+        @Override public String getMethodToken() {
+            return currentToken();
+        }
+
+        @Override public void setMethodToken(String methodToken) {
+            String token = methodToken == null || methodToken.trim().isEmpty()
+                    ? "classical"
+                    : methodToken.trim();
+            while (cfg.segmentationMethods.size() <= channelIndex) {
+                cfg.segmentationMethods.add("classical");
+            }
+            cfg.segmentationMethods.set(channelIndex, token);
+            rememberCurrentToken();
         }
 
         @Override public boolean selectChoice(String choice) {

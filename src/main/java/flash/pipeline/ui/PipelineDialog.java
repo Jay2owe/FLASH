@@ -943,6 +943,11 @@ public class PipelineDialog {
         }
     }
 
+    /** Enables or disables the primary default button. */
+    public void setPrimaryButtonEnabled(boolean enabled) {
+        okButton.setEnabled(enabled);
+    }
+
     /** Makes this dialog modeless so image windows remain interactive while it is open. */
     public void setModal(boolean modal) {
         dialog.setModal(modal);

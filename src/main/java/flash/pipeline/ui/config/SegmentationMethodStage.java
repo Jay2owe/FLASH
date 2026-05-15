@@ -32,25 +32,51 @@ public final class SegmentationMethodStage implements ConfigQcStage {
     public static final String ENHANCED_CLASSICAL = "Enhanced Classical";
     public static final String STARDIST = "StarDist 3D";
     public static final String CELLPOSE = "Cellpose";
+    public static final String TRAIN_CUSTOM_ENGINE = SegmentationMethodLauncherModel.TRAIN_CUSTOM_ENGINE;
     public static final String[] OPTIONS = new String[]{CLASSICAL, ENHANCED_CLASSICAL, STARDIST, CELLPOSE};
 
     public interface MethodStore {
         String getChoice();
         boolean selectChoice(String choice);
+
+        default String getMethodToken() {
+            return getChoice();
+        }
+
+        default void setMethodToken(String methodToken) {
+            selectChoice(choiceForMethodToken(methodToken));
+        }
+    }
+
+    public interface TrainCustomEngineLauncher {
+        boolean launch(ConfigQcContext context, MethodStore methodStore);
     }
 
     private static final Color HELP_COLOR = FlashTheme.TEXT_HELP;
+    private static final TrainCustomEngineLauncher UNAVAILABLE_LAUNCHER =
+            new TrainCustomEngineLauncher() {
+                @Override public boolean launch(ConfigQcContext context, MethodStore methodStore) {
+                    return false;
+                }
+            };
 
     private final MethodStore methodStore;
+    private final TrainCustomEngineLauncher trainLauncher;
     private ConfigQcActions actions;
     private MethodChoicePanel choicePanel;
     private ImagePlus previewSource;
 
     public SegmentationMethodStage(MethodStore methodStore) {
+        this(methodStore, null);
+    }
+
+    public SegmentationMethodStage(MethodStore methodStore,
+                                   TrainCustomEngineLauncher trainLauncher) {
         if (methodStore == null) {
             throw new IllegalArgumentException("methodStore must not be null");
         }
         this.methodStore = methodStore;
+        this.trainLauncher = trainLauncher == null ? UNAVAILABLE_LAUNCHER : trainLauncher;
     }
 
     @Override
@@ -87,7 +113,11 @@ public final class SegmentationMethodStage implements ConfigQcStage {
         summary.add(help);
         panel.add(summary, BorderLayout.NORTH);
 
-        choicePanel = new MethodChoicePanel(methodStore.getChoice(), false);
+        choicePanel = new MethodChoicePanel(methodStore.getChoice(), false, new Runnable() {
+            @Override public void run() {
+                launchTrainingWizard(context);
+            }
+        });
         panel.add(choicePanel, BorderLayout.CENTER);
         return panel;
     }
@@ -108,6 +138,9 @@ public final class SegmentationMethodStage implements ConfigQcStage {
     @Override
     public boolean lockIn(ConfigQcContext context) {
         String choice = choicePanel == null ? methodStore.getChoice() : choicePanel.selectedChoice();
+        if (SegmentationMethodLauncherModel.TRAIN_CUSTOM_ENGINE.equals(choice)) {
+            return launchTrainingWizard(context);
+        }
         if (!methodStore.selectChoice(choice)) {
             setStatus("Segmentation method was not changed.");
             return false;
@@ -163,6 +196,37 @@ public final class SegmentationMethodStage implements ConfigQcStage {
         if (STARDIST.equals(choice)) return StarDistParameterStage.class.getName();
         if (CELLPOSE.equals(choice)) return CellposeParameterStage.class.getName();
         return ClassicalSegmentationStage.class.getName();
+    }
+
+    public static String choiceForMethodToken(String methodToken) {
+        if (methodToken != null) {
+            String token = methodToken.trim();
+            if (token.startsWith("enhanced_classical")) return ENHANCED_CLASSICAL;
+            if (token.startsWith("stardist")) return STARDIST;
+            if (token.startsWith("cellpose")) return CELLPOSE;
+        }
+        return CLASSICAL;
+    }
+
+    private boolean launchTrainingWizard(ConfigQcContext context) {
+        String previousToken = methodStore.getMethodToken();
+        boolean applied = trainLauncher.launch(context, methodStore);
+        if (!applied) {
+            methodStore.setMethodToken(previousToken);
+            if (choicePanel != null) {
+                choicePanel.select(methodStore.getChoice());
+            }
+            setStatus("Train Custom Engine was cancelled.");
+            return false;
+        }
+        if (choicePanel != null) {
+            choicePanel.select(methodStore.getChoice());
+        }
+        if (context != null) {
+            context.requestNextImageIndex(Integer.MAX_VALUE);
+        }
+        setStatus("Segmentation method: " + methodStore.getMethodToken() + ".");
+        return true;
     }
 
     private void setStatus(String text) {
@@ -229,7 +293,7 @@ public final class SegmentationMethodStage implements ConfigQcStage {
     private static final class MethodChoicePanel extends JPanel {
         private final List<JRadioButton> buttons = new ArrayList<JRadioButton>();
 
-        MethodChoicePanel(String selectedChoice, boolean includeSessionNote) {
+        MethodChoicePanel(String selectedChoice, boolean includeSessionNote, Runnable launchAction) {
             setOpaque(false);
             setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
             ButtonGroup group = new ButtonGroup();
@@ -261,6 +325,16 @@ public final class SegmentationMethodStage implements ConfigQcStage {
                             + "Next step: choose the Cellpose model, expected diameter, detection settings, and GPU option.<br>"
                             + "Best for: whole cells, irregular cell bodies, complex morphology, or markers where thresholding does not separate objects cleanly.<br>"
                             + "Watch out for: very small puncta or simple bright objects may be faster and more reproducible with Classical.");
+            add(Box.createVerticalStrut(8));
+            javax.swing.JSeparator separator = new javax.swing.JSeparator();
+            separator.setAlignmentX(Component.LEFT_ALIGNMENT);
+            add(separator);
+            add(Box.createVerticalStrut(6));
+            addCard(group, SegmentationMethodLauncherModel.TRAIN_CUSTOM_ENGINE,
+                    SegmentationMethodLauncherModel.TRAIN_CUSTOM_ENGINE_DISPLAY,
+                    "Open a guided training wizard. This is a launcher only; the saved method will be a trained Random Forest, StarDist model, or Cellpose model.",
+                    true,
+                    launchAction);
 
             select(firstKnownChoice(selectedChoice));
             if (includeSessionNote) {
@@ -292,6 +366,11 @@ public final class SegmentationMethodStage implements ConfigQcStage {
         }
 
         private void addCard(ButtonGroup group, String choice, String title, String body) {
+            addCard(group, choice, title, body, false, null);
+        }
+
+        private void addCard(ButtonGroup group, String choice, String title, String body,
+                             boolean launcher, final Runnable launchAction) {
             JPanel card = new JPanel(new BorderLayout(4, 4));
             card.setOpaque(false);
             card.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -303,6 +382,13 @@ public final class SegmentationMethodStage implements ConfigQcStage {
             radio.setOpaque(false);
             radio.setActionCommand(choice);
             radio.setFont(radio.getFont().deriveFont(java.awt.Font.BOLD));
+            if (launcher) {
+                radio.addActionListener(e -> {
+                    if (launchAction != null) {
+                        launchAction.run();
+                    }
+                });
+            }
             group.add(radio);
             buttons.add(radio);
             card.add(radio, BorderLayout.NORTH);
