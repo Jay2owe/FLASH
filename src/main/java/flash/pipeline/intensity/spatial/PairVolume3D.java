@@ -172,7 +172,11 @@ final class PairVolume3D {
     }
 
     private static boolean maskValue(ImageProcessor processor, int x, int y) {
-        if (processor == null || x >= processor.getWidth() || y >= processor.getHeight()) return false;
+        if (processor == null
+                || x < 0 || y < 0
+                || x >= processor.getWidth() || y >= processor.getHeight()) {
+            return false;
+        }
         double value = processor.getf(x, y);
         return isFinite(value) && value > 0.0;
     }

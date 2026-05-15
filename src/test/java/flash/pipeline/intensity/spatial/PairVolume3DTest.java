@@ -7,6 +7,7 @@ import ij.process.FloatProcessor;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 
 public class PairVolume3DTest {
     @Test
@@ -19,6 +20,18 @@ public class PairVolume3DTest {
         assertEquals(1.0, volume.pixelWidthUm, 0.0);
         assertEquals(2.0, volume.pixelHeightUm, 0.0);
         assertEquals(3.0, volume.pixelDepthUm, 0.0);
+    }
+
+    @Test
+    public void smallerMaskImageDoesNotThrowOrMarkOutOfBoundsVoxels() {
+        ImagePlus source = stack(3, 3, 2, 1.0, 1.0, 1.0, "um");
+        ImagePlus partner = stack(3, 3, 2, 1.0, 1.0, 1.0, "um");
+        ImagePlus partnerMask = stack(3, 1, 2, 1.0, 1.0, 1.0, "um");
+
+        PairVolume3D volume = PairVolume3D.from(source, partner, null, partnerMask, null);
+
+        assertEquals(18, volume.count);
+        assertFalse(volume.partnerMask[PairVolume3D.index(1, 2, 0, volume.width, volume.height)]);
     }
 
     private static ImagePlus stack(int width,

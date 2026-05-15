@@ -6,6 +6,7 @@ import ij.process.FloatProcessor;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 
 public class PairPlane2DTest {
     @Test
@@ -17,6 +18,18 @@ public class PairPlane2DTest {
 
         assertEquals(0.5, plane.pixelWidthUm, 0.0);
         assertEquals(0.25, plane.pixelHeightUm, 0.0);
+    }
+
+    @Test
+    public void smallerMaskImageDoesNotThrowOrMarkOutOfBoundsPixels() {
+        ImagePlus source = image(3, 3, 1.0, 1.0, "um");
+        ImagePlus partner = image(3, 3, 1.0, 1.0, "um");
+        ImagePlus partnerMask = image(3, 1, 1.0, 1.0, "um");
+
+        PairPlane2D plane = PairPlane2D.from(source, partner, null, partnerMask, 1, null);
+
+        assertEquals(9, plane.count);
+        assertFalse(plane.partnerMask[2 * plane.width + 1]);
     }
 
     private static ImagePlus image(int width,
