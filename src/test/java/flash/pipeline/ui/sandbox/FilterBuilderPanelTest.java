@@ -12,6 +12,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
@@ -185,6 +186,20 @@ public class FilterBuilderPanelTest {
                 panel.currentDag());
     }
 
+    @Test
+    public void duplicateForSandboxDoesNotSharePixelsWithSource() {
+        ImagePlus source = image("production-source");
+        source.getProcessor().set(0, 0, 7);
+
+        ImagePlus duplicate = FilterBuilderPanel.duplicateForSandbox(source);
+        duplicate.getProcessor().set(0, 0, 99);
+
+        assertNotSame("Sandbox preview execution must not reuse the production source",
+                source, duplicate);
+        assertEquals("Mutating the sandbox copy must not alter the production source",
+                7, source.getProcessor().get(0, 0));
+    }
+
     private static FilterBuilderPanel.PreviewRunner noopRunner() {
         return new FilterBuilderPanel.PreviewRunner() {
             @Override public ImagePlus createSource() {
@@ -199,5 +214,11 @@ public class FilterBuilderPanelTest {
                 // no-op
             }
         };
+    }
+
+    private static ImagePlus image(String title) {
+        ImageStack stack = new ImageStack(2, 2);
+        stack.addSlice(new ByteProcessor(2, 2));
+        return new ImagePlus(title, stack);
     }
 }

@@ -8,6 +8,7 @@ import flash.pipeline.image.dag.IjmToDagLoader;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import ij.IJ;
 import ij.ImagePlus;
+import ij.plugin.Duplicator;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
@@ -545,14 +546,16 @@ public final class FilterBuilderPanel extends JPanel {
         Thread worker = new Thread(new Runnable() {
             @Override public void run() {
                 ImagePlus source = null;
+                ImagePlus sandboxSource = null;
                 ImagePlus rendered = null;
                 try {
                     source = runner.createSource();
                     if (source == null) throw new IllegalStateException("No preview source image is available.");
+                    sandboxSource = duplicateForSandbox(source);
                     if ("legacy".equals(dag.executionTier)) {
-                        rendered = FilterExecutor.runLegacyDagSandboxed(source, dag);
+                        rendered = FilterExecutor.runLegacyDagSandboxed(sandboxSource, dag);
                     } else {
-                        rendered = FilterExecutor.runDagThreadSafe(source, dag);
+                        rendered = FilterExecutor.runDagThreadSafe(sandboxSource, dag);
                     }
                     final ImagePlus previewResult = rendered;
                     SwingUtilities.invokeLater(new Runnable() {
@@ -591,6 +594,7 @@ public final class FilterBuilderPanel extends JPanel {
                 } finally {
                     if (runner != null) {
                         runner.close(source);
+                        runner.close(sandboxSource);
                         runner.close(rendered);
                     }
                 }
@@ -598,6 +602,21 @@ public final class FilterBuilderPanel extends JPanel {
         }, "sandbox-dag-preview");
         worker.setDaemon(true);
         worker.start();
+    }
+
+    static ImagePlus duplicateForSandbox(ImagePlus source) {
+        if (source == null) return null;
+        ImagePlus duplicate = new Duplicator().run(source);
+        if (duplicate == null) {
+            duplicate = source.duplicate();
+        }
+        if (duplicate == null || duplicate == source) {
+            throw new IllegalStateException("Could not isolate the preview source image.");
+        }
+        duplicate.setTitle(source.getTitle() == null
+                ? "Sandbox Preview Source"
+                : source.getTitle() + " (sandbox preview)");
+        return duplicate;
     }
 
     private void setBusy(boolean busy, String message) {

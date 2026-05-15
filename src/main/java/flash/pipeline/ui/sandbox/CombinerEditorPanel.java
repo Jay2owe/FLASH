@@ -1,12 +1,13 @@
 package flash.pipeline.ui.sandbox;
 
 import flash.pipeline.image.dag.CombinerOp;
+import flash.pipeline.ui.ToggleSwitch;
 
 import javax.swing.BorderFactory;
-import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import java.awt.BorderLayout;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
@@ -56,23 +57,29 @@ public final class CombinerEditorPanel extends JPanel {
         int row = 2;
         for (int i = 0; i < model.lines.size(); i++) {
             final SandboxModel.Line line = model.lines.get(i);
-            final JCheckBox box = new JCheckBox(line.id, combiner.inputs.contains(line.id));
-            box.addActionListener(e -> {
-                if (rebuilding || CombinerEditorPanel.this.combiner == null) return;
-                List<String> inputs = new ArrayList<String>(CombinerEditorPanel.this.combiner.inputs);
-                if (box.isSelected() && !inputs.contains(line.id)) {
-                    inputs.add(line.id);
-                } else if (!box.isSelected()) {
-                    inputs.remove(line.id);
-                }
-                if (inputs.size() >= 2) {
-                    CombinerEditorPanel.this.combiner.inputs = inputs;
-                    notifyChanged();
-                } else {
-                    box.setSelected(true);
+            final ToggleSwitch toggle = new ToggleSwitch(combiner.inputs.contains(line.id));
+            toggle.addChangeListener(new Runnable() {
+                @Override public void run() {
+                    if (rebuilding || CombinerEditorPanel.this.combiner == null) return;
+                    List<String> inputs = new ArrayList<String>(CombinerEditorPanel.this.combiner.inputs);
+                    if (toggle.isSelected() && !inputs.contains(line.id)) {
+                        inputs.add(line.id);
+                    } else if (!toggle.isSelected()) {
+                        inputs.remove(line.id);
+                    }
+                    if (inputs.size() >= 2) {
+                        CombinerEditorPanel.this.combiner.inputs = inputs;
+                        notifyChanged();
+                    } else {
+                        toggle.setSelected(true);
+                    }
                 }
             });
-            addField(box, 0, row++);
+            JPanel inputRow = new JPanel(new BorderLayout(6, 0));
+            inputRow.setOpaque(false);
+            inputRow.add(toggle, BorderLayout.WEST);
+            inputRow.add(new JLabel(line.id), BorderLayout.CENTER);
+            addField(inputRow, 0, row++);
         }
         finish();
     }
