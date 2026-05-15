@@ -124,6 +124,25 @@ public class Cellpose3DRunnerTest {
     }
 
     @Test
+    public void countLabelsIgnoresNonFiniteFloatLabels() {
+        ij.process.FloatProcessor processor = new ij.process.FloatProcessor(3, 1);
+        processor.setf(0, 0, 2.0f);
+        processor.setf(1, 0, Float.NaN);
+        processor.setf(2, 0, Float.POSITIVE_INFINITY);
+        ImageStack stack = new ImageStack(3, 1);
+        stack.addSlice(processor);
+        ImagePlus labels = new ImagePlus("float-labels", stack);
+
+        assertEquals(2, Cellpose3DRunner.countLabels(labels));
+    }
+
+    @Test
+    public void formatDiameterPixelsHandlesNullInputAndNonFiniteDiameter() {
+        assertEquals("0", Cellpose3DRunner.formatDiameterPixels(null, Double.NaN));
+        assertEquals("12.0", Cellpose3DRunner.formatDiameterPixels(null, 12.0));
+    }
+
+    @Test
     public void writeInputStack_createsExpectedTemporaryTiff() throws Exception {
         ImagePlus input = createStack(4, 3, 2);
         Path tempDir = temp.newFolder("cellpose-input").toPath();

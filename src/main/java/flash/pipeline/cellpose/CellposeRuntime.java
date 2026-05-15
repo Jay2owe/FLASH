@@ -8,7 +8,9 @@ import ij.Prefs;
 import javax.swing.JButton;
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -354,32 +356,22 @@ public final class CellposeRuntime {
                 "print('GPU_AVAILABLE=' + ('true' if gpu else 'false'))"
         );
 
-        Process process = null;
-        StringBuilder output = new StringBuilder();
         try {
-            ProcessBuilder pb = new ProcessBuilder(command);
-            pb.redirectErrorStream(true);
-            process = pb.start();
-            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-            String line;
-            while ((line = reader.readLine()) != null) {
-                output.append(line).append('\n');
-            }
-            if (!process.waitFor(PROBE_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-                process.destroyForcibly();
+            CommandResult probeResult = runCommand(command, null, PROBE_TIMEOUT_SECONDS, false);
+            if (probeResult.timedOut) {
                 return new Status(trimmed, true, true, false, "", false,
                         "Cellpose probe timed out.",
                         "The configured Python path did not respond within " + PROBE_TIMEOUT_SECONDS + " seconds.");
             }
-            if (process.exitValue() != 0) {
+            if (probeResult.exitCode != 0) {
                 return new Status(trimmed, true, true, false, "", false,
                         "Python started but Cellpose could not be imported.",
-                        output.toString().trim());
+                        probeResult.output.trim());
             }
 
             String version = "";
             boolean gpuAvailable = false;
-            String[] lines = output.toString().split("\\R");
+            String[] lines = probeResult.output.split("\\R");
             for (String rawLine : lines) {
                 String parsed = rawLine == null ? "" : rawLine.trim();
                 if (parsed.startsWith("CELLPOSE_VERSION=")) {
@@ -401,23 +393,11 @@ public final class CellposeRuntime {
 
             return new Status(trimmed, true, true, true, version, gpuAvailable,
                     "Cellpose is ready.",
-                    output.toString().trim());
+                    probeResult.output.trim());
         } catch (Exception e) {
             return new Status(trimmed, true, true, false, "", false,
                     "Could not run the configured Python executable.",
                     e.getClass().getSimpleName() + ": " + e.getMessage());
-        } finally {
-            if (process != null) {
-                try {
-                    process.getInputStream().close();
-                } catch (Exception ignored) {}
-                try {
-                    process.getErrorStream().close();
-                } catch (Exception ignored) {}
-                try {
-                    process.getOutputStream().close();
-                } catch (Exception ignored) {}
-            }
         }
     }
 
@@ -834,24 +814,28 @@ public final class CellposeRuntime {
     }
 
     private static CommandResult runCommand(List<String> command, File workDir, long timeoutSeconds) throws Exception {
+        return runCommand(command, workDir, timeoutSeconds, true);
+    }
+
+    private static CommandResult runCommand(List<String> command, File workDir,
+                                            long timeoutSeconds, final boolean logOutput) throws Exception {
         Process process = null;
-        StringBuilder output = new StringBuilder();
+        final StringBuilder output = new StringBuilder();
+        Thread outputThread = null;
         try {
             ProcessBuilder pb = new ProcessBuilder(command);
             if (workDir != null) pb.directory(workDir);
             pb.redirectErrorStream(true);
             process = pb.start();
-            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-            String line;
-            while ((line = reader.readLine()) != null) {
-                output.append(line).append('\n');
-                IJ.log(line);
-            }
+            outputThread = startOutputDrainer(process.getInputStream(), output, logOutput);
             if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
-                process.destroyForcibly();
-                return new CommandResult(-1, true, output.toString());
+                process.destroy();
+                if (!process.waitFor(2L, TimeUnit.SECONDS)) {
+                    process.destroyForcibly();
+                }
+                return new CommandResult(-1, true, outputText(output));
             }
-            return new CommandResult(process.exitValue(), false, output.toString());
+            return new CommandResult(process.exitValue(), false, outputText(output));
         } finally {
             if (process != null) {
                 try {
@@ -864,6 +848,45 @@ public final class CellposeRuntime {
                     process.getOutputStream().close();
                 } catch (Exception ignored) {}
             }
+            if (outputThread != null) {
+                try {
+                    outputThread.join(2000L);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+        }
+    }
+
+    private static Thread startOutputDrainer(final InputStream stream,
+                                             final StringBuilder output,
+                                             final boolean logOutput) {
+        Thread thread = new Thread(new Runnable() {
+            @Override public void run() {
+                try {
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(
+                            stream, StandardCharsets.UTF_8));
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        synchronized (output) {
+                            output.append(line).append('\n');
+                        }
+                        if (logOutput) {
+                            IJ.log(line);
+                        }
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+        }, "FLASH Cellpose command output");
+        thread.setDaemon(true);
+        thread.start();
+        return thread;
+    }
+
+    private static String outputText(StringBuilder output) {
+        synchronized (output) {
+            return output.toString();
         }
     }
 
@@ -872,14 +895,23 @@ public final class CellposeRuntime {
     }
 
     public static boolean isNvidiaGpuLikelyAvailable() {
+        Process process = null;
         try {
-            Process process = new ProcessBuilder("nvidia-smi").start();
+            process = new ProcessBuilder("nvidia-smi").start();
             process.getInputStream().close();
             process.getErrorStream().close();
             process.getOutputStream().close();
-            return process.waitFor() == 0;
+            if (!process.waitFor(3L, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                return false;
+            }
+            return process.exitValue() == 0;
         } catch (Exception e) {
             return false;
+        } finally {
+            if (process != null && process.isAlive()) {
+                process.destroyForcibly();
+            }
         }
     }
 }

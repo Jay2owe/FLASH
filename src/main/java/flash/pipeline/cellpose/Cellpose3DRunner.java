@@ -10,15 +10,18 @@ import ij.process.ImageProcessor;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 public final class Cellpose3DRunner {
     private static final String INPUT_STACK_BASENAME = "cellpose_input";
     private static final String MASK_SUFFIX = "_cp_masks.tif";
+    private static final long CELLPOSE_TIMEOUT_SECONDS = 1800L;
 
     private Cellpose3DRunner() {}
 
@@ -114,16 +117,17 @@ public final class Cellpose3DRunner {
     }
 
     public static int countLabels(ImagePlus labelImage) {
+        if (labelImage == null || labelImage.getStack() == null) return 0;
         double maxVal = 0;
         int nSlices = labelImage.getStackSize();
         for (int s = 1; s <= nSlices; s++) {
             ImageProcessor ip = labelImage.getStack().getProcessor(s);
             double sliceMax = ip.getStats().max;
-            if (sliceMax > maxVal) {
+            if (Double.isFinite(sliceMax) && sliceMax > maxVal) {
                 maxVal = sliceMax;
             }
         }
-        return (int) maxVal;
+        return maxVal > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) maxVal;
     }
 
     public static ImagePlus prepareRuntimeInput(ImagePlus primaryInput, ImagePlus companionInput, String channelName) {
@@ -224,23 +228,54 @@ public final class Cellpose3DRunner {
                 + " threads (OMP/MKL/OPENBLAS/NUMEXPR)");
 
         Process process = pb.start();
-        StringBuilder output = new StringBuilder();
+        final StringBuilder output = new StringBuilder();
+        Thread outputThread = new Thread(new Runnable() {
+            @Override public void run() {
+                try {
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(
+                            process.getInputStream(), StandardCharsets.UTF_8));
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        synchronized (output) {
+                            output.append(line).append('\n');
+                        }
+                        IJ.log("    Cellpose" + chTag + " > " + line);
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+        }, "flash-cellpose-output");
+        outputThread.setDaemon(true);
+        outputThread.start();
         try {
-            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-            String line;
-            while ((line = reader.readLine()) != null) {
-                output.append(line).append('\n');
-                IJ.log("    Cellpose" + chTag + " > " + line);
+            if (!process.waitFor(CELLPOSE_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                process.destroy();
+                if (!process.waitFor(2L, TimeUnit.SECONDS)) {
+                    process.destroyForcibly();
+                }
+                throw new IllegalStateException("Cellpose timed out after "
+                        + CELLPOSE_TIMEOUT_SECONDS + " seconds.\n" + outputText(output));
             }
         } finally {
             process.getInputStream().close();
             process.getErrorStream().close();
             process.getOutputStream().close();
+            try {
+                outputThread.join(2000L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
         }
 
-        int exit = process.waitFor();
+        int exit = process.exitValue();
         if (exit != 0) {
-            throw new IllegalStateException("Cellpose exited with code " + exit + ".\n" + output.toString().trim());
+            throw new IllegalStateException("Cellpose exited with code " + exit + ".\n" + outputText(output));
+        }
+    }
+
+    private static String outputText(StringBuilder output) {
+        synchronized (output) {
+            return output.toString().trim();
         }
     }
 
@@ -372,8 +407,9 @@ public final class Cellpose3DRunner {
     }
 
     static String formatDiameterPixels(ImagePlus input, double diameterInUnits) {
-        if (diameterInUnits <= 0) return "0";
-        double pixelWidth = input.getCalibration() == null ? 1.0 : input.getCalibration().pixelWidth;
+        if (diameterInUnits <= 0 || !Double.isFinite(diameterInUnits)) return "0";
+        double pixelWidth = input == null || input.getCalibration() == null
+                ? 1.0 : input.getCalibration().pixelWidth;
         if (pixelWidth <= 0 || Double.isNaN(pixelWidth) || Double.isInfinite(pixelWidth)) {
             pixelWidth = 1.0;
         }
