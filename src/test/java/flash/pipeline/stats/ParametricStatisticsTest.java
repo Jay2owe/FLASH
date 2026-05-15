@@ -71,6 +71,16 @@ public class ParametricStatisticsTest {
         assertEquals(1.0, result[1], 1e-10);
     }
 
+    @Test
+    public void welchTTest_degenerateInputsReturnNeutral() {
+        assertArrayEquals(new double[]{0.0, 1.0},
+                ParametricStatistics.welchTTest(new ArrayList<Double>(), Arrays.asList(1.0, 2.0)),
+                1e-10);
+        assertArrayEquals(new double[]{0.0, 1.0},
+                ParametricStatistics.welchTTest(null, Arrays.asList(1.0, 2.0)),
+                1e-10);
+    }
+
     // ---- One-way ANOVA regression ----
 
     @Test
@@ -116,5 +126,17 @@ public class ParametricStatisticsTest {
         // ssWithin == 0 triggers the guard -> [0, 1]
         assertEquals(0.0, result[0], 1e-10);
         assertEquals(1.0, result[1], 1e-10);
+    }
+
+    @Test
+    public void oneWayAnova_degenerateGroupsReturnNeutral() {
+        List<List<Double>> groups = new ArrayList<List<Double>>();
+        groups.add(Arrays.asList(1.0, 2.0));
+        groups.add(new ArrayList<Double>());
+
+        assertArrayEquals(new double[]{0.0, 1.0},
+                ParametricStatistics.oneWayAnova(groups), 1e-10);
+        assertArrayEquals(new double[]{0.0, 1.0},
+                ParametricStatistics.oneWayAnova(null), 1e-10);
     }
 }

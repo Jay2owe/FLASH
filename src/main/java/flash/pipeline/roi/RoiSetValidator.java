@@ -14,10 +14,22 @@ public final class RoiSetValidator {
 
     public static void validateStrict(RoiManager rm, int startOffset, int nImages) {
         if (rm == null) throw new IllegalStateException("ROI Manager not available");
+        if (startOffset < 0) {
+            throw new IllegalArgumentException("startOffset must be >= 0");
+        }
+        if (nImages < 0) {
+            throw new IllegalArgumentException("nImages must be >= 0");
+        }
         int count = rm.getCount();
-        int expectedNew = nImages * 2;
+        long expectedNewLong = (long) nImages * 2L;
+        long expectedTotalLong = (long) startOffset + expectedNewLong;
+        if (expectedTotalLong > Integer.MAX_VALUE) {
+            throw new IllegalStateException("ROI Manager expected ROI count is too large: "
+                    + expectedTotalLong);
+        }
 
-        int expectedTotal = startOffset + expectedNew;
+        int expectedNew = (int) expectedNewLong;
+        int expectedTotal = (int) expectedTotalLong;
         if (count != expectedTotal) {
             throw new IllegalStateException("ROI Manager has unexpected ROI count. Expected exactly " + expectedTotal + " (" + expectedNew + " new) but found " + count + ".\n" +
                     "Strict mode requires exactly 2 ROIs per image (uncropped + cropped). Do not add extra ROIs.");

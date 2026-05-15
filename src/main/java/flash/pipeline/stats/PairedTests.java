@@ -189,6 +189,9 @@ public final class PairedTests {
     }
 
     private static void requireSameSize(List<Double> a, List<Double> b) {
+        if (a == null || b == null) {
+            throw new IllegalArgumentException("Paired samples must not be null");
+        }
         if (a.size() != b.size()) {
             throw new IllegalArgumentException("Paired samples must have the same size");
         }
@@ -211,8 +214,14 @@ public final class PairedTests {
             throw new IllegalArgumentException("At least one group is required");
         }
 
+        if (groups.get(0) == null) {
+            throw new IllegalArgumentException("Repeated-measures groups must not be null");
+        }
         int size = groups.get(0).size();
         for (List<Double> group : groups) {
+            if (group == null) {
+                throw new IllegalArgumentException("Repeated-measures groups must not be null");
+            }
             if (group.size() != size) {
                 throw new IllegalArgumentException("Repeated-measures groups must have the same size");
             }

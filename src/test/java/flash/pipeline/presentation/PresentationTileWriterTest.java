@@ -183,6 +183,25 @@ public class PresentationTileWriterTest {
     }
 
     @Test
+    public void manifestRewriteReplacesExistingFile() throws Exception {
+        File root = temp.newFolder("manifest-rewrite");
+        File image = new File(root, "DAPI.png");
+        writeSolid(image, Color.BLUE);
+        File manifest = new File(root, "Presentation_Image_Manifest.csv");
+
+        PresentationTileWriter.writeManifest(manifest,
+                Arrays.asList(record(image, "Animal1", "DAPI", 0)),
+                new LinkedHashMap<String, String>());
+        PresentationTileWriter.writeManifest(manifest,
+                Arrays.asList(record(image, "Animal2", "DAPI", 0)),
+                new LinkedHashMap<String, String>());
+
+        List<PresentationTileRecord> readBack = PresentationTileWriter.readManifest(manifest);
+        assertEquals(1, readBack.size());
+        assertEquals("Animal2", readBack.get(0).animal());
+    }
+
+    @Test
     public void configForcesTileAnnotationsWhenIndividualAnnotationsAreEnabled() {
         PresentationTileConfig config = PresentationTileConfig.builder()
                 .createOverviewTile(false)

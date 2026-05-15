@@ -24,6 +24,9 @@ public final class ParametricStatistics {
      * @return {@code [t-statistic, two-tailed p-value]}
      */
     public static double[] welchTTest(List<Double> a, List<Double> b) {
+        if (a == null || b == null || a.size() < 2 || b.size() < 2) {
+            return new double[]{0.0, 1.0};
+        }
         int n1 = a.size();
         int n2 = b.size();
         double m1 = mean(a);
@@ -55,12 +58,21 @@ public final class ParametricStatistics {
      * @return {@code [F-statistic, p-value]}
      */
     public static double[] oneWayAnova(List<List<Double>> groups) {
+        if (groups == null || groups.size() < 2) {
+            return new double[]{0.0, 1.0};
+        }
         int k = groups.size();
         int N = 0;
         double grandSum = 0;
         for (List<Double> g : groups) {
+            if (g == null || g.isEmpty()) {
+                return new double[]{0.0, 1.0};
+            }
             N += g.size();
             for (double v : g) grandSum += v;
+        }
+        if (N <= k) {
+            return new double[]{0.0, 1.0};
         }
         double grandMean = grandSum / N;
 

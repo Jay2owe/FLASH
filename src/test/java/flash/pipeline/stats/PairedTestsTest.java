@@ -78,6 +78,11 @@ public class PairedTestsTest {
     }
 
     @Test(expected = IllegalArgumentException.class)
+    public void pairedTTest_rejectsNullSample() {
+        PairedTests.pairedTTest(null, Arrays.asList(1.0));
+    }
+
+    @Test(expected = IllegalArgumentException.class)
     public void repeatedMeasuresAnova_rejectsUnbalancedGroups() {
         List<List<Double>> groups = new ArrayList<List<Double>>();
         groups.add(Arrays.asList(1.0, 2.0));

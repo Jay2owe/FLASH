@@ -27,6 +27,8 @@ public class ZSliceRangeTest {
         assertNull(ZSliceRange.parse("abc"));
         assertNull(ZSliceRange.parse("3"));
         assertNull(ZSliceRange.parse("3-"));
+        assertNull(ZSliceRange.parse("8-3"));
+        assertNull(ZSliceRange.parse("0-1"));
         assertNull(ZSliceRange.parse(""));
     }
 

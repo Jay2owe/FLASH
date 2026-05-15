@@ -16,8 +16,11 @@ import java.awt.FlowLayout;
 import java.awt.GraphicsEnvironment;
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -660,11 +663,42 @@ public class ExcelSummaryExportAnalysis implements Analysis {
                         "No sheets were selected by preset '" + preset.getName() + "'.");
             }
 
-            IoUtils.mustMkdirs(outFile.getParentFile());
-            try (java.io.FileOutputStream fos = new java.io.FileOutputStream(outFile)) {
-                wb.write(fos);
+            File temp = tempFileFor(outFile);
+            boolean moved = false;
+            try {
+                try (java.io.FileOutputStream fos = new java.io.FileOutputStream(temp)) {
+                    wb.write(fos);
+                }
+                moveAtomically(temp.toPath(), outFile.toPath());
+                moved = true;
+            } finally {
+                if (!moved) {
+                    Files.deleteIfExists(temp.toPath());
+                }
             }
         }
+    }
+
+    private static File tempFileFor(File target) throws IOException {
+        File parent = target.getParentFile();
+        if (parent != null) IoUtils.mustMkdirs(parent);
+        return File.createTempFile(tempPrefix(target), ".tmp",
+                parent == null ? new File(".") : parent);
+    }
+
+    private static void moveAtomically(Path source, Path target) throws IOException {
+        try {
+            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.ATOMIC_MOVE);
+        } catch (AtomicMoveNotSupportedException e) {
+            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+
+    private static String tempPrefix(File target) {
+        String name = target == null ? "excel" : target.getName();
+        String clean = name.replaceAll("[^A-Za-z0-9._-]", "_");
+        return clean.length() < 3 ? "tmp" + clean : clean;
     }
 
     // ---- Style helpers ----------------------------------------------------

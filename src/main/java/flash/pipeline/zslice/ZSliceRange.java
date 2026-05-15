@@ -28,7 +28,7 @@ public final class ZSliceRange {
         if (parts.length != 2) return null;
         try {
             return new ZSliceRange(Integer.parseInt(parts[0]), Integer.parseInt(parts[1]));
-        } catch (NumberFormatException e) {
+        } catch (RuntimeException e) {
             return null;
         }
     }

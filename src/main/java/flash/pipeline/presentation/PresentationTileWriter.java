@@ -17,6 +17,10 @@ import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -74,33 +78,43 @@ public final class PresentationTileWriter {
         File parent = manifest.getParentFile();
         if (parent != null) IoUtils.mustMkdirs(parent);
 
-        PrintWriter pw = CsvSupport.newWriter(manifest);
+        File temp = tempFileFor(manifest);
+        boolean moved = false;
         try {
-            pw.println(CsvSupport.joinRow(Arrays.asList(
-                    "Animal", "Condition", "Hemisphere", "Region",
-                    "OutputName", "StainName", "ChannelIndex",
-                    "ImagePath", "AnnotatedImagePath",
-                    "WidthPx", "HeightPx", "PixelWidthUm", "PixelHeightUm",
-                    "SourceImageId")));
-            for (PresentationTileRecord record : safeRecords(records)) {
+            PrintWriter pw = CsvSupport.newWriter(temp);
+            try {
                 pw.println(CsvSupport.joinRow(Arrays.asList(
-                        record.animal(),
-                        conditionFor(record, conditions),
-                        record.hemisphere(),
-                        record.region(),
-                        record.outputName(),
-                        record.stainName(),
-                        String.valueOf(record.channelIndex()),
-                        absolutePath(record.imageFile()),
-                        absolutePath(record.annotatedImageFile()),
-                        String.valueOf(record.widthPx()),
-                        String.valueOf(record.heightPx()),
-                        formatNumber(record.pixelWidthUm()),
-                        formatNumber(record.pixelHeightUm()),
-                        record.imageId())));
+                        "Animal", "Condition", "Hemisphere", "Region",
+                        "OutputName", "StainName", "ChannelIndex",
+                        "ImagePath", "AnnotatedImagePath",
+                        "WidthPx", "HeightPx", "PixelWidthUm", "PixelHeightUm",
+                        "SourceImageId")));
+                for (PresentationTileRecord record : safeRecords(records)) {
+                    pw.println(CsvSupport.joinRow(Arrays.asList(
+                            record.animal(),
+                            conditionFor(record, conditions),
+                            record.hemisphere(),
+                            record.region(),
+                            record.outputName(),
+                            record.stainName(),
+                            String.valueOf(record.channelIndex()),
+                            absolutePath(record.imageFile()),
+                            absolutePath(record.annotatedImageFile()),
+                            String.valueOf(record.widthPx()),
+                            String.valueOf(record.heightPx()),
+                            formatNumber(record.pixelWidthUm()),
+                            formatNumber(record.pixelHeightUm()),
+                            record.imageId())));
+                }
+            } finally {
+                pw.close();
             }
+            moveAtomically(temp.toPath(), manifest.toPath());
+            moved = true;
         } finally {
-            pw.close();
+            if (!moved) {
+                Files.deleteIfExists(temp.toPath());
+            }
         }
     }
 
@@ -173,7 +187,7 @@ public final class PresentationTileWriter {
             File animalDir = new File(annotatedRoot, record.animal());
             IoUtils.mustMkdirs(animalDir);
             File out = new File(animalDir, source.getName());
-            ImageIO.write(annotated, "png", out);
+            writePngAtomically(annotated, out);
             record.setAnnotatedImageFile(out);
         }
     }
@@ -264,8 +278,48 @@ public final class PresentationTileWriter {
 
         File parent = outputFile.getParentFile();
         if (parent != null) IoUtils.mustMkdirs(parent);
-        ImageIO.write(tile, "png", outputFile);
+        writePngAtomically(tile, outputFile);
         IJ.log("  - Presentation overview tile written: " + outputFile.getAbsolutePath());
+    }
+
+    private static void writePngAtomically(BufferedImage image, File outputFile) throws IOException {
+        File parent = outputFile.getParentFile();
+        if (parent != null) IoUtils.mustMkdirs(parent);
+        File temp = tempFileFor(outputFile);
+        boolean moved = false;
+        try {
+            if (!ImageIO.write(image, "png", temp)) {
+                throw new IOException("No PNG writer available");
+            }
+            moveAtomically(temp.toPath(), outputFile.toPath());
+            moved = true;
+        } finally {
+            if (!moved) {
+                Files.deleteIfExists(temp.toPath());
+            }
+        }
+    }
+
+    private static File tempFileFor(File target) throws IOException {
+        File parent = target.getParentFile();
+        if (parent != null) IoUtils.mustMkdirs(parent);
+        return File.createTempFile(tempPrefix(target), ".tmp",
+                parent == null ? new File(".") : parent);
+    }
+
+    private static void moveAtomically(Path source, Path target) throws IOException {
+        try {
+            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.ATOMIC_MOVE);
+        } catch (AtomicMoveNotSupportedException e) {
+            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+
+    private static String tempPrefix(File target) {
+        String name = target == null ? "presentation" : target.getName();
+        String clean = name.replaceAll("[^A-Za-z0-9._-]", "_");
+        return clean.length() < 3 ? "tmp" + clean : clean;
     }
 
     public static BufferedImage renderAnnotationPreview(PresentationTileConfig config) {
