@@ -12,8 +12,10 @@ import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Stream;
 
@@ -21,6 +23,9 @@ import java.util.stream.Stream;
  * Project-scoped in-memory catalog of stock and user segmentation models.
  */
 public final class ModelCatalog {
+    private static final Map<String, Path> STOCK_RESOURCE_CACHE =
+            new HashMap<String, Path>();
+
     private final Path projectRoot;
     private final Path catalogDir;
     private final LinkedHashMap<String, ModelEntry> entries;
@@ -161,6 +166,13 @@ public final class ModelCatalog {
             return null;
         }
         String resourcePath = entry.resourcePath.get();
+        String cacheKey = cacheKey(resourcePath);
+        synchronized (STOCK_RESOURCE_CACHE) {
+            Path cached = STOCK_RESOURCE_CACHE.get(cacheKey);
+            if (cached != null && Files.isRegularFile(cached)) {
+                return cached;
+            }
+        }
         URL resource = findResource(resourcePath);
         if (resource == null) {
             return null;
@@ -170,12 +182,12 @@ public final class ModelCatalog {
             try {
                 Path path = Paths.get(resource.toURI());
                 if (Files.isRegularFile(path)) {
-                    return path.toAbsolutePath().normalize();
+                    return rememberStockResource(cacheKey, path.toAbsolutePath().normalize());
                 }
             } catch (URISyntaxException e) {
                 Path path = Paths.get(resource.getPath());
                 if (Files.isRegularFile(path)) {
-                    return path.toAbsolutePath().normalize();
+                    return rememberStockResource(cacheKey, path.toAbsolutePath().normalize());
                 }
             }
         }
@@ -191,10 +203,35 @@ public final class ModelCatalog {
         if (!target.startsWith(modelCache)) {
             throw new IOException("Stock resource resolves outside runtime cache: " + resourcePath);
         }
-        try (InputStream in = resource.openStream()) {
-            Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
+        synchronized (STOCK_RESOURCE_CACHE) {
+            Path cached = STOCK_RESOURCE_CACHE.get(cacheKey);
+            if (cached != null && Files.isRegularFile(cached)) {
+                return cached;
+            }
+            if (!Files.isRegularFile(target)) {
+                try (InputStream in = resource.openStream()) {
+                    Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
+                }
+            }
+            return rememberStockResource(cacheKey, target.toAbsolutePath().normalize());
         }
-        return target.toAbsolutePath().normalize();
+    }
+
+    static void clearStockResourceCacheForTests() {
+        synchronized (STOCK_RESOURCE_CACHE) {
+            STOCK_RESOURCE_CACHE.clear();
+        }
+    }
+
+    private String cacheKey(String resourcePath) {
+        return catalogDir.toAbsolutePath().normalize().toString() + "|" + resourcePath;
+    }
+
+    private static Path rememberStockResource(String cacheKey, Path path) {
+        synchronized (STOCK_RESOURCE_CACHE) {
+            STOCK_RESOURCE_CACHE.put(cacheKey, path);
+        }
+        return path;
     }
 
     private static URL findResource(String resourcePath) {

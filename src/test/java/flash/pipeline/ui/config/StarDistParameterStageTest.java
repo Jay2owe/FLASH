@@ -31,7 +31,8 @@ public class StarDistParameterStageTest {
     @Test
     public void parsesAndRendersMethodToken() {
         String token = "stardist:0.7:0.2:linking=15.0:gapClosing=16.0:"
-                + "frameGap=2:area=3.0-99.0:quality=0.8:intensity=22.0";
+                + "frameGap=2:area=3.0-99.0:quality=0.8:intensity=22.0:"
+                + "model=stardist_versatile_fluo";
 
         StarDistParameterStage.Parameters params = StarDistParameterStage.parseMethod(token);
 
@@ -82,7 +83,8 @@ public class StarDistParameterStageTest {
         waitForPreviewRuns(adapter, 1);
 
         assertEquals("stardist:0.8:0.25:linking=11.0:gapClosing=12.0:"
-                        + "frameGap=3:area=5.0-40.0:quality=0.6:intensity=21.0",
+                        + "frameGap=3:area=5.0-40.0:quality=0.6:intensity=21.0:"
+                        + "model=stardist_versatile_fluo",
                 stage.currentMethodForTest());
         assertNotNull(adapter.lastPreviewParameters);
         assertEquals(0.8d, adapter.lastPreviewParameters.probabilityThreshold, 0.001);
@@ -107,7 +109,8 @@ public class StarDistParameterStageTest {
         stage.setIntensityMinForTest("22");
 
         assertEquals("stardist:0.7:0.2:linking=15.0:gapClosing=16.0:"
-                        + "frameGap=2:area=3.0-99.0:quality=0.8:intensity=22.0",
+                        + "frameGap=2:area=3.0-99.0:quality=0.8:intensity=22.0:"
+                        + "model=stardist_versatile_fluo",
                 stage.currentMethodForTest());
     }
 
@@ -221,7 +224,8 @@ public class StarDistParameterStageTest {
         assertRemovedLabelUsesCutoffColor(actions.adjustedPreview, 2, 0xf9a825);
 
         assertTrue(stage.lockIn(context()));
-        assertEquals("stardist:0.5:0.4:area=5.0-10.0:quality=0.5:intensity=50.0",
+        assertEquals("stardist:0.5:0.4:area=5.0-10.0:quality=0.5:intensity=50.0:"
+                        + "model=stardist_versatile_fluo",
                 store.token);
     }
 

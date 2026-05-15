@@ -9,6 +9,7 @@ import java.util.Optional;
 public final class SegmentationMethod {
     public enum Engine { CLASSICAL, ENHANCED_CLASSICAL, STARDIST, CELLPOSE, TRAINED_RF }
 
+    public static final String DEFAULT_STARDIST_MODEL_KEY = "stardist_versatile_fluo";
     private static final double DEFAULT_STARDIST_PROB_THRESH = 0.5;
     private static final double DEFAULT_STARDIST_NMS_THRESH = 0.4;
     private static final double DEFAULT_STARDIST_LINKING_MAX_DISTANCE = 5.0;
@@ -73,6 +74,9 @@ public final class SegmentationMethod {
 
     public Optional<String> modelKey() {
         String value = params.get("model");
+        if ((value == null || value.trim().isEmpty()) && engine == Engine.STARDIST) {
+            value = DEFAULT_STARDIST_MODEL_KEY;
+        }
         if ((value == null || value.trim().isEmpty()) && engine == Engine.TRAINED_RF) {
             value = params.get("modelKey");
         }
@@ -114,6 +118,14 @@ public final class SegmentationMethod {
     public static double starDistNms(SegmentationMethod m) {
         if (m == null || !m.isStarDist()) return DEFAULT_STARDIST_NMS_THRESH;
         return parseDouble(param(m, "nms"), DEFAULT_STARDIST_NMS_THRESH);
+    }
+
+    public static String starDistModelKey(SegmentationMethod m) {
+        if (m == null || !m.isStarDist()) return DEFAULT_STARDIST_MODEL_KEY;
+        String value = param(m, "model");
+        return value == null || value.trim().isEmpty()
+                ? DEFAULT_STARDIST_MODEL_KEY
+                : value.trim();
     }
 
     public static StarDistLinkingParams starDistLinking(SegmentationMethod m) {

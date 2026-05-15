@@ -3,6 +3,13 @@ package flash.pipeline.ui.config;
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.help.SetupHelpCatalog;
 import flash.pipeline.help.SetupHelpTopic;
+import flash.pipeline.segmentation.SegmentationMethod;
+import flash.pipeline.segmentation.StarDistLinkingParams;
+import flash.pipeline.segmentation.StarDistPostFilters;
+import flash.pipeline.segmentation.SegmentationTokenParser;
+import flash.pipeline.segmentation.catalog.ModelCatalog;
+import flash.pipeline.segmentation.catalog.ModelCatalogIO;
+import flash.pipeline.segmentation.catalog.ModelEntry;
 import flash.pipeline.stardist.StarDist3DRunner;
 import flash.pipeline.ui.FlashTheme;
 import flash.pipeline.ui.preview.ObjectSizeFilterPreview;
@@ -12,15 +19,19 @@ import flash.pipeline.ui.variations.ParameterCombo;
 import flash.pipeline.ui.variations.ParameterId;
 import flash.pipeline.ui.variations.VariationEngineContext;
 import flash.pipeline.ui.variations.VariationsDialog;
+import ij.IJ;
 import ij.ImagePlus;
 import ij.measure.ResultsTable;
 
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
+import javax.swing.DefaultListCellRenderer;
 import javax.swing.JButton;
+import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
+import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
@@ -30,7 +41,14 @@ import javax.swing.event.DocumentListener;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
+import java.awt.Component;
+import java.io.File;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 public final class StarDistParameterStage implements ConfigQcStage {
@@ -58,6 +76,7 @@ public final class StarDistParameterStage implements ConfigQcStage {
         public final double areaMax;
         public final double qualityMin;
         public final double intensityMin;
+        public final String modelKey;
 
         public Parameters(double probabilityThreshold,
                           double nmsThreshold,
@@ -68,6 +87,21 @@ public final class StarDistParameterStage implements ConfigQcStage {
                           double areaMax,
                           double qualityMin,
                           double intensityMin) {
+            this(probabilityThreshold, nmsThreshold, linkingMaxDistance, gapClosingMaxDistance,
+                    maxFrameGap, areaMin, areaMax, qualityMin, intensityMin,
+                    SegmentationMethod.DEFAULT_STARDIST_MODEL_KEY);
+        }
+
+        public Parameters(double probabilityThreshold,
+                          double nmsThreshold,
+                          double linkingMaxDistance,
+                          double gapClosingMaxDistance,
+                          int maxFrameGap,
+                          double areaMin,
+                          double areaMax,
+                          double qualityMin,
+                          double intensityMin,
+                          String modelKey) {
             this.probabilityThreshold = probabilityThreshold;
             this.nmsThreshold = nmsThreshold;
             this.linkingMaxDistance = sanitizeNonNegative(linkingMaxDistance);
@@ -77,6 +111,7 @@ public final class StarDistParameterStage implements ConfigQcStage {
             this.areaMax = areaMax <= 0 ? Double.POSITIVE_INFINITY : areaMax;
             this.qualityMin = sanitizeNonNegative(qualityMin);
             this.intensityMin = sanitizeNonNegative(intensityMin);
+            this.modelKey = normalizeModelKey(modelKey);
         }
 
         static Parameters defaults() {
@@ -89,7 +124,8 @@ public final class StarDistParameterStage implements ConfigQcStage {
                     0,
                     Double.POSITIVE_INFINITY,
                     0,
-                    0);
+                    0,
+                    SegmentationMethod.DEFAULT_STARDIST_MODEL_KEY);
         }
     }
 
@@ -117,7 +153,10 @@ public final class StarDistParameterStage implements ConfigQcStage {
     private boolean updatingFields;
     private boolean showRawSource;
     private int lastObjectCount = -1;
+    private List<ModelOption> modelOptions = Collections.emptyList();
 
+    private JComboBox<ModelOption> modelCombo;
+    private JButton manageModelsButton;
     private JTextField probabilityField;
     private JTextField nmsField;
     private JTextField linkingField;
@@ -165,12 +204,15 @@ public final class StarDistParameterStage implements ConfigQcStage {
         this.savedParameters = restartParameters == null
                 ? parseMethod(parameterStore.getMethodToken())
                 : restartParameters;
+        this.modelOptions = modelOptionsFor(context);
 
         JPanel panel = new JPanel();
         panel.setOpaque(false);
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
         panel.setBorder(FlashTheme.pad(2, 0, 0, 0));
         createParameterFields();
+        panel.add(buildModelRow());
+        panel.add(Box.createVerticalStrut(4));
         panel.add(buildGroupRow("Detection:", new String[]{"Probability", "NMS"},
                 new JTextField[]{probabilityField, nmsField}));
         panel.add(Box.createVerticalStrut(4));
@@ -343,6 +385,27 @@ public final class StarDistParameterStage implements ConfigQcStage {
         applyVariationCombo(combo);
     }
 
+    void selectModelForTest(String modelKey) {
+        selectModelKey(modelKey);
+    }
+
+    String selectedModelKeyForTest() {
+        ModelOption selected = selectedModelOption();
+        return selected == null ? null : selected.entry.modelKey;
+    }
+
+    List<String> modelKeysForTest() {
+        List<String> keys = new ArrayList<String>();
+        for (int i = 0; i < modelCombo.getItemCount(); i++) {
+            keys.add(modelCombo.getItemAt(i).entry.modelKey);
+        }
+        return keys;
+    }
+
+    boolean manageModelsButtonEnabledForTest() {
+        return manageModelsButton != null && manageModelsButton.isEnabled();
+    }
+
     private void createParameterFields() {
         probabilityField = createNumberField(5);
         nmsField = createNumberField(5);
@@ -365,6 +428,46 @@ public final class StarDistParameterStage implements ConfigQcStage {
         JTextField field = new JTextField(columns);
         installPostDetectionFilterListener(field);
         return field;
+    }
+
+    private JComponent buildModelRow() {
+        JPanel row = new JPanel(new GridBagLayout());
+        row.setOpaque(false);
+        row.setAlignmentX(JComponent.LEFT_ALIGNMENT);
+        row.setBorder(FlashTheme.pad(2, 0, 2, 0));
+
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.gridy = 0;
+        gbc.insets = new Insets(0, 0, 0, 6);
+        gbc.anchor = GridBagConstraints.WEST;
+
+        gbc.gridx = 0;
+        JLabel heading = new JLabel("Model:");
+        heading.setFont(FlashTheme.bodyMedium());
+        row.add(heading, gbc);
+
+        modelCombo = new JComboBox<ModelOption>(modelOptions.toArray(new ModelOption[0]));
+        modelCombo.setRenderer(new ModelOptionRenderer());
+        modelCombo.addActionListener(e -> modelSelectionChanged());
+        updatingFields = true;
+        try {
+            selectModelKey(savedParameters.modelKey);
+        } finally {
+            updatingFields = false;
+        }
+        gbc.gridx++;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.weightx = 1.0;
+        row.add(modelCombo, gbc);
+
+        manageModelsButton = new JButton("Manage models...");
+        manageModelsButton.setEnabled(false);
+        manageModelsButton.setToolTipText("Model manager is added in a later stage.");
+        gbc.gridx++;
+        gbc.fill = GridBagConstraints.NONE;
+        gbc.weightx = 0.0;
+        row.add(manageModelsButton, gbc);
+        return row;
     }
 
     private JComponent buildGroupRow(String headingText, String[] labels, JTextField[] fields) {
@@ -493,6 +596,7 @@ public final class StarDistParameterStage implements ConfigQcStage {
     private void loadFields(Parameters parameters) {
         updatingFields = true;
         try {
+            selectModelKey(parameters.modelKey);
             probabilityField.setText(String.valueOf(parameters.probabilityThreshold));
             nmsField.setText(String.valueOf(parameters.nmsThreshold));
             linkingField.setText(String.valueOf(parameters.linkingMaxDistance));
@@ -506,6 +610,73 @@ public final class StarDistParameterStage implements ConfigQcStage {
         } finally {
             updatingFields = false;
         }
+    }
+
+    private void modelSelectionChanged() {
+        if (updatingFields) return;
+        ModelOption selected = selectedModelOption();
+        if (selected == null) return;
+        Parameters current = collectParameters();
+        Parameters updated = new Parameters(
+                defaultDouble(selected.entry.defaults.get("probThresh"), current.probabilityThreshold),
+                defaultDouble(selected.entry.defaults.get("nmsThresh"), current.nmsThreshold),
+                current.linkingMaxDistance,
+                current.gapClosingMaxDistance,
+                current.maxFrameGap,
+                current.areaMin,
+                current.areaMax,
+                current.qualityMin,
+                current.intensityMin,
+                selected.entry.modelKey);
+        loadFields(updated);
+        savedParameters = updated;
+        parameterStore.save(formatMethod(updated));
+        warnIfAdvancedRgbSelection(selected.entry);
+        captureCurrentPreviewForComparison();
+        if (labelPreview != null) {
+            runPreviewOnWorker();
+        } else {
+            markPreviewStale(STALE_TEXT);
+        }
+    }
+
+    private void selectModelKey(String modelKey) {
+        if (modelCombo == null || modelCombo.getItemCount() == 0) return;
+        String key = normalizeModelKey(modelKey);
+        int fallbackIndex = 0;
+        for (int i = 0; i < modelCombo.getItemCount(); i++) {
+            ModelOption option = modelCombo.getItemAt(i);
+            if (option != null && SegmentationMethod.DEFAULT_STARDIST_MODEL_KEY.equals(option.entry.modelKey)) {
+                fallbackIndex = i;
+            }
+            if (option != null && key.equals(option.entry.modelKey)) {
+                modelCombo.setSelectedIndex(i);
+                updateModelTooltip(option);
+                return;
+            }
+        }
+        modelCombo.setSelectedIndex(fallbackIndex);
+        updateModelTooltip((ModelOption) modelCombo.getSelectedItem());
+    }
+
+    private ModelOption selectedModelOption() {
+        Object selected = modelCombo == null ? null : modelCombo.getSelectedItem();
+        return selected instanceof ModelOption ? (ModelOption) selected : null;
+    }
+
+    private void updateModelTooltip(ModelOption option) {
+        if (modelCombo == null) return;
+        modelCombo.setToolTipText(option == null ? null : option.tooltip());
+    }
+
+    private void warnIfAdvancedRgbSelection(ModelEntry entry) {
+        if (entry == null || !metadataBoolean(entry, "advanced")) return;
+        if (!metadataBoolean(entry, "rgbOnly")) return;
+        if (activeContext != null && currentImageLooksRgb(activeContext.getCurrentImagePlus())) return;
+        String channel = activeContext == null ? "" : activeContext.getChannelLabel();
+        IJ.log("WARNING: StarDist model '" + entry.name + "' is marked advanced/RGB"
+                + (channel == null || channel.trim().isEmpty() ? "" : " for " + channel)
+                + ". FLASH usually previews one grayscale channel at a time, so this model may be incompatible.");
     }
 
     private void fieldChanged() {
@@ -919,7 +1090,8 @@ public final class StarDistParameterStage implements ConfigQcStage {
                 parse(areaMinField, fallback.areaMin),
                 rawAreaMax <= 0 ? Double.POSITIVE_INFINITY : rawAreaMax,
                 parse(qualityMinField, fallback.qualityMin),
-                parse(intensityMinField, fallback.intensityMin));
+                parse(intensityMinField, fallback.intensityMin),
+                selectedModelKey());
     }
 
     private static Parameters previewRunParameters(Parameters parameters) {
@@ -933,7 +1105,8 @@ public final class StarDistParameterStage implements ConfigQcStage {
                 0,
                 Double.POSITIVE_INFINITY,
                 0,
-                0);
+                0,
+                p.modelKey);
     }
 
     private static Parameters copyParameters(Parameters parameters) {
@@ -947,7 +1120,8 @@ public final class StarDistParameterStage implements ConfigQcStage {
                 parameters.areaMin,
                 parameters.areaMax,
                 parameters.qualityMin,
-                parameters.intensityMin);
+                parameters.intensityMin,
+                parameters.modelKey);
     }
 
     private void markPreviewStale(String text) {
@@ -1004,6 +1178,8 @@ public final class StarDistParameterStage implements ConfigQcStage {
         if (previewButton != null) previewButton.setEnabled(enabled);
         if (resetButton != null) resetButton.setEnabled(enabled);
         if (variationsButton != null) variationsButton.setEnabled(enabled && filteredSource != null);
+        if (modelCombo != null) modelCombo.setEnabled(enabled);
+        if (manageModelsButton != null) manageModelsButton.setEnabled(false);
         if (probabilityField != null) probabilityField.setEnabled(enabled);
         if (nmsField != null) nmsField.setEnabled(enabled);
         if (linkingField != null) linkingField.setEnabled(enabled);
@@ -1043,6 +1219,95 @@ public final class StarDistParameterStage implements ConfigQcStage {
         }
     }
 
+    private static List<ModelOption> modelOptionsFor(ConfigQcContext context) {
+        File projectDir = context == null ? null : context.getProjectDirectory();
+        File root = projectDir == null ? new File(".") : projectDir;
+        ModelCatalog catalog = ModelCatalogIO.read(root.toPath());
+        List<ModelEntry> entries = catalog.forEngine(ModelEntry.Engine.STARDIST);
+        List<ModelEntry> stock = new ArrayList<ModelEntry>();
+        List<ModelEntry> user = new ArrayList<ModelEntry>();
+        for (ModelEntry entry : entries) {
+            if (entry == null) continue;
+            if (entry.isStock()) stock.add(entry);
+            else user.add(entry);
+        }
+        Comparator<ModelEntry> byName = new Comparator<ModelEntry>() {
+            @Override public int compare(ModelEntry left, ModelEntry right) {
+                return labelFor(left).compareToIgnoreCase(labelFor(right));
+            }
+        };
+        Collections.sort(stock, byName);
+        Collections.sort(user, byName);
+
+        List<ModelOption> out = new ArrayList<ModelOption>();
+        for (ModelEntry entry : stock) out.add(new ModelOption(entry));
+        for (ModelEntry entry : user) out.add(new ModelOption(entry));
+        if (out.isEmpty()) {
+            out.add(new ModelOption(new ModelEntry(
+                    SegmentationMethod.DEFAULT_STARDIST_MODEL_KEY,
+                    "StarDist - Versatile fluorescent nuclei",
+                    "General 2D fluorescent nuclei model from the StarDist Fiji plugin.",
+                    ModelEntry.Engine.STARDIST,
+                    ModelEntry.Source.STOCK_RESOURCE,
+                    null,
+                    "models/2D/dsb2018_heavy_augment.zip",
+                    null,
+                    "Versatile (fluorescent nuclei)",
+                    null,
+                    defaultsMap(BinConfig.DEFAULT_STARDIST_PROB_THRESH,
+                            BinConfig.DEFAULT_STARDIST_NMS_THRESH),
+                    null,
+                    false)));
+        }
+        return Collections.unmodifiableList(out);
+    }
+
+    private static Map<String, Object> defaultsMap(double prob, double nms) {
+        Map<String, Object> defaults = new LinkedHashMap<String, Object>();
+        defaults.put("probThresh", Double.valueOf(prob));
+        defaults.put("nmsThresh", Double.valueOf(nms));
+        return defaults;
+    }
+
+    private static String selectedModelKey(JComboBox<ModelOption> combo) {
+        Object selected = combo == null ? null : combo.getSelectedItem();
+        return selected instanceof ModelOption
+                ? ((ModelOption) selected).entry.modelKey
+                : SegmentationMethod.DEFAULT_STARDIST_MODEL_KEY;
+    }
+
+    private String selectedModelKey() {
+        return selectedModelKey(modelCombo);
+    }
+
+    private static double defaultDouble(Object value, double fallback) {
+        if (value instanceof Number) {
+            double parsed = ((Number) value).doubleValue();
+            return Double.isFinite(parsed) ? parsed : fallback;
+        }
+        if (value != null) {
+            try {
+                double parsed = Double.parseDouble(String.valueOf(value));
+                return Double.isFinite(parsed) ? parsed : fallback;
+            } catch (NumberFormatException ignored) {
+                return fallback;
+            }
+        }
+        return fallback;
+    }
+
+    private static boolean metadataBoolean(ModelEntry entry, String key) {
+        if (entry == null || key == null) return false;
+        Object value = entry.metadata.get(key);
+        if (value instanceof Boolean) return ((Boolean) value).booleanValue();
+        return value != null && Boolean.parseBoolean(String.valueOf(value));
+    }
+
+    private static boolean currentImageLooksRgb(ImagePlus image) {
+        if (image == null) return false;
+        return image.getType() == ImagePlus.COLOR_RGB || image.getNChannels() >= 3;
+    }
+
     private void closePreviewWorker() {
         if (previewWorker != null && !previewWorker.isDone()) {
             previewWorker.cancel(true);
@@ -1076,68 +1341,43 @@ public final class StarDistParameterStage implements ConfigQcStage {
         if (method == null || !method.startsWith("stardist")) {
             return defaults;
         }
-        double prob = defaults.probabilityThreshold;
-        double nms = defaults.nmsThreshold;
-        double linking = defaults.linkingMaxDistance;
-        double gapClosing = defaults.gapClosingMaxDistance;
-        int frameGap = defaults.maxFrameGap;
-        double areaMin = defaults.areaMin;
-        double areaMax = defaults.areaMax;
-        double quality = defaults.qualityMin;
-        double intensity = defaults.intensityMin;
-
-        String[] parts = method.split(":");
-        if (parts.length >= 2) prob = parse(parts[1], prob);
-        if (parts.length >= 3) nms = parse(parts[2], nms);
-        for (int i = 3; i < parts.length; i++) {
-            String part = parts[i] == null ? "" : parts[i].trim();
-            if (part.startsWith("linking=")) {
-                linking = sanitizeNonNegative(parse(part.substring("linking=".length()), linking));
-            } else if (part.startsWith("gapClosing=")) {
-                gapClosing = sanitizeNonNegative(parse(part.substring("gapClosing=".length()), gapClosing));
-            } else if (part.startsWith("frameGap=")) {
-                frameGap = sanitizeFrameGap(parse(part.substring("frameGap=".length()), frameGap));
-            } else if (part.startsWith("area=")) {
-                String[] range = part.substring("area=".length()).split("-", 2);
-                if (range.length >= 1) areaMin = sanitizeNonNegative(parse(range[0], areaMin));
-                if (range.length >= 2) {
-                    areaMax = "Infinity".equalsIgnoreCase(range[1])
-                            ? Double.POSITIVE_INFINITY
-                            : sanitizeNonNegative(parse(range[1], areaMax));
-                }
-            } else if (part.startsWith("quality=")) {
-                quality = sanitizeNonNegative(parse(part.substring("quality=".length()), quality));
-            } else if (part.startsWith("intensity=")) {
-                intensity = sanitizeNonNegative(parse(part.substring("intensity=".length()), intensity));
-            }
-        }
-        return new Parameters(prob, nms, linking, gapClosing, frameGap,
-                areaMin, areaMax, quality, intensity);
+        SegmentationMethod parsed = SegmentationTokenParser.parseLenient(method);
+        if (!parsed.isStarDist()) return defaults;
+        StarDistLinkingParams linking = SegmentationMethod.starDistLinking(parsed);
+        StarDistPostFilters filters = SegmentationMethod.starDistPostFilters(parsed);
+        return new Parameters(
+                SegmentationMethod.starDistProb(parsed),
+                SegmentationMethod.starDistNms(parsed),
+                linking.linkingMaxDistance,
+                linking.gapClosingMaxDistance,
+                linking.maxFrameGap,
+                filters.areaMin, filters.areaMax, filters.qualityMin, filters.intensityMin,
+                SegmentationMethod.starDistModelKey(parsed));
     }
 
     public static String formatMethod(Parameters parameters) {
         Parameters p = parameters == null ? Parameters.defaults() : parameters;
-        StringBuilder method = new StringBuilder();
-        method.append("stardist:")
-                .append(p.probabilityThreshold)
-                .append(":")
-                .append(p.nmsThreshold);
+        LinkedHashMap<String, String> params = new LinkedHashMap<String, String>();
+        params.put("prob", String.valueOf(p.probabilityThreshold));
+        params.put("nms", String.valueOf(p.nmsThreshold));
         if (p.linkingMaxDistance != BinConfig.DEFAULT_STARDIST_LINKING_MAX_DISTANCE) {
-            method.append(":linking=").append(p.linkingMaxDistance);
+            params.put("linking", String.valueOf(p.linkingMaxDistance));
         }
         if (p.gapClosingMaxDistance != BinConfig.DEFAULT_STARDIST_GAP_CLOSING_MAX_DISTANCE) {
-            method.append(":gapClosing=").append(p.gapClosingMaxDistance);
+            params.put("gapClosing", String.valueOf(p.gapClosingMaxDistance));
         }
         if (p.maxFrameGap != BinConfig.DEFAULT_STARDIST_MAX_FRAME_GAP) {
-            method.append(":frameGap=").append(p.maxFrameGap);
+            params.put("frameGap", String.valueOf(p.maxFrameGap));
         }
         if (p.areaMin > 0 || Double.isFinite(p.areaMax)) {
-            method.append(":area=").append(p.areaMin).append("-")
-                    .append(Double.isInfinite(p.areaMax) ? "Infinity" : String.valueOf(p.areaMax));
+            params.put("area", String.valueOf(p.areaMin) + "-"
+                    + (Double.isInfinite(p.areaMax) ? "Infinity" : String.valueOf(p.areaMax)));
         }
-        if (p.qualityMin > 0) method.append(":quality=").append(p.qualityMin);
-        if (p.intensityMin > 0) method.append(":intensity=").append(p.intensityMin);
-        return method.toString();
+        if (p.qualityMin > 0) params.put("quality", String.valueOf(p.qualityMin));
+        if (p.intensityMin > 0) params.put("intensity", String.valueOf(p.intensityMin));
+        params.put("model", normalizeModelKey(p.modelKey));
+        return SegmentationTokenParser.format(new SegmentationMethod(
+                SegmentationMethod.Engine.STARDIST, params, ""));
     }
 
     private static double parse(JTextField field, double fallback) {
@@ -1161,6 +1401,58 @@ public final class StarDistParameterStage implements ConfigQcStage {
 
     private static int sanitizeFrameGap(double value) {
         return Math.max(0, (int) Math.round(value));
+    }
+
+    private static String normalizeModelKey(String modelKey) {
+        return modelKey == null || modelKey.trim().isEmpty()
+                ? SegmentationMethod.DEFAULT_STARDIST_MODEL_KEY
+                : modelKey.trim();
+    }
+
+    private static String labelFor(ModelEntry entry) {
+        if (entry == null) return "";
+        String label = entry.name == null || entry.name.trim().isEmpty()
+                ? entry.modelKey
+                : entry.name.trim();
+        if (metadataBoolean(entry, "advanced") && metadataBoolean(entry, "rgbOnly")) {
+            label += " (advanced - RGB)";
+        }
+        return label;
+    }
+
+    private static final class ModelOption {
+        final ModelEntry entry;
+
+        ModelOption(ModelEntry entry) {
+            this.entry = entry;
+        }
+
+        String tooltip() {
+            if (metadataBoolean(entry, "advanced") && metadataBoolean(entry, "rgbOnly")) {
+                return "Advanced RGB model. FLASH previews one grayscale channel at a time, so use only with RGB-aware configuration.";
+            }
+            return entry == null ? null : entry.description;
+        }
+
+        @Override public String toString() {
+            return labelFor(entry);
+        }
+    }
+
+    private static final class ModelOptionRenderer extends DefaultListCellRenderer {
+        @Override
+        public Component getListCellRendererComponent(JList<?> list, Object value, int index,
+                                                      boolean isSelected, boolean cellHasFocus) {
+            super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
+            if (value instanceof ModelOption) {
+                ModelOption option = (ModelOption) value;
+                setText(option.toString());
+                if (list != null) {
+                    list.setToolTipText(option.tooltip());
+                }
+            }
+            return this;
+        }
     }
 
     private static final class ObjectFilterSummary {

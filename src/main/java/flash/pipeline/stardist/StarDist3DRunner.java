@@ -6,6 +6,9 @@ import flash.pipeline.image.ImageOps;
 import flash.pipeline.segmentation.SegmentationMethod;
 import flash.pipeline.segmentation.StarDistLinkingParams;
 import flash.pipeline.segmentation.StarDistPostFilters;
+import flash.pipeline.segmentation.catalog.ModelCatalog;
+import flash.pipeline.segmentation.catalog.ModelCatalogIO;
+import flash.pipeline.segmentation.catalog.ModelEntry;
 import de.csbdresden.stardist.StarDist2DModel;
 import ij.IJ;
 import ij.ImagePlus;
@@ -20,11 +23,13 @@ import java.net.URISyntaxException;
 import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -51,7 +56,20 @@ public class StarDist3DRunner {
     public static final String STATS_AREA_MEAN = "StarDist Area Mean";
     public static final String STATS_QUALITY_MEAN = "StarDist Quality Mean";
     public static final String STATS_INTENSITY_MEAN = "StarDist Intensity Mean";
+    public static final String DEFAULT_STARDIST_MODEL_KEY = SegmentationMethod.DEFAULT_STARDIST_MODEL_KEY;
     private static final String DEFAULT_STARDIST_MODEL_RESOURCE = "models/2D/dsb2018_heavy_augment.zip";
+
+    interface WarningSink {
+        void warn(String message);
+    }
+
+    private static final WarningSink DEFAULT_WARNING_SINK = new WarningSink() {
+        @Override public void warn(String message) {
+            IJ.log(message);
+        }
+    };
+
+    private static WarningSink warningSink = DEFAULT_WARNING_SINK;
 
     /** Whether the TF thread-cap system properties have already been written.
      *  TensorFlow reads the properties at session construction, so first-write
@@ -128,6 +146,10 @@ public class StarDist3DRunner {
     }
 
     public static ImagePlus run(ImagePlus input, SegmentationMethod method, String channelName) {
+        return run(input, method, channelName, null);
+    }
+
+    public static ImagePlus run(ImagePlus input, SegmentationMethod method, String channelName, File projectRoot) {
         SegmentationMethod safe = method == null
                 ? SegmentationMethod.classical("classical")
                 : method;
@@ -143,7 +165,9 @@ public class StarDist3DRunner {
                 filters.areaMin,
                 filters.areaMax,
                 filters.qualityMin,
-                filters.intensityMin);
+                filters.intensityMin,
+                SegmentationMethod.starDistModelKey(safe),
+                projectRoot);
     }
 
     /**
@@ -167,6 +191,19 @@ public class StarDist3DRunner {
                                 double linkingMaxDistance, double gapClosingMaxDistance, int maxFrameGap,
                                 double areaMin, double areaMax,
                                 double qualityMin, double intensityMin) {
+        return run(input, probThresh, nmsThresh, channelName,
+                linkingMaxDistance, gapClosingMaxDistance, maxFrameGap,
+                areaMin, areaMax, qualityMin, intensityMin,
+                DEFAULT_STARDIST_MODEL_KEY, null);
+    }
+
+    public static ImagePlus run(ImagePlus input, double probThresh, double nmsThresh,
+                                String channelName,
+                                double linkingMaxDistance, double gapClosingMaxDistance, int maxFrameGap,
+                                double areaMin, double areaMax,
+                                double qualityMin, double intensityMin,
+                                String modelKey,
+                                File projectRoot) {
         if (!StarDistDetector.isAvailable()) {
             IJ.log("WARNING: " + StarDistDetector.getAvailabilityMessage());
             return null;
@@ -183,6 +220,7 @@ public class StarDist3DRunner {
             double safeLinkingMaxDistance = Math.max(0, linkingMaxDistance);
             double safeGapClosingMaxDistance = Math.max(0, gapClosingMaxDistance);
             int safeMaxFrameGap = Math.max(0, maxFrameGap);
+            File modelFile = resolveStarDistModelFile(modelKey, projectRoot, input, channelName);
 
             ImagePlus dup = duplicateInputForTrackMate(input);
 
@@ -247,7 +285,7 @@ public class StarDist3DRunner {
                     Settings settings = new Settings(dup);
                     settings.addAllAnalyzers();
 
-                    configureStarDistDetector(settings, probThresh, nmsThresh);
+                    configureStarDistDetector(settings, probThresh, nmsThresh, modelFile);
 
                     // Tracker links 2D detections across Z-slices (swapped to timepoints)
                     // into 3D objects. Required for the Z/T swap strategy.
@@ -436,16 +474,119 @@ public class StarDist3DRunner {
     @SuppressWarnings({"rawtypes", "unchecked"})
     static void configureStarDistDetector(Settings settings, double probThresh, double nmsThresh)
             throws IOException {
+        configureStarDistDetector(settings, probThresh, nmsThresh, defaultStarDistModelFile());
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    static void configureStarDistDetector(Settings settings, double probThresh, double nmsThresh,
+                                          File modelFile)
+            throws IOException {
+        if (modelFile == null || !modelFile.isFile()) {
+            throw new IOException("StarDist model file does not exist: " + modelFile);
+        }
         StarDistCustomDetectorFactory factory = new StarDistCustomDetectorFactory();
         settings.detectorFactory = factory;
         settings.detectorSettings = factory.getDefaultSettings();
         settings.detectorSettings.put(DetectorKeys.KEY_TARGET_CHANNEL, Integer.valueOf(1));
         settings.detectorSettings.put(StarDistCustomDetectorFactory.KEY_MODEL_FILEPATH,
-                defaultStarDistModelFile().getAbsolutePath());
+                modelFile.getAbsolutePath());
         settings.detectorSettings.put(StarDistCustomDetectorFactory.KEY_SCORE_THRESHOLD,
                 Double.valueOf(probThresh));
         settings.detectorSettings.put(StarDistCustomDetectorFactory.KEY_OVERLAP_THRESHOLD,
                 Double.valueOf(nmsThresh));
+    }
+
+    static void setWarningSinkForTest(WarningSink sink) {
+        warningSink = sink == null ? DEFAULT_WARNING_SINK : sink;
+    }
+
+    static File resolveStarDistModelFile(SegmentationMethod method, File projectRoot,
+                                         ImagePlus input, String channelName) throws IOException {
+        SegmentationMethod safe = method == null
+                ? SegmentationMethod.classical("classical")
+                : method;
+        return resolveStarDistModelFile(SegmentationMethod.starDistModelKey(safe),
+                projectRoot, input, channelName);
+    }
+
+    static File resolveStarDistModelFile(String modelKey, File projectRoot,
+                                         ImagePlus input, String channelName) throws IOException {
+        String requestedKey = safeModelKey(modelKey);
+        Path root = projectRootPath(projectRoot);
+        ModelCatalog catalog = ModelCatalogIO.read(root);
+        ModelEntry entry = starDistEntry(catalog, requestedKey);
+        if (entry == null) {
+            warn("WARNING: StarDist model '" + requestedKey
+                    + "' was not found in the segmentation model catalog. Falling back to "
+                    + DEFAULT_STARDIST_MODEL_KEY + ".");
+            entry = starDistEntry(catalog, DEFAULT_STARDIST_MODEL_KEY);
+        }
+        if (entry == null) {
+            return defaultStarDistModelFile();
+        }
+
+        warnIfRgbAdvancedModel(entry, input, channelName);
+        Path resolved = catalog.resolve(entry);
+        if (resolved == null || !Files.isRegularFile(resolved)) {
+            if (!DEFAULT_STARDIST_MODEL_KEY.equals(entry.modelKey)) {
+                warn("WARNING: StarDist model '" + entry.modelKey
+                        + "' could not be resolved from the catalog. Falling back to "
+                        + DEFAULT_STARDIST_MODEL_KEY + ".");
+                return resolveStarDistModelFile(DEFAULT_STARDIST_MODEL_KEY, projectRoot, input, channelName);
+            }
+            return defaultStarDistModelFile();
+        }
+        return resolved.toFile();
+    }
+
+    private static ModelEntry starDistEntry(ModelCatalog catalog, String modelKey) {
+        if (catalog == null || modelKey == null) return null;
+        Optional<ModelEntry> found = catalog.get(modelKey);
+        if (!found.isPresent()) return null;
+        ModelEntry entry = found.get();
+        return entry.engine == ModelEntry.Engine.STARDIST ? entry : null;
+    }
+
+    private static Path projectRootPath(File projectRoot) {
+        if (projectRoot != null) {
+            return projectRoot.toPath().toAbsolutePath().normalize();
+        }
+        return Paths.get(System.getProperty("user.dir", ".")).toAbsolutePath().normalize();
+    }
+
+    private static String safeModelKey(String modelKey) {
+        return modelKey == null || modelKey.trim().isEmpty()
+                ? DEFAULT_STARDIST_MODEL_KEY
+                : modelKey.trim();
+    }
+
+    private static void warnIfRgbAdvancedModel(ModelEntry entry, ImagePlus input, String channelName) {
+        if (entry == null || !metadataBoolean(entry, "advanced")) return;
+        if (!metadataBoolean(entry, "rgbOnly")) return;
+        if (isRgbInput(input)) return;
+        String chTag = channelName == null || channelName.trim().isEmpty()
+                ? ""
+                : " for channel '" + channelName.trim() + "'";
+        warn("WARNING: StarDist model '" + entry.name + "'" + chTag
+                + " is marked advanced/RGB. FLASH normally sends a per-channel grayscale image, "
+                + "so this model may be incompatible unless the channel is configured as RGB.");
+    }
+
+    private static boolean metadataBoolean(ModelEntry entry, String key) {
+        if (entry == null || key == null) return false;
+        Object value = entry.metadata.get(key);
+        if (value instanceof Boolean) return ((Boolean) value).booleanValue();
+        return value != null && Boolean.parseBoolean(String.valueOf(value));
+    }
+
+    private static boolean isRgbInput(ImagePlus input) {
+        if (input == null) return false;
+        return input.getType() == ImagePlus.COLOR_RGB || input.getNChannels() >= 3;
+    }
+
+    private static void warn(String message) {
+        WarningSink sink = warningSink == null ? DEFAULT_WARNING_SINK : warningSink;
+        sink.warn(message);
     }
 
     private static File defaultStarDistModelFile() throws IOException {

@@ -177,7 +177,8 @@ public final class StarDistPerCell implements VariationStrategy {
                 doubleParameter(combo, ParameterId.AREA_MIN, p.areaMin),
                 doubleParameter(combo, ParameterId.AREA_MAX, p.areaMax),
                 doubleParameter(combo, ParameterId.QUALITY_MIN, p.qualityMin),
-                doubleParameter(combo, ParameterId.INTENSITY_MIN, p.intensityMin));
+                doubleParameter(combo, ParameterId.INTENSITY_MIN, p.intensityMin),
+                p.modelKey);
     }
 
     private static StarDistParameterStage.Parameters previewRunParameters(
@@ -193,7 +194,8 @@ public final class StarDistPerCell implements VariationStrategy {
                 0,
                 Double.POSITIVE_INFINITY,
                 0,
-                0);
+                0,
+                p.modelKey);
     }
 
     private static ResultsTable objectStatsForLabelPreview(ImagePlus labelImage,

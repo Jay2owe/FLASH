@@ -2486,6 +2486,7 @@ public class ThreeDObjectAnalysis implements Analysis {
         final double[] sdAreaMax = new double[n];
         final double[] sdQualityMin = new double[n];
         final double[] sdIntensityMin = new double[n];
+        final String[] sdModelKey = new String[n];
         final String[] cpModel = new String[n];
         final double[] cpDiameter = new double[n];
         final double[] cpFlowThreshold = new double[n];
@@ -2519,6 +2520,7 @@ public class ThreeDObjectAnalysis implements Analysis {
             sdAreaMax[c] = cfg.getStarDistAreaMax(c);
             sdQualityMin[c] = cfg.getStarDistQualityMin(c);
             sdIntensityMin[c] = cfg.getStarDistIntensityMin(c);
+            sdModelKey[c] = SegmentationMethod.starDistModelKey(cfg.segmentationMethod(c));
             cpModel[c] = cfg.getCellposeModel(c);
             cpDiameter[c] = cfg.getCellposeDiameter(c);
             cpFlowThreshold[c] = cfg.getCellposeFlowThreshold(c);
@@ -2558,6 +2560,7 @@ public class ThreeDObjectAnalysis implements Analysis {
                                     isStarDist[ci], sdProbThresh[ci], sdNmsThresh[ci],
                                     sdLinkingMaxDistance[ci], sdGapClosingMaxDistance[ci], sdMaxFrameGap[ci],
                                     sdAreaMin[ci], sdAreaMax[ci], sdQualityMin[ci], sdIntensityMin[ci],
+                                    sdModelKey[ci], new File(directory),
                                     isCellpose[ci], cpModel[ci], cpDiameter[ci], cpFlowThreshold[ci],
                                     cpCellprobThreshold[ci], cpUseGpu[ci],
                                     cpSecondChannel[ci],
@@ -2592,6 +2595,7 @@ public class ThreeDObjectAnalysis implements Analysis {
                         isStarDist[c], sdProbThresh[c], sdNmsThresh[c],
                         sdLinkingMaxDistance[c], sdGapClosingMaxDistance[c], sdMaxFrameGap[c],
                         sdAreaMin[c], sdAreaMax[c], sdQualityMin[c], sdIntensityMin[c],
+                        sdModelKey[c], new File(directory),
                         isCellpose[c], cpModel[c], cpDiameter[c], cpFlowThreshold[c],
                         cpCellprobThreshold[c], cpUseGpu[c],
                         cpSecondChannel[c],
@@ -2973,6 +2977,7 @@ public class ThreeDObjectAnalysis implements Analysis {
         final double[] sdAreaMax = new double[n];
         final double[] sdQualityMin = new double[n];
         final double[] sdIntensityMin = new double[n];
+        final String[] sdModelKey = new String[n];
         final String[] cpModel = new String[n];
         final double[] cpDiameter = new double[n];
         final double[] cpFlowThreshold = new double[n];
@@ -3006,6 +3011,7 @@ public class ThreeDObjectAnalysis implements Analysis {
             sdAreaMax[c] = cfg.getStarDistAreaMax(c);
             sdQualityMin[c] = cfg.getStarDistQualityMin(c);
             sdIntensityMin[c] = cfg.getStarDistIntensityMin(c);
+            sdModelKey[c] = SegmentationMethod.starDistModelKey(cfg.segmentationMethod(c));
             cpModel[c] = cfg.getCellposeModel(c);
             cpDiameter[c] = cfg.getCellposeDiameter(c);
             cpFlowThreshold[c] = cfg.getCellposeFlowThreshold(c);
@@ -3038,6 +3044,7 @@ public class ThreeDObjectAnalysis implements Analysis {
                                     isStarDist[ci], sdProbThresh[ci], sdNmsThresh[ci],
                                     sdLinkingMaxDistance[ci], sdGapClosingMaxDistance[ci], sdMaxFrameGap[ci],
                                     sdAreaMin[ci], sdAreaMax[ci], sdQualityMin[ci], sdIntensityMin[ci],
+                                    sdModelKey[ci], new File(directory),
                                     isCellpose[ci], cpModel[ci], cpDiameter[ci], cpFlowThreshold[ci],
                                     cpCellprobThreshold[ci], cpUseGpu[ci],
                                     cpSecondChannel[ci],
@@ -3067,6 +3074,7 @@ public class ThreeDObjectAnalysis implements Analysis {
                         isStarDist[c], sdProbThresh[c], sdNmsThresh[c],
                         sdLinkingMaxDistance[c], sdGapClosingMaxDistance[c], sdMaxFrameGap[c],
                         sdAreaMin[c], sdAreaMax[c], sdQualityMin[c], sdIntensityMin[c],
+                        sdModelKey[c], new File(directory),
                         isCellpose[c], cpModel[c], cpDiameter[c], cpFlowThreshold[c],
                         cpCellprobThreshold[c], cpUseGpu[c],
                         cpSecondChannel[c],
@@ -3420,6 +3428,7 @@ public class ThreeDObjectAnalysis implements Analysis {
             double starDistLinkingMaxDistance, double starDistGapClosingMaxDistance, int starDistMaxFrameGap,
             double starDistAreaMin, double starDistAreaMax,
             double starDistQualityMin, double starDistIntensityMin,
+            String starDistModelKey, File projectRoot,
             boolean isCellpose, String cellposeModel, double cellposeDiameter,
             double cellposeFlowThreshold, double cellposeCellprobThreshold, boolean cellposeUseGpu,
             int cellposeSecondChannelIndex, ImagePlus cellposeSecondChannel,
@@ -3468,7 +3477,8 @@ public class ThreeDObjectAnalysis implements Analysis {
                 // (see GpuConcurrency / StarDist3DRunner). No outer lock needed.
                 ImagePlus labelImage = StarDist3DRunner.run(filtered, starDistProbThresh, starDistNmsThresh, channelName,
                         starDistLinkingMaxDistance, starDistGapClosingMaxDistance, starDistMaxFrameGap,
-                        starDistAreaMin, starDistAreaMax, starDistQualityMin, starDistIntensityMin);
+                        starDistAreaMin, starDistAreaMax, starDistQualityMin, starDistIntensityMin,
+                        starDistModelKey, projectRoot);
 
                 // 3. Filter labels by centroid — remove objects whose centroids
                 // fall outside the tissue ROI (before cropping to bounding box).

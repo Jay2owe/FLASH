@@ -4587,7 +4587,10 @@ public class CreateBinFileAnalysis implements Analysis {
                                                 previewProb, previewNms, null,
                                                 previewLinkingMaxDistance, previewGapClosingMaxDistance, previewMaxFrameGap,
                                                 previewAreaMin, previewAreaMax,
-                                                previewQualityMin, previewIntensityMin);
+                                                previewQualityMin, previewIntensityMin,
+                                                SegmentationMethod.starDistModelKey(
+                                                        SegmentationTokenParser.parseLenient(existingMethod)),
+                                                projectRootForConfigurationDir(binFolder));
 
                                         final ImagePlus previewLabel = labelImg;
                                         SwingUtilities.invokeLater(new Runnable() {
@@ -6203,7 +6206,9 @@ public class CreateBinFileAnalysis implements Analysis {
                                     parameters.areaMin,
                                     parameters.areaMax,
                                     parameters.qualityMin,
-                                    parameters.intensityMin);
+                                    parameters.intensityMin,
+                                    parameters.modelKey,
+                                    projectRootForConfigurationDir(binFolder));
                         } finally {
                             closeImageQuietly(input);
                         }
