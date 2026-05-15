@@ -19,6 +19,7 @@ import java.util.Random;
 import java.util.Set;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class DagExecutorTest {
@@ -131,6 +132,63 @@ public class DagExecutorTest {
 
         assertEquals(before, after);
         result.flush();
+    }
+
+    @Test
+    public void nativeDagSkipsDisabledNodes() throws Exception {
+        DagNode disabledAdd = new DagNode("add", OpType.ADD, "value=100 stack");
+        disabledAdd.disabled = true;
+        DagIR dag = new DagIR(
+                1,
+                Arrays.asList(new DagLine("A", Arrays.asList(
+                        disabledAdd,
+                        new DagNode("subtract", OpType.SUBTRACT, "value=1 stack")))),
+                Arrays.<Combiner>asList(),
+                "A",
+                "native");
+
+        ImagePlus source = makeByteStack("source", 1);
+        float before = source.getProcessor().getf(0);
+
+        ImagePlus result = FilterExecutor.runDagThreadSafe(source, dag);
+
+        assertEquals(before - 1.0f, result.getProcessor().getf(0), 0.0f);
+        assertFalse("disabled ADD must not have run",
+                result.getProcessor().getf(0) >= before + 99.0f);
+    }
+
+    @Test
+    public void combinersRunInDeterministicTopologicalOrder() throws Exception {
+        DagIR dag = new DagIR(
+                1,
+                Arrays.asList(
+                        new DagLine("A", Arrays.<DagNode>asList()),
+                        new DagLine("B", Arrays.asList(new DagNode("b1", OpType.ADD, "value=1 stack"))),
+                        new DagLine("C", Arrays.asList(new DagNode("c1", OpType.ADD, "value=2 stack")))),
+                Arrays.asList(
+                        new Combiner("OUT", CombinerOp.ADD, Arrays.asList("AB", "C")),
+                        new Combiner("AB", CombinerOp.ADD, Arrays.asList("A", "B"))),
+                "OUT",
+                "native");
+
+        ImagePlus result = FilterExecutor.runDagThreadSafe(makeByteStack("source", 1), dag);
+        float sourceValue = makeByteStack("source-copy", 1).getProcessor().getf(0);
+
+        assertEquals((sourceValue * 3.0f) + 3.0f, result.getProcessor().getf(0), 0.0f);
+    }
+
+    @Test(expected = DagRejectedException.class)
+    public void combinerCycleThrowsDagRejectedException() throws Exception {
+        DagIR dag = new DagIR(
+                1,
+                Arrays.asList(new DagLine("A", Arrays.<DagNode>asList())),
+                Arrays.asList(
+                        new Combiner("B", CombinerOp.ADD, Arrays.asList("A", "C")),
+                        new Combiner("C", CombinerOp.ADD, Arrays.asList("A", "B"))),
+                "B",
+                "native");
+
+        FilterExecutor.runDagThreadSafe(makeByteStack("source", 1), dag);
     }
 
     private static ImagePlus makeByteStack(String title, int slices) {

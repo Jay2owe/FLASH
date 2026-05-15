@@ -195,6 +195,26 @@ public class FilterExecutorSandboxTest {
         assertEquals(123, imp.getProcessor().getPixel(0, 0));
     }
 
+    @Test
+    public void wrapper_adoptsActiveResultWhenMacroClosesOriginalWithDifferentTitle() throws Exception {
+        final ImagePlus imp = newImage("input");
+
+        invokeSandbox(imp, new Runnable() {
+            @Override public void run() {
+                imp.show();
+                imp.setActivated();
+                ImagePlus result = newImage("result");
+                result.getProcessor().set(0, 0, 77);
+                imp.changes = false;
+                imp.close();
+                result.show();
+                result.setActivated();
+            }
+        });
+
+        assertEquals(77, imp.getProcessor().getPixel(0, 0));
+    }
+
     /** The public legacy entry point must route through the sandbox without throwing on a no-op macro. */
     @Test
     public void publicEntryPoint_runMacroString_smoke() {

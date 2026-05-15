@@ -205,13 +205,20 @@ public final class FilterExecutor {
      * active image.
      */
     private static void adoptResultIfOriginalClosed(ImagePlus imp, String originalTitle, int originalId) {
-        // ID snapshot: if WindowManager still has this ID associated with imp,
-        // the macro modified it in place. Works in both headless and UI modes.
+        // Try to find the result by original title (macros may rename result to match)
         ImagePlus result = findImageByTitleExcluding(originalTitle, imp);
         ImagePlus afterById = ij.WindowManager.getImage(originalId);
-        if (afterById == imp && result == null) return;
-
-        // Try to find the result by original title (macros may rename result to match)
+        if (afterById == imp && result == null) {
+            // Batch-mode close() can leave the original ID mapped to imp.
+            // Still adopt a distinct active result so close-and-replace macros
+            // work when they do not rename the output to the original title.
+            ImagePlus current = ij.WindowManager.getCurrentImage();
+            if (current != null && current != imp && current.getID() != originalId) {
+                result = current;
+            } else {
+                return;
+            }
+        }
         if (result == null) {
             result = ij.WindowManager.getImage(originalTitle);
             if (result == imp) {
@@ -421,6 +428,7 @@ public final class FilterExecutor {
     public static ImagePlus runDagThreadSafe(ImagePlus source, DagIR dag)
             throws DagRejectedException {
         validateDagCanRunNative(source, dag);
+        List<Combiner> orderedCombiners = orderCombinersTopologically(dag);
 
         Map<String, ImagePlus> bus = new HashMap<String, ImagePlus>();
         Map<String, Integer> remainingUses = countRemainingUses(dag);
@@ -428,13 +436,14 @@ public final class FilterExecutor {
         for (DagLine line : dag.lines) {
             ImagePlus work = cloneStackPerSlice(source, line.id);
             for (DagNode node : line.ops) {
+                if (node.disabled) continue;
                 executeOpOnStack(work, new FilterMacroParser.Op(node.type, node.args));
             }
             bus.put(line.id, work);
             releaseIfUnused(bus, remainingUses, line.id);
         }
 
-        for (Combiner combiner : dag.combiners) {
+        for (Combiner combiner : orderedCombiners) {
             List<ImagePlus> inputs = resolveInputs(bus, combiner);
             ImagePlus combined = combineNative(combiner, inputs);
             bus.put(combiner.id, combined);
@@ -496,14 +505,101 @@ public final class FilterExecutor {
         if (!"native".equals(dag.executionTier)) {
             throw new DagRejectedException("Unsupported DAG execution tier: " + dag.executionTier);
         }
+        Set<String> ids = new HashSet<String>();
         for (DagLine line : dag.lines) {
+            if (line == null) throw new DagRejectedException("DAG line is required");
             if (line.id.length() == 0) throw new DagRejectedException("DAG line id is required");
+            if (!ids.add(line.id)) throw new DagRejectedException("Duplicate DAG id: " + line.id);
             for (DagNode node : line.ops) {
+                if (node == null) throw new DagRejectedException("DAG node is required");
                 if (node.type == FilterMacroParser.OpType.UNKNOWN) {
                     throw new DagRejectedException("Unknown DAG op rejected: " + node.id);
                 }
             }
         }
+        for (Combiner combiner : dag.combiners) {
+            if (combiner == null) throw new DagRejectedException("DAG combiner is required");
+            if (combiner.id.length() == 0) throw new DagRejectedException("Combiner id is required");
+            if (!ids.add(combiner.id)) throw new DagRejectedException("Duplicate DAG id: " + combiner.id);
+            if (combiner.inputs.size() < 2) {
+                throw new DagRejectedException("Combiner requires at least two inputs: " + combiner.id);
+            }
+        }
+        orderCombinersTopologically(dag);
+        if (dag.output == null || dag.output.length() == 0) {
+            throw new DagRejectedException("DAG output is required");
+        }
+        if (!ids.contains(dag.output)) {
+            throw new DagRejectedException("Unknown DAG output: " + dag.output);
+        }
+    }
+
+    private static List<Combiner> orderCombinersTopologically(DagIR dag)
+            throws DagRejectedException {
+        Set<String> produced = new HashSet<String>();
+        Set<String> allIds = new HashSet<String>();
+        for (DagLine line : dag.lines) {
+            if (line == null || line.id == null || line.id.length() == 0) continue;
+            produced.add(line.id);
+            allIds.add(line.id);
+        }
+        List<Combiner> pending = new ArrayList<Combiner>(dag.combiners);
+        for (Combiner combiner : pending) {
+            if (combiner != null && combiner.id != null && combiner.id.length() > 0) {
+                allIds.add(combiner.id);
+            }
+        }
+
+        List<Combiner> ordered = new ArrayList<Combiner>();
+        while (!pending.isEmpty()) {
+            boolean progressed = false;
+            for (int i = 0; i < pending.size(); i++) {
+                Combiner combiner = pending.get(i);
+                if (combiner == null) {
+                    throw new DagRejectedException("DAG combiner is required");
+                }
+                if (!allInputsProduced(combiner, produced)) continue;
+                ordered.add(combiner);
+                produced.add(combiner.id);
+                pending.remove(i);
+                i--;
+                progressed = true;
+            }
+            if (!progressed) {
+                throw new DagRejectedException("DAG combiner cycle or unresolved input: "
+                        + describeUnresolvedCombiners(pending, allIds));
+            }
+        }
+        return ordered;
+    }
+
+    private static boolean allInputsProduced(Combiner combiner, Set<String> produced) {
+        for (String input : combiner.inputs) {
+            if (!produced.contains(input)) return false;
+        }
+        return true;
+    }
+
+    private static String describeUnresolvedCombiners(List<Combiner> pending, Set<String> allIds) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < pending.size(); i++) {
+            if (i > 0) sb.append(", ");
+            Combiner combiner = pending.get(i);
+            sb.append(combiner == null ? "<null>" : combiner.id).append(" waiting for ");
+            if (combiner == null) {
+                sb.append("<null>");
+                continue;
+            }
+            boolean first = true;
+            for (String input : combiner.inputs) {
+                if (allIds.contains(input)) continue;
+                if (!first) sb.append("/");
+                sb.append(input);
+                first = false;
+            }
+            if (first) sb.append("upstream combiner");
+        }
+        return sb.toString();
     }
 
     private static Map<String, Integer> countRemainingUses(DagIR dag) {
