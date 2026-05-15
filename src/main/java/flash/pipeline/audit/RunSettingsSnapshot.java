@@ -13,8 +13,7 @@ import flash.pipeline.zslice.ZSliceSelection;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
+import java.util.Arrays;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.EnumMap;
@@ -130,10 +129,10 @@ public final class RunSettingsSnapshot {
         if (!settingsDir.isDirectory() && !settingsDir.mkdirs() && !settingsDir.isDirectory()) {
             throw new IOException("Could not create audit settings folder: " + settingsDir.getAbsolutePath());
         }
-        Files.write(new File(settingsDir, SETTINGS_FILENAME).toPath(),
-                snapshot.toJson().getBytes(StandardCharsets.UTF_8));
-        Files.write(new File(settingsDir, REPLAY_FILENAME).toPath(),
-                (snapshot.replayCommand + "\n").getBytes(StandardCharsets.UTF_8));
+        BinConfigIO.writeAtomic(new File(settingsDir, SETTINGS_FILENAME).toPath(),
+                Arrays.asList(trimTrailingNewline(snapshot.toJson())));
+        BinConfigIO.writeAtomic(new File(settingsDir, REPLAY_FILENAME).toPath(),
+                Arrays.asList(snapshot.replayCommand));
     }
 
     private static List<File> outputFolders(String directory, String analysisName, int analysisIndex) {
@@ -157,13 +156,23 @@ public final class RunSettingsSnapshot {
             case 5: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.SPATIAL);
             case 6: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.LINE_DISTANCE);
             case 7: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.INTENSITY);
-            case 9: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.AGGREGATION);
-            case 10: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.STATISTICS);
-            case 11: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.EXCEL);
-            case 12: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.SPECTRAL);
-            case 13: return layout.visibleConfigurationDir();
+            case 8: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.AGGREGATION);
+            case 9: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.STATISTICS);
+            case 10: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.EXCEL);
+            case 11: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.SPECTRAL);
             default: return null;
         }
+    }
+
+    private static String trimTrailingNewline(String value) {
+        if (value == null) return "";
+        int end = value.length();
+        while (end > 0) {
+            char ch = value.charAt(end - 1);
+            if (ch != '\n' && ch != '\r') break;
+            end--;
+        }
+        return value.substring(0, end);
     }
 
     private static String safeFolderName(int analysisIndex, String analysisName) {

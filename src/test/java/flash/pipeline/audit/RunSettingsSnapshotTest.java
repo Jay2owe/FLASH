@@ -91,6 +91,27 @@ public class RunSettingsSnapshotTest {
     }
 
     @Test
+    public void writerUsesCurrentAnalysisIndexFoldersForAggregationStatsExcelAndSpectral() throws Exception {
+        File dir = temp.newFolder("indexFolders");
+        BinConfigIO.writeFromConfig(dir.getAbsolutePath(), representativeConfig());
+
+        RunSettingsSnapshot.writeForAnalysis(dir.getAbsolutePath(), "Aggregation", 8,
+                EnumSet.of(BinField.CHANNEL_NAMES), null, null);
+        RunSettingsSnapshot.writeForAnalysis(dir.getAbsolutePath(), "Statistics", 9,
+                EnumSet.of(BinField.CHANNEL_NAMES), null, null);
+        RunSettingsSnapshot.writeForAnalysis(dir.getAbsolutePath(), "Excel", 10,
+                EnumSet.of(BinField.CHANNEL_NAMES), null, null);
+        RunSettingsSnapshot.writeForAnalysis(dir.getAbsolutePath(), "Spectral", 11,
+                EnumSet.of(BinField.CHANNEL_NAMES), null, null);
+
+        FlashProjectLayout layout = FlashProjectLayout.forDirectory(dir.getAbsolutePath());
+        assertSnapshotExists(layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.AGGREGATION));
+        assertSnapshotExists(layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.STATISTICS));
+        assertSnapshotExists(layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.EXCEL));
+        assertSnapshotExists(layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.SPECTRAL));
+    }
+
+    @Test
     public void snapshotMentionsEveryPublicListFieldOnBinConfig() throws Exception {
         RunSettingsSnapshot snapshot = new RunSettingsSnapshotTestHarness().snapshot();
         Map<String, Object> root = JsonIO.parseObject(snapshot.toJson());
@@ -160,6 +181,13 @@ public class RunSettingsSnapshotTest {
         assertEquals(expectedSelection.seriesName, actualSelection.seriesName);
         assertEquals(expectedSelection.totalSlices, actualSelection.totalSlices);
         assertEquals(expectedSelection.range, actualSelection.range);
+    }
+
+    private static void assertSnapshotExists(File outputDir) {
+        assertTrue(new File(FlashProjectLayout.settingsDir(outputDir),
+                RunSettingsSnapshot.SETTINGS_FILENAME).isFile());
+        assertTrue(new File(FlashProjectLayout.settingsDir(outputDir),
+                RunSettingsSnapshot.REPLAY_FILENAME).isFile());
     }
 
     private final class RunSettingsSnapshotTestHarness {

@@ -36,8 +36,8 @@ public final class CLIArgumentParser {
      */
     public static boolean hasCliOptions(String macroOptions) {
         if (macroOptions == null || macroOptions.trim().isEmpty()) return false;
-        String lower = macroOptions.toLowerCase(Locale.ROOT);
-        return lower.contains("dir=") || lower.contains("config_dir=");
+        return getValue(macroOptions, "dir") != null
+                || getValue(macroOptions, "config_dir") != null;
     }
 
     /**
@@ -1145,6 +1145,10 @@ public final class CLIArgumentParser {
             int lastClose = -1;
             while (i < options.length()) {
                 char ch = options.charAt(i);
+                if (ch == '\\' && i + 1 < options.length()) {
+                    i += 2;
+                    continue;
+                }
                 if (ch == '[') {
                     depth++;
                 } else if (ch == ']') {
@@ -1160,8 +1164,8 @@ public final class CLIArgumentParser {
                 }
                 i++;
             }
-            if (lastClose > 0) return options.substring(start + 1, lastClose);
-            return options.substring(start + 1);
+            if (lastClose > 0) return unescapeBracketedValue(options.substring(start + 1, lastClose));
+            return unescapeBracketedValue(options.substring(start + 1));
         }
         int end = start;
         while (end < options.length()
@@ -1169,6 +1173,24 @@ public final class CLIArgumentParser {
             end++;
         }
         return options.substring(start, end);
+    }
+
+    private static String unescapeBracketedValue(String value) {
+        if (value == null || value.indexOf('\\') < 0) return value;
+        StringBuilder out = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            if (ch == '\\' && i + 1 < value.length()) {
+                char next = value.charAt(i + 1);
+                if (next == ']' || next == '\\') {
+                    out.append(next);
+                    i++;
+                    continue;
+                }
+            }
+            out.append(ch);
+        }
+        return out.toString();
     }
 
     /**
@@ -1179,10 +1201,46 @@ public final class CLIArgumentParser {
     private static boolean hasBooleanFlag(String options, String key) {
         if (options == null || key == null) return false;
         String lowerKey = key.toLowerCase(Locale.ROOT);
-        String[] toks = options.toLowerCase(Locale.ROOT).split("\\s+");
-        for (String t : toks) {
-            if (t.equals(lowerKey)) return true;
+        List<String> tokens = standaloneTokens(options);
+        for (String t : tokens) {
+            if (t.toLowerCase(Locale.ROOT).equals(lowerKey)) return true;
         }
         return false;
+    }
+
+    private static List<String> standaloneTokens(String options) {
+        List<String> tokens = new ArrayList<String>();
+        StringBuilder current = new StringBuilder();
+        int bracketDepth = 0;
+        for (int i = 0; i < options.length(); i++) {
+            char ch = options.charAt(i);
+            if (ch == '\\' && i + 1 < options.length()) {
+                current.append(ch).append(options.charAt(i + 1));
+                i++;
+                continue;
+            }
+            if (ch == '[') {
+                bracketDepth++;
+                current.append(ch);
+                continue;
+            }
+            if (ch == ']' && bracketDepth > 0) {
+                bracketDepth--;
+                current.append(ch);
+                continue;
+            }
+            if (Character.isWhitespace(ch) && bracketDepth == 0) {
+                if (current.length() > 0) {
+                    tokens.add(current.toString());
+                    current.setLength(0);
+                }
+            } else {
+                current.append(ch);
+            }
+        }
+        if (current.length() > 0) {
+            tokens.add(current.toString());
+        }
+        return tokens;
     }
 }

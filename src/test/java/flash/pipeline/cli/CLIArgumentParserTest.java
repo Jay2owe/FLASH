@@ -46,6 +46,11 @@ public class CLIArgumentParserTest {
         assertFalse(CLIArgumentParser.hasCliOptions("run_3d run_intensity"));
     }
 
+    @Test
+    public void hasCliOptions_doesNotMatchDirInsideLongerKey() {
+        assertFalse(CLIArgumentParser.hasCliOptions("excel.metric_dir=[/tmp/results]"));
+    }
+
     // ── parse: directory ──
 
     @Test
@@ -60,6 +65,13 @@ public class CLIArgumentParserTest {
         CLIConfig cfg = CLIArgumentParser.parse("dir=[C:/path with spaces/data]");
         assertNotNull(cfg);
         assertEquals("C:/path with spaces/data", cfg.getDirectory());
+    }
+
+    @Test
+    public void parse_analysisFlagInsideBracketedPathIsNotSelected() {
+        CLIConfig cfg = CLIArgumentParser.parse("dir=[C:/path with run_3d/data]");
+        assertNotNull(cfg);
+        assertFalse(cfg.getSelectedAnalyses()[4]);
     }
 
     @Test
@@ -319,6 +331,12 @@ public class CLIArgumentParserTest {
         // Inner ']' is not followed by whitespace, so the outer pair wins.
         assertEquals("/Users/foo [bar]/data", CLIArgumentParser.getValue(
                 "dir=[/Users/foo [bar]/data] verbose=true", "dir"));
+    }
+
+    @Test
+    public void getValue_handlesEscapedClosingBracketInBracketedPath() {
+        assertEquals("/Users/foo ] bar/data", CLIArgumentParser.getValue(
+                "dir=[/Users/foo \\] bar/data] verbose=true", "dir"));
     }
 
     @Test

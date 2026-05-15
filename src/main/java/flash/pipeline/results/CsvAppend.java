@@ -1,5 +1,7 @@
 package flash.pipeline.results;
 
+import flash.pipeline.bin.BinConfigIO;
+
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -20,7 +22,8 @@ public final class CsvAppend {
         if (!srcCsv.exists()) return;
 
         if (!destCsv.exists()) {
-            Files.copy(srcCsv.toPath(), destCsv.toPath());
+            List<String> src = Files.readAllLines(srcCsv.toPath(), StandardCharsets.UTF_8);
+            BinConfigIO.writeAtomic(destCsv.toPath(), src);
             return;
         }
 
@@ -28,12 +31,11 @@ public final class CsvAppend {
         List<String> src = Files.readAllLines(srcCsv.toPath(), StandardCharsets.UTF_8);
         if (src.isEmpty()) return;
 
-        String header = src.get(0);
         // keep dest header as-is; append src rows after header
         List<String> out = new ArrayList<>(dest);
         for (int i = 1; i < src.size(); i++) {
             out.add(src.get(i));
         }
-        Files.write(destCsv.toPath(), out, StandardCharsets.UTF_8);
+        BinConfigIO.writeAtomic(destCsv.toPath(), out);
     }
 }
