@@ -83,7 +83,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Macro-faithful rewrite of intensityAnalysis() (Jamie IHF Pipeline 2), focused on outputs.
+ * Macro-faithful rewrite of intensityAnalysis(), focused on outputs.
  *
  * Output: FLASH/Image Analysis/Image Intensities/<channel>.csv and Analysis Details/<channel>.txt
  */

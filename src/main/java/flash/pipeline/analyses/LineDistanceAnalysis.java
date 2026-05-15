@@ -54,7 +54,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Line Distance Analysis for the IHF Pipeline.
+ * Line Distance Analysis for the FLASH pipeline.
  *
  * <p>Lets users draw named reference lines on images and computes the
  * perpendicular distance from every 3D object to those lines. Distances

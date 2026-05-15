@@ -285,7 +285,7 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
         final BinConfig finalRoiBinCfg = roiBinCfg;
         final int lookahead = 3;
         ExecutorService prepPool = Executors.newFixedThreadPool(2, r -> {
-            Thread t = new Thread(r, "IHF-ROI-Prep");
+            Thread t = new Thread(r, "FLASH-ROI-Prep");
             t.setDaemon(true);
             return t;
         });

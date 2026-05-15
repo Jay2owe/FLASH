@@ -6,7 +6,7 @@ import java.util.EnumSet;
 import java.util.Set;
 
 /**
- * One analysis step from the IHF Pipeline.
+ * One analysis step from the FLASH pipeline.
  */
 public interface Analysis {
     void execute(String directory);

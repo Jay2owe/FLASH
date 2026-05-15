@@ -69,7 +69,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Spatial distance analysis step for the IHF Pipeline.
+ * Spatial distance analysis step for the FLASH pipeline.
  *
  * <p>Computes inter-marker nearest neighbor distances (3D Euclidean) between
  * every pair of object channels.
