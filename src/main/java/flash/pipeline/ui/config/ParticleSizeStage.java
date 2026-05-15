@@ -410,12 +410,13 @@ public final class ParticleSizeStage implements ConfigQcStage {
             }
 
             @Override protected void done() {
+                if (isCancelled()) return;
                 try {
                     installObjectPreview(get(), token);
                 } catch (Exception e) {
                     setError("Object preview failed: " + e.getMessage());
                 } finally {
-                    setButtonsEnabled(true);
+                    if (!isCancelled()) setButtonsEnabled(true);
                 }
             }
         };

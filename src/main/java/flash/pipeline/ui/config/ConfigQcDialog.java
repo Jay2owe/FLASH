@@ -180,7 +180,7 @@ public final class ConfigQcDialog {
     }
 
     public ConfigQcResult showDialog() {
-        if (dialog == null) {
+        if (dialog == null || closed.getCount() == 0) {
             return result;
         }
         dialog.pack();
@@ -398,7 +398,9 @@ public final class ConfigQcDialog {
     }
 
     private void refreshButtons() {
-        backButton.setEnabled(findPreviousApplicable(stageIndex - 1) >= 0 || stageIndex == firstApplicableIndex());
+        boolean hasPreviousStage = findPreviousApplicable(stageIndex - 1) >= 0;
+        backButton.setVisible(hasPreviousStage);
+        backButton.setEnabled(hasPreviousStage);
         previousImageButton.setEnabled(currentStage() != null
                 && context.hasImages()
                 && context.getCurrentImageIndex() > 0);
@@ -1061,6 +1063,10 @@ public final class ConfigQcDialog {
 
     JButton cancelButtonForTest() {
         return cancelButton;
+    }
+
+    JButton backButtonForTest() {
+        return backButton;
     }
 
     JButton stageHelpButtonForTest() {

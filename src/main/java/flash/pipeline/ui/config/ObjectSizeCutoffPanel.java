@@ -42,8 +42,10 @@ final class ObjectSizeCutoffPanel extends JPanel {
     void setSummary(ObjectSizeFilterPreview.Summary summary) {
         if (summary == null) {
             minLine.setLinePixels(14);
+            minLine.setVisible(true);
             maxLine.setVisible(false);
             minLabel.setText("Min cutoff: not previewed");
+            maxLabel.setVisible(true);
             maxLabel.setText("Max cutoff: Infinity");
             summaryLabel.setText("Run object preview to label removed objects.");
             return;

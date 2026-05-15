@@ -547,12 +547,13 @@ public final class StarDistParameterStage implements ConfigQcStage {
             }
 
             @Override protected void done() {
+                if (isCancelled()) return;
                 try {
                     installLabelPreview(get(), parameters);
                 } catch (Exception e) {
                     setPreviewError("StarDist preview failed: " + e.getMessage());
                 } finally {
-                    setButtonsEnabled(true);
+                    if (!isCancelled()) setButtonsEnabled(true);
                 }
             }
         };

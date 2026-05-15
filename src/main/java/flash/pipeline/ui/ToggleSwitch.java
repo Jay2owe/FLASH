@@ -60,11 +60,12 @@ public class ToggleSwitch extends JPanel {
     }
 
     public void addChangeListener(Runnable listener) {
+        if (listener == null) return;
         changeListeners.add(listener);
     }
 
     private void fireChangeListeners() {
-        for (Runnable r : changeListeners) {
+        for (Runnable r : new ArrayList<Runnable>(changeListeners)) {
             r.run();
         }
     }

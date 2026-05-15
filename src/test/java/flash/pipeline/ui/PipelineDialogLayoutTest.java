@@ -168,6 +168,40 @@ public class PipelineDialogLayoutTest {
         backingDialog(dialog).dispose();
     }
 
+    @Test
+    public void requestFocusOnShowDetachesOneShotWindowListener() throws Exception {
+        PipelineDialog dialog = new PipelineDialog("Focus Listener");
+        int before = backingDialog(dialog).getWindowListeners().length;
+
+        dialog.requestFocusOnShow(new JPanel());
+        backingDialog(dialog).dispatchEvent(new java.awt.event.WindowEvent(
+                backingDialog(dialog), java.awt.event.WindowEvent.WINDOW_OPENED));
+
+        assertEquals(before, backingDialog(dialog).getWindowListeners().length);
+        backingDialog(dialog).dispose();
+    }
+
+    @Test
+    public void toggleListenersCanMutateListenerListDuringNotification() {
+        final ToggleSwitch toggle = new ToggleSwitch(false);
+        final int[] calls = new int[]{0};
+
+        toggle.addChangeListener(new Runnable() {
+            @Override public void run() {
+                calls[0]++;
+                toggle.addChangeListener(new Runnable() {
+                    @Override public void run() {
+                        calls[0]++;
+                    }
+                });
+            }
+        });
+
+        toggle.setSelected(true);
+
+        assertEquals(1, calls[0]);
+    }
+
     private static JPanel contentPanel(PipelineDialog dialog) throws Exception {
         Field field = PipelineDialog.class.getDeclaredField("contentPanel");
         field.setAccessible(true);

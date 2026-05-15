@@ -539,13 +539,16 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
             }
 
             @Override protected void done() {
+                if (isCancelled()) return;
                 try {
                     installObjectPreview(get(), token, previewMinSize, previewMaxSize, threshold);
                 } catch (Exception e) {
                     setError("Object preview failed: " + e.getMessage());
                 } finally {
-                    setButtonsEnabled(true);
-                    if (actions != null) actions.setPreviewButtonRunning(false);
+                    if (!isCancelled()) {
+                        setButtonsEnabled(true);
+                        if (actions != null) actions.setPreviewButtonRunning(false);
+                    }
                 }
             }
         };

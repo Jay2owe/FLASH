@@ -894,12 +894,13 @@ public final class CellposeParameterStage implements ConfigQcStage {
             }
 
             @Override protected void done() {
+                if (isCancelled()) return;
                 try {
                     installLabelPreview(get(), parameters);
                 } catch (Exception e) {
                     setError("Cellpose preview failed: " + e.getMessage());
                 } finally {
-                    setButtonsEnabled(true);
+                    if (!isCancelled()) setButtonsEnabled(true);
                 }
             }
         };
@@ -1206,6 +1207,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
             }
 
             @Override protected void done() {
+                if (isCancelled()) return;
                 try {
                     GpuInstallResult result = get();
                     if (result != null && result.success) {
@@ -1221,8 +1223,10 @@ public final class CellposeParameterStage implements ConfigQcStage {
                 } catch (Exception e) {
                     setError("GPU install failed: " + e.getMessage());
                 } finally {
-                    installGpuButton.setEnabled(true);
-                    refreshRuntimeLabel();
+                    if (!isCancelled()) {
+                        installGpuButton.setEnabled(true);
+                        refreshRuntimeLabel();
+                    }
                 }
             }
         };

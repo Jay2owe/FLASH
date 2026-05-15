@@ -454,6 +454,21 @@ public class ConfigQcDialogTest {
     }
 
     @Test
+    public void backButtonHiddenOnFirstStageAndShownOnLaterStages() {
+        RecordingStage first = new RecordingStage("First");
+        RecordingStage second = new RecordingStage("Second");
+        ConfigQcDialog dialog = ConfigQcDialog.createForTest(
+                contextWithOneImage(), Arrays.asList(first, second));
+
+        assertFalse(dialog.backButtonForTest().isVisible());
+
+        dialog.lockInForTest();
+
+        assertTrue(dialog.backButtonForTest().isVisible());
+        assertTrue(dialog.backButtonForTest().isEnabled());
+    }
+
+    @Test
     public void backToPreviousStagePreloadsLockedParameters() {
         StoredStage first = new StoredStage();
         RecordingStage second = new RecordingStage("Second");
@@ -479,6 +494,15 @@ public class ConfigQcDialogTest {
 
         assertEquals(ConfigQcResult.BACK, dialog.resultForTest());
         assertEquals(1, stage.leaveCount);
+    }
+
+    @Test
+    public void emptyStageListCompletesWithoutShowingStageShell() {
+        ConfigQcDialog dialog = ConfigQcDialog.createForTest(
+                contextWithOneImage(), Arrays.<ConfigQcStage>asList());
+
+        assertEquals(ConfigQcResult.DONE, dialog.resultForTest());
+        assertEquals(-1, dialog.stageIndexForTest());
     }
 
     @Test

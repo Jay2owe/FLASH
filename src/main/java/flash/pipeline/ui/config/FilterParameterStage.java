@@ -1280,13 +1280,14 @@ public final class FilterParameterStage implements ConfigQcStage {
             }
 
             @Override protected void done() {
+                if (isCancelled()) return;
                 try {
                     installAdjustedPreview(get(), macro);
                 } catch (Exception e) {
                     setPreviewState(PreviewPairPanel.PreviewState.ERROR, e.getMessage());
                     setStatus("Filter preview failed: " + e.getMessage());
                 } finally {
-                    setButtonsEnabled(true);
+                    if (!isCancelled()) setButtonsEnabled(true);
                 }
             }
         };

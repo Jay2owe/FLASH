@@ -1036,6 +1036,7 @@ public class PipelineDialog {
         if (component == null) return;
         dialog.addWindowListener(new WindowAdapter() {
             @Override public void windowOpened(WindowEvent e) {
+                dialog.removeWindowListener(this);
                 SwingUtilities.invokeLater(new Runnable() {
                     @Override public void run() {
                         component.requestFocusInWindow();
