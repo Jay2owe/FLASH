@@ -29,9 +29,10 @@ import java.util.List;
 public final class SegmentationMethodStage implements ConfigQcStage {
 
     public static final String CLASSICAL = "Classical";
+    public static final String ENHANCED_CLASSICAL = "Enhanced Classical";
     public static final String STARDIST = "StarDist 3D";
     public static final String CELLPOSE = "Cellpose";
-    public static final String[] OPTIONS = new String[]{CLASSICAL, STARDIST, CELLPOSE};
+    public static final String[] OPTIONS = new String[]{CLASSICAL, ENHANCED_CLASSICAL, STARDIST, CELLPOSE};
 
     public interface MethodStore {
         String getChoice();
@@ -158,6 +159,7 @@ public final class SegmentationMethodStage implements ConfigQcStage {
     }
 
     public static String stageKeyForChoice(String choice) {
+        if (ENHANCED_CLASSICAL.equals(choice)) return EnhancedClassicalSegmentationStage.class.getName();
         if (STARDIST.equals(choice)) return StarDistParameterStage.class.getName();
         if (CELLPOSE.equals(choice)) return CellposeParameterStage.class.getName();
         return ClassicalSegmentationStage.class.getName();
@@ -239,6 +241,13 @@ public final class SegmentationMethodStage implements ConfigQcStage {
                             + "Best for: bright, clean stains where objects stand out clearly from background and a consistent threshold can be applied across images. Works well for puncta, plaques, or well-separated labelled structures.<br>"
                             + "Watch out for: touching objects may merge, and uneven background can make one threshold unreliable.");
             add(Box.createVerticalStrut(6));
+            addCard(group, ENHANCED_CLASSICAL,
+                    "Enhanced Classical",
+                    "Threshold-based 3D Objects Counter segmentation followed by optional 3D morphology filters.<br>"
+                            + "Next screen: set the signal threshold, object size filter, and shape or intensity predicates.<br>"
+                            + "Best for: classical segmentations that find the right objects plus debris, elongated fragments, or non-round structures that can be removed by 3D measurements.<br>"
+                            + "Watch out for: morphology filters depend on calibration and object shape quality.");
+            add(Box.createVerticalStrut(6));
             addCard(group, STARDIST,
                     "StarDist",
                     "AI-powered segmentation designed for round or star-convex objects, such as nuclei. It detects object shapes directly rather than relying only on pixel intensity.<br>"
@@ -306,6 +315,7 @@ public final class SegmentationMethodStage implements ConfigQcStage {
         }
 
         private static String firstKnownChoice(String choice) {
+            if (ENHANCED_CLASSICAL.equals(choice)) return ENHANCED_CLASSICAL;
             if (STARDIST.equals(choice)) return STARDIST;
             if (CELLPOSE.equals(choice)) return CELLPOSE;
             return CLASSICAL;

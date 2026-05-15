@@ -107,9 +107,30 @@ public class BinConfig {
         return segmentationMethod(channelIndex).isCellpose();
     }
 
+    /** Returns true if the channel at the given 0-based index uses Enhanced Classical segmentation. */
+    public boolean isEnhancedClassical(int channelIndex) {
+        return segmentationMethod(channelIndex).isEnhancedClassical();
+    }
+
     /** Returns true if the channel produces a label image directly (StarDist or Cellpose). */
     public boolean usesLabelImageSegmentation(int channelIndex) {
         return isStarDist(channelIndex) || isCellpose(channelIndex);
+    }
+
+    public int getEnhancedClassicalThreshold(int channelIndex) {
+        return (int) Math.round(SegmentationMethod.threshold(segmentationMethod(channelIndex)));
+    }
+
+    public int getEnhancedClassicalMinSize(int channelIndex) {
+        return SegmentationMethod.minSize(segmentationMethod(channelIndex));
+    }
+
+    public int getEnhancedClassicalMaxSize(int channelIndex) {
+        return SegmentationMethod.maxSize(segmentationMethod(channelIndex));
+    }
+
+    public List<flash.pipeline.segmentation.MorphPredicate> getEnhancedClassicalMorphPredicates(int channelIndex) {
+        return SegmentationMethod.morphPredicates(segmentationMethod(channelIndex));
     }
 
     /** Returns the StarDist probability threshold for the given channel, or 0.5 if not StarDist. */

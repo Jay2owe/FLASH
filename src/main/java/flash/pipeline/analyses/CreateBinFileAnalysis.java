@@ -43,6 +43,8 @@ import flash.pipeline.qc.QcMinMaxPerConditionSelector;
 import flash.pipeline.qc.QcSelectionChannel;
 import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.FeatureDependencyGate;
+import flash.pipeline.segmentation.SegmentationMethod;
+import flash.pipeline.segmentation.SegmentationTokenParser;
 import flash.pipeline.stardist.StarDist3DRunner;
 import flash.pipeline.stardist.StarDistDetector;
 import flash.pipeline.ui.CustomFilterContinueDialog;
@@ -58,6 +60,7 @@ import flash.pipeline.ui.config.ChannelThresholdStage;
 import flash.pipeline.ui.config.ClassicalSegmentationStage;
 import flash.pipeline.ui.config.CellposeParameterStage;
 import flash.pipeline.ui.config.DisplayRangeStage;
+import flash.pipeline.ui.config.EnhancedClassicalSegmentationStage;
 import flash.pipeline.ui.config.FilterParameterStage;
 import flash.pipeline.ui.config.ParticleSizeStage;
 import flash.pipeline.ui.config.SegmentationMethodStage;
@@ -203,10 +206,11 @@ public class CreateBinFileAnalysis implements Analysis {
     private static final int CHANNEL_IDENTITY_CELL_WIDTH = 160;
     private static final int CHANNEL_IDENTITY_NAME_WIDTH = 150;
     private static final String SEGMENTATION_CLASSICAL = "Classical";
+    private static final String SEGMENTATION_ENHANCED_CLASSICAL = "Enhanced Classical";
     private static final String SEGMENTATION_STARDIST = "StarDist 3D";
     private static final String SEGMENTATION_CELLPOSE = "Cellpose";
     private static final String[] SEGMENTATION_OPTIONS = {
-            SEGMENTATION_CLASSICAL, SEGMENTATION_STARDIST, SEGMENTATION_CELLPOSE
+            SEGMENTATION_CLASSICAL, SEGMENTATION_ENHANCED_CLASSICAL, SEGMENTATION_STARDIST, SEGMENTATION_CELLPOSE
     };
 
     private static final String INTENSITY_FILTER =
@@ -2228,6 +2232,9 @@ public class CreateBinFileAnalysis implements Analysis {
                 return cellposeStatus.summary();
             }
             return "Flexible whole-cell or irregular object segmentation.";
+        }
+        if (SEGMENTATION_ENHANCED_CLASSICAL.equals(normalized)) {
+            return "Classical 3D object detection plus optional morphology filters.";
         }
         return "Classical filter and threshold segmentation.";
     }
@@ -5578,6 +5585,60 @@ public class CreateBinFileAnalysis implements Analysis {
                 });
     }
 
+    EnhancedClassicalSegmentationStage createEnhancedClassicalSegmentationStage(final BinUserConfig cfg,
+                                                                                final File binFolder,
+                                                                                final int channelIndex) {
+        final int channelNum = channelIndex + 1;
+        final String chLabel = "C" + channelNum + " (" + cfg.names.get(channelIndex) + ")";
+        return new EnhancedClassicalSegmentationStage(
+                new EnhancedClassicalSegmentationStage.ParameterStore() {
+                    @Override public String getMethodToken() {
+                        return cfg.segmentationMethods.get(channelIndex);
+                    }
+
+                    @Override public void save(String methodToken) {
+                        cfg.segmentationMethods.set(channelIndex, methodToken);
+                    }
+                },
+                new ClassicalSegmentationStage.ThresholdStore() {
+                    @Override public String get() {
+                        return enhancedThresholdOrFallback(cfg, channelIndex);
+                    }
+
+                    @Override public void set(String token) {
+                        cfg.objectThresholds.set(channelIndex, token);
+                        cfg.intensityThresholds.set(channelIndex, token);
+                    }
+                },
+                new ClassicalSegmentationStage.SizeStore() {
+                    @Override public String get() {
+                        return enhancedSizeOrFallback(cfg, channelIndex);
+                    }
+
+                    @Override public void set(String token) {
+                        cfg.sizes.set(channelIndex, token);
+                    }
+                },
+                new EnhancedClassicalSegmentationStage.PreviewAdapter() {
+                    @Override public ImagePlus createRawSource(ConfigQcContext context) {
+                        ImagePlus source = duplicateCurrentChannel(context, channelNum);
+                        if (source == null) return null;
+                        source.setTitle("Enhanced Classical raw input | " + chLabel + " | "
+                                + (context == null ? "" : context.getCurrentImageDisplayName()));
+                        return applyPreviewLut(source, channelColor(cfg, channelIndex));
+                    }
+
+                    @Override public ImagePlus createFilteredSource(ConfigQcContext context) {
+                        return createFilteredSetupSource(context, cfg, binFolder, channelIndex,
+                                "Enhanced Classical filtered input");
+                    }
+
+                    @Override public void close(ImagePlus image) {
+                        closeImageQuietly(image);
+                    }
+                });
+    }
+
     private ObjectsCounter3DWrapper.Result runObjectsCounterPreview(ImagePlus filteredSource,
                                                                     int threshold,
                                                                     int minSize,
@@ -6006,6 +6067,14 @@ public class CreateBinFileAnalysis implements Analysis {
                 new StagePredicate() {
                     @Override public boolean isApplicable() {
                         return isClassicalSegmentation(cfg, channelIndex);
+                    }
+                }));
+        stages.add(new ConditionalConfigQcStage(
+                withSegmentationMethodSwitcher(createEnhancedClassicalSegmentationStage(cfg, binFolder, channelIndex),
+                        methodStore),
+                new StagePredicate() {
+                    @Override public boolean isApplicable() {
+                        return isEnhancedClassicalSegmentation(cfg, channelIndex);
                     }
                 }));
         stages.add(new ConditionalConfigQcStage(
@@ -7806,6 +7875,12 @@ public class CreateBinFileAnalysis implements Analysis {
             }
             return "<html><body style='width:280px;'>" + sb + "</body></html>";
         }
+        if (SEGMENTATION_ENHANCED_CLASSICAL.equals(normalized)) {
+            return "<html><body style='width:280px;'>"
+                    + "Best when thresholding finds likely objects but shape or intensity filters are needed to remove debris.<br>"
+                    + "Uses the same 3D Objects Counter detection as Classical, then filters labels by mcib3d measurements."
+                    + "</body></html>";
+        }
 
         return "<html><body style='width:280px;'>"
                 + "Best for bright, well-separated objects where filtering plus thresholding is enough.<br>"
@@ -7834,6 +7909,7 @@ public class CreateBinFileAnalysis implements Analysis {
 
     private static String segmentationChoiceForMethod(String method) {
         if (method != null) {
+            if (method.startsWith("enhanced_classical")) return SEGMENTATION_ENHANCED_CLASSICAL;
             if (method.startsWith("stardist")) return SEGMENTATION_STARDIST;
             if (method.startsWith("cellpose")) return SEGMENTATION_CELLPOSE;
         }
@@ -7859,6 +7935,32 @@ public class CreateBinFileAnalysis implements Analysis {
                 + ":" + BinConfig.DEFAULT_CELLPOSE_FLOW_THRESHOLD
                 + ":" + BinConfig.DEFAULT_CELLPOSE_CELLPROB_THRESHOLD
                 + ":gpu=" + preferGpu;
+    }
+
+    private static String enhancedThresholdOrFallback(BinUserConfig cfg, int channelIndex) {
+        String fallback = cfg != null && channelIndex >= 0 && channelIndex < cfg.objectThresholds.size()
+                ? cfg.objectThresholds.get(channelIndex)
+                : "0";
+        if (cfg == null || channelIndex < 0 || channelIndex >= cfg.segmentationMethods.size()) {
+            return fallback;
+        }
+        SegmentationMethod method = SegmentationTokenParser.parseLenient(cfg.segmentationMethods.get(channelIndex));
+        if (!method.isEnhancedClassical()) return fallback;
+        return String.valueOf((int) Math.round(SegmentationMethod.threshold(method)));
+    }
+
+    private static String enhancedSizeOrFallback(BinUserConfig cfg, int channelIndex) {
+        String fallback = cfg != null && channelIndex >= 0 && channelIndex < cfg.sizes.size()
+                ? cfg.sizes.get(channelIndex)
+                : "100-Infinity";
+        if (cfg == null || channelIndex < 0 || channelIndex >= cfg.segmentationMethods.size()) {
+            return fallback;
+        }
+        SegmentationMethod method = SegmentationTokenParser.parseLenient(cfg.segmentationMethods.get(channelIndex));
+        if (!method.isEnhancedClassical()) return fallback;
+        int max = SegmentationMethod.maxSize(method);
+        return SegmentationMethod.minSize(method) + "-"
+                + (max == Integer.MAX_VALUE ? "Infinity" : String.valueOf(max));
     }
 
     private static int parseCellposeSecondChannel(String method) {
@@ -7956,6 +8058,15 @@ public class CreateBinFileAnalysis implements Analysis {
                                                    String selection,
                                                    String existingMethod,
                                                    boolean preferCellposeGpu) {
+        if (SEGMENTATION_ENHANCED_CLASSICAL.equals(selection)) {
+            if (existingMethod != null && existingMethod.startsWith("enhanced_classical:")) {
+                segmentationMethods.set(channelIndex, existingMethod);
+            } else {
+                segmentationMethods.set(channelIndex,
+                        "enhanced_classical:thresh=0:minSize=100:maxSize=" + Integer.MAX_VALUE);
+            }
+            return;
+        }
         if (SEGMENTATION_STARDIST.equals(selection)) {
             if (existingMethod != null && existingMethod.startsWith("stardist:")) {
                 segmentationMethods.set(channelIndex, existingMethod);
@@ -7976,8 +8087,14 @@ public class CreateBinFileAnalysis implements Analysis {
     }
 
     private static boolean isClassicalSegmentation(BinUserConfig cfg, int channelIndex) {
-        return !isStarDistSegmentation(cfg, channelIndex)
+        return !isEnhancedClassicalSegmentation(cfg, channelIndex)
+                && !isStarDistSegmentation(cfg, channelIndex)
                 && !isCellposeSegmentation(cfg, channelIndex);
+    }
+
+    private static boolean isEnhancedClassicalSegmentation(BinUserConfig cfg, int channelIndex) {
+        if (cfg == null || channelIndex < 0 || channelIndex >= cfg.segmentationMethods.size()) return false;
+        return safe(cfg.segmentationMethods.get(channelIndex)).startsWith("enhanced_classical");
     }
 
     private static boolean isStarDistSegmentation(BinUserConfig cfg, int channelIndex) {
@@ -8082,6 +8199,9 @@ public class CreateBinFileAnalysis implements Analysis {
 
         @Override public SetupHelpTopic helpTopic() {
             if (delegate instanceof ClassicalSegmentationStage) {
+                return SetupHelpCatalog.CLASSICAL_OBJECT_SEGMENTATION;
+            }
+            if (delegate instanceof EnhancedClassicalSegmentationStage) {
                 return SetupHelpCatalog.CLASSICAL_OBJECT_SEGMENTATION;
             }
             if (delegate instanceof ChannelThresholdStage) {
