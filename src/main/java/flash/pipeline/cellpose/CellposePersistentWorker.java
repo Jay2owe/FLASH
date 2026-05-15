@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -247,13 +248,7 @@ public final class CellposePersistentWorker implements Closeable {
             return CellposeWorkerResult.failure(request.id(),
                     "Cellpose helper process is not running." + stderrSuffix());
         }
-        Map<String, Object> json = new LinkedHashMap<String, Object>();
-        json.put("id", request.id());
-        json.put("diameter", Double.valueOf(Double.parseDouble(
-                Cellpose3DRunner.formatDiameterPixels(runtimeInput,
-                        request.diameter()))));
-        json.put("flow_threshold", Double.valueOf(request.flowThreshold()));
-        json.put("cellprob_threshold", Double.valueOf(request.cellprobThreshold()));
+        Map<String, Object> json = requestPayload(request, runtimeInput);
         stdin.write(JsonIO.write(json));
         stdin.write('\n');
         stdin.flush();
@@ -280,7 +275,40 @@ public final class CellposePersistentWorker implements Closeable {
                             + maskPath + stderrSuffix());
         }
         return CellposeWorkerResult.success(id, label,
-                longValue(response.get("duration_ms"), 0L));
+                longValue(response.get("duration_ms"), 0L),
+                cellprobPath(response));
+    }
+
+    static Map<String, Object> requestPayloadForTest(CellposeWorkerRequest request,
+                                                     ImagePlus runtimeInput) {
+        return requestPayload(request, runtimeInput);
+    }
+
+    static Optional<Path> cellprobPathForTest(Map<String, Object> response) {
+        return cellprobPath(response);
+    }
+
+    private static Map<String, Object> requestPayload(CellposeWorkerRequest request,
+                                                      ImagePlus runtimeInput) {
+        Map<String, Object> json = new LinkedHashMap<String, Object>();
+        json.put("id", request.id());
+        json.put("diameter", Double.valueOf(Double.parseDouble(
+                Cellpose3DRunner.formatDiameterPixels(runtimeInput,
+                        request.diameter()))));
+        json.put("flow_threshold", Double.valueOf(request.flowThreshold()));
+        json.put("cellprob_threshold", Double.valueOf(request.cellprobThreshold()));
+        if (request.dumpCellprob()) {
+            json.put("dump_cellprob", Boolean.TRUE);
+        }
+        return json;
+    }
+
+    private static Optional<Path> cellprobPath(Map<String, Object> response) {
+        String path = stringValue(response == null ? null : response.get("cellprob_path"), "");
+        if (path.trim().isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(Paths.get(path));
     }
 
     private Map<String, Object> readProtocolObject() throws Exception {

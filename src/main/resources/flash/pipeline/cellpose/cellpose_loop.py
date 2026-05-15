@@ -78,6 +78,13 @@ def save_masks(path, masks):
     io.imsave(str(path), masks)
 
 
+def save_cellprob(path, cellprob):
+    import numpy as np
+    import tifffile
+
+    tifffile.imwrite(str(path), np.asarray(cellprob, dtype=np.float32))
+
+
 def main(argv):
     args = parse_args(argv)
     out_dir = Path(args.out_dir)
@@ -101,11 +108,18 @@ def main(argv):
             masks = result[0] if isinstance(result, tuple) else result
             mask_path = out_dir / ("%s_cp_masks.tif" % req["id"])
             save_masks(mask_path, masks)
-            protocol({
+            response = {
                 "id": req["id"],
                 "mask_path": str(mask_path),
                 "duration_ms": int((time.time() - t0) * 1000),
-            })
+            }
+            if req.get("dump_cellprob", False):
+                if not isinstance(result, tuple) or len(result) < 2 or len(result[1]) < 3:
+                    raise RuntimeError("Cellpose did not return a cellprob flow map.")
+                cellprob_path = out_dir / ("%s_cellprob.tif" % req["id"])
+                save_cellprob(cellprob_path, result[1][2])
+                response["cellprob_path"] = str(cellprob_path)
+            protocol(response)
         except Exception as exc:
             protocol({
                 "id": req.get("id", "?"),

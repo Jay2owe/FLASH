@@ -6,11 +6,20 @@ public final class CellposeWorkerRequest {
     private final double diameter;
     private final double flowThreshold;
     private final double cellprobThreshold;
+    private final boolean dumpCellprob;
 
     public CellposeWorkerRequest(String id,
                                  double diameter,
                                  double flowThreshold,
                                  double cellprobThreshold) {
+        this(id, diameter, flowThreshold, cellprobThreshold, false);
+    }
+
+    public CellposeWorkerRequest(String id,
+                                 double diameter,
+                                 double flowThreshold,
+                                 double cellprobThreshold,
+                                 boolean dumpCellprob) {
         if (id == null || id.trim().isEmpty()) {
             throw new IllegalArgumentException("id must not be empty");
         }
@@ -18,6 +27,7 @@ public final class CellposeWorkerRequest {
         this.diameter = sanitizeNonNegative(diameter);
         this.flowThreshold = flowThreshold;
         this.cellprobThreshold = cellprobThreshold;
+        this.dumpCellprob = dumpCellprob;
     }
 
     public String id() {
@@ -50,6 +60,18 @@ public final class CellposeWorkerRequest {
 
     public double getCellprobThreshold() {
         return cellprobThreshold;
+    }
+
+    public boolean dumpCellprob() {
+        return dumpCellprob;
+    }
+
+    public boolean isDumpCellprob() {
+        return dumpCellprob;
+    }
+
+    public boolean getDumpCellprob() {
+        return dumpCellprob;
     }
 
     private static double sanitizeNonNegative(double value) {

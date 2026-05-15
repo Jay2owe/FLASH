@@ -384,6 +384,88 @@ public final class Cellpose3DRunner {
         }
     }
 
+    public static ImagePlus readCellprobImage(Path cellprobPath) {
+        try {
+            if (cellprobPath == null || !Files.isRegularFile(cellprobPath)) {
+                IJ.log("WARNING: Cellpose produced no cell probability file at " + cellprobPath);
+                return null;
+            }
+
+            ImagePlus cellprobImage = IJ.openImage(cellprobPath.toString());
+            if (cellprobImage == null) {
+                throw new IllegalStateException("Could not open Cellpose cell probability image: "
+                        + cellprobPath);
+            }
+
+            if (cellprobImage.getBitDepth() != 32) {
+                ImageStack oldStack = cellprobImage.getStack();
+                ImageStack newStack = new ImageStack(oldStack.getWidth(), oldStack.getHeight());
+                for (int s = 1; s <= oldStack.getSize(); s++) {
+                    ImageProcessor ip = oldStack.getProcessor(s);
+                    newStack.addSlice(ip.convertToFloatProcessor());
+                }
+                cellprobImage.setStack(newStack);
+            }
+
+            cellprobImage.setTitle("Cellpose Cell Probability");
+            cellprobImage.setDimensions(1, Math.max(1, cellprobImage.getStackSize()), 1);
+            return cellprobImage;
+        } catch (Exception e) {
+            IJ.log("WARNING: Failed reading Cellpose cell probability image: " + e.getMessage());
+            return null;
+        }
+    }
+
+    public static double[] perObjectMeanCellprob(ImagePlus labelImage,
+                                                 ImagePlus cellprobImage) {
+        if (labelImage == null || cellprobImage == null
+                || labelImage.getStack() == null || cellprobImage.getStack() == null) {
+            return new double[0];
+        }
+        if (labelImage.getWidth() != cellprobImage.getWidth()
+                || labelImage.getHeight() != cellprobImage.getHeight()
+                || labelImage.getStackSize() != cellprobImage.getStackSize()) {
+            throw new IllegalArgumentException("Label and cell probability images must have matching dimensions.");
+        }
+
+        int maxLabel = countLabels(labelImage);
+        double[] sums = new double[maxLabel + 1];
+        long[] counts = new long[maxLabel + 1];
+        for (int s = 1; s <= labelImage.getStackSize(); s++) {
+            ImageProcessor labels = labelImage.getStack().getProcessor(s);
+            ImageProcessor cellprob = cellprobImage.getStack().getProcessor(s);
+            int width = labels.getWidth();
+            int height = labels.getHeight();
+            for (int y = 0; y < height; y++) {
+                for (int x = 0; x < width; x++) {
+                    float labelValue = labels.getf(x, y);
+                    if (!Float.isFinite(labelValue)) {
+                        continue;
+                    }
+                    int label = (int) labelValue;
+                    if (label <= 0 || label > maxLabel) {
+                        continue;
+                    }
+                    float cellprobValue = cellprob.getf(x, y);
+                    if (!Float.isFinite(cellprobValue)) {
+                        continue;
+                    }
+                    sums[label] += cellprobValue;
+                    counts[label]++;
+                }
+            }
+        }
+
+        double[] means = new double[maxLabel + 1];
+        means[0] = Double.NaN;
+        for (int label = 1; label <= maxLabel; label++) {
+            means[label] = counts[label] == 0L
+                    ? Double.NaN
+                    : sums[label] / (double) counts[label];
+        }
+        return means;
+    }
+
     static Path expectedMaskPath(Path outputDir) {
         return outputDir.resolve(INPUT_STACK_BASENAME + MASK_SUFFIX);
     }
