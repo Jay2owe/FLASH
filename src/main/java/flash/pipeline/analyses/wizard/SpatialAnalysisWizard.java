@@ -35,6 +35,12 @@ public class SpatialAnalysisWizard extends WizardFlow {
     public static final String MORPH_TERRITORY = "Territory x morphology (TDR / FEV_Mag)";
     public static final String MORPH_ALL = "Everything (exploratory)";
 
+    public static final String TEXTURE_NONE = "Not measuring object texture";
+    public static final String TEXTURE_GLCM = "Object texture (GLCM)";
+    public static final String TEXTURE_FRACTAL = "Object complexity (fractal + lacunarity)";
+    public static final String TEXTURE_CLASS = "Object texture classes (auto-discover sub-populations)";
+    public static final String TEXTURE_ALL = "All object texture features (exploratory)";
+
     public static final String RIPLEY_CALIBRATION_WARNING =
             "Ripley's K/L/G needs calibration data. Run calibration first to enable this option.";
     public static final String Z_STACK_WARNING = "requires z-stack with more slices";
@@ -60,6 +66,7 @@ public class SpatialAnalysisWizard extends WizardFlow {
         this.thresholdsConfiguredUpstream = thresholdsConfiguredUpstream;
         register(new SpatialQuestionScreen());
         register(new MorphometryQuestionScreen());
+        register(new TextureQuestionScreen());
         register(new HeatmapTuningScreen());
         register(new ThresholdScreen());
     }
@@ -92,6 +99,11 @@ public class SpatialAnalysisWizard extends WizardFlow {
         }
         applyMorphologyQuestion(out, morph);
 
+        String texture = answerString(safeAnswers, "texture.question", TEXTURE_NONE);
+        applyTextureQuestion(out, texture);
+        int requestedTextureK = intAnswer(safeAnswers, "texture.k", 4);
+        out.textureClassK = Math.max(2, Math.min(10, requestedTextureK));
+
         out.heatmapLut = answerString(safeAnswers, "heatmap.lut", "Fire");
         boolean autoBandwidth = booleanAnswer(safeAnswers, "heatmap.autoBandwidth", true);
         out.kdeBandwidth = autoBandwidth ? 0.0 : doubleAnswer(safeAnswers, "heatmap.bandwidth", 0.0);
@@ -123,6 +135,10 @@ public class SpatialAnalysisWizard extends WizardFlow {
         out.doCompositeIndices = preset.isDoCompositeIndices();
         out.doPopMorphometrics = preset.isDoPopMorphometrics();
         out.doSpatialMorphometrics = preset.isDoSpatialMorphometrics();
+        out.doObjectGLCM = preset.isDoObjectGLCM();
+        out.doObjectFractal = preset.isDoObjectFractal();
+        out.doObjectTextureClass = preset.isDoObjectTextureClass();
+        out.textureClassK = preset.getTextureClassK();
         out.kdeBandwidth = preset.getKdeBandwidth();
         out.heatmapLut = preset.getHeatmapLut();
         out.clusterK = preset.getClusterK();
@@ -227,6 +243,20 @@ public class SpatialAnalysisWizard extends WizardFlow {
             out.doCompositeIndices = true;
             out.doPopMorphometrics = true;
             out.doSpatialMorphometrics = true;
+        }
+    }
+
+    private static void applyTextureQuestion(DerivedConfig out, String option) {
+        if (TEXTURE_GLCM.equals(option)) {
+            out.doObjectGLCM = true;
+        } else if (TEXTURE_FRACTAL.equals(option)) {
+            out.doObjectFractal = true;
+        } else if (TEXTURE_CLASS.equals(option)) {
+            out.doObjectTextureClass = true;
+        } else if (TEXTURE_ALL.equals(option)) {
+            out.doObjectGLCM = true;
+            out.doObjectFractal = true;
+            out.doObjectTextureClass = true;
         }
     }
 
@@ -426,6 +456,34 @@ public class SpatialAnalysisWizard extends WizardFlow {
         public void read(PipelineDialog dialog, AnswerMap answers) {
             String selected = dialog.getNextChoice();
             answers.put("morph.question", selected);
+        }
+
+        public void writeTo(MainPanelBinding panel, AnswerMap answers) {
+        }
+    }
+
+    private final class TextureQuestionScreen extends Screen {
+        private TextureQuestionScreen() {
+            super("What object texture / complexity question are you asking?");
+            defaultAnswer("texture.question", TEXTURE_NONE);
+            defaultAnswer("texture.k", Integer.valueOf(4));
+        }
+
+        public void build(PipelineDialog dialog, AnswerMap answers) {
+            dialog.addHeader("What object texture / complexity question are you asking?");
+            String selected = answers.getString("texture.question", TEXTURE_NONE);
+            dialog.addChoice("Texture question",
+                    new String[]{TEXTURE_NONE, TEXTURE_GLCM, TEXTURE_FRACTAL,
+                            TEXTURE_CLASS, TEXTURE_ALL},
+                    selected);
+            dialog.beginAdvancedSection("spatial.texture.advanced");
+            dialog.addNumericField("Texture classes (k)", answers.getInt("texture.k", 4), 0);
+            dialog.endAdvancedSection();
+        }
+
+        public void read(PipelineDialog dialog, AnswerMap answers) {
+            answers.put("texture.question", dialog.getNextChoice());
+            answers.put("texture.k", Integer.valueOf((int) dialog.getNextNumber()));
         }
 
         public void writeTo(MainPanelBinding panel, AnswerMap answers) {

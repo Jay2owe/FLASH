@@ -227,6 +227,12 @@ public class CLIConfig {
         appendBoolean(parts, "spatial.complex", spatial.doCompositeIndices);
         appendBoolean(parts, "spatial.population", spatial.doPopMorphometrics);
         appendBoolean(parts, "spatial.spatialMorph", spatial.doSpatialMorphometrics);
+        appendBoolean(parts, "spatial.texture.glcm", spatial.textureGlcm);
+        appendBoolean(parts, "spatial.texture.fractal", spatial.textureFractal);
+        appendBoolean(parts, "spatial.texture.class", spatial.textureClass);
+        if (spatial.textureClassK != null) {
+            parts.add("spatial.texture.k=" + spatial.textureClassK);
+        }
         if (spatial.kdeBandwidth != null) {
             parts.add("spatial.kdeBandwidth=" + formatDouble(spatial.kdeBandwidth.doubleValue()));
         }
@@ -586,6 +592,10 @@ public class CLIConfig {
         Boolean doCompositeIndices = null;
         Boolean doPopMorphometrics = null;
         Boolean doSpatialMorphometrics = null;
+        Boolean textureGlcm = null;
+        Boolean textureFractal = null;
+        Boolean textureClass = null;
+        Integer textureClassK = null;
         Double kdeBandwidth = null;
         String heatmapLut = null;
         Integer clusterK = null;
@@ -603,6 +613,10 @@ public class CLIConfig {
         public Boolean getDoCompositeIndices() { return doCompositeIndices; }
         public Boolean getDoPopMorphometrics() { return doPopMorphometrics; }
         public Boolean getDoSpatialMorphometrics() { return doSpatialMorphometrics; }
+        public Boolean getTextureGlcm() { return textureGlcm; }
+        public Boolean getTextureFractal() { return textureFractal; }
+        public Boolean getTextureClass() { return textureClass; }
+        public Integer getTextureClassK() { return textureClassK; }
         public Double getKdeBandwidth() { return kdeBandwidth; }
         public String getHeatmapLut() { return heatmapLut; }
         public Integer getClusterK() { return clusterK; }
@@ -621,6 +635,10 @@ public class CLIConfig {
                     || doCompositeIndices != null
                     || doPopMorphometrics != null
                     || doSpatialMorphometrics != null
+                    || textureGlcm != null
+                    || textureFractal != null
+                    || textureClass != null
+                    || textureClassK != null
                     || kdeBandwidth != null
                     || heatmapLut != null
                     || clusterK != null;

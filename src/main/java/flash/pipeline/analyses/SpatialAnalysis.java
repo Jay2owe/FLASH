@@ -1231,10 +1231,16 @@ public class SpatialAnalysis implements Analysis {
         boolean doCompositeIndices = initialOptions != null && initialOptions.doCompositeIndices;
         boolean doPopMorphometrics = initialOptions != null && initialOptions.doPopMorphometrics;
         boolean doSpatialMorphometrics = initialOptions != null && initialOptions.doSpatialMorphometrics;
+        boolean doObjectGLCM = initialOptions != null && initialOptions.doObjectGLCM;
+        boolean doObjectFractal = initialOptions != null && initialOptions.doObjectFractal;
+        boolean doObjectTextureClass = initialOptions != null && initialOptions.doObjectTextureClass;
         boolean forceRerun = initialOptions != null && initialOptions.forceRerun;
         double heatmapBandwidth = initialOptions == null ? 0.0 : initialOptions.kdeBandwidth;
         String heatmapLut = initialOptions == null ? DEFAULT_HEATMAP_LUT : initialOptions.heatmapLut;
         int clusterK = initialOptions == null ? 0 : initialOptions.clusterK;
+        int textureClassK = initialOptions == null
+                ? ObjectTextureFeatures.DEFAULT_K
+                : clampObjectTextureClassK(initialOptions.textureClassK);
 
         boolean dialogDone = false;
         while (!dialogDone) {
@@ -1320,6 +1326,9 @@ public class SpatialAnalysis implements Analysis {
                     doCompositeIndices, doPopMorphometrics, doSpatialMorphometrics,
                     existingObjectData, artifactStatus);
 
+            addObjectTextureControls(opts, spatialBindings, doObjectGLCM,
+                    doObjectFractal, doObjectTextureClass, textureClassK);
+
             addAdvancedPhenotypingAndHeatmapControls(opts, spatialBindings,
                     doPhenotyping, clusterK, doHeatmaps, heatmapBandwidth, heatmapLut,
                     artifactStatus);
@@ -1345,11 +1354,15 @@ public class SpatialAnalysis implements Analysis {
             doCompositeIndices = opts.getNextBoolean();
             doPopMorphometrics = opts.getNextBoolean();
             doSpatialMorphometrics = opts.getNextBoolean();
+            doObjectGLCM = opts.getNextBoolean();
+            doObjectFractal = opts.getNextBoolean();
+            doObjectTextureClass = opts.getNextBoolean();
             doPhenotyping = opts.getNextBoolean();
             doHeatmaps = opts.getNextBoolean();
             for (String chName : channelNames) {
                 markerThresholds.put(chName, opts.getNextNumber());
             }
+            textureClassK = clampObjectTextureClassK((int) Math.round(opts.getNextNumber()));
             clusterK = (int) opts.getNextNumber();
             heatmapBandwidth = opts.getNextNumber();
             heatmapLut = opts.getNextChoice();
@@ -1381,10 +1394,14 @@ public class SpatialAnalysis implements Analysis {
         config.doCompositeIndices = doCompositeIndices;
         config.doPopMorphometrics = doPopMorphometrics;
         config.doSpatialMorphometrics = doSpatialMorphometrics;
+        config.doObjectGLCM = doObjectGLCM;
+        config.doObjectFractal = doObjectFractal;
+        config.doObjectTextureClass = doObjectTextureClass;
         config.forceRerun = forceRerun;
         config.kdeBandwidth = heatmapBandwidth;
         config.heatmapLut = heatmapLut;
         config.clusterK = clusterK;
+        config.textureClassK = textureClassK;
         config.colocThresholdPercent = firstConfiguredThreshold(channelNames);
         config.markerThresholds.putAll(markerThresholds);
         return config;
@@ -5175,9 +5192,17 @@ public class SpatialAnalysis implements Analysis {
             setToggle(bindings.doCompositeIndicesToggle, config.doCompositeIndices);
             setToggle(bindings.doPopMorphometricsToggle, config.doPopMorphometrics);
             setToggle(bindings.doSpatialMorphometricsToggle, config.doSpatialMorphometrics);
+            setToggle(bindings.doObjectGLCMToggle, config.doObjectGLCM);
+            setToggle(bindings.doObjectFractalToggle, config.doObjectFractal);
+            setToggle(bindings.doObjectTextureClassToggle, config.doObjectTextureClass);
 
             if (bindings.kdeBandwidthField != null) {
                 bindings.kdeBandwidthField.setText(numericText(config.kdeBandwidth, 1));
+            }
+            if (bindings.textureClassKField != null) {
+                bindings.textureClassKField.setText(numericText(
+                        clampObjectTextureClassK(config.textureClassK), 0));
+                bindings.textureClassKField.setEnabled(config.doObjectTextureClass);
             }
             if (bindings.heatmapLutChoice != null && config.heatmapLut != null) {
                 bindings.heatmapLutChoice.setSelectedItem(config.heatmapLut);
@@ -5302,6 +5327,34 @@ public class SpatialAnalysis implements Analysis {
         });
     }
 
+    private void addObjectTextureControls(PipelineDialog opts,
+                                          final SpatialDialogBindings spatialBindings,
+                                          boolean doObjectGLCM,
+                                          boolean doObjectFractal,
+                                          boolean doObjectTextureClass,
+                                          int textureClassK) {
+        opts.addHeader("Object Texture and Complexity");
+        spatialBindings.doObjectGLCMToggle = opts.addToggle("Object texture (GLCM)", doObjectGLCM);
+        spatialBindings.doObjectFractalToggle = opts.addToggle(
+                "Object complexity (fractal + lacunarity)", doObjectFractal);
+        final ToggleSwitch textureClassToggle = opts.addToggle(
+                "Object texture classes", doObjectTextureClass);
+        spatialBindings.doObjectTextureClassToggle = textureClassToggle;
+        opts.beginAdvancedSection("spatial.texture.advanced");
+        spatialBindings.textureClassKField = opts.addNumericField(
+                "Texture classes (k)", clampObjectTextureClassK(textureClassK), 0);
+        opts.endAdvancedSection();
+        spatialBindings.textureClassKField.setEnabled(textureClassToggle.isSelected());
+        textureClassToggle.addChangeListener(new Runnable() {
+            @Override
+            public void run() {
+                if (spatialBindings.textureClassKField != null) {
+                    spatialBindings.textureClassKField.setEnabled(textureClassToggle.isSelected());
+                }
+            }
+        });
+    }
+
     private void addAdvancedPhenotypingAndHeatmapControls(PipelineDialog opts,
                                                           SpatialDialogBindings spatialBindings,
                                                           boolean doPhenotyping,
@@ -5358,6 +5411,10 @@ public class SpatialAnalysis implements Analysis {
         return selectedByDefault
                 || ij.Prefs.get("flash.advanced.global", false)
                 || ij.Prefs.get("flash.advanced.spatial", false);
+    }
+
+    private static int clampObjectTextureClassK(int value) {
+        return Math.max(2, Math.min(10, value));
     }
 
     private static void updateMorphometricDependencyControls(SpatialDialogBindings bindings) {
@@ -5489,6 +5546,12 @@ public class SpatialAnalysis implements Analysis {
                 isSelected(bindings.doCompositeIndicesToggle),
                 isSelected(bindings.doPopMorphometricsToggle),
                 isSelected(bindings.doSpatialMorphometricsToggle),
+                isSelected(bindings.doObjectGLCMToggle),
+                isSelected(bindings.doObjectFractalToggle),
+                isSelected(bindings.doObjectTextureClassToggle),
+                clampObjectTextureClassK((int) Math.round(readNumericField(
+                        bindings.textureClassKField, ObjectTextureFeatures.DEFAULT_K,
+                        "Texture classes (k)"))),
                 readNumericField(bindings.kdeBandwidthField, 0.0, "KDE bandwidth"),
                 selectedText(bindings.heatmapLutChoice, DEFAULT_HEATMAP_LUT),
                 (int) Math.round(readNumericField(bindings.clusterKField, 0.0, "Clusters (k)")),
@@ -5632,6 +5695,10 @@ public class SpatialAnalysis implements Analysis {
         if (spatial.getDoCompositeIndices() != null) config.doCompositeIndices = spatial.getDoCompositeIndices().booleanValue();
         if (spatial.getDoPopMorphometrics() != null) config.doPopMorphometrics = spatial.getDoPopMorphometrics().booleanValue();
         if (spatial.getDoSpatialMorphometrics() != null) config.doSpatialMorphometrics = spatial.getDoSpatialMorphometrics().booleanValue();
+        if (spatial.getTextureGlcm() != null) config.doObjectGLCM = spatial.getTextureGlcm().booleanValue();
+        if (spatial.getTextureFractal() != null) config.doObjectFractal = spatial.getTextureFractal().booleanValue();
+        if (spatial.getTextureClass() != null) config.doObjectTextureClass = spatial.getTextureClass().booleanValue();
+        if (spatial.getTextureClassK() != null) config.textureClassK = clampObjectTextureClassK(spatial.getTextureClassK().intValue());
         if (spatial.getKdeBandwidth() != null) config.kdeBandwidth = spatial.getKdeBandwidth().doubleValue();
         if (spatial.getHeatmapLut() != null && !spatial.getHeatmapLut().trim().isEmpty()) {
             config.heatmapLut = spatial.getHeatmapLut().trim();
@@ -5674,8 +5741,12 @@ public class SpatialAnalysis implements Analysis {
         ToggleSwitch doCompositeIndicesToggle;
         ToggleSwitch doPopMorphometricsToggle;
         ToggleSwitch doSpatialMorphometricsToggle;
+        ToggleSwitch doObjectGLCMToggle;
+        ToggleSwitch doObjectFractalToggle;
+        ToggleSwitch doObjectTextureClassToggle;
         List<JTextField> thresholdFields = new ArrayList<JTextField>();
         JTextField kdeBandwidthField;
+        JTextField textureClassKField;
         JComboBox<String> heatmapLutChoice;
         JTextField clusterKField;
     }

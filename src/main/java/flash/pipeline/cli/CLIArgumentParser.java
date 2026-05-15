@@ -570,6 +570,14 @@ public final class CLIArgumentParser {
         spatial.doPopMorphometrics = parseNullableBoolean(options, "spatial.population", spatial.doPopMorphometrics);
         spatial.doSpatialMorphometrics = parseNullableBoolean(options, "spatial.spatialMorph", spatial.doSpatialMorphometrics);
         spatial.doSpatialMorphometrics = parseNullableBoolean(options, "spatial.spatial_morph", spatial.doSpatialMorphometrics);
+        spatial.textureGlcm = parseNullableBoolean(options, "spatial.texture.glcm", spatial.textureGlcm);
+        spatial.textureFractal = parseNullableBoolean(options, "spatial.texture.fractal", spatial.textureFractal);
+        spatial.textureClass = parseNullableBoolean(options, "spatial.texture.class", spatial.textureClass);
+
+        String textureK = getValue(options, "spatial.texture.k");
+        if (textureK != null) {
+            spatial.textureClassK = Integer.valueOf(parseIntValue("spatial.texture.k", textureK, 4, 2, 10));
+        }
 
         String bandwidth = getValue(options, "spatial.kdeBandwidth");
         if (bandwidth == null) {

@@ -29,6 +29,10 @@ public final class SpatialPreset implements Preset<SpatialPreset> {
     private final boolean doCompositeIndices;
     private final boolean doPopMorphometrics;
     private final boolean doSpatialMorphometrics;
+    private final boolean doObjectGLCM;
+    private final boolean doObjectFractal;
+    private final boolean doObjectTextureClass;
+    private final int textureClassK;
     private final double kdeBandwidth;
     private final String heatmapLut;
     private final int clusterK;
@@ -53,6 +57,36 @@ public final class SpatialPreset implements Preset<SpatialPreset> {
                          String heatmapLut,
                          int clusterK,
                          double colocThresholdPercent) {
+        this(name, description, libraryVersion, doDistances, doSpatialStats, doVolColoc,
+                doCpc, doVoronoi, doHeatmaps, doPhenotyping, do2DMorphology,
+                do3DMorphology, doCompositeIndices, doPopMorphometrics,
+                doSpatialMorphometrics, false, false, false, 4,
+                kdeBandwidth, heatmapLut, clusterK, colocThresholdPercent);
+    }
+
+    public SpatialPreset(String name,
+                         String description,
+                         String libraryVersion,
+                         boolean doDistances,
+                         boolean doSpatialStats,
+                         boolean doVolColoc,
+                         boolean doCpc,
+                         boolean doVoronoi,
+                         boolean doHeatmaps,
+                         boolean doPhenotyping,
+                         boolean do2DMorphology,
+                         boolean do3DMorphology,
+                         boolean doCompositeIndices,
+                         boolean doPopMorphometrics,
+                         boolean doSpatialMorphometrics,
+                         boolean doObjectGLCM,
+                         boolean doObjectFractal,
+                         boolean doObjectTextureClass,
+                         int textureClassK,
+                         double kdeBandwidth,
+                         String heatmapLut,
+                         int clusterK,
+                         double colocThresholdPercent) {
         this.name = requireText("name", name);
         this.description = emptyToNull(description);
         this.libraryVersion = emptyToNull(libraryVersion) == null
@@ -70,6 +104,10 @@ public final class SpatialPreset implements Preset<SpatialPreset> {
         this.doCompositeIndices = doCompositeIndices;
         this.doPopMorphometrics = doPopMorphometrics;
         this.doSpatialMorphometrics = doSpatialMorphometrics;
+        this.doObjectGLCM = doObjectGLCM;
+        this.doObjectFractal = doObjectFractal;
+        this.doObjectTextureClass = doObjectTextureClass;
+        this.textureClassK = Math.max(2, Math.min(10, textureClassK));
         this.kdeBandwidth = kdeBandwidth;
         this.heatmapLut = emptyToNull(heatmapLut) == null ? "Fire" : heatmapLut.trim();
         this.clusterK = clusterK;
@@ -92,6 +130,10 @@ public final class SpatialPreset implements Preset<SpatialPreset> {
     public boolean isDoCompositeIndices() { return doCompositeIndices; }
     public boolean isDoPopMorphometrics() { return doPopMorphometrics; }
     public boolean isDoSpatialMorphometrics() { return doSpatialMorphometrics; }
+    public boolean isDoObjectGLCM() { return doObjectGLCM; }
+    public boolean isDoObjectFractal() { return doObjectFractal; }
+    public boolean isDoObjectTextureClass() { return doObjectTextureClass; }
+    public int getTextureClassK() { return textureClassK; }
     public double getKdeBandwidth() { return kdeBandwidth; }
     public String getHeatmapLut() { return heatmapLut; }
     public int getClusterK() { return clusterK; }
@@ -114,6 +156,10 @@ public final class SpatialPreset implements Preset<SpatialPreset> {
         root.put("doCompositeIndices", Boolean.valueOf(doCompositeIndices));
         root.put("doPopMorphometrics", Boolean.valueOf(doPopMorphometrics));
         root.put("doSpatialMorphometrics", Boolean.valueOf(doSpatialMorphometrics));
+        root.put("doObjectGLCM", Boolean.valueOf(doObjectGLCM));
+        root.put("doObjectFractal", Boolean.valueOf(doObjectFractal));
+        root.put("doObjectTextureClass", Boolean.valueOf(doObjectTextureClass));
+        root.put("textureClassK", Integer.valueOf(textureClassK));
         root.put("kdeBandwidth", Double.valueOf(kdeBandwidth));
         root.put("heatmapLut", heatmapLut);
         root.put("clusterK", Integer.valueOf(clusterK));
@@ -147,6 +193,10 @@ public final class SpatialPreset implements Preset<SpatialPreset> {
                 JsonIO.booleanValue(root.get("doCompositeIndices"), false),
                 JsonIO.booleanValue(root.get("doPopMorphometrics"), false),
                 JsonIO.booleanValue(root.get("doSpatialMorphometrics"), false),
+                JsonIO.booleanValue(root.get("doObjectGLCM"), false),
+                JsonIO.booleanValue(root.get("doObjectFractal"), false),
+                JsonIO.booleanValue(root.get("doObjectTextureClass"), false),
+                JsonIO.intValue(root.get("textureClassK"), 4),
                 doubleValue(root.get("kdeBandwidth"), 0.0),
                 stringOr(root.get("heatmapLut"), "Fire"),
                 JsonIO.intValue(root.get("clusterK"), 0),
