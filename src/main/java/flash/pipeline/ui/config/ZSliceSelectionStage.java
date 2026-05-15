@@ -4,6 +4,7 @@ import flash.pipeline.help.SetupHelpCatalog;
 import flash.pipeline.help.SetupHelpTopic;
 import flash.pipeline.intelligence.EmptySliceSuggester;
 import flash.pipeline.io.SeriesMeta;
+import flash.pipeline.ui.FlashTheme;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import flash.pipeline.zslice.ZSliceRange;
 import flash.pipeline.zslice.ZSliceSelection;
@@ -21,7 +22,6 @@ import javax.swing.JTextField;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import java.awt.BorderLayout;
-import java.awt.Color;
 import java.awt.FlowLayout;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
@@ -291,7 +291,7 @@ public final class ZSliceSelectionStage implements ConfigQcStage {
         panel.setOpaque(false);
         totalSlicesLabel = new JLabel("Total z-slices: ");
         JLabel help = new JLabel("Choose a contiguous inclusive range (e.g. 11-30).");
-        help.setForeground(new Color(90, 90, 90));
+        help.setForeground(FlashTheme.TEXT_HELP);
         panel.add(totalSlicesLabel);
         panel.add(help);
         return panel;
@@ -300,7 +300,7 @@ public final class ZSliceSelectionStage implements ConfigQcStage {
     private JComponent buildRangePanel() {
         JPanel panel = new JPanel(new GridBagLayout());
         panel.setOpaque(false);
-        panel.setBorder(BorderFactory.createEmptyBorder(2, 0, 2, 0));
+        panel.setBorder(FlashTheme.pad(2, 0, 2, 0));
 
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.gridy = 0;
@@ -356,9 +356,9 @@ public final class ZSliceSelectionStage implements ConfigQcStage {
         suggestionLabel = new JLabel(" ");
         feedbackLabel = new JLabel(" ");
         errorLabel = new JLabel(" ");
-        suggestionLabel.setForeground(new Color(90, 90, 90));
-        feedbackLabel.setForeground(new Color(55, 71, 79));
-        errorLabel.setForeground(new Color(160, 45, 45));
+        suggestionLabel.setForeground(FlashTheme.TEXT_HELP);
+        feedbackLabel.setForeground(FlashTheme.TEXT_HEADER);
+        errorLabel.setForeground(FlashTheme.DANGER_FG);
         suggestionLabel.setAlignmentX(JComponent.LEFT_ALIGNMENT);
         feedbackLabel.setAlignmentX(JComponent.LEFT_ALIGNMENT);
         errorLabel.setAlignmentX(JComponent.LEFT_ALIGNMENT);

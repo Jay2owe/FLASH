@@ -1,8 +1,8 @@
 package flash.pipeline.ui.config;
 
 import flash.pipeline.ui.FlashIcons;
+import flash.pipeline.ui.FlashTheme;
 
-import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
 import javax.swing.Icon;
 import javax.swing.JComponent;
@@ -10,7 +10,6 @@ import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.SwingConstants;
 import java.awt.BorderLayout;
-import java.awt.Color;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Cursor;
@@ -44,8 +43,8 @@ public final class CollapsibleSection extends JPanel {
 
         this.headerBar = new JPanel(new BorderLayout(6, 0));
         this.headerBar.setOpaque(true);
-        this.headerBar.setBackground(new Color(238, 238, 238));
-        this.headerBar.setBorder(BorderFactory.createEmptyBorder(3, 6, 3, 6));
+        this.headerBar.setBackground(FlashTheme.SURFACE_MUTED);
+        this.headerBar.setBorder(FlashTheme.pad(3, 6, 3, 6));
 
         this.headerLabel = new JLabel();
         this.headerLabel.setHorizontalAlignment(SwingConstants.LEFT);
@@ -67,7 +66,7 @@ public final class CollapsibleSection extends JPanel {
         this.body = new JPanel();
         this.body.setOpaque(false);
         this.body.setLayout(new BoxLayout(this.body, BoxLayout.Y_AXIS));
-        this.body.setBorder(BorderFactory.createEmptyBorder(2, 6, 2, 6));
+        this.body.setBorder(FlashTheme.pad(2, 6, 2, 6));
         this.body.setAlignmentX(Component.LEFT_ALIGNMENT);
         add(this.body, BorderLayout.CENTER);
 
@@ -120,8 +119,8 @@ public final class CollapsibleSection extends JPanel {
 
     private void refreshHeader() {
         Icon chevron = expanded
-                ? FlashIcons.chevronDown(12, new Color(33, 33, 33))
-                : FlashIcons.chevronRight(12, new Color(33, 33, 33));
+                ? FlashIcons.chevronDown(FlashTheme.ICON_SMALL_SIZE, FlashTheme.TEXT_PRIMARY)
+                : FlashIcons.chevronRight(FlashTheme.ICON_SMALL_SIZE, FlashTheme.TEXT_PRIMARY);
         if (chevron != null) {
             headerLabel.setIcon(chevron);
             headerLabel.setIconTextGap(6);

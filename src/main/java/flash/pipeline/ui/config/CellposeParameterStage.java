@@ -6,6 +6,8 @@ import flash.pipeline.cellpose.CellposeRuntime;
 import flash.pipeline.help.SetupHelpCatalog;
 import flash.pipeline.help.SetupHelpTopic;
 import flash.pipeline.objects.ObjectsCounter3DWrapper;
+import flash.pipeline.ui.FlashTheme;
+import flash.pipeline.ui.ToggleSwitch;
 import flash.pipeline.ui.preview.ObjectSizeFilterPreview;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import flash.pipeline.ui.variations.MontageDisplayActionDelegate;
@@ -20,7 +22,6 @@ import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
-import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
@@ -33,7 +34,6 @@ import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import java.awt.Color;
 import java.awt.Container;
-import java.awt.Font;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
@@ -45,7 +45,7 @@ import java.util.concurrent.CompletableFuture;
 
 public final class CellposeParameterStage implements ConfigQcStage {
 
-    private static final Color HELP_COLOR = new Color(90, 90, 90);
+    private static final Color HELP_COLOR = FlashTheme.TEXT_HELP;
 
     public interface ParameterStore {
         String getMethodToken();
@@ -167,7 +167,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
     private JTextField cellprobField;
     private JTextField sizeMinField;
     private JTextField sizeMaxField;
-    private JCheckBox gpuCheckBox;
+    private ToggleSwitch gpuSwitch;
     private JButton previewButton;
     private JButton installGpuButton;
     private JButton resetButton;
@@ -257,7 +257,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
         JPanel panel = new JPanel();
         panel.setOpaque(false);
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
-        panel.setBorder(BorderFactory.createEmptyBorder(2, 0, 0, 0));
+        panel.setBorder(FlashTheme.pad(2, 0, 0, 0));
         panel.add(buildModelRow());
         panel.add(Box.createVerticalStrut(4));
         panel.add(buildDetectionRow());
@@ -408,8 +408,8 @@ public final class CellposeParameterStage implements ConfigQcStage {
     }
 
     void setUseGpuForTest(boolean useGpu) {
-        if (gpuCheckBox != null) {
-            gpuCheckBox.setSelected(useGpu);
+        if (gpuSwitch != null) {
+            gpuSwitch.setSelected(useGpu);
             fieldChanged();
         }
     }
@@ -480,18 +480,28 @@ public final class CellposeParameterStage implements ConfigQcStage {
         JPanel row = new JPanel(new GridBagLayout());
         row.setOpaque(false);
         row.setAlignmentX(JComponent.LEFT_ALIGNMENT);
-        row.setBorder(BorderFactory.createEmptyBorder(2, 0, 2, 0));
+        row.setBorder(FlashTheme.pad(2, 0, 2, 0));
 
         modelCombo = new JComboBox<String>(CellposeModel.displayNames());
         modelCombo.addActionListener(e -> modelChanged());
         companionCombo = new JComboBox<String>(
                 companionChoices.keySet().toArray(new String[0]));
         companionCombo.addActionListener(e -> companionChanged());
-        gpuCheckBox = new JCheckBox("Use GPU");
-        gpuCheckBox.setOpaque(false);
-        gpuCheckBox.addActionListener(e -> {
-            if (!updatingControls) gpuEdited = true;
-            fieldChanged();
+        gpuSwitch = new ToggleSwitch(false);
+        gpuSwitch.addChangeListener(new Runnable() {
+            @Override public void run() {
+                if (!updatingControls) gpuEdited = true;
+                fieldChanged();
+            }
+        });
+        JLabel gpuLabel = new JLabel("Use GPU");
+        gpuLabel.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+        gpuLabel.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override public void mouseClicked(java.awt.event.MouseEvent e) {
+                if (gpuSwitch.isEnabled()) {
+                    gpuSwitch.setSelected(!gpuSwitch.isSelected());
+                }
+            }
         });
         installGpuButton = new JButton("Install GPU Support");
         installGpuButton.addActionListener(e -> installGpuSupport());
@@ -513,7 +523,13 @@ public final class CellposeParameterStage implements ConfigQcStage {
         gbc.gridx++;
         gbc.weightx = 0.0;
         gbc.fill = GridBagConstraints.NONE;
-        row.add(gpuCheckBox, gbc);
+        JPanel gpuPanel = new JPanel();
+        gpuPanel.setOpaque(false);
+        gpuPanel.setLayout(new BoxLayout(gpuPanel, BoxLayout.X_AXIS));
+        gpuPanel.add(gpuSwitch);
+        gpuPanel.add(Box.createHorizontalStrut(FlashTheme.SPACE_S));
+        gpuPanel.add(gpuLabel);
+        row.add(gpuPanel, gbc);
         gbc.gridx++;
         row.add(installGpuButton, gbc);
         gbc.gridx++;
@@ -527,11 +543,10 @@ public final class CellposeParameterStage implements ConfigQcStage {
         JPanel row = new JPanel(new GridBagLayout());
         row.setOpaque(false);
         row.setAlignmentX(JComponent.LEFT_ALIGNMENT);
-        row.setBorder(BorderFactory.createEmptyBorder(2, 0, 2, 0));
+        row.setBorder(FlashTheme.pad(2, 0, 2, 0));
 
         JLabel heading = new JLabel("Detection:");
-        Font font = heading.getFont();
-        if (font != null) heading.setFont(font.deriveFont(Font.BOLD));
+        heading.setFont(FlashTheme.bodyMedium());
         diameterField = createNumberField(6);
         flowField = createNumberField(5);
         cellprobField = createNumberField(5);
@@ -561,11 +576,10 @@ public final class CellposeParameterStage implements ConfigQcStage {
         JPanel row = new JPanel(new GridBagLayout());
         row.setOpaque(false);
         row.setAlignmentX(JComponent.LEFT_ALIGNMENT);
-        row.setBorder(BorderFactory.createEmptyBorder(2, 0, 2, 0));
+        row.setBorder(FlashTheme.pad(2, 0, 2, 0));
 
         JLabel heading = new JLabel("Object size:");
-        Font font = heading.getFont();
-        if (font != null) heading.setFont(font.deriveFont(Font.BOLD));
+        heading.setFont(FlashTheme.bodyMedium());
         sizeMinField = createSizeField(6);
         sizeMaxField = createSizeField(8);
 
@@ -590,7 +604,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
         JPanel row = new JPanel(new GridBagLayout());
         row.setOpaque(false);
         row.setAlignmentX(JComponent.LEFT_ALIGNMENT);
-        row.setBorder(BorderFactory.createEmptyBorder(2, 0, 2, 0));
+        row.setBorder(FlashTheme.pad(2, 0, 2, 0));
 
         modelDescriptionLabel = hintLabel(" ");
         companionHelpLabel = hintLabel(" ");
@@ -715,7 +729,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
             diameterField.setText(String.valueOf(parameters.diameter));
             flowField.setText(String.valueOf(parameters.flowThreshold));
             cellprobField.setText(String.valueOf(parameters.cellprobThreshold));
-            gpuCheckBox.setSelected(parameters.useGpu);
+            gpuSwitch.setSelected(parameters.useGpu);
             refreshModelDescriptionLabel();
             refreshCompanionHelpLabel();
         } finally {
@@ -822,16 +836,16 @@ public final class CellposeParameterStage implements ConfigQcStage {
     }
 
     private void applyRuntimeGpuDefault(CellposeRuntime.Status status) {
-        if (status == null || !status.ready || gpuCheckBox == null
+        if (status == null || !status.ready || gpuSwitch == null
                 || gpuEdited || savedMethodExplicitGpu) {
             return;
         }
-        if (gpuCheckBox.isSelected() == status.gpuAvailable) {
+        if (gpuSwitch.isSelected() == status.gpuAvailable) {
             return;
         }
         updatingControls = true;
         try {
-            gpuCheckBox.setSelected(status.gpuAvailable);
+            gpuSwitch.setSelected(status.gpuAvailable);
         } finally {
             updatingControls = false;
         }
@@ -1211,7 +1225,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
                 try {
                     GpuInstallResult result = get();
                     if (result != null && result.success) {
-                        gpuCheckBox.setSelected(true);
+                        gpuSwitch.setSelected(true);
                         markPreviewStale(STALE_TEXT);
                         setStatus(result.message.isEmpty()
                                 ? "Cellpose GPU support installed." : result.message);
@@ -1245,7 +1259,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
                 parse(diameterField, fallback.diameter),
                 parse(flowField, fallback.flowThreshold),
                 parse(cellprobField, fallback.cellprobThreshold),
-                gpuCheckBox == null ? fallback.useGpu : gpuCheckBox.isSelected());
+                gpuSwitch == null ? fallback.useGpu : gpuSwitch.isSelected());
     }
 
     private static Parameters copyParameters(Parameters parameters) {
@@ -1324,7 +1338,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
         if (cellprobField != null) cellprobField.setEnabled(enabled);
         if (sizeMinField != null) sizeMinField.setEnabled(enabled);
         if (sizeMaxField != null) sizeMaxField.setEnabled(enabled);
-        if (gpuCheckBox != null) gpuCheckBox.setEnabled(enabled);
+        if (gpuSwitch != null) gpuSwitch.setEnabled(enabled);
         if (preview != null) {
             preview.setSourceModeEnabled(enabled);
             preview.setObjectOverlayEnabled(enabled);

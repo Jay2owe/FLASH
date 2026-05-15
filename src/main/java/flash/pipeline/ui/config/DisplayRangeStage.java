@@ -2,6 +2,7 @@ package flash.pipeline.ui.config;
 
 import flash.pipeline.help.SetupHelpCatalog;
 import flash.pipeline.help.SetupHelpTopic;
+import flash.pipeline.ui.FlashTheme;
 import flash.pipeline.ui.preview.MinMaxControlPanel;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import ij.ImagePlus;
@@ -11,7 +12,6 @@ import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import java.awt.BorderLayout;
-import java.awt.Color;
 
 public final class DisplayRangeStage implements ConfigQcStage {
 
@@ -77,7 +77,7 @@ public final class DisplayRangeStage implements ConfigQcStage {
         panel.setOpaque(false);
 
         JLabel help = new JLabel("Adjust min/max on the channel projection.");
-        help.setForeground(new Color(90, 90, 90));
+        help.setForeground(FlashTheme.TEXT_HELP);
         panel.add(help, BorderLayout.NORTH);
 
         control = new MinMaxControlPanel();
@@ -104,7 +104,7 @@ public final class DisplayRangeStage implements ConfigQcStage {
         panel.add(buildControlPanel(control), BorderLayout.CENTER);
 
         feedbackLabel = new JLabel(" ");
-        feedbackLabel.setForeground(new Color(90, 90, 90));
+        feedbackLabel.setForeground(FlashTheme.TEXT_HELP);
         panel.add(feedbackLabel, BorderLayout.SOUTH);
         return panel;
     }
@@ -183,7 +183,7 @@ public final class DisplayRangeStage implements ConfigQcStage {
     private JComponent buildControlPanel(MinMaxControlPanel control) {
         JPanel wrapper = new JPanel(new BorderLayout());
         wrapper.setOpaque(false);
-        wrapper.setBorder(BorderFactory.createEmptyBorder(2, 0, 0, 0));
+        wrapper.setBorder(FlashTheme.pad(2, 0, 0, 0));
         wrapper.add(control, BorderLayout.CENTER);
         return wrapper;
     }

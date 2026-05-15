@@ -17,7 +17,6 @@ import javax.swing.JPanel;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.WindowConstants;
-import javax.swing.border.EmptyBorder;
 
 import java.awt.BorderLayout;
 import java.awt.Color;
@@ -45,15 +44,15 @@ import java.nio.charset.StandardCharsets;
  */
 public final class AboutFlashDialog implements PlugIn {
 
-    private static final Color HEADER_BG_TOP = new Color(55, 71, 79);
+    private static final Color HEADER_BG_TOP = FlashTheme.TEXT_HEADER;
     private static final Color HEADER_BG_BOTTOM = new Color(84, 110, 122);
-    private static final Color HEADER_FG = Color.WHITE;
-    private static final Color HEADER_ACCENT = new Color(255, 165, 0);
-    private static final Color BODY_BG = new Color(245, 245, 245);
+    private static final Color HEADER_FG = FlashTheme.TEXT_ON_DARK;
+    private static final Color HEADER_ACCENT = FlashTheme.WARNING_BORDER;
+    private static final Color BODY_BG = FlashTheme.SURFACE;
     private static final Color STEP_BG = new Color(250, 251, 252);
     private static final Color STEP_BORDER = new Color(208, 215, 222);
-    private static final Color TEXT_PRIMARY = new Color(33, 33, 33);
-    private static final Color TEXT_MUTED = new Color(117, 117, 117);
+    private static final Color TEXT_PRIMARY = FlashTheme.TEXT_PRIMARY;
+    private static final Color TEXT_MUTED = FlashTheme.TEXT_MUTED;
 
     @Override
     public void run(String arg) {
@@ -106,7 +105,7 @@ public final class AboutFlashDialog implements PlugIn {
         JLabel wordmark = new JLabel("FLASH");
         wordmark.setFont(wordmark.getFont().deriveFont(Font.BOLD, 30f));
         wordmark.setForeground(HEADER_FG);
-        wordmark.setBorder(new EmptyBorder(0, 12, 0, 0));
+        wordmark.setBorder(FlashTheme.pad(0, 12, 0, 0));
         g.gridx = 1; header.add(wordmark, g);
 
         return header;
@@ -116,7 +115,7 @@ public final class AboutFlashDialog implements PlugIn {
         JPanel body = new JPanel();
         body.setBackground(BODY_BG);
         body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
-        body.setBorder(new EmptyBorder(20, 24, 16, 24));
+        body.setBorder(FlashTheme.pad(20, 24, 16, 24));
 
         JLabel tagline = new JLabel("The Pipeline for Fluorescence Automated Spatial Histology");
         tagline.setFont(tagline.getFont().deriveFont(Font.PLAIN, 12f));
@@ -164,7 +163,7 @@ public final class AboutFlashDialog implements PlugIn {
         step.setBackground(STEP_BG);
         step.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(STEP_BORDER, 1),
-                new EmptyBorder(10, 10, 10, 10)));
+                FlashTheme.pad(10)));
 
         JLabel icon = new JLabel(renderSvgIcon("/flash/icons/" + iconName + ".svg", 28, HEADER_BG_TOP));
         icon.setAlignmentX(Component.CENTER_ALIGNMENT);
@@ -190,7 +189,7 @@ public final class AboutFlashDialog implements PlugIn {
         JLabel arrow = new JLabel("→");
         arrow.setFont(arrow.getFont().deriveFont(Font.PLAIN, 18f));
         arrow.setForeground(TEXT_MUTED);
-        arrow.setBorder(new EmptyBorder(0, 8, 0, 8));
+        arrow.setBorder(FlashTheme.pad(0, 8, 0, 8));
         return arrow;
     }
 
@@ -218,7 +217,7 @@ public final class AboutFlashDialog implements PlugIn {
     private static JComponent buildFooter(final JDialog dialog) {
         JPanel footer = new JPanel(new BorderLayout());
         footer.setBackground(BODY_BG);
-        footer.setBorder(new EmptyBorder(12, 24, 16, 24));
+        footer.setBorder(FlashTheme.pad(12, 24, 16, 24));
 
         JLabel attribution = new JLabel("Icons: Tabler (MIT) · SVG: jsvg (MIT)");
         attribution.setFont(attribution.getFont().deriveFont(Font.PLAIN, 10f));

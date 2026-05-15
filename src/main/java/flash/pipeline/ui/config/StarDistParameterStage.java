@@ -4,6 +4,7 @@ import flash.pipeline.bin.BinConfig;
 import flash.pipeline.help.SetupHelpCatalog;
 import flash.pipeline.help.SetupHelpTopic;
 import flash.pipeline.stardist.StarDist3DRunner;
+import flash.pipeline.ui.FlashTheme;
 import flash.pipeline.ui.preview.ObjectSizeFilterPreview;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import flash.pipeline.ui.variations.MontageDisplayActionDelegate;
@@ -26,7 +27,6 @@ import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
-import java.awt.Font;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
@@ -169,7 +169,7 @@ public final class StarDistParameterStage implements ConfigQcStage {
         JPanel panel = new JPanel();
         panel.setOpaque(false);
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
-        panel.setBorder(BorderFactory.createEmptyBorder(2, 0, 0, 0));
+        panel.setBorder(FlashTheme.pad(2, 0, 0, 0));
         createParameterFields();
         panel.add(buildGroupRow("Detection:", new String[]{"Probability", "NMS"},
                 new JTextField[]{probabilityField, nmsField}));
@@ -371,7 +371,7 @@ public final class StarDistParameterStage implements ConfigQcStage {
         JPanel row = new JPanel(new GridBagLayout());
         row.setOpaque(false);
         row.setAlignmentX(JComponent.LEFT_ALIGNMENT);
-        row.setBorder(BorderFactory.createEmptyBorder(2, 0, 2, 0));
+        row.setBorder(FlashTheme.pad(2, 0, 2, 0));
 
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.gridy = 0;
@@ -382,8 +382,7 @@ public final class StarDistParameterStage implements ConfigQcStage {
         gbc.weightx = 0.0;
         gbc.fill = GridBagConstraints.NONE;
         JLabel heading = new JLabel(headingText);
-        Font font = heading.getFont();
-        if (font != null) heading.setFont(font.deriveFont(Font.BOLD));
+        heading.setFont(FlashTheme.bodyMedium());
         row.add(heading, gbc);
 
         for (int i = 0; i < labels.length; i++) {
@@ -403,7 +402,7 @@ public final class StarDistParameterStage implements ConfigQcStage {
         JPanel row = new JPanel(new GridBagLayout());
         row.setOpaque(false);
         row.setAlignmentX(JComponent.LEFT_ALIGNMENT);
-        row.setBorder(BorderFactory.createEmptyBorder(2, 0, 2, 0));
+        row.setBorder(FlashTheme.pad(2, 0, 2, 0));
 
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.gridy = 0;
@@ -412,8 +411,7 @@ public final class StarDistParameterStage implements ConfigQcStage {
 
         gbc.gridx = 0;
         JLabel heading = new JLabel("Filters:");
-        Font font = heading.getFont();
-        if (font != null) heading.setFont(font.deriveFont(Font.BOLD));
+        heading.setFont(FlashTheme.bodyMedium());
         row.add(heading, gbc);
 
         gbc.gridx++;

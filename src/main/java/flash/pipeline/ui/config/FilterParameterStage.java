@@ -8,6 +8,7 @@ import flash.pipeline.image.dag.DagIR;
 import flash.pipeline.image.dag.DagLine;
 import flash.pipeline.image.dag.DagNode;
 import flash.pipeline.image.dag.IjmToDagLoader;
+import flash.pipeline.ui.FlashTheme;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import flash.pipeline.ui.sandbox.FilterBuilderPanel;
 import flash.pipeline.ui.sandbox.FilterCatalog;
@@ -641,7 +642,7 @@ public final class FilterParameterStage implements ConfigQcStage {
         row.add(saveAsButton, gbc);
 
         presetDescriptionLabel = new JLabel(descriptionProvider.describe(selectedPreset));
-        presetDescriptionLabel.setForeground(new Color(90, 90, 90));
+        presetDescriptionLabel.setForeground(FlashTheme.TEXT_HELP);
         presetDescriptionLabel.setHorizontalAlignment(SwingConstants.LEFT);
         updatePresetDescriptionVisibility();
         gbc.gridx = 1;
@@ -659,11 +660,11 @@ public final class FilterParameterStage implements ConfigQcStage {
         // Branched-preset banner (visible only when DAG is non-linear).
         branchedBannerLabel = new JLabel(BRANCHED_BANNER_TEXT);
         branchedBannerLabel.setOpaque(true);
-        branchedBannerLabel.setBackground(new Color(255, 244, 204));
-        branchedBannerLabel.setForeground(new Color(90, 60, 0));
+        branchedBannerLabel.setBackground(FlashTheme.WARNING_BG);
+        branchedBannerLabel.setForeground(FlashTheme.WARNING_FG);
         branchedBannerLabel.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(1, 1, 1, 1, new Color(220, 200, 130)),
-                BorderFactory.createEmptyBorder(4, 8, 4, 8)));
+                BorderFactory.createMatteBorder(1, 1, 1, 1, FlashTheme.WARNING_BORDER),
+                FlashTheme.pad(4, 8, 4, 8)));
         branchedBannerLabel.setAlignmentX(JComponent.LEFT_ALIGNMENT);
         branchedBannerLabel.setVisible(false);
         panel.add(Box.createVerticalStrut(4));
@@ -1244,7 +1245,7 @@ public final class FilterParameterStage implements ConfigQcStage {
 
     private void addParameterMessage(String text) {
         JLabel label = new JLabel(text == null ? "" : text);
-        label.setForeground(new Color(90, 90, 90));
+        label.setForeground(FlashTheme.TEXT_HELP);
         label.setAlignmentX(JComponent.LEFT_ALIGNMENT);
         parameterPanel.add(label);
     }
@@ -2046,7 +2047,7 @@ public final class FilterParameterStage implements ConfigQcStage {
         button.setContentAreaFilled(false);
         button.setFocusPainted(false);
         button.setMargin(new Insets(0, 4, 0, 4));
-        button.setForeground(new Color(50, 110, 200));
+        button.setForeground(FlashTheme.LINK_FG);
         button.setHorizontalAlignment(SwingConstants.LEFT);
         button.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
         return button;

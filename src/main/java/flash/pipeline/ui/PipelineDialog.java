@@ -8,7 +8,6 @@ import flash.pipeline.help.SetupHelpTopic;
 import ij.IJ;
 
 import javax.swing.*;
-import javax.swing.border.EmptyBorder;
 import java.awt.*;
 import java.awt.SecondaryLoop;
 import java.awt.event.MouseAdapter;
@@ -25,17 +24,17 @@ import java.util.concurrent.CountDownLatch;
  */
 public class PipelineDialog {
 
-    private static final Color BG_COLOR = new Color(245, 245, 245);
-    private static final Color HEADER_COLOR = new Color(55, 71, 79);
-    private static final Color SUBHEADER_COLOR = new Color(78, 93, 101);
-    private static final Color LABEL_COLOR = new Color(33, 33, 33);
-    private static final Color HELP_COLOR = new Color(117, 117, 117);
-    private static final Color PRIMARY_ACTION_BG = new Color(235, 248, 239);
-    private static final Color PRIMARY_ACTION_FG = new Color(37, 103, 62);
-    private static final Color PRIMARY_ACTION_BORDER = new Color(111, 173, 130);
-    private static final Color CANCEL_ACTION_BG = new Color(252, 240, 240);
-    private static final Color CANCEL_ACTION_FG = new Color(137, 44, 44);
-    private static final Color CANCEL_ACTION_BORDER = new Color(196, 108, 108);
+    private static final Color BG_COLOR = FlashTheme.SURFACE;
+    private static final Color HEADER_COLOR = FlashTheme.TEXT_HEADER;
+    private static final Color SUBHEADER_COLOR = FlashTheme.TEXT_SUBHEADER;
+    private static final Color LABEL_COLOR = FlashTheme.TEXT_PRIMARY;
+    private static final Color HELP_COLOR = FlashTheme.TEXT_MUTED;
+    private static final Color PRIMARY_ACTION_BG = FlashTheme.PRIMARY_BG;
+    private static final Color PRIMARY_ACTION_FG = FlashTheme.PRIMARY_FG;
+    private static final Color PRIMARY_ACTION_BORDER = FlashTheme.PRIMARY_BORDER;
+    private static final Color CANCEL_ACTION_BG = FlashTheme.DANGER_BG;
+    private static final Color CANCEL_ACTION_FG = FlashTheme.DANGER_FG;
+    private static final Color CANCEL_ACTION_BORDER = FlashTheme.DANGER_BORDER;
     private static final int MAX_BODY_VIEWPORT_WIDTH = 860;
     private static final int MAX_DIALOG_WIDTH = 1100;
     private static final int MIN_DIALOG_WIDTH = 320;
@@ -126,7 +125,7 @@ public class PipelineDialog {
 
         contentPanel = new BodyPanel();
         contentPanel.setLayout(new BoxLayout(contentPanel, BoxLayout.Y_AXIS));
-        contentPanel.setBorder(new EmptyBorder(15, 20, 10, 20));
+        contentPanel.setBorder(FlashTheme.pad(15, 20, 10, 20));
         contentPanel.setBackground(BG_COLOR);
 
         JScrollPane scrollPane = new JScrollPane(contentPanel);
@@ -140,7 +139,7 @@ public class PipelineDialog {
 
         breadcrumbPanel = new JPanel();
         breadcrumbPanel.setBackground(BG_COLOR);
-        breadcrumbPanel.setBorder(new EmptyBorder(4, 12, 2, 12));
+        breadcrumbPanel.setBorder(FlashTheme.pad(4, 12, 2, 12));
         breadcrumbPanel.setPreferredSize(new Dimension(0, 36));
         northContainer.add(breadcrumbPanel);
         dialog.getContentPane().add(northContainer, BorderLayout.NORTH);
@@ -246,7 +245,7 @@ public class PipelineDialog {
         chip.setFont(chip.getFont().deriveFont(Font.PLAIN, 11f));
         chip.setBorder(BorderFactory.createLineBorder(HEADER_COLOR, 1, true));
         chip.setBackground(phase == currentPhase ? HEADER_COLOR : BG_COLOR);
-        chip.setForeground(phase == currentPhase ? Color.WHITE : HEADER_COLOR);
+        chip.setForeground(phase == currentPhase ? FlashTheme.TEXT_ON_DARK : HEADER_COLOR);
         String iconOp = null;
         if (phase == Phase.SETUP)   iconOp = "settings";
         else if (phase == Phase.ANALYSE) iconOp = "microscope";
@@ -270,7 +269,7 @@ public class PipelineDialog {
     public void addHeader(String text, javax.swing.Icon icon) {
         addToBody(Box.createVerticalStrut(10));
         JLabel label = new JLabel(text);
-        label.setFont(label.getFont().deriveFont(Font.BOLD, 13f));
+        label.setFont(FlashTheme.h2());
         label.setForeground(HEADER_COLOR);
         label.setAlignmentX(Component.LEFT_ALIGNMENT);
         if (icon != null) {
@@ -308,7 +307,7 @@ public class PipelineDialog {
 
         JPanel row = createRow();
         JLabel label = new JLabel(text);
-        label.setFont(label.getFont().deriveFont(Font.BOLD, 13f));
+        label.setFont(FlashTheme.h2());
         label.setForeground(HEADER_COLOR);
         row.add(label);
         row.add(Box.createHorizontalStrut(6));
@@ -335,7 +334,7 @@ public class PipelineDialog {
 
         JPanel row = createRow();
         JLabel label = new JLabel(text);
-        label.setFont(label.getFont().deriveFont(Font.BOLD, 13f));
+        label.setFont(FlashTheme.h2());
         label.setForeground(HEADER_COLOR);
         row.add(label);
         row.add(Box.createHorizontalStrut(6));
@@ -361,7 +360,7 @@ public class PipelineDialog {
 
         JPanel row = createRow();
         JLabel label = new JLabel(text);
-        label.setFont(label.getFont().deriveFont(Font.BOLD, 13f));
+        label.setFont(FlashTheme.h2());
         label.setForeground(HEADER_COLOR);
         row.add(label);
         row.add(Box.createHorizontalStrut(8));
@@ -415,10 +414,10 @@ public class PipelineDialog {
     public void addSubHeader(String text) {
         addToBody(Box.createVerticalStrut(6));
         JLabel label = new JLabel(text);
-        label.setFont(label.getFont().deriveFont(Font.BOLD, 12f));
+        label.setFont(FlashTheme.bodyMedium());
         label.setForeground(SUBHEADER_COLOR);
         label.setAlignmentX(Component.LEFT_ALIGNMENT);
-        label.setBorder(new EmptyBorder(0, 16, 0, 0));
+        label.setBorder(FlashTheme.pad(0, 16, 0, 0));
         addToBody(label);
         addToBody(Box.createVerticalStrut(3));
     }
@@ -430,9 +429,9 @@ public class PipelineDialog {
         addToBody(Box.createVerticalStrut(6));
 
         JPanel row = createRow();
-        row.setBorder(new EmptyBorder(0, 20, 0, 4));
+        row.setBorder(FlashTheme.pad(0, 20, 0, 4));
         JLabel label = new JLabel(text);
-        label.setFont(label.getFont().deriveFont(Font.BOLD, 12f));
+        label.setFont(FlashTheme.bodyMedium());
         label.setForeground(SUBHEADER_COLOR);
         row.add(label);
         row.add(Box.createHorizontalStrut(6));
@@ -453,9 +452,9 @@ public class PipelineDialog {
         addToBody(Box.createVerticalStrut(6));
 
         JPanel row = createRow();
-        row.setBorder(new EmptyBorder(0, 20, 0, 4));
+        row.setBorder(FlashTheme.pad(0, 20, 0, 4));
         JLabel label = new JLabel(text);
-        label.setFont(label.getFont().deriveFont(Font.BOLD, 12f));
+        label.setFont(FlashTheme.bodyMedium());
         label.setForeground(SUBHEADER_COLOR);
         row.add(label);
         row.add(Box.createHorizontalStrut(8));
@@ -477,13 +476,13 @@ public class PipelineDialog {
         addToBody(Box.createVerticalStrut(6));
 
         JPanel row = createRow();
-        row.setBorder(new EmptyBorder(0, 20, 0, 4));
+        row.setBorder(FlashTheme.pad(0, 20, 0, 4));
         JLabel statusLabel = normalizeStatusIcon(leadingIcon);
         row.add(statusLabel);
         row.add(Box.createHorizontalStrut(6));
 
         JLabel label = new JLabel(text);
-        label.setFont(label.getFont().deriveFont(Font.BOLD, 12f));
+        label.setFont(FlashTheme.bodyMedium());
         label.setForeground(SUBHEADER_COLOR);
         row.add(label);
         row.add(Box.createHorizontalStrut(8));
@@ -566,7 +565,7 @@ public class PipelineDialog {
         help.setFont(help.getFont().deriveFont(Font.ITALIC, 10f));
         help.setForeground(HELP_COLOR);
         help.setAlignmentX(Component.LEFT_ALIGNMENT);
-        help.setBorder(new EmptyBorder(0, 24, 2, 0));
+        help.setBorder(FlashTheme.pad(0, 24, 2, 0));
         helpLabels.add(help);
         addToBody(help);
         addToBody(Box.createVerticalStrut(2));
@@ -617,7 +616,7 @@ public class PipelineDialog {
         label.setFont(label.getFont().deriveFont(Font.PLAIN, 11f));
         label.setForeground(LABEL_COLOR);
         label.setAlignmentX(Component.LEFT_ALIGNMENT);
-        label.setBorder(new EmptyBorder(0, 4, 2, 0));
+        label.setBorder(FlashTheme.pad(0, 4, 2, 0));
         addToBody(label);
         addToBody(Box.createVerticalStrut(4));
         return label;
@@ -702,21 +701,33 @@ public class PipelineDialog {
         advancedPanel.setOpaque(false);
         advancedPanel.setVisible(openByDefault);
 
-        // Sticky-pref checkbox lives inside the advanced panel.
-        final JCheckBox sticky = new JCheckBox("Always show advanced options for this module",
-                ij.Prefs.get("flash.advanced." + moduleId, false));
-        sticky.setForeground(HELP_COLOR);
-        sticky.setFont(sticky.getFont().deriveFont(Font.PLAIN, 11f));
-        sticky.setOpaque(false);
-        sticky.setAlignmentX(Component.LEFT_ALIGNMENT);
+        // Sticky preference lives inside the advanced panel and uses the same
+        // boolean control as the rest of PipelineDialog.
+        final JPanel stickyRow = createRow();
+        stickyRow.setBorder(FlashTheme.pad(0, 0, 0, 4));
+        final ToggleSwitch sticky = new ToggleSwitch(ij.Prefs.get("flash.advanced." + moduleId, false));
+        JLabel stickyLabel = new JLabel("Always show advanced options for this module");
+        stickyLabel.setForeground(HELP_COLOR);
+        stickyLabel.setFont(FlashTheme.caption());
+        stickyLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        stickyRow.add(sticky);
+        stickyRow.add(Box.createHorizontalStrut(FlashTheme.SPACE_S));
+        stickyRow.add(stickyLabel);
+        stickyRow.add(Box.createHorizontalGlue());
+        stickyRow.setAlignmentX(Component.LEFT_ALIGNMENT);
         final String stickyKey = "flash.advanced." + moduleId;
-        sticky.addActionListener(new java.awt.event.ActionListener() {
-            @Override public void actionPerformed(java.awt.event.ActionEvent e) {
+        sticky.addChangeListener(new Runnable() {
+            @Override public void run() {
                 ij.Prefs.set(stickyKey, sticky.isSelected());
                 ij.Prefs.savePreferences();
             }
         });
-        advancedPanel.add(sticky);
+        stickyLabel.addMouseListener(new MouseAdapter() {
+            @Override public void mouseClicked(MouseEvent e) {
+                sticky.setSelected(!sticky.isSelected());
+            }
+        });
+        advancedPanel.add(stickyRow);
 
         contentPanel.add(advancedPanel);
 
@@ -804,7 +815,7 @@ public class PipelineDialog {
         body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
         body.setAlignmentX(Component.LEFT_ALIGNMENT);
         body.setMaximumSize(new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE));
-        body.setBorder(new EmptyBorder(0, 12, 0, 0));
+        body.setBorder(FlashTheme.pad(0, 12, 0, 0));
         body.setOpaque(false);
         body.setVisible(initiallyExpanded);
         section.add(body);
@@ -1014,9 +1025,9 @@ public class PipelineDialog {
     public void setTransientStatus(String text) {
         if (statusLabel == null) {
             statusLabel = new JLabel(" ");
-            statusLabel.setForeground(new Color(40, 110, 70));
-            statusLabel.setFont(statusLabel.getFont().deriveFont(Font.PLAIN, 12f));
-            statusLabel.setBorder(new EmptyBorder(2, 12, 4, 12));
+            statusLabel.setForeground(FlashTheme.SUCCESS_FG);
+            statusLabel.setFont(FlashTheme.body());
+            statusLabel.setBorder(FlashTheme.pad(2, 12, 4, 12));
             southWrapper = new JPanel(new BorderLayout());
             southWrapper.setBackground(BG_COLOR);
             southWrapper.add(statusLabel, BorderLayout.NORTH);
@@ -1092,7 +1103,7 @@ public class PipelineDialog {
         row.setAlignmentX(Component.LEFT_ALIGNMENT);
         row.setOpaque(false);
         row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
-        row.setBorder(new EmptyBorder(0, 4, 0, 4));
+        row.setBorder(FlashTheme.pad(0, 4, 0, 4));
         return row;
     }
 
@@ -1203,7 +1214,7 @@ public class PipelineDialog {
         button.setFocusPainted(false);
         button.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(border),
-                BorderFactory.createEmptyBorder(3, 10, 3, 10)));
+                FlashTheme.pad(3, 10, 3, 10)));
     }
 
     private static class BodyPanel extends JPanel implements Scrollable {

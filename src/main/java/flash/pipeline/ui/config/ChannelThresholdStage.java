@@ -2,6 +2,7 @@ package flash.pipeline.ui.config;
 
 import flash.pipeline.help.SetupHelpCatalog;
 import flash.pipeline.help.SetupHelpTopic;
+import flash.pipeline.ui.FlashTheme;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import flash.pipeline.ui.preview.ThresholdControlPanel;
 import flash.pipeline.ui.preview.ThresholdOverlayRenderer;
@@ -13,7 +14,6 @@ import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import java.awt.BorderLayout;
-import java.awt.Color;
 
 public final class ChannelThresholdStage implements ConfigQcStage {
 
@@ -81,7 +81,7 @@ public final class ChannelThresholdStage implements ConfigQcStage {
         panel.setOpaque(false);
 
         JLabel help = new JLabel("Adjust threshold to isolate the channel of interest.");
-        help.setForeground(new Color(90, 90, 90));
+        help.setForeground(FlashTheme.TEXT_HELP);
         panel.add(help, BorderLayout.NORTH);
 
         control = new ThresholdControlPanel();
@@ -110,7 +110,7 @@ public final class ChannelThresholdStage implements ConfigQcStage {
         panel.add(buildControlPanel(control), BorderLayout.CENTER);
 
         feedbackLabel = new JLabel(" ");
-        feedbackLabel.setForeground(new Color(90, 90, 90));
+        feedbackLabel.setForeground(FlashTheme.TEXT_HELP);
         panel.add(feedbackLabel, BorderLayout.SOUTH);
         return panel;
     }
@@ -197,7 +197,7 @@ public final class ChannelThresholdStage implements ConfigQcStage {
     private JComponent buildControlPanel(ThresholdControlPanel control) {
         JPanel wrapper = new JPanel(new BorderLayout());
         wrapper.setOpaque(false);
-        wrapper.setBorder(BorderFactory.createEmptyBorder(2, 0, 0, 0));
+        wrapper.setBorder(FlashTheme.pad(2, 0, 0, 0));
         wrapper.add(control, BorderLayout.CENTER);
         return wrapper;
     }

@@ -1,5 +1,7 @@
 package flash.pipeline.ui.preview;
 
+import flash.pipeline.ui.FlashTheme;
+
 import ij.ImagePlus;
 import ij.process.ImageProcessor;
 
@@ -194,14 +196,14 @@ public final class HistogramPanel extends JPanel {
         String minimum = FijiStyleRangeSliderPanel.formatNumber(histogram.getMinimum());
         String maximum = FijiStyleRangeSliderPanel.formatNumber(histogram.getMaximum());
         FontMetrics metrics = g2.getFontMetrics();
-        g2.setColor(new Color(90, 90, 90));
+        g2.setColor(FlashTheme.TEXT_HELP);
         g2.drawString(minimum, left, baseline);
         g2.drawString(maximum, left + plotWidth - metrics.stringWidth(maximum), baseline);
     }
 
     private void drawCenteredText(Graphics2D g2, String text, int width, int height) {
         FontMetrics metrics = g2.getFontMetrics();
-        g2.setColor(new Color(130, 130, 130));
+        g2.setColor(FlashTheme.TEXT_MUTED);
         int x = Math.max(0, (width - metrics.stringWidth(text)) / 2);
         int y = Math.max(metrics.getAscent(), (height + metrics.getAscent()) / 2);
         g2.drawString(text, x, y);

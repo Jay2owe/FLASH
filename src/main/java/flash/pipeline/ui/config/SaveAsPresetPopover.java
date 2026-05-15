@@ -1,5 +1,7 @@
 package flash.pipeline.ui.config;
 
+import flash.pipeline.ui.FlashTheme;
+
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
@@ -10,6 +12,7 @@ import javax.swing.JPanel;
 import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
 import java.awt.BorderLayout;
+import java.awt.Color;
 import java.awt.Dialog;
 import java.awt.GraphicsEnvironment;
 import java.awt.Window;
@@ -31,7 +34,8 @@ public final class SaveAsPresetPopover {
         final String[] result = new String[]{null};
 
         JPanel content = new JPanel(new BorderLayout(8, 8));
-        content.setBorder(BorderFactory.createEmptyBorder(10, 12, 10, 12));
+        content.setBackground(FlashTheme.SURFACE);
+        content.setBorder(FlashTheme.pad(10, 12, 10, 12));
 
         content.add(new JLabel("Preset name:"), BorderLayout.NORTH);
 
@@ -44,6 +48,8 @@ public final class SaveAsPresetPopover {
         buttons.add(Box.createHorizontalGlue());
         JButton cancel = new JButton("Cancel");
         JButton save = new JButton("Save");
+        styleActionButton(cancel, FlashTheme.DANGER_BG, FlashTheme.DANGER_FG, FlashTheme.DANGER_BORDER);
+        styleActionButton(save, FlashTheme.PRIMARY_BG, FlashTheme.PRIMARY_FG, FlashTheme.PRIMARY_BORDER);
         buttons.add(cancel);
         buttons.add(Box.createHorizontalStrut(8));
         buttons.add(save);
@@ -64,5 +70,16 @@ public final class SaveAsPresetPopover {
         dialog.setVisible(true);
 
         return result[0] == null || result[0].isEmpty() ? null : result[0];
+    }
+
+    private static void styleActionButton(JButton button, Color background, Color foreground, Color border) {
+        button.setBackground(background);
+        button.setForeground(foreground);
+        button.setOpaque(true);
+        button.setContentAreaFilled(true);
+        button.setFocusPainted(false);
+        button.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(border),
+                FlashTheme.pad(3, 10, 3, 10)));
     }
 }

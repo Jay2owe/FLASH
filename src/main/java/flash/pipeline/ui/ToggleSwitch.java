@@ -19,11 +19,11 @@ public class ToggleSwitch extends JPanel {
     private static final int THUMB_DIAMETER = 18;
     private static final int THUMB_MARGIN = 2;
 
-    private static final Color COLOR_ON = new Color(76, 175, 80);       // green
-    private static final Color COLOR_OFF = new Color(189, 189, 189);    // gray
-    private static final Color COLOR_DISABLED = new Color(220, 220, 220);
-    private static final Color COLOR_THUMB = Color.WHITE;
-    private static final Color COLOR_THUMB_SHADOW = new Color(0, 0, 0, 40);
+    private static final Color COLOR_ON = FlashTheme.TOGGLE_ON;
+    private static final Color COLOR_OFF = FlashTheme.TOGGLE_OFF;
+    private static final Color COLOR_DISABLED = FlashTheme.TOGGLE_DISABLED;
+    private static final Color COLOR_THUMB = FlashTheme.TOGGLE_THUMB;
+    private static final Color COLOR_THUMB_SHADOW = FlashTheme.TOGGLE_THUMB_SHADOW;
 
     private boolean selected;
     private final List<Runnable> changeListeners = new ArrayList<Runnable>();

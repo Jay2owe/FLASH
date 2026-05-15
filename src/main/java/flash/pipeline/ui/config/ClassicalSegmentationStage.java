@@ -3,6 +3,7 @@ package flash.pipeline.ui.config;
 import flash.pipeline.help.SetupHelpCatalog;
 import flash.pipeline.help.SetupHelpTopic;
 import flash.pipeline.objects.ObjectsCounter3DWrapper;
+import flash.pipeline.ui.FlashTheme;
 import flash.pipeline.ui.preview.ObjectSizeFilterPreview;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import flash.pipeline.ui.preview.ThresholdControlPanel;
@@ -29,7 +30,6 @@ import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
-import java.awt.Color;
 import java.awt.Font;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
@@ -146,7 +146,7 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
         JPanel panel = new JPanel();
         panel.setOpaque(false);
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
-        panel.setBorder(BorderFactory.createEmptyBorder(2, 0, 0, 0));
+        panel.setBorder(FlashTheme.pad(2, 0, 0, 0));
 
         thresholdControl = new ThresholdControlPanel();
         thresholdControl.setMethod("Default");
@@ -179,7 +179,7 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
         panel.add(Box.createVerticalStrut(4));
 
         feedbackLabel = new JLabel(" ");
-        feedbackLabel.setForeground(new Color(90, 90, 90));
+        feedbackLabel.setForeground(FlashTheme.TEXT_HELP);
         feedbackLabel.setAlignmentX(JComponent.LEFT_ALIGNMENT);
         panel.add(feedbackLabel);
 

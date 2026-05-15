@@ -6,6 +6,8 @@ import flash.pipeline.ui.preview.PreviewPairPanel;
 import ij.ImagePlus;
 import ij.plugin.Duplicator;
 
+import flash.pipeline.ui.FlashTheme;
+
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
@@ -36,7 +38,7 @@ public final class SegmentationMethodStage implements ConfigQcStage {
         boolean selectChoice(String choice);
     }
 
-    private static final Color HELP_COLOR = new Color(90, 90, 90);
+    private static final Color HELP_COLOR = FlashTheme.TEXT_HELP;
 
     private final MethodStore methodStore;
     private ConfigQcActions actions;
@@ -285,7 +287,7 @@ public final class SegmentationMethodStage implements ConfigQcStage {
             card.setOpaque(false);
             card.setAlignmentX(Component.LEFT_ALIGNMENT);
             card.setBorder(BorderFactory.createCompoundBorder(
-                    BorderFactory.createLineBorder(new Color(210, 210, 210)),
+                    BorderFactory.createLineBorder(FlashTheme.BORDER),
                     BorderFactory.createEmptyBorder(8, 8, 8, 8)));
 
             JRadioButton radio = new JRadioButton(title);

@@ -6,6 +6,7 @@ import flash.pipeline.image.dag.DagLine;
 import flash.pipeline.image.dag.DagNode;
 import flash.pipeline.image.dag.DagToIjmEmitter;
 import flash.pipeline.image.dag.IjmToDagLoader;
+import flash.pipeline.ui.FlashTheme;
 import flash.pipeline.ui.config.FilterParameterStage;
 import flash.pipeline.ui.variations.FilterVariationEngineContext;
 import flash.pipeline.ui.variations.VariationCache;
@@ -49,11 +50,11 @@ public final class PipelineFigureExporter {
     static final int GAP = 12;
     static final int EXPORT_DPI = 300;
 
-    private static final Color BACKGROUND = Color.WHITE;
+    private static final Color BACKGROUND = FlashTheme.TEXT_ON_DARK;
     private static final Color TILE_BACKGROUND = new Color(0x18, 0x1B, 0x1F);
-    private static final Color BORDER = new Color(0xC9, 0xCF, 0xD6);
-    private static final Color LABEL = new Color(0x24, 0x2A, 0x30);
-    private static final Font LABEL_FONT = new Font("SansSerif", Font.BOLD, 11);
+    private static final Color BORDER = FlashTheme.BORDER_STRONG;
+    private static final Color LABEL = FlashTheme.TEXT_PRIMARY;
+    private static final Font LABEL_FONT = FlashTheme.caption().deriveFont(Font.BOLD);
 
     private PipelineFigureExporter() {
     }

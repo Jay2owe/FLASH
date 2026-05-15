@@ -1,8 +1,8 @@
 package flash.pipeline.ui.config;
 
+import flash.pipeline.ui.FlashTheme;
 import flash.pipeline.ui.preview.ObjectSizeFilterPreview;
 
-import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JComponent;
@@ -26,11 +26,11 @@ final class ObjectSizeCutoffPanel extends JPanel {
         setOpaque(false);
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
         setAlignmentX(JComponent.LEFT_ALIGNMENT);
-        setBorder(BorderFactory.createEmptyBorder(2, 0, 2, 0));
+        setBorder(FlashTheme.pad(2, 0, 2, 0));
 
-        minLabel.setForeground(new Color(75, 75, 75));
-        maxLabel.setForeground(new Color(75, 75, 75));
-        summaryLabel.setForeground(new Color(75, 75, 75));
+        minLabel.setForeground(FlashTheme.TEXT_SUBHEADER);
+        maxLabel.setForeground(FlashTheme.TEXT_SUBHEADER);
+        summaryLabel.setForeground(FlashTheme.TEXT_SUBHEADER);
 
         add(lineRow(minLine, minLabel));
         add(Box.createVerticalStrut(2));
@@ -88,7 +88,7 @@ final class ObjectSizeCutoffPanel extends JPanel {
         private int linePixels = 14;
 
         CutoffLine(Color color) {
-            this.color = color == null ? Color.GRAY : color;
+            this.color = color == null ? FlashTheme.TEXT_MUTED : color;
             setPreferredSize(new Dimension(170, 14));
             setMinimumSize(new Dimension(170, 14));
             setMaximumSize(new Dimension(170, 14));

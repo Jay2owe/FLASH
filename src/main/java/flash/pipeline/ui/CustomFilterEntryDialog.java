@@ -226,12 +226,12 @@ public final class CustomFilterEntryDialog {
     static JPanel makeTile(String title, String description, final PipelineDialog dialog,
                            final String action, boolean recommended, javax.swing.Icon icon) {
         final JPanel panel = new JPanel(new BorderLayout(0, 6));
-        final Color borderColor = recommended ? new Color(70, 120, 200) : new Color(180, 180, 180);
-        final Color baseBg = new Color(250, 250, 250);
-        final Color hoverBg = new Color(240, 245, 252);
+        final Color borderColor = recommended ? FlashTheme.SELECTION_BORDER : FlashTheme.TILE_BORDER;
+        final Color baseBg = FlashTheme.TILE_BG;
+        final Color hoverBg = FlashTheme.TILE_HOVER_BG;
         panel.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(borderColor, recommended ? 2 : 1),
-                BorderFactory.createEmptyBorder(10, 10, 10, 10)));
+                FlashTheme.pad(10)));
         panel.setPreferredSize(new Dimension(200, 150));
         panel.setBackground(baseBg);
         panel.setOpaque(true);

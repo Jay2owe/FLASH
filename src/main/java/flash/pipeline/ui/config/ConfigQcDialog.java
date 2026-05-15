@@ -2,6 +2,7 @@ package flash.pipeline.ui.config;
 
 import flash.pipeline.help.SetupHelpDialog;
 import flash.pipeline.help.SetupHelpTopic;
+import flash.pipeline.ui.FlashTheme;
 import flash.pipeline.ui.HelpButton;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import ij.ImagePlus;
@@ -49,20 +50,20 @@ import java.util.concurrent.CountDownLatch;
 
 public final class ConfigQcDialog {
 
-    private static final Color BG_COLOR = new Color(245, 245, 245);
-    private static final Color HEADER_COLOR = new Color(55, 71, 79);
-    private static final Color HELP_COLOR = new Color(90, 90, 90);
-    private static final Color PRIMARY_ACTION_BG = new Color(235, 248, 239);
-    private static final Color PRIMARY_ACTION_FG = new Color(37, 103, 62);
-    private static final Color PRIMARY_ACTION_BORDER = new Color(111, 173, 130);
-    private static final Color CANCEL_ACTION_BG = new Color(252, 240, 240);
-    private static final Color CANCEL_ACTION_FG = new Color(137, 44, 44);
-    private static final Color CANCEL_ACTION_BORDER = new Color(196, 108, 108);
-    private static final Color PREVIEW_ACTION_BG = new Color(232, 245, 253);
-    private static final Color PREVIEW_ACTION_FG = new Color(15, 87, 140);
-    private static final Color PREVIEW_ACTION_BORDER = new Color(71, 145, 196);
-    private static final Color ACTIVE_STAGE_BG = new Color(222, 239, 231);
-    private static final Color ACTIVE_STAGE_BORDER = new Color(111, 173, 130);
+    private static final Color BG_COLOR = FlashTheme.SURFACE;
+    private static final Color HEADER_COLOR = FlashTheme.TEXT_HEADER;
+    private static final Color HELP_COLOR = FlashTheme.TEXT_HELP;
+    private static final Color PRIMARY_ACTION_BG = FlashTheme.PRIMARY_BG;
+    private static final Color PRIMARY_ACTION_FG = FlashTheme.PRIMARY_FG;
+    private static final Color PRIMARY_ACTION_BORDER = FlashTheme.PRIMARY_BORDER;
+    private static final Color CANCEL_ACTION_BG = FlashTheme.DANGER_BG;
+    private static final Color CANCEL_ACTION_FG = FlashTheme.DANGER_FG;
+    private static final Color CANCEL_ACTION_BORDER = FlashTheme.DANGER_BORDER;
+    private static final Color PREVIEW_ACTION_BG = FlashTheme.INFO_BG;
+    private static final Color PREVIEW_ACTION_FG = FlashTheme.INFO_FG;
+    private static final Color PREVIEW_ACTION_BORDER = FlashTheme.INFO_BORDER;
+    private static final Color ACTIVE_STAGE_BG = FlashTheme.STAGE_ACTIVE_BG;
+    private static final Color ACTIVE_STAGE_BORDER = FlashTheme.PRIMARY_BORDER;
     private static final String PREVIEW_BUTTON_LABEL = "Run Preview";
     private static final String STALE_PREFIX = "\u25CF ";
     private static final Dimension MINIMUM_DIALOG_SIZE = new Dimension(1180, 820);
@@ -209,7 +210,7 @@ public final class ConfigQcDialog {
 
     private void buildContent() {
         rootPanel.setBackground(BG_COLOR);
-        rootPanel.setBorder(BorderFactory.createEmptyBorder(10, 12, 8, 12));
+        rootPanel.setBorder(FlashTheme.pad(10, 12, 8, 12));
         rootPanel.add(buildHeader(), BorderLayout.NORTH);
         rootPanel.add(buildMain(), BorderLayout.CENTER);
         rootPanel.add(buildFooter(), BorderLayout.SOUTH);
@@ -265,7 +266,7 @@ public final class ConfigQcDialog {
     private JComponent buildFooter() {
         JPanel footer = new JPanel(new GridBagLayout());
         footer.setOpaque(false);
-        footer.setBorder(BorderFactory.createEmptyBorder(4, 0, 0, 0));
+        footer.setBorder(FlashTheme.pad(4, 0, 0, 0));
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.gridy = 0;
         gbc.insets = new Insets(0, 0, 0, 6);
@@ -771,7 +772,7 @@ public final class ConfigQcDialog {
             if (i > 0) {
                 JLabel separator = new JLabel(">");
                 separator.setForeground(HELP_COLOR);
-                separator.setBorder(BorderFactory.createEmptyBorder(0, 1, 0, 1));
+                separator.setBorder(FlashTheme.pad(0, 1, 0, 1));
                 stageBreadcrumbPanel.add(separator);
                 plain.append(" > ");
             }
@@ -831,9 +832,9 @@ public final class ConfigQcDialog {
             label.setBackground(ACTIVE_STAGE_BG);
             label.setBorder(BorderFactory.createCompoundBorder(
                     BorderFactory.createLineBorder(ACTIVE_STAGE_BORDER),
-                    BorderFactory.createEmptyBorder(3, 9, 3, 9)));
+                    FlashTheme.pad(3, 9, 3, 9)));
         } else {
-            label.setBorder(BorderFactory.createEmptyBorder(4, 2, 4, 2));
+            label.setBorder(FlashTheme.pad(4, 2, 4, 2));
         }
     }
 
@@ -988,7 +989,7 @@ public final class ConfigQcDialog {
         button.setFocusPainted(false);
         button.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(border),
-                BorderFactory.createEmptyBorder(3, 10, 3, 10)));
+                FlashTheme.pad(3, 10, 3, 10)));
     }
 
     ConfigQcResult resultForTest() {

@@ -21,12 +21,10 @@ import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.WindowConstants;
 import java.awt.BorderLayout;
-import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Dialog;
 import java.awt.FlowLayout;
-import java.awt.Font;
 import java.awt.Frame;
 import java.awt.GraphicsEnvironment;
 import java.awt.Point;
@@ -419,8 +417,8 @@ public final class RecorderDialog {
             if (hasSeed) {
                 JLabel ack = new JLabel("Continuing from your existing filter — "
                         + "new commands you record will be added on top.");
-                ack.setForeground(new Color(70, 110, 70));
-                ack.setBorder(BorderFactory.createEmptyBorder(8, 12, 0, 12));
+                ack.setForeground(FlashTheme.SUCCESS_FG);
+                ack.setBorder(FlashTheme.pad(8, 12, 0, 12));
                 ack.setAlignmentX(Component.LEFT_ALIGNMENT);
                 top.add(ack);
             }
@@ -433,12 +431,12 @@ public final class RecorderDialog {
                     + "Use Fiji normally — filters, duplicates, thresholds, whatever. The plain-English"
                     + " summary below updates as you work. When you're done, click <b>Use this filter</b>."
                     + "</body></html>");
-            intro.setBorder(BorderFactory.createEmptyBorder(10, 12, 4, 12));
+            intro.setBorder(FlashTheme.pad(10, 12, 4, 12));
             intro.setAlignmentX(Component.LEFT_ALIGNMENT);
             top.add(intro);
 
             summary.setText("Recorded so far: nothing yet.");
-            summary.setBorder(BorderFactory.createEmptyBorder(0, 12, 6, 12));
+            summary.setBorder(FlashTheme.pad(0, 12, 6, 12));
             summary.setAlignmentX(Component.LEFT_ALIGNMENT);
             top.add(summary);
 
@@ -446,10 +444,10 @@ public final class RecorderDialog {
 
             area.setEditable(false);
             area.setLineWrap(false);
-            area.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
+            area.setFont(FlashTheme.mono(12));
             area.setText("");
             JScrollPane scroll = new JScrollPane(area);
-            scroll.setBorder(BorderFactory.createEmptyBorder(0, 12, 0, 12));
+            scroll.setBorder(FlashTheme.pad(0, 12, 0, 12));
             dialog.add(scroll, BorderLayout.CENTER);
 
             JPanel footer = new JPanel(new BorderLayout());
@@ -510,9 +508,9 @@ public final class RecorderDialog {
         }
 
         private void buildBanner() {
-            banner.setBackground(new Color(255, 244, 204));
+            banner.setBackground(FlashTheme.WARNING_BG);
             banner.setOpaque(true);
-            banner.setBorder(BorderFactory.createEmptyBorder(8, 12, 8, 12));
+            banner.setBorder(FlashTheme.pad(8, 12, 8, 12));
             JButton open = new JButton("Open sample");
             flash.pipeline.ui.FlashIcons.apply(open, flash.pipeline.ui.FlashIcons.folderOpen());
             open.addActionListener(e -> onOpenSample());

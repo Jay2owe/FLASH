@@ -1,5 +1,7 @@
 package flash.pipeline.ui.preview;
 
+import flash.pipeline.ui.FlashTheme;
+
 import ij.ImagePlus;
 import ij.ImageStack;
 import ij.process.ColorProcessor;
@@ -70,8 +72,8 @@ public final class ImagePreviewPanel extends JPanel {
         titleLabel.setAlignmentX(LEFT_ALIGNMENT);
         detailLabel.setAlignmentX(LEFT_ALIGNMENT);
         statusLabel.setAlignmentX(LEFT_ALIGNMENT);
-        detailLabel.setForeground(new Color(90, 90, 90));
-        statusLabel.setForeground(new Color(90, 90, 90));
+        detailLabel.setForeground(FlashTheme.TEXT_HELP);
+        statusLabel.setForeground(FlashTheme.TEXT_HELP);
         labels.add(titleLabel);
         labels.add(Box.createVerticalStrut(2));
         labels.add(detailLabel);
@@ -613,7 +615,7 @@ public final class ImagePreviewPanel extends JPanel {
             g2.setStroke(new BasicStroke(4f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
             g2.setColor(new Color(0, 0, 0, 180));
             g2.drawLine(x, y + 1, x + length, y + 1);
-            g2.setColor(color == null ? Color.RED : color);
+            g2.setColor(color == null ? FlashTheme.DANGER_FG : color);
             g2.drawLine(x, y, x + length, y);
             g2.setStroke(oldStroke);
             g2.setFont(g2.getFont().deriveFont(Font.BOLD, 11f));

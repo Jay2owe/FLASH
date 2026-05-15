@@ -1,6 +1,7 @@
 package flash.pipeline.ui.variations;
 
 import flash.pipeline.ui.RecorderDialog;
+import flash.pipeline.ui.FlashTheme;
 
 import javax.swing.BorderFactory;
 import javax.swing.Box;
@@ -100,8 +101,8 @@ public final class MacroVariationPickerDialog {
         summary.setOpaque(false);
         summary.setFont(summary.getFont().deriveFont(Font.PLAIN, 11f));
         summary.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(new Color(220, 224, 228)),
-                BorderFactory.createEmptyBorder(6, 8, 6, 8)));
+                BorderFactory.createLineBorder(FlashTheme.BORDER),
+                FlashTheme.pad(6, 8, 6, 8)));
         body.add(summary, BorderLayout.SOUTH);
 
         body.add(actionPanel(), BorderLayout.EAST);
@@ -175,7 +176,7 @@ public final class MacroVariationPickerDialog {
     private MacroVariation promptForPastedScript() {
         JTextField name = new JTextField("Pasted macro", 28);
         JTextArea script = new JTextArea(12, 52);
-        script.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
+        script.setFont(FlashTheme.mono(12));
         JPanel panel = new JPanel(new BorderLayout(6, 6));
         JPanel top = new JPanel(new BorderLayout(6, 0));
         top.add(new JLabel("Name:"), BorderLayout.WEST);

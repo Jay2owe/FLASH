@@ -34,9 +34,9 @@ import java.awt.event.WindowEvent;
  * drawing image.
  */
 public final class RoiOrientationPanel {
-    private static final Color BG_COLOR = new Color(245, 245, 245);
-    private static final Color BORDER_COLOR = new Color(180, 190, 196);
-    private static final Color STATUS_COLOR = new Color(78, 93, 101);
+    private static final Color BG_COLOR = FlashTheme.SURFACE;
+    private static final Color BORDER_COLOR = FlashTheme.BORDER_STRONG;
+    private static final Color STATUS_COLOR = FlashTheme.TEXT_SUBHEADER;
 
     private final JDialog dialog;
     private final OrientationActionTarget target;
@@ -97,7 +97,7 @@ public final class RoiOrientationPanel {
         body.setBackground(BG_COLOR);
         body.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(BORDER_COLOR),
-                BorderFactory.createEmptyBorder(8, 10, 8, 10)));
+                FlashTheme.pad(8, 10, 8, 10)));
 
         JLabel instructionLabel = new JLabel(instructionHtml(imageProgress, imageTitle));
         instructionLabel.setAlignmentX(JLabel.LEFT_ALIGNMENT);

@@ -3,6 +3,7 @@ package flash.pipeline.ui.config;
 import flash.pipeline.help.SetupHelpCatalog;
 import flash.pipeline.help.SetupHelpTopic;
 import flash.pipeline.objects.ObjectsCounter3DWrapper;
+import flash.pipeline.ui.FlashTheme;
 import flash.pipeline.ui.preview.ObjectSizeFilterPreview;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import ij.ImagePlus;
@@ -21,7 +22,6 @@ import javax.swing.JTextField;
 import javax.swing.SwingWorker;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
-import java.awt.Color;
 import java.awt.Font;
 import java.util.Collections;
 import java.util.IdentityHashMap;
@@ -129,7 +129,7 @@ public final class ParticleSizeStage implements ConfigQcStage {
         JPanel panel = new JPanel();
         panel.setOpaque(false);
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
-        panel.setBorder(BorderFactory.createEmptyBorder(2, 0, 0, 0));
+        panel.setBorder(FlashTheme.pad(2, 0, 0, 0));
         panel.add(buildSizeRow());
         panel.add(Box.createVerticalStrut(4));
         sizeCutoffPanel = new ObjectSizeCutoffPanel();
@@ -314,7 +314,7 @@ public final class ParticleSizeStage implements ConfigQcStage {
         row.add(maxField);
         row.add(Box.createHorizontalGlue());
         thresholdLabel = new JLabel("Threshold used: not resolved");
-        thresholdLabel.setForeground(new Color(90, 90, 90));
+        thresholdLabel.setForeground(FlashTheme.TEXT_HELP);
         row.add(thresholdLabel);
         return row;
     }

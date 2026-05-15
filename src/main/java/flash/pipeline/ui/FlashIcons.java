@@ -26,8 +26,8 @@ public final class FlashIcons {
 
     private FlashIcons() {}
 
-    private static final Color DEFAULT_ACTION_COLOR = new Color(33, 33, 33);
-    private static final int DEFAULT_ACTION_SIZE = 14;
+    private static final Color DEFAULT_ACTION_COLOR = FlashTheme.TEXT_PRIMARY;
+    private static final int DEFAULT_ACTION_SIZE = FlashTheme.ICON_ACTION_SIZE;
 
     public static Icon chevronRight(int size, Color color) { return load("chevron-right", size, color); }
     public static Icon chevronDown(int size, Color color)  { return load("chevron-down",  size, color); }
@@ -62,30 +62,32 @@ public final class FlashIcons {
     public static Icon play()        { return play(DEFAULT_ACTION_SIZE, DEFAULT_ACTION_COLOR); }
     public static Icon wand()        { return wand(DEFAULT_ACTION_SIZE, DEFAULT_ACTION_COLOR); }
     public static Icon check()       { return check(DEFAULT_ACTION_SIZE, DEFAULT_ACTION_COLOR); }
-    public static Icon closeX()      { return closeX(12, new Color(102, 102, 102)); }
+    public static Icon closeX()      { return closeX(FlashTheme.ICON_SMALL_SIZE, FlashTheme.TEXT_DISABLED); }
     public static Icon sliders()     { return sliders(DEFAULT_ACTION_SIZE, DEFAULT_ACTION_COLOR); }
 
     /** 18 px section-header icon in slate-blue (H2 colour). */
     public static Icon section(String op) {
-        Color c = new Color(55, 71, 79);
-        if (op.equals("tags"))       return load("tags", 18, c);
-        if (op.equals("palette"))    return load("palette", 18, c);
-        if (op.equals("ruler"))      return load("ruler-2", 18, c);
-        if (op.equals("sun"))        return load("sun", 18, c);
-        if (op.equals("stack"))      return load("stack-2", 18, c);
-        if (op.equals("microscope")) return load("microscope", 18, c);
-        if (op.equals("settings"))   return load("settings", 18, c);
-        if (op.equals("sliders"))    return load("sliders", 18, c);
-        return load(op, 18, c);
+        Color c = FlashTheme.TEXT_HEADER;
+        int size = FlashTheme.ICON_SECTION_SIZE;
+        if (op.equals("tags"))       return load("tags", size, c);
+        if (op.equals("palette"))    return load("palette", size, c);
+        if (op.equals("ruler"))      return load("ruler-2", size, c);
+        if (op.equals("sun"))        return load("sun", size, c);
+        if (op.equals("stack"))      return load("stack-2", size, c);
+        if (op.equals("microscope")) return load("microscope", size, c);
+        if (op.equals("settings"))   return load("settings", size, c);
+        if (op.equals("sliders"))    return load("sliders", size, c);
+        return load(op, size, c);
     }
 
     /** Phase-chip icon. White for active phase, slate-blue for inactive. */
     public static Icon phaseChip(String op, boolean active) {
-        Color c = active ? Color.WHITE : new Color(55, 71, 79);
-        if (op.equals("settings"))   return load("settings", 13, c);
-        if (op.equals("microscope")) return load("microscope", 13, c);
-        if (op.equals("file-export"))return load("file-export", 13, c);
-        return load(op, 13, c);
+        Color c = active ? FlashTheme.TEXT_ON_DARK : FlashTheme.TEXT_HEADER;
+        int size = FlashTheme.ICON_PHASE_SIZE;
+        if (op.equals("settings"))   return load("settings", size, c);
+        if (op.equals("microscope")) return load("microscope", size, c);
+        if (op.equals("file-export"))return load("file-export", size, c);
+        return load(op, size, c);
     }
 
     /**
@@ -97,7 +99,10 @@ public final class FlashIcons {
             java.net.URL url = FlashIcons.class.getResource("/flash/icons/bolt.svg");
             if (url == null) return null;
             String svgText = readAll(url);
-            String hex = "#FFA500";
+            String hex = String.format("#%02x%02x%02x",
+                    FlashTheme.WARNING_BORDER.getRed(),
+                    FlashTheme.WARNING_BORDER.getGreen(),
+                    FlashTheme.WARNING_BORDER.getBlue());
             svgText = svgText
                     .replace("stroke=\"currentColor\"", "stroke=\"" + hex + "\"")
                     .replace("fill=\"currentColor\"", "fill=\"" + hex + "\"");
