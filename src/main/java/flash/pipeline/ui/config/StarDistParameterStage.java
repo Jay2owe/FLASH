@@ -15,6 +15,8 @@ import flash.pipeline.segmentation.catalog.ModelCatalogIO;
 import flash.pipeline.segmentation.catalog.ModelEntry;
 import flash.pipeline.stardist.StarDist3DRunner;
 import flash.pipeline.ui.FlashTheme;
+import flash.pipeline.ui.ModelEntryListCellRenderer;
+import flash.pipeline.ui.SegmentationModelManagerDialog;
 import flash.pipeline.ui.preview.ObjectSizeFilterPreview;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import flash.pipeline.ui.variations.MontageDisplayActionDelegate;
@@ -29,22 +31,20 @@ import ij.measure.ResultsTable;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
-import javax.swing.DefaultListCellRenderer;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
-import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
+import java.awt.Color;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
-import java.awt.Component;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -157,9 +157,18 @@ public final class StarDistParameterStage implements ConfigQcStage {
     private boolean showRawSource;
     private int lastObjectCount = -1;
     private List<ModelOption> modelOptions = Collections.emptyList();
+    private String missingModelKey;
+    private String selectedModelKeySnapshot;
+    private Parameters pendingDefaultsPrevious;
+    private Parameters pendingDefaultsSuggested;
 
     private JComboBox<ModelOption> modelCombo;
+    private JComboBox<ModelOption> missingModelReplacementCombo;
     private JButton manageModelsButton;
+    private JLabel missingModelNoticeLabel;
+    private JLabel defaultsNoticeLabel;
+    private JButton defaultsApplyButton;
+    private JButton defaultsRevertButton;
     private JTextField probabilityField;
     private JTextField nmsField;
     private JTextField linkingField;
@@ -209,13 +218,22 @@ public final class StarDistParameterStage implements ConfigQcStage {
                 ? parseMethod(parameterStore.getMethodToken())
                 : restartParameters;
         this.modelOptions = modelOptionsFor(context);
+        this.missingModelKey = containsModelKey(modelOptions, savedParameters.modelKey)
+                ? null
+                : savedParameters.modelKey;
 
         JPanel panel = new JPanel();
         panel.setOpaque(false);
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
         panel.setBorder(FlashTheme.pad(2, 0, 0, 0));
         createParameterFields();
+        if (missingModelKey != null) {
+            panel.add(buildMissingModelNoticeRow());
+            panel.add(Box.createVerticalStrut(4));
+        }
         panel.add(buildModelRow());
+        panel.add(Box.createVerticalStrut(4));
+        panel.add(buildDefaultsRow());
         panel.add(Box.createVerticalStrut(4));
         panel.add(buildGroupRow("Detection:", new String[]{"Probability", "NMS"},
                 new JTextField[]{probabilityField, nmsField}));
@@ -280,6 +298,10 @@ public final class StarDistParameterStage implements ConfigQcStage {
 
     @Override
     public boolean lockIn(ConfigQcContext context) {
+        if (missingModelKey != null) {
+            setError("Cannot run segmentation: model missing.");
+            return false;
+        }
         Parameters parameters = collectParameters();
         parameterStore.save(formatMethod(parameters));
         savedParameters = parameters;
@@ -417,6 +439,18 @@ public final class StarDistParameterStage implements ConfigQcStage {
         return manageModelsButton != null && manageModelsButton.isEnabled();
     }
 
+    boolean defaultsApplyVisibleForTest() {
+        return defaultsApplyButton != null && defaultsApplyButton.isVisible();
+    }
+
+    void applyPendingDefaultsForTest() {
+        applyPendingDefaults();
+    }
+
+    void revertPendingDefaultsForTest() {
+        revertPendingDefaults();
+    }
+
     private void createParameterFields() {
         probabilityField = createNumberField(5);
         nmsField = createNumberField(5);
@@ -458,11 +492,12 @@ public final class StarDistParameterStage implements ConfigQcStage {
         row.add(heading, gbc);
 
         modelCombo = new JComboBox<ModelOption>(modelOptions.toArray(new ModelOption[0]));
-        modelCombo.setRenderer(new ModelOptionRenderer());
+        modelCombo.setRenderer(new ModelEntryListCellRenderer());
         modelCombo.addActionListener(e -> modelSelectionChanged());
         updatingFields = true;
         try {
             selectModelKey(savedParameters.modelKey);
+            selectedModelKeySnapshot = selectedModelKey();
         } finally {
             updatingFields = false;
         }
@@ -472,13 +507,91 @@ public final class StarDistParameterStage implements ConfigQcStage {
         row.add(modelCombo, gbc);
 
         manageModelsButton = new JButton("Manage models...");
-        manageModelsButton.setEnabled(false);
-        manageModelsButton.setToolTipText("Model manager is added in a later stage.");
+        manageModelsButton.setEnabled(true);
+        manageModelsButton.setToolTipText("Open the segmentation model manager.");
+        manageModelsButton.addActionListener(e -> openModelManager());
         gbc.gridx++;
         gbc.fill = GridBagConstraints.NONE;
         gbc.weightx = 0.0;
         row.add(manageModelsButton, gbc);
         return row;
+    }
+
+    private JComponent buildMissingModelNoticeRow() {
+        JPanel row = new JPanel(new GridBagLayout());
+        row.setOpaque(false);
+        row.setAlignmentX(JComponent.LEFT_ALIGNMENT);
+        row.setBorder(FlashTheme.pad(2, 0, 2, 0));
+
+        missingModelNoticeLabel = new JLabel("Model '" + missingModelKey
+                + "' not found in catalog.");
+        missingModelNoticeLabel.setForeground(FlashTheme.WARNING_FG);
+        missingModelReplacementCombo = new JComboBox<ModelOption>(
+                modelOptions.toArray(new ModelOption[0]));
+        missingModelReplacementCombo.setRenderer(new ModelEntryListCellRenderer());
+        missingModelReplacementCombo.addActionListener(e -> {
+            if (updatingFields) return;
+            ModelOption selected = (ModelOption) missingModelReplacementCombo.getSelectedItem();
+            if (selected != null) {
+                resolveMissingModel(selected.entry.modelKey);
+            }
+        });
+        JButton manage = new JButton("Open Manage models...");
+        manage.addActionListener(e -> openModelManager());
+
+        GridBagConstraints gbc = rowConstraints();
+        row.add(missingModelNoticeLabel, gbc);
+        gbc.gridx++;
+        row.add(new JLabel("Pick replacement"), gbc);
+        gbc.gridx++;
+        gbc.weightx = 1.0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        row.add(missingModelReplacementCombo, gbc);
+        gbc.gridx++;
+        gbc.weightx = 0.0;
+        gbc.fill = GridBagConstraints.NONE;
+        row.add(manage, gbc);
+        return row;
+    }
+
+    private JComponent buildDefaultsRow() {
+        JPanel row = new JPanel(new GridBagLayout());
+        row.setOpaque(false);
+        row.setAlignmentX(JComponent.LEFT_ALIGNMENT);
+        row.setBorder(FlashTheme.pad(2, 0, 2, 0));
+        defaultsNoticeLabel = new JLabel(" ");
+        defaultsNoticeLabel.setForeground(FlashTheme.TEXT_HELP);
+        defaultsApplyButton = new JButton("Apply");
+        defaultsApplyButton.setVisible(false);
+        defaultsApplyButton.addActionListener(e -> applyPendingDefaults());
+        defaultsRevertButton = new JButton("Revert");
+        defaultsRevertButton.setVisible(false);
+        defaultsRevertButton.addActionListener(e -> revertPendingDefaults());
+
+        GridBagConstraints gbc = rowConstraints();
+        row.add(defaultsNoticeLabel, gbc);
+        gbc.gridx++;
+        gbc.weightx = 1.0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        row.add(Box.createHorizontalGlue(), gbc);
+        gbc.gridx++;
+        gbc.weightx = 0.0;
+        gbc.fill = GridBagConstraints.NONE;
+        row.add(defaultsApplyButton, gbc);
+        gbc.gridx++;
+        row.add(defaultsRevertButton, gbc);
+        return row;
+    }
+
+    private static GridBagConstraints rowConstraints() {
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.gridy = 0;
+        gbc.gridx = 0;
+        gbc.insets = new Insets(0, 0, 0, 6);
+        gbc.anchor = GridBagConstraints.WEST;
+        gbc.weightx = 0.0;
+        gbc.fill = GridBagConstraints.NONE;
+        return gbc;
     }
 
     private ClickSuggestPanel buildClickSuggestPanel() {
@@ -711,6 +824,7 @@ public final class StarDistParameterStage implements ConfigQcStage {
         updatingFields = true;
         try {
             selectModelKey(parameters.modelKey);
+            selectedModelKeySnapshot = parameters.modelKey;
             probabilityField.setText(String.valueOf(parameters.probabilityThreshold));
             nmsField.setText(String.valueOf(parameters.nmsThreshold));
             linkingField.setText(String.valueOf(parameters.linkingMaxDistance));
@@ -726,11 +840,93 @@ public final class StarDistParameterStage implements ConfigQcStage {
         }
     }
 
+    private void showPendingDefaults(Parameters previous, Parameters suggested, String modelName) {
+        pendingDefaultsPrevious = copyParameters(previous);
+        pendingDefaultsSuggested = copyParameters(suggested);
+        highlightDefaults();
+        if (defaultsNoticeLabel != null) {
+            defaultsNoticeLabel.setText("Defaults from "
+                    + (modelName == null || modelName.trim().isEmpty()
+                    ? suggested.modelKey : modelName)
+                    + " are pending.");
+        }
+        if (defaultsApplyButton != null) defaultsApplyButton.setVisible(true);
+        if (defaultsRevertButton != null) defaultsRevertButton.setVisible(true);
+        markPreviewStale(STALE_TEXT);
+    }
+
+    private void applyPendingDefaults() {
+        if (pendingDefaultsSuggested == null) return;
+        Parameters applied = copyParameters(pendingDefaultsSuggested);
+        savedParameters = applied;
+        selectedModelKeySnapshot = applied.modelKey;
+        parameterStore.save(formatMethod(applied));
+        clearPendingDefaults();
+        if (labelPreview != null) {
+            runPreviewOnWorker();
+        } else {
+            markPreviewStale(STALE_TEXT);
+        }
+    }
+
+    private void revertPendingDefaults() {
+        if (pendingDefaultsPrevious == null) return;
+        Parameters previous = copyParameters(pendingDefaultsPrevious);
+        loadFields(previous);
+        selectedModelKeySnapshot = previous.modelKey;
+        clearPendingDefaults();
+        markPreviewStale(STALE_TEXT);
+    }
+
+    private void clearPendingDefaults() {
+        pendingDefaultsPrevious = null;
+        pendingDefaultsSuggested = null;
+        clearDefaultsHighlight();
+        if (defaultsNoticeLabel != null) defaultsNoticeLabel.setText(" ");
+        if (defaultsApplyButton != null) defaultsApplyButton.setVisible(false);
+        if (defaultsRevertButton != null) defaultsRevertButton.setVisible(false);
+    }
+
+    private void highlightDefaults() {
+        highlightDefaultField(probabilityField);
+        highlightDefaultField(nmsField);
+    }
+
+    private void clearDefaultsHighlight() {
+        resetDefaultField(probabilityField);
+        resetDefaultField(nmsField);
+    }
+
+    private static void highlightDefaultField(JTextField field) {
+        if (field != null) field.setBackground(new Color(255, 246, 170));
+    }
+
+    private static void resetDefaultField(JTextField field) {
+        if (field != null) field.setBackground(Color.WHITE);
+    }
+
+    private static boolean defaultsChanged(Parameters previous, Parameters suggested) {
+        if (previous == null || suggested == null) return false;
+        return previous.probabilityThreshold != suggested.probabilityThreshold
+                || previous.nmsThreshold != suggested.nmsThreshold;
+    }
+
     private void modelSelectionChanged() {
         if (updatingFields) return;
         ModelOption selected = selectedModelOption();
         if (selected == null) return;
         Parameters current = collectParameters();
+        Parameters previous = new Parameters(
+                current.probabilityThreshold,
+                current.nmsThreshold,
+                current.linkingMaxDistance,
+                current.gapClosingMaxDistance,
+                current.maxFrameGap,
+                current.areaMin,
+                current.areaMax,
+                current.qualityMin,
+                current.intensityMin,
+                selectedModelKeySnapshot == null ? current.modelKey : selectedModelKeySnapshot);
         Parameters updated = new Parameters(
                 defaultDouble(selected.entry.defaults.get("probThresh"), current.probabilityThreshold),
                 defaultDouble(selected.entry.defaults.get("nmsThresh"), current.nmsThreshold),
@@ -743,14 +939,19 @@ public final class StarDistParameterStage implements ConfigQcStage {
                 current.intensityMin,
                 selected.entry.modelKey);
         loadFields(updated);
-        savedParameters = updated;
-        parameterStore.save(formatMethod(updated));
         warnIfAdvancedRgbSelection(selected.entry);
         captureCurrentPreviewForComparison();
-        if (labelPreview != null) {
-            runPreviewOnWorker();
+        if (defaultsChanged(previous, updated)) {
+            showPendingDefaults(previous, updated, selected.entry.name);
         } else {
-            markPreviewStale(STALE_TEXT);
+            savedParameters = updated;
+            parameterStore.save(formatMethod(updated));
+            selectedModelKeySnapshot = updated.modelKey;
+            if (labelPreview != null) {
+                runPreviewOnWorker();
+            } else {
+                markPreviewStale(STALE_TEXT);
+            }
         }
     }
 
@@ -771,6 +972,48 @@ public final class StarDistParameterStage implements ConfigQcStage {
         }
         modelCombo.setSelectedIndex(fallbackIndex);
         updateModelTooltip((ModelOption) modelCombo.getSelectedItem());
+    }
+
+    private void resolveMissingModel(String modelKey) {
+        missingModelKey = null;
+        selectModelKey(modelKey);
+        selectedModelKeySnapshot = modelKey;
+        Parameters current = collectParameters();
+        parameterStore.save(formatMethod(current));
+        savedParameters = current;
+        setStatus("Replacement model selected.");
+        markPreviewStale(STALE_TEXT);
+    }
+
+    private void openModelManager() {
+        File projectDir = activeContext == null ? null : activeContext.getProjectDirectory();
+        File root = projectDir == null ? new File(".") : projectDir;
+        SegmentationModelManagerDialog.showManager(
+                SwingUtilities.getWindowAncestor(preview != null ? preview : manageModelsButton),
+                root.toPath(),
+                ModelEntry.Engine.STARDIST);
+        refreshModelOptionsFromCatalog();
+    }
+
+    private void refreshModelOptionsFromCatalog() {
+        String selectedKey = selectedModelKey();
+        modelOptions = modelOptionsFor(activeContext);
+        if (modelCombo != null) {
+            updatingFields = true;
+            try {
+                modelCombo.removeAllItems();
+                for (int i = 0; i < modelOptions.size(); i++) {
+                    modelCombo.addItem(modelOptions.get(i));
+                }
+                selectModelKey(selectedKey);
+            } finally {
+                updatingFields = false;
+            }
+        }
+        if (!containsModelKey(modelOptions, selectedKey)) {
+            missingModelKey = selectedKey;
+            setError("Cannot run segmentation: model missing.");
+        }
     }
 
     private ModelOption selectedModelOption() {
@@ -816,6 +1059,10 @@ public final class StarDistParameterStage implements ConfigQcStage {
 
     private void runPreviewOnWorker() {
         if (previewWorker != null && !previewWorker.isDone()) return;
+        if (missingModelKey != null) {
+            setError("Cannot run segmentation: model missing.");
+            return;
+        }
         if (filteredSource == null) {
             setError("No StarDist input image is available.");
             return;
@@ -844,6 +1091,9 @@ public final class StarDistParameterStage implements ConfigQcStage {
     }
 
     private void runPreviewNow() throws Exception {
+        if (missingModelKey != null) {
+            throw new IllegalStateException("Cannot run segmentation: model missing.");
+        }
         if (filteredSource == null) {
             throw new IllegalStateException("No StarDist input image is available.");
         }
@@ -1293,7 +1543,7 @@ public final class StarDistParameterStage implements ConfigQcStage {
         if (resetButton != null) resetButton.setEnabled(enabled);
         if (variationsButton != null) variationsButton.setEnabled(enabled && filteredSource != null);
         if (modelCombo != null) modelCombo.setEnabled(enabled);
-        if (manageModelsButton != null) manageModelsButton.setEnabled(false);
+        if (manageModelsButton != null) manageModelsButton.setEnabled(enabled);
         if (probabilityField != null) probabilityField.setEnabled(enabled);
         if (nmsField != null) nmsField.setEnabled(enabled);
         if (linkingField != null) linkingField.setEnabled(enabled);
@@ -1391,8 +1641,10 @@ public final class StarDistParameterStage implements ConfigQcStage {
         Collections.sort(user, byName);
 
         List<ModelOption> out = new ArrayList<ModelOption>();
-        for (ModelEntry entry : stock) out.add(new ModelOption(entry));
-        for (ModelEntry entry : user) out.add(new ModelOption(entry));
+        for (ModelEntry entry : stock) out.add(new ModelOption(entry, false));
+        for (int i = 0; i < user.size(); i++) {
+            out.add(new ModelOption(user.get(i), i == 0));
+        }
         if (out.isEmpty()) {
             out.add(new ModelOption(new ModelEntry(
                     SegmentationMethod.DEFAULT_STARDIST_MODEL_KEY,
@@ -1408,7 +1660,7 @@ public final class StarDistParameterStage implements ConfigQcStage {
                     defaultsMap(BinConfig.DEFAULT_STARDIST_PROB_THRESH,
                             BinConfig.DEFAULT_STARDIST_NMS_THRESH),
                     null,
-                    false)));
+                    false), false));
         }
         return Collections.unmodifiableList(out);
     }
@@ -1457,6 +1709,16 @@ public final class StarDistParameterStage implements ConfigQcStage {
     private static boolean currentImageLooksRgb(ImagePlus image) {
         if (image == null) return false;
         return image.getType() == ImagePlus.COLOR_RGB || image.getNChannels() >= 3;
+    }
+
+    private static boolean containsModelKey(List<ModelOption> options, String modelKey) {
+        String key = normalizeModelKey(modelKey);
+        if (options == null) return false;
+        for (int i = 0; i < options.size(); i++) {
+            ModelOption option = options.get(i);
+            if (option != null && key.equals(option.entry.modelKey)) return true;
+        }
+        return false;
     }
 
     private void closePreviewWorker() {
@@ -1571,38 +1833,29 @@ public final class StarDistParameterStage implements ConfigQcStage {
         return label;
     }
 
-    private static final class ModelOption {
+    private static final class ModelOption implements ModelEntryListCellRenderer.EntryAdapter {
         final ModelEntry entry;
+        final boolean showUserSeparator;
 
-        ModelOption(ModelEntry entry) {
+        ModelOption(ModelEntry entry, boolean showUserSeparator) {
             this.entry = entry;
+            this.showUserSeparator = showUserSeparator;
         }
 
         String tooltip() {
-            if (metadataBoolean(entry, "advanced") && metadataBoolean(entry, "rgbOnly")) {
-                return "Advanced RGB model. FLASH previews one grayscale channel at a time, so use only with RGB-aware configuration.";
-            }
-            return entry == null ? null : entry.description;
+            return ModelEntryListCellRenderer.tooltip(entry);
         }
 
         @Override public String toString() {
-            return labelFor(entry);
+            return ModelEntryListCellRenderer.presentation(entry, showUserSeparator).displayText;
         }
-    }
 
-    private static final class ModelOptionRenderer extends DefaultListCellRenderer {
-        @Override
-        public Component getListCellRendererComponent(JList<?> list, Object value, int index,
-                                                      boolean isSelected, boolean cellHasFocus) {
-            super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
-            if (value instanceof ModelOption) {
-                ModelOption option = (ModelOption) value;
-                setText(option.toString());
-                if (list != null) {
-                    list.setToolTipText(option.tooltip());
-                }
-            }
-            return this;
+        @Override public ModelEntry modelEntry() {
+            return entry;
+        }
+
+        @Override public boolean showUserSeparator() {
+            return showUserSeparator;
         }
     }
 

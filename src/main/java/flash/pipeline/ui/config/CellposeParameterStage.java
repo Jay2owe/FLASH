@@ -16,6 +16,8 @@ import flash.pipeline.segmentation.catalog.ModelCatalog;
 import flash.pipeline.segmentation.catalog.ModelCatalogIO;
 import flash.pipeline.segmentation.catalog.ModelEntry;
 import flash.pipeline.ui.FlashTheme;
+import flash.pipeline.ui.ModelEntryListCellRenderer;
+import flash.pipeline.ui.SegmentationModelManagerDialog;
 import flash.pipeline.ui.ToggleSwitch;
 import flash.pipeline.ui.preview.ObjectSizeFilterPreview;
 import flash.pipeline.ui.preview.PreviewPairPanel;
@@ -30,12 +32,10 @@ import ij.measure.ResultsTable;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
-import javax.swing.DefaultListCellRenderer;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
-import javax.swing.JList;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
@@ -44,7 +44,6 @@ import javax.swing.SwingWorker;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import java.awt.Color;
-import java.awt.Component;
 import java.awt.Container;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
@@ -189,6 +188,9 @@ public final class CellposeParameterStage implements ConfigQcStage {
     private int lastObjectCount = -1;
     private List<ModelOption> modelOptions = Collections.emptyList();
     private String missingModelKey;
+    private String selectedModelKeySnapshot;
+    private Parameters pendingDefaultsPrevious;
+    private Parameters pendingDefaultsSuggested;
 
     private JComboBox<ModelOption> modelCombo;
     private JComboBox<ModelOption> missingModelReplacementCombo;
@@ -206,6 +208,9 @@ public final class CellposeParameterStage implements ConfigQcStage {
     private JButton manageModelsButton;
     private ClickSuggestPanel suggestPanel;
     private JLabel missingModelNoticeLabel;
+    private JLabel defaultsNoticeLabel;
+    private JButton defaultsApplyButton;
+    private JButton defaultsRevertButton;
     private JLabel modelDescriptionLabel;
     private JLabel companionHelpLabel;
     private JLabel runtimeLabel;
@@ -302,6 +307,8 @@ public final class CellposeParameterStage implements ConfigQcStage {
         }
         panel.add(buildModelRow());
         panel.add(Box.createVerticalStrut(4));
+        panel.add(buildDefaultsRow());
+        panel.add(Box.createVerticalStrut(4));
         panel.add(buildDetectionRow());
         panel.add(Box.createVerticalStrut(4));
         panel.add(buildSizeRow());
@@ -372,6 +379,10 @@ public final class CellposeParameterStage implements ConfigQcStage {
 
     @Override
     public boolean lockIn(ConfigQcContext context) {
+        if (missingModelKey != null) {
+            setError("Cannot run segmentation: model missing.");
+            return false;
+        }
         try {
             Parameters parameters = collectParameters();
             ParticleSizeStage.SizeToken size = collectSizeToken();
@@ -543,6 +554,18 @@ public final class CellposeParameterStage implements ConfigQcStage {
         return manageModelsButton != null && manageModelsButton.isEnabled();
     }
 
+    boolean defaultsApplyVisibleForTest() {
+        return defaultsApplyButton != null && defaultsApplyButton.isVisible();
+    }
+
+    void applyPendingDefaultsForTest() {
+        applyPendingDefaults();
+    }
+
+    void revertPendingDefaultsForTest() {
+        revertPendingDefaults();
+    }
+
     String missingModelNoticeTextForTest() {
         return missingModelNoticeLabel == null ? "" : missingModelNoticeLabel.getText();
     }
@@ -563,13 +586,12 @@ public final class CellposeParameterStage implements ConfigQcStage {
 
         missingModelReplacementCombo = new JComboBox<ModelOption>(
                 modelOptions.toArray(new ModelOption[0]));
-        missingModelReplacementCombo.setRenderer(new ModelOptionRenderer());
+        missingModelReplacementCombo.setRenderer(new ModelEntryListCellRenderer());
         missingModelReplacementCombo.addActionListener(e -> {
             if (updatingControls) return;
             ModelOption selected = (ModelOption) missingModelReplacementCombo.getSelectedItem();
             if (selected == null) return;
-            selectModelKey(selected.entry.modelKey);
-            modelChanged();
+            resolveMissingModel(selected.entry.modelKey);
         });
 
         GridBagConstraints gbc = rowConstraints();
@@ -588,7 +610,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
         row.setBorder(FlashTheme.pad(2, 0, 2, 0));
 
         modelCombo = new JComboBox<ModelOption>(modelOptions.toArray(new ModelOption[0]));
-        modelCombo.setRenderer(new ModelOptionRenderer());
+        modelCombo.setRenderer(new ModelEntryListCellRenderer());
         modelCombo.addActionListener(e -> modelChanged());
         companionCombo = new JComboBox<String>(
                 companionChoices.keySet().toArray(new String[0]));
@@ -619,8 +641,9 @@ public final class CellposeParameterStage implements ConfigQcStage {
         gbc.fill = GridBagConstraints.HORIZONTAL;
         row.add(modelCombo, gbc);
         manageModelsButton = new JButton("Manage models...");
-        manageModelsButton.setEnabled(false);
-        manageModelsButton.setToolTipText("Model manager is added in a later stage.");
+        manageModelsButton.setEnabled(true);
+        manageModelsButton.setToolTipText("Open the segmentation model manager.");
+        manageModelsButton.addActionListener(e -> openModelManager());
         gbc.gridx++;
         gbc.weightx = 0.0;
         gbc.fill = GridBagConstraints.NONE;
@@ -649,6 +672,34 @@ public final class CellposeParameterStage implements ConfigQcStage {
         gbc.weightx = 1.0;
         gbc.fill = GridBagConstraints.HORIZONTAL;
         row.add(Box.createHorizontalGlue(), gbc);
+        return row;
+    }
+
+    private JComponent buildDefaultsRow() {
+        JPanel row = new JPanel(new GridBagLayout());
+        row.setOpaque(false);
+        row.setAlignmentX(JComponent.LEFT_ALIGNMENT);
+        row.setBorder(FlashTheme.pad(2, 0, 2, 0));
+        defaultsNoticeLabel = hintLabel(" ");
+        defaultsApplyButton = new JButton("Apply");
+        defaultsApplyButton.setVisible(false);
+        defaultsApplyButton.addActionListener(e -> applyPendingDefaults());
+        defaultsRevertButton = new JButton("Revert");
+        defaultsRevertButton.setVisible(false);
+        defaultsRevertButton.addActionListener(e -> revertPendingDefaults());
+
+        GridBagConstraints gbc = rowConstraints();
+        row.add(defaultsNoticeLabel, gbc);
+        gbc.gridx++;
+        gbc.weightx = 1.0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        row.add(Box.createHorizontalGlue(), gbc);
+        gbc.gridx++;
+        gbc.weightx = 0.0;
+        gbc.fill = GridBagConstraints.NONE;
+        row.add(defaultsApplyButton, gbc);
+        gbc.gridx++;
+        row.add(defaultsRevertButton, gbc);
         return row;
     }
 
@@ -947,6 +998,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
         updatingControls = true;
         try {
             selectModelKey(parameters.modelToken);
+            selectedModelKeySnapshot = parameters.modelToken;
             companionCombo.setSelectedItem(companionChoiceLabel(companionChoices, parameters.secondChannelIndex));
             diameterField.setText(String.valueOf(parameters.diameter));
             flowField.setText(String.valueOf(parameters.flowThreshold));
@@ -973,11 +1025,85 @@ public final class CellposeParameterStage implements ConfigQcStage {
         }
     }
 
+    private void showPendingDefaults(Parameters previous, Parameters suggested, String modelName) {
+        pendingDefaultsPrevious = copyParameters(previous);
+        pendingDefaultsSuggested = copyParameters(suggested);
+        highlightDefaultField(diameterField);
+        highlightDefaultField(flowField);
+        highlightDefaultField(cellprobField);
+        if (defaultsNoticeLabel != null) {
+            defaultsNoticeLabel.setText("Defaults from "
+                    + (modelName == null || modelName.trim().isEmpty()
+                    ? suggested.modelToken : modelName)
+                    + " are pending.");
+        }
+        if (defaultsApplyButton != null) defaultsApplyButton.setVisible(true);
+        if (defaultsRevertButton != null) defaultsRevertButton.setVisible(true);
+        markPreviewStale(STALE_TEXT);
+    }
+
+    private void applyPendingDefaults() {
+        if (pendingDefaultsSuggested == null) return;
+        Parameters applied = copyParameters(pendingDefaultsSuggested);
+        savedParameters = applied;
+        selectedModelKeySnapshot = applied.modelToken;
+        parameterStore.save(formatMethod(applied));
+        clearPendingDefaults();
+        if (labelPreview != null) {
+            runPreviewOnWorker();
+        } else {
+            markPreviewStale(STALE_TEXT);
+        }
+    }
+
+    private void revertPendingDefaults() {
+        if (pendingDefaultsPrevious == null) return;
+        Parameters previous = copyParameters(pendingDefaultsPrevious);
+        loadFields(previous);
+        selectedModelKeySnapshot = previous.modelToken;
+        clearPendingDefaults();
+        markPreviewStale(STALE_TEXT);
+    }
+
+    private void clearPendingDefaults() {
+        pendingDefaultsPrevious = null;
+        pendingDefaultsSuggested = null;
+        resetDefaultField(diameterField);
+        resetDefaultField(flowField);
+        resetDefaultField(cellprobField);
+        if (defaultsNoticeLabel != null) defaultsNoticeLabel.setText(" ");
+        if (defaultsApplyButton != null) defaultsApplyButton.setVisible(false);
+        if (defaultsRevertButton != null) defaultsRevertButton.setVisible(false);
+    }
+
+    private static boolean defaultsChanged(Parameters previous, Parameters suggested) {
+        if (previous == null || suggested == null) return false;
+        return previous.diameter != suggested.diameter
+                || previous.flowThreshold != suggested.flowThreshold
+                || previous.cellprobThreshold != suggested.cellprobThreshold;
+    }
+
+    private static void highlightDefaultField(JTextField field) {
+        if (field != null) field.setBackground(new Color(255, 246, 170));
+    }
+
+    private static void resetDefaultField(JTextField field) {
+        if (field != null) field.setBackground(Color.WHITE);
+    }
+
     private void modelChanged() {
         if (!updatingControls) {
             ModelOption selected = selectedModelOption();
             if (selected != null) {
                 Parameters current = collectParameters();
+                Parameters previous = new Parameters(
+                        selectedModelKeySnapshot == null ? current.modelToken : selectedModelKeySnapshot,
+                        current.secondChannelIndex,
+                        current.diameter,
+                        current.flowThreshold,
+                        current.cellprobThreshold,
+                        current.useGpu,
+                        current.dumpCellprob);
                 Parameters updated = new Parameters(
                         selected.entry.modelKey,
                         selected.entry.supportsSecondChannel ? current.secondChannelIndex : -1,
@@ -986,13 +1112,18 @@ public final class CellposeParameterStage implements ConfigQcStage {
                         defaultDouble(selected.entry.defaults.get("cellprobThreshold"), current.cellprobThreshold),
                         current.useGpu);
                 loadFields(updated);
-                savedParameters = updated;
-                parameterStore.save(formatMethod(updated));
                 captureCurrentPreviewForComparison();
-                if (labelPreview != null) {
-                    runPreviewOnWorker();
+                if (defaultsChanged(previous, updated)) {
+                    showPendingDefaults(previous, updated, selected.entry.name);
                 } else {
-                    markPreviewStale(STALE_TEXT);
+                    savedParameters = updated;
+                    parameterStore.save(formatMethod(updated));
+                    selectedModelKeySnapshot = updated.modelToken;
+                    if (labelPreview != null) {
+                        runPreviewOnWorker();
+                    } else {
+                        markPreviewStale(STALE_TEXT);
+                    }
                 }
             }
         }
@@ -1140,6 +1271,10 @@ public final class CellposeParameterStage implements ConfigQcStage {
 
     private void runPreviewOnWorker() {
         if (previewWorker != null && !previewWorker.isDone()) return;
+        if (missingModelKey != null) {
+            setError("Cannot run segmentation: model missing.");
+            return;
+        }
         if (filteredSource == null) {
             setError("No Cellpose input image is available.");
             return;
@@ -1167,6 +1302,9 @@ public final class CellposeParameterStage implements ConfigQcStage {
     }
 
     private void runPreviewNow() throws Exception {
+        if (missingModelKey != null) {
+            throw new IllegalStateException("Cannot run segmentation: model missing.");
+        }
         if (filteredSource == null) {
             throw new IllegalStateException("No Cellpose input image is available.");
         }
@@ -1586,7 +1724,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
                     && selectedModelSupportsSecondChannel()
                     && companionCombo.getItemCount() > 1);
         }
-        if (manageModelsButton != null) manageModelsButton.setEnabled(false);
+        if (manageModelsButton != null) manageModelsButton.setEnabled(enabled);
         if (diameterField != null) diameterField.setEnabled(enabled);
         if (flowField != null) flowField.setEnabled(enabled);
         if (cellprobField != null) cellprobField.setEnabled(enabled);
@@ -1789,8 +1927,10 @@ public final class CellposeParameterStage implements ConfigQcStage {
             }
         });
         List<ModelOption> out = new ArrayList<ModelOption>();
-        for (ModelEntry entry : stock) out.add(new ModelOption(entry));
-        for (ModelEntry entry : user) out.add(new ModelOption(entry));
+        for (ModelEntry entry : stock) out.add(new ModelOption(entry, false));
+        for (int i = 0; i < user.size(); i++) {
+            out.add(new ModelOption(user.get(i), i == 0));
+        }
         if (out.isEmpty()) {
             out.add(new ModelOption(new ModelEntry(
                     SegmentationMethod.DEFAULT_CELLPOSE_MODEL_KEY,
@@ -1807,7 +1947,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
                             BinConfig.DEFAULT_CELLPOSE_FLOW_THRESHOLD,
                             BinConfig.DEFAULT_CELLPOSE_CELLPROB_THRESHOLD),
                     null,
-                    true)));
+                    true), false));
         }
         return Collections.unmodifiableList(out);
     }
@@ -1842,9 +1982,51 @@ public final class CellposeParameterStage implements ConfigQcStage {
         updateModelTooltip((ModelOption) modelCombo.getSelectedItem());
     }
 
+    private void resolveMissingModel(String modelKey) {
+        missingModelKey = null;
+        selectModelKey(modelKey);
+        selectedModelKeySnapshot = modelKey;
+        Parameters current = collectParameters();
+        parameterStore.save(formatMethod(current));
+        savedParameters = current;
+        setStatus("Replacement model selected.");
+        markPreviewStale(STALE_TEXT);
+    }
+
+    private void openModelManager() {
+        File projectDir = activeContext == null ? null : activeContext.getProjectDirectory();
+        File root = projectDir == null ? new File(".") : projectDir;
+        SegmentationModelManagerDialog.showManager(
+                SwingUtilities.getWindowAncestor(preview != null ? preview : manageModelsButton),
+                root.toPath(),
+                ModelEntry.Engine.CELLPOSE);
+        refreshModelOptionsFromCatalog();
+    }
+
+    private void refreshModelOptionsFromCatalog() {
+        String selectedKey = selectedModelKeyForTest();
+        modelOptions = modelOptionsFor(activeContext);
+        if (modelCombo != null) {
+            updatingControls = true;
+            try {
+                modelCombo.removeAllItems();
+                for (int i = 0; i < modelOptions.size(); i++) {
+                    modelCombo.addItem(modelOptions.get(i));
+                }
+                selectModelKey(selectedKey);
+            } finally {
+                updatingControls = false;
+            }
+        }
+        if (!containsModelKey(modelOptions, selectedKey)) {
+            missingModelKey = selectedKey;
+            setError("Cannot run segmentation: model missing.");
+        }
+    }
+
     private void updateModelTooltip(ModelOption option) {
         if (modelCombo != null) {
-            modelCombo.setToolTipText(option == null ? null : option.description());
+            modelCombo.setToolTipText(option == null ? null : ModelEntryListCellRenderer.tooltip(option.entry));
         }
     }
 
@@ -1935,11 +2117,13 @@ public final class CellposeParameterStage implements ConfigQcStage {
         }
     }
 
-    private static final class ModelOption {
+    private static final class ModelOption implements ModelEntryListCellRenderer.EntryAdapter {
         final ModelEntry entry;
+        final boolean showUserSeparator;
 
-        ModelOption(ModelEntry entry) {
+        ModelOption(ModelEntry entry, boolean showUserSeparator) {
             this.entry = entry;
+            this.showUserSeparator = showUserSeparator;
         }
 
         String description() {
@@ -1947,23 +2131,15 @@ public final class CellposeParameterStage implements ConfigQcStage {
         }
 
         @Override public String toString() {
-            return labelFor(entry);
+            return ModelEntryListCellRenderer.presentation(entry, showUserSeparator).displayText;
         }
-    }
 
-    private static final class ModelOptionRenderer extends DefaultListCellRenderer {
-        @Override
-        public Component getListCellRendererComponent(JList<?> list, Object value, int index,
-                                                      boolean isSelected, boolean cellHasFocus) {
-            super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
-            if (value instanceof ModelOption) {
-                ModelOption option = (ModelOption) value;
-                setText(option.toString());
-                if (list != null) {
-                    list.setToolTipText(option.description());
-                }
-            }
-            return this;
+        @Override public ModelEntry modelEntry() {
+            return entry;
+        }
+
+        @Override public boolean showUserSeparator() {
+            return showUserSeparator;
         }
     }
 

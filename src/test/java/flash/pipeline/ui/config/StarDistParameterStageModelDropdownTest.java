@@ -43,7 +43,7 @@ public class StarDistParameterStageModelDropdownTest {
             assertTrue("Stock entries should appear before user entries: " + keys,
                     keys.get(i).startsWith("stardist_"));
         }
-        assertFalse(stage.manageModelsButtonEnabledForTest());
+        assertTrue(stage.manageModelsButtonEnabledForTest());
     }
 
     @Test
@@ -59,6 +59,14 @@ public class StarDistParameterStageModelDropdownTest {
         stage.selectModelForTest("user_microglia_iba1_v3");
 
         assertEquals("user_microglia_iba1_v3", stage.selectedModelKeyForTest());
+        assertTrue(stage.defaultsApplyVisibleForTest());
+        assertEquals("stardist:0.5:0.4:linking=7.0:area=2.0-20.0:"
+                        + "model=stardist_versatile_fluo",
+                store.token);
+        assertEquals("stardist:0.61:0.22:linking=7.0:area=2.0-20.0:"
+                        + "model=user_microglia_iba1_v3",
+                stage.currentMethodForTest());
+        stage.applyPendingDefaultsForTest();
         assertEquals("stardist:0.61:0.22:linking=7.0:area=2.0-20.0:"
                         + "model=user_microglia_iba1_v3",
                 store.token);
@@ -79,6 +87,8 @@ public class StarDistParameterStageModelDropdownTest {
         adapter.previewRuns = 0;
 
         stage.selectModelForTest("user_preview");
+        assertEquals(0, adapter.previewRuns);
+        stage.applyPendingDefaultsForTest();
         waitForPreviewRuns(adapter, 1);
 
         assertEquals("user_preview", adapter.lastPreviewParameters.modelKey);

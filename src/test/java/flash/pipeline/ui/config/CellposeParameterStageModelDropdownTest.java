@@ -44,7 +44,7 @@ public class CellposeParameterStageModelDropdownTest {
             assertTrue("Stock entries should appear before user entries: " + keys,
                     keys.get(i).startsWith("cellpose_"));
         }
-        assertFalse(stage.manageModelsButtonEnabledForTest());
+        assertTrue(stage.manageModelsButtonEnabledForTest());
     }
 
     @Test
@@ -59,6 +59,12 @@ public class CellposeParameterStageModelDropdownTest {
         stage.setModelForTest("user_microglia_iba1_v3");
 
         assertEquals("user_microglia_iba1_v3", stage.selectedModelKeyForTest());
+        assertTrue(stage.defaultsApplyVisibleForTest());
+        assertEquals("cellpose:30.0:0.4:0.0:gpu=false:model=cellpose_cyto3",
+                store.token);
+        assertEquals("cellpose:22.0:0.7:-0.1:gpu=false:model=user_microglia_iba1_v3",
+                stage.currentMethodForTest());
+        stage.applyPendingDefaultsForTest();
         assertEquals("cellpose:22.0:0.7:-0.1:gpu=false:model=user_microglia_iba1_v3",
                 store.token);
         assertEquals(store.token, stage.currentMethodForTest());
@@ -78,6 +84,8 @@ public class CellposeParameterStageModelDropdownTest {
         adapter.previewRuns = 0;
 
         stage.setModelForTest("user_preview");
+        assertEquals(0, adapter.previewRuns);
+        stage.applyPendingDefaultsForTest();
         waitForPreviewRuns(adapter, 1);
 
         assertEquals("user_preview", adapter.lastParameters.modelToken);
