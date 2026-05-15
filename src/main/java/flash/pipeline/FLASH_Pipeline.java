@@ -389,6 +389,7 @@ public class FLASH_Pipeline implements PlugIn {
         GpuConcurrency.logEffectivePermits();
 
         List<String> failedAnalyses = new ArrayList<>();
+        boolean[] completedAnalyses = new boolean[selections.length];
 
         // Execute selected analyses — CLI always suppresses dialogs
         for (int i = 0; i < selections.length; i++) {
@@ -401,6 +402,7 @@ public class FLASH_Pipeline implements PlugIn {
                 BinSetupDispatcher.clearLastFieldSources();
                 try {
                     analysis.execute(directory);
+                    completedAnalyses[i] = true;
                 } catch (Throwable t) {
                     IJ.handleException(t);
                     IJ.log("[CLI] " + analyses[i] + " FAILED: " + t.getMessage());
@@ -410,27 +412,33 @@ public class FLASH_Pipeline implements PlugIn {
                 writeRunAudit(analysis, i);
             } else {
                 IJ.log("[CLI] Warning: Analysis not implemented for index " + i);
+                failedAnalyses.add("index " + i);
             }
         }
 
         // Auto-trigger aggregation — configured through the same path
-        boolean ran3D = selections[IDX_3D_OBJECT];
-        boolean ranSpatial = selections[IDX_SPATIAL];
-        boolean ranIntensity = selections[IDX_INTENSITY];
+        boolean ran3D = selections[IDX_3D_OBJECT] && completedAnalyses[IDX_3D_OBJECT];
+        boolean ranSpatial = selections[IDX_SPATIAL] && completedAnalyses[IDX_SPATIAL];
+        boolean ranIntensity = selections[IDX_INTENSITY] && completedAnalyses[IDX_INTENSITY];
         boolean manuallyRanAgg = selections[IDX_AGGREGATION];
         if (autoAggregate && (ran3D || ranSpatial || ranIntensity) && !manuallyRanAgg) {
             IJ.log("[CLI] Auto-running Master Data Aggregation...");
             Analysis aggAnalysis = analysisMap.get(IDX_AGGREGATION);
-            configureAnalysis(aggAnalysis, IDX_AGGREGATION, true, qualityReport);
-            BinSetupDispatcher.clearLastFieldSources();
-            try {
-                aggAnalysis.execute(directory);
-            } catch (Throwable t) {
-                IJ.handleException(t);
-                IJ.log("[CLI] " + analyses[IDX_AGGREGATION] + " (auto) FAILED: " + t.getMessage());
+            if (aggAnalysis != null) {
+                configureAnalysis(aggAnalysis, IDX_AGGREGATION, true, qualityReport);
+                BinSetupDispatcher.clearLastFieldSources();
+                try {
+                    aggAnalysis.execute(directory);
+                } catch (Throwable t) {
+                    IJ.handleException(t);
+                    IJ.log("[CLI] " + analyses[IDX_AGGREGATION] + " (auto) FAILED: " + t.getMessage());
+                    failedAnalyses.add(analyses[IDX_AGGREGATION] + " (auto)");
+                }
+                writeRunAudit(aggAnalysis, IDX_AGGREGATION);
+            } else {
+                IJ.log("[CLI] Auto aggregation skipped: analysis not implemented.");
                 failedAnalyses.add(analyses[IDX_AGGREGATION] + " (auto)");
             }
-            writeRunAudit(aggAnalysis, IDX_AGGREGATION);
         }
 
         // Post-run summary (R-01, R-08, R-09) — informational only
