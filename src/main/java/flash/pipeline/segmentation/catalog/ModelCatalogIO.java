@@ -27,6 +27,7 @@ public final class ModelCatalogIO {
     static final String FILES_DIR = "files";
     static final String CATALOG_FILENAME = "catalog.json";
     static final String STOCK_CATALOG_RESOURCE = "segmentation_models/stock_catalog.json";
+    public static final String PROJECT_REGISTERED_METADATA_KEY = "projectRegistered";
 
     public interface WarningSink {
         void warn(String message);
@@ -70,7 +71,7 @@ public final class ModelCatalogIO {
 
         List<ModelEntry> projectEntries = new ArrayList<ModelEntry>();
         for (ModelEntry entry : catalog.all()) {
-            if (entry != null && !entry.isStock()) {
+            if (isProjectWritableEntry(entry)) {
                 validateEntry(entry, true);
                 projectEntries.add(entry);
             }
@@ -157,6 +158,18 @@ public final class ModelCatalogIO {
         return modelKey != null && modelKey.matches("[A-Za-z0-9._-]+");
     }
 
+    public static boolean isProjectWritableEntry(ModelEntry entry) {
+        return entry != null && (!entry.isStock() || isProjectRegisteredBuiltin(entry));
+    }
+
+    public static boolean isProjectRegisteredBuiltin(ModelEntry entry) {
+        if (entry == null || entry.source != ModelEntry.Source.STOCK_BUILTIN) {
+            return false;
+        }
+        Object marker = entry.metadata.get(PROJECT_REGISTERED_METADATA_KEY);
+        return Boolean.TRUE.equals(marker) || "true".equalsIgnoreCase(String.valueOf(marker));
+    }
+
     private static List<ModelEntry> readProjectEntries(Path projectRoot) {
         Path file = catalogFile(projectRoot);
         if (!Files.isRegularFile(file)) {
@@ -201,7 +214,7 @@ public final class ModelCatalogIO {
             try {
                 ModelEntry entry = parseEntry(JsonIO.asObject(raw));
                 validateEntry(entry, true);
-                if (stockCatalog != entry.isStock()) {
+                if (!entryBelongsInCatalogLayer(entry, stockCatalog)) {
                     warn("Skipping model '" + entry.modelKey + "' in " + sourceName
                             + " because its source does not match the catalog layer.");
                     continue;
@@ -213,6 +226,13 @@ public final class ModelCatalogIO {
             }
         }
         return out;
+    }
+
+    private static boolean entryBelongsInCatalogLayer(ModelEntry entry, boolean stockCatalog) {
+        if (stockCatalog) {
+            return entry.isStock() && !isProjectRegisteredBuiltin(entry);
+        }
+        return isProjectWritableEntry(entry);
     }
 
     private static ModelEntry parseEntry(Map<String, Object> map) throws IOException {
