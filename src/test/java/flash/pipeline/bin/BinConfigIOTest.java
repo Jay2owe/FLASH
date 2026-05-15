@@ -345,7 +345,7 @@ public class BinConfigIOTest {
         assertEquals("cellpose:30.0:cyto3:0.4:0.0:gpu=true:chan2=0", cfg.segmentationMethods.get(1));
         assertTrue(cfg.isCellpose(1));
         assertEquals(30.0, cfg.getCellposeDiameter(1), 0.001);
-        assertEquals("cyto3", cfg.getCellposeModel(1));
+        assertEquals("cellpose_cyto3", cfg.getCellposeModel(1));
         assertTrue(cfg.getCellposeUseGpu(1));
         assertEquals(0, cfg.getCellposeSecondChannel(1));
     }

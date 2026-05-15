@@ -37,7 +37,8 @@ public class CellposeParameterStageTest {
         CellposeParameterStage.Parameters params =
                 CellposeParameterStage.parseMethod(token, true, 3, 0);
 
-        assertEquals(token, CellposeParameterStage.formatMethod(params));
+        assertEquals("cellpose:30.0:0.4:0.0:gpu=false:chan2=1:model=cellpose_cyto3",
+                CellposeParameterStage.formatMethod(params));
     }
 
     @Test
@@ -78,7 +79,7 @@ public class CellposeParameterStageTest {
                 .build());
         waitForPreviewRuns(adapter, 1);
 
-        assertEquals("cellpose:22.0:nuclei:0.6:0.2:gpu=false",
+        assertEquals("cellpose:22.0:0.6:0.2:gpu=false:model=cellpose_nuclei",
                 stage.currentMethodForTest());
     }
 
@@ -156,7 +157,7 @@ public class CellposeParameterStageTest {
         stage.setCellprobForTest("0.2");
         stage.setUseGpuForTest(true);
 
-        assertEquals("cellpose:44.0:cyto2:0.6:0.2:gpu=true:chan2=1",
+        assertEquals("cellpose:44.0:0.6:0.2:gpu=true:chan2=1:model=cellpose_cyto2",
                 stage.currentMethodForTest());
     }
 
@@ -348,7 +349,7 @@ public class CellposeParameterStageTest {
         stage.buildControls(context, new RecordingActions());
         stage.onEnter(context, new PreviewPairPanel("Original", "Adjusted"));
 
-        assertTrue(stage.currentMethodForTest().startsWith("cellpose:44.0:cyto3"));
+        assertTrue(stage.currentMethodForTest().startsWith("cellpose:44.0:0.4:0.0"));
         assertEquals("cellpose:30.0:cyto3:0.4:0.0:gpu=false", store.token);
     }
 

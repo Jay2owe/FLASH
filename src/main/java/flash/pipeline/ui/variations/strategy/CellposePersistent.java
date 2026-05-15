@@ -18,6 +18,7 @@ import flash.pipeline.ui.variations.VariationStrategy;
 import ij.ImagePlus;
 import ij.measure.ResultsTable;
 
+import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -39,7 +40,8 @@ public final class CellposePersistent implements VariationStrategy {
                                       ImagePlus runtimeInput,
                                       String model,
                                       boolean useGpu,
-                                      String channelName) throws Exception;
+                                      String channelName,
+                                      File projectRoot) throws Exception;
     }
 
     private final ImagePlus filteredSource;
@@ -241,7 +243,8 @@ public final class CellposePersistent implements VariationStrategy {
                     runtimeInput,
                     parameters.modelToken,
                     parameters.useGpu,
-                    channelName);
+                    channelName,
+                    projectRoot());
             return new WorkerState(worker, tempDir, runtimeInput, cropped, companion);
         } catch (Exception e) {
             if (runtimeInput != null && runtimeInput != cropped
@@ -309,6 +312,10 @@ public final class CellposePersistent implements VariationStrategy {
                 previewAdapter,
                 baseParams,
                 configContext);
+    }
+
+    private File projectRoot() {
+        return configContext == null ? null : configContext.getProjectDirectory();
     }
 
     private static ImagePlus companionFor(CellposeParameterStage.Parameters parameters,
@@ -395,9 +402,11 @@ public final class CellposePersistent implements VariationStrategy {
                                                            ImagePlus runtimeInput,
                                                            String model,
                                                            boolean useGpu,
-                                                           String channelName) throws Exception {
+                                                           String channelName,
+                                                           File projectRoot) throws Exception {
                 return new CellposePersistentWorker(imagePath, outputDir,
-                        referenceInput, runtimeInput, model, useGpu, channelName);
+                        referenceInput, runtimeInput, model, useGpu, channelName,
+                        projectRoot);
             }
         };
     }

@@ -3,6 +3,8 @@ package flash.pipeline.cellpose;
 import flash.pipeline.segmentation.SegmentationMethod;
 import flash.pipeline.segmentation.SegmentationTokenParser;
 
+import java.util.Optional;
+
 public enum CellposeModel {
     CYTO3("cyto3",
             "cyto3",
@@ -57,15 +59,41 @@ public enum CellposeModel {
         return supportsSecondChannel;
     }
 
+    public String catalogKey() {
+        return SegmentationMethod.canonicalCellposeModelKey(token);
+    }
+
     public static CellposeModel fromToken(String token) {
+        Optional<CellposeModel> found = fromTokenOptional(token);
+        if (found.isPresent()) {
+            return found.get();
+        }
+        String display = token == null || token.trim().isEmpty()
+                ? "<missing>"
+                : token.trim();
+        throw new IllegalArgumentException("Unknown Cellpose model: " + display);
+    }
+
+    public static Optional<CellposeModel> fromTokenOptional(String token) {
         if (token != null) {
+            String canonical = SegmentationMethod.canonicalCellposeModelKey(token);
             for (CellposeModel model : values()) {
-                if (model.token.equalsIgnoreCase(token.trim())) {
-                    return model;
+                String trimmed = token.trim();
+                if (model.token.equalsIgnoreCase(trimmed)
+                        || model.displayName.equalsIgnoreCase(trimmed)
+                        || model.catalogKey().equalsIgnoreCase(canonical)) {
+                    return Optional.of(model);
                 }
             }
         }
-        return CYTO3;
+        return Optional.empty();
+    }
+
+    public static Optional<Boolean> supportsSecondChannelFor(String tokenOrKey) {
+        Optional<CellposeModel> found = fromTokenOptional(tokenOrKey);
+        return found.isPresent()
+                ? Optional.of(Boolean.valueOf(found.get().supportsSecondChannel()))
+                : Optional.<Boolean>empty();
     }
 
     public static String runtimeToken(String tokenOrMethod) {
@@ -76,14 +104,13 @@ public enum CellposeModel {
         if (trimmed.startsWith("cellpose:")) {
             SegmentationMethod method = SegmentationTokenParser.parseLenient(trimmed);
             if (method.isCellpose()) {
-                return SegmentationMethod.cellposeModelKey(method);
+                String modelKey = SegmentationMethod.cellposeModelKey(method);
+                Optional<CellposeModel> model = fromTokenOptional(modelKey);
+                return model.isPresent() ? model.get().token() : modelKey;
             }
         }
-        for (CellposeModel model : values()) {
-            if (model.token.equalsIgnoreCase(trimmed) || model.displayName.equalsIgnoreCase(trimmed)) {
-                return model.token();
-            }
-        }
+        Optional<CellposeModel> model = fromTokenOptional(trimmed);
+        if (model.isPresent()) return model.get().token();
         return trimmed;
     }
 

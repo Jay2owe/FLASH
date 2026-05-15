@@ -6,6 +6,11 @@ import flash.pipeline.cellpose.CellposeRuntime;
 import flash.pipeline.help.SetupHelpCatalog;
 import flash.pipeline.help.SetupHelpTopic;
 import flash.pipeline.objects.ObjectsCounter3DWrapper;
+import flash.pipeline.segmentation.SegmentationMethod;
+import flash.pipeline.segmentation.SegmentationTokenParser;
+import flash.pipeline.segmentation.catalog.ModelCatalog;
+import flash.pipeline.segmentation.catalog.ModelCatalogIO;
+import flash.pipeline.segmentation.catalog.ModelEntry;
 import flash.pipeline.ui.FlashTheme;
 import flash.pipeline.ui.ToggleSwitch;
 import flash.pipeline.ui.preview.ObjectSizeFilterPreview;
@@ -21,10 +26,12 @@ import ij.measure.ResultsTable;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
+import javax.swing.DefaultListCellRenderer;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
+import javax.swing.JList;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
@@ -33,11 +40,16 @@ import javax.swing.SwingWorker;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import java.awt.Color;
+import java.awt.Component;
 import java.awt.Container;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
+import java.io.File;
 import java.lang.ref.WeakReference;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -100,9 +112,8 @@ public final class CellposeParameterStage implements ConfigQcStage {
                           double flowThreshold,
                           double cellprobThreshold,
                           boolean useGpu) {
-            CellposeModel model = CellposeModel.fromToken(modelToken);
-            this.modelToken = model.token();
-            this.secondChannelIndex = model.supportsSecondChannel() ? secondChannelIndex : -1;
+            this.modelToken = normalizeModelKey(modelToken);
+            this.secondChannelIndex = sanitizeSecondChannelForKnownModel(this.modelToken, secondChannelIndex);
             this.diameter = sanitizeNonNegative(diameter);
             this.flowThreshold = flowThreshold;
             this.cellprobThreshold = cellprobThreshold;
@@ -159,8 +170,11 @@ public final class CellposeParameterStage implements ConfigQcStage {
     private volatile boolean runtimeUiActive;
     private volatile int runtimeProbeRequestId;
     private int lastObjectCount = -1;
+    private List<ModelOption> modelOptions = Collections.emptyList();
+    private String missingModelKey;
 
-    private JComboBox<String> modelCombo;
+    private JComboBox<ModelOption> modelCombo;
+    private JComboBox<ModelOption> missingModelReplacementCombo;
     private JComboBox<String> companionCombo;
     private JTextField diameterField;
     private JTextField flowField;
@@ -172,6 +186,8 @@ public final class CellposeParameterStage implements ConfigQcStage {
     private JButton installGpuButton;
     private JButton resetButton;
     private JButton variationsButton;
+    private JButton manageModelsButton;
+    private JLabel missingModelNoticeLabel;
     private JLabel modelDescriptionLabel;
     private JLabel companionHelpLabel;
     private JLabel runtimeLabel;
@@ -253,11 +269,19 @@ public final class CellposeParameterStage implements ConfigQcStage {
         this.savedSize = restartSize == null
                 ? ParticleSizeStage.parseSizeToken(sizeStore.get())
                 : restartSize;
+        this.modelOptions = modelOptionsFor(context);
+        this.missingModelKey = containsModelKey(modelOptions, savedParameters.modelToken)
+                ? null
+                : savedParameters.modelToken;
 
         JPanel panel = new JPanel();
         panel.setOpaque(false);
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
         panel.setBorder(FlashTheme.pad(2, 0, 0, 0));
+        if (missingModelKey != null) {
+            panel.add(buildMissingModelNoticeRow());
+            panel.add(Box.createVerticalStrut(4));
+        }
         panel.add(buildModelRow());
         panel.add(Box.createVerticalStrut(4));
         panel.add(buildDetectionRow());
@@ -400,7 +424,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
     }
 
     void setModelForTest(String model) {
-        if (modelCombo != null) modelCombo.setSelectedItem(CellposeModel.fromToken(model).displayName());
+        selectModelKey(model);
     }
 
     void setCompanionForTest(String label) {
@@ -476,13 +500,70 @@ public final class CellposeParameterStage implements ConfigQcStage {
         return installGpuButton != null && installGpuButton.isEnabled();
     }
 
+    List<String> modelKeysForTest() {
+        List<String> keys = new ArrayList<String>();
+        if (modelCombo == null) return keys;
+        for (int i = 0; i < modelCombo.getItemCount(); i++) {
+            keys.add(modelCombo.getItemAt(i).entry.modelKey);
+        }
+        return keys;
+    }
+
+    String selectedModelKeyForTest() {
+        ModelOption selected = selectedModelOption();
+        return selected == null ? null : selected.entry.modelKey;
+    }
+
+    boolean manageModelsButtonEnabledForTest() {
+        return manageModelsButton != null && manageModelsButton.isEnabled();
+    }
+
+    String missingModelNoticeTextForTest() {
+        return missingModelNoticeLabel == null ? "" : missingModelNoticeLabel.getText();
+    }
+
+    boolean replacementSelectorVisibleForTest() {
+        return missingModelReplacementCombo != null && missingModelReplacementCombo.isVisible();
+    }
+
+    private JComponent buildMissingModelNoticeRow() {
+        JPanel row = new JPanel(new GridBagLayout());
+        row.setOpaque(false);
+        row.setAlignmentX(JComponent.LEFT_ALIGNMENT);
+        row.setBorder(FlashTheme.pad(2, 0, 2, 0));
+
+        missingModelNoticeLabel = new JLabel("Cellpose model '" + missingModelKey
+                + "' is not in the catalog. Pick a replacement:");
+        missingModelNoticeLabel.setForeground(FlashTheme.WARNING_FG);
+
+        missingModelReplacementCombo = new JComboBox<ModelOption>(
+                modelOptions.toArray(new ModelOption[0]));
+        missingModelReplacementCombo.setRenderer(new ModelOptionRenderer());
+        missingModelReplacementCombo.addActionListener(e -> {
+            if (updatingControls) return;
+            ModelOption selected = (ModelOption) missingModelReplacementCombo.getSelectedItem();
+            if (selected == null) return;
+            selectModelKey(selected.entry.modelKey);
+            modelChanged();
+        });
+
+        GridBagConstraints gbc = rowConstraints();
+        row.add(missingModelNoticeLabel, gbc);
+        gbc.gridx++;
+        gbc.weightx = 1.0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        row.add(missingModelReplacementCombo, gbc);
+        return row;
+    }
+
     private JComponent buildModelRow() {
         JPanel row = new JPanel(new GridBagLayout());
         row.setOpaque(false);
         row.setAlignmentX(JComponent.LEFT_ALIGNMENT);
         row.setBorder(FlashTheme.pad(2, 0, 2, 0));
 
-        modelCombo = new JComboBox<String>(CellposeModel.displayNames());
+        modelCombo = new JComboBox<ModelOption>(modelOptions.toArray(new ModelOption[0]));
+        modelCombo.setRenderer(new ModelOptionRenderer());
         modelCombo.addActionListener(e -> modelChanged());
         companionCombo = new JComboBox<String>(
                 companionChoices.keySet().toArray(new String[0]));
@@ -512,6 +593,13 @@ public final class CellposeParameterStage implements ConfigQcStage {
         gbc.weightx = 0.25;
         gbc.fill = GridBagConstraints.HORIZONTAL;
         row.add(modelCombo, gbc);
+        manageModelsButton = new JButton("Manage models...");
+        manageModelsButton.setEnabled(false);
+        manageModelsButton.setToolTipText("Model manager is added in a later stage.");
+        gbc.gridx++;
+        gbc.weightx = 0.0;
+        gbc.fill = GridBagConstraints.NONE;
+        row.add(manageModelsButton, gbc);
         gbc.gridx++;
         gbc.weightx = 0.0;
         gbc.fill = GridBagConstraints.NONE;
@@ -724,7 +812,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
     private void loadFields(Parameters parameters) {
         updatingControls = true;
         try {
-            modelCombo.setSelectedItem(CellposeModel.fromToken(parameters.modelToken).displayName());
+            selectModelKey(parameters.modelToken);
             companionCombo.setSelectedItem(companionChoiceLabel(companionChoices, parameters.secondChannelIndex));
             diameterField.setText(String.valueOf(parameters.diameter));
             flowField.setText(String.valueOf(parameters.flowThreshold));
@@ -732,6 +820,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
             gpuSwitch.setSelected(parameters.useGpu);
             refreshModelDescriptionLabel();
             refreshCompanionHelpLabel();
+            refreshCompanionState();
         } finally {
             updatingControls = false;
         }
@@ -751,9 +840,30 @@ public final class CellposeParameterStage implements ConfigQcStage {
     }
 
     private void modelChanged() {
+        if (!updatingControls) {
+            ModelOption selected = selectedModelOption();
+            if (selected != null) {
+                Parameters current = collectParameters();
+                Parameters updated = new Parameters(
+                        selected.entry.modelKey,
+                        selected.entry.supportsSecondChannel ? current.secondChannelIndex : -1,
+                        defaultDouble(selected.entry.defaults.get("diameter"), current.diameter),
+                        defaultDouble(selected.entry.defaults.get("flowThreshold"), current.flowThreshold),
+                        defaultDouble(selected.entry.defaults.get("cellprobThreshold"), current.cellprobThreshold),
+                        current.useGpu);
+                loadFields(updated);
+                savedParameters = updated;
+                parameterStore.save(formatMethod(updated));
+                captureCurrentPreviewForComparison();
+                if (labelPreview != null) {
+                    runPreviewOnWorker();
+                } else {
+                    markPreviewStale(STALE_TEXT);
+                }
+            }
+        }
         refreshModelDescriptionLabel();
         refreshCompanionState();
-        fieldChanged();
     }
 
     private void companionChanged() {
@@ -763,7 +873,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
 
     private void refreshCompanionState() {
         if (companionCombo == null) return;
-        boolean enabled = currentModel().supportsSecondChannel() && companionCombo.getItemCount() > 1;
+        boolean enabled = selectedModelSupportsSecondChannel() && companionCombo.getItemCount() > 1;
         companionCombo.setEnabled(enabled);
         if (!enabled) {
             updatingControls = true;
@@ -783,15 +893,16 @@ public final class CellposeParameterStage implements ConfigQcStage {
 
     private void refreshModelDescriptionLabel() {
         if (modelDescriptionLabel != null) {
-            CellposeModel model = currentModel();
-            modelDescriptionLabel.setText(model.displayName() + ": " + model.description());
+            ModelOption selected = selectedModelOption();
+            modelDescriptionLabel.setText(selected == null
+                    ? "Model: no Cellpose models are available."
+                    : selected.toString() + ": " + selected.description());
         }
     }
 
     private void refreshCompanionHelpLabel() {
         if (companionHelpLabel == null) return;
-        CellposeModel model = currentModel();
-        boolean enabled = model.supportsSecondChannel()
+        boolean enabled = selectedModelSupportsSecondChannel()
                 && companionCombo != null
                 && companionCombo.getItemCount() > 1;
         if (!enabled) {
@@ -1093,7 +1204,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
         try {
             Object model = combo.get(ParameterId.MODEL);
             if (model != null && modelCombo != null) {
-                modelCombo.setSelectedItem(CellposeModel.fromToken(String.valueOf(model)).displayName());
+                selectModelKey(String.valueOf(model));
             }
             setNumberField(diameterField, combo, ParameterId.DIAMETER);
             setNumberField(flowField, combo, ParameterId.FLOW_THRESHOLD);
@@ -1249,12 +1360,13 @@ public final class CellposeParameterStage implements ConfigQcStage {
 
     private Parameters collectParameters() {
         Parameters fallback = savedParameters == null ? Parameters.defaults(defaultUseGpu) : savedParameters;
-        CellposeModel model = currentModel();
-        int secondChannel = model.supportsSecondChannel()
+        ModelOption model = selectedModelOption();
+        String modelKey = model == null ? fallback.modelToken : model.entry.modelKey;
+        int secondChannel = model != null && model.entry.supportsSecondChannel
                 ? selectedCompanionIndex(companionChoices, companionCombo == null ? null : companionCombo.getSelectedItem())
                 : -1;
         return new Parameters(
-                model.token(),
+                modelKey,
                 secondChannel,
                 parse(diameterField, fallback.diameter),
                 parse(flowField, fallback.flowThreshold),
@@ -1285,9 +1397,14 @@ public final class CellposeParameterStage implements ConfigQcStage {
         return field != null && field.getText() != null && !field.getText().trim().isEmpty();
     }
 
-    private CellposeModel currentModel() {
+    private ModelOption selectedModelOption() {
         Object selected = modelCombo == null ? null : modelCombo.getSelectedItem();
-        return CellposeModel.fromToken(selected == null ? null : String.valueOf(selected));
+        return selected instanceof ModelOption ? (ModelOption) selected : null;
+    }
+
+    private boolean selectedModelSupportsSecondChannel() {
+        ModelOption selected = selectedModelOption();
+        return selected != null && selected.entry.supportsSecondChannel;
     }
 
     private void markPreviewStale(String text) {
@@ -1330,9 +1447,10 @@ public final class CellposeParameterStage implements ConfigQcStage {
         if (modelCombo != null) modelCombo.setEnabled(enabled);
         if (companionCombo != null) {
             companionCombo.setEnabled(enabled
-                    && currentModel().supportsSecondChannel()
+                    && selectedModelSupportsSecondChannel()
                     && companionCombo.getItemCount() > 1);
         }
+        if (manageModelsButton != null) manageModelsButton.setEnabled(false);
         if (diameterField != null) diameterField.setEnabled(enabled);
         if (flowField != null) flowField.setEnabled(enabled);
         if (cellprobField != null) cellprobField.setEnabled(enabled);
@@ -1402,7 +1520,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
     static boolean hasExplicitGpuOption(String method) {
         if (method == null || !method.startsWith("cellpose:")) return false;
         String[] parts = method.split(":");
-        for (int i = 5; i < parts.length; i++) {
+        for (int i = 1; i < parts.length; i++) {
             if (parts[i] != null && parts[i].trim().startsWith("gpu=")) {
                 return true;
             }
@@ -1416,32 +1534,18 @@ public final class CellposeParameterStage implements ConfigQcStage {
         if (method == null || !method.startsWith("cellpose:")) {
             return defaults;
         }
-        String model = defaults.modelToken;
-        double diameter = defaults.diameter;
-        double flow = defaults.flowThreshold;
-        double cellprob = defaults.cellprobThreshold;
-        boolean useGpu = defaults.useGpu;
-        int secondChannelIndex = -1;
-
-        String[] parts = method.split(":");
-        if (parts.length >= 2) diameter = parse(parts[1], diameter);
-        if (parts.length >= 3 && parts[2] != null && !parts[2].trim().isEmpty()) {
-            model = parts[2].trim();
-        }
-        if (parts.length >= 4) flow = parse(parts[3], flow);
-        if (parts.length >= 5) cellprob = parse(parts[4], cellprob);
-        for (int i = 5; i < parts.length; i++) {
-            String part = parts[i] == null ? "" : parts[i].trim();
-            if (part.startsWith("gpu=")) {
-                useGpu = !"false".equalsIgnoreCase(part.substring("gpu=".length()));
-            } else if (part.startsWith("chan2=")) {
-                secondChannelIndex = parseInt(part.substring("chan2=".length()), -1);
-            }
-        }
+        SegmentationMethod parsed = SegmentationTokenParser.parseLenient(method);
+        if (!parsed.isCellpose()) return defaults;
+        String model = SegmentationMethod.cellposeModelKey(parsed);
+        double diameter = SegmentationMethod.cellposeDiameter(parsed);
+        double flow = SegmentationMethod.cellposeFlow(parsed);
+        double cellprob = SegmentationMethod.cellposeCellprob(parsed);
+        boolean useGpu = SegmentationMethod.cellposeUseGpu(parsed);
+        int secondChannelIndex = SegmentationMethod.cellposeChan2(parsed);
         if (secondChannelIndex < 0
                 || secondChannelIndex == primaryChannelIndex
                 || (channelCount > 0 && secondChannelIndex >= channelCount)
-                || !CellposeModel.fromToken(model).supportsSecondChannel()) {
+                || !supportsSecondChannelForKnownModel(model)) {
             secondChannelIndex = -1;
         }
         return new Parameters(model, secondChannelIndex, diameter, flow, cellprob, useGpu);
@@ -1451,22 +1555,17 @@ public final class CellposeParameterStage implements ConfigQcStage {
         Parameters p = parameters == null
                 ? Parameters.defaults(BinConfig.DEFAULT_CELLPOSE_USE_GPU)
                 : parameters;
-        CellposeModel model = CellposeModel.fromToken(p.modelToken);
-        StringBuilder method = new StringBuilder();
-        method.append("cellpose:")
-                .append(p.diameter)
-                .append(":")
-                .append(model.token())
-                .append(":")
-                .append(p.flowThreshold)
-                .append(":")
-                .append(p.cellprobThreshold)
-                .append(":gpu=")
-                .append(p.useGpu);
-        if (model.supportsSecondChannel() && p.secondChannelIndex >= 0) {
-            method.append(":chan2=").append(p.secondChannelIndex);
+        LinkedHashMap<String, String> params = new LinkedHashMap<String, String>();
+        params.put("diameter", String.valueOf(p.diameter));
+        params.put("flow", String.valueOf(p.flowThreshold));
+        params.put("cellprob", String.valueOf(p.cellprobThreshold));
+        params.put("gpu", String.valueOf(p.useGpu));
+        if (p.secondChannelIndex >= 0) {
+            params.put("chan2", String.valueOf(p.secondChannelIndex));
         }
-        return method.toString();
+        params.put("model", normalizeModelKey(p.modelToken));
+        return SegmentationTokenParser.format(new SegmentationMethod(
+                SegmentationMethod.Engine.CELLPOSE, params, ""));
     }
 
     static LinkedHashMap<String, Integer> buildCompanionChoices(List<String> channelNames,
@@ -1497,6 +1596,132 @@ public final class CellposeParameterStage implements ConfigQcStage {
         if (choices == null || choices.isEmpty() || selectedItem == null) return -1;
         Integer value = choices.get(String.valueOf(selectedItem));
         return value == null ? -1 : value.intValue();
+    }
+
+    private static List<ModelOption> modelOptionsFor(ConfigQcContext context) {
+        File projectDir = context == null ? null : context.getProjectDirectory();
+        File root = projectDir == null ? new File(".") : projectDir;
+        ModelCatalog catalog = ModelCatalogIO.read(root.toPath());
+        List<ModelEntry> entries = catalog.forEngine(ModelEntry.Engine.CELLPOSE);
+        List<ModelEntry> stock = new ArrayList<ModelEntry>();
+        List<ModelEntry> user = new ArrayList<ModelEntry>();
+        for (ModelEntry entry : entries) {
+            if (entry == null) continue;
+            if (entry.isStock()) stock.add(entry);
+            else user.add(entry);
+        }
+        Collections.sort(user, new Comparator<ModelEntry>() {
+            @Override public int compare(ModelEntry left, ModelEntry right) {
+                return labelFor(left).compareToIgnoreCase(labelFor(right));
+            }
+        });
+        List<ModelOption> out = new ArrayList<ModelOption>();
+        for (ModelEntry entry : stock) out.add(new ModelOption(entry));
+        for (ModelEntry entry : user) out.add(new ModelOption(entry));
+        if (out.isEmpty()) {
+            out.add(new ModelOption(new ModelEntry(
+                    SegmentationMethod.DEFAULT_CELLPOSE_MODEL_KEY,
+                    "Cellpose - cyto3",
+                    "Recommended first-pass model for irregular whole-cell bodies and glial soma.",
+                    ModelEntry.Engine.CELLPOSE,
+                    ModelEntry.Source.STOCK_BUILTIN,
+                    null,
+                    null,
+                    "cyto3",
+                    null,
+                    null,
+                    defaultsMap(BinConfig.DEFAULT_CELLPOSE_DIAMETER,
+                            BinConfig.DEFAULT_CELLPOSE_FLOW_THRESHOLD,
+                            BinConfig.DEFAULT_CELLPOSE_CELLPROB_THRESHOLD),
+                    null,
+                    true)));
+        }
+        return Collections.unmodifiableList(out);
+    }
+
+    private static Map<String, Object> defaultsMap(double diameter,
+                                                   double flow,
+                                                   double cellprob) {
+        Map<String, Object> defaults = new LinkedHashMap<String, Object>();
+        defaults.put("diameter", Double.valueOf(diameter));
+        defaults.put("flowThreshold", Double.valueOf(flow));
+        defaults.put("cellprobThreshold", Double.valueOf(cellprob));
+        return defaults;
+    }
+
+    private void selectModelKey(String modelKey) {
+        if (modelCombo == null || modelCombo.getItemCount() == 0) return;
+        String key = normalizeModelKey(modelKey);
+        int fallbackIndex = 0;
+        for (int i = 0; i < modelCombo.getItemCount(); i++) {
+            ModelOption option = modelCombo.getItemAt(i);
+            if (option != null
+                    && SegmentationMethod.DEFAULT_CELLPOSE_MODEL_KEY.equals(option.entry.modelKey)) {
+                fallbackIndex = i;
+            }
+            if (option != null && key.equals(option.entry.modelKey)) {
+                modelCombo.setSelectedIndex(i);
+                updateModelTooltip(option);
+                return;
+            }
+        }
+        modelCombo.setSelectedIndex(fallbackIndex);
+        updateModelTooltip((ModelOption) modelCombo.getSelectedItem());
+    }
+
+    private void updateModelTooltip(ModelOption option) {
+        if (modelCombo != null) {
+            modelCombo.setToolTipText(option == null ? null : option.description());
+        }
+    }
+
+    private static boolean containsModelKey(List<ModelOption> options, String modelKey) {
+        String key = normalizeModelKey(modelKey);
+        if (options == null || key == null) return false;
+        for (ModelOption option : options) {
+            if (option != null && key.equals(option.entry.modelKey)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String normalizeModelKey(String modelKey) {
+        return modelKey == null || modelKey.trim().isEmpty()
+                ? SegmentationMethod.DEFAULT_CELLPOSE_MODEL_KEY
+                : SegmentationMethod.canonicalCellposeModelKey(modelKey);
+    }
+
+    private static int sanitizeSecondChannelForKnownModel(String modelKey, int secondChannelIndex) {
+        return supportsSecondChannelForKnownModel(modelKey) ? secondChannelIndex : -1;
+    }
+
+    private static boolean supportsSecondChannelForKnownModel(String modelKey) {
+        java.util.Optional<Boolean> support = CellposeModel.supportsSecondChannelFor(modelKey);
+        return !support.isPresent() || support.get().booleanValue();
+    }
+
+    private static double defaultDouble(Object value, double fallback) {
+        if (value instanceof Number) {
+            double parsed = ((Number) value).doubleValue();
+            return Double.isFinite(parsed) ? parsed : fallback;
+        }
+        if (value != null) {
+            try {
+                double parsed = Double.parseDouble(String.valueOf(value));
+                return Double.isFinite(parsed) ? parsed : fallback;
+            } catch (NumberFormatException ignored) {
+                return fallback;
+            }
+        }
+        return fallback;
+    }
+
+    private static String labelFor(ModelEntry entry) {
+        if (entry == null) return "";
+        return entry.name == null || entry.name.trim().isEmpty()
+                ? entry.modelKey
+                : entry.name.trim();
     }
 
     private static RuntimeAdapter noopRuntimeAdapter() {
@@ -1534,6 +1759,38 @@ public final class CellposeParameterStage implements ConfigQcStage {
             if (stage != null) {
                 stage.applyRuntimeProbeResult(requestId, status, throwable);
             }
+        }
+    }
+
+    private static final class ModelOption {
+        final ModelEntry entry;
+
+        ModelOption(ModelEntry entry) {
+            this.entry = entry;
+        }
+
+        String description() {
+            return entry == null || entry.description == null ? "" : entry.description;
+        }
+
+        @Override public String toString() {
+            return labelFor(entry);
+        }
+    }
+
+    private static final class ModelOptionRenderer extends DefaultListCellRenderer {
+        @Override
+        public Component getListCellRendererComponent(JList<?> list, Object value, int index,
+                                                      boolean isSelected, boolean cellHasFocus) {
+            super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
+            if (value instanceof ModelOption) {
+                ModelOption option = (ModelOption) value;
+                setText(option.toString());
+                if (list != null) {
+                    list.setToolTipText(option.description());
+                }
+            }
+            return this;
         }
     }
 

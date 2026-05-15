@@ -3577,7 +3577,8 @@ public class ThreeDObjectAnalysis implements Analysis {
                 // subprocess call (see GpuConcurrency). It does not touch WindowManager,
                 // so no WM lock is required here.
                 ImagePlus labelImage = Cellpose3DRunner.run(filtered, filteredCompanion, cellposeModel, cellposeDiameter,
-                        cellposeFlowThreshold, cellposeCellprobThreshold, cellposeUseGpu, channelName);
+                        cellposeFlowThreshold, cellposeCellprobThreshold, cellposeUseGpu, channelName,
+                        projectRoot);
 
                 if (labelImage != null && (cropRoi != null || clearRoi != null)) {
                     ij.gui.Roi filterRoi = (clearRoi != null) ? clearRoi : cropRoi;

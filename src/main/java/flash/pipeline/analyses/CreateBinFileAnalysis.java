@@ -4949,7 +4949,8 @@ public class CreateBinFileAnalysis implements Analysis {
 
                                         ImagePlus labelImg = Cellpose3DRunner.run(previewDup, previewCompanionDup, previewModel,
                                                 previewDiameter, previewFlow, previewCellprob,
-                                                previewUseGpu, previewChannelName);
+                                                previewUseGpu, previewChannelName,
+                                                projectRootForConfigurationDir(binFolder));
 
                                         final ImagePlus previewLabel = labelImg;
                                         SwingUtilities.invokeLater(new Runnable() {
@@ -6323,7 +6324,8 @@ public class CreateBinFileAnalysis implements Analysis {
                                     parameters.flowThreshold,
                                     parameters.cellprobThreshold,
                                     parameters.useGpu,
-                                    cfg.names.get(channelIndex));
+                                    cfg.names.get(channelIndex),
+                                    projectRootForConfigurationDir(binFolder));
                         } finally {
                             closeImageQuietly(input);
                             closeImageQuietly(companion);
@@ -7935,11 +7937,13 @@ public class CreateBinFileAnalysis implements Analysis {
     }
 
     private static String defaultCellposeMethod(boolean preferGpu) {
-        return "cellpose:" + BinConfig.DEFAULT_CELLPOSE_DIAMETER
-                + ":" + BinConfig.DEFAULT_CELLPOSE_MODEL
-                + ":" + BinConfig.DEFAULT_CELLPOSE_FLOW_THRESHOLD
-                + ":" + BinConfig.DEFAULT_CELLPOSE_CELLPROB_THRESHOLD
-                + ":gpu=" + preferGpu;
+        return CellposeParameterStage.formatMethod(new CellposeParameterStage.Parameters(
+                BinConfig.DEFAULT_CELLPOSE_MODEL,
+                -1,
+                BinConfig.DEFAULT_CELLPOSE_DIAMETER,
+                BinConfig.DEFAULT_CELLPOSE_FLOW_THRESHOLD,
+                BinConfig.DEFAULT_CELLPOSE_CELLPROB_THRESHOLD,
+                preferGpu));
     }
 
     private static String enhancedThresholdOrFallback(BinUserConfig cfg, int channelIndex) {
@@ -7970,17 +7974,7 @@ public class CreateBinFileAnalysis implements Analysis {
 
     private static int parseCellposeSecondChannel(String method) {
         if (method == null || !method.startsWith("cellpose:")) return -1;
-        String[] parts = method.split(":");
-        for (int i = 5; i < parts.length; i++) {
-            if (parts[i].startsWith("chan2=")) {
-                try {
-                    return Integer.parseInt(parts[i].substring("chan2=".length()).trim());
-                } catch (NumberFormatException ignored) {
-                    return -1;
-                }
-            }
-        }
-        return -1;
+        return SegmentationMethod.cellposeChan2(SegmentationTokenParser.parseLenient(method));
     }
 
     private static String buildCellposeMethod(double diameter,
@@ -7989,22 +7983,13 @@ public class CreateBinFileAnalysis implements Analysis {
                                               double cellprobThreshold,
                                               boolean useGpu,
                                               int secondChannelIndex) {
-        CellposeModel model = CellposeModel.fromToken(modelSelection);
-        StringBuilder method = new StringBuilder();
-        method.append("cellpose:")
-                .append(diameter)
-                .append(":")
-                .append(model.token())
-                .append(":")
-                .append(flowThreshold)
-                .append(":")
-                .append(cellprobThreshold)
-                .append(":gpu=")
-                .append(useGpu);
-        if (model.supportsSecondChannel() && secondChannelIndex >= 0) {
-            method.append(":chan2=").append(secondChannelIndex);
-        }
-        return method.toString();
+        return CellposeParameterStage.formatMethod(new CellposeParameterStage.Parameters(
+                SegmentationMethod.canonicalCellposeModelKey(modelSelection),
+                secondChannelIndex,
+                diameter,
+                flowThreshold,
+                cellprobThreshold,
+                useGpu));
     }
 
     private static LinkedHashMap<String, Integer> buildCellposeCompanionChoices(List<String> channelNames,

@@ -130,6 +130,90 @@
         "cellprobThreshold": 0.0
       },
       "supportsSecondChannel": false
+    },
+    {
+      "modelKey": "cellpose_yeast_PhC_cp3",
+      "name": "Cellpose - yeast_PhC_cp3",
+      "description": "Cellpose 3 phase-contrast yeast model.",
+      "engine": "cellpose",
+      "source": "stock_builtin",
+      "pretrainedModel": "yeast_PhC_cp3",
+      "defaults": {
+        "diameter": 30.0,
+        "flowThreshold": 0.4,
+        "cellprobThreshold": 0.0
+      },
+      "supportsSecondChannel": false
+    },
+    {
+      "modelKey": "cellpose_yeast_BF_cp3",
+      "name": "Cellpose - yeast_BF_cp3",
+      "description": "Cellpose 3 brightfield yeast model.",
+      "engine": "cellpose",
+      "source": "stock_builtin",
+      "pretrainedModel": "yeast_BF_cp3",
+      "defaults": {
+        "diameter": 30.0,
+        "flowThreshold": 0.4,
+        "cellprobThreshold": 0.0
+      },
+      "supportsSecondChannel": false
+    },
+    {
+      "modelKey": "cellpose_bact_phase_cp3",
+      "name": "Cellpose - bact_phase_cp3",
+      "description": "Cellpose 3 phase-contrast bacteria model.",
+      "engine": "cellpose",
+      "source": "stock_builtin",
+      "pretrainedModel": "bact_phase_cp3",
+      "defaults": {
+        "diameter": 30.0,
+        "flowThreshold": 0.4,
+        "cellprobThreshold": 0.0
+      },
+      "supportsSecondChannel": false
+    },
+    {
+      "modelKey": "cellpose_bact_fluor_cp3",
+      "name": "Cellpose - bact_fluor_cp3",
+      "description": "Cellpose 3 fluorescent bacteria model.",
+      "engine": "cellpose",
+      "source": "stock_builtin",
+      "pretrainedModel": "bact_fluor_cp3",
+      "defaults": {
+        "diameter": 30.0,
+        "flowThreshold": 0.4,
+        "cellprobThreshold": 0.0
+      },
+      "supportsSecondChannel": false
+    },
+    {
+      "modelKey": "cellpose_deepbacs_cp3",
+      "name": "Cellpose - deepbacs_cp3",
+      "description": "Cellpose 3 DeepBacs bacteria model.",
+      "engine": "cellpose",
+      "source": "stock_builtin",
+      "pretrainedModel": "deepbacs_cp3",
+      "defaults": {
+        "diameter": 30.0,
+        "flowThreshold": 0.4,
+        "cellprobThreshold": 0.0
+      },
+      "supportsSecondChannel": false
+    },
+    {
+      "modelKey": "cellpose_cyto2_cp3",
+      "name": "Cellpose - cyto2_cp3",
+      "description": "Cellpose 3 cyto2 model variant.",
+      "engine": "cellpose",
+      "source": "stock_builtin",
+      "pretrainedModel": "cyto2_cp3",
+      "defaults": {
+        "diameter": 30.0,
+        "flowThreshold": 0.4,
+        "cellprobThreshold": 0.0
+      },
+      "supportsSecondChannel": true
     }
   ]
 }

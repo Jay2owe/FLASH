@@ -1,6 +1,8 @@
 package flash.pipeline.cellpose;
 
 import flash.pipeline.image.GpuConcurrency;
+import flash.pipeline.segmentation.catalog.ModelCatalog;
+import flash.pipeline.segmentation.catalog.ModelCatalogIO;
 import ij.IJ;
 import ij.ImagePlus;
 import ij.ImageStack;
@@ -13,9 +15,11 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
 public final class Cellpose3DRunner {
@@ -43,6 +47,19 @@ public final class Cellpose3DRunner {
                                 double cellprobThreshold,
                                 boolean useGpu,
                                 String channelName) {
+        return run(input, companionInput, model, diameter, flowThreshold, cellprobThreshold,
+                useGpu, channelName, null);
+    }
+
+    public static ImagePlus run(ImagePlus input,
+                                ImagePlus companionInput,
+                                String model,
+                                double diameter,
+                                double flowThreshold,
+                                double cellprobThreshold,
+                                boolean useGpu,
+                                String channelName,
+                                File projectRoot) {
         if (input == null) {
             IJ.log("WARNING: Cellpose input image is null.");
             return null;
@@ -75,7 +92,8 @@ public final class Cellpose3DRunner {
             try {
                 runCellposeCommand(runtime.pythonPath, inputStackPath, tempDir, model, runtimeInput,
                         runtimeInput != null && runtimeInput.getNChannels() > 1,
-                        diameter, flowThreshold, cellprobThreshold, useGpu, channelName);
+                        diameter, flowThreshold, cellprobThreshold, useGpu, channelName,
+                        projectRoot);
             } finally {
                 GpuConcurrency.gpuSemaphore().release();
             }
@@ -182,11 +200,26 @@ public final class Cellpose3DRunner {
                                              String model,
                                              ImagePlus input,
                                              double diameter,
+                                            double flowThreshold,
+                                            double cellprobThreshold,
+                                            boolean useGpu) {
+        return buildCellposeCommand(
+                pythonPath, inputStackPath, outputDir, model, input,
+                false, diameter, flowThreshold, cellprobThreshold, useGpu);
+    }
+
+    static List<String> buildCellposeCommand(String pythonPath,
+                                             Path inputStackPath,
+                                             Path outputDir,
+                                             String model,
+                                             ModelCatalog catalog,
+                                             ImagePlus input,
+                                             double diameter,
                                              double flowThreshold,
                                              double cellprobThreshold,
                                              boolean useGpu) {
         return buildCellposeCommand(
-                pythonPath, inputStackPath, outputDir, model, input,
+                pythonPath, inputStackPath, outputDir, model, catalog, input,
                 false, diameter, flowThreshold, cellprobThreshold, useGpu);
     }
 
@@ -200,10 +233,12 @@ public final class Cellpose3DRunner {
                                            double flowThreshold,
                                            double cellprobThreshold,
                                            boolean useGpu,
-                                           String channelName) throws Exception {
+                                           String channelName,
+                                           File projectRoot) throws Exception {
         List<String> command = buildCellposeCommand(
-                pythonPath, inputStackPath, outputDir, model, input,
-                hasSecondChannel, diameter, flowThreshold, cellprobThreshold, useGpu);
+                pythonPath, inputStackPath, outputDir, model,
+                readCatalog(projectRoot), input, hasSecondChannel, diameter,
+                flowThreshold, cellprobThreshold, useGpu);
 
         String chTag = (channelName != null && !channelName.isEmpty()) ? " [" + channelName + "]" : "";
         IJ.log("    Cellpose" + chTag + " command: " + String.join(" ", command));
@@ -289,6 +324,23 @@ public final class Cellpose3DRunner {
                                              double flowThreshold,
                                              double cellprobThreshold,
                                              boolean useGpu) {
+        return buildCellposeCommand(pythonPath, inputStackPath, outputDir, model,
+                readCatalog(null), input, hasSecondChannel, diameter,
+                flowThreshold, cellprobThreshold, useGpu);
+    }
+
+    static List<String> buildCellposeCommand(String pythonPath,
+                                             Path inputStackPath,
+                                             Path outputDir,
+                                             String model,
+                                             ModelCatalog catalog,
+                                             ImagePlus input,
+                                             boolean hasSecondChannel,
+                                             double diameter,
+                                             double flowThreshold,
+                                             double cellprobThreshold,
+                                             boolean useGpu) {
+        String pretrainedModelArgument = resolvePretrainedModelArgument(model, catalog);
         List<String> command = new ArrayList<String>();
         command.add(CellposeRuntime.normalizeExecutablePath(pythonPath));
         command.add("-m");
@@ -298,7 +350,7 @@ public final class Cellpose3DRunner {
         command.add("--savedir");
         command.add(outputDir.toString());
         command.add("--pretrained_model");
-        command.add(CellposeModel.runtimeToken(model));
+        command.add(pretrainedModelArgument);
         if (hasSecondChannel) {
             command.add("--chan");
             command.add("1");
@@ -336,6 +388,39 @@ public final class Cellpose3DRunner {
         command.add("--no_npy");
         command.add("--verbose");
         return command;
+    }
+
+    static String resolvePretrainedModelArgument(String model, ModelCatalog catalog) {
+        String modelKey = CellposeModelResolver.normalizeModelKey(model);
+        Optional<CellposeModelResolver.Resolved> resolved =
+                new CellposeModelResolver().resolve(modelKey, catalog);
+        if (!resolved.isPresent()) {
+            throw new IllegalArgumentException("Cellpose model '" + displayModelKey(modelKey, model)
+                    + "' not found in catalog. Please import it via Manage Models or select a different model.");
+        }
+        CellposeModelResolver.Resolved value = resolved.get();
+        if (value.built_in) {
+            return value.pretrainedName;
+        }
+        if (value.absolutePath == null || !Files.isRegularFile(Paths.get(value.absolutePath))) {
+            throw new IllegalStateException("Cellpose model file for '"
+                    + displayModelKey(modelKey, model) + "' does not exist: "
+                    + value.absolutePath
+                    + ". Please import it via Manage Models or select a different model.");
+        }
+        return value.absolutePath;
+    }
+
+    private static String displayModelKey(String modelKey, String rawModel) {
+        if (modelKey != null && !modelKey.trim().isEmpty()) return modelKey;
+        return rawModel == null || rawModel.trim().isEmpty() ? "<missing>" : rawModel.trim();
+    }
+
+    private static ModelCatalog readCatalog(File projectRoot) {
+        Path root = projectRoot == null
+                ? Paths.get(System.getProperty("user.dir", "."))
+                : projectRoot.toPath();
+        return ModelCatalogIO.read(root.toAbsolutePath().normalize());
     }
 
     static ImagePlus readMaskImage(Path maskPath, ImagePlus input, String channelName) {

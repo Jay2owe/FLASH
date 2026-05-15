@@ -1,7 +1,7 @@
 package flash.pipeline.ui.variations;
 
+import flash.pipeline.bin.BinConfig;
 import flash.pipeline.image.FilterMacroEditorModel;
-import flash.pipeline.cellpose.CellposeModel;
 import flash.pipeline.ui.config.CellposeParameterStage;
 import flash.pipeline.ui.config.StarDistParameterStage;
 
@@ -560,7 +560,7 @@ public final class ParameterSweepEditor extends JPanel {
         if (id == ParameterId.DIAMETER) return Double.valueOf(30.0d);
         if (id == ParameterId.FLOW_THRESHOLD) return Double.valueOf(0.4d);
         if (id == ParameterId.CELLPROB_THRESHOLD) return Double.valueOf(0.0d);
-        if (id == ParameterId.MODEL) return CellposeModel.CYTO3.token();
+        if (id == ParameterId.MODEL) return BinConfig.DEFAULT_CELLPOSE_MODEL;
         if (id == ParameterId.MACRO) return MacroToken.NONE_VALUE;
         return Integer.valueOf(0);
     }

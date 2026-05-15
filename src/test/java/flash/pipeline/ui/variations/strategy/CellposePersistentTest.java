@@ -15,6 +15,7 @@ import ij.process.ShortProcessor;
 
 import org.junit.Test;
 
+import java.io.File;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -43,7 +44,8 @@ public class CellposePersistentTest {
                                                                    ImagePlus runtimeInput,
                                                                    String model,
                                                                    boolean useGpu,
-                                                                   String channelName) throws Exception {
+                                                                   String channelName,
+                                                                   File projectRoot) throws Exception {
                         throw new IllegalStateException("synthetic helper failure");
                     }
                 });

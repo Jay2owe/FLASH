@@ -453,6 +453,9 @@ public class BinConfigIO {
 
     private static String preserveReadTokenUnlessCanonical(String raw, SegmentationMethod parsed) {
         String canonical = SegmentationTokenParser.format(parsed);
+        if (parsed != null && parsed.isCellpose()) {
+            return canonical;
+        }
         String safeRaw = safeToken(raw);
         return sameToken(safeRaw, canonical) ? canonical : safeRaw;
     }

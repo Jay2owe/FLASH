@@ -1,7 +1,7 @@
 package flash.pipeline.ui.variations.strategy;
 
 import flash.pipeline.cellpose.Cellpose3DRunner;
-import flash.pipeline.cellpose.CellposeModel;
+import flash.pipeline.segmentation.SegmentationMethod;
 import flash.pipeline.ui.config.CellposeParameterStage;
 import flash.pipeline.ui.config.ConfigQcContext;
 import flash.pipeline.ui.preview.ObjectSizeFilterPreview;
@@ -200,7 +200,7 @@ public final class CellposeOneShot implements VariationStrategy {
                 : base;
         String model = stringParameter(combo, ParameterId.MODEL, p.modelToken);
         return new CellposeParameterStage.Parameters(
-                CellposeModel.fromToken(model).token(),
+                SegmentationMethod.canonicalCellposeModelKey(model),
                 p.secondChannelIndex,
                 doubleParameter(combo, ParameterId.DIAMETER, p.diameter),
                 doubleParameter(combo, ParameterId.FLOW_THRESHOLD, p.flowThreshold),

@@ -1,6 +1,8 @@
 package flash.pipeline.cellpose;
 
 import flash.pipeline.image.GpuConcurrency;
+import flash.pipeline.segmentation.catalog.ModelCatalog;
+import flash.pipeline.segmentation.catalog.ModelCatalogIO;
 import flash.pipeline.ui.wizard.JsonIO;
 
 import ij.IJ;
@@ -9,6 +11,7 @@ import ij.ImagePlus;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.Closeable;
+import java.io.File;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
@@ -60,6 +63,18 @@ public final class CellposePersistentWorker implements Closeable {
                                     String model,
                                     boolean useGpu,
                                     String channelName) throws Exception {
+        this(imagePath, outputDir, referenceInput, runtimeInput, model, useGpu,
+                channelName, null);
+    }
+
+    public CellposePersistentWorker(Path imagePath,
+                                    Path outputDir,
+                                    ImagePlus referenceInput,
+                                    ImagePlus runtimeInput,
+                                    String model,
+                                    boolean useGpu,
+                                    String channelName,
+                                    File projectRoot) throws Exception {
         if (imagePath == null) {
             throw new IllegalArgumentException("imagePath must not be null");
         }
@@ -81,7 +96,7 @@ public final class CellposePersistentWorker implements Closeable {
             }
         });
         try {
-            start(imagePath, outputDir, model, useGpu);
+            start(imagePath, outputDir, model, useGpu, projectRoot);
             waitUntilReady();
         } catch (Exception e) {
             close();
@@ -149,7 +164,10 @@ public final class CellposePersistentWorker implements Closeable {
     private void start(Path imagePath,
                        Path outputDir,
                        String model,
-                       boolean useGpu) throws Exception {
+                       boolean useGpu,
+                       File projectRoot) throws Exception {
+        String pretrainedModelArgument = Cellpose3DRunner.resolvePretrainedModelArgument(
+                model, readCatalog(projectRoot));
         CellposeRuntime.Status runtime = CellposeRuntime.probeConfigured();
         if (!runtime.ready) {
             throw new IllegalStateException(runtime.message
@@ -157,7 +175,7 @@ public final class CellposePersistentWorker implements Closeable {
         }
         Files.createDirectories(outputDir);
         List<String> command = buildCommand(runtime.pythonPath,
-                imagePath, outputDir, model, useGpu);
+                imagePath, outputDir, pretrainedModelArgument, useGpu);
         String chTag = channelName.isEmpty() ? "" : " [" + channelName + "]";
         IJ.log("    Cellpose persistent" + chTag + " command: "
                 + String.join(" ", command));
@@ -187,12 +205,12 @@ public final class CellposePersistentWorker implements Closeable {
     private List<String> buildCommand(String pythonPath,
                                       Path imagePath,
                                       Path outputDir,
-                                      String model,
+                                      String pretrainedModelArgument,
                                       boolean useGpu) {
         List<String> command = new ArrayList<String>();
         command.add(CellposeRuntime.normalizeExecutablePath(pythonPath));
         command.add(scriptPath.toString());
-        command.add(CellposeModel.fromToken(model).token());
+        command.add(pretrainedModelArgument);
         command.add(imagePath.toString());
         command.add(outputDir.toString());
         if (useGpu) {
@@ -215,6 +233,13 @@ public final class CellposePersistentWorker implements Closeable {
             }
         }
         return command;
+    }
+
+    private static ModelCatalog readCatalog(File projectRoot) {
+        Path root = projectRoot == null
+                ? Paths.get(System.getProperty("user.dir", "."))
+                : projectRoot.toPath();
+        return ModelCatalogIO.read(root.toAbsolutePath().normalize());
     }
 
     private void waitUntilReady() throws Exception {

@@ -1,6 +1,6 @@
 package flash.pipeline.ui.variations;
 
-import flash.pipeline.cellpose.CellposeModel;
+import flash.pipeline.bin.BinConfig;
 import flash.pipeline.ui.config.CellposeParameterStage;
 import flash.pipeline.ui.config.StarDistParameterStage;
 
@@ -156,7 +156,7 @@ public final class RangeSuggester {
                 ParameterValueList.ofDoubles(-2.0d, -1.0d, 0.0d, 1.0d, 2.0d));
         out.put(ParameterId.MODEL, ParameterValueList.ofStrings(
                 currentString(context, currentDraft, ParameterId.MODEL,
-                        CellposeModel.CYTO3.token())));
+                        BinConfig.DEFAULT_CELLPOSE_MODEL)));
     }
 
     private static ParameterValueList thresholdSuggestions(Projection projection) {

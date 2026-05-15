@@ -18,7 +18,7 @@ public class BinConfigIORoundTripTest {
     public TemporaryFolder temp = new TemporaryFolder();
 
     @Test
-    public void oldNineLineBinSurvivesFourReadWriteRoundTripsIdentically() throws Exception {
+    public void oldNineLineBinStabilizesAfterCanonicalCellposeWrite() throws Exception {
         File dir = writeLegacyBin(
                 "DAPI IBA1 GFAP NeuN",
                 "Blue Green Magenta Red",
@@ -37,9 +37,9 @@ public class BinConfigIORoundTripTest {
         BinConfigIO.writeFromConfig(dir.getAbsolutePath(), second);
         BinConfig third = BinConfigIO.readFromDirectory(dir.getAbsolutePath());
 
-        assertSameFields(first, second);
+        assertSameFields(first, second, false);
         assertSameFields(second, third);
-        assertEquals("cellpose:30:cyto3:0.4:0.0:gpu=true:chan2=0",
+        assertEquals("cellpose:30:0.4:0.0:gpu=true:chan2=0:model=cellpose_cyto3",
                 third.segmentationMethods.get(2));
         assertTrue(third.isStarDist(1));
         assertTrue(third.isCellpose(2));
@@ -87,13 +87,20 @@ public class BinConfigIORoundTripTest {
     }
 
     private static void assertSameFields(BinConfig expected, BinConfig actual) {
+        assertSameFields(expected, actual, true);
+    }
+
+    private static void assertSameFields(BinConfig expected, BinConfig actual,
+                                         boolean includeSegmentationMethods) {
         assertEquals(expected.channelNames, actual.channelNames);
         assertEquals(expected.channelColors, actual.channelColors);
         assertEquals(expected.channelThresholds, actual.channelThresholds);
         assertEquals(expected.channelSizes, actual.channelSizes);
         assertEquals(expected.channelMinMax, actual.channelMinMax);
         assertEquals(expected.channelIntensityThresholds, actual.channelIntensityThresholds);
-        assertEquals(expected.segmentationMethods, actual.segmentationMethods);
+        if (includeSegmentationMethods) {
+            assertEquals(expected.segmentationMethods, actual.segmentationMethods);
+        }
         assertEquals(expected.channelFilterPresets, actual.channelFilterPresets);
         assertEquals(expected.zSliceMode, actual.zSliceMode);
         assertEquals(expected.zSliceConfigPresent, actual.zSliceConfigPresent);

@@ -132,7 +132,7 @@ public final class SegmentationTokenParser {
             putKeyValues(params, parts, 4);
         } else {
             if (parts.length >= 3 && !isEmpty(parts[2])) {
-                params.put("model", parts[2].trim());
+                params.put("model", SegmentationMethod.canonicalCellposeModelKey(parts[2]));
             }
             if (parts.length >= 4 && !isEmpty(parts[3])) {
                 validateFiniteDouble(parts[3], "Cellpose flow", raw);
@@ -149,6 +149,7 @@ public final class SegmentationTokenParser {
         validateDouble(params, "cellprob", false, raw);
         validateBoolean(params, "gpu", false, raw);
         validateInt(params, "chan2", false, raw);
+        params.put("model", SegmentationMethod.canonicalCellposeModelKey(params.get("model")));
         return new SegmentationMethod(SegmentationMethod.Engine.CELLPOSE, params, raw);
     }
 
@@ -205,7 +206,7 @@ public final class SegmentationTokenParser {
         appendIfPresent(sb, "gpu", valueOrDefault(method.params.get("gpu"), "true"));
         appendIfPresent(sb, "chan2", method.params.get("chan2"));
         appendUnknownParams(sb, method.params, CELLPOSE_KNOWN_KEYS);
-        appendIfPresent(sb, "model", valueOrDefault(method.params.get("model"), "cyto3"));
+        appendIfPresent(sb, "model", SegmentationMethod.canonicalCellposeModelKey(method.params.get("model")));
         return sb.toString();
     }
 

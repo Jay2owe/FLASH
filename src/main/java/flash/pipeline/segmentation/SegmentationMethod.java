@@ -1,8 +1,10 @@
 package flash.pipeline.segmentation;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
@@ -10,13 +12,15 @@ public final class SegmentationMethod {
     public enum Engine { CLASSICAL, ENHANCED_CLASSICAL, STARDIST, CELLPOSE, TRAINED_RF }
 
     public static final String DEFAULT_STARDIST_MODEL_KEY = "stardist_versatile_fluo";
+    public static final String DEFAULT_CELLPOSE_MODEL_KEY = "cellpose_cyto3";
+    private static final Map<String, String> LEGACY_CELLPOSE_MODEL_KEYS = legacyCellposeModelKeys();
     private static final double DEFAULT_STARDIST_PROB_THRESH = 0.5;
     private static final double DEFAULT_STARDIST_NMS_THRESH = 0.4;
     private static final double DEFAULT_STARDIST_LINKING_MAX_DISTANCE = 5.0;
     private static final double DEFAULT_STARDIST_GAP_CLOSING_MAX_DISTANCE = 5.0;
     private static final int DEFAULT_STARDIST_MAX_FRAME_GAP = 1;
     private static final double DEFAULT_CELLPOSE_DIAMETER = 30.0;
-    private static final String DEFAULT_CELLPOSE_MODEL = "cyto3";
+    private static final String DEFAULT_CELLPOSE_MODEL = DEFAULT_CELLPOSE_MODEL_KEY;
     private static final double DEFAULT_CELLPOSE_FLOW_THRESHOLD = 0.4;
     private static final double DEFAULT_CELLPOSE_CELLPROB_THRESHOLD = 0.0;
     private static final boolean DEFAULT_CELLPOSE_USE_GPU = true;
@@ -169,7 +173,14 @@ public final class SegmentationMethod {
     public static String cellposeModelKey(SegmentationMethod m) {
         if (m == null || !m.isCellpose()) return DEFAULT_CELLPOSE_MODEL;
         String value = param(m, "model");
-        return value == null || value.trim().isEmpty() ? DEFAULT_CELLPOSE_MODEL : value.trim();
+        return canonicalCellposeModelKey(value);
+    }
+
+    public static String canonicalCellposeModelKey(String value) {
+        if (value == null || value.trim().isEmpty()) return DEFAULT_CELLPOSE_MODEL;
+        String trimmed = value.trim();
+        String mapped = LEGACY_CELLPOSE_MODEL_KEYS.get(trimmed.toLowerCase(Locale.ROOT));
+        return mapped == null ? trimmed : mapped;
     }
 
     public static double cellposeFlow(SegmentationMethod m) {
@@ -253,5 +264,27 @@ public final class SegmentationMethod {
         } catch (NumberFormatException e) {
             return fallback;
         }
+    }
+
+    private static Map<String, String> legacyCellposeModelKeys() {
+        Map<String, String> out = new HashMap<String, String>();
+        putCellposeAlias(out, "cyto3", "cellpose_cyto3");
+        putCellposeAlias(out, "cyto2", "cellpose_cyto2");
+        putCellposeAlias(out, "cyto", "cellpose_cyto");
+        putCellposeAlias(out, "nuclei", "cellpose_nuclei");
+        putCellposeAlias(out, "tissuenet_cp3", "cellpose_tissuenet_cp3");
+        putCellposeAlias(out, "livecell_cp3", "cellpose_livecell_cp3");
+        putCellposeAlias(out, "yeast_PhC_cp3", "cellpose_yeast_PhC_cp3");
+        putCellposeAlias(out, "yeast_BF_cp3", "cellpose_yeast_BF_cp3");
+        putCellposeAlias(out, "bact_phase_cp3", "cellpose_bact_phase_cp3");
+        putCellposeAlias(out, "bact_fluor_cp3", "cellpose_bact_fluor_cp3");
+        putCellposeAlias(out, "deepbacs_cp3", "cellpose_deepbacs_cp3");
+        putCellposeAlias(out, "cyto2_cp3", "cellpose_cyto2_cp3");
+        return Collections.unmodifiableMap(out);
+    }
+
+    private static void putCellposeAlias(Map<String, String> out, String legacy, String key) {
+        out.put(legacy.toLowerCase(Locale.ROOT), key);
+        out.put(key.toLowerCase(Locale.ROOT), key);
     }
 }

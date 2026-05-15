@@ -23,7 +23,7 @@ public class SegmentationTokenParserTest {
                         + "morph=sphericity%3E%3D0.6%2Celongation%3C%3D2.0",
                 "stardist:0.5:0.4:linking=5.0:gapClosing=6.0:"
                         + "area=10.0-100.0:quality=0.2:intensity=15.0:model=my_stardist",
-                "cellpose:30:0.4:0.0:gpu=true:chan2=0:model=cyto3",
+                "cellpose:30:0.4:0.0:gpu=true:chan2=0:model=cellpose_cyto3",
                 "trained_rf:rf_model:base=stardist%3A0.5%3A0.4%3Amodel%3Dstd"
         };
 
@@ -59,12 +59,12 @@ public class SegmentationTokenParserTest {
                 "cellpose:30:cyto3:0.4:0.0:gpu=true:chan2=0");
         assertTrue(legacy.isCellpose());
         assertEquals(30.0, SegmentationMethod.cellposeDiameter(legacy), 0.001);
-        assertEquals("cyto3", SegmentationMethod.cellposeModelKey(legacy));
+        assertEquals("cellpose_cyto3", SegmentationMethod.cellposeModelKey(legacy));
         assertEquals(0.4, SegmentationMethod.cellposeFlow(legacy), 0.001);
         assertEquals(0.0, SegmentationMethod.cellposeCellprob(legacy), 0.001);
         assertTrue(SegmentationMethod.cellposeUseGpu(legacy));
         assertEquals(0, SegmentationMethod.cellposeChan2(legacy));
-        assertEquals("cellpose:30:0.4:0.0:gpu=true:chan2=0:model=cyto3",
+        assertEquals("cellpose:30:0.4:0.0:gpu=true:chan2=0:model=cellpose_cyto3",
                 SegmentationTokenParser.format(legacy));
 
         SegmentationMethod canonical = SegmentationTokenParser.parse(

@@ -70,7 +70,7 @@ public class DownstreamSegmenterResolverTest {
         assertEquals(30.0d,
                 resolution.segmenter().cellposeParametersForTest().diameter,
                 0.0001d);
-        assertEquals("cyto3",
+        assertEquals("cellpose_cyto3",
                 resolution.segmenter().cellposeParametersForTest().modelToken);
         assertFalse(resolution.segmenter().cellposeParametersForTest().useGpu);
     }

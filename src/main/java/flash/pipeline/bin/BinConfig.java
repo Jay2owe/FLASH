@@ -21,7 +21,7 @@ public class BinConfig {
     public static final double DEFAULT_STARDIST_GAP_CLOSING_MAX_DISTANCE = 5.0;
     public static final int DEFAULT_STARDIST_MAX_FRAME_GAP = 1;
     public static final double DEFAULT_CELLPOSE_DIAMETER = 30.0;
-    public static final String DEFAULT_CELLPOSE_MODEL = "cyto3";
+    public static final String DEFAULT_CELLPOSE_MODEL = SegmentationMethod.DEFAULT_CELLPOSE_MODEL_KEY;
     public static final double DEFAULT_CELLPOSE_FLOW_THRESHOLD = 0.4;
     public static final double DEFAULT_CELLPOSE_CELLPROB_THRESHOLD = 0.0;
     public static final boolean DEFAULT_CELLPOSE_USE_GPU = true;

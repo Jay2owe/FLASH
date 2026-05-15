@@ -267,7 +267,7 @@ public class BinConfigTest {
     @Test
     public void getCellposeModel_parsesCorrectly() {
         BinConfig cfg = makeConfig("cellpose:22.5:nuclei:0.3:-1.0:gpu=false");
-        assertEquals("nuclei", cfg.getCellposeModel(0));
+        assertEquals("cellpose_nuclei", cfg.getCellposeModel(0));
     }
 
     @Test
