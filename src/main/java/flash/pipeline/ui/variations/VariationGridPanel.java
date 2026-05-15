@@ -534,7 +534,15 @@ public final class VariationGridPanel extends JPanel implements Scrollable {
                 ? MacroVariationSet.none()
                 : sweep.macroVariations();
         String label = macros.displayNameFor(token);
-        return abbreviate(label == null ? token : label, 28);
+        String display = label == null ? token : label;
+        if (hasDuplicateMacroDisplayName(macros, token, display)) {
+            MacroVariation variation = macros.resolve(token);
+            String hash = variation == null ? "" : variation.normalizedScriptHash();
+            if (hash != null && hash.trim().length() > 0) {
+                display += " " + shortHash(hash);
+            }
+        }
+        return abbreviate(display, 28);
     }
 
     private static String macroTooltip(ParameterSweep sweep, Object value) {
@@ -559,6 +567,41 @@ public final class VariationGridPanel extends JPanel implements Scrollable {
             return safe;
         }
         return safe.substring(0, maxLength - 3) + "...";
+    }
+
+    private static boolean hasDuplicateMacroDisplayName(MacroVariationSet macros,
+                                                        String token,
+                                                        String display) {
+        if (macros == null || token == null || MacroToken.NONE_VALUE.equals(token)) {
+            return false;
+        }
+        String safeDisplay = display == null ? "" : display.trim();
+        if (safeDisplay.isEmpty()) {
+            return false;
+        }
+        int matches = 0;
+        List<MacroVariation> variations = macros.variations();
+        for (int i = 0; i < variations.size(); i++) {
+            MacroVariation variation = variations.get(i);
+            if (variation == null || MacroToken.NONE_VALUE.equals(variation.token())) {
+                continue;
+            }
+            String candidate = variation.displayName() == null
+                    ? ""
+                    : variation.displayName().trim();
+            if (safeDisplay.equals(candidate)) {
+                matches++;
+                if (matches > 1) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static String shortHash(String hash) {
+        String safe = hash == null ? "" : hash.trim();
+        return safe.length() <= 8 ? safe : safe.substring(0, 8);
     }
 
     private static boolean valueEquals(Object left, Object right) {

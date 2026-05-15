@@ -1358,13 +1358,14 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
 
     private static JComponent previewComponent(BufferedImage preview) {
         JLabel label = new JLabel(new ImageIcon(preview));
-        int viewportW = Math.min(preview.getWidth() + 24, 920);
-        int viewportH = Math.min(preview.getHeight() + 24, 720);
-        JScrollPane scroll = new JScrollPane(label);
-        scroll.setBorder(BorderFactory.createEmptyBorder());
-        scroll.getViewport().setBackground(Color.DARK_GRAY);
-        scroll.setPreferredSize(new Dimension(viewportW, viewportH));
-        return scroll;
+        label.setHorizontalAlignment(SwingConstants.CENTER);
+        label.setVerticalAlignment(SwingConstants.CENTER);
+        JPanel panel = new JPanel(new BorderLayout());
+        panel.setBackground(Color.DARK_GRAY);
+        panel.setBorder(BorderFactory.createEmptyBorder(4, 4, 4, 4));
+        panel.add(label, BorderLayout.CENTER);
+        panel.setPreferredSize(new Dimension(preview.getWidth() + 8, preview.getHeight() + 8));
+        return panel;
     }
 
     private static PresentationTileRecord representativePreviewRecord(File projectRoot) {

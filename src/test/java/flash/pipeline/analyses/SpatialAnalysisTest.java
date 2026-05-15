@@ -364,7 +364,7 @@ public class SpatialAnalysisTest {
     }
 
     @Test
-    public void phenotypingAndHeatmapControlsAreInsideAdvancedSection() throws Exception {
+    public void phenotypingAndHeatmapTitlesStayVisibleWithCollapsedControls() throws Exception {
         boolean advancedGlobal = ij.Prefs.get("flash.advanced.global", false);
         boolean advancedSpatial = ij.Prefs.get("flash.advanced.spatial", false);
         ij.Prefs.set("flash.advanced.global", false);
@@ -391,19 +391,35 @@ public class SpatialAnalysisTest {
             method.invoke(analysis, dialog, bindings, false, 0, false, 0.0, "Fire");
 
             JPanel content = contentPanel(dialog);
-            assertTrue("Cell Phenotyping header should be hidden until advanced options are opened",
-                    hasHiddenAncestor(findLabel(content, "Cell Phenotyping"), content));
-            assertTrue("K-means clustering should be hidden until advanced options are opened",
+            JLabel phenotypingHeader = findLabel(content, "Cell Phenotyping");
+            JLabel heatmapHeader = findLabel(content, "Density Heatmaps");
+            assertFalse("Cell Phenotyping title should be visible before expansion",
+                    hasHiddenAncestor(phenotypingHeader, content));
+            assertFalse("Density Heatmaps title should be visible before expansion",
+                    hasHiddenAncestor(heatmapHeader, content));
+            assertTrue("K-means clustering should be hidden until Cell Phenotyping is expanded",
                     hasHiddenAncestor(findLabel(content, "K-means clustering"), content));
-            assertTrue("Clusters input should be hidden until advanced options are opened",
+            assertTrue("Clusters input should be hidden until Cell Phenotyping is expanded",
                     hasHiddenAncestor(findLabel(content, "Clusters (k, 0=auto)"), content));
-            assertTrue("Density Heatmaps header should be hidden until advanced options are opened",
-                    hasHiddenAncestor(findLabel(content, "Density Heatmaps"), content));
-            assertTrue("Density heatmap toggle should be hidden until advanced options are opened",
+            assertTrue("Density heatmap toggle should be hidden until Density Heatmaps is expanded",
                     hasHiddenAncestor(findLabel(content, "Generate density heatmaps"), content));
-            assertTrue("KDE bandwidth input should be hidden until advanced options are opened",
+            assertTrue("KDE bandwidth input should be hidden until Density Heatmaps is expanded",
                     hasHiddenAncestor(findLabel(content, "KDE bandwidth (um, 0=auto)"), content));
-            assertTrue("Heatmap LUT choice should be hidden until advanced options are opened",
+            assertTrue("Heatmap LUT choice should be hidden until Density Heatmaps is expanded",
+                    hasHiddenAncestor(findLabel(content, "Heatmap LUT"), content));
+
+            click(phenotypingHeader);
+            assertFalse("K-means clustering should be visible after expanding Cell Phenotyping",
+                    hasHiddenAncestor(findLabel(content, "K-means clustering"), content));
+            assertFalse("Clusters input should be visible after expanding Cell Phenotyping",
+                    hasHiddenAncestor(findLabel(content, "Clusters (k, 0=auto)"), content));
+
+            click(heatmapHeader);
+            assertFalse("Density heatmap toggle should be visible after expanding Density Heatmaps",
+                    hasHiddenAncestor(findLabel(content, "Generate density heatmaps"), content));
+            assertFalse("KDE bandwidth input should be visible after expanding Density Heatmaps",
+                    hasHiddenAncestor(findLabel(content, "KDE bandwidth (um, 0=auto)"), content));
+            assertFalse("Heatmap LUT choice should be visible after expanding Density Heatmaps",
                     hasHiddenAncestor(findLabel(content, "Heatmap LUT"), content));
         } finally {
             backingDialog(dialog).dispose();
@@ -877,6 +893,23 @@ public class SpatialAnalysisTest {
             }
         }
         return null;
+    }
+
+    private static void click(Component component) {
+        assertNotNull(component);
+        java.awt.event.MouseEvent event = new java.awt.event.MouseEvent(
+                component,
+                java.awt.event.MouseEvent.MOUSE_CLICKED,
+                System.currentTimeMillis(),
+                0,
+                1,
+                1,
+                1,
+                false);
+        java.awt.event.MouseListener[] listeners = component.getMouseListeners();
+        for (int i = 0; i < listeners.length; i++) {
+            listeners[i].mouseClicked(event);
+        }
     }
 
     private static boolean hasHiddenAncestor(Component component, Container stopAt) {

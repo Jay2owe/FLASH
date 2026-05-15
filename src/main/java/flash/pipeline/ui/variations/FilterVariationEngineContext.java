@@ -32,6 +32,8 @@ public final class FilterVariationEngineContext {
     private final FilterParameterStage.PreviewAdapter previewAdapter;
     private final List<String> presetOptions;
     private final PresetMacroLoader presetMacroLoader;
+    private ImagePlus filteredSource;
+    private MontageDisplayActionDelegate montageDisplayActionDelegate;
     private final ClassicalSegmentationStage.PreviewAdapter classicalPreviewAdapter;
     private final StarDistParameterStage.PreviewAdapter starDistPreviewAdapter;
     private final CellposeParameterStage.PreviewAdapter cellposePreviewAdapter;
@@ -143,6 +145,18 @@ public final class FilterVariationEngineContext {
         return sourceImage;
     }
 
+    public ImagePlus filteredSource() {
+        return filteredSource;
+    }
+
+    public ImagePlus getFilteredSource() {
+        return filteredSource;
+    }
+
+    public void setFilteredSource(ImagePlus filteredSource) {
+        this.filteredSource = filteredSource;
+    }
+
     public CropSpec initialCropSpec() {
         return initialCropSpec;
     }
@@ -209,6 +223,19 @@ public final class FilterVariationEngineContext {
 
     public CellposeParameterStage.PreviewAdapter cellposePreviewAdapter() {
         return cellposePreviewAdapter;
+    }
+
+    public MontageDisplayActionDelegate montageDisplayActionDelegate() {
+        return montageDisplayActionDelegate;
+    }
+
+    public MontageDisplayActionDelegate getMontageDisplayActionDelegate() {
+        return montageDisplayActionDelegate;
+    }
+
+    public void setMontageDisplayActionDelegate(
+            MontageDisplayActionDelegate montageDisplayActionDelegate) {
+        this.montageDisplayActionDelegate = montageDisplayActionDelegate;
     }
 
     public String sourceImageHash() {

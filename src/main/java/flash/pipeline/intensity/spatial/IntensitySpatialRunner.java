@@ -334,6 +334,12 @@ public final class IntensitySpatialRunner {
     }
 
     private static String pairLabel(IntensitySpatialPairContext context) {
+        if (context.outputMode() == IntensitySpatialOutputMode.MIP) {
+            return context.imageId()
+                    + " source " + context.sourceChannelName() + " MIP"
+                    + " -> partner " + context.partnerChannelName() + " MIP"
+                    + roiLabel(context.roiLabel());
+        }
         return context.imageId()
                 + " source " + context.sourceChannelName()
                 + " -> partner " + context.partnerChannelName()

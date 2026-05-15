@@ -32,6 +32,8 @@ public final class ObjectSizeFilterPreview {
         public final int aboveMaxCount;
         public final String minDiameterText;
         public final String maxDiameterText;
+        public final double minDiameterPixels;
+        public final double maxDiameterPixels;
         public final int minLinePixels;
         public final int maxLinePixels;
         private final Map<Integer, Classification> classesByLabel;
@@ -45,6 +47,8 @@ public final class ObjectSizeFilterPreview {
                         int aboveMaxCount,
                         String minDiameterText,
                         String maxDiameterText,
+                        double minDiameterPixels,
+                        double maxDiameterPixels,
                         int minLinePixels,
                         int maxLinePixels,
                         Map<Integer, Classification> classesByLabel) {
@@ -57,6 +61,8 @@ public final class ObjectSizeFilterPreview {
             this.aboveMaxCount = aboveMaxCount;
             this.minDiameterText = minDiameterText;
             this.maxDiameterText = maxDiameterText;
+            this.minDiameterPixels = minDiameterPixels;
+            this.maxDiameterPixels = maxDiameterPixels;
             this.minLinePixels = minLinePixels;
             this.maxLinePixels = maxLinePixels;
             this.classesByLabel = classesByLabel == null
@@ -134,6 +140,8 @@ public final class ObjectSizeFilterPreview {
                 large,
                 diameterText(safeMin, reference),
                 maxFinite ? diameterText(safeMax, reference) : "",
+                diameterPixels(safeMin, reference),
+                maxFinite ? diameterPixels(safeMax, reference) : 0.0,
                 linePixels(safeMin),
                 maxFinite ? linePixels(safeMax) : 0,
                 classes);
@@ -332,6 +340,26 @@ public final class ObjectSizeFilterPreview {
             return String.valueOf((int) Math.round(value));
         }
         return String.format(Locale.ROOT, "%.1f", value);
+    }
+
+    private static double diameterPixels(int voxelCount, ImagePlus reference) {
+        double volume = Math.max(0, voxelCount);
+        Calibration cal = reference == null ? null : reference.getCalibration();
+        if (cal != null && calibratedUnit(cal)) {
+            double physicalDiameter = sphereEquivalentDiameter(volume * voxelVolume(reference));
+            double xyPixelSize = xyPixelSize(cal);
+            if (Double.isFinite(physicalDiameter) && finitePositive(xyPixelSize)) {
+                return physicalDiameter / xyPixelSize;
+            }
+        }
+        return sphereEquivalentDiameter(volume);
+    }
+
+    private static double xyPixelSize(Calibration cal) {
+        if (cal == null) return 1.0;
+        double w = finitePositive(cal.pixelWidth) ? cal.pixelWidth : 1.0;
+        double h = finitePositive(cal.pixelHeight) ? cal.pixelHeight : 1.0;
+        return (w + h) / 2.0;
     }
 
     private static int linePixels(int voxelCount) {

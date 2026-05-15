@@ -23,6 +23,8 @@ import java.util.List;
  */
 public final class CrossMark3DAnalysis implements IntensitySpatialPairAnalysis {
     private static final int DEFAULT_COSTES_PSF_PIXELS = 3;
+    private static final int MAX_COSTES_RANDOMIZATION_VOXELS = 262_144;
+    private static final int MAX_COSTES_RANDOMIZATIONS = 199;
 
     @Override
     public IntensitySpatialConfig.AnalysisKey key() {
@@ -145,7 +147,8 @@ public final class CrossMark3DAnalysis implements IntensitySpatialPairAnalysis {
                         new FloatType((float) thresholdB),
                         ThresholdMode.Above);
 
-        double costesP = costesP(pearsons, container, context.config().getPermutations());
+        double costesP = costesP(pearsons, container, context.config().getPermutations(),
+                volume.count, context);
         return new ColocMetrics(pearson, costesP, thresholdA, thresholdB,
                 finiteOrNan(mandersResult.m1), finiteOrNan(mandersResult.m2));
     }
@@ -173,15 +176,32 @@ public final class CrossMark3DAnalysis implements IntensitySpatialPairAnalysis {
                 manders.calculateMandersCorrelation(cursor,
                         new FloatType(0.0f), new FloatType(0.0f), ThresholdMode.Above);
 
-        double costesP = costesP(pearsons, container, context.config().getPermutations());
+        double costesP = costesP(pearsons, container, context.config().getPermutations(),
+                volume.count, context);
         return new BinarizedColocMetrics(costesP,
                 finiteOrNan(mandersResult.m1), finiteOrNan(mandersResult.m2));
     }
 
     private static double costesP(PearsonsCorrelation<FloatType> pearsons,
                                   DataContainer<FloatType> container,
-                                  int permutations) throws Exception {
-        int randomizations = Math.max(1, permutations);
+                                  int permutations,
+                                  int validVoxels,
+                                  IntensitySpatialPairContext context) throws Exception {
+        if (permutations <= 0) {
+            return Double.NaN;
+        }
+        if (validVoxels > MAX_COSTES_RANDOMIZATION_VOXELS) {
+            context.warn("Costes significance skipped for large native-3D volume ("
+                    + validVoxels + " valid voxels; limit "
+                    + MAX_COSTES_RANDOMIZATION_VOXELS
+                    + "); CostesP3D is NaN, Pearson3D and Manders3D still measured.");
+            return Double.NaN;
+        }
+        int randomizations = Math.min(permutations, MAX_COSTES_RANDOMIZATIONS);
+        if (randomizations < permutations) {
+            context.warn("Costes significance permutations capped at "
+                    + MAX_COSTES_RANDOMIZATIONS + " for runtime.");
+        }
         CostesSignificanceTest<FloatType> costes =
                 new CostesSignificanceTest<FloatType>(pearsons, DEFAULT_COSTES_PSF_PIXELS,
                         randomizations, false);

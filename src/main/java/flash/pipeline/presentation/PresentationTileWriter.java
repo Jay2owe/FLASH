@@ -38,6 +38,7 @@ public final class PresentationTileWriter {
     private static final Color TILE_GROUP_BG = new Color(225, 230, 233);
     private static final Color TILE_TEXT = new Color(35, 35, 35);
     private static final Color TILE_HELP_TEXT = new Color(90, 90, 90);
+    private static final int MAX_ANNOTATION_PREVIEW_DIMENSION = 640;
 
     private PresentationTileWriter() {}
 
@@ -329,8 +330,8 @@ public final class PresentationTileWriter {
 
     private static double previewScale(int width, int height) {
         int maxDimension = Math.max(width, height);
-        if (maxDimension <= 4096) return 1.0;
-        return 4096.0 / maxDimension;
+        if (maxDimension <= MAX_ANNOTATION_PREVIEW_DIMENSION) return 1.0;
+        return (double) MAX_ANNOTATION_PREVIEW_DIMENSION / maxDimension;
     }
 
     private static void drawSyntheticPreviewBackground(Graphics2D g, int width, int height) {

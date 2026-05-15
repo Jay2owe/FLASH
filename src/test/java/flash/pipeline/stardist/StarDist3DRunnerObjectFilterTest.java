@@ -1,5 +1,8 @@
 package flash.pipeline.stardist;
 
+import fiji.plugin.trackmate.Settings;
+import fiji.plugin.trackmate.detection.DetectorKeys;
+import fiji.plugin.trackmate.stardist.StarDistCustomDetectorFactory;
 import ij.ImagePlus;
 import ij.ImageStack;
 import ij.measure.Calibration;
@@ -7,7 +10,10 @@ import ij.measure.ResultsTable;
 import ij.process.ShortProcessor;
 import org.junit.Test;
 
+import java.io.File;
+
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 public class StarDist3DRunnerObjectFilterTest {
 
@@ -46,6 +52,27 @@ public class StarDist3DRunnerObjectFilterTest {
         assertEquals(0.5, copy.getCalibration().pixelWidth, 0.0);
         copy.getProcessor().set(0, 0, 99);
         assertEquals(1, input.getProcessor().get(0, 0));
+    }
+
+    @Test
+    public void configureDetectorSettingsPassesThresholdsToTrackMateStarDist() throws Exception {
+        Settings settings = new Settings(labelImage(new int[] {1, 2, 3, 4}));
+
+        StarDist3DRunner.configureStarDistDetector(settings, 0.73, 0.21);
+
+        assertTrue(settings.detectorFactory instanceof StarDistCustomDetectorFactory);
+        assertEquals(Integer.valueOf(1),
+                settings.detectorSettings.get(DetectorKeys.KEY_TARGET_CHANNEL));
+        assertEquals(0.73,
+                ((Double) settings.detectorSettings.get(
+                        StarDistCustomDetectorFactory.KEY_SCORE_THRESHOLD)).doubleValue(),
+                0.0);
+        assertEquals(0.21,
+                ((Double) settings.detectorSettings.get(
+                        StarDistCustomDetectorFactory.KEY_OVERLAP_THRESHOLD)).doubleValue(),
+                0.0);
+        assertTrue(new File((String) settings.detectorSettings.get(
+                StarDistCustomDetectorFactory.KEY_MODEL_FILEPATH)).isFile());
     }
 
     private static ResultsTable objectStats() {

@@ -249,7 +249,7 @@ public class ClassicalSegmentationStageTest {
     }
 
     @Test
-    public void objectPreviewRunsFullCandidateSetBeforeLiveSizeFiltering() throws Exception {
+    public void objectPreviewAppliesCurrentSizeFilterWhenRun() throws Exception {
         RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
         RecordingActions actions = new RecordingActions();
         ClassicalSegmentationStage stage = stage(
@@ -261,11 +261,57 @@ public class ClassicalSegmentationStageTest {
         stage.onEnter(context(), new PreviewPairPanel("Original", "Objects"));
         stage.runPreviewNowForTest();
 
-        assertEquals(0, adapter.lastMinSize);
+        assertEquals(3, adapter.lastMinSize);
         assertEquals(4, adapter.lastMaxSize);
-        assertEquals("Objects: 1 kept; removed 1 small, 0 large. Threshold 20.",
+        assertEquals("Objects: 1 ready. Threshold 20.",
                 actions.status);
-        assertRemovedLabelUsesCutoffColor(actions.adjustedPreview, 1, 0xe53935);
+        assertLabelPixel(actions.adjustedPreview, 0, 0, 0);
+        assertLabelPixel(actions.adjustedPreview, 1, 0, 2);
+    }
+
+    @Test
+    public void looseningSizeFilterMarksPreviewStaleBecauseMissingObjectsNeedRerun() throws Exception {
+        RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
+        RecordingActions actions = new RecordingActions();
+        ClassicalSegmentationStage stage = stage(
+                new RecordingThresholdStore("20"),
+                new RecordingSizeStore("3-Infinity"),
+                adapter);
+
+        stage.buildControls(context(), actions);
+        stage.onEnter(context(), new PreviewPairPanel("Original", "Objects"));
+        stage.runPreviewNowForTest();
+        adapter.previewRuns = 0;
+
+        stage.setMinSizeForTest("1");
+
+        assertTrue(stage.isObjectPreviewStaleForTest());
+        assertEquals("Loosening the range must not silently miss newly included objects",
+                0, adapter.previewRuns);
+        assertTrue(actions.previewButtonStale);
+        assertTrue(actions.status.contains("out of date"));
+    }
+
+    @Test
+    public void restorePreviousComparisonSettingsReloadsCapturedClassicalValues() throws Exception {
+        RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
+        ClassicalSegmentationStage stage = stage(
+                new RecordingThresholdStore("20"),
+                new RecordingSizeStore("1-Infinity"),
+                adapter);
+
+        stage.buildControls(context(), new RecordingActions());
+        stage.onEnter(context(), new PreviewPairPanel("Original", "Objects"));
+        stage.runPreviewNowForTest();
+
+        stage.setMinSizeForTest("3");
+
+        assertEquals("3-Infinity", stage.currentSizeTokenForTest());
+
+        stage.restorePreviousComparisonSettingsForTest();
+
+        assertEquals("1-Infinity", stage.currentSizeTokenForTest());
+        assertEquals("20", stage.currentThresholdTokenForTest());
     }
 
     @Test
@@ -446,15 +492,21 @@ public class ClassicalSegmentationStageTest {
             lastMinSize = minSize;
             lastMaxSize = maxSize;
             ByteProcessor labels = new ByteProcessor(2, 1);
-            labels.set(0, 0, 1);
-            labels.set(1, 0, 2);
             ResultsTable stats = new ResultsTable();
-            stats.incrementCounter();
-            stats.setValue("Label", 0, 1);
-            stats.setValue("Volume (pixel^3)", 0, 2);
-            stats.incrementCounter();
-            stats.setValue("Label", 1, 2);
-            stats.setValue("Volume (pixel^3)", 1, 10);
+            int row = 0;
+            if (withinSize(2, minSize, maxSize)) {
+                labels.set(0, 0, 1);
+                stats.incrementCounter();
+                stats.setValue("Label", row, 1);
+                stats.setValue("Volume (pixel^3)", row, 2);
+                row++;
+            }
+            if (withinSize(4, minSize, maxSize)) {
+                labels.set(1, 0, 2);
+                stats.incrementCounter();
+                stats.setValue("Label", row, 2);
+                stats.setValue("Volume (pixel^3)", row, 4);
+            }
             return new ObjectsCounter3DWrapper.Result(
                     stats, new ImagePlus("labels", labels), null, true);
         }
@@ -467,6 +519,10 @@ public class ClassicalSegmentationStageTest {
 
         @Override public void close(ImagePlus image) {
             if (image != null) image.flush();
+        }
+
+        private static boolean withinSize(int voxels, int minSize, int maxSize) {
+            return voxels >= minSize && voxels <= maxSize;
         }
     }
 
@@ -525,6 +581,11 @@ public class ClassicalSegmentationStageTest {
                 | (model.getGreen(index) << 8)
                 | model.getBlue(index);
         assertEquals(expectedRgb, actual);
+    }
+
+    private static void assertLabelPixel(ImagePlus labelImage, int x, int y, int expectedLabel) {
+        assertNotNull(labelImage);
+        assertEquals(expectedLabel, labelImage.getProcessor().get(x, y));
     }
 
     private static void waitForPreviewRuns(RecordingPreviewAdapter adapter,

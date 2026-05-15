@@ -91,6 +91,25 @@ public class VariationGridPanelAxisLayoutTest {
         });
     }
 
+    @Test
+    public void facetChipRowHandlesNullValuesWithoutThrowing()
+            throws Exception {
+        SwingUtilities.invokeAndWait(() -> {
+            Map<ParameterKey, List<?>> values =
+                    new LinkedHashMap<ParameterKey, List<?>>();
+            values.put(ParameterId.MACRO,
+                    Arrays.<Object>asList(null, MacroToken.NONE_VALUE));
+
+            FacetChipRow row = new FacetChipRow(values,
+                    java.util.Collections.<ParameterKey, Object>emptyMap(),
+                    null);
+
+            assertEquals(null, row.selectedValue(ParameterId.MACRO));
+            assertEquals(Arrays.asList("", MacroToken.NONE_VALUE),
+                    buttonTexts(descendants(row, AbstractButton.class)));
+        });
+    }
+
     private static VariationGridPanel gridFor(final ParameterSweep sweep)
             throws Exception {
         final VariationGridPanel[] holder = new VariationGridPanel[1];

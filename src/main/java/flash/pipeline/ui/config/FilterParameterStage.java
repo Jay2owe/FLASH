@@ -15,6 +15,7 @@ import flash.pipeline.ui.sandbox.RecorderParameterProbe;
 import flash.pipeline.ui.variations.CropSpec;
 import flash.pipeline.ui.variations.FilterVariationEngineContext;
 import flash.pipeline.ui.variations.MacroVariationsDialog;
+import flash.pipeline.ui.variations.MontageDisplayActionDelegate;
 import ij.ImagePlus;
 
 import javax.swing.BorderFactory;
@@ -1351,7 +1352,7 @@ public final class FilterParameterStage implements ConfigQcStage {
                 : currentMacro;
         FilterMacroEditorModel.MacroDefinition parsed =
                 FilterMacroEditorModel.parse(macroForDialog);
-        return new FilterVariationEngineContext(
+        FilterVariationEngineContext context = new FilterVariationEngineContext(
                 parsed,
                 sourceImage,
                 CropSpec.full(),
@@ -1364,6 +1365,34 @@ public final class FilterParameterStage implements ConfigQcStage {
                         return macroStore.loadPresetMacro(presetName);
                     }
                 });
+        if (!previewStale) {
+            context.setFilteredSource(adjustedPreview);
+        }
+        context.setMontageDisplayActionDelegate(montageDisplayActionDelegate());
+        return context;
+    }
+
+    private MontageDisplayActionDelegate montageDisplayActionDelegate() {
+        if (preview == null) {
+            return null;
+        }
+        return new MontageDisplayActionDelegate() {
+            @Override public void adjustBrightnessContrast() {
+                preview.requestBrightnessContrastControls();
+            }
+
+            @Override public void toggleGreyLut() {
+                preview.requestGreyLutToggle();
+            }
+
+            @Override public String lutButtonText() {
+                return preview.lutToggleButton().getText();
+            }
+
+            @Override public String lutButtonTooltip() {
+                return preview.lutToggleButton().getToolTipText();
+            }
+        };
     }
 
     private void applyAcceptedMacro(String macroText) {

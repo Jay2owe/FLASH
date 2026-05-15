@@ -169,6 +169,51 @@ public class VariationCellPanelShiftClickTest {
     }
 
     @Test
+    public void setResultFromWorkerThreadMarshalsToEdt() throws Exception {
+        final VariationCellPanel cell = new VariationCellPanel(combo(1), source(),
+                accepted -> {
+                },
+                null);
+        Thread worker = new Thread(new Runnable() {
+            @Override public void run() {
+                cell.setResult(VariationResult.success(combo(1), label(), 1, 1L, null));
+            }
+        }, "variation-cell-test-worker");
+
+        worker.start();
+        worker.join(2000L);
+        SwingUtilities.invokeAndWait(new Runnable() {
+            @Override public void run() {
+            }
+        });
+
+        assertTrue(cell.hasCachedLabel());
+        assertEquals("1", cell.footerTextForTest());
+    }
+
+    @Test
+    public void setStateClearsStaleCachedLabel() throws Exception {
+        SwingUtilities.invokeAndWait(new Runnable() {
+            @Override public void run() {
+                VariationCellPanel cell = renderedCell(combo(1),
+                        new VariationComparisonSelection(status -> {
+                        }, new VariationComparisonSelection.Opener() {
+                            @Override public void openComparison(VariationCellPanel left,
+                                                                 VariationCellPanel right) {
+                            }
+                        }),
+                        null);
+                assertTrue(cell.hasCachedLabel());
+
+                cell.setState("running");
+
+                assertFalse(cell.hasCachedLabel());
+                assertEquals("running", cell.footerTextForTest());
+            }
+        });
+    }
+
+    @Test
     public void failedCellBlocksAcceptButCanStillBeCompared() throws Exception {
         final AtomicReference<ParameterCombo> accepted =
                 new AtomicReference<ParameterCombo>();

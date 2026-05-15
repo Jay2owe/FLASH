@@ -202,6 +202,23 @@ public class AnalysisHelpCatalogTest {
     }
 
     @Test
+    public void spatialTopicOverviewPreviewsEverySectionInTheDialog() {
+        AnalysisHelpTopic topic = AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_SPATIAL);
+        assertContains(topic.whenToUse, "Spatial Distances section");
+        assertContains(topic.whenToUse, "Colocalization section");
+        assertContains(topic.whenToUse, "Voronoi Tessellation section");
+        assertContains(topic.whenToUse, "Morphometric Analysis section");
+        assertContains(topic.whenToUse, "Cell Phenotyping section");
+        assertContains(topic.whenToUse, "Density Heatmaps section");
+    }
+
+    @Test
+    public void spatialTopicPitfallsMentionForceRerun() {
+        AnalysisHelpTopic topic = AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_SPATIAL);
+        assertContains(topic.pitfalls, "Force re-run");
+    }
+
+    @Test
     public void coreAnalysisTopicsNameRequiredDependencies() {
         assertContains(AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_SPLIT_MERGE).inputs,
                 "Set Up Configuration");

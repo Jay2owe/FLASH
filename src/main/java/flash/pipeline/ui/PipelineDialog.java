@@ -97,6 +97,7 @@ public class PipelineDialog {
     // Sequential retrieval (toggles, numericFields, etc.) is unaffected —
     // components are still appended to the retrieval lists in order.
     private JPanel currentAdvancedPanel;
+    private JPanel currentCollapsiblePanel;
     private String currentModuleId;
 
     public PipelineDialog(String title) {
@@ -739,13 +740,122 @@ public class PipelineDialog {
     }
 
     /**
-     * Routes a body-row component to the active advanced panel if one is
-     * open, otherwise to the default {@code contentPanel}. Sequential
-     * retrieval lists are populated independently by the public {@code add*}
-     * helpers, so visibility changes never affect retrieval order.
+     * Begins a titled section whose title remains visible while the rows added
+     * before {@link #endCollapsibleSection()} can be collapsed or expanded.
+     * Input retrieval order is preserved because the regular add* helpers still
+     * register their controls in the same lists.
+     */
+    public void beginCollapsibleSection(String title, boolean initiallyExpanded) {
+        beginCollapsibleSection(title, initiallyExpanded, null);
+    }
+
+    /**
+     * Begins a titled collapsible section with a setup-style question-mark help
+     * control. The help button sits to the right of the title and opens the
+     * given {@link SetupHelpTopic} without toggling the section's expanded
+     * state. Pass {@code null} for {@code topic} to omit the help control.
+     */
+    public void beginCollapsibleSection(String title, boolean initiallyExpanded,
+                                        SetupHelpTopic topic) {
+        if (currentCollapsiblePanel != null) {
+            throw new IllegalStateException("Nested collapsible sections are not supported");
+        }
+
+        addToBody(Box.createVerticalStrut(10));
+
+        final JPanel section = new JPanel();
+        section.setLayout(new BoxLayout(section, BoxLayout.Y_AXIS));
+        section.setAlignmentX(Component.LEFT_ALIGNMENT);
+        section.setMaximumSize(new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE));
+        section.setOpaque(false);
+
+        final JPanel headerRow = createRow();
+        headerRow.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+
+        final JLabel arrow = new JLabel();
+        arrow.setForeground(HEADER_COLOR);
+        arrow.setFont(arrow.getFont().deriveFont(Font.PLAIN, 13f));
+        arrow.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        headerRow.add(arrow);
+        headerRow.add(Box.createHorizontalStrut(6));
+
+        final JLabel label = new JLabel(title == null ? "" : title);
+        label.setFont(label.getFont().deriveFont(Font.BOLD, 13f));
+        label.setForeground(HEADER_COLOR);
+        label.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        headerRow.add(label);
+        if (topic != null) {
+            headerRow.add(Box.createHorizontalStrut(6));
+            JButton helpButton = createSetupHelpButton(topic);
+            helpButton.setCursor(Cursor.getPredefinedCursor(Cursor.DEFAULT_CURSOR));
+            headerRow.add(helpButton);
+        }
+        headerRow.add(Box.createHorizontalGlue());
+        section.add(headerRow);
+        section.add(Box.createVerticalStrut(4));
+
+        JSeparator sep = new JSeparator(SwingConstants.HORIZONTAL);
+        sep.setMaximumSize(new Dimension(Integer.MAX_VALUE, 1));
+        sep.setAlignmentX(Component.LEFT_ALIGNMENT);
+        section.add(sep);
+        section.add(Box.createVerticalStrut(6));
+
+        final JPanel body = new JPanel();
+        body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
+        body.setAlignmentX(Component.LEFT_ALIGNMENT);
+        body.setMaximumSize(new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE));
+        body.setBorder(new EmptyBorder(0, 12, 0, 0));
+        body.setOpaque(false);
+        body.setVisible(initiallyExpanded);
+        section.add(body);
+
+        addToBody(section);
+        refreshCollapsibleHeader(arrow, initiallyExpanded);
+
+        MouseAdapter toggle = new MouseAdapter() {
+            @Override public void mouseClicked(MouseEvent e) {
+                boolean show = !body.isVisible();
+                body.setVisible(show);
+                refreshCollapsibleHeader(arrow, show);
+                dialog.revalidate();
+                dialog.repaint();
+            }
+        };
+        headerRow.addMouseListener(toggle);
+        arrow.addMouseListener(toggle);
+        label.addMouseListener(toggle);
+
+        this.currentCollapsiblePanel = body;
+    }
+
+    /** Ends the current titled collapsible section. */
+    public void endCollapsibleSection() {
+        this.currentCollapsiblePanel = null;
+    }
+
+    private void refreshCollapsibleHeader(JLabel arrow, boolean expanded) {
+        Icon icon = expanded
+                ? FlashIcons.chevronDown(12, HEADER_COLOR)
+                : FlashIcons.chevronRight(12, HEADER_COLOR);
+        if (icon != null) {
+            arrow.setIcon(icon);
+            arrow.setText("");
+        } else {
+            arrow.setIcon(null);
+            arrow.setText(expanded ? "[-]" : "[+]");
+        }
+    }
+
+    /**
+     * Routes a body-row component to the active collapsible section, advanced
+     * panel, or default {@code contentPanel}. Sequential retrieval lists are
+     * populated independently by the public {@code add*} helpers, so visibility
+     * changes never affect retrieval order.
      */
     private void addToBody(Component c) {
-        if (currentAdvancedPanel != null) {
+        if (currentCollapsiblePanel != null) {
+            currentCollapsiblePanel.add(c);
+        } else if (currentAdvancedPanel != null) {
             currentAdvancedPanel.add(c);
         } else {
             contentPanel.add(c);

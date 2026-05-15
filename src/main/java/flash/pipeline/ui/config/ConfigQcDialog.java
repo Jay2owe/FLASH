@@ -92,7 +92,8 @@ public final class ConfigQcDialog {
     private final JButton backButton = new JButton("Back");
     private final JButton previousImageButton = new JButton("Previous image");
     private final JButton restartButton = new JButton("Restart");
-    private final JButton skipButton = new JButton("Skip");
+    private final JButton skipImageButton = new JButton("Skip image");
+    private final JButton skipStageButton = new JButton("Skip stage");
     private final JButton cancelButton = new JButton("Cancel");
     private final JButton lockInButton = new JButton("Lock in & Next");
     private final JDialog dialog;
@@ -162,6 +163,11 @@ public final class ConfigQcDialog {
 
     public static ConfigQcDialog createModeless(Window owner, ConfigQcContext context, List<ConfigQcStage> stages) {
         return new ConfigQcDialog(owner, context, stages, false);
+    }
+
+    public static ConfigQcDialog createModeless(Window owner, ConfigQcContext context, List<ConfigQcStage> stages,
+                                                List<String> stagePath, int currentStagePathIndex) {
+        return new ConfigQcDialog(owner, context, stages, false, stagePath, currentStagePathIndex);
     }
 
     static ConfigQcDialog createForTest(ConfigQcContext context, List<ConfigQcStage> stages) {
@@ -272,7 +278,9 @@ public final class ConfigQcDialog {
         gbc.gridx++;
         footer.add(restartButton, gbc);
         gbc.gridx++;
-        footer.add(skipButton, gbc);
+        footer.add(skipImageButton, gbc);
+        gbc.gridx++;
+        footer.add(skipStageButton, gbc);
 
         gbc.gridx++;
         gbc.weightx = 1.0;
@@ -297,7 +305,8 @@ public final class ConfigQcDialog {
         backButton.addActionListener(e -> goBack());
         previousImageButton.addActionListener(e -> previousImage());
         restartButton.addActionListener(e -> restartCurrentStage());
-        skipButton.addActionListener(e -> skipCurrentImage());
+        skipImageButton.addActionListener(e -> skipCurrentImage());
+        skipStageButton.addActionListener(e -> skipCurrentStage());
         cancelButton.addActionListener(e -> closeWithResult(ConfigQcResult.CANCEL));
         lockInButton.addActionListener(e -> lockInAndAdvance());
         styleActionButton(lockInButton, PRIMARY_ACTION_BG, PRIMARY_ACTION_FG, PRIMARY_ACTION_BORDER);
@@ -394,7 +403,8 @@ public final class ConfigQcDialog {
                 && context.hasImages()
                 && context.getCurrentImageIndex() > 0);
         restartButton.setEnabled(currentStage() != null);
-        skipButton.setEnabled(context.hasImages());
+        skipImageButton.setEnabled(context.hasImages());
+        skipStageButton.setEnabled(currentStage() != null);
         lockInButton.setText(isLastApplicableStage() && isLastImage()
                 ? "Lock in & Done"
                 : "Lock in & Next");
@@ -563,6 +573,24 @@ public final class ConfigQcDialog {
         advanceImageOrStage(ConfigQcResult.SKIP_CURRENT_IMAGE);
     }
 
+    private void skipCurrentStage() {
+        ConfigQcStage stage = currentStage();
+        if (stage == null) return;
+        String skippedTitle = stage.title();
+        stage.skipCurrentStage(context);
+        context.consumeRequestedNextImageIndex();
+        leaveCurrentStage();
+        int next = findNextApplicable(stageIndex + 1);
+        if (next < 0) {
+            closeWithResult(ConfigQcResult.DONE);
+            return;
+        }
+        stageIndex = next;
+        context.resetCurrentImage();
+        pendingNavigationStatus = "Skipped stage: " + safeStageTitle(skippedTitle) + ".";
+        rebuildCurrentStage();
+    }
+
     private void restartCurrentStage() {
         ConfigQcStage stage = currentStage();
         if (stage == null) return;
@@ -723,6 +751,11 @@ public final class ConfigQcDialog {
             return context.getImageProgressText();
         }
         return context.getImageProgressText() + "    - " + imageName;
+    }
+
+    private static String safeStageTitle(String title) {
+        String text = title == null ? "" : title.trim();
+        return text.isEmpty() ? "current stage" : text;
     }
 
     private void refreshStageBreadcrumb() {
@@ -1042,6 +1075,14 @@ public final class ConfigQcDialog {
         return previousImageButton;
     }
 
+    JButton skipImageButtonForTest() {
+        return skipImageButton;
+    }
+
+    JButton skipStageButtonForTest() {
+        return skipStageButton;
+    }
+
     boolean controlsExpandableForTest() {
         return controlsExpandable;
     }
@@ -1060,6 +1101,10 @@ public final class ConfigQcDialog {
 
     void skipForTest() {
         skipCurrentImage();
+    }
+
+    void skipStageForTest() {
+        skipCurrentStage();
     }
 
     void restartForTest() {

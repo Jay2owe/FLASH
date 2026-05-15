@@ -3,12 +3,21 @@ package flash.pipeline.stardist;
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.image.GpuConcurrency;
 import flash.pipeline.image.ImageOps;
+import de.csbdresden.stardist.StarDist2DModel;
 import ij.IJ;
 import ij.ImagePlus;
 import ij.ImageStack;
 import ij.measure.ResultsTable;
 import ij.process.ImageProcessor;
 
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.URISyntaxException;
+import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -22,6 +31,7 @@ import fiji.plugin.trackmate.Spot;
 import fiji.plugin.trackmate.TrackMate;
 import fiji.plugin.trackmate.action.LabelImgExporter;
 import fiji.plugin.trackmate.detection.DetectorKeys;
+import fiji.plugin.trackmate.stardist.StarDistCustomDetectorFactory;
 import fiji.plugin.trackmate.stardist.StarDistDetectorFactory;
 import fiji.plugin.trackmate.tracking.jaqaman.SparseLAPTrackerFactory;
 
@@ -38,11 +48,13 @@ public class StarDist3DRunner {
     public static final String STATS_AREA_MEAN = "StarDist Area Mean";
     public static final String STATS_QUALITY_MEAN = "StarDist Quality Mean";
     public static final String STATS_INTENSITY_MEAN = "StarDist Intensity Mean";
+    private static final String DEFAULT_STARDIST_MODEL_RESOURCE = "models/2D/dsb2018_heavy_augment.zip";
 
     /** Whether the TF thread-cap system properties have already been written.
      *  TensorFlow reads the properties at session construction, so first-write
      *  wins; we record the decision here so the first StarDist call logs it. */
     private static final AtomicBoolean TF_THREAD_CAP_LOGGED = new AtomicBoolean(false);
+    private static volatile File defaultStarDistModelFile;
 
     static {
         applyTensorFlowThreadCap();
@@ -213,9 +225,7 @@ public class StarDist3DRunner {
                     Settings settings = new Settings(dup);
                     settings.addAllAnalyzers();
 
-                    settings.detectorFactory = new StarDistDetectorFactory();
-                    settings.detectorSettings = settings.detectorFactory.getDefaultSettings();
-                    settings.detectorSettings.put(DetectorKeys.KEY_TARGET_CHANNEL, Integer.valueOf(1));
+                    configureStarDistDetector(settings, probThresh, nmsThresh);
 
                     // Tracker links 2D detections across Z-slices (swapped to timepoints)
                     // into 3D objects. Required for the Z/T swap strategy.
@@ -398,6 +408,53 @@ public class StarDist3DRunner {
                     + e.getClass().getSimpleName() + " - " + e.getMessage());
             IJ.log("WARNING: " + StarDistDetector.getAvailabilityMessage());
             return null;
+        }
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    static void configureStarDistDetector(Settings settings, double probThresh, double nmsThresh)
+            throws IOException {
+        StarDistCustomDetectorFactory factory = new StarDistCustomDetectorFactory();
+        settings.detectorFactory = factory;
+        settings.detectorSettings = factory.getDefaultSettings();
+        settings.detectorSettings.put(DetectorKeys.KEY_TARGET_CHANNEL, Integer.valueOf(1));
+        settings.detectorSettings.put(StarDistCustomDetectorFactory.KEY_MODEL_FILEPATH,
+                defaultStarDistModelFile().getAbsolutePath());
+        settings.detectorSettings.put(StarDistCustomDetectorFactory.KEY_SCORE_THRESHOLD,
+                Double.valueOf(probThresh));
+        settings.detectorSettings.put(StarDistCustomDetectorFactory.KEY_OVERLAP_THRESHOLD,
+                Double.valueOf(nmsThresh));
+    }
+
+    private static File defaultStarDistModelFile() throws IOException {
+        File cached = defaultStarDistModelFile;
+        if (cached != null && cached.isFile()) return cached;
+        synchronized (StarDist3DRunner.class) {
+            cached = defaultStarDistModelFile;
+            if (cached != null && cached.isFile()) return cached;
+
+            URL resource = StarDist2DModel.class.getClassLoader()
+                    .getResource(DEFAULT_STARDIST_MODEL_RESOURCE);
+            if (resource == null) {
+                throw new IOException("StarDist default model resource not found: "
+                        + DEFAULT_STARDIST_MODEL_RESOURCE);
+            }
+            if ("file".equalsIgnoreCase(resource.getProtocol())) {
+                try {
+                    cached = new File(resource.toURI());
+                } catch (URISyntaxException e) {
+                    cached = new File(resource.getPath());
+                }
+            } else {
+                Path temp = Files.createTempFile("flash-stardist-dsb2018-heavy-augment-", ".zip");
+                try (InputStream in = resource.openStream()) {
+                    Files.copy(in, temp, StandardCopyOption.REPLACE_EXISTING);
+                }
+                cached = temp.toFile();
+                cached.deleteOnExit();
+            }
+            defaultStarDistModelFile = cached;
+            return cached;
         }
     }
 

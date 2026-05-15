@@ -175,6 +175,12 @@ public final class LargePreviewDialog extends JDialog {
         refreshObjectPreviewImage();
     }
 
+    void setObjectSizeGuide(ObjectSizeFilterPreview.Summary summary) {
+        originalPreview.setObjectSizeGuide(summary);
+        adjustedPreview.setObjectSizeGuide(summary);
+        extraPreview.setObjectSizeGuide(summary);
+    }
+
     public void setCurrentZ(int zSlice) {
         if (syncingSlices) return;
         syncingSlices = true;

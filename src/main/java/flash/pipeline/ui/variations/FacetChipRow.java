@@ -139,7 +139,7 @@ public final class FacetChipRow extends JPanel {
             final Object value = values.get(i);
             ChipButton chip = new ChipButton(labelFor(axis, value),
                     value instanceof Number);
-            chip.setSelected(value.equals(selectedValues.get(axis)));
+            chip.setSelected(valueEquals(value, selectedValues.get(axis)));
             String tooltip = tooltipFor(axis, value);
             chip.setToolTipText(tooltip == null || tooltip.trim().isEmpty()
                     ? null
@@ -195,7 +195,7 @@ public final class FacetChipRow extends JPanel {
                 g2.setColor(isSelected() ? CHIP_SELECTED_FILL : CHIP_FILL);
                 g2.fillRoundRect(0, 0, width - 1, height - 1, arc, arc);
                 g2.setColor(isSelected() ? SKY_BLUE : CHIP_BORDER);
-                g2.setStroke(new BasicStroke(isSelected() ? 1.5f : 1f));
+                g2.setStroke(new BasicStroke(1.5f));
                 g2.drawRoundRect(0, 0, width - 1, height - 1, arc, arc);
                 if (isSelected()) {
                     int diameter = 6;
@@ -212,5 +212,9 @@ public final class FacetChipRow extends JPanel {
             int length = text == null ? 0 : text.length();
             return new Dimension(Math.max(44, 28 + length * 7), 24);
         }
+    }
+
+    private static boolean valueEquals(Object left, Object right) {
+        return left == null ? right == null : left.equals(right);
     }
 }

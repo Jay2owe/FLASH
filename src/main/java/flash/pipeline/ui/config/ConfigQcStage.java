@@ -39,6 +39,9 @@ public interface ConfigQcStage {
     default void skipCurrentImage(ConfigQcContext context) {
     }
 
+    default void skipCurrentStage(ConfigQcContext context) {
+    }
+
     default void restartStage(ConfigQcContext context) {
     }
 

@@ -208,7 +208,7 @@ public class CountCurveStrip extends JPanel {
     private void paintAxis(Graphics2D g2,
                            List<PlotPoint> points,
                            PlotBounds bounds) {
-        g2.setStroke(new BasicStroke(1f));
+        g2.setStroke(new BasicStroke(1.5f));
         g2.setColor(AXIS);
         g2.drawLine(bounds.left, bounds.bottom, bounds.right, bounds.bottom);
         g2.setFont(getFont());
@@ -270,12 +270,12 @@ public class CountCurveStrip extends JPanel {
             g2.setColor(POINT);
             g2.fillOval(x - radius, y - radius, radius * 2, radius * 2);
             g2.setColor(POINT_BORDER);
-            g2.setStroke(new BasicStroke(1f));
+            g2.setStroke(new BasicStroke(1.5f));
             g2.drawOval(x - radius, y - radius, radius * 2, radius * 2);
             if (selectedIndex.isPresent()
                     && selectedIndex.getAsInt() == point.originalIndex) {
                 g2.setColor(SELECTED_RING);
-                g2.setStroke(new BasicStroke(1.4f));
+                g2.setStroke(new BasicStroke(1.5f));
                 g2.drawOval(x - radius - 3, y - radius - 3,
                         radius * 2 + 6, radius * 2 + 6);
             }

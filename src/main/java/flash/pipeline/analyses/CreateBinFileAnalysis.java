@@ -16,6 +16,7 @@ import flash.pipeline.analyses.wizard.ChannelSetupWizard;
 import flash.pipeline.cli.CLIConfig;
 import flash.pipeline.image.FilterMacroEditorModel;
 import flash.pipeline.image.FilterExecutor;
+import flash.pipeline.image.ImageOps;
 import flash.pipeline.image.WindowManagerLock;
 import flash.pipeline.image.NamedFilterLoader;
 import flash.pipeline.image.dag.DagIRSerializer;
@@ -472,7 +473,7 @@ public class CreateBinFileAnalysis implements Analysis {
                                                                    List<ConfigQcStage> stages,
                                                                    List<String> stagePath,
                                                                    int activeStagePathIndex) {
-        ConfigQcDialog dialog = ConfigQcDialog.createModal(
+        ConfigQcDialog dialog = ConfigQcDialog.createModeless(
                 null, context, stages, stagePath, activeStagePathIndex);
         return dialog.showDialog();
     }
@@ -5584,7 +5585,7 @@ public class CreateBinFileAnalysis implements Analysis {
                                                                     String inputTitle,
                                                                     String mapTitle) {
         if (filteredSource == null) return null;
-        ImagePlus input = filteredSource.duplicate();
+        ImagePlus input = ImageOps.duplicateThreadSafe(filteredSource);
         input.setTitle(inputTitle);
         try {
             ObjectsCounter3DWrapper wrapper = new ObjectsCounter3DWrapper();
@@ -8043,6 +8044,10 @@ public class CreateBinFileAnalysis implements Analysis {
             if (delegate != null) delegate.skipCurrentImage(context);
         }
 
+        @Override public void skipCurrentStage(ConfigQcContext context) {
+            if (delegate != null) delegate.skipCurrentStage(context);
+        }
+
         @Override public void restartStage(ConfigQcContext context) {
             if (delegate != null) delegate.restartStage(context);
         }
@@ -8131,6 +8136,10 @@ public class CreateBinFileAnalysis implements Analysis {
 
         @Override public void skipCurrentImage(ConfigQcContext context) {
             if (delegate != null) delegate.skipCurrentImage(context);
+        }
+
+        @Override public void skipCurrentStage(ConfigQcContext context) {
+            if (delegate != null) delegate.skipCurrentStage(context);
         }
 
         @Override public void restartStage(ConfigQcContext context) {

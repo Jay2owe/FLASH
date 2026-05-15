@@ -56,6 +56,27 @@ public class CountCurveScalingTest {
         assertEquals(25.0d, second.yMax(), 0.0001d);
     }
 
+    @Test
+    public void emptyCurveDataPaintsWithoutThrowing() {
+        CountCurveStrip strip = new CountCurveStrip(
+                new double[0],
+                new double[0],
+                OptionalInt.empty(),
+                null);
+        strip.setSize(240, 80);
+
+        BufferedImage image = new BufferedImage(240, 80,
+                BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = image.createGraphics();
+        try {
+            strip.paint(g);
+        } finally {
+            g.dispose();
+        }
+
+        assertTrue(!strip.selectedIndex().isPresent());
+    }
+
     private static int alpha(int argb) {
         return (argb >>> 24) & 0xff;
     }

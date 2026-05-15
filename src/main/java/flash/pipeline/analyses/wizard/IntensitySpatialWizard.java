@@ -6,6 +6,7 @@ import flash.pipeline.runtime.DependencyRegistry;
 import flash.pipeline.runtime.DependencyService;
 import flash.pipeline.runtime.DependencySpec;
 import flash.pipeline.runtime.DependencyStatus;
+import flash.pipeline.help.IntensitySpatialHelpCatalog;
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.ToggleSwitch;
 import flash.pipeline.ui.wizard.WizardFlow;
@@ -240,23 +241,15 @@ public class IntensitySpatialWizard extends WizardFlow {
     static DependencyId requiredDependency(IntensitySpatialConfig.AnalysisKey key) {
         if (key == null) return null;
         switch (key) {
-            case PATCHINESS:
-            case HOTSPOTSCAN:
             case PERIODICITY:
-                return DependencyId.IMGLIB2_FFT_RUNTIME;
+                return DependencyId.JTRANSFORMS_RUNTIME;
             case GRANULARITY:
-            case DEPTH_PROFILE:
+            case ANISOTROPY:
             case TEXTURECLASS:
                 return DependencyId.IMGLIB2_ALGORITHM_RUNTIME;
             case CROSSMARK:
             case CROSSMARK_3D:
                 return DependencyId.COLOC2_RUNTIME;
-            case DISTANCE_SHELL:
-                return DependencyId.IMGLIB2_ALGORITHM_RUNTIME;
-            case ENTROPY_MI:
-                return DependencyId.JTRANSFORMS_RUNTIME;
-            case DISTANCE_SHELL_3D:
-                return DependencyId.MCIB3D_CORE;
             case ANISOTROPY_3D:
                 return null;
             default:
@@ -534,7 +527,7 @@ public class IntensitySpatialWizard extends WizardFlow {
         switch (key) {
             case PATCHINESS: return "Patchiness and lacunarity";
             case HOTSPOTSCAN: return "Hotspot scan";
-            case NULLMODEL: return "Permutation null model";
+            case NULLMODEL: return "Poisson intensity null model";
             case GRANULARITY: return "Granularity across scales";
             case DEPTH_PROFILE: return "Depth profile from ROI boundary";
             case ANISOTROPY: return "2D alignment / anisotropy";
@@ -733,7 +726,8 @@ public class IntensitySpatialWizard extends WizardFlow {
             if (intentPrelude) {
                 seedSelectionFromIntent(answers);
             }
-            dialog.addHeader("Choose intensity-spatial analyses");
+            dialog.addSetupHelpHeader("Choose intensity-spatial analyses",
+                    IntensitySpatialHelpCatalog.OVERVIEW);
             final JComboBox<String> helperChoice = intentPrelude
                     ? null
                     : dialog.addChoice("Setup helper", EMBEDDED_HELPER_OPTIONS,
@@ -741,7 +735,8 @@ public class IntensitySpatialWizard extends WizardFlow {
             final Map<IntensitySpatialConfig.AnalysisKey, ToggleSwitch> analysisToggles =
                     new LinkedHashMap<IntensitySpatialConfig.AnalysisKey, ToggleSwitch>();
 
-            dialog.addSubHeader("2D spatial analysis source");
+            dialog.addSetupHelpSubHeader("2D spatial analysis source",
+                    IntensitySpatialHelpCatalog.OUTPUT_SOURCE);
             final JComboBox<String> sourceChoice = dialog.addChoice("2D source", SOURCE_MODE_OPTIONS,
                     answers.getString(FIELD_SOURCE_MODE,
                             sourceChoiceFor(initialSourceModeDefault())));
@@ -751,7 +746,8 @@ public class IntensitySpatialWizard extends WizardFlow {
                 sourceChoice.setEnabled(false);
                 sourceWarning.setText("<html><body width='280'>MIP source requires a z-stack with more than one slice.</body></html>");
             }
-            dialog.addSubHeader("Output modes");
+            dialog.addSetupHelpSubHeader("Output modes",
+                    IntensitySpatialHelpCatalog.OUTPUT_SOURCE);
             final ToggleSwitch native3d = dialog.addToggle("Native 3D spatial measurements",
                     answers.getBoolean(FIELD_NATIVE_3D, false));
             if (likelyStackDepth < IntensitySpatialConfig.MIN_NATIVE_3D_SLICES) {
@@ -762,7 +758,8 @@ public class IntensitySpatialWizard extends WizardFlow {
             }
             dialog.addToggle("Write visual overlays", answers.getBoolean(FIELD_OVERLAYS, false));
 
-            dialog.addSubHeader("Single-channel distribution");
+            dialog.addSetupHelpSubHeader("Single-channel distribution",
+                    IntensitySpatialHelpCatalog.SINGLE_CHANNEL);
             analysisToggles.put(IntensitySpatialConfig.AnalysisKey.PATCHINESS, addAnalysisToggle(dialog, IntensitySpatialConfig.AnalysisKey.PATCHINESS,
                     labelFor(IntensitySpatialConfig.AnalysisKey.PATCHINESS),
                     answers.getBoolean(fieldFor(IntensitySpatialConfig.AnalysisKey.PATCHINESS), false)));
@@ -773,7 +770,8 @@ public class IntensitySpatialWizard extends WizardFlow {
                     labelFor(IntensitySpatialConfig.AnalysisKey.NULLMODEL),
                     answers.getBoolean(fieldFor(IntensitySpatialConfig.AnalysisKey.NULLMODEL), false)));
 
-            dialog.addSubHeader("Depth and structure");
+            dialog.addSetupHelpSubHeader("Depth and structure",
+                    IntensitySpatialHelpCatalog.DEPTH_STRUCTURE);
             analysisToggles.put(IntensitySpatialConfig.AnalysisKey.GRANULARITY, addAnalysisToggle(dialog, IntensitySpatialConfig.AnalysisKey.GRANULARITY,
                     labelFor(IntensitySpatialConfig.AnalysisKey.GRANULARITY),
                     answers.getBoolean(fieldFor(IntensitySpatialConfig.AnalysisKey.GRANULARITY), false)));
@@ -784,7 +782,8 @@ public class IntensitySpatialWizard extends WizardFlow {
                     labelFor(IntensitySpatialConfig.AnalysisKey.ANISOTROPY),
                     answers.getBoolean(fieldFor(IntensitySpatialConfig.AnalysisKey.ANISOTROPY), false)));
 
-            dialog.addSubHeader("Cross-channel");
+            dialog.addSetupHelpSubHeader("Cross-channel",
+                    IntensitySpatialHelpCatalog.CROSS_CHANNEL);
             analysisToggles.put(IntensitySpatialConfig.AnalysisKey.CROSSMARK, addAnalysisToggle(dialog, IntensitySpatialConfig.AnalysisKey.CROSSMARK,
                     labelFor(IntensitySpatialConfig.AnalysisKey.CROSSMARK),
                     answers.getBoolean(fieldFor(IntensitySpatialConfig.AnalysisKey.CROSSMARK), false)));
@@ -795,7 +794,8 @@ public class IntensitySpatialWizard extends WizardFlow {
                     labelFor(IntensitySpatialConfig.AnalysisKey.DISTANCE_SHELL),
                     answers.getBoolean(fieldFor(IntensitySpatialConfig.AnalysisKey.DISTANCE_SHELL), false)));
 
-            dialog.addSubHeader("Native 3D analyses");
+            dialog.addSetupHelpSubHeader("Native 3D analyses",
+                    IntensitySpatialHelpCatalog.NATIVE_3D);
             final Map<IntensitySpatialConfig.AnalysisKey, ToggleSwitch> native3dToggles =
                     new LinkedHashMap<IntensitySpatialConfig.AnalysisKey, ToggleSwitch>();
             for (IntensitySpatialConfig.AnalysisKey key : NATIVE_3D_ANALYSES) {
@@ -810,7 +810,8 @@ public class IntensitySpatialWizard extends WizardFlow {
             });
 
             dialog.beginAdvancedSection("intensity.spatial.advanced");
-            dialog.addSubHeader("Advanced analysis families");
+            dialog.addSetupHelpSubHeader("Advanced analysis families",
+                    IntensitySpatialHelpCatalog.ADVANCED);
             analysisToggles.put(IntensitySpatialConfig.AnalysisKey.PERIODICITY, addAnalysisToggle(dialog, IntensitySpatialConfig.AnalysisKey.PERIODICITY,
                     labelFor(IntensitySpatialConfig.AnalysisKey.PERIODICITY),
                     answers.getBoolean(fieldFor(IntensitySpatialConfig.AnalysisKey.PERIODICITY), false)));
@@ -834,7 +835,8 @@ public class IntensitySpatialWizard extends WizardFlow {
                 });
             }
 
-            dialog.addSubHeader("Parameters");
+            dialog.addSetupHelpSubHeader("Parameters",
+                    IntensitySpatialHelpCatalog.PARAMETERS);
             dialog.addNumericField("Shell width (um)", doubleAnswer(answers, FIELD_SHELL_WIDTH,
                     IntensitySpatialConfig.DEFAULT_SHELL_WIDTH_UM), 1);
             dialog.addNumericField("Shell count", answers.getInt(FIELD_SHELL_COUNT,

@@ -14,6 +14,7 @@ import javax.swing.JSlider;
 import javax.swing.SwingConstants;
 import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
+import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Dimension;
@@ -22,6 +23,7 @@ import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Image;
 import java.awt.RenderingHints;
+import java.awt.Stroke;
 import java.awt.image.ColorModel;
 import java.awt.image.IndexColorModel;
 
@@ -56,6 +58,7 @@ public final class ImagePreviewPanel extends JPanel {
     private ZSliceChangeListener zSliceChangeListener;
     private PreviewDisplaySettings displaySettings = PreviewDisplaySettings.defaultFor("Grays");
     private boolean displaySettingsEnabled = true;
+    private ObjectSizeFilterPreview.Summary objectSizeGuide;
 
     public ImagePreviewPanel(String title) {
         super(new BorderLayout(DEFAULT_PANEL_GAP, DEFAULT_PANEL_GAP));
@@ -197,6 +200,11 @@ public final class ImagePreviewPanel extends JPanel {
         canvas.repaint();
     }
 
+    public void setObjectSizeGuide(ObjectSizeFilterPreview.Summary summary) {
+        objectSizeGuide = summary;
+        canvas.repaint();
+    }
+
     void setDisplaySettingsEnabled(boolean enabled) {
         displaySettingsEnabled = enabled;
         canvas.repaint();
@@ -285,6 +293,10 @@ public final class ImagePreviewPanel extends JPanel {
 
     ImageProcessor renderedProcessorForTest() {
         return currentProcessor();
+    }
+
+    ObjectSizeFilterPreview.Summary objectSizeGuideForTest() {
+        return objectSizeGuide;
     }
 
     private boolean hasUsableImage() {
@@ -569,9 +581,46 @@ public final class ImagePreviewPanel extends JPanel {
                 g2.drawImage(awtImage, x, y, drawWidth, drawHeight, null);
                 g2.setColor(new Color(120, 120, 120));
                 g2.drawRect(x, y, drawWidth - 1, drawHeight - 1);
+                drawObjectSizeGuide(g2, x, y, drawWidth, drawHeight, scale);
             } finally {
                 g2.dispose();
             }
+        }
+
+        private void drawObjectSizeGuide(Graphics2D g2, int imageX, int imageY,
+                                         int imageWidth, int imageHeight,
+                                         double imageScale) {
+            ObjectSizeFilterPreview.Summary summary = objectSizeGuide;
+            if (summary == null || imageWidth < 24 || imageHeight < 24) return;
+            int baseline = imageY + imageHeight - 12;
+            int left = imageX + 10;
+            int maxLength = Math.max(8, imageWidth - 20);
+            drawGuideLine(g2, left, baseline, maxLength, summary.minDiameterPixels,
+                    ObjectSizeFilterPreview.belowMinColor(), "min", imageScale);
+            if (summary.maxFinite) {
+                drawGuideLine(g2, left, baseline - 18, maxLength, summary.maxDiameterPixels,
+                        ObjectSizeFilterPreview.aboveMaxColor(), "max", imageScale);
+            }
+        }
+
+        private void drawGuideLine(Graphics2D g2, int x, int y, int maxLength,
+                                   double diameterPixels, Color color, String label,
+                                   double imageScale) {
+            if (!Double.isFinite(diameterPixels) || diameterPixels <= 0.0) return;
+            int length = (int) Math.round(diameterPixels * imageScale);
+            length = Math.max(8, Math.min(maxLength, length));
+            Stroke oldStroke = g2.getStroke();
+            g2.setStroke(new BasicStroke(4f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+            g2.setColor(new Color(0, 0, 0, 180));
+            g2.drawLine(x, y + 1, x + length, y + 1);
+            g2.setColor(color == null ? Color.RED : color);
+            g2.drawLine(x, y, x + length, y);
+            g2.setStroke(oldStroke);
+            g2.setFont(g2.getFont().deriveFont(Font.BOLD, 11f));
+            g2.setColor(new Color(0, 0, 0, 190));
+            g2.drawString(label, x + length + 5, y + 4);
+            g2.setColor(Color.WHITE);
+            g2.drawString(label, x + length + 4, y + 3);
         }
 
         private void drawCenteredText(Graphics2D g2, String text) {

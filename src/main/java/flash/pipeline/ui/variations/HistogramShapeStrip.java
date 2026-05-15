@@ -145,7 +145,7 @@ public final class HistogramShapeStrip extends JPanel {
             int[] bars = downsample(histograms[i], DOWNSAMPLED_BARS);
             int max = max(bars);
             g2.setColor(HISTOGRAM_RIM);
-            g2.setStroke(new BasicStroke(1f));
+            g2.setStroke(new BasicStroke(1.5f));
             g2.drawRect(plot.x, plot.y, Math.max(1, plot.width),
                     Math.max(1, plot.height));
             g2.setColor(HISTOGRAM_FILL);

@@ -373,6 +373,9 @@ public class ConfigQcDialogTest {
         ConfigQcDialog dialog = ConfigQcDialog.createForTest(context, Arrays.asList(stage));
         dialog.previewForTest().setCurrentZ(3);
 
+        assertEquals("Skip image", dialog.skipImageButtonForTest().getText());
+        assertEquals("Skip stage", dialog.skipStageButtonForTest().getText());
+
         dialog.skipForTest();
 
         assertEquals(1, stage.skipCount);
@@ -385,6 +388,45 @@ public class ConfigQcDialogTest {
         assertEquals(1, stage.restartCount);
         assertEquals(0, context.getCurrentImageIndex());
         assertEquals("Image A", dialog.imageTextForTest());
+    }
+
+    @Test
+    public void skipStageMovesToNextStageWithoutLockingOrSkippingImage() {
+        RecordingStage first = new RecordingStage("First");
+        RecordingStage second = new RecordingStage("Second");
+        ConfigQcContext context = contextWithTwoImages();
+        ConfigQcDialog dialog = ConfigQcDialog.createForTest(context, Arrays.asList(first, second));
+
+        dialog.lockInForTest();
+        assertEquals(0, dialog.stageIndexForTest());
+        assertEquals(1, context.getCurrentImageIndex());
+
+        int lockedBeforeSkipStage = first.lockCount;
+        dialog.skipStageForTest();
+
+        assertEquals(1, dialog.stageIndexForTest());
+        assertEquals(0, context.getCurrentImageIndex());
+        assertEquals(lockedBeforeSkipStage, first.lockCount);
+        assertEquals(0, first.skipCount);
+        assertEquals(1, first.skipStageCount);
+        assertEquals(1, first.leaveCount);
+        assertEquals(1, second.enterCount);
+        assertEquals("Second", dialog.stageTextForTest());
+        assertEquals("Skipped stage: First.", dialog.statusTextForTest());
+    }
+
+    @Test
+    public void skipStageOnLastStageCompletesWithoutLocking() {
+        RecordingStage stage = new RecordingStage("Only");
+        ConfigQcDialog dialog = ConfigQcDialog.createForTest(contextWithTwoImages(), Arrays.asList(stage));
+
+        dialog.skipStageForTest();
+
+        assertEquals(ConfigQcResult.DONE, dialog.resultForTest());
+        assertEquals(0, stage.lockCount);
+        assertEquals(0, stage.skipCount);
+        assertEquals(1, stage.skipStageCount);
+        assertEquals(1, stage.leaveCount);
     }
 
     @Test
@@ -580,6 +622,7 @@ public class ConfigQcDialogTest {
         private int leaveCount;
         private int lockCount;
         private int skipCount;
+        private int skipStageCount;
         private int restartCount;
         private ConfigQcActions actions;
         private boolean previewDisplayControls = true;
@@ -628,6 +671,10 @@ public class ConfigQcDialogTest {
 
         @Override public void skipCurrentImage(ConfigQcContext context) {
             skipCount++;
+        }
+
+        @Override public void skipCurrentStage(ConfigQcContext context) {
+            skipStageCount++;
         }
 
         @Override public void restartStage(ConfigQcContext context) {

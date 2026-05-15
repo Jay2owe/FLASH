@@ -223,6 +223,14 @@
 			<scope>provided</scope>
 		</dependency>
 
+		<!-- MigLayout: provided by Fiji at runtime. -->
+		<dependency>
+			<groupId>com.miglayout</groupId>
+			<artifactId>miglayout-swing</artifactId>
+			<version>5.3</version>
+			<scope>provided</scope>
+		</dependency>
+
 		<!-- Intensity-spatial optional runtimes. These are compile-time only and are installed into Fiji on demand. -->
 		<dependency>
 			<groupId>sc.fiji</groupId>

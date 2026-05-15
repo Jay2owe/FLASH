@@ -6,13 +6,17 @@ import flash.pipeline.runtime.DependencyService;
 import flash.pipeline.runtime.DependencyStatus;
 import flash.pipeline.runtime.FeatureDependencyGate;
 import ij.ImagePlus;
+import ij.IJ;
 import ij.measure.Calibration;
 import ij.process.FloatProcessor;
 import org.junit.After;
 import org.junit.Test;
 
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Proxy;
+import java.nio.charset.StandardCharsets;
 import java.util.EnumMap;
 import java.util.List;
 
@@ -62,6 +66,46 @@ public class CrossMark2DAnalysisTest {
                 assertFalse(column.contains("_binarized_"));
             }
         }
+    }
+
+    @Test
+    public void zeroPermutationsSkipCostesPButKeepOtherCrossmarkMetrics() throws Exception {
+        installDependencyStatuses(null);
+        IntensitySpatialConfig noRandomization = IntensitySpatialConfig.builder()
+                .enabled(true)
+                .addAnalysis(IntensitySpatialConfig.AnalysisKey.CROSSMARK)
+                .permutations(0)
+                .build();
+        ImagePlus source = gradientImage(32, 32, false);
+        ImagePlus partner = gradientImage(32, 32, false);
+
+        IntensitySpatialResult result = new CrossMark2DAnalysis().measure(context(noRandomization,
+                source, null, null, partner, null, null));
+
+        assertTrue(Double.isNaN(result.value("DAPI_CostesP_mCherry")));
+        assertTrue(Double.isFinite(result.value("DAPI_Pearson_mCherry")));
+        assertTrue(Double.isFinite(result.value("DAPI_MandersM1_mCherry")));
+        assertTrue(Double.isFinite(result.value("DAPI_CCFPeakAmp_mCherry")));
+        assertTrue(Double.isFinite(result.value("DAPI_MarkCorrStrength_mCherry")));
+    }
+
+    @Test
+    public void mipPairProgressLogNamesBothProjectedImages() throws Exception {
+        installDependencyStatuses(DependencyId.COLOC2_RUNTIME);
+        ImagePlus source = gradientImage(16, 16, false);
+        ImagePlus partner = gradientImage(16, 16, true);
+
+        String log = captureImageJLogOutput(new ThrowingRunnable() {
+            @Override
+            public void run() {
+                IntensitySpatialRunner.standardWithProgress().measurePair(new IntensitySpatialPairContext(
+                        config(), source, null, null, partner, null, null, 1, null,
+                        IntensitySpatialOutputMode.MIP, "synthetic", "DAPI", "mCherry",
+                        "SCN2", null));
+            }
+        });
+
+        assertTrue(log.contains("source DAPI MIP -> partner mCherry MIP ROI SCN2"));
     }
 
     @Test
@@ -120,7 +164,18 @@ public class CrossMark2DAnalysisTest {
                                                        ImagePlus partner,
                                                        ImagePlus partnerBinarized,
                                                        ImagePlus partnerMask) {
-        return new IntensitySpatialPairContext(config(), source, sourceBinarized, sourceMask,
+        return context(config(), source, sourceBinarized, sourceMask,
+                partner, partnerBinarized, partnerMask);
+    }
+
+    private static IntensitySpatialPairContext context(IntensitySpatialConfig config,
+                                                       ImagePlus source,
+                                                       ImagePlus sourceBinarized,
+                                                       ImagePlus sourceMask,
+                                                       ImagePlus partner,
+                                                       ImagePlus partnerBinarized,
+                                                       ImagePlus partnerMask) {
+        return new IntensitySpatialPairContext(config, source, sourceBinarized, sourceMask,
                 partner, partnerBinarized, partnerMask, 1, null,
                 IntensitySpatialOutputMode.BASE, "synthetic", "DAPI", "mCherry", "", null);
     }
@@ -177,5 +232,25 @@ public class CrossMark2DAnalysisTest {
         calibration.setUnit("um");
         image.setCalibration(calibration);
         return image;
+    }
+
+    private static String captureImageJLogOutput(ThrowingRunnable runnable) throws Exception {
+        PrintStream originalOut = System.out;
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        System.setOut(new PrintStream(out, true, StandardCharsets.UTF_8.name()));
+        String ijLog = null;
+        try {
+            if (IJ.getLog() != null) IJ.log("\\Clear");
+            runnable.run();
+            ijLog = IJ.getLog();
+        } finally {
+            System.out.flush();
+            System.setOut(originalOut);
+        }
+        return out.toString(StandardCharsets.UTF_8.name()) + (ijLog == null ? "" : ijLog);
+    }
+
+    private interface ThrowingRunnable {
+        void run() throws Exception;
     }
 }

@@ -2,6 +2,7 @@ package flash.pipeline.ui.preview;
 
 import ij.ImagePlus;
 import ij.ImageStack;
+import ij.measure.ResultsTable;
 import ij.process.ByteProcessor;
 import ij.process.ImageProcessor;
 import ij.process.ShortProcessor;
@@ -128,8 +129,43 @@ public class PreviewPairPanelTest {
         JPanel toolstrip = pair.previewToolstrip();
 
         assertTrue(toolstrip.isAncestorOf(pair.largeViewButton()));
+        assertTrue(toolstrip.isAncestorOf(pair.comparePreviewButton()));
         assertTrue(toolstrip.isAncestorOf(pair.displayControlsButton()));
         assertTrue(toolstrip.isAncestorOf(pair.lutToggleButton()));
+    }
+
+    @Test
+    public void comparisonButtonIsOnlyEnabledWithCurrentAndPreviousObjectPreviews() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted",
+                PreviewPairPanel.PreviewLayout.HORIZONTAL_SLIM);
+        pair.previewToolstrip();
+
+        assertFalse(pair.comparisonPreviewVisibleForTest());
+
+        pair.setComparisonPreviewVisible(true);
+
+        assertTrue(pair.comparisonPreviewVisibleForTest());
+        assertFalse(pair.comparisonPreviewEnabledForTest());
+
+        ImagePlus raw = stack("raw", 2);
+        ImagePlus filtered = stack("filtered", 2);
+        ImagePlus current = stack("current objects", 2);
+        ImagePlus previous = stack("previous objects", 2);
+
+        pair.setLargePreviewImages(raw, filtered, current);
+
+        assertFalse(pair.comparisonPreviewEnabledForTest());
+
+        pair.setPreviousComparisonPreview(previous, "Previous preview ready.");
+
+        assertTrue(pair.comparisonPreviewEnabledForTest());
+        assertSame(previous, pair.comparisonPreviousImageForTest());
+
+        pair.clearComparisonPreview();
+
+        assertFalse(pair.comparisonPreviewVisibleForTest());
+        assertFalse(pair.comparisonPreviewEnabledForTest());
+        assertNull(pair.comparisonPreviousImageForTest());
     }
 
     @Test
@@ -161,6 +197,31 @@ public class PreviewPairPanelTest {
         assertEquals(PreviewDisplaySettings.LutMode.CHANNEL,
                 pair.displaySettingsForTest().getLutMode());
         assertEquals("Grey LUT", pair.lutToggleButton().getText());
+    }
+
+    @Test
+    public void comparisonRawOverlaySourceUsesGlobalGreyLutToggle() {
+        PreviewPairPanel pair = new PreviewPairPanel("Filtered", "Objects");
+        pair.setChannelLutName("Red");
+        ImagePlus raw = uniformSingleSlice("raw", 255);
+        ImagePlus filtered = uniformSingleSlice("filtered", 255);
+        ImagePlus labels = labelThenBackground("objects");
+
+        pair.setLargePreviewImages(raw, filtered, labels);
+
+        ImageProcessor channelOverlay = ObjectOverlayRenderer.renderOverlay(
+                raw, labels, pair.displaySettingsForImageForTest(raw)).getProcessor();
+        assertEquals(PreviewDisplaySettings.LutMode.CHANNEL,
+                pair.displaySettingsForImageForTest(raw).getLutMode());
+        assertEquals(0xff0000, channelOverlay.getPixel(1, 0) & 0xffffff);
+
+        pair.lutToggleButton().doClick();
+
+        PreviewDisplaySettings rawSettings = pair.displaySettingsForImageForTest(raw);
+        ImageProcessor greyOverlay = ObjectOverlayRenderer.renderOverlay(
+                raw, labels, rawSettings).getProcessor();
+        assertEquals(PreviewDisplaySettings.LutMode.GREY, rawSettings.getLutMode());
+        assertEquals(0xffffff, greyOverlay.getPixel(1, 0) & 0xffffff);
     }
 
     @Test
@@ -463,6 +524,76 @@ public class PreviewPairPanelTest {
     }
 
     @Test
+    public void comparisonPreviewDisplayButtonsWorkWhenCompactControlsAreHidden() {
+        assumeFalse(GraphicsEnvironment.isHeadless());
+
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
+        ComparisonPreviewDialog dialog = new ComparisonPreviewDialog(null);
+        try {
+            pair.setChannelLutName("Red");
+            ImagePlus raw = singleSlice("raw", 0, 100);
+            ImagePlus filtered = singleSlice("filtered", 0, 100);
+            pair.setLargePreviewImages(raw, filtered, singleSlice("current", 0, 1));
+            pair.setPreviousComparisonPreview(singleSlice("previous", 0, 1),
+                    "Previous preview ready.");
+            pair.setComparisonPreviewVisible(true);
+            pair.setDisplayControlsAvailable(false);
+            pair.setComparisonPreviewDialogForTest(dialog);
+
+            assertFalse(pair.displayControlsButton().isVisible());
+            assertFalse(pair.lutToggleButton().isVisible());
+            assertTrue(dialog.displayControlsButtonForTest().isVisible());
+            assertTrue(dialog.lutToggleButtonForTest().isVisible());
+
+            dialog.lutToggleButtonForTest().doClick();
+
+            assertEquals(PreviewDisplaySettings.LutMode.GREY,
+                    pair.displaySettingsForTest().getLutMode());
+
+            dialog.displayControlsButtonForTest().doClick();
+
+            assertSame(dialog, pair.displayControlsOwnerForTest());
+        } finally {
+            pair.disposeDisplayControlsDialogForTest();
+            pair.disposeComparisonPreviewForTest();
+            dialog.dispose();
+        }
+    }
+
+    @Test
+    public void comparisonPreviewRestoreButtonRunsConfiguredAction() {
+        assumeFalse(GraphicsEnvironment.isHeadless());
+
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
+        ComparisonPreviewDialog dialog = new ComparisonPreviewDialog(null);
+        final int[] restoreRequests = {0};
+        try {
+            pair.setLargePreviewImages(singleSlice("raw", 0, 100),
+                    singleSlice("filtered", 0, 100),
+                    singleSlice("current", 0, 1));
+            pair.setPreviousComparisonPreview(singleSlice("previous", 0, 1),
+                    "Previous preview ready.");
+            pair.setComparisonRestoreAction(new Runnable() {
+                @Override public void run() {
+                    restoreRequests[0]++;
+                }
+            });
+            pair.setComparisonPreviewVisible(true);
+            pair.setComparisonPreviewDialogForTest(dialog);
+
+            assertTrue(dialog.restorePreviousButtonForTest().isVisible());
+            assertTrue(dialog.restorePreviousButtonForTest().isEnabled());
+
+            dialog.restorePreviousButtonForTest().doClick();
+
+            assertEquals(1, restoreRequests[0]);
+        } finally {
+            pair.disposeComparisonPreviewForTest();
+            dialog.dispose();
+        }
+    }
+
+    @Test
     public void resetZReturnsAllPreviewsToFirstSlice() {
         PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
         pair.setOriginal(stack("original", 5));
@@ -513,6 +644,31 @@ public class PreviewPairPanelTest {
         pair.clearLargePreviewImages();
 
         assertEquals(2, pair.largePreviewImageCountForTest());
+    }
+
+    @Test
+    public void objectSizeGuideAppliesToBothNormalPreviewPanes() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
+        ImagePlus source = stack("source", 1);
+        ResultsTable stats = new ResultsTable();
+        stats.incrementCounter();
+        stats.setValue("Label", 0, 1);
+        stats.setValue("Volume (pixel^3)", 0, 20);
+        ObjectSizeFilterPreview.Summary summary =
+                ObjectSizeFilterPreview.summarize(stats, source, 5, 30, true);
+
+        pair.setOriginal(source);
+        pair.setAdjusted(stack("preview", 1));
+        pair.setObjectSizeGuide(summary);
+
+        assertSame(summary, pair.objectSizeGuideForTest());
+        assertSame(summary, pair.originalPreviewForTest().objectSizeGuideForTest());
+        assertSame(summary, pair.adjustedPreviewForTest().objectSizeGuideForTest());
+
+        pair.setObjectSizeGuide(null);
+
+        assertNull(pair.originalPreviewForTest().objectSizeGuideForTest());
+        assertNull(pair.adjustedPreviewForTest().objectSizeGuideForTest());
     }
 
     @Test
@@ -607,6 +763,22 @@ public class PreviewPairPanelTest {
         processor.set(0, 0, lowValue);
         processor.set(1, 0, highValue);
         return new ImagePlus(title, processor);
+    }
+
+    private static ImagePlus uniformSingleSlice(String title, int value) {
+        ByteProcessor processor = new ByteProcessor(2, 1);
+        processor.set(0, 0, value);
+        processor.set(1, 0, value);
+        return new ImagePlus(title, processor);
+    }
+
+    private static ImagePlus labelThenBackground(String title) {
+        ByteProcessor processor = new ByteProcessor(2, 1);
+        processor.set(0, 0, 1);
+        processor.set(1, 0, 0);
+        ImagePlus image = new ImagePlus(title, processor);
+        LabelMapStyler.apply(image, 1);
+        return image;
     }
 
     private static ImagePlus shortSingleSlice(String title, int lowValue, int highValue) {

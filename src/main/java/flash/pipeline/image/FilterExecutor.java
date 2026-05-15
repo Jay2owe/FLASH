@@ -207,18 +207,24 @@ public final class FilterExecutor {
     private static void adoptResultIfOriginalClosed(ImagePlus imp, String originalTitle, int originalId) {
         // ID snapshot: if WindowManager still has this ID associated with imp,
         // the macro modified it in place. Works in both headless and UI modes.
+        ImagePlus result = findImageByTitleExcluding(originalTitle, imp);
         ImagePlus afterById = ij.WindowManager.getImage(originalId);
-        if (afterById == imp) return;
-
-        // Headless attach via setTempCurrentImage doesn't add an ID to the
-        // IDList. If imp is still the WM current image, treat as in-place.
-        if (GraphicsEnvironment.isHeadless() && ij.WindowManager.getCurrentImage() == imp) return;
+        if (afterById == imp && result == null) return;
 
         // Try to find the result by original title (macros may rename result to match)
-        ImagePlus result = ij.WindowManager.getImage(originalTitle);
-        if (result == null || result == imp) {
-            // Fall back to the current active image
-            result = ij.WindowManager.getCurrentImage();
+        if (result == null) {
+            result = ij.WindowManager.getImage(originalTitle);
+            if (result == imp) {
+                result = null;
+            }
+        }
+        if (result == null) {
+            // Fall back to the current active image, but do not let the
+            // headless temp-current input mask a replacement result.
+            ImagePlus current = ij.WindowManager.getCurrentImage();
+            if (current != imp) {
+                result = current;
+            }
         }
         if (result == null || result == imp || result.getStackSize() == 0) return;
 
@@ -229,6 +235,25 @@ public final class FilterExecutor {
         }
         result.changes = false;
         result.close();
+    }
+
+    private static ImagePlus findImageByTitleExcluding(String title, ImagePlus excluded) {
+        if (title == null) {
+            return null;
+        }
+        int[] ids = ij.WindowManager.getIDList();
+        if (ids == null) {
+            return null;
+        }
+        for (int i = 0; i < ids.length; i++) {
+            ImagePlus candidate = ij.WindowManager.getImage(ids[i]);
+            if (candidate != null
+                    && candidate != excluded
+                    && title.equals(candidate.getTitle())) {
+                return candidate;
+            }
+        }
+        return null;
     }
 
     // ── Thread-safe native execution ──

@@ -130,6 +130,23 @@ public class VariationCellPanelHoldToPeekTest {
         });
     }
 
+    @Test
+    public void removeNotifyStopsHaloTimer() throws Exception {
+        SwingUtilities.invokeAndWait(new Runnable() {
+            @Override public void run() {
+                VariationCellPanel cell = renderedCell(null);
+
+                cell.setBorderHint(VariationCellPanel.BorderHint.KNEE);
+                assertTrue(cell.isHaloVisibleForTest());
+                assertTrue(cell.isHaloTimerRunningForTest());
+
+                cell.removeNotify();
+
+                assertFalse(cell.isHaloTimerRunningForTest());
+            }
+        });
+    }
+
     private static VariationCellPanel renderedCell(AtomicInteger accepts) {
         final AtomicReference<ParameterCombo> ignored =
                 new AtomicReference<ParameterCombo>();

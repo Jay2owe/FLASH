@@ -74,6 +74,10 @@ public final class ParticleSizeStage implements ConfigQcStage {
     private ImagePlus rawSource;
     private ImagePlus filteredSource;
     private ImagePlus labelPreview;
+    private ImagePlus previousLabelPreview;
+    private String previousPreviewText = "";
+    private SizeToken previousSettingsSize;
+    private SizeToken displayedSize;
     private ResultsTable objectStats;
     private SwingWorker<ObjectsCounter3DWrapper.Result, Void> previewWorker;
     private boolean previewStale = true;
@@ -150,6 +154,8 @@ public final class ParticleSizeStage implements ConfigQcStage {
             preview.setSourceToggleVisible(true);
             preview.setSourceMode(PreviewPairPanel.SourceMode.FILTERED);
             preview.setSourceModeEnabled(true);
+            preview.setComparisonPreviewVisible(true);
+            preview.setComparisonRestoreAction(null);
             preview.setSourceModeChangeListener(mode -> {
                 showRawSource = mode == PreviewPairPanel.SourceMode.RAW;
                 refreshSourceAndOutputPreview();
@@ -221,6 +227,8 @@ public final class ParticleSizeStage implements ConfigQcStage {
         if (preview != null) {
             preview.setSourceModeChangeListener(null);
             preview.setDisplaySettingsChangeListener(null);
+            preview.setObjectSizeGuide(null);
+            preview.clearComparisonPreview();
             preview.clearLargePreviewImages();
         }
         closeImages();
@@ -359,6 +367,11 @@ public final class ParticleSizeStage implements ConfigQcStage {
 
     private void fieldChanged() {
         if (updatingFields) return;
+        captureCurrentPreviewForComparison();
+        if (!sizeFieldsReadyForLivePreview()) {
+            markPreviewStale(STALE_TEXT);
+            return;
+        }
         if (!refreshSizeFilterPreview()) {
             markPreviewStale(STALE_TEXT);
         }
@@ -366,6 +379,7 @@ public final class ParticleSizeStage implements ConfigQcStage {
 
     private void resetToSaved() {
         loadFields(savedSize);
+        captureCurrentPreviewForComparison();
         if (!refreshSizeFilterPreview()) {
             markPreviewStale(STALE_TEXT);
         }
@@ -397,7 +411,7 @@ public final class ParticleSizeStage implements ConfigQcStage {
 
             @Override protected void done() {
                 try {
-                    installObjectPreview(get());
+                    installObjectPreview(get(), token);
                 } catch (Exception e) {
                     setError("Object preview failed: " + e.getMessage());
                 } finally {
@@ -417,10 +431,10 @@ public final class ParticleSizeStage implements ConfigQcStage {
         int maxSize = ObjectsCounter3DWrapper.parseMaxSizeVoxels(token.maxText, filteredSource);
         setPreviewState(PreviewPairPanel.PreviewState.RUNNING, "Running object preview...");
         installObjectPreview(previewAdapter.runPreview(
-                filteredSource, thresholdValue.intValue(), minSize, maxSize));
+                filteredSource, thresholdValue.intValue(), minSize, maxSize), token);
     }
 
-    private void installObjectPreview(ObjectsCounter3DWrapper.Result result) {
+    private void installObjectPreview(ObjectsCounter3DWrapper.Result result, SizeToken runSize) {
         int count = previewAdapter.countObjects(result);
         ImagePlus labelImage = result == null ? null : result.getObjectsMap();
         if (labelImage == null) {
@@ -435,12 +449,14 @@ public final class ParticleSizeStage implements ConfigQcStage {
             previewAdapter.close(result.getMaskedImage());
         }
         labelImage.setTitle(count > 0 ? "Object label preview" : "Object label preview (no objects)");
+        captureCurrentPreviewForComparison();
         ImagePlus old = labelPreview;
         labelPreview = labelImage;
         objectStats = result == null ? null : result.getStatistics();
         lastObjectCount = count;
         previewStale = false;
         refreshSizeFilterPreview();
+        displayedSize = normalizedSizeToken(runSize);
         String text = objectCountText();
         setStatus(text);
         if (actions != null) actions.setPreviewButtonStale(false);
@@ -480,6 +496,43 @@ public final class ParticleSizeStage implements ConfigQcStage {
     private void refreshLargePreviewModel() {
         if (preview == null) return;
         preview.setLargePreviewImages(rawSource, filteredSource, labelPreview);
+        preview.setPreviousComparisonPreview(previousLabelPreview, previousPreviewText);
+    }
+
+    private void captureCurrentPreviewForComparison() {
+        if (labelPreview == null) return;
+        ImagePlus snapshot = PreviewPairPanel.duplicateForComparison(
+                labelPreview, "Previous object preview");
+        if (snapshot == null) return;
+        ImagePlus old = previousLabelPreview;
+        previousLabelPreview = snapshot;
+        previousPreviewText = objectCountText();
+        previousSettingsSize = normalizedSizeToken(displayedSize);
+        if (preview != null) {
+            preview.setPreviousComparisonPreview(previousLabelPreview, previousPreviewText);
+            updateComparisonRestoreAction();
+        }
+        closeOldPreviewImage(old);
+    }
+
+    private void updateComparisonRestoreAction() {
+        if (preview == null) return;
+        preview.setComparisonRestoreAction(previousSettingsSize == null
+                ? null
+                : new Runnable() {
+                    @Override public void run() {
+                        restorePreviousComparisonSettings();
+                    }
+                });
+    }
+
+    private void restorePreviousComparisonSettings() {
+        if (previousSettingsSize == null) {
+            setStatus("No previous particle-size settings are available.");
+            return;
+        }
+        loadFields(previousSettingsSize);
+        runPreviewOnWorker();
     }
 
     private ImagePlus currentSourceImage() {
@@ -545,7 +598,9 @@ public final class ParticleSizeStage implements ConfigQcStage {
                     objectStats, filteredSource, minSize, maxSize, maxFinite);
             ObjectSizeFilterPreview.applyClassifiedLut(labelPreview, sizeSummary);
             if (sizeCutoffPanel != null) sizeCutoffPanel.setSummary(sizeSummary);
+            applySizeGuideOverlay();
             previewStale = false;
+            displayedSize = normalizedSizeToken(token);
             refreshSourceAndOutputPreview();
             setStatus(sizeSummary.statusText());
             if (actions != null) actions.setPreviewButtonStale(false);
@@ -566,8 +621,20 @@ public final class ParticleSizeStage implements ConfigQcStage {
             sizeSummary = ObjectSizeFilterPreview.summarize(
                     null, filteredSource, minSize, maxSize, maxFinite);
             sizeCutoffPanel.setSummary(sizeSummary);
+            applySizeGuideOverlay();
         } catch (RuntimeException e) {
             sizeCutoffPanel.setSummary(null);
+            applySizeGuideOverlay(null);
+        }
+    }
+
+    private void applySizeGuideOverlay() {
+        applySizeGuideOverlay(sizeSummary);
+    }
+
+    private void applySizeGuideOverlay(ObjectSizeFilterPreview.Summary summary) {
+        if (preview != null) {
+            preview.setObjectSizeGuide(summary);
         }
     }
 
@@ -632,13 +699,19 @@ public final class ParticleSizeStage implements ConfigQcStage {
         ImagePlus raw = rawSource;
         ImagePlus filtered = filteredSource;
         ImagePlus label = labelPreview;
+        ImagePlus previous = previousLabelPreview;
         rawSource = null;
         filteredSource = null;
         labelPreview = null;
+        previousLabelPreview = null;
+        previousPreviewText = "";
+        previousSettingsSize = null;
+        displayedSize = null;
         objectStats = null;
         sizeSummary = null;
         lastObjectCount = -1;
         Set<ImagePlus> closed = Collections.newSetFromMap(new IdentityHashMap<ImagePlus, Boolean>());
+        closeUnique(previous, closed);
         closeUnique(label, closed);
         closeUnique(filtered, closed);
         closeUnique(raw, closed);
@@ -684,6 +757,10 @@ public final class ParticleSizeStage implements ConfigQcStage {
         return new SizeToken(min, max);
     }
 
+    private static SizeToken normalizedSizeToken(SizeToken token) {
+        return token == null ? null : parseSizeToken(token.toToken());
+    }
+
     private static String normalizeMaxText(String value) {
         if (value == null) return "Infinity";
         String trimmed = value.trim();
@@ -700,6 +777,14 @@ public final class ParticleSizeStage implements ConfigQcStage {
     private static boolean isFiniteMaxToken(String value) {
         String normalized = normalizeMaxText(value);
         return !"Infinity".equals(normalized);
+    }
+
+    private boolean sizeFieldsReadyForLivePreview() {
+        return hasText(minField) && hasText(maxField);
+    }
+
+    private static boolean hasText(JTextField field) {
+        return field != null && field.getText() != null && !field.getText().trim().isEmpty();
     }
 
     private static String firstNonBlank(String value, String fallback) {

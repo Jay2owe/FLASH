@@ -2,6 +2,7 @@ package flash.pipeline.ui.preview;
 
 import ij.ImagePlus;
 import ij.ImageStack;
+import ij.measure.ResultsTable;
 import ij.process.ByteProcessor;
 import ij.process.ColorProcessor;
 import ij.process.ImageProcessor;
@@ -15,12 +16,15 @@ import javax.swing.border.EmptyBorder;
 import javax.swing.border.TitledBorder;
 import java.awt.Component;
 import java.awt.Container;
+import java.awt.Graphics2D;
 import java.awt.image.IndexColorModel;
+import java.awt.image.BufferedImage;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 public class ImagePreviewPanelTest {
@@ -200,6 +204,55 @@ public class ImagePreviewPanelTest {
     }
 
     @Test
+    public void objectSizeGuideCanBeSetAndCleared() {
+        ImagePlus image = stack("source", 1);
+        ResultsTable stats = new ResultsTable();
+        stats.incrementCounter();
+        stats.setValue("Label", 0, 1);
+        stats.setValue("Volume (pixel^3)", 0, 20);
+        ObjectSizeFilterPreview.Summary summary =
+                ObjectSizeFilterPreview.summarize(stats, image, 5, 30, true);
+        ImagePreviewPanel panel = new ImagePreviewPanel("Preview");
+
+        panel.setImage(image);
+        panel.setObjectSizeGuide(summary);
+
+        assertSame(summary, panel.objectSizeGuideForTest());
+        assertTrue(summary.minDiameterPixels > 0.0);
+
+        panel.setObjectSizeGuide(null);
+
+        assertNull(panel.objectSizeGuideForTest());
+    }
+
+    @Test
+    public void objectSizeGuidePaintsCutoffLineOverCanvas() {
+        ImagePlus image = stack("source", 1);
+        ResultsTable stats = new ResultsTable();
+        stats.incrementCounter();
+        stats.setValue("Label", 0, 1);
+        stats.setValue("Volume (pixel^3)", 0, 20);
+        ObjectSizeFilterPreview.Summary summary =
+                ObjectSizeFilterPreview.summarize(stats, image, 5, 30, true);
+        ImagePreviewPanel panel = new ImagePreviewPanel("Preview");
+        panel.setImage(image);
+        panel.setObjectSizeGuide(summary);
+        panel.setSize(260, 260);
+        panel.doLayout();
+
+        BufferedImage rendered = new BufferedImage(260, 260, BufferedImage.TYPE_INT_RGB);
+        Graphics2D graphics = rendered.createGraphics();
+        try {
+            panel.paint(graphics);
+        } finally {
+            graphics.dispose();
+        }
+
+        assertTrue("Expected red cutoff pixels in painted preview",
+                countRedPixels(rendered) > 0);
+    }
+
+    @Test
     public void setZRowVisible_hidesOnlyZControls_keepsSliceSyncState() {
         ImagePreviewPanel panel = new ImagePreviewPanel("Preview");
         panel.setImage(stack("source", 4));
@@ -306,6 +359,22 @@ public class ImagePreviewPanelTest {
                     || containsTitledBorder(compound.getInsideBorder());
         }
         return false;
+    }
+
+    private static int countRedPixels(BufferedImage image) {
+        int count = 0;
+        for (int y = 0; y < image.getHeight(); y++) {
+            for (int x = 0; x < image.getWidth(); x++) {
+                int rgb = image.getRGB(x, y);
+                int r = (rgb >> 16) & 0xff;
+                int g = (rgb >> 8) & 0xff;
+                int b = rgb & 0xff;
+                if (r > 180 && g < 100 && b < 100) {
+                    count++;
+                }
+            }
+        }
+        return count;
     }
 
     private static final class ClosedImagePlus extends ImagePlus {

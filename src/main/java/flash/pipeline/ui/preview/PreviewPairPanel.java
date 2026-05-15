@@ -65,6 +65,7 @@ public final class PreviewPairPanel extends JPanel {
     private final MinMaxControlPanel displayControls = new MinMaxControlPanel(false);
     private final JComboBox<String> lutModeChoice = new JComboBox<String>();
     private final JButton largeViewButton = new JButton("Large view");
+    private final JButton comparePreviewButton = new JButton("Compare previews");
     private final JButton displayControlsButton = new JButton("Adjust Brightness/Contrast");
     private final JButton lutToggleButton = new JButton("Grey LUT");
     private final JPanel objectOverlayControls = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
@@ -83,9 +84,13 @@ public final class PreviewPairPanel extends JPanel {
     private ImagePlus largePreviewOriginalSourceImage;
     private ImagePlus largePreviewFilteredSourceImage;
     private SourceMode largePreviewSourceMode = SourceMode.RAW;
+    private ImagePlus comparisonPreviousImage;
+    private String comparisonPreviousStatus = "";
+    private Runnable comparisonRestoreAction;
     private ImagePlus generatedObjectOverlayImage;
     private String channelLutName = "Grays";
     private PreviewDisplaySettings displaySettings = PreviewDisplaySettings.defaultFor(channelLutName);
+    private ObjectSizeFilterPreview.Summary objectSizeGuide;
     private final Map<ImagePlus, PreviewDisplaySettings> displaySettingsByImage =
             new IdentityHashMap<ImagePlus, PreviewDisplaySettings>();
     private ImagePlus displayControlImage;
@@ -98,6 +103,7 @@ public final class PreviewPairPanel extends JPanel {
     private boolean largeDisplayControlsActivated;
     private boolean displayRangeInitialized;
     private LargePreviewDialog largePreviewDialog;
+    private ComparisonPreviewDialog comparisonPreviewDialog;
     private JDialog displayControlsDialog;
     private SharedZChangeListener sharedZChangeListener;
     private DisplaySettingsChangeListener displaySettingsChangeListener;
@@ -115,6 +121,7 @@ public final class PreviewPairPanel extends JPanel {
     private boolean sourceToggleVisible;
     private boolean sourceModeEnabled = true;
     private boolean objectOverlayEnabled = true;
+    private boolean comparisonPreviewVisible;
     private SourceMode sourceMode = SourceMode.FILTERED;
 
     public PreviewPairPanel(String originalTitle, String adjustedTitle) {
@@ -145,6 +152,7 @@ public final class PreviewPairPanel extends JPanel {
             adjustedPreview.setSlim(true);
         }
         wireLargeViewButton();
+        wireComparePreviewButton();
         wireDisplayControlsButton();
         wireObjectOverlayControls();
         wireSliceSync();
@@ -184,12 +192,16 @@ public final class PreviewPairPanel extends JPanel {
         largePreviewSecondImage = null;
         largePreviewThirdImage = null;
         clearLargePreviewSourceChoiceFields();
+        comparisonPreviousImage = null;
+        comparisonPreviousStatus = "";
+        comparisonRestoreAction = null;
         displayControlImage = null;
         displaySettingsByImage.clear();
         displayRangeInitialized = false;
         currentZ = 1;
         objectOverlayCheck.setSelected(false);
         updateObjectOverlayControls();
+        setObjectSizeGuide(null);
 
         originalPreview.setImage(null);
         adjustedPreview.setImage(null);
@@ -204,6 +216,8 @@ public final class PreviewPairPanel extends JPanel {
         displaySettings = PreviewDisplaySettings.defaultFor(channelLutName);
         applyDisplaySettings();
         updateLargeImages();
+        updateComparisonImages();
+        updateComparisonButtonState();
         refreshSharedZRow();
     }
 
@@ -245,6 +259,58 @@ public final class PreviewPairPanel extends JPanel {
         return displaySettings;
     }
 
+    public void setObjectSizeGuide(ObjectSizeFilterPreview.Summary summary) {
+        objectSizeGuide = summary;
+        originalPreview.setObjectSizeGuide(summary);
+        adjustedPreview.setObjectSizeGuide(summary);
+        if (largePreviewDialog != null) {
+            largePreviewDialog.setObjectSizeGuide(summary);
+        }
+        if (comparisonPreviewDialog != null) {
+            comparisonPreviewDialog.setObjectSizeGuide(summary);
+        }
+    }
+
+    public void setComparisonPreviewVisible(boolean visible) {
+        comparisonPreviewVisible = visible;
+        comparePreviewButton.setVisible(visible);
+        if (!visible && comparisonPreviewDialog != null) {
+            comparisonPreviewDialog.setVisible(false);
+        }
+        updateComparisonButtonState();
+        if (previewToolstripComponent != null) {
+            previewToolstripComponent.revalidate();
+            previewToolstripComponent.repaint();
+        }
+    }
+
+    public void setPreviousComparisonPreview(ImagePlus previousImage, String previousStatus) {
+        comparisonPreviousImage = previousImage;
+        comparisonPreviousStatus = previousStatus == null ? "" : previousStatus.trim();
+        updateComparisonImages();
+        updateComparisonButtonState();
+        updateComparisonRestoreActionState();
+    }
+
+    public void setComparisonRestoreAction(Runnable restoreAction) {
+        comparisonRestoreAction = restoreAction;
+        updateComparisonRestoreActionState();
+    }
+
+    public void clearComparisonPreview() {
+        comparisonPreviousImage = null;
+        comparisonPreviousStatus = "";
+        comparisonRestoreAction = null;
+        if (comparisonPreviewDialog != null) {
+            comparisonPreviewDialog.setVisible(false);
+            comparisonPreviewDialog.clearSourceChoices();
+            comparisonPreviewDialog.setImages(null, null, currentZ);
+            comparisonPreviewDialog.setPreviewStatus(null, null);
+            comparisonPreviewDialog.setRestoreActionState(false, null);
+        }
+        setComparisonPreviewVisible(false);
+    }
+
     public void setLargePreviewImages(ImagePlus firstImage, ImagePlus secondImage,
                                       ImagePlus thirdImage) {
         rememberCurrentDisplaySettings();
@@ -257,6 +323,8 @@ public final class PreviewPairPanel extends JPanel {
         applyDisplaySettings();
         applyCurrentZ(currentZ);
         updateLargeImages();
+        updateComparisonImages();
+        updateComparisonButtonState();
     }
 
     public void setLargePreviewSourceChoices(ImagePlus originalSource, ImagePlus filteredSource) {
@@ -268,6 +336,7 @@ public final class PreviewPairPanel extends JPanel {
         applyDisplaySettings();
         applyCurrentZ(currentZ);
         updateLargeImages();
+        updateComparisonImages();
     }
 
     public void clearLargePreviewSourceChoices() {
@@ -279,6 +348,7 @@ public final class PreviewPairPanel extends JPanel {
         applyDisplaySettings();
         applyCurrentZ(currentZ);
         updateLargeImages();
+        updateComparisonImages();
     }
 
     public void setLargePreviewSourceMode(SourceMode mode) {
@@ -290,6 +360,7 @@ public final class PreviewPairPanel extends JPanel {
         applyDisplaySettings();
         applyCurrentZ(currentZ);
         updateLargeImages();
+        updateComparisonImages();
     }
 
     public void clearLargePreviewImages() {
@@ -308,10 +379,16 @@ public final class PreviewPairPanel extends JPanel {
         applyDisplaySettings();
         applyCurrentZ(currentZ);
         updateLargeImages();
+        updateComparisonImages();
+        updateComparisonButtonState();
     }
 
     public JButton largeViewButton() {
         return largeViewButton;
+    }
+
+    public JButton comparePreviewButton() {
+        return comparePreviewButton;
     }
 
     public JButton displayControlsButton() {
@@ -339,6 +416,20 @@ public final class PreviewPairPanel extends JPanel {
         }
         updateLutToggleButton();
         updateLargeDialogDisplayActionState();
+    }
+
+    public void requestBrightnessContrastControls() {
+        requestBrightnessContrastControls(currentOwner());
+    }
+
+    public void requestBrightnessContrastControls(Window controlsOwner) {
+        activateLargeDisplayControls();
+        showDisplayControlsDialog(controlsOwner == null ? currentOwner() : controlsOwner);
+    }
+
+    public void requestGreyLutToggle() {
+        activateLargeDisplayControls();
+        togglePreviewLutMode();
     }
 
     public void setCompactPreviewHeaders(boolean compact) {
@@ -375,6 +466,7 @@ public final class PreviewPairPanel extends JPanel {
         JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
         right.setOpaque(false);
         right.add(largeViewButton);
+        right.add(comparePreviewButton);
         right.add(displayControlsButton);
         right.add(lutToggleButton);
 
@@ -383,6 +475,7 @@ public final class PreviewPairPanel extends JPanel {
         previewToolstripComponent.add(left, BorderLayout.WEST);
         previewToolstripComponent.add(right, BorderLayout.EAST);
         applySourceControlsState();
+        updateComparisonButtonState();
         return previewToolstripComponent;
     }
 
@@ -431,6 +524,8 @@ public final class PreviewPairPanel extends JPanel {
         setSourceMode(SourceMode.FILTERED);
         setSourceModeEnabled(true);
         setObjectOverlayEnabled(true);
+        setObjectSizeGuide(null);
+        clearComparisonPreview();
         largeDisplayControlsActivated = false;
         if (!displayControlsAvailable) {
             hideDisplayControlsDialog();
@@ -507,6 +602,40 @@ public final class PreviewPairPanel extends JPanel {
         return availableLargePreviewSourceMode(largePreviewSourceMode);
     }
 
+    boolean comparisonPreviewVisibleForTest() {
+        return comparePreviewButton.isVisible();
+    }
+
+    boolean comparisonPreviewEnabledForTest() {
+        return comparePreviewButton.isEnabled();
+    }
+
+    ImagePlus comparisonPreviousImageForTest() {
+        return comparisonPreviousImage;
+    }
+
+    boolean comparisonRestoreActionAvailableForTest() {
+        return comparisonRestoreAction != null;
+    }
+
+    void setComparisonPreviewDialogForTest(ComparisonPreviewDialog dialog) {
+        comparisonPreviewDialog = dialog;
+        wireComparisonDialog();
+        updateComparisonImages();
+        updateComparisonDialogDisplayActionState();
+    }
+
+    Window comparisonPreviewOwnerForTest() {
+        return comparisonPreviewDialog == null ? null : comparisonPreviewDialog.ownerForTest();
+    }
+
+    void disposeComparisonPreviewForTest() {
+        if (comparisonPreviewDialog != null) {
+            comparisonPreviewDialog.dispose();
+            comparisonPreviewDialog = null;
+        }
+    }
+
     void setDisplayRangeForTest(double min, double max) {
         displayControls.setRange(min, max);
         updateDisplaySettingsFromControls();
@@ -531,6 +660,10 @@ public final class PreviewPairPanel extends JPanel {
 
     ImagePreviewPanel adjustedPreviewForTest() {
         return adjustedPreview;
+    }
+
+    ObjectSizeFilterPreview.Summary objectSizeGuideForTest() {
+        return objectSizeGuide;
     }
 
     JPanel previewPairContainerForTest() {
@@ -619,6 +752,22 @@ public final class PreviewPairPanel extends JPanel {
     static int clampSharedZ(int requestedZ, int originalSlices, int adjustedSlices,
                             int extraSlices) {
         return clampSharedZ(requestedZ, new int[]{originalSlices, adjustedSlices, extraSlices});
+    }
+
+    public static ImagePlus duplicateForComparison(ImagePlus image, String title) {
+        if (image == null) return null;
+        try {
+            ImagePlus copy = image.duplicate();
+            String safeTitle = title == null || title.trim().isEmpty()
+                    ? image.getTitle()
+                    : title.trim();
+            copy.setTitle(safeTitle);
+            copy.setCalibration(image.getCalibration());
+            copy.setOpenAsHyperStack(image.isHyperStack());
+            return copy;
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     private static int clampSharedZ(int requestedZ, int[] sliceCounts) {
@@ -755,6 +904,15 @@ public final class PreviewPairPanel extends JPanel {
         });
     }
 
+    private void wireComparePreviewButton() {
+        comparePreviewButton.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                showComparisonPreview();
+            }
+        });
+        updateComparisonButtonState();
+    }
+
     private void wireDisplayControlsButton() {
         displayControlsButton.addActionListener(new ActionListener() {
             @Override public void actionPerformed(ActionEvent e) {
@@ -839,6 +997,24 @@ public final class PreviewPairPanel extends JPanel {
         largePreviewDialog.raiseForUser();
     }
 
+    private void showComparisonPreview() {
+        if (GraphicsEnvironment.isHeadless() || !comparisonPreviewAvailable()) return;
+        Window currentOwner = currentOwner();
+        if (comparisonPreviewDialog == null
+                || comparisonPreviewDialog.ownerForTest() != currentOwner) {
+            if (comparisonPreviewDialog != null) {
+                comparisonPreviewDialog.dispose();
+            }
+            comparisonPreviewDialog = new ComparisonPreviewDialog(currentOwner);
+            wireComparisonDialog();
+        }
+        updateComparisonImages();
+        if (!comparisonPreviewDialog.isVisible()) {
+            comparisonPreviewDialog.setLocationRelativeTo(currentOwner);
+        }
+        comparisonPreviewDialog.raiseForUser();
+    }
+
     private void showDisplayControlsDialog(Window currentOwner) {
         if (GraphicsEnvironment.isHeadless()) return;
         if (displayControlsDialog == null || displayControlsDialog.getOwner() != currentOwner) {
@@ -910,6 +1086,28 @@ public final class PreviewPairPanel extends JPanel {
         updateLargeDialogDisplayActionState();
     }
 
+    private void wireComparisonDialog() {
+        if (comparisonPreviewDialog == null) return;
+        comparisonPreviewDialog.setSliceListener(new ComparisonPreviewDialog.SliceListener() {
+            @Override public void zSliceChanged(int zSlice) {
+                applyCurrentZ(zSlice);
+            }
+        });
+        comparisonPreviewDialog.setDisplayActionListener(new ComparisonPreviewDialog.DisplayActionListener() {
+            @Override public void adjustBrightnessContrastRequested() {
+                activateLargeDisplayControls();
+                showDisplayControlsDialog(comparisonPreviewDialog);
+            }
+
+            @Override public void lutToggleRequested() {
+                activateLargeDisplayControls();
+                togglePreviewLutMode();
+            }
+        });
+        updateComparisonDialogDisplayActionState();
+        updateComparisonRestoreActionState();
+    }
+
     private void applyCurrentZ(int requestedZ) {
         if (syncingSlices) return;
         syncingSlices = true;
@@ -920,6 +1118,9 @@ public final class PreviewPairPanel extends JPanel {
             adjustedPreview.setCurrentZ(currentZ);
             if (largePreviewDialog != null) {
                 largePreviewDialog.setCurrentZ(currentZ);
+            }
+            if (comparisonPreviewDialog != null) {
+                comparisonPreviewDialog.setCurrentZ(currentZ);
             }
             if (sharedZChangeListener != null && currentZ != previousZ) {
                 sharedZChangeListener.zSliceChanged(currentZ);
@@ -1018,9 +1219,55 @@ public final class PreviewPairPanel extends JPanel {
             largePreviewDialog.clearSourceChoices();
             largePreviewDialog.setImages(originalImage, adjustedImage, currentZ);
         }
+        largePreviewDialog.setObjectSizeGuide(objectSizeGuide);
         largePreviewDialog.setAdjustedStatusText(adjustedPreview.statusTextForTest());
         largePreviewDialog.setDisplaySettings(largeFirstDisplaySettings(),
                 largeSecondDisplaySettings());
+    }
+
+    private void updateComparisonImages() {
+        if (comparisonPreviewDialog == null) return;
+        ImagePlus rawSource = comparisonRawSourceImage();
+        ImagePlus filteredSource = comparisonFilteredSourceImage();
+        if (rawSource != null || filteredSource != null) {
+            comparisonPreviewDialog.setSourceChoices(
+                    rawSource,
+                    displaySettingsForImage(rawSource),
+                    filteredSource,
+                    displaySettingsForImage(filteredSource));
+        } else {
+            comparisonPreviewDialog.clearSourceChoices();
+        }
+        comparisonPreviewDialog.setImages(largePreviewThirdImage, comparisonPreviousImage, currentZ);
+        comparisonPreviewDialog.setObjectSizeGuide(objectSizeGuide);
+        comparisonPreviewDialog.setPreviewStatus(
+                adjustedPreview.statusTextForTest(),
+                comparisonPreviousStatus);
+        updateComparisonDialogDisplayActionState();
+        updateComparisonRestoreActionState();
+    }
+
+    private void updateComparisonButtonState() {
+        comparePreviewButton.setVisible(comparisonPreviewVisible);
+        comparePreviewButton.setEnabled(comparisonPreviewAvailable());
+    }
+
+    private boolean comparisonPreviewAvailable() {
+        return comparisonPreviewVisible
+                && largePreviewThirdImage != null
+                && comparisonPreviousImage != null;
+    }
+
+    private ImagePlus comparisonRawSourceImage() {
+        return largePreviewOriginalSourceImage != null
+                ? largePreviewOriginalSourceImage
+                : largePreviewFirstImage;
+    }
+
+    private ImagePlus comparisonFilteredSourceImage() {
+        return largePreviewFilteredSourceImage != null
+                ? largePreviewFilteredSourceImage
+                : largePreviewSecondImage;
     }
 
     private void updateAdjustedPreviewImage() {
@@ -1087,6 +1334,9 @@ public final class PreviewPairPanel extends JPanel {
         adjustedPreview.setStatusText(status);
         if (largePreviewDialog != null) {
             largePreviewDialog.setAdjustedStatusText(status);
+        }
+        if (comparisonPreviewDialog != null) {
+            comparisonPreviewDialog.setPreviewStatus(status, comparisonPreviousStatus);
         }
     }
 
@@ -1205,6 +1455,9 @@ public final class PreviewPairPanel extends JPanel {
             largePreviewDialog.setDisplaySettings(largeFirstDisplaySettings(),
                     largeSecondDisplaySettings());
         }
+        if (comparisonPreviewDialog != null) {
+            updateComparisonImages();
+        }
     }
 
     private boolean shouldPreserveDisplayRange(ImagePlus displayImage, double previousMin,
@@ -1251,7 +1504,21 @@ public final class PreviewPairPanel extends JPanel {
             return displaySettings;
         }
         PreviewDisplaySettings settings = image == null ? null : displaySettingsByImage.get(image);
-        return settings == null ? PreviewDisplaySettings.defaultFor(channelLutName) : settings;
+        return displaySettingsWithCurrentLut(settings);
+    }
+
+    private PreviewDisplaySettings displaySettingsWithCurrentLut(PreviewDisplaySettings settings) {
+        PreviewDisplaySettings rangeSource = settings == null
+                ? PreviewDisplaySettings.defaultFor(channelLutName)
+                : settings;
+        PreviewDisplaySettings.LutMode mode = displaySettings == null
+                ? PreviewDisplaySettings.LutMode.CHANNEL
+                : displaySettings.getLutMode();
+        return PreviewDisplaySettings.of(
+                rangeSource.getDisplayMin(),
+                rangeSource.getDisplayMax(),
+                mode,
+                channelLutName);
     }
 
     private PreviewDisplaySettings largeFirstDisplaySettings() {
@@ -1365,6 +1632,7 @@ public final class PreviewPairPanel extends JPanel {
                 ? "Show previews with the selected channel LUT."
                 : "Show previews in grey.");
         updateLargeDialogDisplayActionState();
+        updateComparisonDialogDisplayActionState();
     }
 
     private boolean displaySettingsAvailable() {
@@ -1383,5 +1651,28 @@ public final class PreviewPairPanel extends JPanel {
         largePreviewDialog.setDisplayActionState(
                 lutToggleButton.getText(),
                 lutToggleButton.getToolTipText());
+    }
+
+    private void updateComparisonDialogDisplayActionState() {
+        if (comparisonPreviewDialog == null) return;
+        comparisonPreviewDialog.setDisplayActionState(
+                lutToggleButton.getText(),
+                lutToggleButton.getToolTipText());
+    }
+
+    private void updateComparisonRestoreActionState() {
+        if (comparisonPreviewDialog == null) return;
+        comparisonPreviewDialog.setRestoreActionListener(
+                comparisonRestoreAction == null
+                        ? null
+                        : new ComparisonPreviewDialog.RestoreActionListener() {
+                            @Override public void restorePreviousRequested() {
+                                comparisonRestoreAction.run();
+                            }
+                        });
+        boolean available = comparisonRestoreAction != null && comparisonPreviousImage != null;
+        comparisonPreviewDialog.setRestoreActionState(
+                available,
+                "Restore the settings that produced the previous preview.");
     }
 }

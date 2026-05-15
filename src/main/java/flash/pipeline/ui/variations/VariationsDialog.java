@@ -106,6 +106,8 @@ public final class VariationsDialog extends PipelineDialog {
     private VariationState resumeState;
     private ComparisonPreviewDialog comparisonDialog;
     private VariationMontageDialog montageDialog;
+    private ImagePlus montageRawSourceChoice;
+    private ImagePlus montageFilteredSourceChoice;
     private CropSpec currentCropSpec = CropSpec.centre256();
     private boolean suppressCropEvents;
     private int completedCount;
@@ -166,11 +168,13 @@ public final class VariationsDialog extends PipelineDialog {
 
     public void dispose() {
         cancelExecutor();
+        comparisonSelection.clearForAccept();
         if (comparisonDialog != null) {
             comparisonDialog.dispose();
             comparisonDialog = null;
         }
         disposeMontageDialog();
+        disposeCells();
         Window window = getWindow();
         if (window != null) {
             window.dispose();
@@ -490,6 +494,7 @@ public final class VariationsDialog extends PipelineDialog {
 
     private void startOnEdt() {
         cancelExecutor();
+        disposeMontageDialog();
         currentSweep = editor.currentSweep();
         ImagePlus source = context.filteredSource();
         ResourceGuard.Feasibility feasibility =
@@ -505,8 +510,10 @@ public final class VariationsDialog extends PipelineDialog {
         failedCount = 0;
         stableCountStatus = "";
         stableMasksStatus = "";
+        comparisonSelection.clearForAccept();
         clearCountCurves();
         setSuggestionText("Most stable: pending");
+        suggestButton.setEnabled(false);
         runStartedAtMs = System.currentTimeMillis();
         ImagePlus croppedSource = currentSweep.cropSpec().apply(source);
         ImagePlus croppedRawSource = croppedRawSourceForPeek(currentSweep.cropSpec());
@@ -519,6 +526,7 @@ public final class VariationsDialog extends PipelineDialog {
                         : activeResume.completedByComboId();
         List<VariationState.CompletedCell> restoredCompleted =
                 new ArrayList<VariationState.CompletedCell>();
+        disposeCells();
         cells.clear();
         cellsByCombo.clear();
         cellIndexesByCombo.clear();
@@ -571,6 +579,7 @@ public final class VariationsDialog extends PipelineDialog {
             applyStabilityHint();
             updateCountCurves();
             setStatusTextNow(completionStatus());
+            suggestButton.setEnabled(true);
             stateStore.clear();
             return;
         }
@@ -584,25 +593,29 @@ public final class VariationsDialog extends PipelineDialog {
             showMessage(e.getMessage());
             setStatusTextNow("Refused");
             setStrategyText(" ");
+            suggestButton.setEnabled(true);
             return;
         }
         setStrategyText(strategyDescription(strategy, combos.size()));
         String now = Instant.now().toString();
         String startedAt = activeResume == null ? now : activeResume.startedAt();
         stateStore.save(new VariationState(currentSweep, restoredCompleted, startedAt, now));
-        executor = new VariationExecutor(currentSweep,
+        final VariationExecutor[] workerRef = new VariationExecutor[1];
+        final VariationExecutor worker = new VariationExecutor(currentSweep,
                 strategy,
                 runCache,
-                (result, index) -> handleResult(result, index.intValue()),
+                (result, index) -> handleResult(workerRef[0], result, index.intValue()),
                 status -> setStatusText(status),
                 stateStore);
-        executor.addPropertyChangeListener(evt -> {
+        workerRef[0] = worker;
+        executor = worker;
+        worker.addPropertyChangeListener(evt -> {
             if ("state".equals(evt.getPropertyName())
                     && javax.swing.SwingWorker.StateValue.DONE == evt.getNewValue()) {
-                handleExecutorDone();
+                handleExecutorDone(worker);
             }
         });
-        executor.execute();
+        worker.execute();
     }
 
     private VariationState compatibleResumeState(ParameterSweep sweep) {
@@ -614,6 +627,7 @@ public final class VariationsDialog extends PipelineDialog {
                 sweep.sourceImageHash())) {
             return null;
         }
+        resumeState = resumeState.validatedForResume(sweep);
         return resumeState;
     }
 
@@ -643,7 +657,22 @@ public final class VariationsDialog extends PipelineDialog {
                 saved.durationMs(), null);
     }
 
-    private void handleResult(VariationResult result, int index) {
+    private void handleResult(final VariationExecutor worker,
+                              VariationResult result,
+                              int index) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            final VariationResult safeResult = result;
+            final int safeIndex = index;
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    handleResult(worker, safeResult, safeIndex);
+                }
+            });
+            return;
+        }
+        if (worker != executor) {
+            return;
+        }
         if (result == null) {
             return;
         }
@@ -734,11 +763,20 @@ public final class VariationsDialog extends PipelineDialog {
         }
     }
 
-    private void handleExecutorDone() {
-        VariationExecutor worker = executor;
-        if (worker == null) {
+    private void handleExecutorDone(VariationExecutor worker) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            final VariationExecutor safeWorker = worker;
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    handleExecutorDone(safeWorker);
+                }
+            });
             return;
         }
+        if (worker == null || worker != executor) {
+            return;
+        }
+        suggestButton.setEnabled(true);
         if (worker.isCancelled()) {
             setStatusTextNow("Cancelled");
             for (int i = 0; i < cells.size(); i++) {
@@ -1129,9 +1167,7 @@ public final class VariationsDialog extends PipelineDialog {
         }
         VariationMontageDialog dialog = montageDialog();
         dialog.setTiles(montageTiles, currentSweep, zSlider.getValue());
-        dialog.setSourceChoices(
-                croppedForComparison(context.rawSource()),
-                croppedForComparison(context.filteredSource()));
+        setMontageSourceChoices(dialog);
         PreviewDisplaySettings settings =
                 PreviewDisplaySettings.defaultFor(context.channelName());
         dialog.setDisplaySettings(settings, settings);
@@ -1247,14 +1283,67 @@ public final class VariationsDialog extends PipelineDialog {
             montageDialog.dispose();
             montageDialog = null;
         }
+        disposeMontageSourceChoices();
+    }
+
+    private void setMontageSourceChoices(VariationMontageDialog dialog) {
+        disposeMontageSourceChoices();
+        montageRawSourceChoice = croppedForComparison(context.rawSource());
+        montageFilteredSourceChoice = croppedForComparison(context.filteredSource());
+        dialog.setSourceChoices(montageRawSourceChoice, montageFilteredSourceChoice);
+    }
+
+    private void disposeMontageSourceChoices() {
+        ImagePlus rawChoice = montageRawSourceChoice;
+        ImagePlus filteredChoice = montageFilteredSourceChoice;
+        montageRawSourceChoice = null;
+        montageFilteredSourceChoice = null;
+        disposeIfOwnedImage(rawChoice, context.rawSource(), context.filteredSource());
+        disposeIfOwnedImage(filteredChoice, context.rawSource(), context.filteredSource(),
+                rawChoice);
+    }
+
+    private static void disposeIfOwnedImage(ImagePlus image,
+                                            ImagePlus... externalReferences) {
+        if (image == null) {
+            return;
+        }
+        if (externalReferences != null) {
+            for (int i = 0; i < externalReferences.length; i++) {
+                if (image == externalReferences[i]) {
+                    return;
+                }
+            }
+        }
+        try {
+            image.changes = false;
+        } catch (Throwable ignored) {
+        }
+        try {
+            image.close();
+        } catch (Throwable ignored) {
+        }
+        try {
+            image.flush();
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private void disposeCells() {
+        for (int i = 0; i < cells.size(); i++) {
+            cells.get(i).disposeImages();
+        }
     }
 
     private void acceptAndClose(ParameterCombo combo) {
         comparisonSelection.clearForAccept();
-        if (onAccept != null) {
-            onAccept.accept(combo);
+        try {
+            if (onAccept != null) {
+                onAccept.accept(combo);
+            }
+        } finally {
+            dispose();
         }
-        dispose();
     }
 
     private void cancelExecutor() {
@@ -1265,16 +1354,43 @@ public final class VariationsDialog extends PipelineDialog {
     }
 
     private void setStatusTextNow(String text) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            final String safeText = text;
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setStatusTextNow(safeText);
+                }
+            });
+            return;
+        }
         statusLabel.setText(safe(text));
         updateProgressSliver();
     }
 
     private void setSuggestionText(String text) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            final String safeText = text;
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setSuggestionText(safeText);
+                }
+            });
+            return;
+        }
         suggestionLabel.setText(safe(text));
         updateProgressSliver();
     }
 
     private void setStrategyText(String text) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            final String safeText = text;
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setStrategyText(safeText);
+                }
+            });
+            return;
+        }
         strategyLabel.setText(safe(text));
         updateProgressSliver();
     }
@@ -1347,6 +1463,10 @@ public final class VariationsDialog extends PipelineDialog {
     }
 
     private void runRangeSuggester() {
+        if (isExecutorActive()) {
+            setStatusTextNow("Stop the running sweep before suggesting ranges.");
+            return;
+        }
         final ParameterSweep draft;
         try {
             draft = editor.currentSweep();

@@ -1576,7 +1576,7 @@ public class IntensityAnalysisV2 implements Analysis {
                 for (int p = 0; p < channelCount; p++) {
                     if (p == c || rawImages[p] == null) continue;
                     IJ.log("      Pair " + orderedPairProgress(c, p, channelCount)
-                            + " " + sourceName + " -> " + channelNames[p] + " MIP");
+                            + " " + sourceName + " MIP -> " + channelNames[p] + " MIP");
                     ImagePlus sourceMip = null;
                     ImagePlus sourceBinMip = null;
                     ImagePlus sourceMaskMip = null;

@@ -9,6 +9,8 @@ import flash.pipeline.image.dag.DagNode;
 import flash.pipeline.image.dag.DagToIjmEmitter;
 import flash.pipeline.image.dag.IjmToDagLoader;
 import flash.pipeline.ui.PipelineDialog;
+import flash.pipeline.ui.preview.PreviewDisplaySettings;
+import flash.pipeline.ui.preview.VariationMontageDialog;
 import flash.pipeline.ui.preview.PipelineFigureExporter;
 import flash.pipeline.ui.sandbox.FilterAlternatives;
 import flash.pipeline.ui.sandbox.FilterAlternatives.Alternative;
@@ -54,6 +56,8 @@ import java.awt.Rectangle;
 import java.awt.Window;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.util.ArrayList;
@@ -124,6 +128,9 @@ public final class MacroVariationsDialog extends PipelineDialog {
     private ParameterSweep currentSweep;
     private VariationCache currentRunCache;
     private ImagePlus currentBaselineCrop;
+    private VariationMontageDialog montageDialog;
+    private ImagePlus montageRawSourceChoice;
+    private ImagePlus montageFilteredSourceChoice;
     private HistogramShapeStrip histogramShapeStrip;
     private Mode mode = Mode.PARAMS;
     private CropSpec currentCropSpec;
@@ -156,12 +163,15 @@ public final class MacroVariationsDialog extends PipelineDialog {
         this.currentCropSpec = context.initialCropSpec();
         setDefaultButtonsVisible(false);
         buildUi();
+        installWindowCleanup();
         refreshCellEstimate();
     }
 
     public void dispose() {
         cancelExecutor();
         cancelDownstreamWorker();
+        disposeMontageDialog();
+        disposeCells();
         Window window = getWindow();
         if (window != null) {
             window.dispose();
@@ -246,6 +256,10 @@ public final class MacroVariationsDialog extends PipelineDialog {
 
     JButton openLargeMontageButtonForTest() {
         return openLargeMontageButton;
+    }
+
+    VariationMontageDialog montageDialogForTest() {
+        return montageDialog;
     }
 
     JButton exportPipelineFigureButtonForTest() {
@@ -364,6 +378,11 @@ public final class MacroVariationsDialog extends PipelineDialog {
 
         openLargeMontageButton = addFooterButton("Open large montage");
         openLargeMontageButton.setEnabled(false);
+        openLargeMontageButton.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                openMontage();
+            }
+        });
         exportPipelineFigureButton = addFooterButton("Export pipeline figure");
         exportPipelineFigureButton.setEnabled(false);
         exportPipelineFigureButton.addActionListener(new ActionListener() {
@@ -433,6 +452,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
     private void startOnEdt() {
         cancelExecutor();
         cancelDownstreamWorker();
+        disposeMontageDialog();
         try {
             currentSweep = withChainCacheNamespace(currentSweepForMode());
         } catch (RuntimeException e) {
@@ -462,6 +482,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
         }
         clearHistogramShapeIndicator();
         clearDownstreamVerdicts();
+        disposeCells();
         cells.clear();
         cellsByCombo.clear();
         cellIndexesByCombo.clear();
@@ -470,7 +491,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
             runButton.setEnabled(false);
         }
         useComboButton.setEnabled(false);
-        openLargeMontageButton.setEnabled(false);
+        updateMontageButtonState();
         exportPipelineFigureButton.setEnabled(false);
 
         final ImagePlus croppedSource = currentSweep.cropSpec().apply(source);
@@ -515,22 +536,26 @@ public final class MacroVariationsDialog extends PipelineDialog {
         setSuggestionText("Most stable: pending");
         setStrategyText(strategyTextForMode(combos.size()));
 
-        executor = new VariationExecutor(currentSweep,
+        final VariationExecutor[] workerRef = new VariationExecutor[1];
+        final VariationExecutor worker = new VariationExecutor(currentSweep,
                 strategy,
                 runCache,
                 new java.util.function.BiConsumer<VariationResult, Integer>() {
                     @Override public void accept(VariationResult result, Integer index) {
-                        handleResult(result, index == null ? -1 : index.intValue());
+                        handleResult(workerRef[0], result,
+                                index == null ? -1 : index.intValue());
                     }
                 },
                 null);
-        executor.addPropertyChangeListener(evt -> {
+        workerRef[0] = worker;
+        executor = worker;
+        worker.addPropertyChangeListener(evt -> {
             if ("state".equals(evt.getPropertyName())
                     && javax.swing.SwingWorker.StateValue.DONE == evt.getNewValue()) {
-                handleExecutorDone();
+                handleExecutorDone(worker);
             }
         });
-        executor.execute();
+        worker.execute();
     }
 
     private JPanel headerPanel() {
@@ -1642,13 +1667,20 @@ public final class MacroVariationsDialog extends PipelineDialog {
         }
     }
 
-    private void handleResult(VariationResult result, int index) {
+    private void handleResult(final VariationExecutor worker,
+                              VariationResult result,
+                              int index) {
         if (!SwingUtilities.isEventDispatchThread()) {
+            final VariationResult safeResult = result;
+            final int safeIndex = index;
             SwingUtilities.invokeLater(new Runnable() {
                 @Override public void run() {
-                    handleResult(result, index);
+                    handleResult(worker, safeResult, safeIndex);
                 }
             });
+            return;
+        }
+        if (worker != executor) {
             return;
         }
         if (result == null) {
@@ -1676,6 +1708,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
             completedCount++;
         }
         failedCount = countFailures();
+        updateMontageButtonState();
         setStatusTextNow(progressStatus());
         if (completedCount >= cells.size() && !cells.isEmpty()) {
             updateHistogramShapeIndicator();
@@ -1689,17 +1722,17 @@ public final class MacroVariationsDialog extends PipelineDialog {
         }
     }
 
-    private void handleExecutorDone() {
+    private void handleExecutorDone(VariationExecutor worker) {
         if (!SwingUtilities.isEventDispatchThread()) {
+            final VariationExecutor safeWorker = worker;
             SwingUtilities.invokeLater(new Runnable() {
                 @Override public void run() {
-                    handleExecutorDone();
+                    handleExecutorDone(safeWorker);
                 }
             });
             return;
         }
-        VariationExecutor worker = executor;
-        if (worker == null) {
+        if (worker == null || worker != executor) {
             return;
         }
         if (runButton != null) {
@@ -1708,11 +1741,13 @@ public final class MacroVariationsDialog extends PipelineDialog {
         if (worker.isCancelled()) {
             setStatusTextNow("Cancelled");
             markRunningCellsCancelled();
+            updateMontageButtonState();
             return;
         }
         try {
             worker.get();
             failedCount = countFailures();
+            updateMontageButtonState();
             updateHistogramShapeIndicator();
             setStatusTextNow(completionStatus());
             if (downstreamVerdictCheckBox.isSelected()) {
@@ -1720,8 +1755,169 @@ public final class MacroVariationsDialog extends PipelineDialog {
             }
         } catch (Exception e) {
             failedCount = countFailures();
+            updateMontageButtonState();
             setStatusTextNow("Error: " + safe(e.getMessage()));
             showMessage(e.getMessage());
+        }
+    }
+
+    private void openMontage() {
+        List<VariationMontageDialog.MontageTile> montageTiles = buildMontageTiles();
+        if (montageTiles.isEmpty()) {
+            updateMontageButtonState();
+            showMessage("Wait for at least one successful tile before opening the montage.");
+            return;
+        }
+        VariationMontageDialog dialog = montageDialog();
+        dialog.setTiles(montageTiles, currentSweep, zSlider.getValue());
+        setMontageSourceChoices(dialog);
+        PreviewDisplaySettings settings =
+                PreviewDisplaySettings.defaultFor(context.channelName());
+        dialog.setDisplaySettings(settings, settings);
+        wireMontageDisplayActions(dialog, context.montageDisplayActionDelegate());
+        dialog.raiseForUser();
+    }
+
+    private void wireMontageDisplayActions(
+            final VariationMontageDialog dialog,
+            final MontageDisplayActionDelegate delegate) {
+        if (delegate == null) {
+            dialog.setDisplayActionListener(null);
+            dialog.setDisplayActionState("Grey LUT",
+                    "Display controls require an active main preview.");
+            dialog.setDisplayActionsEnabled(false,
+                    "Display controls require an active main preview.");
+            return;
+        }
+        dialog.setDisplayActionListener(new VariationMontageDialog.DisplayActionListener() {
+            @Override public void adjustBrightnessContrastRequested() {
+                delegate.adjustBrightnessContrast();
+                updateMontageDisplayActionState(dialog, delegate);
+            }
+
+            @Override public void lutToggleRequested() {
+                delegate.toggleGreyLut();
+                updateMontageDisplayActionState(dialog, delegate);
+            }
+        });
+        updateMontageDisplayActionState(dialog, delegate);
+    }
+
+    private void updateMontageDisplayActionState(
+            VariationMontageDialog dialog,
+            MontageDisplayActionDelegate delegate) {
+        if (dialog == null || delegate == null) {
+            return;
+        }
+        dialog.setDisplayActionState(delegate.lutButtonText(),
+                delegate.lutButtonTooltip());
+        dialog.setDisplayActionsEnabled(true, delegate.lutButtonTooltip());
+    }
+
+    private VariationMontageDialog montageDialog() {
+        if (montageDialog == null || !montageDialog.isDisplayable()) {
+            montageDialog = new VariationMontageDialog(
+                    SwingUtilities.getWindowAncestor(gridPanel));
+        }
+        return montageDialog;
+    }
+
+    private List<VariationMontageDialog.MontageTile> buildMontageTiles() {
+        List<VariationResult> results = montageResults();
+        if (results.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<VariationMontageDialog.MontageTile> tiles =
+                new ArrayList<VariationMontageDialog.MontageTile>(results.size());
+        for (int i = 0; i < results.size(); i++) {
+            VariationResult result = results.get(i);
+            tiles.add(new VariationMontageDialog.MontageTile(
+                    result.combo(),
+                    result.label(),
+                    result.nObjects(),
+                    result.meanNeighbourIou()));
+        }
+        return tiles;
+    }
+
+    private List<VariationResult> montageResults() {
+        List<VariationResult> results = new ArrayList<VariationResult>();
+        for (int i = 0; i < resultsByCell.size(); i++) {
+            VariationResult result = resultsByCell.get(i);
+            if (isMontageResult(result)) {
+                results.add(result);
+            }
+        }
+        return results;
+    }
+
+    private void updateMontageButtonState() {
+        if (openLargeMontageButton != null) {
+            openLargeMontageButton.setEnabled(hasMontageResult());
+        }
+    }
+
+    private boolean hasMontageResult() {
+        for (int i = 0; i < resultsByCell.size(); i++) {
+            if (isMontageResult(resultsByCell.get(i))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isMontageResult(VariationResult result) {
+        return result != null && !result.hasError();
+    }
+
+    private void disposeMontageDialog() {
+        if (montageDialog != null) {
+            montageDialog.dispose();
+            montageDialog = null;
+        }
+        disposeMontageSourceChoices();
+    }
+
+    private void setMontageSourceChoices(VariationMontageDialog dialog) {
+        disposeMontageSourceChoices();
+        montageRawSourceChoice = croppedForComparison(context.sourceImage());
+        montageFilteredSourceChoice = croppedForComparison(context.filteredSource());
+        dialog.setSourceChoices(montageRawSourceChoice, montageFilteredSourceChoice);
+    }
+
+    private void disposeMontageSourceChoices() {
+        ImagePlus rawChoice = montageRawSourceChoice;
+        ImagePlus filteredChoice = montageFilteredSourceChoice;
+        montageRawSourceChoice = null;
+        montageFilteredSourceChoice = null;
+        disposeIfOwnedImage(rawChoice, context.sourceImage(), context.filteredSource());
+        disposeIfOwnedImage(filteredChoice, context.sourceImage(),
+                context.filteredSource(), rawChoice);
+    }
+
+    private static void disposeIfOwnedImage(ImagePlus image,
+                                            ImagePlus... externalReferences) {
+        if (image == null) {
+            return;
+        }
+        if (externalReferences != null) {
+            for (int i = 0; i < externalReferences.length; i++) {
+                if (image == externalReferences[i]) {
+                    return;
+                }
+            }
+        }
+        try {
+            image.changes = false;
+        } catch (Throwable ignored) {
+        }
+        try {
+            image.close();
+        } catch (Throwable ignored) {
+        }
+        try {
+            image.flush();
+        } catch (Throwable ignored) {
         }
     }
 
@@ -2016,7 +2212,10 @@ public final class MacroVariationsDialog extends PipelineDialog {
                 new ArrayList<VariationResult>(resultsByCell);
         final ImagePlus baseline = currentBaselineCrop;
         final VariationCache cache = currentRunCache;
-        downstreamWorker = new SwingWorker<Map<ParameterCombo, DownstreamVerdict.Verdict>, Void>() {
+        final SwingWorker<Map<ParameterCombo, DownstreamVerdict.Verdict>, Void>[] workerRef =
+                new SwingWorker[1];
+        SwingWorker<Map<ParameterCombo, DownstreamVerdict.Verdict>, Void> worker =
+                new SwingWorker<Map<ParameterCombo, DownstreamVerdict.Verdict>, Void>() {
             @Override protected Map<ParameterCombo, DownstreamVerdict.Verdict>
             doInBackground() {
                 return DownstreamVerdict.compute(snapshot,
@@ -2032,7 +2231,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
                             @Override public void accept(final DownstreamVerdict.Progress progress) {
                                 SwingUtilities.invokeLater(new Runnable() {
                                     @Override public void run() {
-                                        handleDownstreamProgress(progress);
+                                        handleDownstreamProgress(workerRef[0], progress);
                                     }
                                 });
                             }
@@ -2040,6 +2239,9 @@ public final class MacroVariationsDialog extends PipelineDialog {
             }
 
             @Override protected void done() {
+                if (this != downstreamWorker) {
+                    return;
+                }
                 stopDownstreamButton.setEnabled(false);
                 if (isCancelled()) {
                     setStatusTextNow("Downstream cancelled");
@@ -2055,16 +2257,24 @@ public final class MacroVariationsDialog extends PipelineDialog {
                 }
             }
         };
-        downstreamWorker.execute();
+        workerRef[0] = worker;
+        downstreamWorker = worker;
+        worker.execute();
     }
 
-    private void handleDownstreamProgress(DownstreamVerdict.Progress progress) {
+    private void handleDownstreamProgress(
+            final SwingWorker<Map<ParameterCombo, DownstreamVerdict.Verdict>, Void> worker,
+            DownstreamVerdict.Progress progress) {
         if (!SwingUtilities.isEventDispatchThread()) {
+            final DownstreamVerdict.Progress safeProgress = progress;
             SwingUtilities.invokeLater(new Runnable() {
                 @Override public void run() {
-                    handleDownstreamProgress(progress);
+                    handleDownstreamProgress(worker, safeProgress);
                 }
             });
+            return;
+        }
+        if (worker != downstreamWorker) {
             return;
         }
         if (progress == null) {
@@ -2130,11 +2340,40 @@ public final class MacroVariationsDialog extends PipelineDialog {
         stopDownstreamButton.setEnabled(false);
     }
 
-    private void acceptAndClose(ParameterCombo combo, FilterSweepStrategy strategy) {
-        if (onAccept != null && combo != null && strategy != null) {
-            onAccept.accept(strategy.renderMacroForCombo(combo));
+    private void installWindowCleanup() {
+        Window window = getWindow();
+        if (window == null) {
+            return;
         }
-        dispose();
+        window.addWindowListener(new WindowAdapter() {
+            @Override public void windowClosing(WindowEvent e) {
+                cancelExecutor();
+                cancelDownstreamWorker();
+                disposeMontageDialog();
+            }
+
+            @Override public void windowClosed(WindowEvent e) {
+                cancelExecutor();
+                cancelDownstreamWorker();
+                disposeMontageDialog();
+            }
+        });
+    }
+
+    private void disposeCells() {
+        for (int i = 0; i < cells.size(); i++) {
+            cells.get(i).disposeImages();
+        }
+    }
+
+    private void acceptAndClose(ParameterCombo combo, FilterSweepStrategy strategy) {
+        try {
+            if (onAccept != null && combo != null && strategy != null) {
+                onAccept.accept(strategy.renderMacroForCombo(combo));
+            }
+        } finally {
+            dispose();
+        }
     }
 
     private void selectCombo(ParameterCombo combo, FilterSweepStrategy strategy) {
@@ -2315,14 +2554,41 @@ public final class MacroVariationsDialog extends PipelineDialog {
     }
 
     private void setStatusTextNow(String text) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            final String safeText = text;
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setStatusTextNow(safeText);
+                }
+            });
+            return;
+        }
         statusLabel.setText(safe(text));
     }
 
     private void setSuggestionText(String text) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            final String safeText = text;
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setSuggestionText(safeText);
+                }
+            });
+            return;
+        }
         suggestionLabel.setText(safe(text));
     }
 
     private void setStrategyText(String text) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            final String safeText = text;
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setStrategyText(safeText);
+                }
+            });
+            return;
+        }
         strategyLabel.setText(safe(text));
     }
 
@@ -2425,6 +2691,21 @@ public final class MacroVariationsDialog extends PipelineDialog {
         }
         editor.setCropSpec(currentCropSpec);
         refreshCellEstimate();
+    }
+
+    private ImagePlus croppedForComparison(ImagePlus source) {
+        if (source == null) {
+            return null;
+        }
+        CropSpec spec = currentSweep == null ? currentCropSpec : currentSweep.cropSpec();
+        if (spec == null) {
+            return source;
+        }
+        try {
+            return spec.apply(source);
+        } catch (RuntimeException e) {
+            return source;
+        }
     }
 
     private void selectCropButton(CropSpec spec) {

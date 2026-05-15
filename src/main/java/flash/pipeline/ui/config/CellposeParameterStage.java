@@ -8,6 +8,7 @@ import flash.pipeline.help.SetupHelpTopic;
 import flash.pipeline.objects.ObjectsCounter3DWrapper;
 import flash.pipeline.ui.preview.ObjectSizeFilterPreview;
 import flash.pipeline.ui.preview.PreviewPairPanel;
+import flash.pipeline.ui.variations.MontageDisplayActionDelegate;
 import flash.pipeline.ui.variations.ParameterCombo;
 import flash.pipeline.ui.variations.ParameterId;
 import flash.pipeline.ui.variations.VariationEngineContext;
@@ -141,6 +142,12 @@ public final class CellposeParameterStage implements ConfigQcStage {
     private ImagePlus rawSource;
     private ImagePlus filteredSource;
     private ImagePlus labelPreview;
+    private ImagePlus previousLabelPreview;
+    private String previousPreviewText = "";
+    private Parameters previousSettings;
+    private ParticleSizeStage.SizeToken previousSettingsSize;
+    private Parameters displayedSettings;
+    private ParticleSizeStage.SizeToken displayedSize;
     private ResultsTable objectStats;
     private SwingWorker<ImagePlus, Void> previewWorker;
     private SwingWorker<GpuInstallResult, Void> installWorker;
@@ -283,6 +290,8 @@ public final class CellposeParameterStage implements ConfigQcStage {
             preview.setSourceToggleVisible(true);
             preview.setSourceMode(PreviewPairPanel.SourceMode.FILTERED);
             preview.setSourceModeEnabled(true);
+            preview.setComparisonPreviewVisible(true);
+            preview.setComparisonRestoreAction(null);
             preview.setSourceModeChangeListener(mode -> {
                 showRawSource = mode == PreviewPairPanel.SourceMode.RAW;
                 refreshSourceAndOutputPreview();
@@ -360,6 +369,8 @@ public final class CellposeParameterStage implements ConfigQcStage {
         if (preview != null) {
             preview.setSourceModeChangeListener(null);
             preview.setDisplaySettingsChangeListener(null);
+            preview.setObjectSizeGuide(null);
+            preview.clearComparisonPreview();
             preview.clearLargePreviewImages();
         }
         closeImages();
@@ -848,6 +859,11 @@ public final class CellposeParameterStage implements ConfigQcStage {
 
     private void sizeFieldChanged() {
         if (updatingControls) return;
+        captureCurrentPreviewForComparison();
+        if (!sizeFieldsReadyForLivePreview()) {
+            markPreviewStale(STALE_TEXT);
+            return;
+        }
         if (!refreshSizeFilterPreview()) {
             markPreviewStale(STALE_TEXT);
         }
@@ -857,6 +873,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
         loadFields(savedParameters);
         loadSizeFields(savedSize);
         refreshCompanionState();
+        captureCurrentPreviewForComparison();
         if (!refreshSizeFilterPreview()) {
             markPreviewStale(STALE_TEXT);
         }
@@ -878,7 +895,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
 
             @Override protected void done() {
                 try {
-                    installLabelPreview(get());
+                    installLabelPreview(get(), parameters);
                 } catch (Exception e) {
                     setError("Cellpose preview failed: " + e.getMessage());
                 } finally {
@@ -893,8 +910,9 @@ public final class CellposeParameterStage implements ConfigQcStage {
         if (filteredSource == null) {
             throw new IllegalStateException("No Cellpose input image is available.");
         }
+        Parameters parameters = collectParameters();
         setPreviewState(PreviewPairPanel.PreviewState.RUNNING, "Running Cellpose preview...");
-        installLabelPreview(runPreviewWithCompanion(collectParameters()));
+        installLabelPreview(runPreviewWithCompanion(parameters), parameters);
     }
 
     private ImagePlus runPreviewWithCompanion(Parameters parameters) throws Exception {
@@ -910,7 +928,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
         }
     }
 
-    private void installLabelPreview(ImagePlus labelImage) {
+    private void installLabelPreview(ImagePlus labelImage, Parameters settings) {
         if (labelImage == null) {
             setPreviewState(PreviewPairPanel.PreviewState.ERROR, "Cellpose returned no label map.");
             setStatus("Cellpose returned no label map.");
@@ -918,12 +936,14 @@ public final class CellposeParameterStage implements ConfigQcStage {
         }
         int count = previewAdapter.countLabels(labelImage);
         labelImage.setTitle("Cellpose label preview");
+        captureCurrentPreviewForComparison();
         ImagePlus old = labelPreview;
         labelPreview = labelImage;
         objectStats = ObjectSizeFilterPreview.statisticsFromLabelMap(labelImage, filteredSource);
         previewStale = false;
         lastObjectCount = count;
         refreshSizeFilterPreview();
+        displayedSettings = copyParameters(settings);
         String text = objectCountText();
         setStatus(text);
         if (actions != null) actions.setPreviewButtonStale(false);
@@ -964,6 +984,49 @@ public final class CellposeParameterStage implements ConfigQcStage {
     private void refreshLargePreviewModel() {
         if (preview == null) return;
         preview.setLargePreviewImages(rawSource, filteredSource, labelPreview);
+        preview.setPreviousComparisonPreview(previousLabelPreview, previousPreviewText);
+    }
+
+    private void captureCurrentPreviewForComparison() {
+        if (labelPreview == null) return;
+        ImagePlus snapshot = PreviewPairPanel.duplicateForComparison(
+                labelPreview, "Previous Cellpose preview");
+        if (snapshot == null) return;
+        ImagePlus old = previousLabelPreview;
+        previousLabelPreview = snapshot;
+        previousPreviewText = objectCountText();
+        previousSettings = copyParameters(displayedSettings);
+        previousSettingsSize = normalizedSizeToken(displayedSize);
+        if (preview != null) {
+            preview.setPreviousComparisonPreview(previousLabelPreview, previousPreviewText);
+            updateComparisonRestoreAction();
+        }
+        if (old != null && old != labelPreview && old != filteredSource && old != rawSource) {
+            previewAdapter.close(old);
+        }
+    }
+
+    private void updateComparisonRestoreAction() {
+        if (preview == null) return;
+        boolean available = previousSettings != null && previousSettingsSize != null;
+        preview.setComparisonRestoreAction(!available
+                ? null
+                : new Runnable() {
+                    @Override public void run() {
+                        restorePreviousComparisonSettings();
+                    }
+                });
+    }
+
+    private void restorePreviousComparisonSettings() {
+        if (previousSettings == null || previousSettingsSize == null) {
+            setStatus("No previous Cellpose settings are available.");
+            return;
+        }
+        loadFields(previousSettings);
+        loadSizeFields(previousSettingsSize);
+        refreshCompanionState();
+        runPreviewOnWorker();
     }
 
     private void openVariationsDialog() {
@@ -977,12 +1040,36 @@ public final class CellposeParameterStage implements ConfigQcStage {
                 filteredSource,
                 activeContext,
                 collectParameters(),
-                previewAdapter);
+                previewAdapter,
+                montageDisplayActionDelegate());
         VariationsDialog dialog = new VariationsDialog(
                 SwingUtilities.getWindowAncestor(preview != null ? preview : previewButton),
                 ctx,
                 this::applyVariationCombo);
         dialog.showDialog();
+    }
+
+    private MontageDisplayActionDelegate montageDisplayActionDelegate() {
+        if (preview == null) {
+            return null;
+        }
+        return new MontageDisplayActionDelegate() {
+            @Override public void adjustBrightnessContrast() {
+                preview.requestBrightnessContrastControls();
+            }
+
+            @Override public void toggleGreyLut() {
+                preview.requestGreyLutToggle();
+            }
+
+            @Override public String lutButtonText() {
+                return preview.lutToggleButton().getText();
+            }
+
+            @Override public String lutButtonTooltip() {
+                return preview.lutToggleButton().getToolTipText();
+            }
+        };
     }
 
     private void applyVariationCombo(ParameterCombo combo) {
@@ -1052,7 +1139,9 @@ public final class CellposeParameterStage implements ConfigQcStage {
                     objectStats, filteredSource, minSize, maxSize, maxFinite);
             ObjectSizeFilterPreview.applyClassifiedLut(labelPreview, sizeSummary);
             if (sizeCutoffPanel != null) sizeCutoffPanel.setSummary(sizeSummary);
+            applySizeGuideOverlay();
             previewStale = false;
+            displayedSize = normalizedSizeToken(token);
             refreshSourceAndOutputPreview();
             setStatus(sizeSummary.statusText());
             if (actions != null) actions.setPreviewButtonStale(false);
@@ -1073,8 +1162,20 @@ public final class CellposeParameterStage implements ConfigQcStage {
             sizeSummary = ObjectSizeFilterPreview.summarize(
                     null, filteredSource, minSize, maxSize, maxFinite);
             sizeCutoffPanel.setSummary(sizeSummary);
+            applySizeGuideOverlay();
         } catch (RuntimeException e) {
             sizeCutoffPanel.setSummary(null);
+            applySizeGuideOverlay(null);
+        }
+    }
+
+    private void applySizeGuideOverlay() {
+        applySizeGuideOverlay(sizeSummary);
+    }
+
+    private void applySizeGuideOverlay(ObjectSizeFilterPreview.Summary summary) {
+        if (preview != null) {
+            preview.setObjectSizeGuide(summary);
         }
     }
 
@@ -1141,6 +1242,29 @@ public final class CellposeParameterStage implements ConfigQcStage {
                 parse(flowField, fallback.flowThreshold),
                 parse(cellprobField, fallback.cellprobThreshold),
                 gpuCheckBox == null ? fallback.useGpu : gpuCheckBox.isSelected());
+    }
+
+    private static Parameters copyParameters(Parameters parameters) {
+        if (parameters == null) return null;
+        return new Parameters(
+                parameters.modelToken,
+                parameters.secondChannelIndex,
+                parameters.diameter,
+                parameters.flowThreshold,
+                parameters.cellprobThreshold,
+                parameters.useGpu);
+    }
+
+    private static ParticleSizeStage.SizeToken normalizedSizeToken(ParticleSizeStage.SizeToken token) {
+        return token == null ? null : ParticleSizeStage.parseSizeToken(token.toToken());
+    }
+
+    private boolean sizeFieldsReadyForLivePreview() {
+        return hasText(sizeMinField) && hasText(sizeMaxField);
+    }
+
+    private static boolean hasText(JTextField field) {
+        return field != null && field.getText() != null && !field.getText().trim().isEmpty();
     }
 
     private CellposeModel currentModel() {
@@ -1234,12 +1358,20 @@ public final class CellposeParameterStage implements ConfigQcStage {
         ImagePlus label = labelPreview;
         ImagePlus filtered = filteredSource;
         ImagePlus raw = rawSource;
+        ImagePlus previous = previousLabelPreview;
         labelPreview = null;
+        previousLabelPreview = null;
+        previousPreviewText = "";
+        previousSettings = null;
+        previousSettingsSize = null;
+        displayedSettings = null;
+        displayedSize = null;
         objectStats = null;
         sizeSummary = null;
         rawSource = null;
         filteredSource = null;
         lastObjectCount = -1;
+        if (previous != null && previous != label && previous != filtered && previous != raw) previewAdapter.close(previous);
         if (label != null && label != filtered && label != raw) previewAdapter.close(label);
         if (filtered != null && filtered != raw) previewAdapter.close(filtered);
         if (raw != null) previewAdapter.close(raw);

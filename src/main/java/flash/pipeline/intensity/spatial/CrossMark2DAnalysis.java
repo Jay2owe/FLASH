@@ -23,6 +23,9 @@ import java.util.List;
  */
 public final class CrossMark2DAnalysis implements IntensitySpatialPairAnalysis {
     private static final int DEFAULT_COSTES_PSF_PIXELS = 3;
+    private static final int MAX_COSTES_RANDOMIZATION_PIXELS = 262_144;
+    private static final int MAX_COSTES_RANDOMIZATIONS = 199;
+    private static final int MAX_SPATIAL_CORRELATION_SAMPLES = 32_768;
     private static final int MAX_SHIFT_PIXELS = 12;
     private static final int MAX_MARK_RADIUS_PIXELS = 12;
 
@@ -161,7 +164,8 @@ public final class CrossMark2DAnalysis implements IntensitySpatialPairAnalysis {
                         new FloatType((float) thresholdB),
                         ThresholdMode.Above);
 
-        double costesP = costesP(pearsons, container, context.config().getPermutations());
+        double costesP = costesP(pearsons, container, context.config().getPermutations(),
+                plane.count, context);
         return new ColocMetrics(pearson, costesP, thresholdA, thresholdB,
                 finiteOrNan(mandersResult.m1), finiteOrNan(mandersResult.m2));
     }
@@ -189,15 +193,32 @@ public final class CrossMark2DAnalysis implements IntensitySpatialPairAnalysis {
                 manders.calculateMandersCorrelation(cursor,
                         new FloatType(0.0f), new FloatType(0.0f), ThresholdMode.Above);
 
-        double costesP = costesP(pearsons, container, context.config().getPermutations());
+        double costesP = costesP(pearsons, container, context.config().getPermutations(),
+                plane.count, context);
         return new BinarizedColocMetrics(costesP,
                 finiteOrNan(mandersResult.m1), finiteOrNan(mandersResult.m2));
     }
 
     private static double costesP(PearsonsCorrelation<FloatType> pearsons,
                                   DataContainer<FloatType> container,
-                                  int permutations) throws Exception {
-        int randomizations = Math.max(1, permutations);
+                                  int permutations,
+                                  int validPixels,
+                                  IntensitySpatialPairContext context) throws Exception {
+        if (permutations <= 0) {
+            return Double.NaN;
+        }
+        if (validPixels > MAX_COSTES_RANDOMIZATION_PIXELS) {
+            context.warn("Costes significance skipped for large cross-channel plane ("
+                    + validPixels + " valid pixels; limit "
+                    + MAX_COSTES_RANDOMIZATION_PIXELS
+                    + "); CostesP is NaN, Pearson and Manders still measured.");
+            return Double.NaN;
+        }
+        int randomizations = Math.min(permutations, MAX_COSTES_RANDOMIZATIONS);
+        if (randomizations < permutations) {
+            context.warn("Costes significance permutations capped at "
+                    + MAX_COSTES_RANDOMIZATIONS + " for runtime.");
+        }
         CostesSignificanceTest<FloatType> costes =
                 new CostesSignificanceTest<FloatType>(pearsons, DEFAULT_COSTES_PSF_PIXELS,
                         randomizations, false);
@@ -207,12 +228,13 @@ public final class CrossMark2DAnalysis implements IntensitySpatialPairAnalysis {
 
     private static Peak ccfPeak(PairPlane2D plane) {
         int maxShift = Math.min(MAX_SHIFT_PIXELS, Math.max(0, Math.min(plane.width, plane.height) / 4));
+        int sampleStep = sampleStep(plane.count);
         double best = Double.NEGATIVE_INFINITY;
         int bestDx = 0;
         int bestDy = 0;
         for (int dy = -maxShift; dy <= maxShift; dy++) {
             for (int dx = -maxShift; dx <= maxShift; dx++) {
-                double r = plane.shiftedPearson(dx, dy);
+                double r = shiftedPearson(plane, dx, dy, sampleStep);
                 if (Double.isNaN(r) || Double.isInfinite(r)) continue;
                 if (r > best) {
                     best = r;
@@ -225,6 +247,45 @@ public final class CrossMark2DAnalysis implements IntensitySpatialPairAnalysis {
         return new Peak(distanceUm(bestDx, bestDy, plane), best);
     }
 
+    private static double shiftedPearson(PairPlane2D plane, int dx, int dy, int sampleStep) {
+        double sumA = 0.0;
+        double sumB = 0.0;
+        double sumAA = 0.0;
+        double sumBB = 0.0;
+        double sumAB = 0.0;
+        int n = 0;
+        int step = Math.max(1, sampleStep);
+        int start = step == 1 ? 0 : step / 2;
+        for (int y = start; y < plane.height; y += step) {
+            int yy = y + dy;
+            if (yy < 0 || yy >= plane.height) continue;
+            for (int x = start; x < plane.width; x += step) {
+                int xx = x + dx;
+                if (xx < 0 || xx >= plane.width) continue;
+                int sourceIndex = y * plane.width + x;
+                int partnerIndex = yy * plane.width + xx;
+                if (!plane.valid[sourceIndex] || !plane.valid[partnerIndex]) continue;
+                double a = plane.source[sourceIndex];
+                double b = plane.partner[partnerIndex];
+                sumA += a;
+                sumB += b;
+                sumAA += a * a;
+                sumBB += b * b;
+                sumAB += a * b;
+                n++;
+            }
+        }
+        if (n < 2 && step > 1) {
+            return shiftedPearson(plane, dx, dy, 1);
+        }
+        if (n < 2) return Double.NaN;
+        double cov = sumAB - (sumA * sumB / n);
+        double varA = sumAA - (sumA * sumA / n);
+        double varB = sumBB - (sumB * sumB / n);
+        double denom = Math.sqrt(varA * varB);
+        return denom <= 0.0 || !PairPlane2D.isFinite(denom) ? Double.NaN : cov / denom;
+    }
+
     private static Peak markCorrelationPeak(PairPlane2D plane) {
         double meanSource = plane.meanSource();
         double meanPartner = plane.meanPartner();
@@ -233,6 +294,8 @@ public final class CrossMark2DAnalysis implements IntensitySpatialPairAnalysis {
 
         int maxRadius = Math.min(MAX_MARK_RADIUS_PIXELS,
                 Math.max(0, Math.min(plane.width, plane.height) / 4));
+        int sampleStep = sampleStep(plane.count);
+        int sampleStart = sampleStep == 1 ? 0 : sampleStep / 2;
         double best = Double.NEGATIVE_INFINITY;
         int bestRadius = 0;
         for (int radius = 0; radius <= maxRadius; radius++) {
@@ -242,10 +305,10 @@ public final class CrossMark2DAnalysis implements IntensitySpatialPairAnalysis {
                 for (int dx = -radius; dx <= radius; dx++) {
                     int rounded = (int) Math.round(Math.sqrt(dx * dx + dy * dy));
                     if (rounded != radius) continue;
-                    for (int y = 0; y < plane.height; y++) {
+                    for (int y = sampleStart; y < plane.height; y += sampleStep) {
                         int yy = y + dy;
                         if (yy < 0 || yy >= plane.height) continue;
-                        for (int x = 0; x < plane.width; x++) {
+                        for (int x = sampleStart; x < plane.width; x += sampleStep) {
                             int xx = x + dx;
                             if (xx < 0 || xx >= plane.width) continue;
                             int a = y * plane.width + x;
@@ -267,6 +330,14 @@ public final class CrossMark2DAnalysis implements IntensitySpatialPairAnalysis {
         if (best == Double.NEGATIVE_INFINITY) return Peak.nan();
         double radiusUm = bestRadius * (plane.pixelWidthUm + plane.pixelHeightUm) / 2.0;
         return new Peak(radiusUm, best);
+    }
+
+    private static int sampleStep(int validPixels) {
+        if (validPixels <= MAX_SPATIAL_CORRELATION_SAMPLES) {
+            return 1;
+        }
+        return Math.max(1, (int) Math.ceil(Math.sqrt(
+                validPixels / (double) MAX_SPATIAL_CORRELATION_SAMPLES)));
     }
 
     private static double distanceUm(int dx, int dy, PairPlane2D plane) {

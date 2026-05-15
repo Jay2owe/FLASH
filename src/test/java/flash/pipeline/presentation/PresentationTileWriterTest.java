@@ -210,6 +210,22 @@ public class PresentationTileWriterTest {
         assertEquals(320, preview.getHeight());
     }
 
+    @Test
+    public void annotationPreviewCapsLargeImagesAndPreservesAspectRatio() {
+        PresentationTileRecord representative = new PresentationTileRecord(
+                null, "Animal1", "LH", "Cortex", "DAPI", "DAPI",
+                0, 4000, 2000, 0.5, 0.5);
+        PresentationTileConfig config = PresentationTileConfig.builder()
+                .scaleBarEnabled(true)
+                .labelMode(PresentationTileConfig.LabelMode.STAIN_NAME)
+                .build();
+
+        BufferedImage preview = PresentationTileWriter.renderAnnotationPreview(config, representative);
+
+        assertEquals(640, preview.getWidth());
+        assertEquals(320, preview.getHeight());
+    }
+
     private static PresentationTileRecord record(File file, String animal, String stain, int channelIndex) {
         return new PresentationTileRecord(file, animal, "LH", "Cortex", stain, stain,
                 channelIndex, 40, 40, 1.0, 1.0);

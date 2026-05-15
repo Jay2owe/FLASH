@@ -44,6 +44,22 @@ public class AnalysisDialogHelpAttachmentTest {
     }
 
     @Test
+    public void spatialAnalysisDialogAttachesSectionHelpForEverySection() throws Exception {
+        String path = "src/main/java/flash/pipeline/analyses/SpatialAnalysis.java";
+        assertSourceContains(path, "import flash.pipeline.help.SpatialHelpCatalog;");
+        assertSourceContains(path,
+                "addSetupHelpSubHeader(\"Spatial Distances\", SpatialHelpCatalog.DISTANCES)");
+        assertSourceContains(path,
+                "addSetupHelpHeader(\"Colocalization\", SpatialHelpCatalog.COLOCALIZATION)");
+        assertSourceContains(path,
+                "addSetupHelpHeader(\"Voronoi Tessellation\", SpatialHelpCatalog.VORONOI)");
+        assertSourceContains(path,
+                "addSetupHelpHeader(\"Morphometric Analysis\", SpatialHelpCatalog.MORPHOMETRY)");
+        assertSourceContains(path, "SpatialHelpCatalog.PHENOTYPING");
+        assertSourceContains(path, "SpatialHelpCatalog.HEATMAPS");
+    }
+
+    @Test
     public void attachedDialogTopicsExistInCatalog() {
         assertCatalogTopic(FLASH_Pipeline.IDX_CREATE_BIN);
         assertCatalogTopic(FLASH_Pipeline.IDX_DRAW_ROIS);

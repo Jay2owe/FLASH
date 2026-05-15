@@ -24,6 +24,7 @@ import flash.pipeline.intelligence.MetadataDiagnostics;
 import flash.pipeline.naming.ChannelFilenameCodec;
 import flash.pipeline.objects.CpcUtils;
 
+import flash.pipeline.help.SpatialHelpCatalog;
 import flash.pipeline.image.AdaptiveParallelism;
 import flash.pipeline.io.CalibrationIO;
 import flash.pipeline.io.CsvTableIO;
@@ -1158,7 +1159,7 @@ public class SpatialAnalysis implements Analysis {
                                     spatialBindings, selectedPresetName);
                         }
                     });
-            opts.addSubHeader("Spatial Distances");
+            opts.addSetupHelpSubHeader("Spatial Distances", SpatialHelpCatalog.DISTANCES);
             spatialBindings.doDistancesToggle = opts.addToggle(
                     decorateArtifactLabel("Nearest neighbor distances", artifactStatus,
                             SubAnalysis.INTER_MARKER_DISTANCES),
@@ -1186,7 +1187,7 @@ public class SpatialAnalysis implements Analysis {
             opts.addHelpText("Point pattern analysis per channel (requires calibrated centroids).");
             opts.endAdvancedSection();
 
-            opts.addHeader("Colocalization");
+            opts.addSetupHelpHeader("Colocalization", SpatialHelpCatalog.COLOCALIZATION);
             final ToggleSwitch volToggle = opts.addToggle("Volumetric overlap", doVolumetric);
             spatialBindings.doVolColocToggle = volToggle;
             opts.addHelpText("Counts nearest-neighbor objects exceeding the colocalization "
@@ -1213,7 +1214,7 @@ public class SpatialAnalysis implements Analysis {
             opts.addHelpText(existingObjectData.colocalizationHelperText());
 
             opts.beginAdvancedSection("spatial");
-            opts.addHeader("Voronoi Tessellation");
+            opts.addSetupHelpHeader("Voronoi Tessellation", SpatialHelpCatalog.VORONOI);
             spatialBindings.doVoronoiToggle = opts.addToggle(
                     decorateArtifactLabel("Voronoi territory analysis", artifactStatus, SubAnalysis.VORONOI),
                     defaultForArtifactStatus(artifactStatus, SubAnalysis.VORONOI, doVoronoi));
@@ -4637,7 +4638,7 @@ public class SpatialAnalysis implements Analysis {
                                          boolean doSpatialMorphometrics,
                                          SpatialObjectDataAvailability detectedData,
                                          SpatialArtifactStatus artifactStatus) {
-        opts.addHeader("Morphometric Analysis");
+        opts.addSetupHelpHeader("Morphometric Analysis", SpatialHelpCatalog.MORPHOMETRY);
         if (detectedData != null) {
             opts.addHelpText(detectedData.morphometryHelperText());
         }
@@ -4714,28 +4715,43 @@ public class SpatialAnalysis implements Analysis {
                                                           double heatmapBandwidth,
                                                           String heatmapLut,
                                                           SpatialArtifactStatus artifactStatus) {
-        opts.beginAdvancedSection("spatial");
-        opts.addHeader("Cell Phenotyping");
+        boolean phenotypingDefault = defaultForArtifactStatus(artifactStatus,
+                SubAnalysis.PHENOTYPING, doPhenotyping);
+        boolean heatmapsDefault = defaultForArtifactStatus(artifactStatus,
+                SubAnalysis.DENSITY_HEATMAPS, doHeatmaps);
+
+        opts.beginCollapsibleSection("Cell Phenotyping",
+                spatialDisclosureOpenByDefault(phenotypingDefault),
+                SpatialHelpCatalog.PHENOTYPING);
         spatialBindings.doPhenotypingToggle = opts.addToggle(
                 decorateArtifactLabel("K-means clustering", artifactStatus, SubAnalysis.PHENOTYPING),
-                defaultForArtifactStatus(artifactStatus, SubAnalysis.PHENOTYPING, doPhenotyping));
+                phenotypingDefault);
         opts.addHelpText("Clusters objects by multi-channel feature profile "
                 + "(volume, intensity, colocalization). Auto-detects optimal k via silhouette score.");
         spatialBindings.clusterKField = opts.addNumericField("Clusters (k, 0=auto)", clusterK, 0);
         opts.addHelpText("Number of clusters. 0 auto-detects optimal k (2-10).");
+        opts.endCollapsibleSection();
 
-        opts.addHeader("Density Heatmaps");
+        opts.beginCollapsibleSection("Density Heatmaps",
+                spatialDisclosureOpenByDefault(heatmapsDefault),
+                SpatialHelpCatalog.HEATMAPS);
         spatialBindings.doHeatmapsToggle = opts.addToggle(
                 decorateArtifactLabel("Generate density heatmaps", artifactStatus,
                         SubAnalysis.DENSITY_HEATMAPS),
-                defaultForArtifactStatus(artifactStatus, SubAnalysis.DENSITY_HEATMAPS, doHeatmaps));
+                heatmapsDefault);
         opts.addHelpText("Gaussian KDE density maps per channel. "
                 + "Saved as TIFF + PNG to FLASH/Image Analysis/Spatial Analysis/Image Outputs/<animal>/Heatmaps/.");
         spatialBindings.kdeBandwidthField = opts.addNumericField("KDE bandwidth (um, 0=auto)", heatmapBandwidth, 1);
         opts.addHelpText("Kernel bandwidth in microns. 0 uses Scott's rule automatically.");
         String[] lutOptions = {"Fire", "Grays", "Cyan", "Green", "Magenta", "Red"};
         spatialBindings.heatmapLutChoice = opts.addChoice("Heatmap LUT", lutOptions, heatmapLut);
-        opts.endAdvancedSection();
+        opts.endCollapsibleSection();
+    }
+
+    private static boolean spatialDisclosureOpenByDefault(boolean selectedByDefault) {
+        return selectedByDefault
+                || ij.Prefs.get("flash.advanced.global", false)
+                || ij.Prefs.get("flash.advanced.spatial", false);
     }
 
     private static void updateMorphometricDependencyControls(SpatialDialogBindings bindings) {

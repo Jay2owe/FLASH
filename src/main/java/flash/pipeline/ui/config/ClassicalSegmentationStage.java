@@ -7,6 +7,7 @@ import flash.pipeline.ui.preview.ObjectSizeFilterPreview;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import flash.pipeline.ui.preview.ThresholdControlPanel;
 import flash.pipeline.ui.preview.ThresholdOverlayRenderer;
+import flash.pipeline.ui.variations.MontageDisplayActionDelegate;
 import flash.pipeline.ui.variations.ParameterCombo;
 import flash.pipeline.ui.variations.ParameterId;
 import flash.pipeline.ui.variations.VariationEngineContext;
@@ -77,6 +78,12 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
     private ImagePlus filteredSource;
     private ImagePlus thresholdPreview;
     private ImagePlus labelPreview;
+    private ImagePlus previousLabelPreview;
+    private String previousPreviewText = "";
+    private ParticleSizeStage.SizeToken previousSettingsSize;
+    private String previousSettingsThresholdToken;
+    private ParticleSizeStage.SizeToken displayedSize;
+    private String displayedThresholdToken;
     private ResultsTable objectStats;
     private SwingWorker<ObjectsCounter3DWrapper.Result, Void> previewWorker;
     private Double restartLowerThreshold;
@@ -84,6 +91,8 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
     private boolean objectPreviewStale = true;
     private boolean updatingFields;
     private int lastObjectCount = -1;
+    private int previewedMinSize = -1;
+    private int previewedMaxSize = -1;
 
     private JTextField minField;
     private JTextField maxField;
@@ -196,6 +205,8 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
             preview.setSourceModeEnabled(true);
             preview.setObjectOverlaySelected(false);
             preview.setObjectOverlayEnabled(true);
+            preview.setComparisonPreviewVisible(true);
+            preview.setComparisonRestoreAction(null);
         }
         if (actions != null) {
             actions.registerPreviewButton(previewButton);
@@ -280,6 +291,8 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
         if (preview != null) {
             preview.setSourceModeChangeListener(null);
             preview.setDisplaySettingsChangeListener(null);
+            preview.setObjectSizeGuide(null);
+            preview.clearComparisonPreview();
             preview.clearLargePreviewImages();
         }
         closeImages();
@@ -329,6 +342,10 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
 
     void runPreviewNowForTest() throws Exception {
         runPreviewNow();
+    }
+
+    void restorePreviousComparisonSettingsForTest() {
+        restorePreviousComparisonSettings(false);
     }
 
     void applyVariationComboForTest(ParameterCombo combo) {
@@ -428,6 +445,7 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
 
     private void sizeFieldChanged() {
         if (updatingFields) return;
+        captureCurrentPreviewForComparison();
         if (!refreshSizeFilterPreview()) {
             markObjectPreviewStale(STALE_TEXT);
         }
@@ -435,6 +453,7 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
 
     private void resetSizesToSaved() {
         loadSizeFields(savedSize);
+        captureCurrentPreviewForComparison();
         if (!refreshSizeFilterPreview()) {
             markObjectPreviewStale(STALE_TEXT);
         }
@@ -500,12 +519,13 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
         final int threshold;
         final int previewMinSize;
         final int previewMaxSize;
+        final ParticleSizeStage.SizeToken token;
         try {
-            ParticleSizeStage.SizeToken token = collectSizeToken();
+            token = collectSizeToken();
             threshold = currentThresholdValue();
             validateSizeToken(token);
-            previewMinSize = previewMinSizeVoxels();
-            previewMaxSize = previewMaxSizeVoxels();
+            previewMinSize = minSizeVoxels(token);
+            previewMaxSize = maxSizeVoxels(token);
         } catch (RuntimeException e) {
             setError("Enter valid min and max voxel sizes.");
             return;
@@ -520,7 +540,7 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
 
             @Override protected void done() {
                 try {
-                    installObjectPreview(get());
+                    installObjectPreview(get(), token, previewMinSize, previewMaxSize, threshold);
                 } catch (Exception e) {
                     setError("Object preview failed: " + e.getMessage());
                 } finally {
@@ -539,9 +559,11 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
         ParticleSizeStage.SizeToken token = collectSizeToken();
         int threshold = currentThresholdValue();
         validateSizeToken(token);
+        int minSize = minSizeVoxels(token);
+        int maxSize = maxSizeVoxels(token);
         setPreviewState(PreviewPairPanel.PreviewState.RUNNING, "Running object preview...");
         installObjectPreview(previewAdapter.runPreview(filteredSource, threshold,
-                previewMinSizeVoxels(), previewMaxSizeVoxels()));
+                minSize, maxSize), token, minSize, maxSize, threshold);
     }
 
     private void validateSizeToken(ParticleSizeStage.SizeToken token) {
@@ -549,15 +571,21 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
         ObjectsCounter3DWrapper.parseMaxSizeVoxels(token.maxText, filteredSource);
     }
 
-    private int previewMinSizeVoxels() {
-        return 0;
+    private int minSizeVoxels(ParticleSizeStage.SizeToken token) {
+        return ObjectsCounter3DWrapper.parseMinSizeVoxels(
+                token == null ? null : token.minText, 100);
     }
 
-    private int previewMaxSizeVoxels() {
-        return ObjectsCounter3DWrapper.parseMaxSizeVoxels("Infinity", filteredSource);
+    private int maxSizeVoxels(ParticleSizeStage.SizeToken token) {
+        return ObjectsCounter3DWrapper.parseMaxSizeVoxels(
+                token == null ? null : token.maxText, filteredSource);
     }
 
-    private void installObjectPreview(ObjectsCounter3DWrapper.Result result) {
+    private void installObjectPreview(ObjectsCounter3DWrapper.Result result,
+                                      ParticleSizeStage.SizeToken runSize,
+                                      int runMinSize,
+                                      int runMaxSize,
+                                      int runThreshold) {
         int count = previewAdapter.countObjects(result);
         ImagePlus labelImage = result == null ? null : result.getObjectsMap();
         if (labelImage == null) {
@@ -572,12 +600,17 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
         }
         labelImage.setTitle(count > 0 ? "Object label preview" : "Object label preview (no objects)");
 
+        captureCurrentPreviewForComparison();
         ImagePlus old = labelPreview;
         labelPreview = labelImage;
         objectStats = result == null ? null : result.getStatistics();
+        previewedMinSize = Math.max(0, runMinSize);
+        previewedMaxSize = Math.max(previewedMinSize, runMaxSize);
+        displayedThresholdToken = String.valueOf(runThreshold);
         objectPreviewStale = false;
         lastObjectCount = count;
         refreshSizeFilterPreview();
+        displayedSize = normalizedSizeToken(runSize);
         String text = objectCountText();
         refreshObjectPreview(text, PreviewPairPanel.PreviewState.READY);
         setStatus(text);
@@ -635,6 +668,58 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
         if (preview == null) return;
         preview.setLargePreviewSourceChoices(rawSource, filteredSource);
         preview.setLargePreviewImages(rawSource, thresholdPreview, labelPreview);
+        preview.setPreviousComparisonPreview(previousLabelPreview, previousPreviewText);
+    }
+
+    private void captureCurrentPreviewForComparison() {
+        if (labelPreview == null) return;
+        ImagePlus snapshot = PreviewPairPanel.duplicateForComparison(
+                labelPreview, "Previous object preview");
+        if (snapshot == null) return;
+        ImagePlus old = previousLabelPreview;
+        previousLabelPreview = snapshot;
+        previousPreviewText = objectCountText();
+        previousSettingsSize = normalizedSizeToken(displayedSize);
+        previousSettingsThresholdToken = displayedThresholdToken;
+        if (preview != null) {
+            preview.setPreviousComparisonPreview(previousLabelPreview, previousPreviewText);
+            updateComparisonRestoreAction();
+        }
+        closeOldPreviewImage(old);
+    }
+
+    private void updateComparisonRestoreAction() {
+        if (preview == null) return;
+        boolean available = previousSettingsSize != null
+                && previousSettingsThresholdToken != null;
+        preview.setComparisonRestoreAction(!available
+                ? null
+                : new Runnable() {
+                    @Override public void run() {
+                        restorePreviousComparisonSettings(true);
+                    }
+                });
+    }
+
+    private void restorePreviousComparisonSettings(boolean runPreview) {
+        if (previousSettingsSize == null || previousSettingsThresholdToken == null) {
+            setStatus("No previous Classical segmentation settings are available.");
+            return;
+        }
+        loadSizeFields(previousSettingsSize);
+        if (thresholdControl != null) {
+            try {
+                double lower = Double.parseDouble(previousSettingsThresholdToken);
+                thresholdControl.setThreshold(lower, imageMaximum(filteredSource));
+                updateThresholdPreview(true);
+            } catch (NumberFormatException e) {
+                setError("Could not restore the previous threshold.");
+                return;
+            }
+        }
+        if (runPreview) {
+            runPreviewOnWorker();
+        }
     }
 
     private void openVariationsDialog() {
@@ -662,12 +747,36 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
                 filteredSource,
                 activeContext,
                 base,
-                previewAdapter);
+                previewAdapter,
+                montageDisplayActionDelegate());
         VariationsDialog dialog = new VariationsDialog(
                 SwingUtilities.getWindowAncestor(preview != null ? preview : previewButton),
                 ctx,
                 this::applyVariationCombo);
         dialog.showDialog();
+    }
+
+    private MontageDisplayActionDelegate montageDisplayActionDelegate() {
+        if (preview == null) {
+            return null;
+        }
+        return new MontageDisplayActionDelegate() {
+            @Override public void adjustBrightnessContrast() {
+                preview.requestBrightnessContrastControls();
+            }
+
+            @Override public void toggleGreyLut() {
+                preview.requestGreyLutToggle();
+            }
+
+            @Override public String lutButtonText() {
+                return preview.lutToggleButton().getText();
+            }
+
+            @Override public String lutButtonTooltip() {
+                return preview.lutToggleButton().getToolTipText();
+            }
+        };
     }
 
     private void applyVariationCombo(ParameterCombo combo) {
@@ -729,7 +838,12 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
                     objectStats, filteredSource, minSize, maxSize, maxFinite);
             ObjectSizeFilterPreview.applyClassifiedLut(labelPreview, sizeSummary);
             if (sizeCutoffPanel != null) sizeCutoffPanel.setSummary(sizeSummary);
+            applySizeGuideOverlay();
+            if (!canRelabelFromCurrentPreview(minSize, maxSize)) {
+                return false;
+            }
             objectPreviewStale = false;
+            displayedSize = normalizedSizeToken(token);
             String text = objectCountText();
             refreshObjectPreview(text, PreviewPairPanel.PreviewState.READY);
             setStatus(text);
@@ -751,8 +865,20 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
             sizeSummary = ObjectSizeFilterPreview.summarize(
                     null, filteredSource, minSize, maxSize, maxFinite);
             sizeCutoffPanel.setSummary(sizeSummary);
+            applySizeGuideOverlay();
         } catch (RuntimeException e) {
             sizeCutoffPanel.setSummary(null);
+            applySizeGuideOverlay(null);
+        }
+    }
+
+    private void applySizeGuideOverlay() {
+        applySizeGuideOverlay(sizeSummary);
+    }
+
+    private void applySizeGuideOverlay(ObjectSizeFilterPreview.Summary summary) {
+        if (preview != null) {
+            preview.setObjectSizeGuide(summary);
         }
     }
 
@@ -832,14 +958,24 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
         ImagePlus filtered = filteredSource;
         ImagePlus threshold = thresholdPreview;
         ImagePlus label = labelPreview;
+        ImagePlus previous = previousLabelPreview;
         rawSource = null;
         filteredSource = null;
         thresholdPreview = null;
         labelPreview = null;
+        previousLabelPreview = null;
+        previousPreviewText = "";
+        previousSettingsSize = null;
+        previousSettingsThresholdToken = null;
+        displayedSize = null;
+        displayedThresholdToken = null;
         objectStats = null;
         sizeSummary = null;
         lastObjectCount = -1;
+        previewedMinSize = -1;
+        previewedMaxSize = -1;
         Set<ImagePlus> closed = Collections.newSetFromMap(new IdentityHashMap<ImagePlus, Boolean>());
+        closeUnique(previous, closed);
         closeUnique(label, closed);
         closeUnique(threshold, closed);
         closeUnique(filtered, closed);
@@ -901,5 +1037,16 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
     private static int nonNegativeInt(Number value) {
         if (value == null) return 0;
         return Math.max(0, (int) Math.round(value.doubleValue()));
+    }
+
+    private boolean canRelabelFromCurrentPreview(int minSize, int maxSize) {
+        if (previewedMinSize < 0 || previewedMaxSize < 0) return false;
+        int safeMin = Math.max(0, minSize);
+        int safeMax = Math.max(safeMin, maxSize);
+        return safeMin >= previewedMinSize && safeMax <= previewedMaxSize;
+    }
+
+    private static ParticleSizeStage.SizeToken normalizedSizeToken(ParticleSizeStage.SizeToken token) {
+        return token == null ? null : ParticleSizeStage.parseSizeToken(token.toToken());
     }
 }

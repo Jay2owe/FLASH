@@ -66,4 +66,13 @@ public class KneeDetectorTest {
         assertTrue(knee.isPresent());
         assertEquals(3, knee.getAsInt());
     }
+
+    @Test
+    public void allNonFiniteValuesReturnEmpty() {
+        OptionalInt knee = KneeDetector.findKneeIndex(
+                new double[] {0, 1, 2, 3},
+                new double[] {Double.NaN, Double.NaN, Double.NaN, Double.NaN});
+
+        assertFalse(knee.isPresent());
+    }
 }

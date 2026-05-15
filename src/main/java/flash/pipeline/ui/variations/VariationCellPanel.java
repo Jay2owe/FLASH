@@ -57,7 +57,7 @@ public final class VariationCellPanel extends JPanel {
     private static final Color DOWNSTREAM_NEUTRAL = new Color(0x7A, 0x82, 0x89);
     private static final Color CHIP_TEXT = new Color(0x22, 0x22, 0x22);
     private static final int CARD_RADIUS = 8;
-    private static final float DEFAULT_OUTLINE_WIDTH = 1f;
+    private static final float DEFAULT_OUTLINE_WIDTH = 1.5f;
     private static final float COMPARE_OUTLINE_WIDTH = 4f;
     private static final float HALO_ALPHA_BASE = 0.14f;
     private static final float HALO_ALPHA_AMPLITUDE = 0.08f;
@@ -106,6 +106,8 @@ public final class VariationCellPanel extends JPanel {
     private ImagePlus cachedOverlayImage;
     private ImagePlus displayedPreviewImage;
     private ImagePlus currentPreviewImage;
+    private ImagePlus ownedCachedLabel;
+    private ImagePlus ownedDisplayedPreviewImage;
     private OverlayMode overlayMode = OverlayMode.NONE;
     private double cachedOtsuLower = Double.NaN;
     private long durationMs = -1L;
@@ -242,6 +244,8 @@ public final class VariationCellPanel extends JPanel {
         showSegmentationFooter();
         clearRibbonLabelOverride();
         filteredImage = null;
+        setCachedLabel(null, false);
+        cachedStats = null;
         invalidateOverlayCache();
         errorState = false;
         errorText = "";
@@ -264,7 +268,15 @@ public final class VariationCellPanel extends JPanel {
         setLabel(label, stats, stats == null ? -1 : stats.size(), -1L);
     }
 
-    public void setResult(VariationResult result) {
+    public void setResult(final VariationResult result) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setResult(result);
+                }
+            });
+            return;
+        }
         if (result == null) {
             return;
         }
@@ -306,7 +318,7 @@ public final class VariationCellPanel extends JPanel {
                 : result.previewImage();
         invalidateOverlayCache();
         filteredImage = filtered;
-        cachedLabel = null;
+        setCachedLabel(null, false);
         cachedStats = null;
         objectCount = -1;
         deltaN = UNKNOWN_DELTA;
@@ -348,7 +360,7 @@ public final class VariationCellPanel extends JPanel {
         acceptEnabled = false;
         errorText = errorDetails(error);
         showSegmentationFooter();
-        cachedLabel = createEmptyLabel();
+        setCachedLabel(createEmptyLabel(), true);
         cachedStats = null;
         objectCount = -1;
         deltaN = UNKNOWN_DELTA;
@@ -383,7 +395,8 @@ public final class VariationCellPanel extends JPanel {
         clearDownstreamVerdictState();
         filteredImage = null;
         invalidateOverlayCache();
-        this.cachedLabel = label == null ? createPlaceholderLabel() : label;
+        setCachedLabel(label == null ? createPlaceholderLabel() : label,
+                label == null);
         this.cachedStats = stats;
         this.objectCount = Math.max(0, nObjects);
         this.durationMs = durationMs;
@@ -405,7 +418,7 @@ public final class VariationCellPanel extends JPanel {
         if (rendered == null) {
             rendered = cachedLabel;
         }
-        setDisplayedPreviewImage(rendered);
+        setDisplayedPreviewImage(rendered, rendered != cachedLabel);
         refreshFooter();
         refreshTooltip();
     }
@@ -711,6 +724,14 @@ public final class VariationCellPanel extends JPanel {
         return suppressNextClick;
     }
 
+    boolean isHaloTimerRunningForTest() {
+        return haloTimer.isRunning();
+    }
+
+    boolean isHaloVisibleForTest() {
+        return showHalo;
+    }
+
     String ribbonLabelForTest() {
         return ribbonLabelOverride;
     }
@@ -768,6 +789,41 @@ public final class VariationCellPanel extends JPanel {
         cancelPeek(true);
         haloTimer.stop();
         super.removeNotify();
+    }
+
+    void disposeImages() {
+        cancelPeek(false);
+        resetHalo();
+        ImagePlus oldOwnedLabel = ownedCachedLabel;
+        ImagePlus oldOwnedPreview = ownedDisplayedPreviewImage;
+        ImagePlus oldOverlay = cachedOverlayImage;
+        ImagePlus oldCached = cachedLabel;
+        ImagePlus oldFiltered = filteredImage;
+        ImagePlus oldDisplayed = displayedPreviewImage;
+        ImagePlus oldCurrent = currentPreviewImage;
+
+        cachedLabel = null;
+        cachedStats = null;
+        filteredImage = null;
+        displayedPreviewImage = null;
+        currentPreviewImage = null;
+        cachedOverlayImage = null;
+        ownedCachedLabel = null;
+        ownedDisplayedPreviewImage = null;
+        preview.setImage(null);
+
+        disposeOwnedImage(oldOwnedLabel);
+        disposeOwnedImage(oldOwnedPreview);
+        disposeOwnedImage(oldOverlay);
+        disposeIfDistinctCellResultImage(oldCached,
+                oldOwnedLabel, oldOwnedPreview, oldOverlay);
+        disposeIfDistinctCellResultImage(oldFiltered,
+                oldOwnedLabel, oldOwnedPreview, oldOverlay, oldCached);
+        disposeIfDistinctCellResultImage(oldDisplayed,
+                oldOwnedLabel, oldOwnedPreview, oldOverlay, oldCached, oldFiltered);
+        disposeIfDistinctCellResultImage(oldCurrent,
+                oldOwnedLabel, oldOwnedPreview, oldOverlay, oldCached,
+                oldFiltered, oldDisplayed);
     }
 
     private void installMouseHandlers() {
@@ -929,12 +985,23 @@ public final class VariationCellPanel extends JPanel {
     }
 
     private void invalidateOverlayCache() {
+        disposeOwnedImage(cachedOverlayImage);
         cachedOverlayImage = null;
         cachedOtsuLower = Double.NaN;
     }
 
     private void setDisplayedPreviewImage(ImagePlus image) {
+        setDisplayedPreviewImage(image, false);
+    }
+
+    private void setDisplayedPreviewImage(ImagePlus image, boolean owned) {
+        if (ownedDisplayedPreviewImage != null
+                && ownedDisplayedPreviewImage != image
+                && ownedDisplayedPreviewImage != cachedOverlayImage) {
+            disposeOwnedImage(ownedDisplayedPreviewImage);
+        }
         displayedPreviewImage = image;
+        ownedDisplayedPreviewImage = owned ? image : null;
         if (!peeking) {
             showPreviewImage(image);
         }
@@ -1122,7 +1189,7 @@ public final class VariationCellPanel extends JPanel {
         g2.setColor(STABILITY_BORDER);
         g2.fillOval(x, y, diameter, diameter);
         g2.setColor(RIBBON_RIM);
-        g2.setStroke(new BasicStroke(1f));
+        g2.setStroke(new BasicStroke(1.5f));
         g2.drawOval(x, y, diameter, diameter);
         g2.dispose();
     }
@@ -1169,7 +1236,7 @@ public final class VariationCellPanel extends JPanel {
         g2.setColor(fill);
         g2.fill(path);
         g2.setColor(RIBBON_RIM);
-        g2.setStroke(new BasicStroke(1f));
+        g2.setStroke(new BasicStroke(1.5f));
         g2.draw(path);
         g2.setClip(path);
         g2.setFont(FlashTheme.bodyMedium().deriveFont(8.5f));
@@ -1343,6 +1410,59 @@ public final class VariationCellPanel extends JPanel {
             }
         }
         return label;
+    }
+
+    private void setCachedLabel(ImagePlus label, boolean owned) {
+        if (ownedCachedLabel != null && ownedCachedLabel != label) {
+            disposeOwnedImage(ownedCachedLabel);
+        }
+        cachedLabel = label;
+        ownedCachedLabel = owned ? label : null;
+    }
+
+    private void disposeIfCellResultImage(ImagePlus image) {
+        if (image == null
+                || image == rawSourceImage
+                || image == croppedSource
+                || image == ownedCachedLabel
+                || image == ownedDisplayedPreviewImage
+                || image == cachedOverlayImage) {
+            return;
+        }
+        disposeOwnedImage(image);
+    }
+
+    private void disposeIfDistinctCellResultImage(ImagePlus image,
+                                                  ImagePlus... alreadyDisposed) {
+        if (image == null) {
+            return;
+        }
+        if (alreadyDisposed != null) {
+            for (int i = 0; i < alreadyDisposed.length; i++) {
+                if (image == alreadyDisposed[i]) {
+                    return;
+                }
+            }
+        }
+        disposeIfCellResultImage(image);
+    }
+
+    private static void disposeOwnedImage(ImagePlus image) {
+        if (image == null) {
+            return;
+        }
+        try {
+            image.changes = false;
+        } catch (Throwable ignored) {
+        }
+        try {
+            image.close();
+        } catch (Throwable ignored) {
+        }
+        try {
+            image.flush();
+        } catch (Throwable ignored) {
+        }
     }
 
     private static boolean dimensionsMatch(ImagePlus source, ImagePlus label) {

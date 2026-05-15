@@ -6,6 +6,7 @@ import flash.pipeline.help.SetupHelpTopic;
 import flash.pipeline.stardist.StarDist3DRunner;
 import flash.pipeline.ui.preview.ObjectSizeFilterPreview;
 import flash.pipeline.ui.preview.PreviewPairPanel;
+import flash.pipeline.ui.variations.MontageDisplayActionDelegate;
 import flash.pipeline.ui.variations.ParameterCombo;
 import flash.pipeline.ui.variations.ParameterId;
 import flash.pipeline.ui.variations.VariationEngineContext;
@@ -106,6 +107,10 @@ public final class StarDistParameterStage implements ConfigQcStage {
     private ImagePlus rawSource;
     private ImagePlus filteredSource;
     private ImagePlus labelPreview;
+    private ImagePlus previousLabelPreview;
+    private String previousPreviewText = "";
+    private Parameters previousSettings;
+    private Parameters displayedSettings;
     private ResultsTable objectStats;
     private SwingWorker<ImagePlus, Void> previewWorker;
     private boolean previewStale = true;
@@ -190,6 +195,8 @@ public final class StarDistParameterStage implements ConfigQcStage {
             preview.setSourceToggleVisible(true);
             preview.setSourceMode(PreviewPairPanel.SourceMode.FILTERED);
             preview.setSourceModeEnabled(true);
+            preview.setComparisonPreviewVisible(true);
+            preview.setComparisonRestoreAction(null);
             preview.setSourceModeChangeListener(mode -> {
                 showRawSource = mode == PreviewPairPanel.SourceMode.RAW;
                 refreshSourceAndOutputPreview();
@@ -249,6 +256,7 @@ public final class StarDistParameterStage implements ConfigQcStage {
         if (preview != null) {
             preview.setSourceModeChangeListener(null);
             preview.setDisplaySettingsChangeListener(null);
+            preview.clearComparisonPreview();
             preview.clearLargePreviewImages();
         }
         closeImages();
@@ -509,6 +517,7 @@ public final class StarDistParameterStage implements ConfigQcStage {
 
     private void postDetectionFilterFieldChanged() {
         if (updatingFields) return;
+        captureCurrentPreviewForComparison();
         if (!refreshObjectFilterPreview()) {
             markPreviewStale(STALE_TEXT);
         }
@@ -516,6 +525,7 @@ public final class StarDistParameterStage implements ConfigQcStage {
 
     private void resetToSaved() {
         loadFields(savedParameters);
+        captureCurrentPreviewForComparison();
         if (!refreshObjectFilterPreview()) {
             markPreviewStale(STALE_TEXT);
         }
@@ -527,17 +537,18 @@ public final class StarDistParameterStage implements ConfigQcStage {
             setError("No StarDist input image is available.");
             return;
         }
-        final Parameters parameters = previewRunParameters(collectParameters());
+        final Parameters parameters = collectParameters();
+        final Parameters runParameters = previewRunParameters(parameters);
         setPreviewState(PreviewPairPanel.PreviewState.RUNNING, "Running StarDist preview...");
         setButtonsEnabled(false);
         previewWorker = new SwingWorker<ImagePlus, Void>() {
             @Override protected ImagePlus doInBackground() throws Exception {
-                return previewAdapter.runPreview(filteredSource, parameters);
+                return previewAdapter.runPreview(filteredSource, runParameters);
             }
 
             @Override protected void done() {
                 try {
-                    installLabelPreview(get());
+                    installLabelPreview(get(), parameters);
                 } catch (Exception e) {
                     setPreviewError("StarDist preview failed: " + e.getMessage());
                 } finally {
@@ -552,24 +563,27 @@ public final class StarDistParameterStage implements ConfigQcStage {
         if (filteredSource == null) {
             throw new IllegalStateException("No StarDist input image is available.");
         }
+        Parameters parameters = collectParameters();
         setPreviewState(PreviewPairPanel.PreviewState.RUNNING, "Running StarDist preview...");
         installLabelPreview(previewAdapter.runPreview(filteredSource,
-                previewRunParameters(collectParameters())));
+                previewRunParameters(parameters)), parameters);
     }
 
-    private void installLabelPreview(ImagePlus labelImage) {
+    private void installLabelPreview(ImagePlus labelImage, Parameters settings) {
         if (labelImage == null) {
             setPreviewError("StarDist returned no label map.");
             return;
         }
         int count = previewAdapter.countLabels(labelImage);
         labelImage.setTitle("StarDist label preview");
+        captureCurrentPreviewForComparison();
         ImagePlus old = labelPreview;
         labelPreview = labelImage;
         objectStats = objectStatsForLabelPreview(labelImage);
         previewStale = false;
         lastObjectCount = count;
         boolean ready = refreshObjectFilterPreview();
+        displayedSettings = copyParameters(settings);
         if (ready) {
             String text = objectCountText();
             setStatus(text);
@@ -614,6 +628,45 @@ public final class StarDistParameterStage implements ConfigQcStage {
     private void refreshLargePreviewModel() {
         if (preview == null) return;
         preview.setLargePreviewImages(rawSource, filteredSource, labelPreview);
+        preview.setPreviousComparisonPreview(previousLabelPreview, previousPreviewText);
+    }
+
+    private void captureCurrentPreviewForComparison() {
+        if (labelPreview == null) return;
+        ImagePlus snapshot = PreviewPairPanel.duplicateForComparison(
+                labelPreview, "Previous StarDist preview");
+        if (snapshot == null) return;
+        ImagePlus old = previousLabelPreview;
+        previousLabelPreview = snapshot;
+        previousPreviewText = objectCountText();
+        previousSettings = copyParameters(displayedSettings);
+        if (preview != null) {
+            preview.setPreviousComparisonPreview(previousLabelPreview, previousPreviewText);
+            updateComparisonRestoreAction();
+        }
+        if (old != null && old != labelPreview && old != filteredSource && old != rawSource) {
+            previewAdapter.close(old);
+        }
+    }
+
+    private void updateComparisonRestoreAction() {
+        if (preview == null) return;
+        preview.setComparisonRestoreAction(previousSettings == null
+                ? null
+                : new Runnable() {
+                    @Override public void run() {
+                        restorePreviousComparisonSettings();
+                    }
+                });
+    }
+
+    private void restorePreviousComparisonSettings() {
+        if (previousSettings == null) {
+            setStatus("No previous StarDist settings are available.");
+            return;
+        }
+        loadFields(previousSettings);
+        runPreviewOnWorker();
     }
 
     private void openVariationsDialog() {
@@ -627,12 +680,36 @@ public final class StarDistParameterStage implements ConfigQcStage {
                 filteredSource,
                 activeContext,
                 collectParameters(),
-                previewAdapter);
+                previewAdapter,
+                montageDisplayActionDelegate());
         VariationsDialog dialog = new VariationsDialog(
                 SwingUtilities.getWindowAncestor(preview != null ? preview : previewButton),
                 ctx,
                 this::applyVariationCombo);
         dialog.showDialog();
+    }
+
+    private MontageDisplayActionDelegate montageDisplayActionDelegate() {
+        if (preview == null) {
+            return null;
+        }
+        return new MontageDisplayActionDelegate() {
+            @Override public void adjustBrightnessContrast() {
+                preview.requestBrightnessContrastControls();
+            }
+
+            @Override public void toggleGreyLut() {
+                preview.requestGreyLutToggle();
+            }
+
+            @Override public String lutButtonText() {
+                return preview.lutToggleButton().getText();
+            }
+
+            @Override public String lutButtonTooltip() {
+                return preview.lutToggleButton().getToolTipText();
+            }
+        };
     }
 
     private void applyVariationCombo(ParameterCombo combo) {
@@ -697,6 +774,7 @@ public final class StarDistParameterStage implements ConfigQcStage {
             objectFilterSummary = summarizeObjectFilters(objectStats, starDistClasses);
             ObjectSizeFilterPreview.applyClassifiedLut(labelPreview, allObjectsSummary, starDistClasses);
             previewStale = false;
+            displayedSettings = copyParameters(parameters);
             refreshSourceAndOutputPreview();
             setStatus(objectFilterSummary.statusText());
             if (actions != null) actions.setPreviewButtonStale(false);
@@ -859,6 +937,20 @@ public final class StarDistParameterStage implements ConfigQcStage {
                 0);
     }
 
+    private static Parameters copyParameters(Parameters parameters) {
+        if (parameters == null) return null;
+        return new Parameters(
+                parameters.probabilityThreshold,
+                parameters.nmsThreshold,
+                parameters.linkingMaxDistance,
+                parameters.gapClosingMaxDistance,
+                parameters.maxFrameGap,
+                parameters.areaMin,
+                parameters.areaMax,
+                parameters.qualityMin,
+                parameters.intensityMin);
+    }
+
     private void markPreviewStale(String text) {
         previewStale = true;
         setPreviewState(PreviewPairPanel.PreviewState.STALE, text);
@@ -963,12 +1055,18 @@ public final class StarDistParameterStage implements ConfigQcStage {
         ImagePlus label = labelPreview;
         ImagePlus filtered = filteredSource;
         ImagePlus raw = rawSource;
+        ImagePlus previous = previousLabelPreview;
         labelPreview = null;
+        previousLabelPreview = null;
+        previousPreviewText = "";
+        previousSettings = null;
+        displayedSettings = null;
         objectStats = null;
         objectFilterSummary = null;
         rawSource = null;
         filteredSource = null;
         lastObjectCount = -1;
+        if (previous != null && previous != label && previous != filtered && previous != raw) previewAdapter.close(previous);
         if (label != null && label != filtered && label != raw) previewAdapter.close(label);
         if (filtered != null && filtered != raw) previewAdapter.close(filtered);
         if (raw != null) previewAdapter.close(raw);
