@@ -298,7 +298,7 @@ public final class Cellpose3DRunner {
         command.add("--savedir");
         command.add(outputDir.toString());
         command.add("--pretrained_model");
-        command.add(CellposeModel.fromToken(model).token());
+        command.add(CellposeModel.runtimeToken(model));
         if (hasSecondChannel) {
             command.add("--chan");
             command.add("1");

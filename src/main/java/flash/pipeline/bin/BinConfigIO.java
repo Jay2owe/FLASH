@@ -2,12 +2,14 @@ package flash.pipeline.bin;
 
 import flash.pipeline.image.NamedFilterLoader;
 import flash.pipeline.io.FlashProjectLayout;
+import flash.pipeline.segmentation.SegmentationMethod;
+import flash.pipeline.segmentation.SegmentationTokenCodec;
+import flash.pipeline.segmentation.SegmentationTokenParser;
 import flash.pipeline.zslice.ZSliceConfig;
 import flash.pipeline.zslice.ZSliceConfigIO;
 import flash.pipeline.zslice.ZSliceMode;
 import ij.IJ;
 
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -85,11 +87,11 @@ public class BinConfigIO {
 
         // Line 7: segmentation methods (optional, defaults to "classical")
         for (String m : segmentationMethods) {
-            cfg.segmentationMethods.add(m);
+            cfg.addSegmentationMethodToken(m);
         }
         // Pad to match channel count with defaults
         while (cfg.segmentationMethods.size() < cfg.numChannels()) {
-            cfg.segmentationMethods.add("classical");
+            cfg.addSegmentationMethodToken("classical");
         }
 
         cfg.zSliceMode = zSliceMode;
@@ -153,7 +155,9 @@ public class BinConfigIO {
             addTokens(cfg.channelSizes, sizes);
             addTokens(cfg.channelMinMax, minmax);
             addTokens(cfg.channelIntensityThresholds, intensityThresholds);
-            addTokens(cfg.segmentationMethods, segmentationMethods);
+            for (int i = 0; i < segmentationMethods.length; i++) {
+                cfg.addSegmentationMethodToken(segmentationMethods[i]);
+            }
             if (hasFilterPresetLine) {
                 for (int i = 0; i < storedFilterPresets.length; i++) {
                     cfg.channelFilterPresets.add(resolveFilterPresetForChannel(
@@ -213,7 +217,7 @@ public class BinConfigIO {
         lines.add(joinTokens(safe.channelSizes));
         lines.add(joinTokens(safe.channelMinMax));
         lines.add(joinTokens(safe.channelIntensityThresholds));
-        lines.add(joinTokens(safe.segmentationMethods));
+        lines.add(joinTokens(segmentationTokensForWrite(safe)));
 
         List<String> filterPresetTokens = new ArrayList<String>();
         for (int i = 0; i < safe.channelFilterPresets.size(); i++) {
@@ -383,6 +387,39 @@ public class BinConfigIO {
         for (int i = 0; i < tokens.length; i++) {
             target.add(tokens[i]);
         }
+    }
+
+    private static List<String> segmentationTokensForWrite(BinConfig cfg) {
+        List<String> out = new ArrayList<String>();
+        if (cfg == null) return out;
+        for (int i = 0; i < cfg.segmentationMethods.size(); i++) {
+            String raw = cfg.segmentationMethods.get(i);
+            SegmentationMethod parsed = cfg.parsedSegmentationMethodForWrite(i);
+            if (parsed != null && sameToken(raw, parsed.rawToken)) {
+                out.add(parsed.shouldPreserveRawTokenOnWrite()
+                        ? safeToken(raw)
+                        : preserveReadTokenUnlessCanonical(raw, parsed));
+            } else {
+                out.add(safeToken(raw));
+            }
+        }
+        return out;
+    }
+
+    private static String preserveReadTokenUnlessCanonical(String raw, SegmentationMethod parsed) {
+        String canonical = SegmentationTokenParser.format(parsed);
+        String safeRaw = safeToken(raw);
+        return sameToken(safeRaw, canonical) ? canonical : safeRaw;
+    }
+
+    private static String safeToken(String token) {
+        return token == null ? "" : token;
+    }
+
+    private static boolean sameToken(String a, String b) {
+        String left = a == null ? "" : a.trim();
+        String right = b == null ? "" : b.trim();
+        return left.equals(right);
     }
 
     private static String[] inferFilterPresets(File binFolder, int channelCount) {
@@ -555,7 +592,7 @@ public class BinConfigIO {
         if ("Puncta Resolve".equals(normalized)) return "puncta_resolve";
         if ("Diffuse Object".equals(normalized)) return "diffuse_object";
         if ("Custom".equals(normalized)) return "custom";
-        return CUSTOM_FILTER_TOKEN_PREFIX + percentEncodeToken(normalized);
+        return CUSTOM_FILTER_TOKEN_PREFIX + SegmentationTokenCodec.percentEncodeToken(normalized);
     }
 
     private static String decodeFilterPresetToken(String presetName) {
@@ -571,7 +608,8 @@ public class BinConfigIO {
         if ("diffuse_object".equalsIgnoreCase(normalized)) return "Diffuse Object";
         if ("custom".equalsIgnoreCase(normalized)) return "Custom";
         if (normalized.toLowerCase(Locale.ROOT).startsWith(CUSTOM_FILTER_TOKEN_PREFIX)) {
-            String value = percentDecodeToken(normalized.substring(CUSTOM_FILTER_TOKEN_PREFIX.length())).trim();
+            String value = SegmentationTokenCodec.percentDecodeToken(
+                    normalized.substring(CUSTOM_FILTER_TOKEN_PREFIX.length())).trim();
             if (!value.isEmpty()) return value;
         }
         if (normalized.toLowerCase(Locale.ROOT).startsWith("userfilter_")) {
@@ -603,45 +641,6 @@ public class BinConfigIO {
             sb.append(tokens.get(i));
         }
         return sb.toString();
-    }
-
-    private static String percentEncodeToken(String value) {
-        byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < bytes.length; i++) {
-            int b = bytes[i] & 0xff;
-            if ((b >= 'A' && b <= 'Z')
-                    || (b >= 'a' && b <= 'z')
-                    || (b >= '0' && b <= '9')
-                    || b == '-' || b == '_' || b == '.' || b == '~') {
-                sb.append((char) b);
-            } else {
-                sb.append('%');
-                char high = Character.toUpperCase(Character.forDigit((b >> 4) & 0x0f, 16));
-                char low = Character.toUpperCase(Character.forDigit(b & 0x0f, 16));
-                sb.append(high).append(low);
-            }
-        }
-        return sb.toString();
-    }
-
-    private static String percentDecodeToken(String encoded) {
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        for (int i = 0; i < encoded.length(); i++) {
-            char ch = encoded.charAt(i);
-            if (ch == '%' && i + 2 < encoded.length()) {
-                int high = Character.digit(encoded.charAt(i + 1), 16);
-                int low = Character.digit(encoded.charAt(i + 2), 16);
-                if (high >= 0 && low >= 0) {
-                    out.write((high << 4) + low);
-                    i += 2;
-                    continue;
-                }
-            }
-            byte[] raw = String.valueOf(ch).getBytes(StandardCharsets.UTF_8);
-            out.write(raw, 0, raw.length);
-        }
-        return new String(out.toByteArray(), StandardCharsets.UTF_8);
     }
 
     private static String normalizeMacroContent(String content) {

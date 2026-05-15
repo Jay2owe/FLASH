@@ -1,5 +1,9 @@
 package flash.pipeline.bin;
 
+import flash.pipeline.segmentation.SegmentationMethod;
+import flash.pipeline.segmentation.SegmentationTokenParser;
+import flash.pipeline.segmentation.StarDistLinkingParams;
+import flash.pipeline.segmentation.StarDistPostFilters;
 import flash.pipeline.zslice.ZSliceConfig;
 import flash.pipeline.zslice.ZSliceMode;
 import flash.pipeline.zslice.ZSliceRange;
@@ -33,6 +37,7 @@ public class BinConfig {
     public ZSliceMode zSliceMode = ZSliceMode.FULL;
     public boolean zSliceConfigPresent = false;
     public final Map<Integer, ZSliceSelection> zSliceSelections = new LinkedHashMap<Integer, ZSliceSelection>();
+    private final List<SegmentationMethod> parsedSegmentationMethods = new ArrayList<SegmentationMethod>();
 
     public int numChannels() {
         return channelNames.size();
@@ -89,14 +94,12 @@ public class BinConfig {
 
     /** Returns true if the channel at the given 0-based index uses StarDist 3D segmentation. */
     public boolean isStarDist(int channelIndex) {
-        if (channelIndex < 0 || channelIndex >= segmentationMethods.size()) return false;
-        return segmentationMethods.get(channelIndex).startsWith("stardist");
+        return segmentationMethod(channelIndex).isStarDist();
     }
 
     /** Returns true if the channel at the given 0-based index uses Cellpose segmentation. */
     public boolean isCellpose(int channelIndex) {
-        if (channelIndex < 0 || channelIndex >= segmentationMethods.size()) return false;
-        return segmentationMethods.get(channelIndex).startsWith("cellpose");
+        return segmentationMethod(channelIndex).isCellpose();
     }
 
     /** Returns true if the channel produces a label image directly (StarDist or Cellpose). */
@@ -106,167 +109,133 @@ public class BinConfig {
 
     /** Returns the StarDist probability threshold for the given channel, or 0.5 if not StarDist. */
     public double getStarDistProbThresh(int channelIndex) {
-        if (!isStarDist(channelIndex)) return DEFAULT_STARDIST_PROB_THRESH;
-        String[] parts = segmentationMethods.get(channelIndex).split(":");
-        if (parts.length >= 2) {
-            try { return Double.parseDouble(parts[1]); } catch (NumberFormatException e) { /* fall through */ }
-        }
-        return DEFAULT_STARDIST_PROB_THRESH;
+        return SegmentationMethod.starDistProb(segmentationMethod(channelIndex));
     }
 
     /** Returns the StarDist NMS threshold for the given channel, or 0.4 if not StarDist. */
     public double getStarDistNmsThresh(int channelIndex) {
-        if (!isStarDist(channelIndex)) return DEFAULT_STARDIST_NMS_THRESH;
-        String[] parts = segmentationMethods.get(channelIndex).split(":");
-        if (parts.length >= 3) {
-            try { return Double.parseDouble(parts[2]); } catch (NumberFormatException e) { /* fall through */ }
-        }
-        return DEFAULT_STARDIST_NMS_THRESH;
+        return SegmentationMethod.starDistNms(segmentationMethod(channelIndex));
     }
 
     /** Returns the TrackMate linking max distance for the given StarDist channel, or 5.0 by default. */
     public double getStarDistLinkingMaxDistance(int channelIndex) {
-        return Math.max(0, getStarDistKeyValue(channelIndex, "linking",
-                DEFAULT_STARDIST_LINKING_MAX_DISTANCE, true));
+        StarDistLinkingParams linking = SegmentationMethod.starDistLinking(segmentationMethod(channelIndex));
+        return linking.linkingMaxDistance;
     }
 
     /** Returns the TrackMate gap-closing max distance for the given StarDist channel, or 5.0 by default. */
     public double getStarDistGapClosingMaxDistance(int channelIndex) {
-        return Math.max(0, getStarDistKeyValue(channelIndex, "gapClosing",
-                DEFAULT_STARDIST_GAP_CLOSING_MAX_DISTANCE, true));
+        StarDistLinkingParams linking = SegmentationMethod.starDistLinking(segmentationMethod(channelIndex));
+        return linking.gapClosingMaxDistance;
     }
 
     /** Returns the TrackMate max frame gap for the given StarDist channel, or 1 by default. */
     public int getStarDistMaxFrameGap(int channelIndex) {
-        double value = getStarDistKeyValue(channelIndex, "frameGap", DEFAULT_STARDIST_MAX_FRAME_GAP, true);
-        return (int) Math.max(0, Math.round(value));
+        StarDistLinkingParams linking = SegmentationMethod.starDistLinking(segmentationMethod(channelIndex));
+        return linking.maxFrameGap;
     }
 
     /** Returns the minimum area filter for the given StarDist channel, or 0 (no filter). */
     public double getStarDistAreaMin(int channelIndex) {
-        return getStarDistKeyValue(channelIndex, "area", 0, true);
+        StarDistPostFilters filters = SegmentationMethod.starDistPostFilters(segmentationMethod(channelIndex));
+        return filters.areaMin;
     }
 
     /** Returns the maximum area filter for the given StarDist channel, or Infinity (no filter). */
     public double getStarDistAreaMax(int channelIndex) {
-        return getStarDistKeyValue(channelIndex, "area", Double.POSITIVE_INFINITY, false);
+        StarDistPostFilters filters = SegmentationMethod.starDistPostFilters(segmentationMethod(channelIndex));
+        return filters.areaMax;
     }
 
     /** Returns the minimum quality filter for the given StarDist channel, or 0 (no filter). */
     public double getStarDistQualityMin(int channelIndex) {
-        return getStarDistKeyValue(channelIndex, "quality", 0, true);
+        StarDistPostFilters filters = SegmentationMethod.starDistPostFilters(segmentationMethod(channelIndex));
+        return filters.qualityMin;
     }
 
     /** Returns the minimum mean-intensity filter for the given StarDist channel, or 0 (no filter). */
     public double getStarDistIntensityMin(int channelIndex) {
-        return getStarDistKeyValue(channelIndex, "intensity", 0, true);
+        StarDistPostFilters filters = SegmentationMethod.starDistPostFilters(segmentationMethod(channelIndex));
+        return filters.intensityMin;
     }
 
     /** Returns the Cellpose diameter for the given channel, or 30.0 if not Cellpose. */
     public double getCellposeDiameter(int channelIndex) {
-        if (!isCellpose(channelIndex)) return DEFAULT_CELLPOSE_DIAMETER;
-        String[] parts = segmentationMethods.get(channelIndex).split(":");
-        if (parts.length >= 2) {
-            try { return Double.parseDouble(parts[1]); } catch (NumberFormatException e) { /* fall through */ }
-        }
-        return DEFAULT_CELLPOSE_DIAMETER;
+        return SegmentationMethod.cellposeDiameter(segmentationMethod(channelIndex));
     }
 
     /** Returns the Cellpose model for the given channel, or cyto3 if not Cellpose. */
     public String getCellposeModel(int channelIndex) {
-        if (!isCellpose(channelIndex)) return DEFAULT_CELLPOSE_MODEL;
-        String[] parts = segmentationMethods.get(channelIndex).split(":");
-        if (parts.length >= 3 && parts[2] != null && !parts[2].trim().isEmpty()) {
-            return parts[2].trim();
-        }
-        return DEFAULT_CELLPOSE_MODEL;
+        return SegmentationMethod.cellposeModelKey(segmentationMethod(channelIndex));
     }
 
     /** Returns the Cellpose flow threshold for the given channel, or 0.4 if not Cellpose. */
     public double getCellposeFlowThreshold(int channelIndex) {
-        if (!isCellpose(channelIndex)) return DEFAULT_CELLPOSE_FLOW_THRESHOLD;
-        String[] parts = segmentationMethods.get(channelIndex).split(":");
-        if (parts.length >= 4) {
-            try { return Double.parseDouble(parts[3]); } catch (NumberFormatException e) { /* fall through */ }
-        }
-        return DEFAULT_CELLPOSE_FLOW_THRESHOLD;
+        return SegmentationMethod.cellposeFlow(segmentationMethod(channelIndex));
     }
 
     /** Returns the Cellpose cell probability threshold for the given channel, or 0.0 if not Cellpose. */
     public double getCellposeCellprobThreshold(int channelIndex) {
-        if (!isCellpose(channelIndex)) return DEFAULT_CELLPOSE_CELLPROB_THRESHOLD;
-        String[] parts = segmentationMethods.get(channelIndex).split(":");
-        if (parts.length >= 5) {
-            try { return Double.parseDouble(parts[4]); } catch (NumberFormatException e) { /* fall through */ }
-        }
-        return DEFAULT_CELLPOSE_CELLPROB_THRESHOLD;
+        return SegmentationMethod.cellposeCellprob(segmentationMethod(channelIndex));
     }
 
     /** Returns whether GPU should be used for this Cellpose channel. */
     public boolean getCellposeUseGpu(int channelIndex) {
-        if (!isCellpose(channelIndex)) return DEFAULT_CELLPOSE_USE_GPU;
-        String value = getCellposeKeyValue(channelIndex, "gpu");
-        if (value != null) return !"false".equalsIgnoreCase(value);
-        return DEFAULT_CELLPOSE_USE_GPU;
+        return SegmentationMethod.cellposeUseGpu(segmentationMethod(channelIndex));
     }
 
     /** Returns the optional 0-based Cellpose companion channel index, or -1 when not configured. */
     public int getCellposeSecondChannel(int channelIndex) {
-        if (!isCellpose(channelIndex)) return -1;
-        String value = getCellposeKeyValue(channelIndex, "chan2");
-        if (value == null || value.trim().isEmpty()) return -1;
-        try {
-            return Integer.parseInt(value.trim());
-        } catch (NumberFormatException e) {
-            return -1;
-        }
+        return SegmentationMethod.cellposeChan2(segmentationMethod(channelIndex));
     }
 
-    /**
-     * Parses a key=value pair from the segmentation method string.
-     * Format:
-     * stardist:prob:nms:linking=d:gapClosing=d:frameGap=n:area=min-max:quality=min:intensity=min
-     *
-     * @param channelIndex 0-based channel index
-     * @param key          the key to look for (e.g. "linking", "gapClosing", "frameGap", "area")
-     * @param defaultValue value to return if key is not found
-     * @param firstHalf    for range values like "min-max", true returns min, false returns max
-     */
-    private double getStarDistKeyValue(int channelIndex, String key, double defaultValue, boolean firstHalf) {
-        if (!isStarDist(channelIndex)) return defaultValue;
-        String method = segmentationMethods.get(channelIndex);
-        // Split on ':' — first 3 parts are stardist:prob:nms, rest are key=value pairs
-        String[] parts = method.split(":");
-        for (int i = 3; i < parts.length; i++) {
-            if (parts[i].startsWith(key + "=")) {
-                String val = parts[i].substring(key.length() + 1);
-                if (val.contains("-")) {
-                    String[] range = val.split("-", 2);
-                    try {
-                        if (firstHalf) return Double.parseDouble(range[0]);
-                        else {
-                            if ("Infinity".equalsIgnoreCase(range[1])) return Double.POSITIVE_INFINITY;
-                            return Double.parseDouble(range[1]);
-                        }
-                    } catch (NumberFormatException e) { return defaultValue; }
-                } else {
-                    try { return Double.parseDouble(val); } catch (NumberFormatException e) { return defaultValue; }
-                }
+    public SegmentationMethod segmentationMethod(int channelIndex) {
+        if (channelIndex < 0 || channelIndex >= segmentationMethods.size()) {
+            return SegmentationMethod.classical("classical");
+        }
+        String raw = segmentationMethods.get(channelIndex);
+        if (channelIndex < parsedSegmentationMethods.size()) {
+            SegmentationMethod parsed = parsedSegmentationMethods.get(channelIndex);
+            if (parsed != null && sameToken(raw, parsed.rawToken)) {
+                return parsed;
             }
         }
-        return defaultValue;
+        return SegmentationTokenParser.parseLenient(raw);
     }
 
-    private String getCellposeKeyValue(int channelIndex, String key) {
-        if (!isCellpose(channelIndex) || key == null || key.trim().isEmpty()) return null;
-        String method = segmentationMethods.get(channelIndex);
-        String[] parts = method.split(":");
-        for (int i = 5; i < parts.length; i++) {
-            if (parts[i].startsWith(key + "=")) {
-                return parts[i].substring(key.length() + 1).trim();
-            }
+    public void addSegmentationMethodToken(String token) {
+        segmentationMethods.add(token);
+        parsedSegmentationMethods.add(SegmentationTokenParser.parseLenient(token));
+    }
+
+    public void addSegmentationMethod(SegmentationMethod method) {
+        SegmentationMethod safe = method == null ? SegmentationMethod.classical("classical") : method;
+        segmentationMethods.add(SegmentationTokenParser.format(safe));
+        parsedSegmentationMethods.add(safe);
+    }
+
+    public void setSegmentationMethod(int channelIndex, SegmentationMethod method) {
+        if (channelIndex < 0) return;
+        while (segmentationMethods.size() <= channelIndex) {
+            addSegmentationMethodToken("classical");
         }
-        return null;
+        while (parsedSegmentationMethods.size() <= channelIndex) {
+            parsedSegmentationMethods.add(null);
+        }
+        SegmentationMethod safe = method == null ? SegmentationMethod.classical("classical") : method;
+        segmentationMethods.set(channelIndex, SegmentationTokenParser.format(safe));
+        parsedSegmentationMethods.set(channelIndex, safe);
+    }
+
+    public SegmentationMethod parsedSegmentationMethodForWrite(int channelIndex) {
+        if (channelIndex < 0 || channelIndex >= parsedSegmentationMethods.size()) return null;
+        return parsedSegmentationMethods.get(channelIndex);
+    }
+
+    private static boolean sameToken(String a, String b) {
+        String left = a == null ? "" : a.trim();
+        String right = b == null ? "" : b.trim();
+        return left.equals(right);
     }
 
     public boolean usesZSliceSubset() {

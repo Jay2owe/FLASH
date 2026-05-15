@@ -3,6 +3,9 @@ package flash.pipeline.stardist;
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.image.GpuConcurrency;
 import flash.pipeline.image.ImageOps;
+import flash.pipeline.segmentation.SegmentationMethod;
+import flash.pipeline.segmentation.StarDistLinkingParams;
+import flash.pipeline.segmentation.StarDistPostFilters;
 import de.csbdresden.stardist.StarDist2DModel;
 import ij.IJ;
 import ij.ImagePlus;
@@ -122,6 +125,25 @@ public class StarDist3DRunner {
                 BinConfig.DEFAULT_STARDIST_GAP_CLOSING_MAX_DISTANCE,
                 BinConfig.DEFAULT_STARDIST_MAX_FRAME_GAP,
                 0, Double.POSITIVE_INFINITY, 0, 0);
+    }
+
+    public static ImagePlus run(ImagePlus input, SegmentationMethod method, String channelName) {
+        SegmentationMethod safe = method == null
+                ? SegmentationMethod.classical("classical")
+                : method;
+        StarDistLinkingParams linking = SegmentationMethod.starDistLinking(safe);
+        StarDistPostFilters filters = SegmentationMethod.starDistPostFilters(safe);
+        return run(input,
+                SegmentationMethod.starDistProb(safe),
+                SegmentationMethod.starDistNms(safe),
+                channelName,
+                linking.linkingMaxDistance,
+                linking.gapClosingMaxDistance,
+                linking.maxFrameGap,
+                filters.areaMin,
+                filters.areaMax,
+                filters.qualityMin,
+                filters.intensityMin);
     }
 
     /**

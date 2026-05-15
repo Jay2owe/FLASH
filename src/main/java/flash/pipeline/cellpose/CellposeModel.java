@@ -1,5 +1,8 @@
 package flash.pipeline.cellpose;
 
+import flash.pipeline.segmentation.SegmentationMethod;
+import flash.pipeline.segmentation.SegmentationTokenParser;
+
 public enum CellposeModel {
     CYTO3("cyto3",
             "cyto3",
@@ -63,6 +66,25 @@ public enum CellposeModel {
             }
         }
         return CYTO3;
+    }
+
+    public static String runtimeToken(String tokenOrMethod) {
+        if (tokenOrMethod == null || tokenOrMethod.trim().isEmpty()) {
+            return CYTO3.token();
+        }
+        String trimmed = tokenOrMethod.trim();
+        if (trimmed.startsWith("cellpose:")) {
+            SegmentationMethod method = SegmentationTokenParser.parseLenient(trimmed);
+            if (method.isCellpose()) {
+                return SegmentationMethod.cellposeModelKey(method);
+            }
+        }
+        for (CellposeModel model : values()) {
+            if (model.token.equalsIgnoreCase(trimmed) || model.displayName.equalsIgnoreCase(trimmed)) {
+                return model.token();
+            }
+        }
+        return trimmed;
     }
 
     public static String[] displayNames() {
