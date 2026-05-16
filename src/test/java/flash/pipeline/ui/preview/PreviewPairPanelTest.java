@@ -1,5 +1,6 @@
 package flash.pipeline.ui.preview;
 
+import flash.pipeline.click.ClickStore;
 import ij.ImagePlus;
 import ij.ImageStack;
 import ij.measure.ResultsTable;
@@ -12,7 +13,10 @@ import java.awt.Dimension;
 import java.awt.Frame;
 import java.awt.GraphicsEnvironment;
 import java.awt.GridLayout;
+import java.awt.event.MouseEvent;
 import java.awt.image.IndexColorModel;
+import java.io.File;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.JPanel;
 import javax.swing.JSlider;
@@ -26,7 +30,6 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assume.assumeFalse;
 
 public class PreviewPairPanelTest {
-
     @Test
     public void horizontalSlim_arrangesPreviewsOneByTwo_andHidesPerPanelChrome() {
         PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted",
@@ -431,6 +434,69 @@ public class PreviewPairPanelTest {
     }
 
     @Test
+    public void inlineClickFiresHandlerWhenLabelPresent() throws Exception {
+        ClickStore store = new ClickStore();
+        PreviewPairPanel pair = clickCapturePair(store);
+
+        assertTrue(pair.originalPreviewForTest().hasPixelClickListenerForTest());
+        assertTrue(pair.adjustedPreviewForTest().hasPixelClickListenerForTest());
+
+        pair.adjustedPreviewForTest().firePixelClickForTest(
+                0.0, 0.0, 1, MouseEvent.BUTTON1, 0);
+
+        List<ClickStore.Click> clicks = store.all();
+        assertEquals(1, clicks.size());
+        assertEquals(7, clicks.get(0).label);
+        assertEquals(ClickStore.Verdict.NEGATIVE, clicks.get(0).verdict);
+    }
+
+    @Test
+    public void inlineClickIgnoredWhenNoLabel() throws Exception {
+        ClickStore store = new ClickStore();
+        PreviewPairPanel pair = clickCapturePair(store);
+
+        pair.adjustedPreviewForTest().firePixelClickForTest(
+                1.0, 0.0, 1, MouseEvent.BUTTON1, 0);
+
+        assertTrue(store.all().isEmpty());
+    }
+
+    @Test
+    public void inlineClickWritesToClickStore() throws Exception {
+        ClickStore store = new ClickStore();
+        PreviewPairPanel pair = clickCapturePair(store);
+
+        pair.originalPreviewForTest().firePixelClickForTest(
+                2.0, 1.0, 2, MouseEvent.BUTTON1, MouseEvent.SHIFT_DOWN_MASK);
+
+        List<ClickStore.Click> clicks = store.all();
+        assertEquals(1, clicks.size());
+        ClickStore.Click click = clicks.get(0);
+        assertEquals("Mouse1_LH_SCN", click.imageName);
+        assertEquals(2, click.channelOneBased);
+        assertEquals(11, click.label);
+        assertEquals(2, click.z);
+        assertEquals(2.0, click.x, 0.0001);
+        assertEquals(1.0, click.y, 0.0001);
+        assertEquals(ClickStore.Verdict.POSITIVE, click.verdict);
+
+        pair.originalPreviewForTest().firePixelClickForTest(
+                2.0, 1.0, 2, MouseEvent.BUTTON3, 0);
+
+        assertTrue(store.all().isEmpty());
+    }
+
+    @Test
+    public void clearClickCaptureClearsInlineListeners() throws Exception {
+        PreviewPairPanel pair = clickCapturePair(new ClickStore());
+
+        pair.clearClickCapture();
+
+        assertFalse(pair.originalPreviewForTest().hasPixelClickListenerForTest());
+        assertFalse(pair.adjustedPreviewForTest().hasPixelClickListenerForTest());
+    }
+
+    @Test
     public void objectOverlayDefersRerenderWhileDisplayRangeSliderIsAdjusting() {
         PreviewPairPanel pair = new PreviewPairPanel("Filtered", "Objects");
         ByteProcessor sourceProcessor = new ByteProcessor(4, 1);
@@ -786,6 +852,47 @@ public class PreviewPairPanelTest {
         processor.set(0, 0, lowValue);
         processor.set(1, 0, highValue);
         return new ImagePlus(title, processor);
+    }
+
+    private PreviewPairPanel clickCapturePair(ClickStore store) throws Exception {
+        PreviewPairPanel pair = new PreviewPairPanel("Filtered", "Objects");
+        pair.setClickCapture(newClickBinFolder(), store, "Mouse1_LH_SCN", 2);
+        ImagePlus raw = clickSource("raw");
+        ImagePlus filtered = clickSource("filtered");
+        ImagePlus labels = clickLabels("Object labels");
+        pair.setOriginal(filtered);
+        pair.setLargePreviewImages(raw, filtered, labels);
+        pair.setAdjusted(labels);
+        return pair;
+    }
+
+    private static File newClickBinFolder() {
+        File dir = new File("target/test-click-capture/" + System.nanoTime());
+        assertTrue(dir.mkdirs() || dir.isDirectory());
+        return dir;
+    }
+
+    private static ImagePlus clickSource(String title) {
+        ImageStack stack = new ImageStack(3, 2);
+        for (int i = 0; i < 2; i++) {
+            ByteProcessor processor = new ByteProcessor(3, 2);
+            processor.set(0, 0, 50);
+            processor.set(2, 1, 100);
+            stack.addSlice(processor);
+        }
+        return new ImagePlus(title, stack);
+    }
+
+    private static ImagePlus clickLabels(String title) {
+        ImageStack stack = new ImageStack(3, 2);
+        ByteProcessor first = new ByteProcessor(3, 2);
+        first.set(0, 0, 7);
+        first.set(1, 0, 0);
+        stack.addSlice(first);
+        ByteProcessor second = new ByteProcessor(3, 2);
+        second.set(2, 1, 11);
+        stack.addSlice(second);
+        return new ImagePlus(title, stack);
     }
 
     private static int blend(int base, int overlay, double alpha) {

@@ -346,6 +346,18 @@ public final class ImagePreviewPanel extends JPanel {
         return objectSizeGuide;
     }
 
+    boolean hasPixelClickListenerForTest() {
+        return pixelClickListener != null;
+    }
+
+    void firePixelClickForTest(double imageX, double imageY,
+                               int z, int button, int modifiers) {
+        PixelClickListener listener = pixelClickListener;
+        if (listener != null) {
+            listener.pixelClicked(this, imageX, imageY, z, button, modifiers);
+        }
+    }
+
     private boolean hasUsableImage() {
         return hasUsableImage(image);
     }

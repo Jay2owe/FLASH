@@ -1,6 +1,5 @@
 package flash.pipeline.ui.preview;
 
-import flash.pipeline.objects.LabelIndex;
 import ij.ImagePlus;
 
 import javax.swing.BorderFactory;
@@ -18,7 +17,6 @@ import java.awt.GraphicsEnvironment;
 import java.awt.GridLayout;
 import java.awt.Rectangle;
 import java.awt.Window;
-import java.awt.event.MouseEvent;
 
 public final class LargePreviewDialog extends JDialog {
 
@@ -375,14 +373,16 @@ public final class LargePreviewDialog extends JDialog {
     }
 
     private void dispatchObjectClick(double x, double y, int z, int button, int modifiers) {
-        if (objectClickListener == null || objectLabelImage == null) return;
-        int label = LabelIndex.getLabelAt(objectLabelImage, (int) x, (int) y, z);
-        if (label <= 0) return;
-        boolean clear = button == MouseEvent.BUTTON3;
-        boolean left = button == MouseEvent.BUTTON1;
-        if (!clear && !left) return;
-        boolean positive = left && (modifiers & MouseEvent.SHIFT_DOWN_MASK) != 0;
-        objectClickListener.objectClicked(label, z, x, y, positive, clear);
+        if (objectClickListener == null) return;
+        ObjectClickDispatcher.dispatch(objectLabelImage, x, y, z, button, modifiers,
+                new ObjectClickDispatcher.Handler() {
+                    @Override public void objectClicked(int label, int clickZ,
+                                                        double clickX, double clickY,
+                                                        boolean positive, boolean clear) {
+                        objectClickListener.objectClicked(label, clickZ, clickX, clickY,
+                                positive, clear);
+                    }
+                });
     }
 
     private void wireSourceControls() {

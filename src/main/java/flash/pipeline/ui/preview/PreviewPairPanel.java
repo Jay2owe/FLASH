@@ -538,6 +538,7 @@ public final class PreviewPairPanel extends JPanel {
         clickImageName = imageName == null ? "" : imageName;
         clickChannelOneBased = Math.max(0, channelOneBased);
         wireLargeObjectClickListener();
+        wireInlineObjectClickListener();
         applyClickOverlayMarkers();
     }
 
@@ -548,6 +549,7 @@ public final class PreviewPairPanel extends JPanel {
         clickImageName = "";
         clickChannelOneBased = 0;
         wireLargeObjectClickListener();
+        clearInlineObjectClickListener();
     }
 
     public boolean objectOverlaySelected() {
@@ -1146,6 +1148,38 @@ public final class PreviewPairPanel extends JPanel {
                 handleLargeObjectClick(label, z, x, y, positive, clear);
             }
         });
+    }
+
+    private void wireInlineObjectClickListener() {
+        if (!clickCaptureAvailable()) {
+            clearInlineObjectClickListener();
+            return;
+        }
+        ImagePreviewPanel.PixelClickListener listener = new ImagePreviewPanel.PixelClickListener() {
+            @Override public void pixelClicked(ImagePreviewPanel src, double imageX, double imageY,
+                                               int z, int button, int modifiers) {
+                dispatchInlineObjectClick(imageX, imageY, z, button, modifiers);
+            }
+        };
+        originalPreview.setPixelClickListener(listener);
+        adjustedPreview.setPixelClickListener(listener);
+    }
+
+    private void clearInlineObjectClickListener() {
+        originalPreview.setPixelClickListener(null);
+        adjustedPreview.setPixelClickListener(null);
+    }
+
+    private void dispatchInlineObjectClick(double x, double y, int z,
+                                           int button, int modifiers) {
+        ObjectClickDispatcher.dispatch(largePreviewThirdImage, x, y, z, button, modifiers,
+                new ObjectClickDispatcher.Handler() {
+                    @Override public void objectClicked(int label, int clickZ,
+                                                        double clickX, double clickY,
+                                                        boolean positive, boolean clear) {
+                        handleLargeObjectClick(label, clickZ, clickX, clickY, positive, clear);
+                    }
+                });
     }
 
     private void wireComparisonDialog() {
