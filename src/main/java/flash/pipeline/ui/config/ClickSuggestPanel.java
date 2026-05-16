@@ -16,6 +16,7 @@ import javax.swing.JTextField;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Cursor;
+import java.awt.Font;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
@@ -88,6 +89,7 @@ final class ClickSuggestPanel extends JPanel {
     static final class Suggestion {
         final List<FieldSuggestion> fields;
         final String message;
+        final String hint;
         final Runnable applyAction;
         final Runnable revertAction;
 
@@ -95,10 +97,19 @@ final class ClickSuggestPanel extends JPanel {
                    String message,
                    Runnable applyAction,
                    Runnable revertAction) {
+            this(fields, message, "", applyAction, revertAction);
+        }
+
+        Suggestion(List<FieldSuggestion> fields,
+                   String message,
+                   String hint,
+                   Runnable applyAction,
+                   Runnable revertAction) {
             this.fields = fields == null
                     ? Collections.<FieldSuggestion>emptyList()
                     : Collections.unmodifiableList(new ArrayList<FieldSuggestion>(fields));
             this.message = message == null ? "" : message;
+            this.hint = hint == null ? "" : hint;
             this.applyAction = applyAction;
             this.revertAction = revertAction;
         }
@@ -111,6 +122,7 @@ final class ClickSuggestPanel extends JPanel {
     private final ToggleListener toggleListener;
     private final ToggleSwitch toggle;
     private final JLabel statusLabel;
+    private final JLabel hintLabel;
     private final JButton suggestButton;
     private final JButton applyButton;
     private final JButton revertButton;
@@ -203,6 +215,14 @@ final class ClickSuggestPanel extends JPanel {
         row.add(revertButton, gbc);
         add(row);
 
+        hintLabel = new JLabel(" ");
+        hintLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        hintLabel.setForeground(FlashTheme.TEXT_HELP);
+        hintLabel.setFont(hintLabel.getFont().deriveFont(Font.ITALIC,
+                Math.max(10.0f, hintLabel.getFont().getSize2D() - 1.0f)));
+        hintLabel.setVisible(false);
+        add(hintLabel);
+
         refreshTimer = new javax.swing.Timer(1000, e -> refreshCounts());
         refreshTimer.setRepeats(true);
         addHierarchyListener(new HierarchyListener() {
@@ -235,7 +255,7 @@ final class ClickSuggestPanel extends JPanel {
             return;
         }
         Suggestion suggestion = suggestionProvider == null ? null : suggestionProvider.suggest();
-        if (suggestion == null || suggestion.fields.isEmpty()) {
+        if (suggestion == null || (suggestion.fields.isEmpty() && !hasText(suggestion.hint))) {
             statusLabel.setText("No clear suggestion - try clicking more bad objects.");
             return;
         }
@@ -247,9 +267,12 @@ final class ClickSuggestPanel extends JPanel {
             field.binding.set(field.value);
             highlight(field.binding.component);
         }
-        statusLabel.setText(suggestion.message);
-        applyButton.setVisible(true);
-        revertButton.setVisible(true);
+        statusLabel.setText(hasText(suggestion.message) ? suggestion.message
+                : "No clear suggestion - try clicking more bad objects.");
+        setHintText(suggestion.hint);
+        boolean actionable = !suggestion.fields.isEmpty();
+        applyButton.setVisible(actionable);
+        revertButton.setVisible(actionable);
         revalidate();
         repaint();
     }
@@ -277,6 +300,7 @@ final class ClickSuggestPanel extends JPanel {
             revertOriginalValues();
         }
         restoreBackgrounds();
+        setHintText("");
         pendingSuggestion = null;
         originalValues = Collections.emptyList();
         applyButton.setVisible(false);
@@ -327,6 +351,7 @@ final class ClickSuggestPanel extends JPanel {
         Counts counts = safeCounts();
         boolean active = toggle.isSelected();
         suggestButton.setEnabled(active && counts.negative >= 3);
+        if (pendingSuggestion != null) return;
         if (active) {
             String suffix = counts.negative < 3 ? ". Need 3 negatives." : ".";
             statusLabel.setText("clicked: " + counts.negative + " negative, "
@@ -339,6 +364,20 @@ final class ClickSuggestPanel extends JPanel {
     private Counts safeCounts() {
         Counts counts = countsProvider == null ? null : countsProvider.counts();
         return counts == null ? new Counts(0, 0) : counts;
+    }
+
+    private void setHintText(String hint) {
+        if (hasText(hint)) {
+            hintLabel.setText(hint);
+            hintLabel.setVisible(true);
+        } else {
+            hintLabel.setText(" ");
+            hintLabel.setVisible(false);
+        }
+    }
+
+    private static boolean hasText(String text) {
+        return text != null && text.trim().length() > 0;
     }
 
     private void updateTimerState() {

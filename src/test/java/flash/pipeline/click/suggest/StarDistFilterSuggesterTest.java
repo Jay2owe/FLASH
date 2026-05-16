@@ -11,9 +11,11 @@ import org.junit.Test;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 
 public class StarDistFilterSuggesterTest {
 
@@ -68,11 +70,53 @@ public class StarDistFilterSuggesterTest {
         assertFalse(suggestion.hasSuggestion());
     }
 
+    @Test
+    public void populatesHintWhenBadQualityIsFarBelowCurrentMinQuality() {
+        ImagePlus labels = labels(5);
+        labels.setProperty(StarDist3DRunner.OBJECT_STATS_PROPERTY,
+                stats(new double[]{0.1, 0.1, 0.1, 0.9, 0.9},
+                        new double[]{50, 50, 50, 50, 50},
+                        new double[]{10, 10, 10, 10, 10}));
+
+        StarDistFilterSuggester.StarDistSuggestion suggestion = suggest(labels,
+                negatives(c(1, 0), c(2, 1), c(3, 2)), positives(c(5, 4)),
+                Collections.singletonMap("minQuality", Double.valueOf(0.5d)));
+
+        assertFalse(suggestion.hasSuggestion());
+        assertTrue(suggestion.hasHint());
+        assertTrue(suggestion.hint.contains("Quality below current minQuality (0.5)"));
+        assertTrue(suggestion.hint.contains(
+                "Consider raising prob threshold during detection"));
+    }
+
+    @Test
+    public void leavesHintEmptyWhenBadQualityIsCloseToCurrentMinQuality() {
+        ImagePlus labels = labels(5);
+        labels.setProperty(StarDist3DRunner.OBJECT_STATS_PROPERTY,
+                stats(new double[]{0.45, 0.46, 0.44, 0.9, 0.9},
+                        new double[]{50, 50, 50, 50, 50},
+                        new double[]{10, 10, 10, 10, 10}));
+
+        StarDistFilterSuggester.StarDistSuggestion suggestion = suggest(labels,
+                negatives(c(1, 0), c(2, 1), c(3, 2)), positives(c(5, 4)),
+                Collections.singletonMap("minQuality", Double.valueOf(0.5d)));
+
+        assertFalse(suggestion.hasHint());
+        assertTrue(suggestion.hint.length() == 0);
+    }
+
     private static StarDistFilterSuggester.StarDistSuggestion suggest(
             ImagePlus labels, List<ClickStore.Click> negative, List<ClickStore.Click> positive) {
+        return suggest(labels, negative, positive, Collections.<String, Double>emptyMap());
+    }
+
+    private static StarDistFilterSuggester.StarDistSuggestion suggest(
+            ImagePlus labels,
+            List<ClickStore.Click> negative,
+            List<ClickStore.Click> positive,
+            Map<String, Double> currentParams) {
         return new StarDistFilterSuggester().suggest(new SuggestionContext(
-                null, labels, null, negative, positive,
-                Collections.<String, Double>emptyMap()));
+                null, labels, null, negative, positive, currentParams));
     }
 
     private static List<ClickStore.Click> negatives(ClickStore.Click... clicks) {
@@ -89,11 +133,15 @@ public class StarDistFilterSuggesterTest {
     }
 
     private static ImagePlus labels() {
-        ShortProcessor processor = new ShortProcessor(4, 1);
-        for (int x = 0; x < 4; x++) {
+        return labels(4);
+    }
+
+    private static ImagePlus labels(int count) {
+        ShortProcessor processor = new ShortProcessor(count, 1);
+        for (int x = 0; x < count; x++) {
             processor.set(x, 0, x + 1);
         }
-        ImageStack stack = new ImageStack(4, 1);
+        ImageStack stack = new ImageStack(count, 1);
         stack.addSlice(processor);
         return new ImagePlus("labels", stack);
     }

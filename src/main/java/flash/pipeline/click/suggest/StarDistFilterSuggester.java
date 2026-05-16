@@ -13,6 +13,8 @@ import java.util.Set;
 public final class StarDistFilterSuggester
         implements ParameterSuggester<StarDistFilterSuggester.StarDistSuggestion> {
 
+    private static final double LOW_QUALITY_HINT_MARGIN = 0.1d;
+
     public static final class StarDistSuggestion {
         public final Double minQuality;
         public final Double minArea;
@@ -43,8 +45,16 @@ public final class StarDistFilterSuggester
                     || maxArea != null || minIntensity != null;
         }
 
+        public boolean hasHint() {
+            return hint.length() > 0;
+        }
+
         public static StarDistSuggestion none() {
             return new StarDistSuggestion(null, null, null, null, 0, 0, "");
+        }
+
+        static StarDistSuggestion none(String hint) {
+            return new StarDistSuggestion(null, null, null, null, 0, 0, hint);
         }
     }
 
@@ -68,6 +78,7 @@ public final class StarDistFilterSuggester
         if (badLabels.size() < 3) {
             return StarDistSuggestion.none();
         }
+        String hint = lowQualityHint(ctx, rows, badLabels);
 
         List<Candidate> candidates = new ArrayList<Candidate>();
         addIfPresent(candidates, minCandidate(ctx, rows, badLabels, positiveLabels,
@@ -82,9 +93,9 @@ public final class StarDistFilterSuggester
 
         Candidate best = bestCandidate(candidates, badLabels.size());
         if (best == null || best.badRemoved <= 0) {
-            return StarDistSuggestion.none();
+            return StarDistSuggestion.none(hint);
         }
-        return best.toSuggestion();
+        return best.toSuggestion(hint);
     }
 
     private static void addIfPresent(List<Candidate> candidates, Candidate candidate) {
@@ -163,6 +174,26 @@ public final class StarDistFilterSuggester
         candidate.collateralRemoved = SuggestionSupport.countCollateral(
                 allLabels, badLabels, positiveLabels, rule);
         return candidate.badRemoved <= 0 ? null : candidate;
+    }
+
+    private static String lowQualityHint(SuggestionContext ctx,
+                                         Map<Integer, StatRow> rows,
+                                         Set<Integer> badLabels) {
+        double currentMinQuality = SuggestionSupport.current(ctx.currentParams,
+                "minQuality", Double.NaN);
+        if (!SuggestionSupport.finite(currentMinQuality)) return "";
+        double cutoff = currentMinQuality - LOW_QUALITY_HINT_MARGIN;
+        for (Integer label : badLabels) {
+            StatRow row = rows.get(label);
+            double quality = row == null ? Double.NaN : row.quality;
+            if (!SuggestionSupport.finite(quality) || quality >= cutoff) {
+                return "";
+            }
+        }
+        return "All clicked-bad objects have Quality below current minQuality ("
+                + formatNumber(currentMinQuality)
+                + "). Consider raising prob threshold during detection - these may be "
+                + "detection-level noise that minQuality alone cannot remove.";
     }
 
     private static Candidate betterAreaCandidate(Candidate minArea, Candidate maxArea) {
@@ -277,7 +308,7 @@ public final class StarDistFilterSuggester
             return new Candidate(order, metric, value, minimum);
         }
 
-        StarDistSuggestion toSuggestion() {
+        StarDistSuggestion toSuggestion(String hint) {
             Double minQuality = null;
             Double minArea = null;
             Double maxArea = null;
@@ -292,7 +323,16 @@ public final class StarDistFilterSuggester
                 minIntensity = Double.valueOf(value);
             }
             return new StarDistSuggestion(minQuality, minArea, maxArea, minIntensity,
-                    badRemoved, collateralRemoved, "");
+                    badRemoved, collateralRemoved, hint);
         }
+    }
+
+    private static String formatNumber(double value) {
+        if (!Double.isFinite(value)) return String.valueOf(value);
+        double rounded = Math.rint(value);
+        if (Math.abs(value - rounded) < 1.0e-9) {
+            return String.valueOf((long) rounded);
+        }
+        return String.valueOf(value);
     }
 }

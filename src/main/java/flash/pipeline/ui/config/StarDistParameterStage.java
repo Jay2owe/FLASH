@@ -648,7 +648,7 @@ public final class StarDistParameterStage implements ConfigQcStage {
         StarDistFilterSuggester.StarDistSuggestion suggestion =
                 new StarDistFilterSuggester().suggest(new SuggestionContext(
                         filteredSource, labelPreview, null, negatives, positives, params));
-        if (suggestion == null || !suggestion.hasSuggestion()) {
+        if (suggestion == null || (!suggestion.hasSuggestion() && !suggestion.hasHint())) {
             return null;
         }
         List<ClickSuggestPanel.FieldSuggestion> fields =
@@ -673,18 +673,23 @@ public final class StarDistParameterStage implements ConfigQcStage {
                     ClickSuggestPanel.ValueBinding.text("intensity min", intensityMinField),
                     formatNumber(suggestion.minIntensity.doubleValue())));
         }
+        boolean actionable = !fields.isEmpty();
         return new ClickSuggestPanel.Suggestion(fields,
-                suggestionMessage(fields, suggestion.badRemoved, suggestion.collateralRemoved),
-                new Runnable() {
+                actionable
+                        ? suggestionMessage(fields, suggestion.badRemoved,
+                                suggestion.collateralRemoved)
+                        : "No clear StarDist post-filter suggestion.",
+                suggestion.hint,
+                actionable ? new Runnable() {
                     @Override public void run() {
                         applyStarDistSuggestion();
                     }
-                },
-                new Runnable() {
+                } : null,
+                actionable ? new Runnable() {
                     @Override public void run() {
                         if (!refreshObjectFilterPreview()) markPreviewStale(STALE_TEXT);
                     }
-                });
+                } : null);
     }
 
     private void applyStarDistSuggestion() {
