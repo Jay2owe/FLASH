@@ -138,10 +138,42 @@ public final class ObjectAnalysisDetailsWriter {
             boolean spatialAnalysis,
             Map<String, Double> colocThresholds
     ) throws Exception {
+        writeStarDistPerChannel(analysisDetailsDir, binDir, channelName, channelIndex1Based,
+                null, probThresh, nmsThresh, linkingMaxDistance, gapClosingMaxDistance,
+                maxFrameGap, areaMin, areaMax, qualityMin, intensityMin, allChannelNames,
+                spatialAnalysis, colocThresholds);
+    }
+
+    public static void writeStarDistPerChannel(
+            File analysisDetailsDir,
+            File binDir,
+            String channelName,
+            int channelIndex1Based,
+            ModelEntry modelEntry,
+            double probThresh,
+            double nmsThresh,
+            double linkingMaxDistance,
+            double gapClosingMaxDistance,
+            int maxFrameGap,
+            double areaMin,
+            double areaMax,
+            double qualityMin,
+            double intensityMin,
+            String[] allChannelNames,
+            boolean spatialAnalysis,
+            Map<String, Double> colocThresholds
+    ) throws Exception {
         flash.pipeline.io.IoUtils.mustMkdirs(analysisDetailsDir);
 
         File out = new File(analysisDetailsDir, ChannelFilenameCodec.toSafe(channelName) + ".txt");
         String macroText = loadObjectFilterMacro(binDir, channelIndex1Based);
+        String modelSummary = modelSummary(modelEntry,
+                "Versatile (fluorescent nuclei)",
+                SegmentationMethod.DEFAULT_STARDIST_MODEL_KEY,
+                "");
+        String sourceSummary = sourceSummary(modelEntry);
+        String fijiModelChoice = starDistFijiModelChoice(modelEntry, "Versatile (fluorescent nuclei)");
+        String modelFileReference = modelFileReference(modelEntry);
 
         try (Writer w = new OutputStreamWriter(new FileOutputStream(out), StandardCharsets.UTF_8)) {
             w.write("\n");
@@ -159,7 +191,10 @@ public final class ObjectAnalysisDetailsWriter {
             w.write("\n");
             w.write("<Analysis Macro>\n");
             w.write("// Segmentation Method: StarDist 3D\n");
-            w.write("// Model: Versatile (fluorescent nuclei)\n");
+            w.write("// Model: " + modelSummary + "\n");
+            if (!sourceSummary.isEmpty()) {
+                w.write("// Model Source: " + sourceSummary + "\n");
+            }
             w.write("// QC/Sanity Parameters: probThresh=" + formatValue(probThresh)
                     + ", nmsThresh=" + formatValue(nmsThresh)
                     + ", linking=" + formatValue(linkingMaxDistance)
@@ -168,10 +203,17 @@ public final class ObjectAnalysisDetailsWriter {
                     + ", area=" + formatRange(areaMin, areaMax)
                     + ", quality>=" + formatValue(qualityMin)
                     + ", intensity>=" + formatValue(intensityMin) + "\n");
-            w.write("run(\"StarDist 3D\", \"input=" + channelName + "_stardist_input"
-                    + " modelChoice='Versatile (fluorescent nuclei)'"
-                    + " probThresh=" + probThresh
-                    + " nmsThresh=" + nmsThresh + "\");\n");
+            if (!fijiModelChoice.isEmpty()) {
+                w.write("run(\"StarDist 3D\", \"input=" + channelName + "_stardist_input"
+                        + " modelChoice='" + macroQuote(fijiModelChoice) + "'"
+                        + " probThresh=" + probThresh
+                        + " nmsThresh=" + nmsThresh + "\");\n");
+            } else {
+                w.write("// run(\"StarDist 3D\", \"input=" + channelName + "_stardist_input"
+                        + " modelFile='" + macroQuote(modelFileReference) + "'"
+                        + " probThresh=" + probThresh
+                        + " nmsThresh=" + nmsThresh + "\");\n");
+            }
 
             if (allChannelNames != null) {
                 for (String other : allChannelNames) {
@@ -216,10 +258,37 @@ public final class ObjectAnalysisDetailsWriter {
             boolean spatialAnalysis,
             Map<String, Double> colocThresholds
     ) throws Exception {
+        writeCellposePerChannel(analysisDetailsDir, binDir, channelName, channelIndex1Based,
+                null, modelToken, diameter, flowThreshold, cellprobThreshold, useGpu,
+                companionChannelName, allChannelNames, spatialAnalysis, colocThresholds);
+    }
+
+    public static void writeCellposePerChannel(
+            File analysisDetailsDir,
+            File binDir,
+            String channelName,
+            int channelIndex1Based,
+            ModelEntry modelEntry,
+            String modelToken,
+            double diameter,
+            double flowThreshold,
+            double cellprobThreshold,
+            boolean useGpu,
+            String companionChannelName,
+            String[] allChannelNames,
+            boolean spatialAnalysis,
+            Map<String, Double> colocThresholds
+    ) throws Exception {
         flash.pipeline.io.IoUtils.mustMkdirs(analysisDetailsDir);
 
         File out = new File(analysisDetailsDir, ChannelFilenameCodec.toSafe(channelName) + ".txt");
         String macroText = loadObjectFilterMacro(binDir, channelIndex1Based);
+        String modelSummary = modelSummary(modelEntry,
+                modelToken,
+                SegmentationMethod.canonicalCellposeModelKey(modelToken),
+                "");
+        String sourceSummary = sourceSummary(modelEntry);
+        String cliModelToken = cellposeCliModelToken(modelEntry, modelToken);
 
         try (Writer w = new OutputStreamWriter(new FileOutputStream(out), StandardCharsets.UTF_8)) {
             w.write("\n");
@@ -237,7 +306,10 @@ public final class ObjectAnalysisDetailsWriter {
             w.write("\n");
             w.write("<Analysis Macro>\n");
             w.write("// Segmentation Method: Cellpose\n");
-            w.write("// Model: " + modelToken + "\n");
+            w.write("// Model: " + modelSummary + "\n");
+            if (!sourceSummary.isEmpty()) {
+                w.write("// Model Source: " + sourceSummary + "\n");
+            }
             w.write("// Parameters: diameter=" + formatValue(diameter)
                     + ", flowThreshold=" + formatValue(flowThreshold)
                     + ", cellprobThreshold=" + formatValue(cellprobThreshold)
@@ -250,7 +322,7 @@ public final class ObjectAnalysisDetailsWriter {
                 w.write("// Companion channel: " + companionChannelName
                         + " (runner merges the filtered primary and companion stacks before calling Cellpose)\n");
                 w.write("// python -m cellpose --image_path <stack.tif> --savedir <output_dir>"
-                        + " --pretrained_model " + modelToken
+                        + " --pretrained_model " + cliModelToken
                         + " --chan 1 --chan2 2 --channel_axis <derived>"
                         + " --diameter " + diameter
                         + " --flow_threshold " + flowThreshold
@@ -260,7 +332,7 @@ public final class ObjectAnalysisDetailsWriter {
                         + "  // anisotropy derived from image calibration when available\n");
             } else {
                 w.write("// python -m cellpose --image_path <stack.tif> --savedir <output_dir>"
-                        + " --pretrained_model " + modelToken
+                        + " --pretrained_model " + cliModelToken
                         + " --chan 0 --diameter " + diameter
                         + " --flow_threshold " + flowThreshold
                         + " --cellprob_threshold " + cellprobThreshold
@@ -308,6 +380,24 @@ public final class ObjectAnalysisDetailsWriter {
             boolean spatialAnalysis,
             Map<String, Double> colocThresholds
     ) throws Exception {
+        writePerChannel(analysisDetailsDir, binDir, channelName, channelIndex1Based,
+                thresholdToken, particleSizeToken, allChannelNames, spatialAnalysis,
+                colocThresholds, null, null);
+    }
+
+    public static void writePerChannel(
+            File analysisDetailsDir,
+            File binDir,
+            String channelName,
+            int channelIndex1Based,
+            String thresholdToken,
+            String particleSizeToken,
+            String[] allChannelNames,
+            boolean spatialAnalysis,
+            Map<String, Double> colocThresholds,
+            ModelEntry modelEntry,
+            SegmentationMethod segmentationMethod
+    ) throws Exception {
 
         flash.pipeline.io.IoUtils.mustMkdirs(analysisDetailsDir);
 
@@ -327,6 +417,20 @@ public final class ObjectAnalysisDetailsWriter {
 
             w.write("\n");
             w.write("<Analysis Macro>\n");
+            if (segmentationMethod != null && segmentationMethod.isTrainedRf()) {
+                w.write("// Segmentation Method: Trained RF\n");
+                w.write("// Model: " + modelSummary(modelEntry,
+                        SegmentationMethod.trainedRfModelKey(segmentationMethod),
+                        SegmentationMethod.trainedRfModelKey(segmentationMethod),
+                        "Trained RF: ") + "\n");
+                String sourceSummary = sourceSummary(modelEntry);
+                if (!sourceSummary.isEmpty()) {
+                    w.write("// Model Source: " + sourceSummary + "\n");
+                }
+                w.write("// Base Segmentation Method: "
+                        + SegmentationTokenParser.format(SegmentationMethod.trainedRfBase(segmentationMethod))
+                        + "\n");
+            }
             w.write("selectImage(" + channelName + "_filtered);\n");
             w.write("run(\"3D OC Options\", \"volume surface nb_of_obj._voxels nb_of_surf._voxels integrated_density mean_gray_value std_dev_gray_value median_gray_value minimum_gray_value maximum_gray_value centroid mean_distance_to_surface std_dev_distance_to_surface median_distance_to_surface centre_of_mass bounding_box show_masked_image_(redirection_requiered) dots_size=5 font_size=10 show_numbers white_numbers store_results_within_a_table_named_after_the_image_(macro_friendly) redirect_to=[" + channelName + "_unfiltered]\");\n");
             w.write("run(\"3D Objects Counter\", \"threshold=" + thresholdToken + " slice=6 min.=" + minSize + " max.=" + maxSize + " objects statistics summary\");\n");
@@ -379,6 +483,141 @@ public final class ObjectAnalysisDetailsWriter {
         }
 
         return ensureTrailingNewline(NamedFilterLoader.loadDefaultFilter());
+    }
+
+    private static String modelSummary(ModelEntry entry,
+                                       String fallbackDisplayName,
+                                       String fallbackModelKey,
+                                       String prefix) {
+        String display = modelDisplayName(entry, fallbackDisplayName, fallbackModelKey);
+        String key = entry == null ? cleanLine(fallbackModelKey) : cleanLine(entry.modelKey);
+        StringBuilder sb = new StringBuilder();
+        if (prefix != null) {
+            sb.append(prefix);
+        }
+        sb.append(display);
+        if (!key.isEmpty()) {
+            sb.append(" (key=").append(key).append(")");
+        }
+        return sb.toString();
+    }
+
+    private static String modelDisplayName(ModelEntry entry,
+                                           String fallbackDisplayName,
+                                           String fallbackModelKey) {
+        if (entry != null) {
+            String name = cleanLine(entry.name);
+            if (!name.isEmpty()) {
+                return name;
+            }
+            String key = cleanLine(entry.modelKey);
+            if (!key.isEmpty()) {
+                return key;
+            }
+        }
+        String fallback = cleanLine(fallbackDisplayName);
+        if (!fallback.isEmpty()) {
+            return fallback;
+        }
+        fallback = cleanLine(fallbackModelKey);
+        return fallback.isEmpty() ? "Unknown model" : fallback;
+    }
+
+    private static String sourceSummary(ModelEntry entry) {
+        if (entry == null || entry.source == null) {
+            return "";
+        }
+        List<String> parts = new ArrayList<String>();
+        parts.add(sourceLabel(entry.source));
+        if (entry.pretrainedModel.isPresent()) {
+            parts.add("pretrained name=" + cleanLine(entry.pretrainedModel.get()));
+        }
+        if (entry.fijiModelChoice.isPresent()) {
+            parts.add("Fiji model choice=" + cleanLine(entry.fijiModelChoice.get()));
+        }
+        if (entry.filePath.isPresent()) {
+            parts.add("path=" + publicPathReference(entry.filePath.get()));
+        } else if (entry.resourcePath.isPresent()) {
+            parts.add("resource=" + cleanLine(entry.resourcePath.get()));
+        }
+        if (entry.base.isPresent()) {
+            parts.add("base=" + cleanLine(entry.base.get()));
+        }
+        return join(parts, "; ");
+    }
+
+    private static String sourceLabel(ModelEntry.Source source) {
+        if (source == ModelEntry.Source.STOCK_RESOURCE) {
+            return "Fiji stock resource";
+        }
+        if (source == ModelEntry.Source.STOCK_BUILTIN) {
+            return "Fiji built-in";
+        }
+        if (source == ModelEntry.Source.USER_IMPORTED) {
+            return "Custom import";
+        }
+        if (source == ModelEntry.Source.USER_TRAINED) {
+            return "User trained";
+        }
+        return source.jsonValue();
+    }
+
+    private static String starDistFijiModelChoice(ModelEntry entry, String fallback) {
+        if (entry == null) {
+            return cleanLine(fallback);
+        }
+        if (entry.fijiModelChoice.isPresent()) {
+            return cleanLine(entry.fijiModelChoice.get());
+        }
+        return entry.isStock() ? modelDisplayName(entry, fallback, entry.modelKey) : "";
+    }
+
+    private static String modelFileReference(ModelEntry entry) {
+        if (entry == null) {
+            return "";
+        }
+        if (entry.filePath.isPresent()) {
+            return publicPathReference(entry.filePath.get());
+        }
+        if (entry.resourcePath.isPresent()) {
+            return cleanLine(entry.resourcePath.get());
+        }
+        return cleanLine(entry.modelKey);
+    }
+
+    private static String cellposeCliModelToken(ModelEntry entry, String fallbackModelToken) {
+        if (entry != null) {
+            if (entry.pretrainedModel.isPresent()) {
+                return cleanLine(entry.pretrainedModel.get());
+            }
+            if (entry.filePath.isPresent()) {
+                return publicPathReference(entry.filePath.get());
+            }
+        }
+        return cleanLine(fallbackModelToken);
+    }
+
+    private static String publicPathReference(String path) {
+        String clean = cleanLine(path);
+        if (clean.isEmpty()) {
+            return "";
+        }
+        String normalized = clean.replace('\\', '/');
+        boolean absolute = normalized.startsWith("/")
+                || normalized.startsWith("//")
+                || normalized.matches("^[A-Za-z]:/.*");
+        if (!absolute) {
+            return normalized;
+        }
+        int slash = normalized.lastIndexOf('/');
+        String name = slash >= 0 && slash + 1 < normalized.length()
+                ? normalized.substring(slash + 1)
+                : "model";
+        return "${MACHINE_LOCAL}/" + name;
+    }
+
+    private static String macroQuote(String value) {
+        return cleanLine(value).replace("'", "\\'");
     }
 
     private static String readFile(File file) throws Exception {

@@ -71,6 +71,9 @@ import flash.pipeline.segmentation.EnhancedClassicalRunner;
 import flash.pipeline.segmentation.MorphPredicate;
 import flash.pipeline.segmentation.TrainedRfParameters;
 import flash.pipeline.segmentation.TrainedRfRunner;
+import flash.pipeline.segmentation.catalog.ModelCatalog;
+import flash.pipeline.segmentation.catalog.ModelCatalogIO;
+import flash.pipeline.segmentation.catalog.ModelEntry;
 
 import ij.IJ;
 import ij.ImagePlus;
@@ -96,6 +99,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
@@ -906,10 +910,11 @@ public class ThreeDObjectAnalysis implements Analysis {
         objectAnalysisDetailsDir.mkdirs();
 
         File binDir = activeConfigurationDir(directory);
+        ModelCatalog modelCatalog = ModelCatalogIO.read(new File(directory).toPath().toAbsolutePath().normalize());
         try {
             ObjectAnalysisDetailsWriter.writeSegmentationModelsReport(
                     objectAnalysisDetailsDir,
-                    new File(directory),
+                    modelCatalog,
                     cfg.channelNames,
                     cfg.segmentationMethods);
         } catch (Exception e) {
@@ -1029,6 +1034,8 @@ public class ThreeDObjectAnalysis implements Analysis {
                                 binDir,
                                 channelName,
                                 cIndex + 1,
+                                resolvedModelEntry(modelCatalog, cfg.segmentationMethod(cIndex),
+                                        ModelEntry.Engine.STARDIST),
                                 cfg.getStarDistProbThresh(cIndex),
                                 cfg.getStarDistNmsThresh(cIndex),
                                 cfg.getStarDistLinkingMaxDistance(cIndex),
@@ -1053,6 +1060,8 @@ public class ThreeDObjectAnalysis implements Analysis {
                                 binDir,
                                 channelName,
                                 cIndex + 1,
+                                resolvedModelEntry(modelCatalog, cfg.segmentationMethod(cIndex),
+                                        ModelEntry.Engine.CELLPOSE),
                                 cfg.getCellposeModel(cIndex),
                                 cfg.getCellposeDiameter(cIndex),
                                 cfg.getCellposeFlowThreshold(cIndex),
@@ -1081,7 +1090,10 @@ public class ThreeDObjectAnalysis implements Analysis {
                                 sizeTok,
                                 cfg.channelNames.toArray(new String[0]),
                                 runSpatial,
-                                markerThresholds
+                                markerThresholds,
+                                resolvedModelEntry(modelCatalog, cfg.segmentationMethod(cIndex),
+                                        ModelEntry.Engine.SMILE_RF),
+                                cfg.segmentationMethod(cIndex)
                         );
                     }
                 }
@@ -4694,6 +4706,31 @@ public class ThreeDObjectAnalysis implements Analysis {
         String threshold = channelIndex < cfg.channelThresholds.size() ? cfg.channelThresholds.get(channelIndex) : "";
         String size = channelIndex < cfg.channelSizes.size() ? cfg.channelSizes.get(channelIndex) : "";
         return "Segmentation=Classical, Threshold=" + threshold + ", Size=" + size;
+    }
+
+    private static ModelEntry resolvedModelEntry(ModelCatalog catalog,
+                                                 SegmentationMethod method,
+                                                 ModelEntry.Engine expectedEngine) {
+        if (catalog == null || method == null || expectedEngine == null) {
+            return null;
+        }
+        String modelKey = "";
+        if (expectedEngine == ModelEntry.Engine.STARDIST && method.isStarDist()) {
+            modelKey = SegmentationMethod.starDistModelKey(method);
+        } else if (expectedEngine == ModelEntry.Engine.CELLPOSE && method.isCellpose()) {
+            modelKey = SegmentationMethod.cellposeModelKey(method);
+        } else if (expectedEngine == ModelEntry.Engine.SMILE_RF && method.isTrainedRf()) {
+            modelKey = SegmentationMethod.trainedRfModelKey(method);
+        }
+        if (modelKey == null || modelKey.trim().isEmpty()) {
+            return null;
+        }
+        Optional<ModelEntry> found = catalog.get(modelKey.trim());
+        if (!found.isPresent()) {
+            return null;
+        }
+        ModelEntry entry = found.get();
+        return entry.engine == expectedEngine ? entry : null;
     }
 
     /** Build canonical percentage overlap column name stored in each channel CSV. */
