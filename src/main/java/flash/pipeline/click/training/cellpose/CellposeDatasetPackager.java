@@ -169,7 +169,7 @@ public final class CellposeDatasetPackager {
             counters.imagesWritten++;
             for (int z = 1; z <= slices; z++) {
                 String stem = fileStem(clicks.imageName, channelOneBased, z);
-                saveSlice(raw, z, outputDir.resolve(stem + ".tif"), false);
+                saveSlice(raw, channelOneBased, z, outputDir.resolve(stem + ".tif"), false);
                 CorrectedMask mask = correctedMask(labels, z,
                         clicks.negativeLabels, clicks.positiveLabels);
                 saveProcessor(mask.processor, stem + "_masks",
@@ -222,10 +222,10 @@ public final class CellposeDatasetPackager {
         return slices <= 0 ? stackSize : slices;
     }
 
-    private static ImageProcessor sliceProcessor(ImagePlus image, int z) {
+    private static ImageProcessor sliceProcessor(ImagePlus image, int channelOneBased, int z) {
         int index;
         if (image.getNChannels() > 1 || image.getNFrames() > 1) {
-            index = image.getStackIndex(1, z, 1);
+            index = image.getStackIndex(channelOneBased, z, 1);
         } else {
             index = z;
         }
@@ -233,11 +233,31 @@ public final class CellposeDatasetPackager {
         return image.getStack().getProcessor(index);
     }
 
+    private static ImageProcessor labelSliceProcessor(ImagePlus image, int z) {
+        return sliceProcessor(image, 1, z);
+    }
+
+    private static ImageProcessor rawSliceProcessor(ImagePlus image,
+                                                    int channelOneBased,
+                                                    int z) throws IOException {
+        int channel = Math.max(1, channelOneBased);
+        if (image.getNChannels() < channel) {
+            if (image.getNChannels() == 1) {
+                channel = 1;
+            } else {
+                throw new IOException("Raw image '" + image.getTitle()
+                        + "' does not contain channel " + channelOneBased + ".");
+            }
+        }
+        return sliceProcessor(image, channel, z);
+    }
+
     private static void saveSlice(ImagePlus source,
+                                  int channelOneBased,
                                   int z,
                                   Path target,
                                   boolean forceShort) throws IOException {
-        ImageProcessor processor = sliceProcessor(source, z).duplicate();
+        ImageProcessor processor = rawSliceProcessor(source, channelOneBased, z).duplicate();
         if (forceShort) {
             processor = processor.convertToShort(false);
         }
@@ -263,7 +283,7 @@ public final class CellposeDatasetPackager {
                                                int z,
                                                Set<Integer> negativeLabels,
                                                Set<Integer> positiveLabels) {
-        ImageProcessor source = sliceProcessor(labels, z);
+        ImageProcessor source = labelSliceProcessor(labels, z);
         int width = source.getWidth();
         int height = source.getHeight();
         ShortProcessor out = new ShortProcessor(width, height);

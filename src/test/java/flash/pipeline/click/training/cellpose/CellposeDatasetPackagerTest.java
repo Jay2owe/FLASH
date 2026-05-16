@@ -149,6 +149,35 @@ public class CellposeDatasetPackagerTest {
     }
 
     @Test
+    public void rawHyperstackExportHonorsSelectedChannel() throws Exception {
+        Path root = projectRoot();
+        ImagePlus raw = twoChannelRawHyperstack(3, 2, 17, 211);
+        ImagePlus labels = labelStack(3, 2, new int[][][] {
+                { {0, 0, 1} }
+        });
+
+        ClickStore channelTwoStore = new ClickStore();
+        channelTwoStore.add(click("Image1", 2, 1, ClickStore.Verdict.POSITIVE));
+        CellposeDatasetPackager.PackagingResult channelTwoResult =
+                new CellposeDatasetPackager().packageDataset(
+                        root, "channel-two", 2, channelTwoStore,
+                        provider("Image1", raw),
+                        provider("Image1", labels),
+                        "cyto3");
+        assertExportedRawIntensity(channelTwoResult.outputDir.resolve("Image1_C2_z001.tif"), 211);
+
+        ClickStore channelOneStore = new ClickStore();
+        channelOneStore.add(click("Image1", 1, 1, ClickStore.Verdict.POSITIVE));
+        CellposeDatasetPackager.PackagingResult channelOneResult =
+                new CellposeDatasetPackager().packageDataset(
+                        root, "channel-one", 1, channelOneStore,
+                        provider("Image1", raw),
+                        provider("Image1", labels),
+                        "cyto3");
+        assertExportedRawIntensity(channelOneResult.outputDir.resolve("Image1_C1_z001.tif"), 17);
+    }
+
+    @Test
     public void outputDirIsAtomic() throws Exception {
         Path root = projectRoot();
         Path existing = root.resolve("Configuration")
@@ -250,6 +279,29 @@ public class CellposeDatasetPackagerTest {
         return image;
     }
 
+    private static ImagePlus twoChannelRawHyperstack(int width,
+                                                     int height,
+                                                     int channelOneValue,
+                                                     int channelTwoValue) {
+        ImageStack stack = new ImageStack(width, height);
+        stack.addSlice(constantProcessor(width, height, channelOneValue));
+        stack.addSlice(constantProcessor(width, height, channelTwoValue));
+        ImagePlus image = new ImagePlus("raw", stack);
+        image.setDimensions(2, 1, 1);
+        image.setOpenAsHyperStack(true);
+        return image;
+    }
+
+    private static ShortProcessor constantProcessor(int width, int height, int value) {
+        ShortProcessor processor = new ShortProcessor(width, height);
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                processor.set(x, y, value);
+            }
+        }
+        return processor;
+    }
+
     private static ImagePlus labelStack(int width, int height, int[][][] labeledPixelsPerSlice) {
         ImageStack stack = new ImageStack(width, height);
         for (int[][] slicePixels : labeledPixelsPerSlice) {
@@ -271,6 +323,17 @@ public class CellposeDatasetPackagerTest {
     private static long tiffCount(Path dir) throws IOException {
         try (Stream<Path> stream = Files.list(dir)) {
             return stream.filter(path -> path.getFileName().toString().endsWith(".tif")).count();
+        }
+    }
+
+    private static void assertExportedRawIntensity(Path path, int expected) {
+        ImagePlus exported = IJ.openImage(path.toString());
+        try {
+            assertTrue("Expected exported TIFF to load: " + path, exported != null);
+            assertEquals(expected, exported.getProcessor().get(0, 0));
+            assertEquals(expected, exported.getProcessor().get(2, 1));
+        } finally {
+            close(exported);
         }
     }
 
