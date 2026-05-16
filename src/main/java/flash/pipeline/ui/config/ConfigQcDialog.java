@@ -130,6 +130,9 @@ public final class ConfigQcDialog {
         this.previewPair = new PreviewPairPanel(owner, "Original Image", "Adjusted / output preview",
                 PreviewPairPanel.PreviewLayout.HORIZONTAL_SLIM);
         this.dialog = GraphicsEnvironment.isHeadless() ? null : createDialog(owner, modal);
+        if (context != null) {
+            context.setWindowOwner(dialog == null ? owner : dialog);
+        }
         buildContent();
         wireButtons();
         if (dialog != null) {

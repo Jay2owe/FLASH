@@ -7,6 +7,7 @@ import flash.pipeline.naming.ImageNameParser;
 
 import ij.ImagePlus;
 
+import java.awt.Window;
 import java.io.File;
 import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
@@ -62,6 +63,7 @@ public final class ConfigQcContext {
     private final List<String> channelNames;
     private final Map<String, Object> attributes = new HashMap<String, Object>();
     private final FilteredStackCache filteredStackCache;
+    private Window windowOwner;
     private int channelIndex;
     private int currentImageIndex;
     private Integer requestedNextImageIndex;
@@ -116,6 +118,14 @@ public final class ConfigQcContext {
 
     public ClickStore getClickStore() {
         return clickStore;
+    }
+
+    public Window getWindowOwner() {
+        return windowOwner;
+    }
+
+    public void setWindowOwner(Window windowOwner) {
+        this.windowOwner = windowOwner;
     }
 
     public List<ConfigQcImage> getImages() {

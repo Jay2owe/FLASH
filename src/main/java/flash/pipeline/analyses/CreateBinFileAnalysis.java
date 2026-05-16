@@ -6227,9 +6227,16 @@ public class CreateBinFileAnalysis implements Analysis {
                         cellposeBaseTokenForTraining(cfg, channelIndex));
                 workflowRef[0] = workflow;
 
-                return TrainCustomEngineWizard.show(null, workflow);
+                return showTrainCustomEngineWizard(
+                        context == null ? null : context.getWindowOwner(),
+                        workflow);
             }
         };
+    }
+
+    protected boolean showTrainCustomEngineWizard(Window owner,
+                                                  TrainCustomEngineWorkflow workflow) {
+        return TrainCustomEngineWizard.show(owner, workflow);
     }
 
     private ImagePlus createTrainingRawImage(ConfigQcContext context,
