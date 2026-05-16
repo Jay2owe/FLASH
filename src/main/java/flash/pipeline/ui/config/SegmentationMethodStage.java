@@ -2,6 +2,11 @@ package flash.pipeline.ui.config;
 
 import flash.pipeline.help.SetupHelpCatalog;
 import flash.pipeline.help.SetupHelpTopic;
+import flash.pipeline.segmentation.SegmentationMethod;
+import flash.pipeline.segmentation.SegmentationTokenParser;
+import flash.pipeline.segmentation.catalog.ModelCatalog;
+import flash.pipeline.segmentation.catalog.ModelCatalogIO;
+import flash.pipeline.segmentation.catalog.ModelEntry;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import ij.ImagePlus;
 import ij.plugin.Duplicator;
@@ -17,6 +22,7 @@ import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JRadioButton;
+import java.io.File;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
@@ -25,6 +31,8 @@ import java.awt.GridBagLayout;
 import java.awt.Insets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.Optional;
 
 public final class SegmentationMethodStage implements ConfigQcStage {
 
@@ -34,6 +42,7 @@ public final class SegmentationMethodStage implements ConfigQcStage {
     public static final String CELLPOSE = "Cellpose";
     public static final String TRAIN_CUSTOM_ENGINE = SegmentationMethodLauncherModel.TRAIN_CUSTOM_ENGINE;
     public static final String[] OPTIONS = new String[]{CLASSICAL, ENHANCED_CLASSICAL, STARDIST, CELLPOSE};
+    private static final String TRAINED_RF_DISPLAY_PREFIX = "Trained RF: ";
 
     public interface MethodStore {
         String getChoice();
@@ -113,7 +122,11 @@ public final class SegmentationMethodStage implements ConfigQcStage {
         summary.add(help);
         panel.add(summary, BorderLayout.NORTH);
 
-        choicePanel = new MethodChoicePanel(methodStore.getChoice(), false, new Runnable() {
+        String selectedChoice = selectedChoiceFor(methodStore);
+        choicePanel = new MethodChoicePanel(selectedChoice,
+                trainedRfOptionFor(selectedChoice, context),
+                false,
+                new Runnable() {
             @Override public void run() {
                 launchTrainingWizard(context);
             }
@@ -140,6 +153,14 @@ public final class SegmentationMethodStage implements ConfigQcStage {
         String choice = choicePanel == null ? methodStore.getChoice() : choicePanel.selectedChoice();
         if (SegmentationMethodLauncherModel.TRAIN_CUSTOM_ENGINE.equals(choice)) {
             return launchTrainingWizard(context);
+        }
+        if (isTrainedRfChoice(choice)) {
+            methodStore.setMethodToken(choice);
+            if (context != null) {
+                context.requestNextImageIndex(Integer.MAX_VALUE);
+            }
+            setStatus("Segmentation method: " + displayTextForChoice(choice, context) + ".");
+            return true;
         }
         if (!methodStore.selectChoice(choice)) {
             setStatus("Segmentation method was not changed.");
@@ -170,7 +191,8 @@ public final class SegmentationMethodStage implements ConfigQcStage {
         gbc.insets = new Insets(0, 0, 0, 8);
         gbc.anchor = GridBagConstraints.WEST;
 
-        final JLabel current = new JLabel("Current: " + methodStore.getChoice());
+        final JLabel current = new JLabel("Current: "
+                + displayTextForChoice(methodStore.getChoice(), null));
         gbc.gridx = 0;
         gbc.weightx = 1.0;
         gbc.fill = GridBagConstraints.HORIZONTAL;
@@ -199,13 +221,34 @@ public final class SegmentationMethodStage implements ConfigQcStage {
     }
 
     public static String choiceForMethodToken(String methodToken) {
+        SegmentationMethod method = parseMethodToken(methodToken);
+        if (method != null) {
+            if (method.isEnhancedClassical()) return ENHANCED_CLASSICAL;
+            if (method.isStarDist()) return STARDIST;
+            if (method.isCellpose()) return CELLPOSE;
+            if (method.isTrainedRf()) return method.rawToken;
+        }
         if (methodToken != null) {
-            String token = methodToken.trim();
+            String token = methodToken.trim().toLowerCase(Locale.ROOT);
             if (token.startsWith("enhanced_classical")) return ENHANCED_CLASSICAL;
             if (token.startsWith("stardist")) return STARDIST;
             if (token.startsWith("cellpose")) return CELLPOSE;
         }
         return CLASSICAL;
+    }
+
+    static boolean isTrainedRfChoice(String choice) {
+        SegmentationMethod method = parseMethodToken(choice);
+        return method != null && method.isTrainedRf();
+    }
+
+    static String displayTextForChoice(String choice, ConfigQcContext context) {
+        TrainedRfOption option = trainedRfOptionFor(choice, context);
+        if (option != null) {
+            return option.displayText;
+        }
+        String text = choice == null ? "" : choice.trim();
+        return text.isEmpty() ? CLASSICAL : text;
     }
 
     private boolean launchTrainingWizard(ConfigQcContext context) {
@@ -214,19 +257,99 @@ public final class SegmentationMethodStage implements ConfigQcStage {
         if (!applied) {
             methodStore.setMethodToken(previousToken);
             if (choicePanel != null) {
-                choicePanel.select(methodStore.getChoice());
+                choicePanel.select(selectedChoiceFor(methodStore));
             }
             setStatus("Train Custom Engine was cancelled.");
             return false;
         }
         if (choicePanel != null) {
-            choicePanel.select(methodStore.getChoice());
+            String selectedChoice = selectedChoiceFor(methodStore);
+            choicePanel.addTrainedRfOption(trainedRfOptionFor(selectedChoice, context));
+            choicePanel.select(selectedChoice);
         }
         if (context != null) {
             context.requestNextImageIndex(Integer.MAX_VALUE);
         }
         setStatus("Segmentation method: " + methodStore.getMethodToken() + ".");
         return true;
+    }
+
+    private static String selectedChoiceFor(MethodStore methodStore) {
+        if (methodStore == null) return CLASSICAL;
+        String choiceFromToken = choiceForMethodToken(methodStore.getMethodToken());
+        if (!CLASSICAL.equals(choiceFromToken)) {
+            return choiceFromToken;
+        }
+        String choice = methodStore.getChoice();
+        if (ENHANCED_CLASSICAL.equals(choice) || STARDIST.equals(choice)
+                || CELLPOSE.equals(choice) || isTrainedRfChoice(choice)) {
+            return choice.trim();
+        }
+        return CLASSICAL;
+    }
+
+    private static SegmentationMethod parseMethodToken(String methodToken) {
+        String token = methodToken == null ? "" : methodToken.trim();
+        if (token.isEmpty()) return null;
+        try {
+            return SegmentationTokenParser.parse(token);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
+    private static TrainedRfOption trainedRfOptionFor(String choice, ConfigQcContext context) {
+        SegmentationMethod method = parseMethodToken(choice);
+        if (method == null || !method.isTrainedRf()) {
+            return null;
+        }
+        String modelKey = SegmentationMethod.trainedRfModelKey(method);
+        String name = trainedRfModelName(modelKey, context);
+        return new TrainedRfOption(method.rawToken, modelKey, TRAINED_RF_DISPLAY_PREFIX + name);
+    }
+
+    private static String trainedRfModelName(String modelKey, ConfigQcContext context) {
+        String fallback = modelKey == null || modelKey.trim().isEmpty()
+                ? "Unknown model"
+                : modelKey.trim();
+        File projectRoot = context == null ? null : context.getProjectDirectory();
+        if (projectRoot == null) return fallback;
+        try {
+            ModelCatalog catalog = ModelCatalogIO.read(projectRoot.toPath());
+            Optional<ModelEntry> entry = catalog.get(fallback);
+            if (entry.isPresent() && entry.get().name != null
+                    && !entry.get().name.trim().isEmpty()) {
+                return entry.get().name.trim();
+            }
+        } catch (RuntimeException e) {
+            return fallback;
+        }
+        return fallback;
+    }
+
+    private static String trainedRfBody(TrainedRfOption option) {
+        String modelKey = option == null ? "" : option.modelKey;
+        return "Saved Random Forest model from this project's catalog.<br>"
+                + "Model key: " + escapeHtml(modelKey) + ".";
+    }
+
+    private static String escapeHtml(String text) {
+        String value = text == null ? "" : text;
+        return value.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;");
+    }
+
+    private static final class TrainedRfOption {
+        final String choice;
+        final String modelKey;
+        final String displayText;
+
+        TrainedRfOption(String choice, String modelKey, String displayText) {
+            this.choice = choice == null ? "" : choice;
+            this.modelKey = modelKey == null ? "" : modelKey;
+            this.displayText = displayText == null ? TRAINED_RF_DISPLAY_PREFIX + this.modelKey : displayText;
+        }
     }
 
     private void setStatus(String text) {
@@ -292,11 +415,13 @@ public final class SegmentationMethodStage implements ConfigQcStage {
 
     private static final class MethodChoicePanel extends JPanel {
         private final List<JRadioButton> buttons = new ArrayList<JRadioButton>();
+        private final ButtonGroup group;
 
-        MethodChoicePanel(String selectedChoice, boolean includeSessionNote, Runnable launchAction) {
+        MethodChoicePanel(String selectedChoice, TrainedRfOption trainedRfOption,
+                          boolean includeSessionNote, Runnable launchAction) {
             setOpaque(false);
             setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
-            ButtonGroup group = new ButtonGroup();
+            group = new ButtonGroup();
 
             addCard(group, CLASSICAL,
                     "Classical: 3D Objects Counter",
@@ -325,6 +450,10 @@ public final class SegmentationMethodStage implements ConfigQcStage {
                             + "Next step: choose the Cellpose model, expected diameter, detection settings, and GPU option.<br>"
                             + "Best for: whole cells, irregular cell bodies, complex morphology, or markers where thresholding does not separate objects cleanly.<br>"
                             + "Watch out for: very small puncta or simple bright objects may be faster and more reproducible with Classical.");
+            if (trainedRfOption != null) {
+                add(Box.createVerticalStrut(6));
+                addTrainedRfCard(trainedRfOption);
+            }
             add(Box.createVerticalStrut(8));
             javax.swing.JSeparator separator = new javax.swing.JSeparator();
             separator.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -346,6 +475,16 @@ public final class SegmentationMethodStage implements ConfigQcStage {
             }
         }
 
+        void addTrainedRfOption(TrainedRfOption option) {
+            if (option == null || containsChoice(option.choice)) {
+                return;
+            }
+            add(Box.createVerticalStrut(6));
+            addTrainedRfCard(option);
+            revalidate();
+            repaint();
+        }
+
         String selectedChoice() {
             for (JRadioButton button : buttons) {
                 if (button.isSelected()) return button.getActionCommand();
@@ -363,6 +502,19 @@ public final class SegmentationMethodStage implements ConfigQcStage {
             if (!buttons.isEmpty()) {
                 buttons.get(0).setSelected(true);
             }
+        }
+
+        private boolean containsChoice(String choice) {
+            for (JRadioButton button : buttons) {
+                if (button.getActionCommand().equals(choice)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private void addTrainedRfCard(TrainedRfOption option) {
+            addCard(group, option.choice, option.displayText, trainedRfBody(option));
         }
 
         private void addCard(ButtonGroup group, String choice, String title, String body) {
@@ -404,6 +556,7 @@ public final class SegmentationMethodStage implements ConfigQcStage {
             if (ENHANCED_CLASSICAL.equals(choice)) return ENHANCED_CLASSICAL;
             if (STARDIST.equals(choice)) return STARDIST;
             if (CELLPOSE.equals(choice)) return CELLPOSE;
+            if (isTrainedRfChoice(choice)) return choice.trim();
             return CLASSICAL;
         }
     }

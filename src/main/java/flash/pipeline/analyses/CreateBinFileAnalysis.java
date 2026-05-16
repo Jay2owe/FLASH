@@ -8668,7 +8668,7 @@ public class CreateBinFileAnalysis implements Analysis {
         }
 
         @Override public String getChoice() {
-            return segmentationChoiceForMethod(currentToken());
+            return SegmentationMethodStage.choiceForMethodToken(currentToken());
         }
 
         @Override public String getMethodToken() {
@@ -8718,7 +8718,7 @@ public class CreateBinFileAnalysis implements Analysis {
 
         private void rememberCurrentToken() {
             String token = currentToken();
-            rememberedTokens.put(segmentationChoiceForMethod(token), token);
+            rememberedTokens.put(SegmentationMethodStage.choiceForMethodToken(token), token);
         }
 
         private String currentToken() {

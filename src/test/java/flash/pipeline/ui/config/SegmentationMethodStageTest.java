@@ -1,21 +1,32 @@
 package flash.pipeline.ui.config;
 
+import flash.pipeline.segmentation.catalog.ModelCatalog;
+import flash.pipeline.segmentation.catalog.ModelCatalogIO;
+import flash.pipeline.segmentation.catalog.ModelEntry;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import ij.ImagePlus;
 import ij.ImageStack;
 import ij.process.ByteProcessor;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JRadioButton;
+import java.io.File;
 import java.lang.reflect.Field;
 import java.util.Arrays;
+import java.util.Collections;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
 
 public class SegmentationMethodStageTest {
+
+    @Rule
+    public TemporaryFolder temp = new TemporaryFolder();
 
     @Test
     public void lockInStoresChoiceAndMovesStraightToMethodSpecificStage() {
@@ -69,6 +80,47 @@ public class SegmentationMethodStageTest {
     }
 
     @Test
+    public void trainedRfTokenLoadsAsCatalogNamedChoiceAndRoundTripsUnchanged() throws Exception {
+        File projectRoot = temp.newFolder("project");
+        writeSmileRfCatalog(projectRoot, "test_model_key", "Test Microglia RF");
+        String token = "trained_rf:test_model_key:base=classical";
+        TokenStore store = new TokenStore(token);
+        SegmentationMethodStage stage = new SegmentationMethodStage(store);
+        ConfigQcContext context = ConfigQcContext.fromImages(
+                projectRoot,
+                null,
+                null,
+                Collections.<ImagePlus>emptyList(),
+                Arrays.asList("IBA1"),
+                0);
+
+        JComponent controls = stage.buildControls(context, new RecordingActions());
+        JRadioButton selected = selectedRadio(controls);
+
+        assertNotNull(selected);
+        assertEquals(token, selected.getActionCommand());
+        assertEquals("Trained RF: Test Microglia RF", selected.getText());
+        assertNotEquals(SegmentationMethodStage.CLASSICAL, selected.getActionCommand());
+
+        stage.lockIn(context);
+
+        assertEquals(token, store.token);
+    }
+
+    @Test
+    public void selectingClassicalAfterTrainedRfWritesPlainClassical() {
+        String token = "trained_rf:test_model_key:base=classical";
+        TokenStore store = new TokenStore(token);
+        SegmentationMethodStage stage = new SegmentationMethodStage(store);
+        JComponent controls = stage.buildControls(null, new RecordingActions());
+
+        selectRadio(controls, SegmentationMethodStage.CLASSICAL);
+        stage.lockIn(null);
+
+        assertEquals("classical", store.token);
+    }
+
+    @Test
     public void onEnterShowsSelectedChannelInsteadOfChannelOne() throws Exception {
         SegmentationMethodStage stage = new SegmentationMethodStage(new RecordingStore());
         ImagePlus source = twoChannelStack("Image A");
@@ -111,6 +163,23 @@ public class SegmentationMethodStageTest {
             java.awt.Component[] children = ((java.awt.Container) component).getComponents();
             for (int i = 0; i < children.length; i++) {
                 JRadioButton found = findRadio(children[i], actionCommand);
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    private static JRadioButton selectedRadio(java.awt.Component component) {
+        if (component instanceof JRadioButton) {
+            JRadioButton button = (JRadioButton) component;
+            if (button.isSelected()) {
+                return button;
+            }
+        }
+        if (component instanceof java.awt.Container) {
+            java.awt.Component[] children = ((java.awt.Container) component).getComponents();
+            for (int i = 0; i < children.length; i++) {
+                JRadioButton found = selectedRadio(children[i]);
                 if (found != null) return found;
             }
         }
@@ -161,6 +230,25 @@ public class SegmentationMethodStageTest {
         return (ImagePlus) field.get(preview);
     }
 
+    private static void writeSmileRfCatalog(File projectRoot, String modelKey, String name) throws Exception {
+        ModelEntry entry = new ModelEntry(
+                modelKey,
+                name,
+                "Test RF model",
+                ModelEntry.Engine.SMILE_RF,
+                ModelEntry.Source.USER_TRAINED,
+                "files/" + modelKey + "/model.model",
+                null,
+                null,
+                null,
+                null,
+                Collections.<String, Object>emptyMap(),
+                Collections.<String, Object>emptyMap(),
+                false);
+        ModelCatalogIO.writeProject(projectRoot.toPath(),
+                new ModelCatalog(projectRoot.toPath(), Collections.singletonList(entry)));
+    }
+
     private static final class RecordingStore implements SegmentationMethodStage.MethodStore {
         String choice = SegmentationMethodStage.CLASSICAL;
 
@@ -171,6 +259,39 @@ public class SegmentationMethodStageTest {
         @Override public boolean selectChoice(String choice) {
             this.choice = choice;
             return true;
+        }
+    }
+
+    private static final class TokenStore implements SegmentationMethodStage.MethodStore {
+        String token;
+
+        TokenStore(String token) {
+            this.token = token;
+        }
+
+        @Override public String getChoice() {
+            return SegmentationMethodStage.choiceForMethodToken(token);
+        }
+
+        @Override public boolean selectChoice(String choice) {
+            if (SegmentationMethodStage.STARDIST.equals(choice)) {
+                token = "stardist:0.5:0.4";
+            } else if (SegmentationMethodStage.CELLPOSE.equals(choice)) {
+                token = "cellpose:30.0:0.4:0.0";
+            } else if (SegmentationMethodStage.ENHANCED_CLASSICAL.equals(choice)) {
+                token = "enhanced_classical:thresh=1:minSize=1:maxSize=10";
+            } else {
+                token = "classical";
+            }
+            return true;
+        }
+
+        @Override public String getMethodToken() {
+            return token;
+        }
+
+        @Override public void setMethodToken(String methodToken) {
+            token = methodToken;
         }
     }
 
