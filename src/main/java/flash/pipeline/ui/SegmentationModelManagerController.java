@@ -13,6 +13,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.LinkedHashSet;
 
 /**
  * Testable controller for the segmentation model manager dialog.
@@ -45,6 +48,13 @@ public final class SegmentationModelManagerController {
 
     public synchronized List<ModelEntry> list(ModelEntry.Engine engineFilter,
                                               ModelEntry.Source sourceFilter) {
+        return list(engineFilter, sourceFilter, null);
+    }
+
+    public synchronized List<ModelEntry> list(ModelEntry.Engine engineFilter,
+                                              ModelEntry.Source sourceFilter,
+                                              String tagFilter) {
+        String tag = clean(tagFilter);
         List<ModelEntry> out = new ArrayList<ModelEntry>();
         for (ModelEntry entry : catalog.all()) {
             if (engineFilter != null && entry.engine != engineFilter) {
@@ -53,9 +63,27 @@ public final class SegmentationModelManagerController {
             if (sourceFilter != null && entry.source != sourceFilter) {
                 continue;
             }
+            if (tag != null && !entry.tags.contains(tag)) {
+                continue;
+            }
             out.add(entry);
         }
         return Collections.unmodifiableList(out);
+    }
+
+    public synchronized List<String> allTags(ModelEntry.Engine engineFilter,
+                                             ModelEntry.Source sourceFilter) {
+        TreeSet<String> tags = new TreeSet<String>();
+        for (ModelEntry entry : catalog.all()) {
+            if (engineFilter != null && entry.engine != engineFilter) {
+                continue;
+            }
+            if (sourceFilter != null && entry.source != sourceFilter) {
+                continue;
+            }
+            tags.addAll(entry.tags);
+        }
+        return Collections.unmodifiableList(new ArrayList<String>(tags));
     }
 
     public boolean canEdit(ModelEntry entry) {
@@ -130,6 +158,15 @@ public final class SegmentationModelManagerController {
                                         String description,
                                         Map<String, Object> defaults)
             throws IOException {
+        return edit(modelKey, displayName, description, defaults, null);
+    }
+
+    public synchronized ModelEntry edit(String modelKey,
+                                        String displayName,
+                                        String description,
+                                        Map<String, Object> defaults,
+                                        Set<String> tags)
+            throws IOException {
         ModelEntry existing = requireEntry(modelKey);
         if (!canEdit(existing)) {
             throw new IOException("Stock model entries are read-only.");
@@ -141,6 +178,7 @@ public final class SegmentationModelManagerController {
                 existing.engine, existing.source, value(existing.filePath),
                 value(existing.resourcePath), value(existing.pretrainedModel),
                 value(existing.fijiModelChoice), value(existing.base),
+                tags == null ? existing.tags : normalizeTags(tags),
                 defaults == null ? existing.defaults : defaults,
                 metadata, existing.supportsSecondChannel);
 
@@ -261,5 +299,18 @@ public final class SegmentationModelManagerController {
         return input == null
                 ? new LinkedHashMap<String, Object>()
                 : new LinkedHashMap<String, Object>(input);
+    }
+
+    static Set<String> normalizeTags(Set<String> requested) {
+        LinkedHashSet<String> out = new LinkedHashSet<String>();
+        if (requested != null) {
+            for (String tag : requested) {
+                String cleaned = clean(tag);
+                if (cleaned != null) {
+                    out.add(cleaned);
+                }
+            }
+        }
+        return Collections.unmodifiableSet(out);
     }
 }

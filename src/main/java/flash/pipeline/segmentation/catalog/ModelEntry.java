@@ -8,6 +8,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
+import java.util.LinkedHashSet;
 
 /**
  * Immutable description of a segmentation model known to a FLASH project.
@@ -80,6 +82,8 @@ public final class ModelEntry {
     public final Optional<String> pretrainedModel;
     public final Optional<String> fijiModelChoice;
     public final Optional<String> base;
+    public final String baseToken;
+    public final Set<String> tags;
     public final Map<String, Object> defaults;
     public final Map<String, Object> metadata;
     public final boolean supportsSecondChannel;
@@ -97,6 +101,25 @@ public final class ModelEntry {
                       Map<String, Object> defaults,
                       Map<String, Object> metadata,
                       boolean supportsSecondChannel) {
+        this(modelKey, name, description, engine, source, filePath, resourcePath,
+                pretrainedModel, fijiModelChoice, base, null, defaults, metadata,
+                supportsSecondChannel);
+    }
+
+    public ModelEntry(String modelKey,
+                      String name,
+                      String description,
+                      Engine engine,
+                      Source source,
+                      String filePath,
+                      String resourcePath,
+                      String pretrainedModel,
+                      String fijiModelChoice,
+                      String base,
+                      Set<String> tags,
+                      Map<String, Object> defaults,
+                      Map<String, Object> metadata,
+                      boolean supportsSecondChannel) {
         this.modelKey = modelKey;
         this.name = name;
         this.description = description;
@@ -107,6 +130,8 @@ public final class ModelEntry {
         this.pretrainedModel = optionalString(pretrainedModel);
         this.fijiModelChoice = optionalString(fijiModelChoice);
         this.base = optionalString(base);
+        this.baseToken = value(this.base);
+        this.tags = freezeTags(tags);
         this.defaults = freezeMap(defaults);
         this.metadata = freezeMap(metadata);
         this.supportsSecondChannel = supportsSecondChannel;
@@ -119,7 +144,7 @@ public final class ModelEntry {
     public ModelEntry withFilePath(String newFilePath) {
         return new ModelEntry(modelKey, name, description, engine, source,
                 newFilePath, value(resourcePath), value(pretrainedModel),
-                value(fijiModelChoice), value(base), defaults, metadata,
+                value(fijiModelChoice), value(base), tags, defaults, metadata,
                 supportsSecondChannel);
     }
 
@@ -135,6 +160,7 @@ public final class ModelEntry {
         putIfPresent(out, "pretrainedModel", value(pretrainedModel));
         putIfPresent(out, "fijiModelChoice", value(fijiModelChoice));
         putIfPresent(out, "base", value(base));
+        if (!tags.isEmpty()) out.put("tags", new ArrayList<String>(tags));
         if (!defaults.isEmpty()) out.put("defaults", defaults);
         if (!metadata.isEmpty()) out.put("metadata", metadata);
         out.put("supportsSecondChannel", Boolean.valueOf(supportsSecondChannel));
@@ -155,6 +181,7 @@ public final class ModelEntry {
                 && Objects.equals(pretrainedModel, that.pretrainedModel)
                 && Objects.equals(fijiModelChoice, that.fijiModelChoice)
                 && Objects.equals(base, that.base)
+                && Objects.equals(tags, that.tags)
                 && Objects.equals(defaults, that.defaults)
                 && Objects.equals(metadata, that.metadata)
                 && supportsSecondChannel == that.supportsSecondChannel;
@@ -163,7 +190,7 @@ public final class ModelEntry {
     @Override
     public int hashCode() {
         return Objects.hash(modelKey, name, description, engine, source, filePath,
-                resourcePath, pretrainedModel, fijiModelChoice, base, defaults,
+                resourcePath, pretrainedModel, fijiModelChoice, base, tags, defaults,
                 metadata, Boolean.valueOf(supportsSecondChannel));
     }
 
@@ -199,6 +226,19 @@ public final class ModelEntry {
             }
         }
         return Collections.unmodifiableMap(out);
+    }
+
+    private static Set<String> freezeTags(Set<String> input) {
+        LinkedHashSet<String> out = new LinkedHashSet<String>();
+        if (input != null) {
+            for (String tag : input) {
+                String cleaned = tag == null ? "" : tag.trim();
+                if (!cleaned.isEmpty()) {
+                    out.add(cleaned);
+                }
+            }
+        }
+        return Collections.unmodifiableSet(out);
     }
 
     @SuppressWarnings("unchecked")

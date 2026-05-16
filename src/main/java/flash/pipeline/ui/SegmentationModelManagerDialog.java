@@ -19,7 +19,10 @@ import javax.swing.JTextField;
 import javax.swing.ListSelectionModel;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import javax.swing.table.DefaultTableModel;
+import javax.swing.table.TableCellRenderer;
 import java.awt.BorderLayout;
+import java.awt.Color;
+import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Window;
@@ -27,9 +30,11 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Project-scoped manager for custom segmentation model catalog entries.
@@ -41,12 +46,14 @@ public final class SegmentationModelManagerDialog extends PipelineDialog {
     private final SegmentationModelManagerController controller;
     private final JComboBox<String> engineFilter;
     private final JComboBox<String> sourceFilter;
+    private final JComboBox<String> tagFilter;
     private final DefaultTableModel tableModel;
     private final JTable table;
     private final JTextArea detailsArea;
     private final JButton editButton;
     private final JButton deleteButton;
     private List<ModelEntry> visibleEntries = new ArrayList<ModelEntry>();
+    private boolean updatingTagFilter;
 
     public SegmentationModelManagerDialog(Path projectRoot) {
         this(null, projectRoot, null);
@@ -92,6 +99,9 @@ public final class SegmentationModelManagerDialog extends PipelineDialog {
                 ModelEntry.Source.USER_TRAINED.jsonValue()
         });
         filters.add(sourceFilter);
+        filters.add(new JLabel("Tag:"));
+        tagFilter = new JComboBox<String>(new String[]{ALL});
+        filters.add(tagFilter);
         addComponent(filters);
 
         tableModel = new DefaultTableModel(new Object[]{"Name", "Engine", "Source", "Date"}, 0) {
@@ -102,6 +112,7 @@ public final class SegmentationModelManagerDialog extends PipelineDialog {
         table = new JTable(tableModel);
         table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         table.setRowHeight(24);
+        table.getColumnModel().getColumn(0).setCellRenderer(new NameTagRenderer());
         table.getColumnModel().getColumn(0).setPreferredWidth(340);
         table.getColumnModel().getColumn(1).setPreferredWidth(90);
         table.getColumnModel().getColumn(2).setPreferredWidth(150);
@@ -114,10 +125,16 @@ public final class SegmentationModelManagerDialog extends PipelineDialog {
         actions.setOpaque(false);
         JButton addStarDistButton = new JButton("Add StarDist...");
         JButton addCellposeButton = new JButton("Add Cellpose...");
+        JButton bulkImportButton = new JButton("Bulk import...");
+        JButton exportButton = new JButton("Export catalog...");
+        JButton importButton = new JButton("Import catalog...");
         editButton = new JButton("Edit");
         deleteButton = new JButton("Delete");
         actions.add(addStarDistButton);
         actions.add(addCellposeButton);
+        actions.add(bulkImportButton);
+        actions.add(exportButton);
+        actions.add(importButton);
         actions.add(editButton);
         actions.add(deleteButton);
         addComponent(actions);
@@ -142,6 +159,11 @@ public final class SegmentationModelManagerDialog extends PipelineDialog {
 
         engineFilter.addActionListener(e -> refreshTable(null));
         sourceFilter.addActionListener(e -> refreshTable(null));
+        tagFilter.addActionListener(e -> {
+            if (!updatingTagFilter) {
+                refreshTable(null);
+            }
+        });
         table.getSelectionModel().addListSelectionListener(e -> {
             if (!e.getValueIsAdjusting()) {
                 updateSelectionState();
@@ -149,6 +171,9 @@ public final class SegmentationModelManagerDialog extends PipelineDialog {
         });
         addStarDistButton.addActionListener(e -> addStarDist());
         addCellposeButton.addActionListener(e -> addCellpose());
+        bulkImportButton.addActionListener(e -> bulkImport());
+        exportButton.addActionListener(e -> exportCatalog());
+        importButton.addActionListener(e -> importCatalog());
         editButton.addActionListener(e -> editSelected());
         deleteButton.addActionListener(e -> deleteSelected());
 
@@ -179,12 +204,13 @@ public final class SegmentationModelManagerDialog extends PipelineDialog {
     private void refreshTable(String preferredModelKey) {
         ModelEntry.Engine engine = selectedEngine();
         ModelEntry.Source source = selectedSource();
-        visibleEntries = controller.list(engine, source);
+        refreshTagFilterChoices(engine, source);
+        visibleEntries = controller.list(engine, source, selectedTag());
 
         tableModel.setRowCount(0);
         for (ModelEntry entry : visibleEntries) {
             tableModel.addRow(new Object[]{
-                    displayName(entry),
+                    entry,
                     entry.engine.jsonValue(),
                     sourceLabel(entry),
                     dateLabel(entry)
@@ -241,6 +267,34 @@ public final class SegmentationModelManagerDialog extends PipelineDialog {
             return null;
         }
         return ModelEntry.Source.fromJson(selected.toString());
+    }
+
+    private String selectedTag() {
+        Object selected = tagFilter.getSelectedItem();
+        if (selected == null || ALL.equals(selected.toString())) {
+            return null;
+        }
+        return selected.toString();
+    }
+
+    private void refreshTagFilterChoices(ModelEntry.Engine engine, ModelEntry.Source source) {
+        String selected = selectedTag();
+        List<String> tags = controller.allTags(engine, source);
+        updatingTagFilter = true;
+        try {
+            tagFilter.removeAllItems();
+            tagFilter.addItem(ALL);
+            boolean found = false;
+            for (String tag : tags) {
+                tagFilter.addItem(tag);
+                if (tag.equals(selected)) {
+                    found = true;
+                }
+            }
+            tagFilter.setSelectedItem(found ? selected : ALL);
+        } finally {
+            updatingTagFilter = false;
+        }
     }
 
     private void addStarDist() {
@@ -332,6 +386,8 @@ public final class SegmentationModelManagerDialog extends PipelineDialog {
         final JTextField nameField = dialog.addStringField("Display name", entry.name, 36);
         final JTextField descriptionField = dialog.addStringField("Description",
                 entry.description == null ? "" : entry.description, 44);
+        final JTextField tagsField = dialog.addStringField("Tags",
+                tagsToText(entry.tags), 44);
         final JTextArea defaultsArea = new JTextArea(defaultsToText(entry.defaults), 6, 44);
         defaultsArea.setLineWrap(false);
         JPanel defaultsPanel = new JPanel(new BorderLayout(4, 4));
@@ -346,11 +402,82 @@ public final class SegmentationModelManagerDialog extends PipelineDialog {
         }
         try {
             ModelEntry edited = controller.edit(entry.modelKey, nameField.getText(),
-                    descriptionField.getText(), parseDefaults(defaultsArea.getText()));
+                    descriptionField.getText(), parseDefaults(defaultsArea.getText()),
+                    parseTags(tagsField.getText()));
             setTransientStatus("Saved " + edited.name + ".");
             refreshTable(edited.modelKey);
         } catch (Exception ex) {
             showError("Could not edit model", ex);
+        }
+    }
+
+    private void bulkImport() {
+        JFileChooser chooser = new JFileChooser(projectRoot.toFile());
+        chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+        if (chooser.showOpenDialog(getWindow()) != JFileChooser.APPROVE_OPTION) {
+            return;
+        }
+        try {
+            BulkImportController bulk = new BulkImportController(projectRoot);
+            BulkImportController.Summary summary = bulk.importFolder(chooser.getSelectedFile().toPath());
+            controller.reload();
+            IJ.showMessage("Bulk import", summary.message());
+            setTransientStatus(summary.message());
+            refreshTable(null);
+        } catch (Exception ex) {
+            showError("Could not bulk import models", ex);
+        }
+    }
+
+    private void exportCatalog() {
+        JFileChooser chooser = new JFileChooser(projectRoot.toFile());
+        chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
+        chooser.setFileFilter(new FileNameExtensionFilter("Catalog zip files", "zip"));
+        if (chooser.showSaveDialog(getWindow()) != JFileChooser.APPROVE_OPTION) {
+            return;
+        }
+        try {
+            Path zip = ensureZipExtension(chooser.getSelectedFile().toPath());
+            new CatalogExportController(projectRoot).exportCatalog(zip);
+            setTransientStatus("Exported catalog to " + zip.getFileName() + ".");
+        } catch (Exception ex) {
+            showError("Could not export catalog", ex);
+        }
+    }
+
+    private void importCatalog() {
+        JFileChooser chooser = new JFileChooser(projectRoot.toFile());
+        chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
+        chooser.setFileFilter(new FileNameExtensionFilter("Catalog zip files", "zip"));
+        if (chooser.showOpenDialog(getWindow()) != JFileChooser.APPROVE_OPTION) {
+            return;
+        }
+
+        PipelineDialog dialog = new PipelineDialog(getWindow(), "Import Segmentation Catalog");
+        dialog.addHeader("Import Catalog");
+        dialog.addMessage("Import models from this catalog zip. Matching project keys can be kept or replaced.");
+        final JComboBox<String> conflicts = dialog.addChoice("Conflicts",
+                new String[]{"Keep project entries", "Replace with imported entries"},
+                "Keep project entries");
+        dialog.setPrimaryButtonText("Import");
+        if (!dialog.showDialog()) {
+            return;
+        }
+
+        try {
+            CatalogExportController.ConflictPolicy policy =
+                    "Replace with imported entries".equals(conflicts.getSelectedItem())
+                            ? CatalogExportController.ConflictPolicy.REPLACE_WITH_IMPORTED
+                            : CatalogExportController.ConflictPolicy.KEEP_PROJECT;
+            CatalogExportController.ImportSummary summary =
+                    new CatalogExportController(projectRoot).importCatalog(
+                            chooser.getSelectedFile().toPath(), policy);
+            controller.reload();
+            IJ.showMessage("Import catalog", summary.message());
+            setTransientStatus(summary.message());
+            refreshTable(null);
+        } catch (Exception ex) {
+            showError("Could not import catalog", ex);
         }
     }
 
@@ -399,11 +526,11 @@ public final class SegmentationModelManagerDialog extends PipelineDialog {
         return new File(text).toPath();
     }
 
-    private String displayName(ModelEntry entry) {
+    private static String displayName(ModelEntry entry) {
         if (ModelCatalogIO.isDiscoveredEntry(entry)) {
             return entry.name + " (auto-discovered)";
         }
-        return controller.canEdit(entry) ? entry.name : entry.name + " (stock)";
+        return ModelCatalogIO.isProjectWritableEntry(entry) ? entry.name : entry.name + " (stock)";
     }
 
     private String sourceLabel(ModelEntry entry) {
@@ -470,6 +597,34 @@ public final class SegmentationModelManagerDialog extends PipelineDialog {
         return sb.toString();
     }
 
+    private static String tagsToText(Set<String> tags) {
+        StringBuilder sb = new StringBuilder();
+        if (tags != null) {
+            for (String tag : tags) {
+                if (sb.length() > 0) {
+                    sb.append(", ");
+                }
+                sb.append(tag);
+            }
+        }
+        return sb.toString();
+    }
+
+    private static Set<String> parseTags(String text) {
+        LinkedHashSet<String> out = new LinkedHashSet<String>();
+        if (text == null || text.trim().isEmpty()) {
+            return out;
+        }
+        String[] parts = text.split(",");
+        for (String part : parts) {
+            String tag = part == null ? "" : part.trim();
+            if (!tag.isEmpty()) {
+                out.add(tag);
+            }
+        }
+        return out;
+    }
+
     private static Map<String, Object> parseDefaults(String text) throws IOException {
         Map<String, Object> out = new LinkedHashMap<String, Object>();
         if (text == null || text.trim().isEmpty()) {
@@ -517,8 +672,70 @@ public final class SegmentationModelManagerDialog extends PipelineDialog {
         }
     }
 
+    private static Path ensureZipExtension(Path path) {
+        if (path == null || path.getFileName() == null) {
+            return path;
+        }
+        String text = path.toString();
+        if (text.toLowerCase(java.util.Locale.ROOT).endsWith(".zip")) {
+            return path;
+        }
+        return path.resolveSibling(path.getFileName().toString() + ".zip");
+    }
+
     private static void showError(String title, Exception ex) {
         String message = ex == null ? "Unknown error." : ex.getMessage();
         IJ.showMessage(title, message == null ? ex.toString() : message);
+    }
+
+    private static final class NameTagRenderer extends JPanel implements TableCellRenderer {
+        private static final Color[] TAG_COLORS = new Color[]{
+                new Color(71, 111, 148),
+                new Color(91, 132, 87),
+                new Color(142, 92, 73),
+                new Color(120, 96, 154),
+                new Color(64, 137, 130)
+        };
+
+        NameTagRenderer() {
+            super(new FlowLayout(FlowLayout.LEFT, 4, 2));
+            setOpaque(true);
+        }
+
+        @Override
+        public Component getTableCellRendererComponent(JTable table,
+                                                       Object value,
+                                                       boolean isSelected,
+                                                       boolean hasFocus,
+                                                       int row,
+                                                       int column) {
+            removeAll();
+            Color background = isSelected ? table.getSelectionBackground() : table.getBackground();
+            Color foreground = isSelected ? table.getSelectionForeground() : table.getForeground();
+            setBackground(background);
+
+            ModelEntry entry = value instanceof ModelEntry ? (ModelEntry) value : null;
+            JLabel name = new JLabel(entry == null ? String.valueOf(value) : displayName(entry));
+            name.setForeground(foreground);
+            add(name);
+
+            if (entry != null) {
+                int i = 0;
+                for (String tag : entry.tags) {
+                    JLabel chip = new JLabel(tag);
+                    chip.setOpaque(true);
+                    chip.setBackground(TAG_COLORS[(tag.hashCode() & 0x7fffffff) % TAG_COLORS.length]);
+                    chip.setForeground(Color.WHITE);
+                    chip.setFont(FlashTheme.caption());
+                    chip.setBorder(BorderFactory.createEmptyBorder(1, 5, 1, 5));
+                    add(chip);
+                    i++;
+                    if (i >= 4) {
+                        break;
+                    }
+                }
+            }
+            return this;
+        }
     }
 }

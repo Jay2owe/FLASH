@@ -15,8 +15,10 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Reads and writes the project-scoped segmentation model catalog.
@@ -26,7 +28,7 @@ public final class ModelCatalogIO {
     static final String CONFIGURATION_DIR = "Configuration";
     static final String CATALOG_DIR = "Segmentation Models";
     static final String FILES_DIR = "files";
-    static final String CATALOG_FILENAME = "catalog.json";
+    public static final String CATALOG_FILENAME = "catalog.json";
     static final String STOCK_CATALOG_RESOURCE = "segmentation_models/stock_catalog.json";
     public static final String PROJECT_REGISTERED_METADATA_KEY = "projectRegistered";
     public static final String DISCOVERED_FROM_METADATA_KEY = "discovered_from";
@@ -118,7 +120,15 @@ public final class ModelCatalogIO {
         }
     }
 
-    static Path catalogDirectory(Path projectRoot) {
+    public static List<ModelEntry> readProjectCatalogFile(Path file) throws IOException {
+        if (file == null || !Files.isRegularFile(file)) {
+            throw new IOException("Catalog file does not exist: " + file);
+        }
+        String json = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+        return parseCatalog(json, file.toString(), false);
+    }
+
+    public static Path catalogDirectory(Path projectRoot) {
         return projectRoot.resolve(CONFIGURATION_DIR).resolve(CATALOG_DIR);
     }
 
@@ -264,7 +274,7 @@ public final class ModelCatalogIO {
                 entry.pretrainedModel.isPresent() ? entry.pretrainedModel.get() : null,
                 entry.fijiModelChoice.isPresent() ? entry.fijiModelChoice.get() : null,
                 entry.base.isPresent() ? entry.base.get() : null,
-                entry.defaults, metadata, entry.supportsSecondChannel);
+                entry.tags, entry.defaults, metadata, entry.supportsSecondChannel);
     }
 
     private static List<ModelEntry> parseCatalog(String json, String sourceName, boolean stockCatalog)
@@ -327,9 +337,23 @@ public final class ModelCatalogIO {
                 JsonIO.stringValue(map.get("pretrainedModel")),
                 JsonIO.stringValue(map.get("fijiModelChoice")),
                 JsonIO.stringValue(map.get("base")),
+                copyTags(JsonIO.asList(map.get("tags"))),
                 copyObjectMap(JsonIO.asObject(map.get("defaults"))),
                 copyObjectMap(JsonIO.asObject(map.get("metadata"))),
                 JsonIO.booleanValue(map.get("supportsSecondChannel"), false));
+    }
+
+    private static Set<String> copyTags(List<Object> input) {
+        LinkedHashSet<String> out = new LinkedHashSet<String>();
+        if (input != null) {
+            for (Object item : input) {
+                String tag = item == null ? "" : String.valueOf(item).trim();
+                if (!tag.isEmpty()) {
+                    out.add(tag);
+                }
+            }
+        }
+        return out;
     }
 
     private static Map<String, Object> copyObjectMap(Map<String, Object> input) {

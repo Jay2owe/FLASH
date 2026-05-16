@@ -85,12 +85,7 @@ public final class SegmentationModelImportService {
     }
 
     public String uniqueModelKey(ModelCatalog catalog, ModelEntry.Engine engine, String displayName) {
-        String enginePrefix = engine == null ? "model" : engine.jsonValue();
-        String slug = slug(displayName);
-        if (slug.isEmpty()) {
-            slug = "model";
-        }
-        String base = enginePrefix + "_" + slug;
+        String base = defaultModelKey(engine, displayName);
         String key = base;
         int suffix = 2;
         while (catalog != null && catalog.get(key).isPresent()) {
@@ -98,6 +93,15 @@ public final class SegmentationModelImportService {
             suffix++;
         }
         return key;
+    }
+
+    public String defaultModelKey(ModelEntry.Engine engine, String displayName) {
+        String enginePrefix = engine == null ? "model" : engine.jsonValue();
+        String slug = slug(displayName);
+        if (slug.isEmpty()) {
+            slug = "model";
+        }
+        return enginePrefix + "_" + slug;
     }
 
     private Path requireProjectFile(Path sourceFile, String label) throws IOException {
