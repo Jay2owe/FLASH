@@ -20,7 +20,9 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 public final class Cellpose3DRunner {
     public static final String CELLPROB_IMAGE_PROPERTY = "flash.cellpose.cellprobImage";
@@ -103,24 +105,23 @@ public final class Cellpose3DRunner {
             // GPU permit gate: shared with StarDist so two GPU inferences cannot overlap
             // on a single card by default. Stack/mask I/O stays outside — only the
             // Python subprocess consumes GPU memory.
+            if (dumpCellprob) {
+                return runWithPersistentCellprobDump(inputStackPath, tempDir, input,
+                        runtimeInput, model, diameter, flowThreshold, cellprobThreshold,
+                        useGpu, channelName, projectRoot);
+            }
+
             GpuConcurrency.gpuSemaphore().acquireUninterruptibly();
             try {
                 runCellposeCommand(runtime.pythonPath, inputStackPath, tempDir, model, runtimeInput,
                         runtimeInput != null && runtimeInput.getNChannels() > 1,
                         diameter, flowThreshold, cellprobThreshold, useGpu, channelName,
-                        projectRoot, dumpCellprob);
+                        projectRoot, false);
             } finally {
                 GpuConcurrency.gpuSemaphore().release();
             }
 
-            ImagePlus labelImage = readMaskImage(expectedMaskPath(tempDir), input, channelName);
-            if (labelImage != null && dumpCellprob) {
-                ImagePlus cellprobImage = readCellprobImage(expectedCellprobPath(tempDir));
-                if (cellprobImage != null) {
-                    labelImage.setProperty(CELLPROB_IMAGE_PROPERTY, cellprobImage);
-                }
-            }
-            return labelImage;
+            return readMaskImage(expectedMaskPath(tempDir), input, channelName);
         } catch (Exception e) {
             IJ.log("WARNING: Cellpose failed: " + e.getClass().getSimpleName() + " - " + e.getMessage());
             java.io.StringWriter sw = new java.io.StringWriter();
@@ -136,6 +137,67 @@ public final class Cellpose3DRunner {
             if (tempDir != null) {
                 deleteRecursively(tempDir);
             }
+        }
+    }
+
+    private static ImagePlus runWithPersistentCellprobDump(Path inputStackPath,
+                                                          Path outputDir,
+                                                          ImagePlus referenceInput,
+                                                          ImagePlus runtimeInput,
+                                                          String model,
+                                                          double diameter,
+                                                          double flowThreshold,
+                                                          double cellprobThreshold,
+                                                          boolean useGpu,
+                                                          String channelName,
+                                                          File projectRoot) throws Exception {
+        CellposePersistentWorker worker = new CellposePersistentWorker(
+                inputStackPath,
+                outputDir,
+                referenceInput,
+                runtimeInput,
+                model,
+                useGpu,
+                channelName,
+                projectRoot);
+        try {
+            Future<CellposeWorkerResult> future = worker.submit(new CellposeWorkerRequest(
+                    INPUT_STACK_BASENAME,
+                    diameter,
+                    flowThreshold,
+                    cellprobThreshold,
+                    true));
+            CellposeWorkerResult result;
+            try {
+                result = future.get(CELLPOSE_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            } catch (TimeoutException e) {
+                future.cancel(true);
+                throw new IllegalStateException("Cellpose timed out after "
+                        + CELLPOSE_TIMEOUT_SECONDS + " seconds.", e);
+            }
+            if (result == null || result.hasError()) {
+                throw new IllegalStateException(result == null
+                        ? "Cellpose helper returned no result."
+                        : result.errorText());
+            }
+            ImagePlus labelImage = result.labelImage();
+            if (labelImage != null) {
+                Path cellprobPath = result.cellprobPath().orElse(expectedCellprobPath(outputDir));
+                attachCellprobImage(labelImage, cellprobPath);
+            }
+            return labelImage;
+        } finally {
+            worker.close();
+        }
+    }
+
+    static void attachCellprobImage(ImagePlus labelImage, Path cellprobPath) {
+        if (labelImage == null) {
+            return;
+        }
+        ImagePlus cellprobImage = readCellprobImage(cellprobPath);
+        if (cellprobImage != null) {
+            labelImage.setProperty(CELLPROB_IMAGE_PROPERTY, cellprobImage);
         }
     }
 

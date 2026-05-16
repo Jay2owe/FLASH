@@ -1,5 +1,6 @@
 package flash.pipeline.click.suggest;
 
+import flash.pipeline.cellpose.Cellpose3DRunner;
 import flash.pipeline.click.ClickStore;
 import ij.ImagePlus;
 import ij.ImageStack;
@@ -22,6 +23,19 @@ public class CellposeFilterSuggesterTest {
         ImagePlus cellprob = values(new float[][]{{0.1f, 0.2f, 0.3f, 0.9f}});
 
         CellposeFilterSuggester.CellposeSuggestion suggestion = suggest(labels, cellprob,
+                negatives(c(1, 0), c(2, 1), c(3, 2)), positives(c(4, 3)));
+
+        assertNotNull(suggestion.cellprobThreshold);
+    }
+
+    @Test
+    public void suggestsCellprobWhenImageCarriesRunnerCellprobProperty() {
+        ImagePlus labels = labels(new int[][]{{1, 2, 3, 4}});
+        ImagePlus cellprob = values(new float[][]{{0.1f, 0.2f, 0.3f, 0.9f}});
+        labels.setProperty(Cellpose3DRunner.CELLPROB_IMAGE_PROPERTY, cellprob);
+
+        CellposeFilterSuggester.CellposeSuggestion suggestion = suggest(labels,
+                (ImagePlus) labels.getProperty(Cellpose3DRunner.CELLPROB_IMAGE_PROPERTY),
                 negatives(c(1, 0), c(2, 1), c(3, 2)), positives(c(4, 3)));
 
         assertNotNull(suggestion.cellprobThreshold);
