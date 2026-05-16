@@ -400,10 +400,16 @@ public final class SegmentationModelManagerDialog extends PipelineDialog {
     }
 
     private String displayName(ModelEntry entry) {
+        if (ModelCatalogIO.isDiscoveredEntry(entry)) {
+            return entry.name + " (auto-discovered)";
+        }
         return controller.canEdit(entry) ? entry.name : entry.name + " (stock)";
     }
 
     private String sourceLabel(ModelEntry entry) {
+        if (ModelCatalogIO.isDiscoveredEntry(entry)) {
+            return entry.source.jsonValue() + " (auto-discovered)";
+        }
         if (ModelCatalogIO.isProjectRegisteredBuiltin(entry)) {
             return entry.source.jsonValue() + " (registered)";
         }

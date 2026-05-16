@@ -1,6 +1,7 @@
 package flash.pipeline.segmentation.catalog;
 
 import flash.pipeline.bin.BinConfigIO;
+import flash.pipeline.cellpose.CellposeRegisteredModels;
 import flash.pipeline.ui.wizard.JsonIO;
 import ij.IJ;
 
@@ -28,9 +29,15 @@ public final class ModelCatalogIO {
     static final String CATALOG_FILENAME = "catalog.json";
     static final String STOCK_CATALOG_RESOURCE = "segmentation_models/stock_catalog.json";
     public static final String PROJECT_REGISTERED_METADATA_KEY = "projectRegistered";
+    public static final String DISCOVERED_FROM_METADATA_KEY = "discovered_from";
+    public static final String CELLPOSE_DISCOVERY_SOURCE = "cellpose";
 
     public interface WarningSink {
         void warn(String message);
+    }
+
+    interface DiscoveryProvider {
+        List<ModelEntry> fetch(List<String> existingModelKeys);
     }
 
     private static volatile WarningSink warningSink = new WarningSink() {
@@ -41,6 +48,12 @@ public final class ModelCatalogIO {
             } catch (Throwable ignored) {
                 System.err.println("[FLASH] " + message);
             }
+        }
+    };
+    private static volatile DiscoveryProvider discoveryProvider = new DiscoveryProvider() {
+        @Override
+        public List<ModelEntry> fetch(List<String> existingModelKeys) {
+            return CellposeRegisteredModels.fetch(existingModelKeys);
         }
     };
 
@@ -58,6 +71,7 @@ public final class ModelCatalogIO {
         for (ModelEntry project : readProjectEntries(projectRoot)) {
             putMerged(merged, project, true);
         }
+        mergeDiscoveredEntries(merged);
         return new ModelCatalog(projectRoot, new ArrayList<ModelEntry>(merged.values()));
     }
 
@@ -125,6 +139,15 @@ public final class ModelCatalogIO {
         } : sink;
     }
 
+    static void setDiscoveryProviderForTests(DiscoveryProvider provider) {
+        discoveryProvider = provider == null ? new DiscoveryProvider() {
+            @Override
+            public List<ModelEntry> fetch(List<String> existingModelKeys) {
+                return CellposeRegisteredModels.fetch(existingModelKeys);
+            }
+        } : provider;
+    }
+
     static void validateEntry(ModelEntry entry, boolean requireFileForUserEntries) throws IOException {
         if (entry == null) {
             throw new IOException("Model entry is null.");
@@ -159,7 +182,9 @@ public final class ModelCatalogIO {
     }
 
     public static boolean isProjectWritableEntry(ModelEntry entry) {
-        return entry != null && (!entry.isStock() || isProjectRegisteredBuiltin(entry));
+        return entry != null
+                && !isDiscoveredEntry(entry)
+                && (!entry.isStock() || isProjectRegisteredBuiltin(entry));
     }
 
     public static boolean isProjectRegisteredBuiltin(ModelEntry entry) {
@@ -168,6 +193,14 @@ public final class ModelCatalogIO {
         }
         Object marker = entry.metadata.get(PROJECT_REGISTERED_METADATA_KEY);
         return Boolean.TRUE.equals(marker) || "true".equalsIgnoreCase(String.valueOf(marker));
+    }
+
+    public static boolean isDiscoveredEntry(ModelEntry entry) {
+        if (entry == null) {
+            return false;
+        }
+        Object marker = entry.metadata.get(DISCOVERED_FROM_METADATA_KEY);
+        return marker != null && !String.valueOf(marker).trim().isEmpty();
     }
 
     private static List<ModelEntry> readProjectEntries(Path projectRoot) {
@@ -193,6 +226,45 @@ public final class ModelCatalogIO {
                     + "' overrides a stock model with the same key.");
         }
         merged.put(entry.modelKey, entry);
+    }
+
+    private static void mergeDiscoveredEntries(LinkedHashMap<String, ModelEntry> merged) {
+        DiscoveryProvider provider = discoveryProvider;
+        if (provider == null) {
+            return;
+        }
+        try {
+            List<ModelEntry> discovered = provider.fetch(
+                    new ArrayList<String>(merged.keySet()));
+            if (discovered == null || discovered.isEmpty()) {
+                return;
+            }
+            for (ModelEntry entry : discovered) {
+                if (entry == null || merged.containsKey(entry.modelKey)) {
+                    continue;
+                }
+                merged.put(entry.modelKey, markDiscovered(entry));
+            }
+        } catch (Throwable t) {
+            warn("Cellpose registered model discovery skipped: " + t.getMessage());
+        }
+    }
+
+    private static ModelEntry markDiscovered(ModelEntry entry) {
+        Object marker = entry.metadata.get(DISCOVERED_FROM_METADATA_KEY);
+        if (marker != null && !String.valueOf(marker).trim().isEmpty()) {
+            return entry;
+        }
+        Map<String, Object> metadata = copyObjectMap(entry.metadata);
+        metadata.put(DISCOVERED_FROM_METADATA_KEY, CELLPOSE_DISCOVERY_SOURCE);
+        return new ModelEntry(entry.modelKey, entry.name, entry.description,
+                entry.engine, entry.source,
+                entry.filePath.isPresent() ? entry.filePath.get() : null,
+                entry.resourcePath.isPresent() ? entry.resourcePath.get() : null,
+                entry.pretrainedModel.isPresent() ? entry.pretrainedModel.get() : null,
+                entry.fijiModelChoice.isPresent() ? entry.fijiModelChoice.get() : null,
+                entry.base.isPresent() ? entry.base.get() : null,
+                entry.defaults, metadata, entry.supportsSecondChannel);
     }
 
     private static List<ModelEntry> parseCatalog(String json, String sourceName, boolean stockCatalog)

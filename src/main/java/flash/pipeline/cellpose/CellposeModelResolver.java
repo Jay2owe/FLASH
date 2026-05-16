@@ -6,6 +6,7 @@ import flash.pipeline.segmentation.catalog.ModelEntry;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Optional;
 
 public final class CellposeModelResolver {
@@ -48,6 +49,20 @@ public final class CellposeModelResolver {
                 return Optional.empty();
             }
             return Optional.of(Resolved.builtIn(entry.pretrainedModel.get()));
+        }
+        if (CellposeRegisteredModels.isDiscoveredCellposeEntry(entry)) {
+            if (entry.filePath.isPresent()) {
+                try {
+                    Path path = Paths.get(entry.filePath.get());
+                    if (path.isAbsolute()) {
+                        return Optional.of(Resolved.file(path.toAbsolutePath().normalize().toString()));
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+            if (entry.pretrainedModel.isPresent()) {
+                return Optional.of(Resolved.builtIn(entry.pretrainedModel.get()));
+            }
         }
         try {
             Path resolved = catalog.resolve(entry);

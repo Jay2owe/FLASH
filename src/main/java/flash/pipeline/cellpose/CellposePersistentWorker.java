@@ -39,6 +39,8 @@ public final class CellposePersistentWorker implements Closeable {
 
     private static final String SCRIPT_RESOURCE =
             "/flash/pipeline/cellpose/cellpose_loop.py";
+    private static final String LIST_MODELS_SCRIPT_RESOURCE =
+            "/flash/pipeline/cellpose/list_models.py";
     private static final long READY_TIMEOUT_SECONDS = 30L;
     private static final long CLOSE_TIMEOUT_SECONDS = 5L;
 
@@ -159,6 +161,127 @@ public final class CellposePersistentWorker implements Closeable {
 
     String stderrTailForTest() {
         return stderrTail.text();
+    }
+
+    public static Map<String, Object> listRegisteredModels(final String requestId,
+                                                           long timeout,
+                                                           TimeUnit unit) throws Exception {
+        if (unit == null) {
+            unit = TimeUnit.SECONDS;
+        }
+        long timeoutMs = Math.max(1L, unit.toMillis(timeout));
+        CellposeRuntime.Status status = CellposeRuntime.cachedStatus();
+        if (status == null || !status.ready) {
+            try {
+                status = CellposeRuntime.probeAsync().get(timeoutMs, TimeUnit.MILLISECONDS);
+            } catch (TimeoutException e) {
+                throw new IllegalStateException("Cellpose runtime probe timed out while listing models.", e);
+            }
+        }
+        if (status == null || !status.ready) {
+            String message = status == null ? "Cellpose is not configured." : status.message;
+            throw new IllegalStateException(message);
+        }
+
+        Path script = extractResource(LIST_MODELS_SCRIPT_RESOURCE,
+                "flash_cellpose_list_models_", ".py");
+        final TailBuffer tail = new TailBuffer(80);
+        Process process = null;
+        Thread stderrThread = null;
+        ExecutorService readerExecutor = Executors.newSingleThreadExecutor(new ThreadFactory() {
+            @Override public Thread newThread(Runnable runnable) {
+                Thread thread = new Thread(runnable, "flash-cellpose-list-models-reader");
+                thread.setDaemon(true);
+                return thread;
+            }
+        });
+        try {
+            List<String> command = new ArrayList<String>();
+            command.add(CellposeRuntime.normalizeExecutablePath(status.pythonPath));
+            command.add(script.toString());
+            process = new ProcessBuilder(command).start();
+            final Process running = process;
+            stderrThread = new Thread(new Runnable() {
+                @Override public void run() {
+                    try {
+                        BufferedReader reader = new BufferedReader(new InputStreamReader(
+                                running.getErrorStream(), StandardCharsets.UTF_8));
+                        String line;
+                        while ((line = reader.readLine()) != null) {
+                            tail.add(line);
+                        }
+                    } catch (Exception ignored) {
+                    }
+                }
+            }, "flash-cellpose-list-models-stderr");
+            stderrThread.setDaemon(true);
+            stderrThread.start();
+
+            BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(
+                    process.getOutputStream(), StandardCharsets.UTF_8));
+            Map<String, Object> request = new LinkedHashMap<String, Object>();
+            request.put("id", requestId == null || requestId.trim().isEmpty()
+                    ? "list_models" : requestId);
+            request.put("list_models", Boolean.TRUE);
+            writer.write(JsonIO.write(request));
+            writer.write('\n');
+            writer.flush();
+            writer.close();
+
+            final BufferedReader reader = new BufferedReader(new InputStreamReader(
+                    process.getInputStream(), StandardCharsets.UTF_8));
+            Future<Map<String, Object>> response = readerExecutor.submit(
+                    new Callable<Map<String, Object>>() {
+                        @Override public Map<String, Object> call() throws Exception {
+                            return readProtocolObject(reader, tail);
+                        }
+                    });
+            try {
+                return response.get(timeoutMs, TimeUnit.MILLISECONDS);
+            } catch (TimeoutException e) {
+                response.cancel(true);
+                throw new IllegalStateException("Cellpose registered model listing timed out."
+                        + stderrSuffix(tail), e);
+            }
+        } finally {
+            readerExecutor.shutdownNow();
+            if (process != null) {
+                try {
+                    process.destroy();
+                    if (!process.waitFor(1L, TimeUnit.SECONDS)) {
+                        killProcessTree(process);
+                        process.destroyForcibly();
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    killProcessTree(process);
+                    process.destroyForcibly();
+                }
+                try {
+                    process.getInputStream().close();
+                } catch (Exception ignored) {
+                }
+                try {
+                    process.getErrorStream().close();
+                } catch (Exception ignored) {
+                }
+                try {
+                    process.getOutputStream().close();
+                } catch (Exception ignored) {
+                }
+            }
+            if (stderrThread != null) {
+                try {
+                    stderrThread.join(500L);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+            try {
+                Files.deleteIfExists(script);
+            } catch (Exception ignored) {
+            }
+        }
     }
 
     private void start(Path imagePath,
@@ -337,15 +460,20 @@ public final class CellposePersistentWorker implements Closeable {
     }
 
     private Map<String, Object> readProtocolObject() throws Exception {
+        return readProtocolObject(stdout, stderrTail);
+    }
+
+    private static Map<String, Object> readProtocolObject(BufferedReader stdout,
+                                                          TailBuffer stderrTail) throws Exception {
         while (true) {
             if (stdout == null) {
                 throw new IllegalStateException("Cellpose helper stdout is closed."
-                        + stderrSuffix());
+                        + stderrSuffix(stderrTail));
             }
             String line = stdout.readLine();
             if (line == null) {
                 throw new IllegalStateException("Cellpose helper exited before "
-                        + "writing a protocol response." + stderrSuffix());
+                        + "writing a protocol response." + stderrSuffix(stderrTail));
             }
             String trimmed = line.trim();
             if (trimmed.isEmpty()) {
@@ -405,13 +533,19 @@ public final class CellposePersistentWorker implements Closeable {
     }
 
     private Path extractScript() throws Exception {
+        return extractResource(SCRIPT_RESOURCE, "flash_cellpose_loop_", ".py");
+    }
+
+    private static Path extractResource(String resourcePath,
+                                        String tempPrefix,
+                                        String tempSuffix) throws Exception {
         InputStream in = CellposePersistentWorker.class.getResourceAsStream(
-                SCRIPT_RESOURCE);
+                resourcePath);
         if (in == null) {
             throw new IllegalStateException("Missing bundled Cellpose helper: "
-                    + SCRIPT_RESOURCE);
+                    + resourcePath);
         }
-        Path temp = Files.createTempFile("flash_cellpose_loop_", ".py");
+        Path temp = Files.createTempFile(tempPrefix, tempSuffix);
         try {
             Files.copy(in, temp, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
         } finally {
@@ -424,7 +558,11 @@ public final class CellposePersistentWorker implements Closeable {
     }
 
     private String stderrSuffix() {
-        String tail = stderrTail.text();
+        return stderrSuffix(stderrTail);
+    }
+
+    private static String stderrSuffix(TailBuffer stderrTail) {
+        String tail = stderrTail == null ? "" : stderrTail.text();
         return tail.isEmpty() ? "" : "\nHelper output:\n" + tail;
     }
 
