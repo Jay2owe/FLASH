@@ -40,19 +40,25 @@ import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
 
 public final class PreviewPairPanel extends JPanel {
     private static final String CLICK_ROI_PREFIX = "flash-click:";
     private static final Color CLICK_POSITIVE_COLOR = new Color(25, 180, 80);
     private static final Color CLICK_NEGATIVE_COLOR = new Color(220, 55, 55);
-    private static final ExecutorService CLICK_WRITE_EXECUTOR =
-            Executors.newSingleThreadExecutor(new ThreadFactory() {
-                @Override public Thread newThread(Runnable r) {
-                    Thread thread = new Thread(r, "flash-click-config-writer");
-                    thread.setDaemon(true);
-                    return thread;
-                }
-            });
+    private static final long CLICK_WRITE_FLUSH_TIMEOUT_MILLIS = 2000L;
+    private static final Object CLICK_WRITE_EXECUTOR_LOCK = new Object();
+    private static ExecutorService clickWriteExecutor = newClickWriteExecutor();
+
+    private static ExecutorService newClickWriteExecutor() {
+        return Executors.newSingleThreadExecutor(new ThreadFactory() {
+            @Override public Thread newThread(Runnable r) {
+                Thread thread = new Thread(r, "flash-click-config-writer");
+                thread.setDaemon(true);
+                return thread;
+            }
+        });
+    }
 
     public interface SharedZChangeListener {
         void zSliceChanged(int zSlice);
@@ -133,6 +139,9 @@ public final class PreviewPairPanel extends JPanel {
     private ClickStore clickStore;
     private String clickImageName = "";
     private int clickChannelOneBased;
+    private final Object clickFlushStateLock = new Object();
+    private int clickWriteGeneration;
+    private int clickFlushedGeneration;
     private SharedZChangeListener sharedZChangeListener;
     private DisplaySettingsChangeListener displaySettingsChangeListener;
     private SourceModeChangeListener sourceModeListener;
@@ -537,19 +546,44 @@ public final class PreviewPairPanel extends JPanel {
         clickStore = store;
         clickImageName = imageName == null ? "" : imageName;
         clickChannelOneBased = Math.max(0, channelOneBased);
+        resetClickFlushTracking();
         wireLargeObjectClickListener();
         wireInlineObjectClickListener();
         applyClickOverlayMarkers();
     }
 
     public void clearClickCapture() {
+        flushClicksSync();
         clearClickOverlaysFromKnownImages();
         clickBinFolder = null;
         clickStore = null;
         clickImageName = "";
         clickChannelOneBased = 0;
+        resetClickFlushTracking();
         wireLargeObjectClickListener();
         clearInlineObjectClickListener();
+    }
+
+    public void flushClicksSync() {
+        drainPendingClickWrites();
+        final File binFolder;
+        final ClickStore store;
+        final int generation;
+        synchronized (clickFlushStateLock) {
+            binFolder = clickBinFolder;
+            store = clickStore;
+            generation = clickWriteGeneration;
+            if (binFolder == null || store == null || clickFlushedGeneration >= generation) {
+                return;
+            }
+        }
+        try {
+            ClicksConfigIO.write(binFolder, store);
+            markClickFlushed(binFolder, store, generation);
+        } catch (IOException e) {
+            IJ.log("[FLASH] Warning: could not flush click selections to "
+                    + binFolder.getAbsolutePath() + ": " + e.getMessage());
+        }
     }
 
     public boolean objectOverlaySelected() {
@@ -1407,7 +1441,7 @@ public final class PreviewPairPanel extends JPanel {
                     verdict,
                     System.currentTimeMillis()));
         }
-        scheduleClickWrite();
+        scheduleClickWrite(markClickWriteNeeded());
         applyClickOverlayMarkers();
         updateAdjustedPreviewImage();
         updateLargeImages();
@@ -1422,11 +1456,11 @@ public final class PreviewPairPanel extends JPanel {
                 && !clickImageName.trim().isEmpty();
     }
 
-    private void scheduleClickWrite() {
+    private void scheduleClickWrite(final int generation) {
         final File binFolder = clickBinFolder;
         final ClickStore store = clickStore;
-        if (binFolder == null || store == null) return;
-        CLICK_WRITE_EXECUTOR.execute(new Runnable() {
+        if (binFolder == null || store == null || generation <= 0) return;
+        executeClickWriteTask(new Runnable() {
             @Override public void run() {
                 try {
                     ClicksConfigIO.write(binFolder, store);
@@ -1436,6 +1470,64 @@ public final class PreviewPairPanel extends JPanel {
                 }
             }
         });
+    }
+
+    private int markClickWriteNeeded() {
+        synchronized (clickFlushStateLock) {
+            clickWriteGeneration++;
+            return clickWriteGeneration;
+        }
+    }
+
+    private void markClickFlushed(File binFolder, ClickStore store, int generation) {
+        synchronized (clickFlushStateLock) {
+            if (clickBinFolder == binFolder && clickStore == store
+                    && clickFlushedGeneration < generation) {
+                clickFlushedGeneration = generation;
+            }
+        }
+    }
+
+    private void resetClickFlushTracking() {
+        synchronized (clickFlushStateLock) {
+            clickWriteGeneration = 0;
+            clickFlushedGeneration = 0;
+        }
+    }
+
+    private static void executeClickWriteTask(Runnable task) {
+        if (task == null) return;
+        synchronized (CLICK_WRITE_EXECUTOR_LOCK) {
+            if (clickWriteExecutor == null
+                    || clickWriteExecutor.isShutdown()
+                    || clickWriteExecutor.isTerminated()) {
+                clickWriteExecutor = newClickWriteExecutor();
+            }
+            clickWriteExecutor.execute(task);
+        }
+    }
+
+    private static void drainPendingClickWrites() {
+        final ExecutorService executor;
+        synchronized (CLICK_WRITE_EXECUTOR_LOCK) {
+            executor = clickWriteExecutor;
+            clickWriteExecutor = null;
+        }
+        if (executor == null) return;
+        executor.shutdown();
+        try {
+            if (!executor.awaitTermination(CLICK_WRITE_FLUSH_TIMEOUT_MILLIS,
+                    TimeUnit.MILLISECONDS)) {
+                IJ.log("[FLASH] Warning: timed out waiting for click selections writer.");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            IJ.log("[FLASH] Warning: interrupted while flushing click selections.");
+        }
+    }
+
+    static void drainPendingClickWritesForTest() {
+        drainPendingClickWrites();
     }
 
     private void applyClickOverlayMarkers() {

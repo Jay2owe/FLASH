@@ -677,6 +677,7 @@ public final class ConfigQcDialog {
 
     private void closeWithResult(ConfigQcResult result) {
         this.result = result == null ? ConfigQcResult.CANCEL : result;
+        previewPair.flushClicksSync();
         leaveCurrentStage();
         previewPair.disposeDisplayControlsDialog();
         if (dialog != null && dialog.isDisplayable()) {
@@ -693,6 +694,7 @@ public final class ConfigQcDialog {
         if (!enteredStage) return;
         ConfigQcStage stage = currentStage();
         enteredStage = false;
+        previewPair.flushClicksSync();
         detachPreviewImages();
         if (stage != null) {
             stage.onLeave(context);
