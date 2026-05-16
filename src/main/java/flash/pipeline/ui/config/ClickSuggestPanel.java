@@ -92,6 +92,7 @@ final class ClickSuggestPanel extends JPanel {
         final String hint;
         final Runnable applyAction;
         final Runnable revertAction;
+        final List<ActionSuggestion> actions;
 
         Suggestion(List<FieldSuggestion> fields,
                    String message,
@@ -105,6 +106,16 @@ final class ClickSuggestPanel extends JPanel {
                    String hint,
                    Runnable applyAction,
                    Runnable revertAction) {
+            this(fields, message, hint, applyAction, revertAction,
+                    Collections.<ActionSuggestion>emptyList());
+        }
+
+        Suggestion(List<FieldSuggestion> fields,
+                   String message,
+                   String hint,
+                   Runnable applyAction,
+                   Runnable revertAction,
+                   List<ActionSuggestion> actions) {
             this.fields = fields == null
                     ? Collections.<FieldSuggestion>emptyList()
                     : Collections.unmodifiableList(new ArrayList<FieldSuggestion>(fields));
@@ -112,6 +123,21 @@ final class ClickSuggestPanel extends JPanel {
             this.hint = hint == null ? "" : hint;
             this.applyAction = applyAction;
             this.revertAction = revertAction;
+            this.actions = actions == null
+                    ? Collections.<ActionSuggestion>emptyList()
+                    : Collections.unmodifiableList(new ArrayList<ActionSuggestion>(actions));
+        }
+    }
+
+    static final class ActionSuggestion {
+        final String buttonText;
+        final Runnable action;
+
+        ActionSuggestion(String buttonText, Runnable action) {
+            this.buttonText = buttonText == null || buttonText.trim().isEmpty()
+                    ? "Apply"
+                    : buttonText;
+            this.action = action;
         }
     }
 
@@ -120,12 +146,14 @@ final class ClickSuggestPanel extends JPanel {
     private final CountsProvider countsProvider;
     private final SuggestionProvider suggestionProvider;
     private final ToggleListener toggleListener;
+    private final int minimumNegativeClicks;
     private final ToggleSwitch toggle;
     private final JLabel statusLabel;
     private final JLabel hintLabel;
     private final JButton suggestButton;
     private final JButton applyButton;
     private final JButton revertButton;
+    private final JPanel actionPanel;
     private final javax.swing.Timer refreshTimer;
     private final Map<JComponent, Color> originalBackgrounds =
             new IdentityHashMap<JComponent, Color>();
@@ -136,9 +164,17 @@ final class ClickSuggestPanel extends JPanel {
     ClickSuggestPanel(CountsProvider countsProvider,
                       SuggestionProvider suggestionProvider,
                       ToggleListener toggleListener) {
+        this(countsProvider, suggestionProvider, toggleListener, 3);
+    }
+
+    ClickSuggestPanel(CountsProvider countsProvider,
+                      SuggestionProvider suggestionProvider,
+                      ToggleListener toggleListener,
+                      int minimumNegativeClicks) {
         this.countsProvider = countsProvider;
         this.suggestionProvider = suggestionProvider;
         this.toggleListener = toggleListener;
+        this.minimumNegativeClicks = Math.max(1, minimumNegativeClicks);
 
         setOpaque(false);
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
@@ -198,6 +234,9 @@ final class ClickSuggestPanel extends JPanel {
         revertButton = new JButton("Revert");
         revertButton.setVisible(false);
         revertButton.addActionListener(e -> revertPending());
+        actionPanel = new JPanel(new GridBagLayout());
+        actionPanel.setOpaque(false);
+        actionPanel.setVisible(false);
 
         gbc = rowConstraints();
         row.add(statusLabel, gbc);
@@ -213,6 +252,8 @@ final class ClickSuggestPanel extends JPanel {
         row.add(applyButton, gbc);
         gbc.gridx++;
         row.add(revertButton, gbc);
+        gbc.gridx++;
+        row.add(actionPanel, gbc);
         add(row);
 
         hintLabel = new JLabel(" ");
@@ -249,13 +290,16 @@ final class ClickSuggestPanel extends JPanel {
         if (!toggle.isSelected()) return;
         clearPending(true);
         Counts counts = safeCounts();
-        if (counts.negative < 3) {
+        if (counts.negative < minimumNegativeClicks) {
             statusLabel.setText("clicked: " + counts.negative + " negative, "
-                    + counts.positive + " positive. Need 3 negatives.");
+                    + counts.positive + " positive. Need "
+                    + negativeRequirementText() + ".");
             return;
         }
         Suggestion suggestion = suggestionProvider == null ? null : suggestionProvider.suggest();
-        if (suggestion == null || (suggestion.fields.isEmpty() && !hasText(suggestion.hint))) {
+        if (suggestion == null || (suggestion.fields.isEmpty()
+                && suggestion.actions.isEmpty()
+                && !hasText(suggestion.hint))) {
             statusLabel.setText("No clear suggestion - try clicking more bad objects.");
             return;
         }
@@ -273,6 +317,7 @@ final class ClickSuggestPanel extends JPanel {
         boolean actionable = !suggestion.fields.isEmpty();
         applyButton.setVisible(actionable);
         revertButton.setVisible(actionable);
+        populateActionPanel(suggestion.actions);
         revalidate();
         repaint();
     }
@@ -301,6 +346,7 @@ final class ClickSuggestPanel extends JPanel {
         }
         restoreBackgrounds();
         setHintText("");
+        clearActionPanel();
         pendingSuggestion = null;
         originalValues = Collections.emptyList();
         applyButton.setVisible(false);
@@ -350,10 +396,12 @@ final class ClickSuggestPanel extends JPanel {
     private void refreshCounts() {
         Counts counts = safeCounts();
         boolean active = toggle.isSelected();
-        suggestButton.setEnabled(active && counts.negative >= 3);
+        suggestButton.setEnabled(active && counts.negative >= minimumNegativeClicks);
         if (pendingSuggestion != null) return;
         if (active) {
-            String suffix = counts.negative < 3 ? ". Need 3 negatives." : ".";
+            String suffix = counts.negative < minimumNegativeClicks
+                    ? ". Need " + negativeRequirementText() + "."
+                    : ".";
             statusLabel.setText("clicked: " + counts.negative + " negative, "
                     + counts.positive + " positive" + suffix);
         } else {
@@ -374,6 +422,35 @@ final class ClickSuggestPanel extends JPanel {
             hintLabel.setText(" ");
             hintLabel.setVisible(false);
         }
+    }
+
+    private String negativeRequirementText() {
+        return minimumNegativeClicks + (minimumNegativeClicks == 1
+                ? " negative"
+                : " negatives");
+    }
+
+    private void populateActionPanel(List<ActionSuggestion> actions) {
+        clearActionPanel();
+        if (actions == null || actions.isEmpty()) return;
+        GridBagConstraints gbc = rowConstraints();
+        for (int i = 0; i < actions.size(); i++) {
+            final ActionSuggestion action = actions.get(i);
+            if (action == null || action.action == null) continue;
+            JButton button = new JButton(action.buttonText);
+            button.addActionListener(e -> {
+                action.action.run();
+                clearPending(false);
+            });
+            gbc.gridx = i;
+            actionPanel.add(button, gbc);
+        }
+        actionPanel.setVisible(actionPanel.getComponentCount() > 0);
+    }
+
+    private void clearActionPanel() {
+        actionPanel.removeAll();
+        actionPanel.setVisible(false);
     }
 
     private static boolean hasText(String text) {

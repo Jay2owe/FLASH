@@ -1,5 +1,7 @@
 package flash.pipeline.ui.config;
 
+import flash.pipeline.click.suggest.EnhancedClassicalMorphSuggester;
+import flash.pipeline.click.suggest.SuggestionContext;
 import flash.pipeline.help.AnalysisHelpCatalog;
 import flash.pipeline.help.AnalysisHelpDialog;
 import flash.pipeline.help.SetupHelpCatalog;
@@ -143,7 +145,15 @@ public final class EnhancedClassicalSegmentationStage implements ConfigQcStage {
                         if (image == rawPreviewSource) rawPreviewSource = null;
                         EnhancedClassicalSegmentationStage.this.previewAdapter.close(image);
                     }
-                });
+                },
+                new ClassicalSegmentationStage.SuggestionDecorator() {
+                    @Override public ClickSuggestPanel.Suggestion decorate(
+                            SuggestionContext context,
+                            ClickSuggestPanel.Suggestion parameterSuggestion) {
+                        return decorateEnhancedSuggestion(context, parameterSuggestion);
+                    }
+                },
+                1);
     }
 
     @Override public String title() {
@@ -346,6 +356,71 @@ public final class EnhancedClassicalSegmentationStage implements ConfigQcStage {
             predicates.add(new MorphPredicate(row.feature, operator(row.operator), row.value));
         }
         return predicates;
+    }
+
+    private ClickSuggestPanel.Suggestion decorateEnhancedSuggestion(
+            SuggestionContext context,
+            ClickSuggestPanel.Suggestion parameterSuggestion) {
+        SuggestionContext morphContext = rawPreviewSource == null || context == null
+                ? context
+                : new SuggestionContext(
+                        rawPreviewSource,
+                        context.labelImage,
+                        context.auxImage,
+                        context.negativeClicks,
+                        context.positiveClicks,
+                        context.currentParams);
+        final EnhancedClassicalMorphSuggester.MorphSuggestion morphSuggestion =
+                new EnhancedClassicalMorphSuggester().suggestMorph(morphContext);
+        if (morphSuggestion == null) {
+            return parameterSuggestion;
+        }
+
+        List<ClickSuggestPanel.ActionSuggestion> actions =
+                new ArrayList<ClickSuggestPanel.ActionSuggestion>();
+        if (parameterSuggestion != null) {
+            actions.addAll(parameterSuggestion.actions);
+        }
+        actions.add(new ClickSuggestPanel.ActionSuggestion(
+                "Add to morph filters",
+                new Runnable() {
+                    @Override public void run() {
+                        addSuggestedMorphFilter(morphSuggestion);
+                    }
+                }));
+
+        if (parameterSuggestion == null) {
+            return new ClickSuggestPanel.Suggestion(
+                    new ArrayList<ClickSuggestPanel.FieldSuggestion>(),
+                    morphSuggestion.message(),
+                    "",
+                    null,
+                    null,
+                    actions);
+        }
+        String message = parameterSuggestion.message == null
+                || parameterSuggestion.message.trim().isEmpty()
+                ? morphSuggestion.message()
+                : parameterSuggestion.message + " " + morphSuggestion.message();
+        return new ClickSuggestPanel.Suggestion(
+                parameterSuggestion.fields,
+                message,
+                parameterSuggestion.hint,
+                parameterSuggestion.applyAction,
+                parameterSuggestion.revertAction,
+                actions);
+    }
+
+    private void addSuggestedMorphFilter(EnhancedClassicalMorphSuggester.MorphSuggestion suggestion) {
+        if (suggestion == null) return;
+        MorphPredicate predicate = suggestion.toPredicate();
+        rows.add(new PredicateRow(predicate.featureName, predicate.op.symbol(),
+                predicate.value, true));
+        if (filterSection != null) filterSection.setExpanded(true);
+        refreshRows();
+        markPreviewStale();
+        setStatus("Added morph filter: " + predicate.format()
+                + ". Run object preview again.");
     }
 
     private String buildMethodToken(String thresholdToken, String sizeToken) {

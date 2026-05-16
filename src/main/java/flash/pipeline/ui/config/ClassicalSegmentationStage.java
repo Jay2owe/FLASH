@@ -68,12 +68,19 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
         void close(ImagePlus image);
     }
 
+    interface SuggestionDecorator {
+        ClickSuggestPanel.Suggestion decorate(SuggestionContext context,
+                                              ClickSuggestPanel.Suggestion parameterSuggestion);
+    }
+
     private static final String EMPTY_TEXT = "Threshold preview is ready. Press Run Object Preview.";
     private static final String STALE_TEXT = "Object preview is out of date. Press Run Object Preview.";
 
     private final ThresholdStore thresholdStore;
     private final SizeStore sizeStore;
     private final PreviewAdapter previewAdapter;
+    private final SuggestionDecorator suggestionDecorator;
+    private final int clickSuggestMinimumNegatives;
 
     private ConfigQcActions actions;
     private PreviewPairPanel preview;
@@ -114,6 +121,14 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
     public ClassicalSegmentationStage(ThresholdStore thresholdStore,
                                       SizeStore sizeStore,
                                       PreviewAdapter previewAdapter) {
+        this(thresholdStore, sizeStore, previewAdapter, null, 3);
+    }
+
+    ClassicalSegmentationStage(ThresholdStore thresholdStore,
+                               SizeStore sizeStore,
+                               PreviewAdapter previewAdapter,
+                               SuggestionDecorator suggestionDecorator,
+                               int clickSuggestMinimumNegatives) {
         if (thresholdStore == null) {
             throw new IllegalArgumentException("thresholdStore must not be null");
         }
@@ -126,6 +141,8 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
         this.thresholdStore = thresholdStore;
         this.sizeStore = sizeStore;
         this.previewAdapter = previewAdapter;
+        this.suggestionDecorator = suggestionDecorator;
+        this.clickSuggestMinimumNegatives = Math.max(1, clickSuggestMinimumNegatives);
     }
 
     @Override
@@ -441,7 +458,8 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
                         return suggestClassicalParameters();
                     }
                 },
-                null);
+                null,
+                clickSuggestMinimumNegatives);
     }
 
     private ClickSuggestPanel.Counts currentClickCounts() {
@@ -483,11 +501,12 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
         } catch (RuntimeException ignored) {
             // Invalid size fields will be surfaced by the normal preview path.
         }
+        SuggestionContext suggestionContext = new SuggestionContext(
+                filteredSource, labelPreview, null, negatives, positives, params);
         ClassicalParameterSuggester.ClassicalSuggestion suggestion =
-                new ClassicalParameterSuggester().suggest(new SuggestionContext(
-                        filteredSource, labelPreview, null, negatives, positives, params));
+                new ClassicalParameterSuggester().suggest(suggestionContext);
         if (suggestion == null || !suggestion.hasSuggestion()) {
-            return null;
+            return decorateSuggestion(suggestionContext, null);
         }
         List<ClickSuggestPanel.FieldSuggestion> fields =
                 new ArrayList<ClickSuggestPanel.FieldSuggestion>();
@@ -505,7 +524,7 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
                     ClickSuggestPanel.ValueBinding.text("max size", maxField),
                     String.valueOf(suggestion.maxSize.intValue())));
         }
-        return new ClickSuggestPanel.Suggestion(fields,
+        return decorateSuggestion(suggestionContext, new ClickSuggestPanel.Suggestion(fields,
                 suggestionMessage(fields, suggestion.badRemoved, suggestion.collateralRemoved),
                 new Runnable() {
                     @Override public void run() {
@@ -516,7 +535,14 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
                     @Override public void run() {
                         markObjectPreviewStale(STALE_TEXT);
                     }
-                });
+                }));
+    }
+
+    private ClickSuggestPanel.Suggestion decorateSuggestion(SuggestionContext context,
+                                                           ClickSuggestPanel.Suggestion parameterSuggestion) {
+        return suggestionDecorator == null
+                ? parameterSuggestion
+                : suggestionDecorator.decorate(context, parameterSuggestion);
     }
 
     private ClickSuggestPanel.ValueBinding thresholdBinding() {
