@@ -48,8 +48,10 @@ import java.awt.Container;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
+import java.awt.Window;
 import java.io.File;
 import java.lang.ref.WeakReference;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -87,6 +89,10 @@ public final class CellposeParameterStage implements ConfigQcStage {
         CompletableFuture<CellposeRuntime.Status> probeRuntimeAsync();
         boolean nvidiaGpuLikelyAvailable();
         GpuInstallResult installGpuSupport();
+    }
+
+    interface ModelManagerLauncher {
+        void show(Window owner, Path root, ModelEntry.Engine engine);
     }
 
     public static final class GpuInstallResult {
@@ -158,6 +164,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
     private final int channelCount;
     private final int primaryChannelIndex;
     private final boolean defaultUseGpu;
+    private ModelManagerLauncher modelManagerLauncher = defaultModelManagerLauncher();
 
     private ConfigQcActions actions;
     private PreviewPairPanel preview;
@@ -580,6 +587,10 @@ public final class CellposeParameterStage implements ConfigQcStage {
                 && missingNoticeContainer.getComponentCount() > 0;
     }
 
+    void setModelManagerLauncherForTest(ModelManagerLauncher launcher) {
+        modelManagerLauncher = launcher == null ? defaultModelManagerLauncher() : launcher;
+    }
+
     void refreshModelOptionsFromCatalogForTest() {
         refreshModelOptionsFromCatalog();
     }
@@ -610,6 +621,12 @@ public final class CellposeParameterStage implements ConfigQcStage {
         gbc.weightx = 1.0;
         gbc.fill = GridBagConstraints.HORIZONTAL;
         row.add(missingModelReplacementCombo, gbc);
+        JButton manage = new JButton("Open Manage models...");
+        manage.addActionListener(e -> openModelManager());
+        gbc.gridx++;
+        gbc.weightx = 0.0;
+        gbc.fill = GridBagConstraints.NONE;
+        row.add(manage, gbc);
         return row;
     }
 
@@ -2036,11 +2053,19 @@ public final class CellposeParameterStage implements ConfigQcStage {
     private void openModelManager() {
         File projectDir = activeContext == null ? null : activeContext.getProjectDirectory();
         File root = projectDir == null ? new File(".") : projectDir;
-        SegmentationModelManagerDialog.showManager(
+        modelManagerLauncher.show(
                 SwingUtilities.getWindowAncestor(preview != null ? preview : manageModelsButton),
                 root.toPath(),
                 ModelEntry.Engine.CELLPOSE);
         refreshModelOptionsFromCatalog();
+    }
+
+    private static ModelManagerLauncher defaultModelManagerLauncher() {
+        return new ModelManagerLauncher() {
+            @Override public void show(Window owner, Path root, ModelEntry.Engine engine) {
+                SegmentationModelManagerDialog.showManager(owner, root, engine);
+            }
+        };
     }
 
     private void refreshModelOptionsFromCatalog() {
