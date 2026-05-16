@@ -4,6 +4,7 @@ import flash.pipeline.bin.BinConfig;
 import flash.pipeline.image.GpuConcurrency;
 import flash.pipeline.image.ImageOps;
 import flash.pipeline.segmentation.SegmentationMethod;
+import flash.pipeline.segmentation.SegmentationRunFailureException;
 import flash.pipeline.segmentation.StarDistLinkingParams;
 import flash.pipeline.segmentation.StarDistPostFilters;
 import flash.pipeline.segmentation.catalog.ModelCatalog;
@@ -205,8 +206,11 @@ public class StarDist3DRunner {
                                 String modelKey,
                                 File projectRoot) {
         if (!StarDistDetector.isAvailable()) {
-            IJ.log("WARNING: " + StarDistDetector.getAvailabilityMessage());
-            return null;
+            String message = StarDistDetector.getAvailabilityMessage();
+            IJ.log("WARNING: " + message);
+            IllegalStateException cause = new IllegalStateException(message);
+            logStackTrace(cause);
+            throw failure("StarDist failed: " + message, cause);
         }
 
         if (TF_THREAD_CAP_LOGGED.compareAndSet(false, true)) {
@@ -237,7 +241,8 @@ public class StarDist3DRunner {
                 dup.changes = false;
                 dup.close();
                 dup.flush();
-                return null;
+                throw new IllegalStateException("StarDist" + chTag0
+                        + " input image has 0 slices - cannot process");
             }
 
             // Pad channel dim from 1 → 2 (duplicating the single channel) so
@@ -298,18 +303,23 @@ public class StarDist3DRunner {
                     TrackMate trackmate = new TrackMate(model, settings);
 
                     if (!trackmate.checkInput()) {
-                        IJ.log("WARNING: StarDist TrackMate input check failed: " + trackmate.getErrorMessage());
-                        return null;
+                        String message = "StarDist TrackMate input check failed: "
+                                + safeTrackMateMessage(trackmate.getErrorMessage());
+                        IJ.log("WARNING: " + message);
+                        throw new IllegalStateException(message);
                     }
 
                     if (!trackmate.execDetection()) {
                         logTrackMateFailure("detection", trackmate.getErrorMessage());
-                        return null;
+                        throw new IllegalStateException("StarDist detection failed: "
+                                + safeTrackMateMessage(trackmate.getErrorMessage()));
                     }
 
                     if (!trackmate.computeSpotFeatures(false)) {
-                        IJ.log("WARNING: StarDist feature computation failed: " + trackmate.getErrorMessage());
-                        return null;
+                        String message = "StarDist feature computation failed: "
+                                + safeTrackMateMessage(trackmate.getErrorMessage());
+                        IJ.log("WARNING: " + message);
+                        throw new IllegalStateException(message);
                     }
 
                     trackmate.execInitialSpotFiltering();
@@ -336,8 +346,10 @@ public class StarDist3DRunner {
                     // Spots exist — run tracker to link 2D detections into 3D objects
                     int spotsBeforeTracking = nSpots;
                     if (!trackmate.execTracking()) {
-                        IJ.log("WARNING: StarDist tracking failed: " + trackmate.getErrorMessage());
-                        return null;
+                        String message = "StarDist tracking failed: "
+                                + safeTrackMateMessage(trackmate.getErrorMessage());
+                        IJ.log("WARNING: " + message);
+                        throw new IllegalStateException(message);
                     }
                     int nTracks = model.getTrackModel().nTracks(true);
 
@@ -404,8 +416,9 @@ public class StarDist3DRunner {
             }
 
             if (labelImp == null) {
-                IJ.log("WARNING: StarDist label image export returned null");
-                return null;
+                String message = "StarDist label image export returned null";
+                IJ.log("WARNING: " + message);
+                throw new IllegalStateException(message);
             }
 
             // REGRESSION GUARD: LabelImgExporter produces 32-bit float. Must convert to 16-bit.
@@ -462,12 +475,15 @@ public class StarDist3DRunner {
             java.io.StringWriter sw = new java.io.StringWriter();
             e.printStackTrace(new java.io.PrintWriter(sw));
             IJ.log(sw.toString());
-            return null;
+            throw failure("StarDist failed: " + exceptionSummary(e), e);
         } catch (LinkageError e) {
             IJ.log("WARNING: StarDist failed due to an incompatible runtime: "
                     + e.getClass().getSimpleName() + " - " + e.getMessage());
             IJ.log("WARNING: " + StarDistDetector.getAvailabilityMessage());
-            return null;
+            java.io.StringWriter sw = new java.io.StringWriter();
+            e.printStackTrace(new java.io.PrintWriter(sw));
+            IJ.log(sw.toString());
+            throw failure("StarDist failed due to an incompatible runtime: " + exceptionSummary(e), e);
         }
     }
 
@@ -770,9 +786,7 @@ public class StarDist3DRunner {
     }
 
     private static void logTrackMateFailure(String phase, String message) {
-        String safeMessage = message == null || message.trim().isEmpty()
-                ? "No error message was returned by TrackMate."
-                : message;
+        String safeMessage = safeTrackMateMessage(message);
         IJ.log("WARNING: StarDist " + phase + " failed: " + safeMessage);
         if (safeMessage.contains("NullPointerException")) {
             IJ.log("WARNING: StarDist returned a NullPointerException inside TrackMate/StarDist. "
@@ -780,6 +794,31 @@ public class StarDist3DRunner {
                     + "or Dropbox-conflicted StarDist jars. Use Dependencies > Auto-Fix StarDist, "
                     + "close Fiji, and restart Fiji before retrying.");
         }
+    }
+
+    private static String safeTrackMateMessage(String message) {
+        return message == null || message.trim().isEmpty()
+                ? "No error message was returned by TrackMate."
+                : message.trim();
+    }
+
+    private static SegmentationRunFailureException failure(String message, Throwable cause) {
+        return new SegmentationRunFailureException(message, cause);
+    }
+
+    private static void logStackTrace(Throwable throwable) {
+        java.io.StringWriter sw = new java.io.StringWriter();
+        throwable.printStackTrace(new java.io.PrintWriter(sw));
+        IJ.log(sw.toString());
+    }
+
+    private static String exceptionSummary(Throwable throwable) {
+        if (throwable == null) {
+            return "unknown error";
+        }
+        String message = throwable.getMessage();
+        return throwable.getClass().getSimpleName()
+                + (message == null || message.trim().isEmpty() ? "" : " - " + message.trim());
     }
 
 }

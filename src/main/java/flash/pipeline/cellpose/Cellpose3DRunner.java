@@ -1,6 +1,7 @@
 package flash.pipeline.cellpose;
 
 import flash.pipeline.image.GpuConcurrency;
+import flash.pipeline.segmentation.SegmentationRunFailureException;
 import flash.pipeline.segmentation.catalog.ModelCatalog;
 import flash.pipeline.segmentation.catalog.ModelCatalogIO;
 import ij.IJ;
@@ -78,15 +79,23 @@ public final class Cellpose3DRunner {
                                 File projectRoot,
                                 boolean dumpCellprob) {
         if (input == null) {
-            IJ.log("WARNING: Cellpose input image is null.");
-            return null;
+            String message = "Cellpose input image is null.";
+            IJ.log("WARNING: " + message);
+            IllegalArgumentException cause = new IllegalArgumentException(message);
+            logStackTrace(cause);
+            throw failure("Cellpose failed: " + message, cause);
         }
 
         CellposeRuntime.Status runtime = CellposeRuntime.probeConfigured();
         if (!runtime.ready) {
             IJ.log("WARNING: " + runtime.message);
             if (!runtime.details.isEmpty()) IJ.log(runtime.details);
-            return null;
+            String message = runtime.message == null || runtime.message.trim().isEmpty()
+                    ? "Cellpose runtime is not ready."
+                    : runtime.message.trim();
+            IllegalStateException cause = new IllegalStateException(message);
+            logStackTrace(cause);
+            throw failure("Cellpose failed: " + message, cause);
         }
 
         Path tempDir = null;
@@ -94,8 +103,9 @@ public final class Cellpose3DRunner {
         try {
             int stackSize = input.getStackSize();
             if (stackSize <= 0) {
-                IJ.log("WARNING: Cellpose input image has 0 slices.");
-                return null;
+                String message = "Cellpose input image has 0 slices.";
+                IJ.log("WARNING: " + message);
+                throw new IllegalStateException(message);
             }
 
             runtimeInput = prepareRuntimeInput(input, companionInput, channelName);
@@ -121,13 +131,18 @@ public final class Cellpose3DRunner {
                 GpuConcurrency.gpuSemaphore().release();
             }
 
-            return readMaskImage(expectedMaskPath(tempDir), input, channelName);
+            Path maskPath = expectedMaskPath(tempDir);
+            ImagePlus labelImage = readMaskImage(maskPath, input, channelName);
+            if (labelImage == null) {
+                throw new IllegalStateException("Cellpose produced no readable mask image at " + maskPath);
+            }
+            return labelImage;
         } catch (Exception e) {
             IJ.log("WARNING: Cellpose failed: " + e.getClass().getSimpleName() + " - " + e.getMessage());
             java.io.StringWriter sw = new java.io.StringWriter();
             e.printStackTrace(new java.io.PrintWriter(sw));
             IJ.log(sw.toString());
-            return null;
+            throw failure("Cellpose failed: " + exceptionSummary(e), e);
         } finally {
             if (runtimeInput != null && runtimeInput != input) {
                 runtimeInput.changes = false;
@@ -570,8 +585,30 @@ public final class Cellpose3DRunner {
             return labelImage;
         } catch (Exception e) {
             IJ.log("WARNING: Failed reading Cellpose mask image: " + e.getMessage());
+            java.io.StringWriter sw = new java.io.StringWriter();
+            e.printStackTrace(new java.io.PrintWriter(sw));
+            IJ.log(sw.toString());
             return null;
         }
+    }
+
+    private static SegmentationRunFailureException failure(String message, Throwable cause) {
+        return new SegmentationRunFailureException(message, cause);
+    }
+
+    private static void logStackTrace(Throwable throwable) {
+        java.io.StringWriter sw = new java.io.StringWriter();
+        throwable.printStackTrace(new java.io.PrintWriter(sw));
+        IJ.log(sw.toString());
+    }
+
+    private static String exceptionSummary(Throwable throwable) {
+        if (throwable == null) {
+            return "unknown error";
+        }
+        String message = throwable.getMessage();
+        return throwable.getClass().getSimpleName()
+                + (message == null || message.trim().isEmpty() ? "" : " - " + message.trim());
     }
 
     public static ImagePlus readCellprobImage(Path cellprobPath) {

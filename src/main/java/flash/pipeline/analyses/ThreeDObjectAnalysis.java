@@ -58,6 +58,7 @@ import flash.pipeline.runtime.PluginInstallGuard;
 import flash.pipeline.roi.RoiIO;
 import flash.pipeline.roi.RoiOps;
 import flash.pipeline.segmentation.SegmentationMethod;
+import flash.pipeline.segmentation.SegmentationRunFailureException;
 import flash.pipeline.segmentation.SegmentationTokenParser;
 import flash.pipeline.zslice.ZSliceOps;
 
@@ -3528,10 +3529,21 @@ public class ThreeDObjectAnalysis implements Analysis {
                         + " | input ch stackSize=" + ch.getStackSize());
                 // StarDist manages its own narrow lock + GPU semaphore internally
                 // (see GpuConcurrency / StarDist3DRunner). No outer lock needed.
-                ImagePlus labelImage = StarDist3DRunner.run(filtered, starDistProbThresh, starDistNmsThresh, channelName,
-                        starDistLinkingMaxDistance, starDistGapClosingMaxDistance, starDistMaxFrameGap,
-                        starDistAreaMin, starDistAreaMax, starDistQualityMin, starDistIntensityMin,
-                        starDistModelKey, projectRoot);
+                ImagePlus labelImage;
+                try {
+                    labelImage = StarDist3DRunner.run(filtered, starDistProbThresh, starDistNmsThresh, channelName,
+                            starDistLinkingMaxDistance, starDistGapClosingMaxDistance, starDistMaxFrameGap,
+                            starDistAreaMin, starDistAreaMax, starDistQualityMin, starDistIntensityMin,
+                            starDistModelKey, projectRoot);
+                } catch (SegmentationRunFailureException e) {
+                    String failureReason = e.getMessage();
+                    IJ.log("    - [Ch " + (c + 1) + "] WARNING: " + failureReason);
+                    filtered.changes = false;
+                    filtered.close();
+                    filtered.flush();
+                    return new ChannelFilterResult(c, channelName, ch, null,
+                            null, 0, 0, true, failureReason);
+                }
 
                 // 3. Filter labels by centroid — remove objects whose centroids
                 // fall outside the tissue ROI (before cropping to bounding box).
@@ -3629,9 +3641,25 @@ public class ThreeDObjectAnalysis implements Analysis {
                 // Cellpose holds the shared GPU semaphore internally around its Python
                 // subprocess call (see GpuConcurrency). It does not touch WindowManager,
                 // so no WM lock is required here.
-                ImagePlus labelImage = Cellpose3DRunner.run(filtered, filteredCompanion, cellposeModel, cellposeDiameter,
-                        cellposeFlowThreshold, cellposeCellprobThreshold, cellposeUseGpu, channelName,
-                        projectRoot);
+                ImagePlus labelImage;
+                try {
+                    labelImage = Cellpose3DRunner.run(filtered, filteredCompanion, cellposeModel, cellposeDiameter,
+                            cellposeFlowThreshold, cellposeCellprobThreshold, cellposeUseGpu, channelName,
+                            projectRoot);
+                } catch (SegmentationRunFailureException e) {
+                    String failureReason = e.getMessage();
+                    IJ.log("    - [Ch " + (c + 1) + "] WARNING: " + failureReason);
+                    filtered.changes = false;
+                    filtered.close();
+                    filtered.flush();
+                    if (filteredCompanion != null) {
+                        filteredCompanion.changes = false;
+                        filteredCompanion.close();
+                        filteredCompanion.flush();
+                    }
+                    return new ChannelFilterResult(c, channelName, ch, null,
+                            null, 0, 0, true, failureReason);
+                }
 
                 if (labelImage != null && (cropRoi != null || clearRoi != null)) {
                     ij.gui.Roi filterRoi = (clearRoi != null) ? clearRoi : cropRoi;
@@ -3860,7 +3888,15 @@ public class ThreeDObjectAnalysis implements Analysis {
                                 cellposeSecondChannelName, cellposeSecondChannelFilterFilename);
                         rfParams = rfParams.withCellposeCompanionImage(rfCellposeCompanion);
                     }
-                    ImagePlus labelImage = new TrainedRfRunner().run(filtered, rfParams);
+                    ImagePlus labelImage;
+                    try {
+                        labelImage = new TrainedRfRunner().run(filtered, rfParams);
+                    } catch (SegmentationRunFailureException e) {
+                        String failureReason = e.getMessage();
+                        IJ.log("    - [Ch " + (c + 1) + "] WARNING: " + failureReason);
+                        return new ChannelFilterResult(c, channelName, ch, null,
+                                null, 0, 0, true, failureReason);
+                    }
 
                     if (labelImage == null) {
                         String failureReason = "Trained RF segmentation failed";

@@ -11,6 +11,7 @@ import flash.pipeline.help.SetupHelpCatalog;
 import flash.pipeline.help.SetupHelpTopic;
 import flash.pipeline.objects.ObjectsCounter3DWrapper;
 import flash.pipeline.segmentation.SegmentationMethod;
+import flash.pipeline.segmentation.SegmentationRunFailureException;
 import flash.pipeline.segmentation.SegmentationTokenParser;
 import flash.pipeline.segmentation.catalog.ModelCatalog;
 import flash.pipeline.segmentation.catalog.ModelCatalogIO;
@@ -155,6 +156,8 @@ public final class CellposeParameterStage implements ConfigQcStage {
 
     private static final String STALE_TEXT = "Preview is out of date. Press Run Preview.";
     private static final String EMPTY_TEXT = "Filtered input is ready. Press Run Preview.";
+    private static final int MAX_PREVIEW_ERROR_CHARS = 200;
+    private static final String PREVIEW_ERROR_SUFFIX = "...see log for full";
 
     private final ParameterStore parameterStore;
     private final SizeStore sizeStore;
@@ -1348,7 +1351,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
                 try {
                     installLabelPreview(get(), parameters);
                 } catch (Exception e) {
-                    setError("Cellpose preview failed: " + e.getMessage());
+                    setPreviewFailure(e);
                 } finally {
                     if (!isCancelled()) setButtonsEnabled(true);
                 }
@@ -1366,7 +1369,11 @@ public final class CellposeParameterStage implements ConfigQcStage {
         }
         Parameters parameters = collectParameters();
         setPreviewState(PreviewPairPanel.PreviewState.RUNNING, "Running Cellpose preview...");
-        installLabelPreview(runPreviewWithCompanion(parameters), parameters);
+        try {
+            installLabelPreview(runPreviewWithCompanion(parameters), parameters);
+        } catch (SegmentationRunFailureException e) {
+            setPreviewFailure(e);
+        }
     }
 
     private ImagePlus runPreviewWithCompanion(Parameters parameters) throws Exception {
@@ -1384,8 +1391,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
 
     private void installLabelPreview(ImagePlus labelImage, Parameters settings) {
         if (labelImage == null) {
-            setPreviewState(PreviewPairPanel.PreviewState.ERROR, "Cellpose returned no label map.");
-            setStatus("Cellpose returned no label map.");
+            setPreviewError("Cellpose returned no label map.");
             return;
         }
         int count = previewAdapter.countLabels(labelImage);
@@ -1767,6 +1773,72 @@ public final class CellposeParameterStage implements ConfigQcStage {
         setPreviewState(PreviewPairPanel.PreviewState.ERROR, text);
         setStatus(text);
         if (actions != null) actions.setPreviewButtonStale(true);
+    }
+
+    private void setPreviewError(String text) {
+        ImagePlus old = labelPreview;
+        labelPreview = null;
+        objectStats = null;
+        sizeSummary = null;
+        previewStale = true;
+        lastObjectCount = -1;
+        if (preview != null) {
+            preview.setOriginal(currentSourceImage());
+            preview.setAdjusted(null);
+            refreshLargePreviewModel();
+        }
+        if (old != null) {
+            previewAdapter.close(old);
+        }
+        setError(text);
+    }
+
+    private void setPreviewFailure(Throwable throwable) {
+        setPreviewError(previewFailureText("Cellpose", throwable));
+    }
+
+    private static String previewFailureText(String engine, Throwable throwable) {
+        SegmentationRunFailureException runnerFailure = runnerFailure(throwable);
+        String message = runnerFailure == null
+                ? rootMessage(throwable)
+                : runnerFailure.getMessage();
+        return truncatePreviewError(engine + " preview failed: " + message);
+    }
+
+    private static SegmentationRunFailureException runnerFailure(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            if (current instanceof SegmentationRunFailureException) {
+                return (SegmentationRunFailureException) current;
+            }
+            current = current.getCause();
+        }
+        return null;
+    }
+
+    private static String rootMessage(Throwable throwable) {
+        Throwable current = throwable;
+        Throwable root = throwable;
+        while (current != null) {
+            root = current;
+            current = current.getCause();
+        }
+        String message = root == null ? null : root.getMessage();
+        if (message == null || message.trim().isEmpty()) {
+            return root == null ? "unknown error" : root.getClass().getSimpleName();
+        }
+        return message.trim();
+    }
+
+    private static String truncatePreviewError(String text) {
+        String safe = text == null || text.trim().isEmpty()
+                ? "Segmentation preview failed."
+                : text.trim().replace('\n', ' ').replace('\r', ' ');
+        if (safe.length() <= MAX_PREVIEW_ERROR_CHARS) {
+            return safe;
+        }
+        int keep = Math.max(0, MAX_PREVIEW_ERROR_CHARS - PREVIEW_ERROR_SUFFIX.length());
+        return safe.substring(0, keep).trim() + PREVIEW_ERROR_SUFFIX;
     }
 
     private void setButtonsEnabled(boolean enabled) {
