@@ -1,5 +1,6 @@
 package flash.pipeline.click.training;
 
+import flash.pipeline.segmentation.catalog.ModelEntry;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -8,6 +9,7 @@ import smile.classification.RandomForest;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.Assert.*;
 
@@ -91,6 +93,38 @@ public class ObjectClassifierTrainerTest {
             sum += value;
         }
         assertEquals(1.0, sum, 1.0e-9);
+    }
+
+    @Test
+    public void catalogEntryIncludesAuditMetadata() {
+        ObjectClassifierTrainer.TrainingResult result =
+                new ObjectClassifierTrainer.TrainingResult(
+                        null,
+                        new String[] {"volume", "sphericity", "mean_intensity"},
+                        0.83,
+                        new double[] {0.20, 0.50, 0.30},
+                        28,
+                        41,
+                        ObjectClassifierTrainer.QualityFlag.OK);
+
+        ModelEntry entry = ObjectClassifierPersistence.catalogEntry(
+                "trained_rf_microglia_v1",
+                "Microglia RF",
+                "description",
+                "classical",
+                result);
+
+        assertEquals("smile-2.6.0", entry.metadata.get("engineVersion"));
+        assertTrue(entry.metadata.get("trainedAt") instanceof Long);
+        assertEquals(Double.valueOf(0.83), entry.metadata.get("crossValAccuracy"));
+        assertEquals("OK", entry.metadata.get("qualityFlag"));
+        assertEquals("OK", entry.metadata.get("quality"));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> importance = (Map<String, Object>) entry.metadata.get("featureImportance");
+        assertEquals(Double.valueOf(0.20), importance.get("volume"));
+        assertEquals(Double.valueOf(0.50), importance.get("sphericity"));
+        assertEquals(Double.valueOf(0.30), importance.get("mean_intensity"));
     }
 
     @Test

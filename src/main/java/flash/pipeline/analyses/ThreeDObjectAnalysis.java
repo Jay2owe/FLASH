@@ -899,6 +899,15 @@ public class ThreeDObjectAnalysis implements Analysis {
         objectAnalysisDetailsDir.mkdirs();
 
         File binDir = activeConfigurationDir(directory);
+        try {
+            ObjectAnalysisDetailsWriter.writeSegmentationModelsReport(
+                    objectAnalysisDetailsDir,
+                    new File(directory),
+                    cfg.channelNames,
+                    cfg.segmentationMethods);
+        } catch (Exception e) {
+            IJ.log("Warning: failed writing segmentation model audit details: " + e.getMessage());
+        }
 
         File imageAnalysisRoot = layout.objectImageOutputsWriteDir();
         //noinspection ResultOfMethodCallIgnored

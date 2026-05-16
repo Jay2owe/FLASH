@@ -82,11 +82,15 @@ public final class ObjectClassifierPersistence {
         metadata.put("engineVersion", ENGINE_VERSION);
         metadata.put("license", "LGPL-3.0");
         if (result != null) {
+            metadata.put("trainedAt", Long.valueOf(System.currentTimeMillis()));
             metadata.put("positiveExamples", Integer.valueOf(result.positiveExamples));
             metadata.put("negativeExamples", Integer.valueOf(result.negativeExamples));
             metadata.put("crossValAccuracy", Double.valueOf(result.crossValAccuracy));
+            metadata.put("qualityFlag", result.quality.name());
             metadata.put("quality", result.quality.name());
             metadata.put("featureNames", stringList(result.featureNames));
+            metadata.put("featureImportance",
+                    featureImportanceMap(result.featureNames, result.featureImportance));
         }
 
         return new ModelEntry(
@@ -126,6 +130,22 @@ public final class ObjectClassifierPersistence {
         if (values != null) {
             for (String value : values) {
                 if (value != null) out.add(value);
+            }
+        }
+        return out;
+    }
+
+    private static Map<String, Object> featureImportanceMap(String[] names, double[] weights) {
+        Map<String, Object> out = new LinkedHashMap<String, Object>();
+        if (names == null || weights == null) {
+            return out;
+        }
+        int count = Math.min(names.length, weights.length);
+        for (int i = 0; i < count; i++) {
+            String name = names[i];
+            double weight = weights[i];
+            if (name != null && !name.trim().isEmpty() && Double.isFinite(weight)) {
+                out.put(name.trim(), Double.valueOf(weight));
             }
         }
         return out;
