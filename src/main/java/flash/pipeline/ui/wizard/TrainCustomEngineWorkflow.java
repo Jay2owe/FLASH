@@ -1,6 +1,7 @@
 package flash.pipeline.ui.wizard;
 
 import flash.pipeline.bin.BinConfig;
+import flash.pipeline.cellpose.Cellpose3DRunner;
 import flash.pipeline.click.ClickStore;
 import flash.pipeline.click.training.ImagePlusProvider;
 import flash.pipeline.click.training.ObjectClassifierPersistence;
@@ -44,10 +45,12 @@ public final class TrainCustomEngineWorkflow {
     public static final int MIN_NEGATIVE_CLICKS = 20;
 
     public enum Base {
-        CLASSICAL("Classical", "RF"),
-        ENHANCED_CLASSICAL("Enhanced Classical", "RF"),
-        STARDIST("StarDist", "StarDist"),
-        CELLPOSE("Cellpose", "Cellpose");
+        CLASSICAL("Classical + RF post-filter (in-process training)", "RF"),
+        ENHANCED_CLASSICAL("Enhanced Classical + RF post-filter (in-process training)", "RF"),
+        STARDIST_RF("StarDist + RF post-filter (in-process training)", "StarDistRF"),
+        CELLPOSE_RF("Cellpose + RF post-filter (in-process training)", "CellposeRF"),
+        STARDIST("StarDist custom model (external training)", "StarDist"),
+        CELLPOSE("Cellpose custom model (external training)", "Cellpose");
 
         public final String label;
         public final String shortLabel;
@@ -58,7 +61,14 @@ public final class TrainCustomEngineWorkflow {
         }
 
         public boolean trainsRf() {
-            return this == CLASSICAL || this == ENHANCED_CLASSICAL;
+            return this == CLASSICAL || this == ENHANCED_CLASSICAL
+                    || this == STARDIST_RF || this == CELLPOSE_RF;
+        }
+
+        public Base tokenBase() {
+            if (this == STARDIST_RF) return STARDIST;
+            if (this == CELLPOSE_RF) return CELLPOSE;
+            return this;
         }
     }
 
@@ -438,13 +448,14 @@ public final class TrainCustomEngineWorkflow {
         if (base == null) return;
         String cleaned = clean(token, null);
         if (cleaned != null) {
-            baseTokens.put(base, cleaned);
+            baseTokens.put(base.tokenBase(), cleaned);
         }
     }
 
     public String baseToken(Base base) {
-        String token = baseTokens.get(base);
-        return clean(token, base == Base.CLASSICAL ? "classical" : previousMethodToken);
+        Base key = base == null ? Base.CLASSICAL : base.tokenBase();
+        String token = baseTokens.get(key);
+        return clean(token, key == Base.CLASSICAL ? "classical" : previousMethodToken);
     }
 
     public void selectBase(Base base) {
@@ -795,7 +806,8 @@ public final class TrainCustomEngineWorkflow {
                     raw = rawProvider.get(imageName);
                     labelsImage = labelProvider.get(imageName);
                     List<ObjectFeatureExtractor.FeatureRow> rows =
-                            extractor.extractFromLabelImage(labelsImage, raw, null, labels);
+                            extractor.extractFromLabelImage(
+                                    labelsImage, raw, cellprobImage(labelsImage), labels);
                     Map<Integer, ObjectFeatureExtractor.FeatureRow> byLabel =
                             rowsByLabel(rows);
                     addRows(byLabel, positiveLabels, positives);
@@ -835,6 +847,16 @@ public final class TrainCustomEngineWorkflow {
             image.changes = false;
             image.close();
             image.flush();
+        }
+
+        private static ImagePlus cellprobImage(ImagePlus labelsImage) {
+            if (labelsImage == null) return null;
+            try {
+                Object property = labelsImage.getProperty(Cellpose3DRunner.CELLPROB_IMAGE_PROPERTY);
+                return property instanceof ImagePlus ? (ImagePlus) property : null;
+            } catch (RuntimeException e) {
+                return null;
+            }
         }
     }
 

@@ -65,7 +65,7 @@ public class TrainedRfRunnerTest {
     }
 
     @Test
-    public void unsupportedBaseLogsWarningAndReturnsBaseUnchanged() {
+    public void nestedTrainedRfBaseLogsWarningAndReturnsBaseUnchanged() {
         final ImagePlus baseLabels = fiveLabelImage();
         ImagePlus raw = rawLike(baseLabels);
         final List<String> warnings = new ArrayList<String>();
@@ -75,7 +75,7 @@ public class TrainedRfRunnerTest {
                 null,
                 null,
                 null,
-                SegmentationTokenParser.parse("stardist:0.5:0.4"),
+                SegmentationTokenParser.parse("trained_rf:inner_rf:base=classical"),
                 0.5,
                 1,
                 1,
@@ -99,7 +99,7 @@ public class TrainedRfRunnerTest {
 
         assertSamePixels(baseLabels, result);
         assertFalse(warnings.isEmpty());
-        assertTrue(warnings.get(0).contains("Classical and Enhanced Classical"));
+        assertTrue(warnings.get(0).contains("cannot use another Trained RF"));
     }
 
     private static List<ObjectFeatureExtractor.FeatureRow> rows(int count, boolean positive) {

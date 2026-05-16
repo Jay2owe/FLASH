@@ -6254,7 +6254,8 @@ public class CreateBinFileAnalysis implements Analysis {
                 return createEnhancedClassicalTrainingLabels(
                         workflow, context, cfg, binFolder, channelIndex, imageName);
             }
-            if (base == TrainCustomEngineWorkflow.Base.STARDIST) {
+            if (base == TrainCustomEngineWorkflow.Base.STARDIST
+                    || base == TrainCustomEngineWorkflow.Base.STARDIST_RF) {
                 return createStarDistTrainingLabels(
                         workflow, context, cfg, binFolder, channelIndex, imageName);
             }
@@ -6386,7 +6387,8 @@ public class CreateBinFileAnalysis implements Analysis {
                     SegmentationMethod.cellposeCellprob(method),
                     SegmentationMethod.cellposeUseGpu(method),
                     channelNameForTraining(cfg, channelIndex),
-                    projectRootForConfigurationDir(binFolder));
+                    projectRootForConfigurationDir(binFolder),
+                    workflow.selectedBase().trainsRf());
             if (labels != null) {
                 labels.setTitle("Training Cellpose labels | " + safe(imageName));
             }

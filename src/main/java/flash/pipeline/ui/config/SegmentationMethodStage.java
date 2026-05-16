@@ -305,7 +305,16 @@ public final class SegmentationMethodStage implements ConfigQcStage {
         }
         String modelKey = SegmentationMethod.trainedRfModelKey(method);
         String name = trainedRfModelName(modelKey, context);
-        return new TrainedRfOption(method.rawToken, modelKey, TRAINED_RF_DISPLAY_PREFIX + name);
+        return new TrainedRfOption(method.rawToken, modelKey,
+                trainedRfDisplayPrefix(method) + name);
+    }
+
+    private static String trainedRfDisplayPrefix(SegmentationMethod method) {
+        SegmentationMethod base = SegmentationMethod.trainedRfBase(method);
+        if (base.isStarDist()) return "Trained RF (over StarDist): ";
+        if (base.isCellpose()) return "Trained RF (over Cellpose): ";
+        if (base.isEnhancedClassical()) return "Trained RF (over Enhanced Classical): ";
+        return TRAINED_RF_DISPLAY_PREFIX;
     }
 
     private static String trainedRfModelName(String modelKey, ConfigQcContext context) {

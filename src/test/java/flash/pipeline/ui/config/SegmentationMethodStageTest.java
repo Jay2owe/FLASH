@@ -108,6 +108,21 @@ public class SegmentationMethodStageTest {
     }
 
     @Test
+    public void trainedRfOverDeepBaseDisplaysBaseInPickerLabel() throws Exception {
+        File projectRoot = temp.newFolder("project-deep-rf");
+        writeSmileRfCatalog(projectRoot, "microglia_v3", "microglia_v3");
+
+        assertPickerLabel(projectRoot,
+                "trained_rf:microglia_v3:"
+                        + "base=stardist%3A0.5%3A0.3%3Aarea%3D20-2000%3Amodel%3Duser_stardist_v1",
+                "Trained RF (over StarDist): microglia_v3");
+        assertPickerLabel(projectRoot,
+                "trained_rf:microglia_v3:"
+                        + "base=cellpose%3A30.0%3A0.4%3A0.0%3Agpu%3Dfalse%3Amodel%3Dcellpose_cyto3",
+                "Trained RF (over Cellpose): microglia_v3");
+    }
+
+    @Test
     public void selectingClassicalAfterTrainedRfWritesPlainClassical() {
         String token = "trained_rf:test_model_key:base=classical";
         TokenStore store = new TokenStore(token);
@@ -184,6 +199,25 @@ public class SegmentationMethodStageTest {
             }
         }
         return null;
+    }
+
+    private static void assertPickerLabel(File projectRoot, String token, String expected) {
+        TokenStore store = new TokenStore(token);
+        SegmentationMethodStage stage = new SegmentationMethodStage(store);
+        ConfigQcContext context = ConfigQcContext.fromImages(
+                projectRoot,
+                null,
+                null,
+                Collections.<ImagePlus>emptyList(),
+                Arrays.asList("IBA1"),
+                0);
+
+        JComponent controls = stage.buildControls(context, new RecordingActions());
+        JRadioButton selected = selectedRadio(controls);
+
+        assertNotNull(selected);
+        assertEquals(token, selected.getActionCommand());
+        assertEquals(expected, selected.getText());
     }
 
     private static JButton findButton(java.awt.Component component, String text) {

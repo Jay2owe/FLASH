@@ -95,10 +95,12 @@ public final class TrainCustomEngineWizard {
         JComboBox<String> base = dialog.addChoice("Base engine", new String[] {
                 TrainCustomEngineWorkflow.Base.CLASSICAL.label,
                 TrainCustomEngineWorkflow.Base.ENHANCED_CLASSICAL.label,
+                TrainCustomEngineWorkflow.Base.STARDIST_RF.label,
+                TrainCustomEngineWorkflow.Base.CELLPOSE_RF.label,
                 TrainCustomEngineWorkflow.Base.STARDIST.label,
                 TrainCustomEngineWorkflow.Base.CELLPOSE.label
         }, workflow.selectedBase().label);
-        dialog.addHelpText("Classical and Enhanced Classical train an in-process Random Forest. StarDist and Cellpose package datasets for external training.");
+        dialog.addHelpText("Options marked RF post-filter train a Smile Random Forest inside FLASH using objects from the chosen base engine. Custom model options package datasets for external StarDist or Cellpose training.");
         JPanel helpRow = new JPanel();
         helpRow.setOpaque(false);
         helpRow.setLayout(new BoxLayout(helpRow, BoxLayout.X_AXIS));

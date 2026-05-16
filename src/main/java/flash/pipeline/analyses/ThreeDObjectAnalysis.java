@@ -394,7 +394,9 @@ public class ThreeDObjectAnalysis implements Analysis {
     private static boolean usesStarDistSegmentation(BinConfig cfg) {
         if (cfg == null) return false;
         for (int i = 0; i < cfg.numChannels(); i++) {
-            if (cfg.isStarDist(i)) return true;
+            SegmentationMethod method = cfg.segmentationMethod(i);
+            if (method.isStarDist()) return true;
+            if (method.isTrainedRf() && SegmentationMethod.trainedRfBase(method).isStarDist()) return true;
         }
         return false;
     }
@@ -402,7 +404,9 @@ public class ThreeDObjectAnalysis implements Analysis {
     private static boolean usesCellposeSegmentation(BinConfig cfg) {
         if (cfg == null) return false;
         for (int i = 0; i < cfg.numChannels(); i++) {
-            if (cfg.isCellpose(i)) return true;
+            SegmentationMethod method = cfg.segmentationMethod(i);
+            if (method.isCellpose()) return true;
+            if (method.isTrainedRf() && SegmentationMethod.trainedRfBase(method).isCellpose()) return true;
         }
         return false;
     }
@@ -2527,6 +2531,9 @@ public class ThreeDObjectAnalysis implements Analysis {
             }
             isStarDist[c] = cfg.isStarDist(c);
             isCellpose[c] = cfg.isCellpose(c);
+            SegmentationMethod cellposeSettingsMethod = segmentationMethod.isTrainedRf()
+                    ? SegmentationMethod.trainedRfBase(segmentationMethod)
+                    : segmentationMethod;
             sdProbThresh[c] = cfg.getStarDistProbThresh(c);
             sdNmsThresh[c] = cfg.getStarDistNmsThresh(c);
             sdLinkingMaxDistance[c] = cfg.getStarDistLinkingMaxDistance(c);
@@ -2537,12 +2544,12 @@ public class ThreeDObjectAnalysis implements Analysis {
             sdQualityMin[c] = cfg.getStarDistQualityMin(c);
             sdIntensityMin[c] = cfg.getStarDistIntensityMin(c);
             sdModelKey[c] = SegmentationMethod.starDistModelKey(cfg.segmentationMethod(c));
-            cpModel[c] = cfg.getCellposeModel(c);
-            cpDiameter[c] = cfg.getCellposeDiameter(c);
-            cpFlowThreshold[c] = cfg.getCellposeFlowThreshold(c);
-            cpCellprobThreshold[c] = cfg.getCellposeCellprobThreshold(c);
-            cpUseGpu[c] = cfg.getCellposeUseGpu(c);
-            cpSecondChannel[c] = cfg.getCellposeSecondChannel(c);
+            cpModel[c] = SegmentationMethod.cellposeModelKey(cellposeSettingsMethod);
+            cpDiameter[c] = SegmentationMethod.cellposeDiameter(cellposeSettingsMethod);
+            cpFlowThreshold[c] = SegmentationMethod.cellposeFlow(cellposeSettingsMethod);
+            cpCellprobThreshold[c] = SegmentationMethod.cellposeCellprob(cellposeSettingsMethod);
+            cpUseGpu[c] = SegmentationMethod.cellposeUseGpu(cellposeSettingsMethod);
+            cpSecondChannel[c] = SegmentationMethod.cellposeChan2(cellposeSettingsMethod);
         }
 
         // Use a thread pool for parallel filtering (cap at 4 to avoid memory pressure)
@@ -3031,6 +3038,9 @@ public class ThreeDObjectAnalysis implements Analysis {
             }
             isStarDist[c] = cfg.isStarDist(c);
             isCellpose[c] = cfg.isCellpose(c);
+            SegmentationMethod cellposeSettingsMethod = segmentationMethod.isTrainedRf()
+                    ? SegmentationMethod.trainedRfBase(segmentationMethod)
+                    : segmentationMethod;
             sdProbThresh[c] = cfg.getStarDistProbThresh(c);
             sdNmsThresh[c] = cfg.getStarDistNmsThresh(c);
             sdLinkingMaxDistance[c] = cfg.getStarDistLinkingMaxDistance(c);
@@ -3041,12 +3051,12 @@ public class ThreeDObjectAnalysis implements Analysis {
             sdQualityMin[c] = cfg.getStarDistQualityMin(c);
             sdIntensityMin[c] = cfg.getStarDistIntensityMin(c);
             sdModelKey[c] = SegmentationMethod.starDistModelKey(cfg.segmentationMethod(c));
-            cpModel[c] = cfg.getCellposeModel(c);
-            cpDiameter[c] = cfg.getCellposeDiameter(c);
-            cpFlowThreshold[c] = cfg.getCellposeFlowThreshold(c);
-            cpCellprobThreshold[c] = cfg.getCellposeCellprobThreshold(c);
-            cpUseGpu[c] = cfg.getCellposeUseGpu(c);
-            cpSecondChannel[c] = cfg.getCellposeSecondChannel(c);
+            cpModel[c] = SegmentationMethod.cellposeModelKey(cellposeSettingsMethod);
+            cpDiameter[c] = SegmentationMethod.cellposeDiameter(cellposeSettingsMethod);
+            cpFlowThreshold[c] = SegmentationMethod.cellposeFlow(cellposeSettingsMethod);
+            cpCellprobThreshold[c] = SegmentationMethod.cellposeCellprob(cellposeSettingsMethod);
+            cpUseGpu[c] = SegmentationMethod.cellposeUseGpu(cellposeSettingsMethod);
+            cpSecondChannel[c] = SegmentationMethod.cellposeChan2(cellposeSettingsMethod);
         }
 
         // Parallel filter (same logic as run3DObjectsCounterPerChannel Phase A)
@@ -3814,83 +3824,96 @@ public class ThreeDObjectAnalysis implements Analysis {
             }
 
             if (segmentationMethod != null && segmentationMethod.isTrainedRf()) {
-                ImagePlus labelImage = new TrainedRfRunner().run(
-                        filtered,
-                        TrainedRfParameters.fromMethod(
-                                segmentationMethod,
-                                projectRoot == null ? null : projectRoot.toPath(),
-                                ch,
-                                (int) Math.round(threshold),
-                                minSizeVox,
-                                maxSizeVox,
-                                0.5)
-                                .withWarningSink(new TrainedRfRunner.WarningSink() {
-                                    @Override
-                                    public void warn(String message) {
-                                        IJ.log(message);
-                                    }
-                                }));
+                ImagePlus rfCellposeCompanion = null;
+                try {
+                    SegmentationMethod rfBase = SegmentationMethod.trainedRfBase(segmentationMethod);
+                    TrainedRfParameters rfParams = TrainedRfParameters.fromMethod(
+                            segmentationMethod,
+                            projectRoot == null ? null : projectRoot.toPath(),
+                            ch,
+                            (int) Math.round(threshold),
+                            minSizeVox,
+                            maxSizeVox,
+                            0.5)
+                            .withWarningSink(new TrainedRfRunner.WarningSink() {
+                                @Override
+                                public void warn(String message) {
+                                    IJ.log(message);
+                                }
+                            });
+                    if (rfBase.isCellpose()) {
+                        int rfCompanionIndex = SegmentationMethod.cellposeChan2(rfBase);
+                        rfCellposeCompanion = prepareCellposeSecondChannelInput(
+                                c, channelName, ch, binDir,
+                                rfCompanionIndex, cellposeSecondChannel,
+                                cellposeSecondChannelName, cellposeSecondChannelFilterFilename);
+                        rfParams = rfParams.withCellposeCompanionImage(rfCellposeCompanion);
+                    }
+                    ImagePlus labelImage = new TrainedRfRunner().run(filtered, rfParams);
 
-                if (labelImage == null) {
-                    String failureReason = "Trained RF segmentation failed";
-                    IJ.log("    - [Ch " + (c + 1) + "] WARNING: " + failureReason);
-                    return new ChannelFilterResult(c, channelName, ch, null,
-                            null, 0, 0, true, failureReason);
-                }
+                    if (labelImage == null) {
+                        String failureReason = "Trained RF segmentation failed";
+                        IJ.log("    - [Ch " + (c + 1) + "] WARNING: " + failureReason);
+                        return new ChannelFilterResult(c, channelName, ch, null,
+                                null, 0, 0, true, failureReason);
+                    }
 
-                if (labelImage != null && (cropRoi != null || clearRoi != null)) {
-                    ij.gui.Roi filterRoi;
-                    if (classicalCentroidFilter) {
-                        filterRoi = (clearRoi != null) ? clearRoi : cropRoi;
-                    } else {
-                        filterRoi = (clearRoi != null)
-                                ? (ij.gui.Roi) clearRoi.clone()
-                                : (ij.gui.Roi) cropRoi.clone();
-                        if (cropRoi != null) {
-                            java.awt.Rectangle cropBounds = cropRoi.getBounds();
-                            filterRoi.setLocation(
-                                    filterRoi.getBounds().x - cropBounds.x,
-                                    filterRoi.getBounds().y - cropBounds.y);
+                    if (labelImage != null && (cropRoi != null || clearRoi != null)) {
+                        ij.gui.Roi filterRoi;
+                        if (classicalCentroidFilter) {
+                            filterRoi = (clearRoi != null) ? clearRoi : cropRoi;
+                        } else {
+                            filterRoi = (clearRoi != null)
+                                    ? (ij.gui.Roi) clearRoi.clone()
+                                    : (ij.gui.Roi) cropRoi.clone();
+                            if (cropRoi != null) {
+                                java.awt.Rectangle cropBounds = cropRoi.getBounds();
+                                filterRoi.setLocation(
+                                        filterRoi.getBounds().x - cropBounds.x,
+                                        filterRoi.getBounds().y - cropBounds.y);
+                            }
+                        }
+                        int beforeFilter = StarDist3DRunner.countLabels(labelImage);
+                        int removed = filterLabelsByCentroid(labelImage, filterRoi);
+                        int afterFilter = beforeFilter - removed;
+                        IJ.log("    Trained RF [" + channelName + "] ROI filter: " + beforeFilter
+                                + " -> " + afterFilter + " objects (" + removed + " outside "
+                                + roiSetName + " ROI removed)");
+
+                        if (classicalCentroidFilter) {
+                            RoiOps.removeNonRoiThreadSafe(filtered, cropRoi, clearRoi);
+                            RoiOps.removeNonRoiThreadSafe(ch, cropRoi, clearRoi);
+                            RoiOps.removeNonRoiThreadSafe(labelImage, cropRoi, clearRoi);
                         }
                     }
-                    int beforeFilter = StarDist3DRunner.countLabels(labelImage);
-                    int removed = filterLabelsByCentroid(labelImage, filterRoi);
-                    int afterFilter = beforeFilter - removed;
-                    IJ.log("    Trained RF [" + channelName + "] ROI filter: " + beforeFilter
-                            + " -> " + afterFilter + " objects (" + removed + " outside "
-                            + roiSetName + " ROI removed)");
 
-                    if (classicalCentroidFilter) {
-                        RoiOps.removeNonRoiThreadSafe(filtered, cropRoi, clearRoi);
-                        RoiOps.removeNonRoiThreadSafe(ch, cropRoi, clearRoi);
-                        RoiOps.removeNonRoiThreadSafe(labelImage, cropRoi, clearRoi);
+                    ImagePlus binaryMask = ImageOps.duplicateThreadSafe(labelImage);
+                    binaryMask.setTitle(channelName + "_filtered");
+                    ij.ImageStack maskStack = binaryMask.getStack();
+                    for (int s = 1; s <= maskStack.getSize(); s++) {
+                        ij.process.ImageProcessor ip = maskStack.getProcessor(s);
+                        for (int p = 0; p < ip.getPixelCount(); p++) {
+                            ip.set(p, ip.get(p) > 0 ? 255 : 0);
+                        }
                     }
-                }
 
-                ImagePlus binaryMask = ImageOps.duplicateThreadSafe(labelImage);
-                binaryMask.setTitle(channelName + "_filtered");
-                ij.ImageStack maskStack = binaryMask.getStack();
-                for (int s = 1; s <= maskStack.getSize(); s++) {
-                    ij.process.ImageProcessor ip = maskStack.getProcessor(s);
-                    for (int p = 0; p < ip.getPixelCount(); p++) {
-                        ip.set(p, ip.get(p) > 0 ? 255 : 0);
+                    int nObjects = StarDist3DRunner.countLabels(labelImage);
+                    if (!compactLog) {
+                        IJ.log("    - [Ch " + (c + 1) + "] Trained RF segmentation (model="
+                                + SegmentationMethod.trainedRfModelKey(segmentationMethod)
+                                + ", base=" + SegmentationTokenParser.format(SegmentationMethod.trainedRfBase(segmentationMethod))
+                                + "): " + nObjects + " objects kept");
                     }
-                }
 
-                int nObjects = StarDist3DRunner.countLabels(labelImage);
-                if (!compactLog) {
-                    IJ.log("    - [Ch " + (c + 1) + "] Trained RF segmentation (model="
-                            + SegmentationMethod.trainedRfModelKey(segmentationMethod)
-                            + ", base=" + SegmentationTokenParser.format(SegmentationMethod.trainedRfBase(segmentationMethod))
-                            + "): " + nObjects + " objects kept");
+                    return new ChannelFilterResult(c, channelName, ch, binaryMask,
+                            null, minSizeVox, maxSizeVox, false, null,
+                            true, "Trained RF", labelImage,
+                            "Trained RF (model=" + SegmentationMethod.trainedRfModelKey(segmentationMethod)
+                                    + ", base=" + SegmentationTokenParser.format(SegmentationMethod.trainedRfBase(segmentationMethod)) + ")",
+                            preDetection);
+                } finally {
+                    closeQuietly(rfCellposeCompanion);
                 }
-
-                return new ChannelFilterResult(c, channelName, ch, binaryMask,
-                        null, minSizeVox, maxSizeVox, false, null,
-                        true, "Trained RF", labelImage,
-                        "Trained RF (model=" + SegmentationMethod.trainedRfModelKey(segmentationMethod)
-                                + ", base=" + SegmentationTokenParser.format(SegmentationMethod.trainedRfBase(segmentationMethod)) + ")",
-                        preDetection);
             }
 
             return new ChannelFilterResult(c, channelName, ch, filtered,

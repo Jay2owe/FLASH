@@ -19,6 +19,7 @@ public final class TrainedRfParameters {
     public final int maxSize;
     public final ImagePlus intensityImage;
     public final ImagePlus auxImage;
+    public final ImagePlus cellposeCompanionImage;
     public final TrainedRfRunner.BaseRunner baseRunner;
     public final TrainedRfRunner.WarningSink warningSink;
 
@@ -36,6 +37,26 @@ public final class TrainedRfParameters {
                                ImagePlus auxImage,
                                TrainedRfRunner.BaseRunner baseRunner,
                                TrainedRfRunner.WarningSink warningSink) {
+        this(modelKey, projectRoot, modelPath, model, featureNames, base,
+                keepThreshold, threshold, minSize, maxSize, intensityImage, auxImage,
+                null, baseRunner, warningSink);
+    }
+
+    public TrainedRfParameters(String modelKey,
+                               Path projectRoot,
+                               Path modelPath,
+                               RandomForest model,
+                               String[] featureNames,
+                               SegmentationMethod base,
+                               double keepThreshold,
+                               int threshold,
+                               int minSize,
+                               int maxSize,
+                               ImagePlus intensityImage,
+                               ImagePlus auxImage,
+                               ImagePlus cellposeCompanionImage,
+                               TrainedRfRunner.BaseRunner baseRunner,
+                               TrainedRfRunner.WarningSink warningSink) {
         this.modelKey = modelKey == null ? "" : modelKey.trim();
         this.projectRoot = projectRoot;
         this.modelPath = modelPath;
@@ -48,6 +69,7 @@ public final class TrainedRfParameters {
         this.maxSize = Math.max(this.minSize, maxSize);
         this.intensityImage = intensityImage;
         this.auxImage = auxImage;
+        this.cellposeCompanionImage = cellposeCompanionImage;
         this.baseRunner = baseRunner;
         this.warningSink = warningSink;
     }
@@ -81,11 +103,19 @@ public final class TrainedRfParameters {
 
     public TrainedRfParameters withBaseRunner(TrainedRfRunner.BaseRunner runner) {
         return new TrainedRfParameters(modelKey, projectRoot, modelPath, model, featureNames, base,
-                keepThreshold, threshold, minSize, maxSize, intensityImage, auxImage, runner, warningSink);
+                keepThreshold, threshold, minSize, maxSize, intensityImage, auxImage,
+                cellposeCompanionImage, runner, warningSink);
     }
 
     public TrainedRfParameters withWarningSink(TrainedRfRunner.WarningSink sink) {
         return new TrainedRfParameters(modelKey, projectRoot, modelPath, model, featureNames, base,
-                keepThreshold, threshold, minSize, maxSize, intensityImage, auxImage, baseRunner, sink);
+                keepThreshold, threshold, minSize, maxSize, intensityImage, auxImage,
+                cellposeCompanionImage, baseRunner, sink);
+    }
+
+    public TrainedRfParameters withCellposeCompanionImage(ImagePlus companionImage) {
+        return new TrainedRfParameters(modelKey, projectRoot, modelPath, model, featureNames, base,
+                keepThreshold, threshold, minSize, maxSize, intensityImage, auxImage,
+                companionImage, baseRunner, warningSink);
     }
 }

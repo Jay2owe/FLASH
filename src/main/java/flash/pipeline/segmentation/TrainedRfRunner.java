@@ -1,5 +1,6 @@
 package flash.pipeline.segmentation;
 
+import flash.pipeline.cellpose.Cellpose3DRunner;
 import flash.pipeline.click.training.ObjectClassifierPersistence;
 import flash.pipeline.click.training.ObjectClassifierScorer;
 import flash.pipeline.click.training.ObjectFeatureExtractor;
@@ -8,6 +9,7 @@ import flash.pipeline.objects.ObjectsCounter3DWrapper;
 import flash.pipeline.segmentation.catalog.ModelCatalog;
 import flash.pipeline.segmentation.catalog.ModelCatalogIO;
 import flash.pipeline.segmentation.catalog.ModelEntry;
+import flash.pipeline.stardist.StarDist3DRunner;
 import ij.IJ;
 import ij.ImagePlus;
 import ij.ImageStack;
@@ -15,6 +17,7 @@ import ij.measure.ResultsTable;
 import ij.process.ImageProcessor;
 import smile.classification.RandomForest;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
@@ -45,8 +48,8 @@ public final class TrainedRfRunner {
                 ? SegmentationMethod.classical("classical")
                 : safe.base;
 
-        if (base.isStarDist() || base.isCellpose() || base.isTrainedRf()) {
-            warn(safe, "Warning: Trained RF post-filter supports only Classical and Enhanced Classical bases in v1; "
+        if (base.isTrainedRf()) {
+            warn(safe, "Warning: Trained RF post-filter cannot use another Trained RF as its base; "
                     + "returning the base output unchanged.");
             return runBaseUnchanged(channelImage, safe);
         }
@@ -59,8 +62,9 @@ public final class TrainedRfRunner {
         ModelBundle bundle = loadModel(safe);
         ObjectFeatureExtractor extractor = new ObjectFeatureExtractor();
         ImagePlus intensity = safe.intensityImage == null ? channelImage : safe.intensityImage;
+        ImagePlus aux = safe.auxImage == null ? cellprobImage(baseLabels) : safe.auxImage;
         List<ObjectFeatureExtractor.FeatureRow> rows =
-                extractor.extractFromLabelImage(baseLabels, intensity, safe.auxImage, null);
+                extractor.extractFromLabelImage(baseLabels, intensity, aux, null);
 
         ObjectClassifierScorer scorer = new ObjectClassifierScorer();
         List<ObjectClassifierScorer.ScoreResult> scores =
@@ -90,6 +94,22 @@ public final class TrainedRfRunner {
                                     IJ.log(message);
                                 }
                             }));
+        }
+        if (base.isStarDist()) {
+            return StarDist3DRunner.run(channelImage, base, null, projectRootFile(params));
+        }
+        if (base.isCellpose()) {
+            return Cellpose3DRunner.run(
+                    channelImage,
+                    params.cellposeCompanionImage,
+                    SegmentationMethod.cellposeModelKey(base),
+                    SegmentationMethod.cellposeDiameter(base),
+                    SegmentationMethod.cellposeFlow(base),
+                    SegmentationMethod.cellposeCellprob(base),
+                    SegmentationMethod.cellposeUseGpu(base),
+                    null,
+                    projectRootFile(params),
+                    true);
         }
         return runClassicalBase(channelImage, params);
     }
@@ -202,6 +222,21 @@ public final class TrainedRfRunner {
         }
         empty.updateAndDraw();
         return empty;
+    }
+
+    private static File projectRootFile(TrainedRfParameters params) {
+        Path root = params == null ? null : params.projectRoot;
+        return root == null ? null : root.toFile();
+    }
+
+    private static ImagePlus cellprobImage(ImagePlus labelImage) {
+        if (labelImage == null) return null;
+        try {
+            Object property = labelImage.getProperty(Cellpose3DRunner.CELLPROB_IMAGE_PROPERTY);
+            return property instanceof ImagePlus ? (ImagePlus) property : null;
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     private static void warn(TrainedRfParameters params, String message) {
