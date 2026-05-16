@@ -121,7 +121,14 @@ public final class ModelCatalog {
     }
 
     public synchronized void remove(String modelKey) throws IOException {
+        remove(modelKey, true);
+    }
+
+    public synchronized void remove(String modelKey, boolean removeFiles) throws IOException {
         entries.remove(modelKey);
+        if (!removeFiles) {
+            return;
+        }
         if (!ModelCatalogIO.isSafeModelKey(modelKey)) {
             return;
         }

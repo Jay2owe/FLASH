@@ -79,7 +79,7 @@ public class SegmentationModelManagerControllerTest {
     }
 
     @Test
-    public void deleteUserEntryRemovesFileAndRow() throws Exception {
+    public void deleteUserEntryRemovesRowAndKeepsFileByDefault() throws Exception {
         Path root = temp.newFolder("delete").toPath();
         Path source = validZip(root.resolve("imports").resolve("delete.zip"));
         SegmentationModelManagerController controller = new SegmentationModelManagerController(root);
@@ -90,7 +90,7 @@ public class SegmentationModelManagerControllerTest {
 
         controller.delete(added.modelKey);
 
-        assertFalse(Files.exists(copied));
+        assertTrue(Files.isRegularFile(copied));
         assertFalse(controller.get(added.modelKey).isPresent());
         assertFalse(ModelCatalogIO.read(root).get(added.modelKey).isPresent());
     }

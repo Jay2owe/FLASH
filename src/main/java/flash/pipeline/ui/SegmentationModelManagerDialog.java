@@ -9,6 +9,7 @@ import ij.IJ;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JFileChooser;
 import javax.swing.JLabel;
@@ -496,13 +497,16 @@ public final class SegmentationModelManagerDialog extends PipelineDialog {
         PipelineDialog dialog = new PipelineDialog(getWindow(), "Delete Segmentation Model");
         dialog.addHeader("Delete Model");
         dialog.addMessage("Delete " + entry.name + " from this project catalog?");
-        dialog.addHelpText("FLASH will remove the catalog row and the copied model file directory.");
+        dialog.addHelpText("Removes the catalog entry. Copied model files on disk are kept by default.");
+        final JCheckBox removeFiles = new JCheckBox("Also delete copied model files on disk", false);
+        removeFiles.setOpaque(false);
+        dialog.addComponent(removeFiles);
         dialog.setPrimaryButtonText("Delete");
         if (!dialog.showDialog()) {
             return;
         }
         try {
-            controller.delete(entry.modelKey);
+            controller.delete(entry.modelKey, removeFiles.isSelected());
             setTransientStatus("Deleted " + entry.name + ".");
             refreshTable(null);
         } catch (Exception ex) {

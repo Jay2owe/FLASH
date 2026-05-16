@@ -188,11 +188,15 @@ public final class SegmentationModelManagerController {
     }
 
     public synchronized void delete(String modelKey) throws IOException {
+        delete(modelKey, false);
+    }
+
+    public synchronized void delete(String modelKey, boolean removeFiles) throws IOException {
         ModelEntry existing = requireEntry(modelKey);
         if (!canDelete(existing)) {
             throw new IOException("Stock model entries are read-only.");
         }
-        catalog.remove(modelKey);
+        catalog.remove(modelKey, removeFiles);
         persist();
     }
 
