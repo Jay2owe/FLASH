@@ -42,6 +42,7 @@ import javax.swing.SwingWorker;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import java.awt.Color;
+import java.awt.Container;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
@@ -165,6 +166,7 @@ public final class StarDistParameterStage implements ConfigQcStage {
     private JComboBox<ModelOption> modelCombo;
     private JComboBox<ModelOption> missingModelReplacementCombo;
     private JButton manageModelsButton;
+    private JPanel missingNoticeContainer;
     private JLabel missingModelNoticeLabel;
     private JLabel defaultsNoticeLabel;
     private JButton defaultsApplyButton;
@@ -227,10 +229,9 @@ public final class StarDistParameterStage implements ConfigQcStage {
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
         panel.setBorder(FlashTheme.pad(2, 0, 0, 0));
         createParameterFields();
-        if (missingModelKey != null) {
-            panel.add(buildMissingModelNoticeRow());
-            panel.add(Box.createVerticalStrut(4));
-        }
+        missingNoticeContainer = buildMissingModelNoticeContainer();
+        panel.add(missingNoticeContainer);
+        refreshMissingModelNoticeRow();
         panel.add(buildModelRow());
         panel.add(Box.createVerticalStrut(4));
         panel.add(buildDefaultsRow());
@@ -443,6 +444,24 @@ public final class StarDistParameterStage implements ConfigQcStage {
         return defaultsApplyButton != null && defaultsApplyButton.isVisible();
     }
 
+    String missingModelNoticeTextForTest() {
+        return missingModelNoticeLabel == null ? "" : missingModelNoticeLabel.getText();
+    }
+
+    boolean replacementSelectorVisibleForTest() {
+        return missingModelReplacementCombo != null && missingModelReplacementCombo.isVisible();
+    }
+
+    boolean missingModelNoticeInPanelForTest() {
+        return missingNoticeContainer != null
+                && missingNoticeContainer.isVisible()
+                && missingNoticeContainer.getComponentCount() > 0;
+    }
+
+    void refreshModelOptionsFromCatalogForTest() {
+        refreshModelOptionsFromCatalog();
+    }
+
     void applyPendingDefaultsForTest() {
         applyPendingDefaults();
     }
@@ -552,6 +571,35 @@ public final class StarDistParameterStage implements ConfigQcStage {
         gbc.fill = GridBagConstraints.NONE;
         row.add(manage, gbc);
         return row;
+    }
+
+    private JPanel buildMissingModelNoticeContainer() {
+        JPanel container = new JPanel();
+        container.setOpaque(false);
+        container.setLayout(new BoxLayout(container, BoxLayout.Y_AXIS));
+        container.setAlignmentX(JComponent.LEFT_ALIGNMENT);
+        return container;
+    }
+
+    private void refreshMissingModelNoticeRow() {
+        if (missingNoticeContainer == null) return;
+        missingNoticeContainer.removeAll();
+        if (missingModelKey == null) {
+            missingModelNoticeLabel = null;
+            missingModelReplacementCombo = null;
+            missingNoticeContainer.setVisible(false);
+        } else {
+            missingNoticeContainer.add(buildMissingModelNoticeRow());
+            missingNoticeContainer.add(Box.createVerticalStrut(4));
+            missingNoticeContainer.setVisible(true);
+        }
+        missingNoticeContainer.revalidate();
+        missingNoticeContainer.repaint();
+        Container parent = missingNoticeContainer.getParent();
+        if (parent != null) {
+            parent.revalidate();
+            parent.repaint();
+        }
     }
 
     private JComponent buildDefaultsRow() {
@@ -986,6 +1034,7 @@ public final class StarDistParameterStage implements ConfigQcStage {
         Parameters current = collectParameters();
         parameterStore.save(formatMethod(current));
         savedParameters = current;
+        refreshMissingModelNoticeRow();
         setStatus("Replacement model selected.");
         markPreviewStale(STALE_TEXT);
     }
@@ -1018,7 +1067,10 @@ public final class StarDistParameterStage implements ConfigQcStage {
         if (!containsModelKey(modelOptions, selectedKey)) {
             missingModelKey = selectedKey;
             setError("Cannot run segmentation: model missing.");
+        } else {
+            missingModelKey = null;
         }
+        refreshMissingModelNoticeRow();
     }
 
     private ModelOption selectedModelOption() {

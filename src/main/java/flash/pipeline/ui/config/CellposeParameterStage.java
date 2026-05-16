@@ -206,6 +206,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
     private JButton resetButton;
     private JButton variationsButton;
     private JButton manageModelsButton;
+    private JPanel missingNoticeContainer;
     private ClickSuggestPanel suggestPanel;
     private JLabel missingModelNoticeLabel;
     private JLabel defaultsNoticeLabel;
@@ -301,10 +302,9 @@ public final class CellposeParameterStage implements ConfigQcStage {
         panel.setOpaque(false);
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
         panel.setBorder(FlashTheme.pad(2, 0, 0, 0));
-        if (missingModelKey != null) {
-            panel.add(buildMissingModelNoticeRow());
-            panel.add(Box.createVerticalStrut(4));
-        }
+        missingNoticeContainer = buildMissingModelNoticeContainer();
+        panel.add(missingNoticeContainer);
+        refreshMissingModelNoticeRow();
         panel.add(buildModelRow());
         panel.add(Box.createVerticalStrut(4));
         panel.add(buildDefaultsRow());
@@ -574,6 +574,16 @@ public final class CellposeParameterStage implements ConfigQcStage {
         return missingModelReplacementCombo != null && missingModelReplacementCombo.isVisible();
     }
 
+    boolean missingModelNoticeInPanelForTest() {
+        return missingNoticeContainer != null
+                && missingNoticeContainer.isVisible()
+                && missingNoticeContainer.getComponentCount() > 0;
+    }
+
+    void refreshModelOptionsFromCatalogForTest() {
+        refreshModelOptionsFromCatalog();
+    }
+
     private JComponent buildMissingModelNoticeRow() {
         JPanel row = new JPanel(new GridBagLayout());
         row.setOpaque(false);
@@ -601,6 +611,35 @@ public final class CellposeParameterStage implements ConfigQcStage {
         gbc.fill = GridBagConstraints.HORIZONTAL;
         row.add(missingModelReplacementCombo, gbc);
         return row;
+    }
+
+    private JPanel buildMissingModelNoticeContainer() {
+        JPanel container = new JPanel();
+        container.setOpaque(false);
+        container.setLayout(new BoxLayout(container, BoxLayout.Y_AXIS));
+        container.setAlignmentX(JComponent.LEFT_ALIGNMENT);
+        return container;
+    }
+
+    private void refreshMissingModelNoticeRow() {
+        if (missingNoticeContainer == null) return;
+        missingNoticeContainer.removeAll();
+        if (missingModelKey == null) {
+            missingModelNoticeLabel = null;
+            missingModelReplacementCombo = null;
+            missingNoticeContainer.setVisible(false);
+        } else {
+            missingNoticeContainer.add(buildMissingModelNoticeRow());
+            missingNoticeContainer.add(Box.createVerticalStrut(4));
+            missingNoticeContainer.setVisible(true);
+        }
+        missingNoticeContainer.revalidate();
+        missingNoticeContainer.repaint();
+        Container parent = missingNoticeContainer.getParent();
+        if (parent != null) {
+            parent.revalidate();
+            parent.repaint();
+        }
     }
 
     private JComponent buildModelRow() {
@@ -1989,6 +2028,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
         Parameters current = collectParameters();
         parameterStore.save(formatMethod(current));
         savedParameters = current;
+        refreshMissingModelNoticeRow();
         setStatus("Replacement model selected.");
         markPreviewStale(STALE_TEXT);
     }
@@ -2021,7 +2061,10 @@ public final class CellposeParameterStage implements ConfigQcStage {
         if (!containsModelKey(modelOptions, selectedKey)) {
             missingModelKey = selectedKey;
             setError("Cannot run segmentation: model missing.");
+        } else {
+            missingModelKey = null;
         }
+        refreshMissingModelNoticeRow();
     }
 
     private void updateModelTooltip(ModelOption option) {

@@ -96,6 +96,41 @@ public class StarDistParameterStageModelDropdownTest {
         assertEquals(0.23, adapter.lastPreviewParameters.nmsThreshold, 0.001);
     }
 
+    @Test
+    public void missingModelOnReloadShowsReplacementSelector() throws Exception {
+        File root = temp.newFolder("missing-root");
+        StarDistParameterStage stage = new StarDistParameterStage(
+                new RecordingStore("stardist:0.5:0.4:model=user_missing"),
+                new RecordingPreviewAdapter());
+
+        stage.buildControls(context(root), new RecordingActions());
+
+        assertTrue(stage.missingModelNoticeTextForTest().contains("user_missing"));
+        assertTrue(stage.missingModelNoticeInPanelForTest());
+        assertTrue(stage.replacementSelectorVisibleForTest());
+        assertEquals("stardist_versatile_fluo", stage.selectedModelKeyForTest());
+    }
+
+    @Test
+    public void catalogRefreshShowsMissingModelNoticeWhenSelectedModelRemoved() throws Exception {
+        File root = projectWithUserModel("user_deleted", "User Deleted", 0.61, 0.22);
+        StarDistParameterStage stage = new StarDistParameterStage(
+                new RecordingStore("stardist:0.5:0.4:model=user_deleted"),
+                new RecordingPreviewAdapter());
+
+        stage.buildControls(context(root), new RecordingActions());
+        assertEquals("user_deleted", stage.selectedModelKeyForTest());
+        assertFalse(stage.missingModelNoticeInPanelForTest());
+
+        removeUserModel(root, "user_deleted");
+        stage.refreshModelOptionsFromCatalogForTest();
+
+        assertTrue(stage.missingModelNoticeTextForTest().contains("user_deleted"));
+        assertTrue(stage.missingModelNoticeInPanelForTest());
+        assertTrue(stage.replacementSelectorVisibleForTest());
+        assertEquals("stardist_versatile_fluo", stage.selectedModelKeyForTest());
+    }
+
     private File projectWithUserModel(String key, String name, double prob, double nms) throws Exception {
         Path root = temp.newFolder(key + "-root").toPath();
         Path source = temp.newFile(key + ".zip").toPath();
@@ -104,6 +139,12 @@ public class StarDistParameterStageModelDropdownTest {
         catalog.add(userStarDist(key, name, prob, nms), source);
         ModelCatalogIO.writeProject(root, catalog);
         return root.toFile();
+    }
+
+    private static void removeUserModel(File root, String key) throws Exception {
+        ModelCatalog catalog = ModelCatalogIO.read(root.toPath());
+        catalog.remove(key);
+        ModelCatalogIO.writeProject(root.toPath(), catalog);
     }
 
     private static ConfigQcContext context(File root) {

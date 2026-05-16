@@ -103,6 +103,26 @@ public class CellposeParameterStageModelDropdownTest {
         stage.buildControls(context(root), new RecordingActions());
 
         assertTrue(stage.missingModelNoticeTextForTest().contains("user_missing"));
+        assertTrue(stage.missingModelNoticeInPanelForTest());
+        assertTrue(stage.replacementSelectorVisibleForTest());
+        assertEquals("cellpose_cyto3", stage.selectedModelKeyForTest());
+    }
+
+    @Test
+    public void catalogRefreshShowsMissingModelNoticeWhenSelectedModelRemoved() throws Exception {
+        File root = projectWithUserModel("user_deleted", "User Deleted", 21.0, 0.55, -0.2);
+        CellposeParameterStage stage = stage(root,
+                new RecordingStore("cellpose:30.0:0.4:0.0:gpu=false:model=user_deleted"));
+
+        stage.buildControls(context(root), new RecordingActions());
+        assertEquals("user_deleted", stage.selectedModelKeyForTest());
+        assertFalse(stage.missingModelNoticeInPanelForTest());
+
+        removeUserModel(root, "user_deleted");
+        stage.refreshModelOptionsFromCatalogForTest();
+
+        assertTrue(stage.missingModelNoticeTextForTest().contains("user_deleted"));
+        assertTrue(stage.missingModelNoticeInPanelForTest());
         assertTrue(stage.replacementSelectorVisibleForTest());
         assertEquals("cellpose_cyto3", stage.selectedModelKeyForTest());
     }
@@ -117,6 +137,12 @@ public class CellposeParameterStageModelDropdownTest {
         catalog.add(userCellpose(key, name, diameter, flow, cellprob), source);
         ModelCatalogIO.writeProject(root, catalog);
         return root.toFile();
+    }
+
+    private static void removeUserModel(File root, String key) throws Exception {
+        ModelCatalog catalog = ModelCatalogIO.read(root.toPath());
+        catalog.remove(key);
+        ModelCatalogIO.writeProject(root.toPath(), catalog);
     }
 
     private static CellposeParameterStage stage(File root, RecordingStore store) {
