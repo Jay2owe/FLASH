@@ -3,7 +3,9 @@ package flash.pipeline.click.training.stardist;
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinConfigIO;
 import flash.pipeline.click.ClickStore;
+import flash.pipeline.click.ClicksConfigIO;
 import flash.pipeline.click.training.ImagePlusProvider;
+import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.naming.ChannelFilenameCodec;
 import flash.pipeline.ui.wizard.JsonIO;
 import ij.ImagePlus;
@@ -11,6 +13,7 @@ import ij.ImageStack;
 import ij.io.FileSaver;
 import ij.process.ImageProcessor;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
@@ -50,7 +53,6 @@ public final class StarDistDatasetPackager {
     private static final String LABELS_DIR = "labels";
     private static final String README_FILENAME = "README.txt";
     private static final String METADATA_FILENAME = "metadata.json";
-    private static final String SOURCE_CLICKS_JSON_PATH = "../../.bin/Clicks.json";
 
     public static final class PackagingResult {
         public final Path outputDir;
@@ -181,7 +183,7 @@ public final class StarDistDatasetPackager {
             }
 
             writeReadme(tempDir, channelOneBased, channelName, tiled, tileSize);
-            writeMetadata(tempDir, channelOneBased, channelName, originalImagesWritten,
+            writeMetadata(tempDir, root, outputDir, channelOneBased, channelName, originalImagesWritten,
                     trainingImagesWritten, positiveLabelsRetained, negativeLabelsRemoved,
                     tiled, tileSize, tileCount);
 
@@ -607,6 +609,8 @@ public final class StarDistDatasetPackager {
     }
 
     private static void writeMetadata(Path outputDir,
+                                      Path projectRoot,
+                                      Path finalOutputDir,
                                       int channelOneBased,
                                       String channelName,
                                       int imageCount,
@@ -627,7 +631,7 @@ public final class StarDistDatasetPackager {
         counts.put("positive", Integer.valueOf(positiveLabelsRetained));
         counts.put("negative", Integer.valueOf(negativeLabelsRemoved));
         root.put("objectCount", counts);
-        root.put("sourceClicksJsonPath", SOURCE_CLICKS_JSON_PATH);
+        root.put("sourceClicksJsonPath", sourceClicksPath(projectRoot, finalOutputDir));
         root.put("recommendedNotebook", RECOMMENDED_NOTEBOOK);
         root.put("tileMode", tiled ? "tiled" : "whole");
         if (tiled) {
@@ -637,6 +641,35 @@ public final class StarDistDatasetPackager {
         String json = JsonIO.write(root) + "\n";
         Files.write(outputDir.resolve(METADATA_FILENAME),
                 json.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static String sourceClicksPath(Path projectRoot, Path outputDir) {
+        Path clicks = sourceClicksJson(projectRoot);
+        try {
+            return outputDir.toAbsolutePath().normalize().relativize(clicks)
+                    .toString().replace('\\', '/');
+        } catch (IllegalArgumentException e) {
+            return clicks.toString();
+        }
+    }
+
+    private static Path sourceClicksJson(Path projectRoot) {
+        FlashProjectLayout layout = FlashProjectLayout.forDirectory(projectRoot.toString());
+        Path writePath = layout.configurationWriteDir().toPath()
+                .resolve(ClicksConfigIO.FILE_NAME)
+                .toAbsolutePath()
+                .normalize();
+        if (Files.isRegularFile(writePath)) {
+            return writePath;
+        }
+        for (File dir : layout.configurationReadDirs()) {
+            Path candidate = dir.toPath().resolve(ClicksConfigIO.FILE_NAME)
+                    .toAbsolutePath().normalize();
+            if (Files.isRegularFile(candidate)) {
+                return candidate;
+            }
+        }
+        return writePath;
     }
 
     private static String channelName(Path projectRoot, int channelOneBased) {

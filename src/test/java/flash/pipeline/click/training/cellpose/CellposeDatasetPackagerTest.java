@@ -1,7 +1,9 @@
 package flash.pipeline.click.training.cellpose;
 
 import flash.pipeline.click.ClickStore;
+import flash.pipeline.click.ClicksConfigIO;
 import flash.pipeline.click.training.ImagePlusProvider;
+import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.ui.wizard.JsonIO;
 import ij.IJ;
 import ij.ImagePlus;
@@ -78,6 +80,8 @@ public class CellposeDatasetPackagerTest {
     public void metadataJsonAndTrainCommandWritten() throws Exception {
         Path root = projectRoot();
         writeChannelData(root);
+        Path clicksJson = modernClicksJson(root);
+        writeClicksJson(clicksJson);
         ClickStore store = new ClickStore();
         store.add(click("Image1", 2, 1, ClickStore.Verdict.POSITIVE));
         store.add(click("Image1", 2, 2, ClickStore.Verdict.NEGATIVE));
@@ -102,12 +106,29 @@ public class CellposeDatasetPackagerTest {
         assertEquals(command, JsonIO.stringValue(metadata.get("trainCommand")));
         assertEquals(1, JsonIO.intValue(metadata.get("imageCount"), -1));
         assertEquals(1, JsonIO.intValue(metadata.get("sliceCount"), -1));
-        assertEquals("../../../../.bin/Clicks.json",
+        assertEquals(relativePath(result.outputDir, clicksJson),
                 JsonIO.stringValue(metadata.get("sourceClicksJsonPath")));
 
         Map<String, Object> objectCount = JsonIO.asObject(metadata.get("objectCount"));
         assertEquals(1, JsonIO.intValue(objectCount.get("positive"), -1));
         assertEquals(1, JsonIO.intValue(objectCount.get("negative"), -1));
+    }
+
+    @Test
+    public void metadataClicksPathUsesLegacyBinWhenOnlyLegacyClicksJsonExists() throws Exception {
+        Path root = projectRoot();
+        Path clicksJson = root.resolve(".bin").resolve(ClicksConfigIO.FILE_NAME);
+        writeClicksJson(clicksJson);
+        ClickStore store = new ClickStore();
+        store.add(click("Image1", 2, 1, ClickStore.Verdict.POSITIVE));
+
+        CellposeDatasetPackager.PackagingResult result =
+                packageOneImage(root, "legacy-clicks", store);
+
+        Map<String, Object> metadata = JsonIO.parseObject(
+                text(result.outputDir.resolve("metadata.json")));
+        assertEquals(relativePath(result.outputDir, clicksJson),
+                JsonIO.stringValue(metadata.get("sourceClicksJsonPath")));
     }
 
     @Test
@@ -246,7 +267,9 @@ public class CellposeDatasetPackagerTest {
     }
 
     private static void writeChannelData(Path root) throws IOException {
-        Path bin = root.resolve(".bin");
+        Path bin = FlashProjectLayout.forDirectory(root.toString())
+                .configurationWriteDir()
+                .toPath();
         Files.createDirectories(bin);
         Files.write(bin.resolve("Channel_Data.txt"),
                 Arrays.asList(
@@ -259,8 +282,27 @@ public class CellposeDatasetPackagerTest {
                         "classical\tcellpose:30:0.4:0.0:gpu=false:model=cellpose_cyto3",
                         "default\tdefault",
                         "zslice:full",
-                        "clicks:per_channel"),
+                "clicks:per_channel"),
                 StandardCharsets.UTF_8);
+    }
+
+    private static Path modernClicksJson(Path root) {
+        return FlashProjectLayout.forDirectory(root.toString())
+                .configurationWriteDir()
+                .toPath()
+                .resolve(ClicksConfigIO.FILE_NAME);
+    }
+
+    private static void writeClicksJson(Path clicksJson) throws IOException {
+        Files.createDirectories(clicksJson.getParent());
+        Files.write(clicksJson, Arrays.asList("{}"), StandardCharsets.UTF_8);
+    }
+
+    private static String relativePath(Path from, Path to) {
+        return from.toAbsolutePath().normalize()
+                .relativize(to.toAbsolutePath().normalize())
+                .toString()
+                .replace('\\', '/');
     }
 
     private static ImagePlus rawStack(int width, int height, int slices) {

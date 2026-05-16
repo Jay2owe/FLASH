@@ -143,6 +143,30 @@ public final class FlashProjectLayout {
         return settingsDir(visibleConfigurationDir());
     }
 
+    public static File projectRootForConfigurationDir(File configDir) {
+        if (configDir == null) return null;
+
+        File parent = configDir.getParentFile();
+        if (parent != null && LEGACY_BIN_DIR.equals(configDir.getName())) {
+            return parent;
+        }
+
+        if (parent != null && CONFIGURATION_DIR.equals(parent.getName())) {
+            File flashDir = parent.getParentFile();
+            if (flashDir != null && FLASH_DIR.equals(flashDir.getName())
+                    && flashDir.getParentFile() != null) {
+                return flashDir.getParentFile();
+            }
+        }
+
+        if (parent != null && FLASH_DIR.equals(parent.getName())
+                && parent.getParentFile() != null) {
+            return parent.getParentFile();
+        }
+
+        return parent;
+    }
+
     public File legacyBinDir() {
         return new File(projectRoot, LEGACY_BIN_DIR);
     }

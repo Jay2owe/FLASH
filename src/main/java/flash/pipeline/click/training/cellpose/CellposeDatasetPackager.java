@@ -7,6 +7,7 @@ import flash.pipeline.cellpose.CellposeRuntime;
 import flash.pipeline.click.ClickStore;
 import flash.pipeline.click.ClicksConfigIO;
 import flash.pipeline.click.training.ImagePlusProvider;
+import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.naming.ChannelFilenameCodec;
 import flash.pipeline.segmentation.SegmentationMethod;
 import flash.pipeline.segmentation.catalog.ModelCatalog;
@@ -20,6 +21,7 @@ import ij.io.FileSaver;
 import ij.process.ImageProcessor;
 import ij.process.ShortProcessor;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
@@ -367,14 +369,32 @@ public final class CellposeDatasetPackager {
     }
 
     private static String sourceClicksPath(Path projectRoot, Path outputDir) {
-        Path clicks = projectRoot.resolve(".bin").resolve(ClicksConfigIO.FILE_NAME)
-                .toAbsolutePath().normalize();
+        Path clicks = sourceClicksJson(projectRoot);
         try {
             return outputDir.toAbsolutePath().normalize().relativize(clicks)
                     .toString().replace('\\', '/');
         } catch (IllegalArgumentException e) {
             return clicks.toString();
         }
+    }
+
+    private static Path sourceClicksJson(Path projectRoot) {
+        FlashProjectLayout layout = FlashProjectLayout.forDirectory(projectRoot.toString());
+        Path writePath = layout.configurationWriteDir().toPath()
+                .resolve(ClicksConfigIO.FILE_NAME)
+                .toAbsolutePath()
+                .normalize();
+        if (Files.isRegularFile(writePath)) {
+            return writePath;
+        }
+        for (File dir : layout.configurationReadDirs()) {
+            Path candidate = dir.toPath().resolve(ClicksConfigIO.FILE_NAME)
+                    .toAbsolutePath().normalize();
+            if (Files.isRegularFile(candidate)) {
+                return candidate;
+            }
+        }
+        return writePath;
     }
 
     private static String resolvePretrainedModel(Path projectRoot, String baseModel) {
