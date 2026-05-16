@@ -22,6 +22,7 @@ import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -56,15 +57,26 @@ public final class StarDistDatasetPackager {
         public final int imagesWritten;
         public final int positiveLabelsRetained;
         public final int negativeLabelsRemoved;
+        public final int tileCount;
 
         public PackagingResult(Path outputDir,
                                int imagesWritten,
                                int positiveLabelsRetained,
                                int negativeLabelsRemoved) {
+            this(outputDir, imagesWritten, positiveLabelsRetained,
+                    negativeLabelsRemoved, -1);
+        }
+
+        public PackagingResult(Path outputDir,
+                               int imagesWritten,
+                               int positiveLabelsRetained,
+                               int negativeLabelsRemoved,
+                               int tileCount) {
             this.outputDir = outputDir;
             this.imagesWritten = imagesWritten;
             this.positiveLabelsRetained = positiveLabelsRetained;
             this.negativeLabelsRemoved = negativeLabelsRemoved;
+            this.tileCount = tileCount;
         }
     }
 
@@ -74,6 +86,17 @@ public final class StarDistDatasetPackager {
                                           ClickStore clickStore,
                                           ImagePlusProvider rawImageProvider,
                                           ImagePlusProvider labelImageProvider) throws IOException {
+        return packageDataset(projectRoot, sessionName, channelOneBased, clickStore,
+                rawImageProvider, labelImageProvider, 0);
+    }
+
+    public PackagingResult packageDataset(Path projectRoot,
+                                          String sessionName,
+                                          int channelOneBased,
+                                          ClickStore clickStore,
+                                          ImagePlusProvider rawImageProvider,
+                                          ImagePlusProvider labelImageProvider,
+                                          int tileSize) throws IOException {
         if (projectRoot == null) {
             throw new IOException("Project root must not be null.");
         }
@@ -85,6 +108,9 @@ public final class StarDistDatasetPackager {
         }
         if (labelImageProvider == null) {
             throw new IOException("Label image provider must not be null.");
+        }
+        if (tileSize < 0) {
+            throw new IOException("Tile size must be 0 for whole-image export or a positive pixel size.");
         }
 
         Path root = projectRoot.toAbsolutePath().normalize();
@@ -109,6 +135,8 @@ public final class StarDistDatasetPackager {
         int trainingImagesWritten = 0;
         int positiveLabelsRetained = 0;
         int negativeLabelsRemoved = 0;
+        int tileCount = 0;
+        boolean tiled = tileSize > 0;
 
         try {
             Path rawDir = tempDir.resolve(RAW_DIR);
@@ -133,26 +161,34 @@ public final class StarDistDatasetPackager {
                 positiveLabelsRetained += correction.positiveLabelsRetained;
                 negativeLabelsRemoved += correction.negativeLabelsRemoved;
 
-                int slices = labelSliceCount(correction.labels);
-                for (int z = 1; z <= slices; z++) {
-                    String fileName = outputFileName(imageName, channelOneBased, z);
-                    ImagePlus rawSlice = rawSlice(rawImage, channelOneBased, z);
-                    ImagePlus labelSlice = labelSlice(correction.labels, z);
-                    saveTiff(rawSlice, rawDir.resolve(fileName));
-                    saveTiff(labelSlice, labelsDir.resolve(fileName));
-                    trainingImagesWritten++;
+                if (tiled) {
+                    int tilesForImage = writeTilesForImage(imageName, channelOneBased,
+                            clicks, rawImage, correction.labels, rawDir, labelsDir, tileSize);
+                    tileCount += tilesForImage;
+                    trainingImagesWritten += tilesForImage;
+                } else {
+                    int slices = labelSliceCount(correction.labels);
+                    for (int z = 1; z <= slices; z++) {
+                        String fileName = outputFileName(imageName, channelOneBased, z);
+                        ImagePlus rawSlice = rawSlice(rawImage, channelOneBased, z);
+                        ImagePlus labelSlice = labelSlice(correction.labels, z);
+                        saveTiff(rawSlice, rawDir.resolve(fileName));
+                        saveTiff(labelSlice, labelsDir.resolve(fileName));
+                        trainingImagesWritten++;
+                    }
                 }
                 originalImagesWritten++;
             }
 
-            writeReadme(tempDir, channelOneBased, channelName);
+            writeReadme(tempDir, channelOneBased, channelName, tiled, tileSize);
             writeMetadata(tempDir, channelOneBased, channelName, originalImagesWritten,
-                    trainingImagesWritten, positiveLabelsRetained, negativeLabelsRemoved);
+                    trainingImagesWritten, positiveLabelsRetained, negativeLabelsRemoved,
+                    tiled, tileSize, tileCount);
 
             replaceDirectory(tempDir, outputDir);
             tempDir = null;
             return new PackagingResult(outputDir, trainingImagesWritten,
-                    positiveLabelsRetained, negativeLabelsRemoved);
+                    positiveLabelsRetained, negativeLabelsRemoved, tiled ? tileCount : -1);
         } finally {
             if (tempDir != null) {
                 deleteRecursivelyIfExists(tempDir);
@@ -219,6 +255,207 @@ public final class StarDistDatasetPackager {
             }
         }
         return new Correction(labels, retained, labelsToRemove.size());
+    }
+
+    private static int writeTilesForImage(String imageName,
+                                          int channelOneBased,
+                                          List<ClickStore.Click> clicks,
+                                          ImagePlus rawImage,
+                                          ImagePlus labelImage,
+                                          Path rawDir,
+                                          Path labelsDir,
+                                          int tileSize) throws IOException {
+        List<ClickStore.Click> positiveClicks = positiveClicks(clicks);
+        if (positiveClicks.isEmpty()) {
+            return 0;
+        }
+        Set<Integer> positiveLabels = labelsFromClicks(positiveClicks);
+        int written = 0;
+        int tileIndex = 0;
+        for (ClickStore.Click click : positiveClicks) {
+            LabelCentroid centroid = centroidForClick(labelImage, click);
+            if (centroid == null) {
+                continue;
+            }
+
+            ImagePlus labelSlice = labelSlice(labelImage, centroid.z);
+            ImagePlus rawSlice = rawSlice(rawImage, channelOneBased, centroid.z);
+            requireSamePlaneSize(rawSlice, labelSlice, imageName);
+            requireTileFits(labelSlice, tileSize, imageName);
+
+            int x = tileOrigin(centroid.x, tileSize, labelSlice.getWidth());
+            int y = tileOrigin(centroid.y, tileSize, labelSlice.getHeight());
+            ImagePlus labelTile = cropPlane(labelSlice, x, y, tileSize, tileSize,
+                    "label-tile");
+            if (!containsAnyLabel(labelTile.getProcessor(), positiveLabels)) {
+                continue;
+            }
+
+            ImagePlus rawTile = cropPlane(rawSlice, x, y, tileSize, tileSize,
+                    "raw-tile");
+            tileIndex++;
+            String fileName = tileOutputFileName(imageName, channelOneBased,
+                    centroid.z, tileIndex);
+            saveTiff(rawTile, rawDir.resolve(fileName));
+            saveTiff(labelTile, labelsDir.resolve(fileName));
+            written++;
+        }
+        return written;
+    }
+
+    private static List<ClickStore.Click> positiveClicks(List<ClickStore.Click> clicks) {
+        List<ClickStore.Click> out = new ArrayList<ClickStore.Click>();
+        if (clicks == null) {
+            return out;
+        }
+        for (ClickStore.Click click : clicks) {
+            if (click != null && click.verdict == ClickStore.Verdict.POSITIVE
+                    && click.label > 0) {
+                out.add(click);
+            }
+        }
+        Collections.sort(out, new Comparator<ClickStore.Click>() {
+            @Override
+            public int compare(ClickStore.Click left, ClickStore.Click right) {
+                if (left.z != right.z) {
+                    return left.z < right.z ? -1 : 1;
+                }
+                if (left.label != right.label) {
+                    return left.label < right.label ? -1 : 1;
+                }
+                int xCompare = Double.compare(left.x, right.x);
+                if (xCompare != 0) {
+                    return xCompare;
+                }
+                return Double.compare(left.y, right.y);
+            }
+        });
+        return out;
+    }
+
+    private static Set<Integer> labelsFromClicks(List<ClickStore.Click> clicks) {
+        Set<Integer> labels = new HashSet<Integer>();
+        if (clicks == null) {
+            return labels;
+        }
+        for (ClickStore.Click click : clicks) {
+            if (click != null && click.label > 0) {
+                labels.add(Integer.valueOf(click.label));
+            }
+        }
+        return labels;
+    }
+
+    private static LabelCentroid centroidForClick(ImagePlus labels,
+                                                  ClickStore.Click click) throws IOException {
+        if (click == null || click.label <= 0) {
+            return null;
+        }
+        int slices = labelSliceCount(labels);
+        if (click.z >= 1 && click.z <= slices) {
+            LabelCentroid centroid = centroidForLabelInSlice(labels, click.label, click.z);
+            if (centroid != null) {
+                return centroid;
+            }
+        }
+        for (int z = 1; z <= slices; z++) {
+            if (z == click.z) {
+                continue;
+            }
+            LabelCentroid centroid = centroidForLabelInSlice(labels, click.label, z);
+            if (centroid != null) {
+                return centroid;
+            }
+        }
+        return null;
+    }
+
+    private static LabelCentroid centroidForLabelInSlice(ImagePlus labels,
+                                                         int targetLabel,
+                                                         int z) throws IOException {
+        ImageProcessor ip = labelSlice(labels, z).getProcessor();
+        double sumX = 0.0;
+        double sumY = 0.0;
+        long count = 0L;
+        int width = ip.getWidth();
+        int height = ip.getHeight();
+        for (int y = 0; y < height; y++) {
+            int row = y * width;
+            for (int x = 0; x < width; x++) {
+                int label = labelFromPixel(ip.getf(row + x));
+                if (label == targetLabel) {
+                    sumX += x;
+                    sumY += y;
+                    count++;
+                }
+            }
+        }
+        if (count == 0L) {
+            return null;
+        }
+        return new LabelCentroid(z, sumX / count, sumY / count);
+    }
+
+    private static void requireSamePlaneSize(ImagePlus rawSlice,
+                                             ImagePlus labelSlice,
+                                             String imageName) throws IOException {
+        if (rawSlice.getWidth() != labelSlice.getWidth()
+                || rawSlice.getHeight() != labelSlice.getHeight()) {
+            throw new IOException("Raw and StarDist label image sizes differ for '"
+                    + imageName + "'.");
+        }
+    }
+
+    private static void requireTileFits(ImagePlus image,
+                                        int tileSize,
+                                        String imageName) throws IOException {
+        if (tileSize > image.getWidth() || tileSize > image.getHeight()) {
+            throw new IOException("Tile size " + tileSize + " does not fit image '"
+                    + imageName + "' (" + image.getWidth() + "x"
+                    + image.getHeight() + ").");
+        }
+    }
+
+    private static int tileOrigin(double centroid, int tileSize, int dimension) {
+        int origin = (int) Math.round(centroid - (tileSize / 2.0));
+        if (origin < 0) {
+            return 0;
+        }
+        int maxOrigin = dimension - tileSize;
+        return origin > maxOrigin ? maxOrigin : origin;
+    }
+
+    private static ImagePlus cropPlane(ImagePlus image,
+                                       int x,
+                                       int y,
+                                       int width,
+                                       int height,
+                                       String title) {
+        ImageProcessor processor = image.getProcessor();
+        processor.setRoi(x, y, width, height);
+        ImageProcessor cropped = processor.crop().convertToShort(false);
+        processor.resetRoi();
+        ImageStack stack = new ImageStack(width, height);
+        stack.addSlice(cropped);
+        ImagePlus out = new ImagePlus(title, stack);
+        out.setDimensions(1, 1, 1);
+        if (image.getCalibration() != null) {
+            out.setCalibration(image.getCalibration().copy());
+        }
+        return out;
+    }
+
+    private static boolean containsAnyLabel(ImageProcessor ip, Set<Integer> labels) {
+        if (ip == null || labels == null || labels.isEmpty()) {
+            return false;
+        }
+        for (int i = 0; i < ip.getPixelCount(); i++) {
+            int label = labelFromPixel(ip.getf(i));
+            if (label > 0 && labels.contains(Integer.valueOf(label))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static void removeLabels(ImagePlus labels, Set<Integer> labelsToRemove) {
@@ -346,7 +583,9 @@ public final class StarDistDatasetPackager {
 
     private static void writeReadme(Path outputDir,
                                     int channelOneBased,
-                                    String channelName) throws IOException {
+                                    String channelName,
+                                    boolean tiled,
+                                    int tileSize) throws IOException {
         List<String> lines = new ArrayList<String>();
         lines.add("FLASH StarDist 2D training dataset");
         lines.add("");
@@ -358,7 +597,12 @@ public final class StarDistDatasetPackager {
         lines.add("Recommended notebook:");
         lines.add(RECOMMENDED_NOTEBOOK);
         lines.add("");
-        lines.add("This v1 export uses whole-image slices. Tiled exports are a follow-up.");
+        if (tiled) {
+            lines.add("This input is pre-tiled into " + tileSize + "x" + tileSize
+                    + " pixel crops centered on positive StarDist labels.");
+        } else {
+            lines.add("This export uses whole-image slices.");
+        }
         Files.write(outputDir.resolve(README_FILENAME), lines, StandardCharsets.UTF_8);
     }
 
@@ -368,7 +612,10 @@ public final class StarDistDatasetPackager {
                                       int imageCount,
                                       int sliceCount,
                                       int positiveLabelsRetained,
-                                      int negativeLabelsRemoved) throws IOException {
+                                      int negativeLabelsRemoved,
+                                      boolean tiled,
+                                      int tileSize,
+                                      int tileCount) throws IOException {
         Map<String, Object> root = JsonIO.object();
         root.put("version", Integer.valueOf(METADATA_VERSION));
         root.put("channel", Integer.valueOf(channelOneBased));
@@ -382,6 +629,11 @@ public final class StarDistDatasetPackager {
         root.put("objectCount", counts);
         root.put("sourceClicksJsonPath", SOURCE_CLICKS_JSON_PATH);
         root.put("recommendedNotebook", RECOMMENDED_NOTEBOOK);
+        root.put("tileMode", tiled ? "tiled" : "whole");
+        if (tiled) {
+            root.put("tileSize", Integer.valueOf(tileSize));
+            root.put("tileCount", Integer.valueOf(tileCount));
+        }
         String json = JsonIO.write(root) + "\n";
         Files.write(outputDir.resolve(METADATA_FILENAME),
                 json.getBytes(StandardCharsets.UTF_8));
@@ -456,6 +708,18 @@ public final class StarDistDatasetPackager {
         String safeImage = safePathSegment(stripTiffExtension(imageName), "Image");
         return safeImage + "_C" + channelOneBased + "_z"
                 + String.format(Locale.ROOT, "%03d", Integer.valueOf(z)) + ".tif";
+    }
+
+    private static String tileOutputFileName(String imageName,
+                                             int channelOneBased,
+                                             int z,
+                                             int tileIndex) {
+        String safeImage = safePathSegment(stripTiffExtension(imageName), "Image");
+        return safeImage + "_C" + channelOneBased + "_z"
+                + String.format(Locale.ROOT, "%03d", Integer.valueOf(z))
+                + "_tile"
+                + String.format(Locale.ROOT, "%03d", Integer.valueOf(tileIndex))
+                + ".tif";
     }
 
     private static String stripTiffExtension(String imageName) {
@@ -586,6 +850,18 @@ public final class StarDistDatasetPackager {
             this.labels = labels;
             this.positiveLabelsRetained = positiveLabelsRetained;
             this.negativeLabelsRemoved = negativeLabelsRemoved;
+        }
+    }
+
+    private static final class LabelCentroid {
+        final int z;
+        final double x;
+        final double y;
+
+        LabelCentroid(int z, double x, double y) {
+            this.z = z;
+            this.x = x;
+            this.y = y;
         }
     }
 }

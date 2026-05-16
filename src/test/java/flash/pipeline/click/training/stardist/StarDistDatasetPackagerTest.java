@@ -12,6 +12,7 @@ import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
@@ -99,6 +100,9 @@ public class StarDistDatasetPackagerTest {
         assertEquals("../../.bin/Clicks.json", JsonIO.stringValue(json.get("sourceClicksJsonPath")));
         assertEquals(StarDistDatasetPackager.RECOMMENDED_NOTEBOOK,
                 JsonIO.stringValue(json.get("recommendedNotebook")));
+        assertEquals("whole", JsonIO.stringValue(json.get("tileMode")));
+        assertFalse(json.containsKey("tileSize"));
+        assertFalse(json.containsKey("tileCount"));
     }
 
     @Test
@@ -163,12 +167,132 @@ public class StarDistDatasetPackagerTest {
         assertFalse(Files.exists(existing.resolve("metadata.json")));
     }
 
+    @Test
+    public void tileModeProducesNonOverlappingTiles() throws Exception {
+        Path root = temp.newFolder("tiles").toPath();
+        String imageName = "SlideA.tif";
+        Map<String, ImagePlus> raw = map(imageName,
+                constantImage("raw", 256, 256, 1, 100));
+        Map<String, ImagePlus> labels = map(imageName,
+                labelImageWithPoints("labels", 256, 256, new int[][] {
+                        {1, 80, 80},
+                        {2, 160, 80},
+                        {3, 80, 160}
+                }));
+        ClickStore clicks = new ClickStore();
+        clicks.add(clickAt(imageName, 2, 1, 1, 80.0, 80.0,
+                ClickStore.Verdict.POSITIVE));
+        clicks.add(clickAt(imageName, 2, 2, 1, 160.0, 80.0,
+                ClickStore.Verdict.POSITIVE));
+        clicks.add(clickAt(imageName, 2, 3, 1, 80.0, 160.0,
+                ClickStore.Verdict.POSITIVE));
+
+        StarDistDatasetPackager.PackagingResult result = new StarDistDatasetPackager()
+                .packageDataset(root, "session", 2, clicks,
+                        provider(raw), provider(labels), 64);
+
+        assertEquals(3, result.imagesWritten);
+        assertEquals(3, result.positiveLabelsRetained);
+        assertEquals(3, result.tileCount);
+        assertEquals(3, countTifs(result.outputDir.resolve("raw")));
+        assertEquals(3, countTifs(result.outputDir.resolve("labels")));
+        assertCenteredTile(result.outputDir, "SlideA_C2_z001_tile001.tif", 1);
+        assertCenteredTile(result.outputDir, "SlideA_C2_z001_tile002.tif", 2);
+        assertCenteredTile(result.outputDir, "SlideA_C2_z001_tile003.tif", 3);
+
+        Map<String, Object> json = JsonIO.parseObject(new String(
+                Files.readAllBytes(result.outputDir.resolve("metadata.json")),
+                StandardCharsets.UTF_8));
+        assertEquals("tiled", JsonIO.stringValue(json.get("tileMode")));
+        assertEquals(64, JsonIO.intValue(json.get("tileSize"), -1));
+        assertEquals(3, JsonIO.intValue(json.get("tileCount"), -1));
+        String readme = new String(Files.readAllBytes(result.outputDir.resolve("README.txt")),
+                StandardCharsets.UTF_8);
+        assertTrue(readme.contains("pre-tiled"));
+    }
+
+    @Test
+    public void tileNearEdgeIsShiftedNotPadded() throws Exception {
+        Path root = temp.newFolder("edge-tile").toPath();
+        String imageName = "Edge";
+        Map<String, ImagePlus> raw = map(imageName,
+                constantImage("raw", 256, 256, 1, 500));
+        Map<String, ImagePlus> labels = map(imageName,
+                labelImageWithPoints("labels", 256, 256, new int[][] {
+                        {1, 5, 5}
+                }));
+        ClickStore clicks = new ClickStore();
+        clicks.add(clickAt(imageName, 2, 1, 1, 5.0, 5.0,
+                ClickStore.Verdict.POSITIVE));
+
+        StarDistDatasetPackager.PackagingResult result = new StarDistDatasetPackager()
+                .packageDataset(root, "session", 2, clicks,
+                        provider(raw), provider(labels), 64);
+
+        assertEquals(1, result.tileCount);
+        ImagePlus labelTile = open(result.outputDir.resolve("labels")
+                .resolve("Edge_C2_z001_tile001.tif"));
+        assertEquals(64, labelTile.getWidth());
+        assertEquals(64, labelTile.getHeight());
+        assertEquals(1, pixel(labelTile, 5, 5));
+        assertEquals(0, pixel(labelTile, 32, 32));
+
+        ImagePlus rawTile = open(result.outputDir.resolve("raw")
+                .resolve("Edge_C2_z001_tile001.tif"));
+        assertEquals(500, pixel(rawTile, 0, 0));
+        assertEquals(500, pixel(rawTile, 63, 63));
+    }
+
+    @Test
+    public void wholeImageModeUnchanged() throws Exception {
+        Path root = temp.newFolder("whole-explicit").toPath();
+        Map<String, ImagePlus> raw = map("Image1",
+                constantImage("raw", 4, 3, 1, 100));
+        Map<String, ImagePlus> labels = map("Image1", labelImage("labels", new int[][][] {
+                {{1, 1, 0, 0}, {1, 0, 0, 0}, {0, 0, 0, 0}}
+        }));
+        ClickStore clicks = new ClickStore();
+        clicks.add(click("Image1", 2, 1, ClickStore.Verdict.POSITIVE));
+
+        StarDistDatasetPackager.PackagingResult result = new StarDistDatasetPackager()
+                .packageDataset(root, "session", 2, clicks,
+                        provider(raw), provider(labels), 0);
+
+        assertEquals(1, result.imagesWritten);
+        assertEquals(-1, result.tileCount);
+        assertTrue(Files.isRegularFile(result.outputDir.resolve("raw")
+                .resolve("Image1_C2_z001.tif")));
+        assertFalse(Files.exists(result.outputDir.resolve("raw")
+                .resolve("Image1_C2_z001_tile001.tif")));
+        ImagePlus exported = open(result.outputDir.resolve("labels")
+                .resolve("Image1_C2_z001.tif"));
+        assertEquals(4, exported.getWidth());
+        assertEquals(3, exported.getHeight());
+        assertEquals(1, pixel(exported, 0, 0));
+
+        Map<String, Object> json = JsonIO.parseObject(new String(
+                Files.readAllBytes(result.outputDir.resolve("metadata.json")),
+                StandardCharsets.UTF_8));
+        assertEquals("whole", JsonIO.stringValue(json.get("tileMode")));
+        assertFalse(json.containsKey("tileSize"));
+        assertFalse(json.containsKey("tileCount"));
+    }
+
     static ClickStore.Click click(String image,
                                   int channel,
                                   int label,
                                   ClickStore.Verdict verdict) {
-        return new ClickStore.Click(image, channel, label, 1,
-                1.0, 1.0, verdict, 123L);
+        return clickAt(image, channel, label, 1, 1.0, 1.0, verdict);
+    }
+
+    static ClickStore.Click clickAt(String image,
+                                    int channel,
+                                    int label,
+                                    int z,
+                                    double x,
+                                    double y,
+                                    ClickStore.Verdict verdict) {
+        return new ClickStore.Click(image, channel, label, z, x, y, verdict, 123L);
     }
 
     static ImagePlus constantImage(String title, int width, int height, int slices, int value) {
@@ -204,6 +328,22 @@ public class StarDistDatasetPackagerTest {
         return image;
     }
 
+    static ImagePlus labelImageWithPoints(String title,
+                                          int width,
+                                          int height,
+                                          int[][] labelXY) {
+        ImageStack stack = new ImageStack(width, height);
+        ShortProcessor sp = new ShortProcessor(width, height);
+        for (int i = 0; i < labelXY.length; i++) {
+            int[] point = labelXY[i];
+            sp.set(point[1], point[2], point[0]);
+        }
+        stack.addSlice(sp);
+        ImagePlus image = new ImagePlus(title, stack);
+        image.setDimensions(1, 1, 1);
+        return image;
+    }
+
     static ImagePlus open(Path path) {
         ImagePlus image = new Opener().openImage(path.toString());
         assertNotNull("Could not open " + path, image);
@@ -227,6 +367,26 @@ public class StarDistDatasetPackagerTest {
         Map<String, ImagePlus> out = new HashMap<String, ImagePlus>();
         out.put(name, image);
         return out;
+    }
+
+    private static void assertCenteredTile(Path outputDir, String fileName, int label) {
+        ImagePlus tile = open(outputDir.resolve("labels").resolve(fileName));
+        assertEquals(64, tile.getWidth());
+        assertEquals(64, tile.getHeight());
+        assertEquals(label, pixel(tile, 32, 32));
+    }
+
+    private static int countTifs(Path dir) throws Exception {
+        int count = 0;
+        DirectoryStream<Path> stream = Files.newDirectoryStream(dir, "*.tif");
+        try {
+            for (Path ignored : stream) {
+                count++;
+            }
+        } finally {
+            stream.close();
+        }
+        return count;
     }
 
     private static void writeChannelData(Path root, String firstLine) throws Exception {

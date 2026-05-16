@@ -192,7 +192,8 @@ public final class TrainCustomEngineWorkflow {
                                     channelOneBased,
                                     selection == null ? clickStore : selection.toClickStore(),
                                     rawProvider,
-                                    labelProvider);
+                                    labelProvider,
+                                    0);
                     safe.update(1.0, "StarDist dataset packaged.");
                     return result;
                 }
