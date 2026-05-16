@@ -5,6 +5,11 @@ import flash.pipeline.bin.BinConfigIO;
 import flash.pipeline.bin.BinField;
 import flash.pipeline.cli.CLIConfig;
 import flash.pipeline.io.FlashProjectLayout;
+import flash.pipeline.segmentation.SegmentationMethod;
+import flash.pipeline.segmentation.SegmentationTokenParser;
+import flash.pipeline.segmentation.catalog.ModelCatalog;
+import flash.pipeline.segmentation.catalog.ModelCatalogIO;
+import flash.pipeline.segmentation.catalog.ModelEntry;
 import flash.pipeline.ui.wizard.JsonIO;
 import flash.pipeline.zslice.ZSliceMode;
 import flash.pipeline.zslice.ZSliceRange;
@@ -21,6 +26,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
 
@@ -118,6 +124,7 @@ public final class RunSettingsSnapshot {
         root.put("analysis_index", Integer.valueOf(analysisIndex));
         root.put("directory", directory);
         root.put("bin_config", binConfigToJson(binConfig));
+        root.put("segmentation_models", segmentationModelsToJson(binConfig, directory));
         root.put("field_sources", new LinkedHashMap<String, String>(fieldSources));
         root.put("replay_command", replayCommand);
         return root;
@@ -285,6 +292,138 @@ public final class RunSettingsSnapshot {
         return cfg;
     }
 
+    private static List<Object> segmentationModelsToJson(BinConfig cfg, String directory) {
+        List<Object> rows = new ArrayList<Object>();
+        BinConfig safe = cfg == null ? new BinConfig() : cfg;
+        ModelCatalog catalog = readModelCatalog(directory);
+        int count = safe.segmentationMethods == null ? 0 : safe.segmentationMethods.size();
+        for (int i = 0; i < count; i++) {
+            rows.add(segmentationModelRow(i, safe.segmentationMethods.get(i), catalog));
+        }
+        return rows;
+    }
+
+    private static Map<String, Object> segmentationModelRow(int channelIndex,
+                                                            String methodToken,
+                                                            ModelCatalog catalog) {
+        Map<String, Object> row = JsonIO.object();
+        String raw = methodToken == null ? "" : methodToken;
+        SegmentationMethod method = SegmentationTokenParser.parseLenient(raw);
+        row.put("channel_index", Integer.valueOf(channelIndex));
+        row.put("method", raw);
+        row.put("engine", snapshotEngine(method));
+
+        String modelKey = modelKey(method);
+        if (!modelKey.isEmpty()) {
+            row.put("model_key", modelKey);
+            Optional<ModelEntry> found = resolveModel(catalog, method, modelKey);
+            if (found.isPresent()) {
+                ModelEntry entry = found.get();
+                row.put("display_name", displayName(entry));
+                row.put("source_type", sourceType(entry));
+            } else {
+                row.put("source_type", "unknown");
+            }
+        } else {
+            row.put("source_type", "unknown");
+        }
+        return row;
+    }
+
+    private static ModelCatalog readModelCatalog(String directory) {
+        if (directory == null || directory.trim().isEmpty()) {
+            return null;
+        }
+        try {
+            return ModelCatalogIO.read(new File(directory).toPath().toAbsolutePath().normalize());
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    private static Optional<ModelEntry> resolveModel(ModelCatalog catalog,
+                                                     SegmentationMethod method,
+                                                     String modelKey) {
+        if (catalog == null || method == null || modelKey == null || modelKey.trim().isEmpty()) {
+            return Optional.empty();
+        }
+        Optional<ModelEntry> found = catalog.get(modelKey.trim());
+        if (!found.isPresent()) {
+            return Optional.empty();
+        }
+        ModelEntry entry = found.get();
+        if (method.isStarDist() && entry.engine != ModelEntry.Engine.STARDIST) {
+            return Optional.empty();
+        }
+        if (method.isCellpose() && entry.engine != ModelEntry.Engine.CELLPOSE) {
+            return Optional.empty();
+        }
+        if (method.isTrainedRf() && entry.engine != ModelEntry.Engine.SMILE_RF) {
+            return Optional.empty();
+        }
+        return Optional.of(entry);
+    }
+
+    private static String modelKey(SegmentationMethod method) {
+        if (method == null) {
+            return "";
+        }
+        if (method.isStarDist()) {
+            return safe(SegmentationMethod.starDistModelKey(method));
+        }
+        if (method.isCellpose()) {
+            return safe(SegmentationMethod.cellposeModelKey(method));
+        }
+        if (method.isTrainedRf()) {
+            return safe(SegmentationMethod.trainedRfModelKey(method));
+        }
+        return "";
+    }
+
+    private static String snapshotEngine(SegmentationMethod method) {
+        if (method == null || method.isClassical()) {
+            return "classical";
+        }
+        if (method.isEnhancedClassical()) {
+            return "classical_enhanced";
+        }
+        if (method.isStarDist()) {
+            return "stardist";
+        }
+        if (method.isCellpose()) {
+            return "cellpose";
+        }
+        if (method.isTrainedRf()) {
+            return "trained_rf";
+        }
+        return "classical";
+    }
+
+    private static String displayName(ModelEntry entry) {
+        if (entry == null) {
+            return null;
+        }
+        String name = safe(entry.name);
+        return name.isEmpty() ? safe(entry.modelKey) : name;
+    }
+
+    private static String sourceType(ModelEntry entry) {
+        if (entry == null || entry.source == null) {
+            return "unknown";
+        }
+        if (entry.source == ModelEntry.Source.STOCK_BUILTIN) {
+            return "fiji_builtin";
+        }
+        if (entry.source == ModelEntry.Source.STOCK_RESOURCE) {
+            return "stock";
+        }
+        if (entry.source == ModelEntry.Source.USER_IMPORTED
+                || entry.source == ModelEntry.Source.USER_TRAINED) {
+            return "user";
+        }
+        return "unknown";
+    }
+
     private static List<Object> zSliceSelectionsToJson(BinConfig cfg) {
         List<Object> rows = new ArrayList<Object>();
         for (Map.Entry<Integer, ZSliceSelection> entry : cfg.zSliceSelections.entrySet()) {
@@ -350,5 +489,9 @@ public final class RunSettingsSnapshot {
 
     private static String absolutePath(String directory) {
         return directory == null ? "" : new File(directory).getAbsolutePath();
+    }
+
+    private static String safe(String value) {
+        return value == null ? "" : value.trim();
     }
 }
