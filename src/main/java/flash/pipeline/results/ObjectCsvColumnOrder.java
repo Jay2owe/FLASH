@@ -90,6 +90,11 @@ public final class ObjectCsvColumnOrder {
             "MorphTexture_GLCMCorrelation",
             "MorphTexture_GLCMEntropy",
             "MorphTexture_GLCMHomogeneity",
+            "MorphTexture_GLCM3DContrast",
+            "MorphTexture_GLCM3DASM",
+            "MorphTexture_GLCM3DCorrelation",
+            "MorphTexture_GLCM3DEntropy",
+            "MorphTexture_GLCM3DHomogeneity",
             "MorphTexture_FractalDim",
             "MorphTexture_FractalDim_R2",
             "MorphTexture_LacunarityMean",
@@ -103,7 +108,17 @@ public final class ObjectCsvColumnOrder {
             "MorphTexture_F5",
             "MorphTexture_F6",
             "MorphTexture_F7",
-            "MorphTexture_F8"
+            "MorphTexture_F8",
+            "MorphTexture_Class3DLabel",
+            "MorphTexture_Class3DDistance",
+            "MorphTexture_F3D1",
+            "MorphTexture_F3D2",
+            "MorphTexture_F3D3",
+            "MorphTexture_F3D4",
+            "MorphTexture_F3D5",
+            "MorphTexture_F3D6",
+            "MorphTexture_F3D7",
+            "MorphTexture_F3D8"
     );
 
     private ObjectCsvColumnOrder() {}

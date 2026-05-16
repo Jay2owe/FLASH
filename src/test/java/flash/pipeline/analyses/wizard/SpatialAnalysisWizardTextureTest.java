@@ -20,6 +20,7 @@ public class SpatialAnalysisWizardTextureTest {
         assertFalse(config.doObjectGLCM);
         assertFalse(config.doObjectFractal);
         assertFalse(config.doObjectTextureClass);
+        assertFalse(config.doNative3DTexture);
         assertEquals(4, config.textureClassK);
     }
 
@@ -64,6 +65,22 @@ public class SpatialAnalysisWizardTextureTest {
     }
 
     @Test
+    public void native3DTextureToggleRoundTripsThroughDerivedConfig() {
+        Map<String, Object> answers = new LinkedHashMap<String, Object>();
+        answers.put("spatial.question", SpatialAnalysisWizard.SPATIAL_NONE);
+        answers.put("morph.question", SpatialAnalysisWizard.MORPH_NONE);
+        answers.put("texture.question", SpatialAnalysisWizard.TEXTURE_NONE);
+        answers.put("texture.k", Integer.valueOf(4));
+        answers.put("spatial.texture.native3d", Boolean.TRUE);
+
+        SpatialAnalysisWizard.DerivedConfig config =
+                SpatialAnalysisWizard.deriveConfig(null, null, true, answers);
+
+        assertTrue(config.doNative3DTexture);
+        assertTrue(config.anyEarlyPhaseToggleOn());
+    }
+
+    @Test
     public void textureScreenDefaultsAreRegisteredBetweenMorphometryAndHeatmapDefaults() {
         SpatialAnalysisWizard wizard = new SpatialAnalysisWizard(
                 flash.pipeline.ui.wizard.WizardFlow.MainPanelBinding.NULL,
@@ -77,6 +94,7 @@ public class SpatialAnalysisWizardTextureTest {
         assertTrue(keys.indexOf("morph.question") < keys.indexOf("texture.question"));
         assertTrue(keys.indexOf("texture.question") < keys.indexOf("heatmap.lut"));
         assertEquals(Integer.valueOf(4), wizard.currentAnswers().get("texture.k"));
+        assertEquals(Boolean.FALSE, wizard.currentAnswers().get("spatial.texture.native3d"));
     }
 
     private static SpatialAnalysisWizard.DerivedConfig derive(String textureOption, int k) {

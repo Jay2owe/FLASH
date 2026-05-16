@@ -36,6 +36,20 @@ Master Aggregation writes channel-prefixed means:
 - `<channel>_MorphTexture_GLCMEntropyMean`
 - `<channel>_MorphTexture_GLCMHomogeneityMean`
 
+Native-3D mode adds separate columns in the same per-channel CSV:
+
+- `MorphTexture_GLCM3DContrast`
+- `MorphTexture_GLCM3DASM`
+- `MorphTexture_GLCM3DCorrelation`
+- `MorphTexture_GLCM3DEntropy`
+- `MorphTexture_GLCM3DHomogeneity`
+
+## 3D vs 2D mode
+
+The default GLCM path uses 2D per-slice results averaged across the object's z-range. Enable native-3D texture when objects span multiple z-slices and their voxel-to-voxel structure matters through depth, especially for axially anisotropic or layered structures.
+
+The toggle is in Spatial Analysis -> Texture question -> advanced -> Native-3D texture (GLCM + texture classes). Native-3D columns coexist with the 2D columns in the same per-channel object CSV, so enabling it does not replace existing `MorphTexture_GLCM*` values.
+
 ## How to interpret typical values
 
 Interpret GLCM values within the same marker, microscope setup, and segmentation strategy. The values are most useful as relative comparisons across animals or regions.
@@ -56,8 +70,8 @@ Example:
 - Small objects can have too few valid neighbouring pixel pairs for stable texture estimates.
 - GLCM values depend on image quality, background subtraction, and saturation. Avoid comparing runs with different acquisition settings unless those differences are controlled.
 - The metric uses object-mask pixels only, but the object bounding box still defines the patch workspace.
-- v1 uses 2D per-slice GLCM results averaged across slices.
-- Native-3D texture is deferred and not in v1.
+- The default path uses 2D per-slice GLCM results averaged across slices.
+- Native-3D GLCM skips single-slice objects because a 3D neighbourhood is not defined for them.
 
 ## Where it appears in the wizard
 
@@ -66,3 +80,4 @@ Spatial Analysis -> Texture question -> Object texture (GLCM)
 It is also enabled by:
 - Spatial Analysis -> Texture question -> All object texture features (exploratory)
 - CLI option `spatial.texture.glcm=true`
+- CLI option `spatial.texture.native3d=true` for native-3D GLCM and texture classes

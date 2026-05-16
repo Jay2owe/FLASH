@@ -124,6 +124,12 @@ public final class MorphometryDetailsWriter {
             w.write("  MorphTexture_GLCMEntropy       Texture disorder from the GLCM probability matrix.\n");
             w.write("  MorphTexture_GLCMHomogeneity   Local grey-level similarity.\n");
             w.write("                                 GLCM values use 2D per-slice ObjectTextureGLCM results averaged across slices.\n\n");
+            w.write("  MorphTexture_GLCM3DContrast      Native-3D GLCM contrast across 13 voxel-neighbour directions.\n");
+            w.write("  MorphTexture_GLCM3DASM           Native-3D angular second moment, also called GLCM energy.\n");
+            w.write("  MorphTexture_GLCM3DCorrelation   Native-3D GLCM correlation across neighbouring voxel values.\n");
+            w.write("  MorphTexture_GLCM3DEntropy       Texture disorder from the native-3D GLCM probability matrix.\n");
+            w.write("  MorphTexture_GLCM3DHomogeneity   Local grey-level similarity from the native-3D GLCM.\n");
+            w.write("                                   Native-3D GLCM uses ObjectTextureGLCM3D on objects spanning multiple z-slices.\n\n");
             w.write("  MorphTexture_FractalDim        Box-counting fractal dimension from an XY object-mask projection.\n");
             w.write("  MorphTexture_FractalDim_R2     Goodness-of-fit for the log-log box-counting regression.\n");
             w.write("  MorphTexture_LacunarityMean    Mean gliding-box lacunarity across valid box scales.\n");
@@ -133,7 +139,10 @@ public final class MorphometryDetailsWriter {
             w.write("  MorphTexture_ClassDistance     Distance to the assigned texture-class centroid.\n");
             w.write("  MorphTexture_F1..F8            Gabor and wavelet feature-vector values used for texture classes.\n");
             w.write("                                 Texture-class values use 2D per-slice ObjectTextureFeatures results averaged across slices.\n");
-            w.write("Native-3D texture metrics are not part of v1; the current implementation uses 2D slice/projection summaries.\n");
+            w.write("  MorphTexture_Class3DLabel      Integer native-3D texture class assigned by 3D Gabor + 3D wavelet k-means.\n");
+            w.write("  MorphTexture_Class3DDistance   Distance to the assigned native-3D texture-class centroid.\n");
+            w.write("  MorphTexture_F3D1..F3D8        Native-3D Gabor and wavelet feature-vector values.\n");
+            w.write("                                 Native-3D texture-class values use ObjectTextureFeatures3D on objects spanning multiple z-slices.\n");
             w.write("</Per-Object Texture and Complexity>\n");
         } catch (Exception e) {
             ij.IJ.log("Failed to write morphometry details: " + e.getMessage());

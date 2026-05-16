@@ -578,6 +578,7 @@ public final class CLIArgumentParser {
         spatial.textureGlcm = parseNullableBoolean(options, "spatial.texture.glcm", spatial.textureGlcm);
         spatial.textureFractal = parseNullableBoolean(options, "spatial.texture.fractal", spatial.textureFractal);
         spatial.textureClass = parseNullableBoolean(options, "spatial.texture.class", spatial.textureClass);
+        spatial.textureNative3D = parseNullableBoolean(options, "spatial.texture.native3d", spatial.textureNative3D);
 
         String textureK = getValue(options, "spatial.texture.k");
         if (textureK != null) {

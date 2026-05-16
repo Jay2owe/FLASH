@@ -34,6 +34,12 @@ Master Aggregation writes channel-prefixed means:
 - `<channel>_MorphTexture_LacunarityMeanMean`
 - `<channel>_MorphTexture_LacunaritySpreadMean`
 
+## 3D vs 2D mode
+
+Fractal complexity is still computed from the XY projection of each object mask. The native-3D texture toggle adds separate 3D GLCM and 3D texture-class columns alongside the fractal columns; it does not change the fractal calculation.
+
+Enable native-3D texture when the same objects span multiple z-slices and depth-wise signal texture is biologically relevant, especially for axially anisotropic or layered structures. The toggle is in Spatial Analysis -> Texture question -> advanced -> Native-3D texture (GLCM + texture classes). The 3D texture columns coexist with the 2D texture and fractal columns in the same per-channel object CSV.
+
 ## How to interpret typical values
 
 Fractal dimension is easiest to read as a shape-complexity score:
@@ -57,8 +63,7 @@ Example:
 
 - Very small masks do not provide enough box sizes for reliable regression.
 - Fractal dimension is sensitive to segmentation smoothing, erosion, dilation, and threshold choice.
-- The v1 fractal path uses an XY mask projection, not a native 3D box-counting volume.
-- Native-3D texture is deferred and not in v1.
+- The fractal path uses an XY mask projection, not a native 3D box-counting volume.
 - Treat `MorphTexture_FractalDim_R2` as a reliability flag before interpreting group differences.
 
 ## Where it appears in the wizard

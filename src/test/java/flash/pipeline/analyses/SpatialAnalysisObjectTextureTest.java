@@ -88,13 +88,35 @@ public class SpatialAnalysisObjectTextureTest {
     }
 
     @Test
+    public void executeWritesNative3DTextureColumnsHeadlessly() throws Exception {
+        File root = temp.newFolder("spatial-object-texture-3d");
+        Fixture fixture = createFixture(root);
+
+        runNative3DTexture(root);
+
+        File channelFile = new File(fixture.objectsDir, "A.csv");
+        CsvTableIO.ChannelData data = CsvTableIO.loadChannelCsv(channelFile, "A");
+        assertNotNull(data);
+        assertNative3DTextureColumnsPresent(data);
+        assertFinite(data, 0, "MorphTexture_GLCM3DContrast");
+        assertFinite(data, 0, "MorphTexture_Class3DDistance");
+        assertFinite(data, 0, "MorphTexture_F3D8");
+
+        File centroidFile = new File(FlashProjectLayout.forDirectory(root.getAbsolutePath()).configurationWriteDir(),
+                "morph_texture_centroids_3D_A.txt");
+        assertTrue(centroidFile.isFile());
+    }
+
+    @Test
     public void objectCsvColumnOrderPlacesTextureAfterMorphGroups() {
         List<String> ordered = ObjectCsvColumnOrder.orderedColumns("A", Arrays.asList(
                 "MorphTexture_F1",
+                "MorphTexture_F3D1",
                 "Morph_Sphericity",
                 "Morph_Area_um2",
                 "Mean",
                 "MorphTexture_GLCMContrast",
+                "MorphTexture_GLCM3DContrast",
                 "MorphTexture_FractalDim"
         ), Arrays.asList("A"));
 
@@ -103,8 +125,10 @@ public class SpatialAnalysisObjectTextureTest {
                 "Morph_Area_um2",
                 "Morph_Sphericity",
                 "MorphTexture_GLCMContrast",
+                "MorphTexture_GLCM3DContrast",
                 "MorphTexture_FractalDim",
-                "MorphTexture_F1"
+                "MorphTexture_F1",
+                "MorphTexture_F3D1"
         ), ordered);
     }
 
@@ -129,7 +153,22 @@ public class SpatialAnalysisObjectTextureTest {
                 "MorphTexture_F5",
                 "MorphTexture_F6",
                 "MorphTexture_F7",
-                "MorphTexture_F8");
+                "MorphTexture_F8",
+                "MorphTexture_GLCM3DContrast",
+                "MorphTexture_GLCM3DASM",
+                "MorphTexture_GLCM3DCorrelation",
+                "MorphTexture_GLCM3DEntropy",
+                "MorphTexture_GLCM3DHomogeneity",
+                "MorphTexture_Class3DLabel",
+                "MorphTexture_Class3DDistance",
+                "MorphTexture_F3D1",
+                "MorphTexture_F3D2",
+                "MorphTexture_F3D3",
+                "MorphTexture_F3D4",
+                "MorphTexture_F3D5",
+                "MorphTexture_F3D6",
+                "MorphTexture_F3D7",
+                "MorphTexture_F3D8");
         Map<String, Integer> colIdx = new HashMap<String, Integer>();
         for (int i = 0; i < header.size(); i++) {
             colIdx.put(header.get(i), Integer.valueOf(i));
@@ -138,6 +177,8 @@ public class SpatialAnalysisObjectTextureTest {
         rows.add(new ArrayList<String>(Arrays.asList(
                 "1", "1", "1", "1", "1",
                 "1", "1", "1", "1",
+                "0", "1", "1", "1", "1", "1", "1", "1", "1", "1",
+                "1", "1", "1", "1", "1",
                 "0", "1", "1", "1", "1", "1", "1", "1", "1", "1")));
         Map<String, CsvTableIO.ChannelData> channels =
                 new LinkedHashMap<String, CsvTableIO.ChannelData>();
@@ -150,6 +191,8 @@ public class SpatialAnalysisObjectTextureTest {
         assertTrue(detected.hasObjectGLCMForAllChannels(Arrays.asList("A")));
         assertTrue(detected.hasObjectFractalForAllChannels(Arrays.asList("A")));
         assertTrue(detected.hasObjectTextureClassForAllChannels(Arrays.asList("A")));
+        assertTrue(detected.hasObjectGLCM3DForAllChannels(Arrays.asList("A")));
+        assertTrue(detected.hasObjectTextureClass3DForAllChannels(Arrays.asList("A")));
     }
 
     private static double averageSliceGlcmContrast(ImagePlus label, ImagePlus raw, int labelValue) {
@@ -182,6 +225,17 @@ public class SpatialAnalysisObjectTextureTest {
         assertTrue(data.colIdx.containsKey("MorphTexture_F8"));
     }
 
+    private static void assertNative3DTextureColumnsPresent(CsvTableIO.ChannelData data) {
+        assertTrue(data.colIdx.containsKey("MorphTexture_GLCM3DContrast"));
+        assertTrue(data.colIdx.containsKey("MorphTexture_GLCM3DASM"));
+        assertTrue(data.colIdx.containsKey("MorphTexture_GLCM3DCorrelation"));
+        assertTrue(data.colIdx.containsKey("MorphTexture_GLCM3DEntropy"));
+        assertTrue(data.colIdx.containsKey("MorphTexture_GLCM3DHomogeneity"));
+        assertTrue(data.colIdx.containsKey("MorphTexture_Class3DLabel"));
+        assertTrue(data.colIdx.containsKey("MorphTexture_Class3DDistance"));
+        assertTrue(data.colIdx.containsKey("MorphTexture_F3D8"));
+    }
+
     private static void assertFinite(CsvTableIO.ChannelData data, int row, String column) {
         double value = data.getDouble(row, column);
         assertTrue(column + " should be finite", !Double.isNaN(value) && !Double.isInfinite(value));
@@ -201,6 +255,17 @@ public class SpatialAnalysisObjectTextureTest {
         config.doObjectGLCM = true;
         config.doObjectFractal = true;
         config.doObjectTextureClass = true;
+        config.textureClassK = 2;
+        SpatialAnalysis analysis = new SpatialAnalysis();
+        analysis.setHeadless(true);
+        analysis.setSuppressDialogs(true);
+        analysis.setWizardConfig(config);
+        analysis.execute(root.getAbsolutePath());
+    }
+
+    private static void runNative3DTexture(File root) {
+        SpatialAnalysisWizard.DerivedConfig config = new SpatialAnalysisWizard.DerivedConfig();
+        config.doNative3DTexture = true;
         config.textureClassK = 2;
         SpatialAnalysis analysis = new SpatialAnalysis();
         analysis.setHeadless(true);

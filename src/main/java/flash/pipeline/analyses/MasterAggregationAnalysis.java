@@ -1245,7 +1245,8 @@ public class MasterAggregationAnalysis implements Analysis {
 
                     // Output column name: strip threshold digits from VolContains for clean aggregated names
                     String cleanH = normalizedHeader.replaceAll("(_VolContains)\\d+(_)", "$1$2");
-                    boolean modal = "MorphTexture_ClassLabel".equals(cleanH);
+                    boolean modal = "MorphTexture_ClassLabel".equals(cleanH)
+                            || "MorphTexture_Class3DLabel".equals(cleanH);
                     // Add channel prefix for columns that don't already contain it
                     // (channel-agnostic Morph_, MorphTexture_, Voronoi_, Cluster - see needsChannelPrefix).
                     boolean needsPrefix = needsChannelPrefix(cleanH);

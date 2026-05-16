@@ -35,9 +35,12 @@ import flash.pipeline.io.IoUtils;
 import flash.pipeline.io.CsvTableIO.ChannelData;
 import flash.pipeline.morphometry.ObjectFractal;
 import flash.pipeline.morphometry.ObjectPatch;
+import flash.pipeline.morphometry.ObjectPatch3D;
 import flash.pipeline.morphometry.ObjectPatchBuilder;
 import flash.pipeline.morphometry.ObjectTextureFeatures;
+import flash.pipeline.morphometry.ObjectTextureFeatures3D;
 import flash.pipeline.morphometry.ObjectTextureGLCM;
+import flash.pipeline.morphometry.ObjectTextureGLCM3D;
 import flash.pipeline.results.MorphometryDetailsWriter;
 import flash.pipeline.results.ObjectCsvColumnOrder;
 import flash.pipeline.runtime.DependencyId;
@@ -158,6 +161,13 @@ public class SpatialAnalysis implements Analysis {
             "MorphTexture_GLCMEntropy",
             "MorphTexture_GLCMHomogeneity"
     };
+    private static final String[] MORPH_TEXTURE_GLCM3D_COLUMNS = {
+            "MorphTexture_GLCM3DContrast",
+            "MorphTexture_GLCM3DASM",
+            "MorphTexture_GLCM3DCorrelation",
+            "MorphTexture_GLCM3DEntropy",
+            "MorphTexture_GLCM3DHomogeneity"
+    };
     private static final String[] MORPH_TEXTURE_CLASS_COLUMNS = {
             "MorphTexture_ClassLabel",
             "MorphTexture_ClassDistance",
@@ -169,6 +179,18 @@ public class SpatialAnalysis implements Analysis {
             "MorphTexture_F6",
             "MorphTexture_F7",
             "MorphTexture_F8"
+    };
+    private static final String[] MORPH_TEXTURE_CLASS3D_COLUMNS = {
+            "MorphTexture_Class3DLabel",
+            "MorphTexture_Class3DDistance",
+            "MorphTexture_F3D1",
+            "MorphTexture_F3D2",
+            "MorphTexture_F3D3",
+            "MorphTexture_F3D4",
+            "MorphTexture_F3D5",
+            "MorphTexture_F3D6",
+            "MorphTexture_F3D7",
+            "MorphTexture_F3D8"
     };
 
     private Map<String, Double> markerThresholds = new HashMap<String, Double>();
@@ -222,6 +244,7 @@ public class SpatialAnalysis implements Analysis {
         private boolean doObjectGLCM;
         private boolean doObjectFractal;
         private boolean doObjectTextureClass;
+        private boolean doNative3DTexture;
         private boolean forceRerun;
         private SpatialArtifactStatus artifactStatus;
         private double heatmapBandwidth;
@@ -244,6 +267,8 @@ public class SpatialAnalysis implements Analysis {
         private final Set<String> morphTextureGlcmChannels = new LinkedHashSet<String>();
         private final Set<String> morphTextureFractalChannels = new LinkedHashSet<String>();
         private final Set<String> morphTextureClassChannels = new LinkedHashSet<String>();
+        private final Set<String> morphTextureGlcm3DChannels = new LinkedHashSet<String>();
+        private final Set<String> morphTextureClass3DChannels = new LinkedHashSet<String>();
         private final Set<String> distancePairs = new LinkedHashSet<String>();
         private final Set<String> volumetricOverlapPairs = new LinkedHashSet<String>();
         private final Set<String> volumetricFlagPairs = new LinkedHashSet<String>();
@@ -281,6 +306,8 @@ public class SpatialAnalysis implements Analysis {
                 if (hasUsableColumns(cd, MORPH_TEXTURE_GLCM_COLUMNS)) morphTextureGlcmChannels.add(channelName);
                 if (hasUsableColumns(cd, MORPH_TEXTURE_FRACTAL_COLUMNS)) morphTextureFractalChannels.add(channelName);
                 if (hasUsableColumns(cd, MORPH_TEXTURE_CLASS_COLUMNS)) morphTextureClassChannels.add(channelName);
+                if (hasUsableColumns(cd, MORPH_TEXTURE_GLCM3D_COLUMNS)) morphTextureGlcm3DChannels.add(channelName);
+                if (hasUsableColumns(cd, MORPH_TEXTURE_CLASS3D_COLUMNS)) morphTextureClass3DChannels.add(channelName);
             }
 
             for (String source : channelNames) {
@@ -344,6 +371,8 @@ public class SpatialAnalysis implements Analysis {
             if (!morphTextureGlcmChannels.isEmpty()) parts.add("object GLCM texture columns");
             if (!morphTextureFractalChannels.isEmpty()) parts.add("object fractal texture columns");
             if (!morphTextureClassChannels.isEmpty()) parts.add("object texture-class columns");
+            if (!morphTextureGlcm3DChannels.isEmpty()) parts.add("native-3D object GLCM texture columns");
+            if (!morphTextureClass3DChannels.isEmpty()) parts.add("native-3D object texture-class columns");
             if (!processLengthChannels.isEmpty()) parts.add("process length data");
             if (parts.isEmpty()) {
                 return "No reusable morphometric columns were detected. Selected morphology outputs will be computed.";
@@ -422,6 +451,14 @@ public class SpatialAnalysis implements Analysis {
 
         boolean hasObjectTextureClassForAllChannels(List<String> names) {
             return allChannelsHave(morphTextureClassChannels, names);
+        }
+
+        boolean hasObjectGLCM3DForAllChannels(List<String> names) {
+            return allChannelsHave(morphTextureGlcm3DChannels, names);
+        }
+
+        boolean hasObjectTextureClass3DForAllChannels(List<String> names) {
+            return allChannelsHave(morphTextureClass3DChannels, names);
         }
 
         private boolean hasDirectedDistance(String source, String partner) {
@@ -503,6 +540,8 @@ public class SpatialAnalysis implements Analysis {
             if (!morphTextureGlcmChannels.isEmpty()) parts.add("object GLCM texture");
             if (!morphTextureFractalChannels.isEmpty()) parts.add("object fractal texture");
             if (!morphTextureClassChannels.isEmpty()) parts.add("object texture class");
+            if (!morphTextureGlcm3DChannels.isEmpty()) parts.add("native-3D object GLCM texture");
+            if (!morphTextureClass3DChannels.isEmpty()) parts.add("native-3D object texture class");
             if (!processLengthChannels.isEmpty()) parts.add("process length");
             return joinSummary(parts);
         }
@@ -728,6 +767,7 @@ public class SpatialAnalysis implements Analysis {
         boolean doObjectGLCM = false;
         boolean doObjectFractal = false;
         boolean doObjectTextureClass = false;
+        boolean doNative3DTexture = false;
         boolean forceRerun = false;
         double heatmapBandwidth = 0; // 0 = auto (Scott's rule)
         String heatmapLut = DEFAULT_HEATMAP_LUT;
@@ -765,6 +805,7 @@ public class SpatialAnalysis implements Analysis {
             doObjectGLCM = effectiveOptions.doObjectGLCM;
             doObjectFractal = effectiveOptions.doObjectFractal;
             doObjectTextureClass = effectiveOptions.doObjectTextureClass;
+            doNative3DTexture = effectiveOptions.doNative3DTexture;
             forceRerun = effectiveOptions.forceRerun;
             heatmapBandwidth = effectiveOptions.kdeBandwidth;
             heatmapLut = effectiveOptions.heatmapLut;
@@ -836,6 +877,12 @@ public class SpatialAnalysis implements Analysis {
             IJ.log("--- Reusing existing object texture-class columns; skipping object texture class ---");
             doObjectTextureClass = false;
         }
+        if (!forceRerun && doNative3DTexture
+                && existingObjectData.hasObjectGLCM3DForAllChannels(channelNames)
+                && existingObjectData.hasObjectTextureClass3DForAllChannels(channelNames)) {
+            IJ.log("--- Reusing existing native-3D object texture columns; skipping native-3D object texture ---");
+            doNative3DTexture = false;
+        }
 
         RuntimeDependencyAction dependencyAction =
                 checkRuntimeDependencies(doVoronoi, do3DShapeFeatures);
@@ -868,6 +915,7 @@ public class SpatialAnalysis implements Analysis {
         context.doObjectGLCM = doObjectGLCM;
         context.doObjectFractal = doObjectFractal;
         context.doObjectTextureClass = doObjectTextureClass;
+        context.doNative3DTexture = doNative3DTexture;
         context.forceRerun = forceRerun;
         context.artifactStatus = artifactStatus;
         context.heatmapBandwidth = heatmapBandwidth;
@@ -957,7 +1005,8 @@ public class SpatialAnalysis implements Analysis {
                     context.doCompositeIndices, provider);
         }
 
-        if (context.doObjectGLCM || context.doObjectFractal || context.doObjectTextureClass) {
+        if (context.doObjectGLCM || context.doObjectFractal
+                || context.doObjectTextureClass || context.doNative3DTexture) {
             IJ.log("--- Object Texture and Complexity ---");
             runObjectTexture(directory, context, provider);
         }
@@ -968,7 +1017,8 @@ public class SpatialAnalysis implements Analysis {
                                            LabelImageProvider provider) {
         if (!context.doCpc && !context.doHeatmaps
                 && !context.doMorphology && !context.do3DShapeFeatures
-                && !context.doObjectGLCM && !context.doObjectFractal && !context.doObjectTextureClass) {
+                && !context.doObjectGLCM && !context.doObjectFractal
+                && !context.doObjectTextureClass && !context.doNative3DTexture) {
             IJ.log("--- Spatial early phase: no object-dependent work selected ---");
             return;
         }
@@ -1036,7 +1086,9 @@ public class SpatialAnalysis implements Analysis {
         }
 
         // Write morphometry analysis details
-        if (context.do3DShapeFeatures || context.doPopMorphometrics || context.doSpatialMorphometrics) {
+        if (context.do3DShapeFeatures || context.doPopMorphometrics || context.doSpatialMorphometrics
+                || context.doObjectGLCM || context.doObjectFractal
+                || context.doObjectTextureClass || context.doNative3DTexture) {
             File morphDir = spatialMorphometryOutputDir(directory);
             MorphometryDetailsWriter.write(morphDir, context.do3DShapeFeatures, context.doCompositeIndices,
                     context.doPopMorphometrics, context.doSpatialMorphometrics);
@@ -1046,7 +1098,8 @@ public class SpatialAnalysis implements Analysis {
         if (context.doVoronoi || context.doPhenotyping || context.doMorphology
                 || context.do3DShapeFeatures || context.doPopMorphometrics
                 || context.doSpatialMorphometrics
-                || context.doObjectGLCM || context.doObjectFractal || context.doObjectTextureClass) {
+                || context.doObjectGLCM || context.doObjectFractal
+                || context.doObjectTextureClass || context.doNative3DTexture) {
             reorderManagedSpatialColumns(context.channels, context.channelNames);
             writeUpdatedCsvs(context.objectsDir, context.channels, "--- Writing final updated CSVs ---");
         }
@@ -1234,6 +1287,7 @@ public class SpatialAnalysis implements Analysis {
         boolean doObjectGLCM = initialOptions != null && initialOptions.doObjectGLCM;
         boolean doObjectFractal = initialOptions != null && initialOptions.doObjectFractal;
         boolean doObjectTextureClass = initialOptions != null && initialOptions.doObjectTextureClass;
+        boolean doNative3DTexture = initialOptions != null && initialOptions.doNative3DTexture;
         boolean forceRerun = initialOptions != null && initialOptions.forceRerun;
         double heatmapBandwidth = initialOptions == null ? 0.0 : initialOptions.kdeBandwidth;
         String heatmapLut = initialOptions == null ? DEFAULT_HEATMAP_LUT : initialOptions.heatmapLut;
@@ -1327,7 +1381,7 @@ public class SpatialAnalysis implements Analysis {
                     existingObjectData, artifactStatus);
 
             addObjectTextureControls(opts, spatialBindings, doObjectGLCM,
-                    doObjectFractal, doObjectTextureClass, textureClassK);
+                    doObjectFractal, doObjectTextureClass, doNative3DTexture, textureClassK);
 
             addAdvancedPhenotypingAndHeatmapControls(opts, spatialBindings,
                     doPhenotyping, clusterK, doHeatmaps, heatmapBandwidth, heatmapLut,
@@ -1357,6 +1411,7 @@ public class SpatialAnalysis implements Analysis {
             doObjectGLCM = opts.getNextBoolean();
             doObjectFractal = opts.getNextBoolean();
             doObjectTextureClass = opts.getNextBoolean();
+            doNative3DTexture = opts.getNextBoolean();
             doPhenotyping = opts.getNextBoolean();
             doHeatmaps = opts.getNextBoolean();
             for (String chName : channelNames) {
@@ -1397,6 +1452,7 @@ public class SpatialAnalysis implements Analysis {
         config.doObjectGLCM = doObjectGLCM;
         config.doObjectFractal = doObjectFractal;
         config.doObjectTextureClass = doObjectTextureClass;
+        config.doNative3DTexture = doNative3DTexture;
         config.forceRerun = forceRerun;
         config.kdeBandwidth = heatmapBandwidth;
         config.heatmapLut = heatmapLut;
@@ -4039,7 +4095,8 @@ public class SpatialAnalysis implements Analysis {
                                   SpatialExecutionContext context,
                                   LabelImageProvider provider) {
         if (context == null
-                || (!context.doObjectGLCM && !context.doObjectFractal && !context.doObjectTextureClass)) {
+                || (!context.doObjectGLCM && !context.doObjectFractal
+                && !context.doObjectTextureClass && !context.doNative3DTexture)) {
             return;
         }
         IJ.log("  object texture and complexity: selected outputs will run unless complete columns are reused.");
@@ -4075,12 +4132,25 @@ public class SpatialAnalysis implements Analysis {
                     context.doObjectTextureClass
                             ? collectTextureFeatureVectors(channelName, cd, sections, rawResolver, provider)
                             : null;
+            Map<Integer, ObjectTextureFeatures3D.FeatureVector> vectors3DByRow =
+                    context.doNative3DTexture
+                            ? collectTextureFeatureVectors3D(channelName, cd, sections, rawResolver, provider,
+                            context.calibration)
+                            : null;
             double[][] centroids = null;
             if (context.doObjectTextureClass) {
                 centroids = loadOrFitTextureCentroids(directory, channelName,
                         vectorsByRow == null
                                 ? new ArrayList<ObjectTextureFeatures.FeatureVector>()
                                 : new ArrayList<ObjectTextureFeatures.FeatureVector>(vectorsByRow.values()),
+                        context.textureClassK);
+            }
+            double[][] centroids3D = null;
+            if (context.doNative3DTexture) {
+                centroids3D = loadOrFitTextureCentroids3D(directory, channelName,
+                        vectors3DByRow == null
+                                ? new ArrayList<ObjectTextureFeatures3D.FeatureVector>()
+                                : new ArrayList<ObjectTextureFeatures3D.FeatureVector>(vectors3DByRow.values()),
                         context.textureClassK);
             }
 
@@ -4091,6 +4161,11 @@ public class SpatialAnalysis implements Analysis {
             int unreliableFractal = 0;
             int invalidClass = 0;
             int unreliableClass = 0;
+            int invalidGlcm3D = 0;
+            int unreliableGlcm3D = 0;
+            int invalidClass3D = 0;
+            int unreliableClass3D = 0;
+            int skippedSingleSlice3D = 0;
 
             for (Map.Entry<SectionKey, List<Integer>> se : sections.entrySet()) {
                 SectionKey section = se.getKey();
@@ -4141,6 +4216,32 @@ public class SpatialAnalysis implements Analysis {
                                 unreliableClass++;
                             }
                         }
+                        if (context.doNative3DTexture) {
+                            ObjectPatch3D patch3D = ObjectPatchBuilder.buildVolumetric(obj, rawStack);
+                            if (patch3D == null) {
+                                writeNaN(cd, rowIdx, MORPH_TEXTURE_GLCM3D_COLUMNS);
+                                writeNaN(cd, rowIdx, MORPH_TEXTURE_CLASS3D_COLUMNS);
+                                skippedSingleSlice3D++;
+                            } else {
+                                ObjectTextureGLCM3D.Result glcm3D = ObjectTextureGLCM3D.compute(patch3D);
+                                writeGLCM3D(cd, rowIdx, glcm3D);
+                                if (!glcm3D.valid) invalidGlcm3D++;
+                                else if (!glcm3D.reliable) unreliableGlcm3D++;
+
+                                ObjectTextureFeatures3D.FeatureVector vector3D =
+                                        vectors3DByRow == null ? null : vectors3DByRow.get(Integer.valueOf(rowIdx));
+                                if (vector3D == null) {
+                                    vector3D = ObjectTextureFeatures3D.computeFeatures(patch3D);
+                                }
+                                writeTextureClass3D(cd, rowIdx, vector3D, centroids3D);
+                                if (vector3D == null || !vector3D.valid
+                                        || centroids3D == null || centroids3D.length == 0) {
+                                    invalidClass3D++;
+                                } else if (!vector3D.reliable) {
+                                    unreliableClass3D++;
+                                }
+                            }
+                        }
                         totalMeasured++;
                     }
                 } catch (Exception e) {
@@ -4155,6 +4256,8 @@ public class SpatialAnalysis implements Analysis {
             IJ.log("  " + channelName + ": " + totalMeasured + " objects with object texture");
             logTextureReliability(channelName, invalidGlcm, unreliableGlcm,
                     invalidFractal, unreliableFractal, invalidClass, unreliableClass);
+            logTexture3DReliability(channelName, skippedSingleSlice3D,
+                    invalidGlcm3D, unreliableGlcm3D, invalidClass3D, unreliableClass3D);
         }
     }
 
@@ -4197,6 +4300,50 @@ public class SpatialAnalysis implements Analysis {
         return vectors;
     }
 
+    private Map<Integer, ObjectTextureFeatures3D.FeatureVector> collectTextureFeatureVectors3D(
+            String channelName,
+            ChannelData cd,
+            Map<SectionKey, List<Integer>> sections,
+            RawTextureImageResolver rawResolver,
+            LabelImageProvider provider,
+            CalibrationIO.PixelCalibration calibration) {
+        Map<Integer, ObjectTextureFeatures3D.FeatureVector> vectors =
+                new LinkedHashMap<Integer, ObjectTextureFeatures3D.FeatureVector>();
+        for (Map.Entry<SectionKey, List<Integer>> se : sections.entrySet()) {
+            SectionKey section = se.getKey();
+            List<Integer> rowIndices = se.getValue();
+            if (rowIndices.isEmpty()) continue;
+
+            ImagePlus labelImg = provider.get(channelName, section);
+            if (labelImg == null) continue;
+            ImagePlus rawStack = null;
+            try {
+                rawStack = rawResolver.open(channelName, cd, rowIndices);
+                if (rawStack == null) continue;
+                applyCalibration(rawStack, calibration);
+                Map<Integer, mcib3d.geom2.Object3DInt> objMap = loadObjectMap(labelImg);
+                boolean hasLabelCol = cd.colIdx.containsKey("Label");
+                for (int rowIdx : rowIndices) {
+                    int label = resolveRowLabel(cd, rowIdx, hasLabelCol, labelImg);
+                    mcib3d.geom2.Object3DInt obj = objMap.get(Integer.valueOf(label));
+                    if (obj == null) continue;
+                    ObjectPatch3D patch = ObjectPatchBuilder.buildVolumetric(obj, rawStack);
+                    if (patch == null) continue;
+                    vectors.put(Integer.valueOf(rowIdx),
+                            ObjectTextureFeatures3D.computeFeatures(patch));
+                }
+            } catch (Exception e) {
+                IJ.log("    Native-3D texture feature collection failed for "
+                        + section.labelFileName(channelName)
+                        + ": " + e.getClass().getSimpleName() + " - " + e.getMessage());
+            } finally {
+                closeImage(rawStack);
+                closeLabelImage(labelImg, provider, channelName, section);
+            }
+        }
+        return vectors;
+    }
+
     private double[][] loadOrFitTextureCentroids(String directory,
                                                  String channelName,
                                                  List<ObjectTextureFeatures.FeatureVector> vectors,
@@ -4223,6 +4370,33 @@ public class SpatialAnalysis implements Analysis {
         return fitted;
     }
 
+    private double[][] loadOrFitTextureCentroids3D(String directory,
+                                                   String channelName,
+                                                   List<ObjectTextureFeatures3D.FeatureVector> vectors,
+                                                   int k) {
+        File writeFile = textureCentroids3DFile(directory, channelName);
+        double[][] centroids = loadTextureCentroids3D(directory, channelName);
+        if (centroids != null && centroids.length == k) {
+            IJ.log("    Loaded native-3D object texture centroids: " + writeFile.getName());
+            return centroids;
+        }
+
+        double[][] fitted = ObjectTextureFeatures3D.fitCentroids(vectors, k);
+        if (fitted.length == 0) {
+            IJ.log("    No valid native-3D texture feature vectors for " + channelName
+                    + "; native-3D texture class columns will be NaN.");
+            return fitted;
+        }
+        try {
+            ObjectTextureFeatures3D.CentroidsIO.save(writeFile, fitted);
+            IJ.log("    Fitted native-3D object texture centroids: " + writeFile.getName());
+        } catch (IOException e) {
+            IJ.log("    Could not save native-3D texture centroids for "
+                    + channelName + ": " + e.getMessage());
+        }
+        return fitted;
+    }
+
     private double[][] loadTextureCentroids(String directory, String channelName) {
         for (File candidate : textureCentroidReadFiles(directory, channelName)) {
             try {
@@ -4239,9 +4413,30 @@ public class SpatialAnalysis implements Analysis {
         return null;
     }
 
+    private double[][] loadTextureCentroids3D(String directory, String channelName) {
+        for (File candidate : textureCentroid3DReadFiles(directory, channelName)) {
+            try {
+                double[][] centroids = ObjectTextureFeatures3D.CentroidsIO.load(candidate,
+                        ObjectTextureFeatures3D.DEFAULT_FEATURE_DIM);
+                if (centroids != null) {
+                    return centroids;
+                }
+            } catch (Exception e) {
+                IJ.log("    Ignoring unreadable native-3D texture centroids "
+                        + candidate.getName() + ": " + e.getMessage());
+            }
+        }
+        return null;
+    }
+
     private static File textureCentroidsFile(String directory, String channelName) {
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
         return new File(layout.configurationWriteDir(), textureCentroidsFileName(channelName, ".txt"));
+    }
+
+    private static File textureCentroids3DFile(String directory, String channelName) {
+        FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
+        return new File(layout.configurationWriteDir(), textureCentroids3DFileName(channelName, ".txt"));
     }
 
     private static List<File> textureCentroidReadFiles(String directory, String channelName) {
@@ -4256,8 +4451,24 @@ public class SpatialAnalysis implements Analysis {
         return out;
     }
 
+    private static List<File> textureCentroid3DReadFiles(String directory, String channelName) {
+        FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
+        List<File> out = new ArrayList<File>();
+        Set<String> seen = new LinkedHashSet<String>();
+        addUniqueFile(out, seen, textureCentroids3DFile(directory, channelName));
+        for (File dir : layout.configurationReadDirs()) {
+            addUniqueFile(out, seen, new File(dir, textureCentroids3DFileName(channelName, ".txt")));
+            addUniqueFile(out, seen, new File(dir, textureCentroids3DFileName(channelName, ".bin")));
+        }
+        return out;
+    }
+
     private static String textureCentroidsFileName(String channelName, String extension) {
         return "morph_texture_centroids_" + ChannelFilenameCodec.toSafe(channelName) + extension;
+    }
+
+    private static String textureCentroids3DFileName(String channelName, String extension) {
+        return "morph_texture_centroids_3D_" + ChannelFilenameCodec.toSafe(channelName) + extension;
     }
 
     private static void addUniqueFile(List<File> out, Set<String> seen, File file) {
@@ -4273,7 +4484,13 @@ public class SpatialAnalysis implements Analysis {
         if (context.doObjectGLCM && !hasUsableColumns(cd, MORPH_TEXTURE_GLCM_COLUMNS)) return false;
         if (context.doObjectFractal && !hasUsableColumns(cd, MORPH_TEXTURE_FRACTAL_COLUMNS)) return false;
         if (context.doObjectTextureClass && !hasUsableColumns(cd, MORPH_TEXTURE_CLASS_COLUMNS)) return false;
-        return context.doObjectGLCM || context.doObjectFractal || context.doObjectTextureClass;
+        if (context.doNative3DTexture
+                && (!hasUsableColumns(cd, MORPH_TEXTURE_GLCM3D_COLUMNS)
+                || !hasUsableColumns(cd, MORPH_TEXTURE_CLASS3D_COLUMNS))) {
+            return false;
+        }
+        return context.doObjectGLCM || context.doObjectFractal
+                || context.doObjectTextureClass || context.doNative3DTexture;
     }
 
     private void addSelectedTextureColumns(ChannelData cd, SpatialExecutionContext context) {
@@ -4285,6 +4502,10 @@ public class SpatialAnalysis implements Analysis {
         }
         if (context.doObjectTextureClass) {
             for (String column : MORPH_TEXTURE_CLASS_COLUMNS) cd.addColumn(column);
+        }
+        if (context.doNative3DTexture) {
+            for (String column : MORPH_TEXTURE_GLCM3D_COLUMNS) cd.addColumn(column);
+            for (String column : MORPH_TEXTURE_CLASS3D_COLUMNS) cd.addColumn(column);
         }
     }
 
@@ -4381,6 +4602,18 @@ public class SpatialAnalysis implements Analysis {
         cd.set(rowIdx, "MorphTexture_GLCMHomogeneity", formatStat(result.homogeneity));
     }
 
+    private void writeGLCM3D(ChannelData cd, int rowIdx, ObjectTextureGLCM3D.Result result) {
+        if (result == null || !result.valid) {
+            writeNaN(cd, rowIdx, MORPH_TEXTURE_GLCM3D_COLUMNS);
+            return;
+        }
+        cd.set(rowIdx, "MorphTexture_GLCM3DContrast", formatStat(result.contrast));
+        cd.set(rowIdx, "MorphTexture_GLCM3DASM", formatStat(result.asm));
+        cd.set(rowIdx, "MorphTexture_GLCM3DCorrelation", formatStat(result.correlation));
+        cd.set(rowIdx, "MorphTexture_GLCM3DEntropy", formatStat(result.entropy));
+        cd.set(rowIdx, "MorphTexture_GLCM3DHomogeneity", formatStat(result.homogeneity));
+    }
+
     private void writeFractal(ChannelData cd, int rowIdx, ObjectFractal.Result result) {
         if (result == null || !result.valid) {
             writeNaN(cd, rowIdx, MORPH_TEXTURE_FRACTAL_COLUMNS);
@@ -4412,6 +4645,26 @@ public class SpatialAnalysis implements Analysis {
         }
     }
 
+    private void writeTextureClass3D(ChannelData cd,
+                                     int rowIdx,
+                                     ObjectTextureFeatures3D.FeatureVector vector,
+                                     double[][] centroids) {
+        if (vector == null || !vector.valid || vector.features == null
+                || vector.features.length != ObjectTextureFeatures3D.DEFAULT_FEATURE_DIM
+                || centroids == null || centroids.length == 0) {
+            writeNaN(cd, rowIdx, MORPH_TEXTURE_CLASS3D_COLUMNS);
+            return;
+        }
+        ObjectTextureFeatures3D.ClassAssignment assignment =
+                ObjectTextureFeatures3D.assignToCentroids(vector, centroids);
+        cd.set(rowIdx, "MorphTexture_Class3DLabel", String.valueOf(assignment.classLabel));
+        cd.set(rowIdx, "MorphTexture_Class3DDistance",
+                formatStat(vector.reliable ? assignment.classDistance : Double.POSITIVE_INFINITY));
+        for (int i = 0; i < vector.features.length; i++) {
+            cd.set(rowIdx, "MorphTexture_F3D" + (i + 1), formatStat(finiteOrZero(vector.features[i])));
+        }
+    }
+
     private void writeNaN(ChannelData cd, int rowIdx, String[] columns) {
         for (String column : columns) {
             cd.set(rowIdx, column, "NaN");
@@ -4433,6 +4686,24 @@ public class SpatialAnalysis implements Analysis {
                 + "GLCM invalid=" + invalidGlcm + ", GLCM unreliable=" + unreliableGlcm
                 + ", fractal invalid=" + invalidFractal + ", fractal unreliable=" + unreliableFractal
                 + ", class invalid=" + invalidClass + ", class unreliable=" + unreliableClass);
+    }
+
+    private void logTexture3DReliability(String channelName,
+                                         int skippedSingleSlice,
+                                         int invalidGlcm3D,
+                                         int unreliableGlcm3D,
+                                         int invalidClass3D,
+                                         int unreliableClass3D) {
+        if (skippedSingleSlice > 0) {
+            IJ.log("    " + channelName + ": skipped " + skippedSingleSlice
+                    + " single-slice objects for native-3D texture");
+        }
+        if (invalidGlcm3D + unreliableGlcm3D + invalidClass3D + unreliableClass3D == 0) {
+            return;
+        }
+        IJ.log("    " + channelName + " native-3D texture quality flags: "
+                + "GLCM3D invalid=" + invalidGlcm3D + ", GLCM3D unreliable=" + unreliableGlcm3D
+                + ", class3D invalid=" + invalidClass3D + ", class3D unreliable=" + unreliableClass3D);
     }
 
     private static double finiteOrZero(double value) {
@@ -5195,6 +5466,7 @@ public class SpatialAnalysis implements Analysis {
             setToggle(bindings.doObjectGLCMToggle, config.doObjectGLCM);
             setToggle(bindings.doObjectFractalToggle, config.doObjectFractal);
             setToggle(bindings.doObjectTextureClassToggle, config.doObjectTextureClass);
+            setToggle(bindings.doNative3DTextureToggle, config.doNative3DTexture);
 
             if (bindings.kdeBandwidthField != null) {
                 bindings.kdeBandwidthField.setText(numericText(config.kdeBandwidth, 1));
@@ -5332,6 +5604,7 @@ public class SpatialAnalysis implements Analysis {
                                           boolean doObjectGLCM,
                                           boolean doObjectFractal,
                                           boolean doObjectTextureClass,
+                                          boolean doNative3DTexture,
                                           int textureClassK) {
         opts.addHeader("Object Texture and Complexity");
         spatialBindings.doObjectGLCMToggle = opts.addToggle("Object texture (GLCM)", doObjectGLCM);
@@ -5341,6 +5614,8 @@ public class SpatialAnalysis implements Analysis {
                 "Object texture classes", doObjectTextureClass);
         spatialBindings.doObjectTextureClassToggle = textureClassToggle;
         opts.beginAdvancedSection("spatial.texture.advanced");
+        spatialBindings.doNative3DTextureToggle = opts.addToggle(
+                "Native-3D texture (GLCM + texture classes)", doNative3DTexture);
         spatialBindings.textureClassKField = opts.addNumericField(
                 "Texture classes (k)", clampObjectTextureClassK(textureClassK), 0);
         opts.endAdvancedSection();
@@ -5549,6 +5824,7 @@ public class SpatialAnalysis implements Analysis {
                 isSelected(bindings.doObjectGLCMToggle),
                 isSelected(bindings.doObjectFractalToggle),
                 isSelected(bindings.doObjectTextureClassToggle),
+                isSelected(bindings.doNative3DTextureToggle),
                 clampObjectTextureClassK((int) Math.round(readNumericField(
                         bindings.textureClassKField, ObjectTextureFeatures.DEFAULT_K,
                         "Texture classes (k)"))),
@@ -5698,6 +5974,7 @@ public class SpatialAnalysis implements Analysis {
         if (spatial.getTextureGlcm() != null) config.doObjectGLCM = spatial.getTextureGlcm().booleanValue();
         if (spatial.getTextureFractal() != null) config.doObjectFractal = spatial.getTextureFractal().booleanValue();
         if (spatial.getTextureClass() != null) config.doObjectTextureClass = spatial.getTextureClass().booleanValue();
+        if (spatial.getTextureNative3D() != null) config.doNative3DTexture = spatial.getTextureNative3D().booleanValue();
         if (spatial.getTextureClassK() != null) config.textureClassK = clampObjectTextureClassK(spatial.getTextureClassK().intValue());
         if (spatial.getKdeBandwidth() != null) config.kdeBandwidth = spatial.getKdeBandwidth().doubleValue();
         if (spatial.getHeatmapLut() != null && !spatial.getHeatmapLut().trim().isEmpty()) {
@@ -5744,6 +6021,7 @@ public class SpatialAnalysis implements Analysis {
         ToggleSwitch doObjectGLCMToggle;
         ToggleSwitch doObjectFractalToggle;
         ToggleSwitch doObjectTextureClassToggle;
+        ToggleSwitch doNative3DTextureToggle;
         List<JTextField> thresholdFields = new ArrayList<JTextField>();
         JTextField kdeBandwidthField;
         JTextField textureClassKField;

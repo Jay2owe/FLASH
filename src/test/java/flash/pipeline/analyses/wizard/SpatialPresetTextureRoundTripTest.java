@@ -26,7 +26,7 @@ public class SpatialPresetTextureRoundTripTest {
         SpatialPreset preset = new SpatialPreset("Texture Preset", "test", "1",
                 true, false, true, true, false, true, false,
                 true, true, true, false, false,
-                true, true, true, 6,
+                true, true, true, true, 6,
                 4.5, "Cyan", 3, 30.0);
 
         io.save(preset);
@@ -36,6 +36,7 @@ public class SpatialPresetTextureRoundTripTest {
         assertEquals(preset.isDoObjectGLCM(), loaded.isDoObjectGLCM());
         assertEquals(preset.isDoObjectFractal(), loaded.isDoObjectFractal());
         assertEquals(preset.isDoObjectTextureClass(), loaded.isDoObjectTextureClass());
+        assertEquals(preset.isDoNative3DTexture(), loaded.isDoNative3DTexture());
         assertEquals(preset.getTextureClassK(), loaded.getTextureClassK());
         assertEquals(preset.toJsonObject(), loaded.toJsonObject());
 
@@ -43,6 +44,7 @@ public class SpatialPresetTextureRoundTripTest {
         assertTrue(derived.doObjectGLCM);
         assertTrue(derived.doObjectFractal);
         assertTrue(derived.doObjectTextureClass);
+        assertTrue(derived.doNative3DTexture);
         assertEquals(6, derived.textureClassK);
     }
 
@@ -69,12 +71,14 @@ public class SpatialPresetTextureRoundTripTest {
         assertFalse(loaded.isDoObjectGLCM());
         assertFalse(loaded.isDoObjectFractal());
         assertFalse(loaded.isDoObjectTextureClass());
+        assertFalse(loaded.isDoNative3DTexture());
         assertEquals(4, loaded.getTextureClassK());
 
         SpatialAnalysisWizard.DerivedConfig derived = SpatialAnalysisWizard.fromPreset(loaded);
         assertFalse(derived.doObjectGLCM);
         assertFalse(derived.doObjectFractal);
         assertFalse(derived.doObjectTextureClass);
+        assertFalse(derived.doNative3DTexture);
         assertEquals(4, derived.textureClassK);
     }
 }

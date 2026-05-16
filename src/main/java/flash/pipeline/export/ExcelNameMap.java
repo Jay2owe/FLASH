@@ -258,6 +258,21 @@ public final class ExcelNameMap {
         addRule("<ab>_MorphTexture_GLCMHomogeneityMean",
                 "<ab> GLCM homogeneity",
                 OBJ_COUNTER + "Mean per-object GLCM homogeneity for <ab> objects.");
+        addRule("<ab>_MorphTexture_GLCM3DContrastMean",
+                "<ab> GLCM contrast (3D)",
+                OBJ_COUNTER + "Mean native-3D per-object GLCM contrast for <ab> objects.");
+        addRule("<ab>_MorphTexture_GLCM3DASMMean",
+                "<ab> GLCM ASM (3D)",
+                OBJ_COUNTER + "Mean native-3D per-object GLCM angular second moment for <ab> objects.");
+        addRule("<ab>_MorphTexture_GLCM3DCorrelationMean",
+                "<ab> GLCM correlation (3D)",
+                OBJ_COUNTER + "Mean native-3D per-object GLCM correlation for <ab> objects.");
+        addRule("<ab>_MorphTexture_GLCM3DEntropyMean",
+                "<ab> GLCM entropy (3D)",
+                OBJ_COUNTER + "Mean native-3D per-object GLCM entropy for <ab> objects.");
+        addRule("<ab>_MorphTexture_GLCM3DHomogeneityMean",
+                "<ab> GLCM homogeneity (3D)",
+                OBJ_COUNTER + "Mean native-3D per-object GLCM homogeneity for <ab> objects.");
         addRule("<ab>_MorphTexture_FractalDimMean",
                 "<ab> Fractal dimension",
                 OBJ_COUNTER + "Mean per-object box-counting fractal dimension for <ab> objects.");
@@ -276,6 +291,12 @@ public final class ExcelNameMap {
         addRule("<ab>_MorphTexture_ClassDistanceMean",
                 "<ab> Texture class distance",
                 OBJ_COUNTER + "Mean distance from each <ab> object to its assigned texture-class centroid.");
+        addRule("<ab>_MorphTexture_Class3DLabelMode",
+                "<ab> Texture class (3D)",
+                OBJ_COUNTER + "Most common native-3D per-object texture class for <ab> objects in the aggregation group.");
+        addRule("<ab>_MorphTexture_Class3DDistanceMean",
+                "<ab> Texture-class centroid distance (3D)",
+                OBJ_COUNTER + "Mean distance from each <ab> object to its assigned native-3D texture-class centroid.");
 
         // Sort rules so longer regex patterns match first (more specific)
         RULES.sort((a, b) -> Integer.compare(b.regex.pattern().length(), a.regex.pattern().length()));

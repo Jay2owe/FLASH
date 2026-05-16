@@ -103,6 +103,7 @@ public class SpatialAnalysisWizard extends WizardFlow {
         applyTextureQuestion(out, texture);
         int requestedTextureK = intAnswer(safeAnswers, "texture.k", 4);
         out.textureClassK = Math.max(2, Math.min(10, requestedTextureK));
+        out.doNative3DTexture = booleanAnswer(safeAnswers, "spatial.texture.native3d", false);
 
         out.heatmapLut = answerString(safeAnswers, "heatmap.lut", "Fire");
         boolean autoBandwidth = booleanAnswer(safeAnswers, "heatmap.autoBandwidth", true);
@@ -138,6 +139,7 @@ public class SpatialAnalysisWizard extends WizardFlow {
         out.doObjectGLCM = preset.isDoObjectGLCM();
         out.doObjectFractal = preset.isDoObjectFractal();
         out.doObjectTextureClass = preset.isDoObjectTextureClass();
+        out.doNative3DTexture = preset.isDoNative3DTexture();
         out.textureClassK = preset.getTextureClassK();
         out.kdeBandwidth = preset.getKdeBandwidth();
         out.heatmapLut = preset.getHeatmapLut();
@@ -393,6 +395,7 @@ public class SpatialAnalysisWizard extends WizardFlow {
         public boolean doObjectGLCM;
         public boolean doObjectFractal;
         public boolean doObjectTextureClass;
+        public boolean doNative3DTexture;
         public boolean forceRerun;
         public double kdeBandwidth = 0.0;
         public String heatmapLut = "Fire";
@@ -403,7 +406,8 @@ public class SpatialAnalysisWizard extends WizardFlow {
 
         public boolean anyEarlyPhaseToggleOn() {
             return forceRerun || doCpc || doHeatmaps || do2DMorphology || do3DMorphology
-                    || doObjectGLCM || doObjectFractal || doObjectTextureClass;
+                    || doObjectGLCM || doObjectFractal
+                    || doObjectTextureClass || doNative3DTexture;
         }
     }
 
@@ -467,6 +471,7 @@ public class SpatialAnalysisWizard extends WizardFlow {
             super("What object texture / complexity question are you asking?");
             defaultAnswer("texture.question", TEXTURE_NONE);
             defaultAnswer("texture.k", Integer.valueOf(4));
+            defaultAnswer("spatial.texture.native3d", Boolean.FALSE);
         }
 
         public void build(PipelineDialog dialog, AnswerMap answers) {
@@ -477,12 +482,15 @@ public class SpatialAnalysisWizard extends WizardFlow {
                             TEXTURE_CLASS, TEXTURE_ALL},
                     selected);
             dialog.beginAdvancedSection("spatial.texture.advanced");
+            dialog.addToggle("Native-3D texture (GLCM + texture classes)",
+                    answers.getBoolean("spatial.texture.native3d", false));
             dialog.addNumericField("Texture classes (k)", answers.getInt("texture.k", 4), 0);
             dialog.endAdvancedSection();
         }
 
         public void read(PipelineDialog dialog, AnswerMap answers) {
             answers.put("texture.question", dialog.getNextChoice());
+            answers.put("spatial.texture.native3d", Boolean.valueOf(dialog.getNextBoolean()));
             answers.put("texture.k", Integer.valueOf((int) dialog.getNextNumber()));
         }
 

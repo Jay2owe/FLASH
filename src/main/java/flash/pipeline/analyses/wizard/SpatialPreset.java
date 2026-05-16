@@ -32,6 +32,7 @@ public final class SpatialPreset implements Preset<SpatialPreset> {
     private final boolean doObjectGLCM;
     private final boolean doObjectFractal;
     private final boolean doObjectTextureClass;
+    private final boolean doNative3DTexture;
     private final int textureClassK;
     private final double kdeBandwidth;
     private final String heatmapLut;
@@ -87,6 +88,38 @@ public final class SpatialPreset implements Preset<SpatialPreset> {
                          String heatmapLut,
                          int clusterK,
                          double colocThresholdPercent) {
+        this(name, description, libraryVersion, doDistances, doSpatialStats, doVolColoc,
+                doCpc, doVoronoi, doHeatmaps, doPhenotyping, do2DMorphology,
+                do3DMorphology, doCompositeIndices, doPopMorphometrics,
+                doSpatialMorphometrics, doObjectGLCM, doObjectFractal,
+                doObjectTextureClass, false, textureClassK,
+                kdeBandwidth, heatmapLut, clusterK, colocThresholdPercent);
+    }
+
+    public SpatialPreset(String name,
+                         String description,
+                         String libraryVersion,
+                         boolean doDistances,
+                         boolean doSpatialStats,
+                         boolean doVolColoc,
+                         boolean doCpc,
+                         boolean doVoronoi,
+                         boolean doHeatmaps,
+                         boolean doPhenotyping,
+                         boolean do2DMorphology,
+                         boolean do3DMorphology,
+                         boolean doCompositeIndices,
+                         boolean doPopMorphometrics,
+                         boolean doSpatialMorphometrics,
+                         boolean doObjectGLCM,
+                         boolean doObjectFractal,
+                         boolean doObjectTextureClass,
+                         boolean doNative3DTexture,
+                         int textureClassK,
+                         double kdeBandwidth,
+                         String heatmapLut,
+                         int clusterK,
+                         double colocThresholdPercent) {
         this.name = requireText("name", name);
         this.description = emptyToNull(description);
         this.libraryVersion = emptyToNull(libraryVersion) == null
@@ -107,6 +140,7 @@ public final class SpatialPreset implements Preset<SpatialPreset> {
         this.doObjectGLCM = doObjectGLCM;
         this.doObjectFractal = doObjectFractal;
         this.doObjectTextureClass = doObjectTextureClass;
+        this.doNative3DTexture = doNative3DTexture;
         this.textureClassK = Math.max(2, Math.min(10, textureClassK));
         this.kdeBandwidth = kdeBandwidth;
         this.heatmapLut = emptyToNull(heatmapLut) == null ? "Fire" : heatmapLut.trim();
@@ -133,6 +167,7 @@ public final class SpatialPreset implements Preset<SpatialPreset> {
     public boolean isDoObjectGLCM() { return doObjectGLCM; }
     public boolean isDoObjectFractal() { return doObjectFractal; }
     public boolean isDoObjectTextureClass() { return doObjectTextureClass; }
+    public boolean isDoNative3DTexture() { return doNative3DTexture; }
     public int getTextureClassK() { return textureClassK; }
     public double getKdeBandwidth() { return kdeBandwidth; }
     public String getHeatmapLut() { return heatmapLut; }
@@ -159,6 +194,7 @@ public final class SpatialPreset implements Preset<SpatialPreset> {
         root.put("doObjectGLCM", Boolean.valueOf(doObjectGLCM));
         root.put("doObjectFractal", Boolean.valueOf(doObjectFractal));
         root.put("doObjectTextureClass", Boolean.valueOf(doObjectTextureClass));
+        root.put("doNative3DTexture", Boolean.valueOf(doNative3DTexture));
         root.put("textureClassK", Integer.valueOf(textureClassK));
         root.put("kdeBandwidth", Double.valueOf(kdeBandwidth));
         root.put("heatmapLut", heatmapLut);
@@ -196,6 +232,7 @@ public final class SpatialPreset implements Preset<SpatialPreset> {
                 JsonIO.booleanValue(root.get("doObjectGLCM"), false),
                 JsonIO.booleanValue(root.get("doObjectFractal"), false),
                 JsonIO.booleanValue(root.get("doObjectTextureClass"), false),
+                JsonIO.booleanValue(root.get("doNative3DTexture"), false),
                 JsonIO.intValue(root.get("textureClassK"), 4),
                 doubleValue(root.get("kdeBandwidth"), 0.0),
                 stringOr(root.get("heatmapLut"), "Fire"),

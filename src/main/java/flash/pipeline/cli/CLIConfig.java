@@ -231,6 +231,7 @@ public class CLIConfig {
         appendBoolean(parts, "spatial.texture.glcm", spatial.textureGlcm);
         appendBoolean(parts, "spatial.texture.fractal", spatial.textureFractal);
         appendBoolean(parts, "spatial.texture.class", spatial.textureClass);
+        appendBoolean(parts, "spatial.texture.native3d", spatial.textureNative3D);
         if (spatial.textureClassK != null) {
             parts.add("spatial.texture.k=" + spatial.textureClassK);
         }
@@ -624,6 +625,7 @@ public class CLIConfig {
         Boolean textureGlcm = null;
         Boolean textureFractal = null;
         Boolean textureClass = null;
+        Boolean textureNative3D = null;
         Integer textureClassK = null;
         Double kdeBandwidth = null;
         String heatmapLut = null;
@@ -645,6 +647,8 @@ public class CLIConfig {
         public Boolean getTextureGlcm() { return textureGlcm; }
         public Boolean getTextureFractal() { return textureFractal; }
         public Boolean getTextureClass() { return textureClass; }
+        public Boolean getTextureNative3D() { return textureNative3D; }
+        public void setTextureNative3D(Boolean textureNative3D) { this.textureNative3D = textureNative3D; }
         public Integer getTextureClassK() { return textureClassK; }
         public Double getKdeBandwidth() { return kdeBandwidth; }
         public String getHeatmapLut() { return heatmapLut; }
@@ -667,6 +671,7 @@ public class CLIConfig {
                     || textureGlcm != null
                     || textureFractal != null
                     || textureClass != null
+                    || textureNative3D != null
                     || textureClassK != null
                     || kdeBandwidth != null
                     || heatmapLut != null

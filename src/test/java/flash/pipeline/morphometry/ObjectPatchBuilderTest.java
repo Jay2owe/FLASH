@@ -49,6 +49,25 @@ public class ObjectPatchBuilderTest {
         assertEquals(165.0f, objectSlice.intensity[objectSlice.index(5 - 3, 6 - 4)], 1e-6f);
     }
 
+    @Test
+    public void buildVolumetricPadsAllAxesAndUsesObjectVoxelsForMask() {
+        ImagePlus label = labelStack();
+        ImagePlus raw = rawStack();
+        Object3DInt object = objectByLabel(label).get(Integer.valueOf(7));
+
+        ObjectPatch3D patch = ObjectPatchBuilder.buildVolumetric(object, raw);
+
+        assertEquals(6, patch.width);
+        assertEquals(6, patch.height);
+        assertEquals(3, patch.depth);
+        assertEquals(32, patch.objectVoxelCount());
+        assertEquals(0.5, patch.pixelSize_um, 1e-12);
+        assertEquals(2.0, patch.sliceSpacing_um, 1e-12);
+        assertEquals(265.0f, patch.intensity[patch.index(5 - 3, 6 - 4, 2)], 1e-6f);
+        assertTrue(patch.containsObjectVoxel(4 - 3, 5 - 4, 1));
+        assertEquals(0, patch.mask[patch.index(3 - 3, 4 - 4, 0)]);
+    }
+
     private static ImagePlus labelStack() {
         int width = 12;
         int height = 12;
@@ -83,6 +102,7 @@ public class ObjectPatchBuilderTest {
         ImagePlus raw = new ImagePlus("raw", stack);
         Calibration cal = new Calibration(raw);
         cal.pixelWidth = 0.5;
+        cal.pixelDepth = 2.0;
         raw.setCalibration(cal);
         return raw;
     }
