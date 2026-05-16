@@ -184,6 +184,12 @@ public class ThreeDObjectAnalysis implements Analysis {
     /** Shared lock for all legacy ImageJ1/plugin paths that touch WindowManager or Prefs. */
     private static final ReentrantLock COUNTER3D_LOCK = WindowManagerLock.LOCK;
 
+    private static final class FatalSegmentationException extends RuntimeException {
+        FatalSegmentationException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
     /** Lazy runtime check: is mcib3d-core available for native (thread-safe) object counting? */
     private static volatile Boolean mcib3dAvailable = null;
 
@@ -2568,6 +2574,7 @@ public class ThreeDObjectAnalysis implements Analysis {
             ExecutorService filterPool = Executors.newFixedThreadPool(filterThreads);
             List<Future<?>> filterFutures = new ArrayList<Future<?>>();
 
+            try {
             for (int c = 0; c < n; c++) {
                 final int ci = c;
                 final ImagePlus ch = chans[c];
@@ -2609,14 +2616,10 @@ public class ThreeDObjectAnalysis implements Analysis {
             }
 
             // Wait for all filter tasks to complete
-            for (Future<?> f : filterFutures) {
-                try {
-                    f.get();
-                } catch (Exception e) {
-                    IJ.log("    WARNING: Filter thread error: " + e.getMessage());
-                }
+            waitForFilterFutures(filterFutures);
+            } finally {
+                filterPool.shutdown();
             }
-            filterPool.shutdown();
         } else {
             // Single channel — no need for thread pool overhead
             for (int c = 0; c < n; c++) {
@@ -3074,6 +3077,7 @@ public class ThreeDObjectAnalysis implements Analysis {
         if (filterThreads > 1) {
             ExecutorService filterPool = Executors.newFixedThreadPool(filterThreads);
             List<Future<?>> filterFutures = new ArrayList<Future<?>>();
+            try {
             for (int c = 0; c < n; c++) {
                 final int ci = c;
                 final ImagePlus ch = chans[c];
@@ -3107,12 +3111,10 @@ public class ThreeDObjectAnalysis implements Analysis {
                     }
                 }));
             }
-            for (Future<?> f : filterFutures) {
-                try { f.get(); } catch (Exception e) {
-                    IJ.log("    WARNING: Filter thread error: " + e.getMessage());
-                }
+            waitForFilterFutures(filterFutures);
+            } finally {
+                filterPool.shutdown();
             }
-            filterPool.shutdown();
         } else {
             for (int c = 0; c < n; c++) {
                 filterResults[c] = filterAndThresholdChannel(
@@ -3938,8 +3940,33 @@ public class ThreeDObjectAnalysis implements Analysis {
             for (String line : sw.toString().split("\\r?\\n")) {
                 IJ.log("      " + line);
             }
+            if (segmentationMethod != null && segmentationMethod.isTrainedRf()) {
+                String modelKey = SegmentationMethod.trainedRfModelKey(segmentationMethod);
+                throw new FatalSegmentationException(
+                        "Trained RF segmentation failed for channel '" + channelName
+                                + "' using model '" + modelKey + "': " + errMsg,
+                        t);
+            }
             return new ChannelFilterResult(c, channelName, ch, null,
                     null, 0, 0, true, "filter error: " + errMsg);
+        }
+    }
+
+    private static void waitForFilterFutures(List<Future<?>> filterFutures) {
+        for (Future<?> f : filterFutures) {
+            try {
+                f.get();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException("Filter thread interrupted.", e);
+            } catch (java.util.concurrent.ExecutionException e) {
+                Throwable cause = e.getCause();
+                if (cause instanceof FatalSegmentationException) {
+                    throw (FatalSegmentationException) cause;
+                }
+                IJ.log("    WARNING: Filter thread error: "
+                        + (cause == null ? e.getMessage() : cause.getMessage()));
+            }
         }
     }
 

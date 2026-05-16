@@ -72,6 +72,7 @@ import flash.pipeline.ui.config.FilterParameterStage;
 import flash.pipeline.ui.config.ParticleSizeStage;
 import flash.pipeline.ui.config.SegmentationMethodStage;
 import flash.pipeline.ui.config.StarDistParameterStage;
+import flash.pipeline.ui.config.TrainedRfSummaryStage;
 import flash.pipeline.ui.config.ZSliceSelectionStage;
 import flash.pipeline.ui.sandbox.SandboxDialog;
 import flash.pipeline.ui.wizard.MarkerAutoComplete;
@@ -6081,9 +6082,55 @@ public class CreateBinFileAnalysis implements Analysis {
                 cfg.names,
                 channelIndex,
                 setupFilteredStackCache);
+        List<ConfigQcStage> stages = createSegmentationObjectQcStages(
+                cfg, binFolder, channelIndex, includeAiChannelThreshold, methodStore);
+
+        ConfigQcResult result = showEmbeddedConfigQcDialog(context, stages);
+        if (result == ConfigQcResult.DONE || result == ConfigQcResult.SKIP_CURRENT_IMAGE) {
+            if (isStarDistSegmentation(cfg, channelIndex)) {
+                cfg.sizes.set(channelIndex, "0-Infinity");
+                if (!includeAiChannelThreshold) {
+                    cfg.objectThresholds.set(channelIndex, "default");
+                }
+            } else if (isCellposeSegmentation(cfg, channelIndex)) {
+                cfg.sizes.set(channelIndex, "100-Infinity");
+                if (!includeAiChannelThreshold) {
+                    cfg.objectThresholds.set(channelIndex, "default");
+                }
+            }
+            return "continue";
+        }
+        if (result == ConfigQcResult.BACK) {
+            return "back";
+        }
+        return "cancel";
+    }
+
+    List<ConfigQcStage> createSegmentationObjectQcStagesForTest(BinUserConfig cfg,
+                                                                File binFolder,
+                                                                int channelIndex,
+                                                                boolean includeAiChannelThreshold) {
+        ensureConfigHasChannels(cfg);
+        return createSegmentationObjectQcStages(
+                cfg, binFolder, channelIndex, includeAiChannelThreshold,
+                new SegmentationMethodStore(cfg, channelIndex));
+    }
+
+    private List<ConfigQcStage> createSegmentationObjectQcStages(final BinUserConfig cfg,
+                                                                 final File binFolder,
+                                                                 final int channelIndex,
+                                                                 boolean includeAiChannelThreshold,
+                                                                 final SegmentationMethodStage.MethodStore methodStore) {
         List<ConfigQcStage> stages = new ArrayList<ConfigQcStage>();
         stages.add(new SegmentationMethodStage(methodStore,
                 createTrainCustomEngineLauncher(cfg, binFolder, channelIndex)));
+        stages.add(new ConditionalConfigQcStage(
+                new TrainedRfSummaryStage(methodStore),
+                new StagePredicate() {
+                    @Override public boolean isApplicable() {
+                        return isTrainedRfSegmentation(cfg, channelIndex);
+                    }
+                }));
         stages.add(new ConditionalConfigQcStage(
                 withSegmentationMethodSwitcher(createClassicalSegmentationStage(cfg, binFolder, channelIndex),
                         methodStore),
@@ -6127,26 +6174,7 @@ public class CreateBinFileAnalysis implements Analysis {
                         }
                     }));
         }
-
-        ConfigQcResult result = showEmbeddedConfigQcDialog(context, stages);
-        if (result == ConfigQcResult.DONE || result == ConfigQcResult.SKIP_CURRENT_IMAGE) {
-            if (isStarDistSegmentation(cfg, channelIndex)) {
-                cfg.sizes.set(channelIndex, "0-Infinity");
-                if (!includeAiChannelThreshold) {
-                    cfg.objectThresholds.set(channelIndex, "default");
-                }
-            } else if (isCellposeSegmentation(cfg, channelIndex)) {
-                cfg.sizes.set(channelIndex, "100-Infinity");
-                if (!includeAiChannelThreshold) {
-                    cfg.objectThresholds.set(channelIndex, "default");
-                }
-            }
-            return "continue";
-        }
-        if (result == ConfigQcResult.BACK) {
-            return "back";
-        }
-        return "cancel";
+        return stages;
     }
 
     private ConfigQcStage withSegmentationMethodSwitcher(ConfigQcStage delegate,
@@ -7636,13 +7664,7 @@ public class CreateBinFileAnalysis implements Analysis {
     }
 
     private File projectRootForConfigurationDir(File configDir) {
-        if (configDir == null) return null;
-        File flashDir = configDir.getParentFile();
-        if (flashDir != null && FlashProjectLayout.FLASH_DIR.equals(flashDir.getName())
-                && flashDir.getParentFile() != null) {
-            return flashDir.getParentFile();
-        }
-        return configDir.getParentFile();
+        return FlashProjectLayout.projectRootForConfigurationDir(configDir);
     }
 
     private static ModelCatalog readModelCatalog(File projectRoot) {
@@ -8573,7 +8595,8 @@ public class CreateBinFileAnalysis implements Analysis {
     private static boolean isClassicalSegmentation(BinUserConfig cfg, int channelIndex) {
         return !isEnhancedClassicalSegmentation(cfg, channelIndex)
                 && !isStarDistSegmentation(cfg, channelIndex)
-                && !isCellposeSegmentation(cfg, channelIndex);
+                && !isCellposeSegmentation(cfg, channelIndex)
+                && !isTrainedRfSegmentation(cfg, channelIndex);
     }
 
     private static boolean isEnhancedClassicalSegmentation(BinUserConfig cfg, int channelIndex) {
@@ -8589,6 +8612,11 @@ public class CreateBinFileAnalysis implements Analysis {
     private static boolean isCellposeSegmentation(BinUserConfig cfg, int channelIndex) {
         if (cfg == null || channelIndex < 0 || channelIndex >= cfg.segmentationMethods.size()) return false;
         return safe(cfg.segmentationMethods.get(channelIndex)).startsWith("cellpose");
+    }
+
+    private static boolean isTrainedRfSegmentation(BinUserConfig cfg, int channelIndex) {
+        if (cfg == null || channelIndex < 0 || channelIndex >= cfg.segmentationMethods.size()) return false;
+        return safe(cfg.segmentationMethods.get(channelIndex)).startsWith("trained_rf:");
     }
 
     private interface StagePredicate {

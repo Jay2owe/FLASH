@@ -214,6 +214,7 @@ public final class SegmentationMethodStage implements ConfigQcStage {
     }
 
     public static String stageKeyForChoice(String choice) {
+        if (isTrainedRfChoice(choice)) return TrainedRfSummaryStage.class.getName();
         if (ENHANCED_CLASSICAL.equals(choice)) return EnhancedClassicalSegmentationStage.class.getName();
         if (STARDIST.equals(choice)) return StarDistParameterStage.class.getName();
         if (CELLPOSE.equals(choice)) return CellposeParameterStage.class.getName();
