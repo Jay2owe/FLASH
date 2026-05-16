@@ -49,6 +49,9 @@ import flash.pipeline.segmentation.EnhancedClassicalParameters;
 import flash.pipeline.segmentation.EnhancedClassicalRunner;
 import flash.pipeline.segmentation.SegmentationMethod;
 import flash.pipeline.segmentation.SegmentationTokenParser;
+import flash.pipeline.segmentation.catalog.ModelCatalog;
+import flash.pipeline.segmentation.catalog.ModelCatalogIO;
+import flash.pipeline.segmentation.catalog.ModelEntry;
 import flash.pipeline.stardist.StarDist3DRunner;
 import flash.pipeline.stardist.StarDistDetector;
 import flash.pipeline.ui.CustomFilterContinueDialog;
@@ -139,6 +142,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -215,6 +219,7 @@ public class CreateBinFileAnalysis implements Analysis {
     private static final String SEGMENTATION_ENHANCED_CLASSICAL = "Enhanced Classical";
     private static final String SEGMENTATION_STARDIST = "StarDist 3D";
     private static final String SEGMENTATION_CELLPOSE = "Cellpose";
+    private static final String SEGMENTATION_TRAINED_RF_PREFIX = "Trained RF: ";
     private static final String[] SEGMENTATION_OPTIONS = {
             SEGMENTATION_CLASSICAL, SEGMENTATION_ENHANCED_CLASSICAL, SEGMENTATION_STARDIST, SEGMENTATION_CELLPOSE
     };
@@ -588,16 +593,20 @@ public class CreateBinFileAnalysis implements Analysis {
         final CellposeRuntime.Status[] cellposeStatus =
                 new CellposeRuntime.Status[]{CellposeRuntime.cachedStatus()};
         boolean cellposeReady = cellposeReadyOrUnknown(cellposeStatus[0]);
+        final ModelCatalog modelCatalog = readModelCatalog(projectRootForConfigurationDir(binFolder));
         final List<JComboBox<String>> segmentationCombos = new ArrayList<JComboBox<String>>();
         final List<JLabel> segmentationLabels = new ArrayList<JLabel>();
         for (int i = 0; i < cfg.names.size(); i++) {
+            String currentMethod = i < cfg.segmentationMethods.size()
+                    ? cfg.segmentationMethods.get(i)
+                    : "classical";
             String defSegmentation = i < cfg.segmentationMethods.size()
                     ? segmentationChoiceForDialogDefault(
-                            cfg.segmentationMethods.get(i), starDistAvailable, cellposeReady)
+                            currentMethod, starDistAvailable, cellposeReady, modelCatalog)
                     : SEGMENTATION_CLASSICAL;
             JComboBox<String> segmentationCombo = dialog.addChoice(
                     "C" + (i + 1) + " (" + cfg.names.get(i) + ")",
-                    SEGMENTATION_OPTIONS, defSegmentation);
+                    segmentationOptionsForMethod(currentMethod, modelCatalog), defSegmentation);
             final JLabel segmentationDesc = dialog.addHelpText(
                     segmentationDescriptionFor(defSegmentation, starDistAvailable, cellposeStatus[0]));
             segmentationCombos.add(segmentationCombo);
@@ -2241,6 +2250,9 @@ public class CreateBinFileAnalysis implements Analysis {
         }
         if (SEGMENTATION_ENHANCED_CLASSICAL.equals(normalized)) {
             return "Classical 3D object detection plus optional morphology filters.";
+        }
+        if (isTrainedRfDisplayChoice(normalized)) {
+            return "Saved trained Random Forest model from this project's catalog.";
         }
         return "Classical filter and threshold segmentation.";
     }
@@ -7626,6 +7638,15 @@ public class CreateBinFileAnalysis implements Analysis {
         return configDir.getParentFile();
     }
 
+    private static ModelCatalog readModelCatalog(File projectRoot) {
+        if (projectRoot == null) return null;
+        try {
+            return ModelCatalogIO.read(projectRoot.toPath());
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
     private void writeChannelIdentities(File binFolder, BinUserConfig cfg) throws IOException {
         if (cfg == null || cfg.markerIds == null || cfg.markerIds.isEmpty()) return;
         List<ChannelIdentities.Entry> entries = new ArrayList<ChannelIdentities.Entry>();
@@ -8280,6 +8301,12 @@ public class CreateBinFileAnalysis implements Analysis {
                     + "Uses the same 3D Objects Counter detection as Classical, then filters labels by mcib3d measurements."
                     + "</body></html>";
         }
+        if (isTrainedRfDisplayChoice(normalized)) {
+            return "<html><body style='width:280px;'>"
+                    + "Saved trained Random Forest model from this project's catalog.<br>"
+                    + "Confirming this choice keeps the exact trained_rf token already saved for the channel."
+                    + "</body></html>";
+        }
 
         return "<html><body style='width:280px;'>"
                 + "Best for bright, well-separated objects where filtering plus thresholding is enough.<br>"
@@ -8307,10 +8334,15 @@ public class CreateBinFileAnalysis implements Analysis {
     }
 
     private static String segmentationChoiceForMethod(String method) {
+        return segmentationChoiceForMethod(method, null);
+    }
+
+    private static String segmentationChoiceForMethod(String method, ModelCatalog modelCatalog) {
         if (method != null) {
             if (method.startsWith("enhanced_classical")) return SEGMENTATION_ENHANCED_CLASSICAL;
             if (method.startsWith("stardist")) return SEGMENTATION_STARDIST;
             if (method.startsWith("cellpose")) return SEGMENTATION_CELLPOSE;
+            if (isTrainedRfToken(method)) return trainedRfChoiceForMethod(method, modelCatalog);
         }
         return SEGMENTATION_CLASSICAL;
     }
@@ -8318,7 +8350,14 @@ public class CreateBinFileAnalysis implements Analysis {
     static String segmentationChoiceForDialogDefault(String method,
                                                      boolean starDistAvailable,
                                                      boolean cellposeReady) {
-        String choice = segmentationChoiceForMethod(method);
+        return segmentationChoiceForDialogDefault(method, starDistAvailable, cellposeReady, null);
+    }
+
+    static String segmentationChoiceForDialogDefault(String method,
+                                                     boolean starDistAvailable,
+                                                     boolean cellposeReady,
+                                                     ModelCatalog modelCatalog) {
+        String choice = segmentationChoiceForMethod(method, modelCatalog);
         if (SEGMENTATION_STARDIST.equals(choice) && !starDistAvailable) {
             return SEGMENTATION_CLASSICAL;
         }
@@ -8326,6 +8365,53 @@ public class CreateBinFileAnalysis implements Analysis {
             return SEGMENTATION_CLASSICAL;
         }
         return choice;
+    }
+
+    private static String[] segmentationOptionsForMethod(String method, ModelCatalog modelCatalog) {
+        String trainedRfChoice = isTrainedRfToken(method)
+                ? trainedRfChoiceForMethod(method, modelCatalog)
+                : null;
+        if (trainedRfChoice == null || trainedRfChoice.trim().isEmpty()) {
+            return SEGMENTATION_OPTIONS;
+        }
+        String[] options = new String[SEGMENTATION_OPTIONS.length + 1];
+        System.arraycopy(SEGMENTATION_OPTIONS, 0, options, 0, SEGMENTATION_OPTIONS.length);
+        options[SEGMENTATION_OPTIONS.length] = trainedRfChoice;
+        return options;
+    }
+
+    private static boolean isTrainedRfToken(String method) {
+        return method != null && method.trim().toLowerCase(Locale.ROOT).startsWith("trained_rf:");
+    }
+
+    private static boolean isTrainedRfDisplayChoice(String selection) {
+        return selection != null && selection.trim().startsWith(SEGMENTATION_TRAINED_RF_PREFIX);
+    }
+
+    private static String trainedRfChoiceForMethod(String method, ModelCatalog modelCatalog) {
+        String modelKey = trainedRfModelKey(method);
+        String label = modelKey;
+        if (modelCatalog != null && modelKey != null && !modelKey.trim().isEmpty()) {
+            Optional<ModelEntry> entry = modelCatalog.get(modelKey.trim());
+            if (entry.isPresent() && entry.get().name != null
+                    && !entry.get().name.trim().isEmpty()) {
+                label = entry.get().name.trim();
+            }
+        }
+        if (label == null || label.trim().isEmpty()) {
+            label = "Unknown model";
+        }
+        return SEGMENTATION_TRAINED_RF_PREFIX + label.trim();
+    }
+
+    private static String trainedRfModelKey(String method) {
+        try {
+            return SegmentationMethod.trainedRfModelKey(SegmentationTokenParser.parse(method));
+        } catch (IllegalArgumentException e) {
+            String token = method == null ? "" : method.trim();
+            String[] parts = token.split(":", 3);
+            return parts.length >= 2 ? parts[1].trim() : "";
+        }
     }
 
     private static String defaultCellposeMethod(boolean preferGpu) {
@@ -8440,7 +8526,16 @@ public class CreateBinFileAnalysis implements Analysis {
                                                    String selection,
                                                    String existingMethod,
                                                    boolean preferCellposeGpu) {
-        if (SEGMENTATION_ENHANCED_CLASSICAL.equals(selection)) {
+        String selected = selection == null ? "" : selection.trim();
+        if (isTrainedRfToken(selected)) {
+            segmentationMethods.set(channelIndex, selected);
+            return;
+        }
+        if (isTrainedRfToken(existingMethod) && isTrainedRfDisplayChoice(selected)) {
+            segmentationMethods.set(channelIndex, existingMethod);
+            return;
+        }
+        if (SEGMENTATION_ENHANCED_CLASSICAL.equals(selected)) {
             if (existingMethod != null && existingMethod.startsWith("enhanced_classical:")) {
                 segmentationMethods.set(channelIndex, existingMethod);
             } else {
@@ -8449,7 +8544,7 @@ public class CreateBinFileAnalysis implements Analysis {
             }
             return;
         }
-        if (SEGMENTATION_STARDIST.equals(selection)) {
+        if (SEGMENTATION_STARDIST.equals(selected)) {
             if (existingMethod != null && existingMethod.startsWith("stardist:")) {
                 segmentationMethods.set(channelIndex, existingMethod);
             } else {
@@ -8457,7 +8552,7 @@ public class CreateBinFileAnalysis implements Analysis {
             }
             return;
         }
-        if (SEGMENTATION_CELLPOSE.equals(selection)) {
+        if (SEGMENTATION_CELLPOSE.equals(selected)) {
             if (existingMethod != null && existingMethod.startsWith("cellpose:")) {
                 segmentationMethods.set(channelIndex, existingMethod);
             } else {
