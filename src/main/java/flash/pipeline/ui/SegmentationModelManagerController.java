@@ -5,6 +5,7 @@ import flash.pipeline.segmentation.catalog.ModelCatalogIO;
 import flash.pipeline.segmentation.catalog.ModelEntry;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -92,6 +93,13 @@ public final class SegmentationModelManagerController {
 
     public boolean canDelete(ModelEntry entry) {
         return ModelCatalogIO.isProjectWritableEntry(entry);
+    }
+
+    public boolean canDuplicate(ModelEntry entry) {
+        return entry != null
+                && entry.isStock()
+                && !ModelCatalogIO.isProjectWritableEntry(entry)
+                && !ModelCatalogIO.isDiscoveredEntry(entry);
     }
 
     public synchronized ModelEntry addStarDistModel(Path sourceFile,
@@ -200,6 +208,88 @@ public final class SegmentationModelManagerController {
         persist();
     }
 
+    public synchronized ModelEntry duplicateAsUser(String modelKey) throws IOException {
+        ModelEntry existing = requireEntry(modelKey);
+        if (!canDuplicate(existing)) {
+            throw new IOException("Only read-only stock model entries can be duplicated.");
+        }
+
+        String name = duplicateName(existing.name);
+        String key = importService.uniqueModelKey(catalog, existing.engine, name);
+        Map<String, Object> metadata = importMetadata("duplicated_stock");
+        metadata.put("duplicatedFrom", existing.modelKey);
+
+        ModelEntry copy;
+        if (existing.source == ModelEntry.Source.STOCK_BUILTIN) {
+            String pretrained = importService.validateCellposeRegisteredName(
+                    value(existing.pretrainedModel));
+            metadata.put(ModelCatalogIO.PROJECT_REGISTERED_METADATA_KEY, Boolean.TRUE);
+            copy = new ModelEntry(key, name, existing.description,
+                    existing.engine, ModelEntry.Source.STOCK_BUILTIN,
+                    null, null, pretrained,
+                    value(existing.fijiModelChoice), value(existing.base),
+                    existing.tags, existing.defaults, metadata,
+                    existing.supportsSecondChannel);
+            replaceOrAdd(copy);
+            persist();
+            return get(key).orElse(copy);
+        }
+
+        Path source = catalog.resolve(existing);
+        if (source == null || !Files.isRegularFile(source)) {
+            throw new IOException("Stock model file is missing: " + existing.modelKey);
+        }
+        validateResolvedModelFile(existing, source);
+        copy = new ModelEntry(key, name, existing.description,
+                existing.engine, ModelEntry.Source.USER_IMPORTED,
+                null, null, null,
+                value(existing.fijiModelChoice), value(existing.base),
+                existing.tags, existing.defaults, metadata,
+                existing.supportsSecondChannel);
+        ModelEntry saved = catalog.add(copy, source);
+        persist();
+        return get(saved.modelKey).orElse(saved);
+    }
+
+    public synchronized Map<String, ModelStatus> validateAll() {
+        LinkedHashMap<String, ModelStatus> out = new LinkedHashMap<String, ModelStatus>();
+        for (ModelEntry entry : catalog.all()) {
+            out.put(entry.modelKey, status(entry));
+        }
+        return Collections.unmodifiableMap(out);
+    }
+
+    public synchronized ModelStatus status(String modelKey) {
+        Optional<ModelEntry> entry = catalog.get(modelKey);
+        return entry.isPresent()
+                ? status(entry.get())
+                : ModelStatus.missing("Model entry is not in the catalog.");
+    }
+
+    public synchronized ModelStatus status(ModelEntry entry) {
+        if (entry == null) {
+            return ModelStatus.invalid("Model entry is null.");
+        }
+        try {
+            if (entry.source == ModelEntry.Source.STOCK_BUILTIN) {
+                importService.validateCellposeRegisteredName(value(entry.pretrainedModel));
+                return ModelStatus.ok();
+            }
+
+            Path resolved = catalog.resolve(entry);
+            if (resolved == null) {
+                return ModelStatus.missing("Model file is not registered.");
+            }
+            if (!Files.isRegularFile(resolved)) {
+                return ModelStatus.missing("Model file is missing: " + resolved);
+            }
+            validateResolvedModelFile(entry, resolved);
+            return ModelStatus.ok();
+        } catch (IOException e) {
+            return ModelStatus.invalid(e.getMessage());
+        }
+    }
+
     public synchronized void reload() {
         catalog = ModelCatalogIO.read(projectRoot);
     }
@@ -269,6 +359,21 @@ public final class SegmentationModelManagerController {
         return dot > 0 ? name.substring(0, dot) : name;
     }
 
+    private static String duplicateName(String name) {
+        String cleaned = clean(name);
+        return (cleaned == null ? "Model" : cleaned) + " (copy)";
+    }
+
+    private void validateResolvedModelFile(ModelEntry entry, Path source) throws IOException {
+        if (entry.engine == ModelEntry.Engine.STARDIST) {
+            importService.validateResolvedStarDistZip(source);
+        } else if (entry.engine == ModelEntry.Engine.CELLPOSE) {
+            importService.validateResolvedCellposeModelFile(source);
+        } else if (source == null || !Files.isRegularFile(source)) {
+            throw new IOException("Model file does not exist: " + source);
+        }
+    }
+
     private static Map<String, Object> defaultsOr(Map<String, Object> requested,
                                                   Map<String, Object> fallback) {
         return requested == null || requested.isEmpty()
@@ -316,5 +421,60 @@ public final class SegmentationModelManagerController {
             }
         }
         return Collections.unmodifiableSet(out);
+    }
+
+    public static final class ModelStatus {
+        public enum State {
+            OK("OK"),
+            MISSING("Missing"),
+            INVALID("Invalid");
+
+            private final String label;
+
+            State(String label) {
+                this.label = label;
+            }
+
+            public String label() {
+                return label;
+            }
+        }
+
+        private final State state;
+        private final String message;
+
+        private ModelStatus(State state, String message) {
+            this.state = state;
+            this.message = message == null ? "" : message;
+        }
+
+        static ModelStatus ok() {
+            return new ModelStatus(State.OK, "");
+        }
+
+        static ModelStatus missing(String message) {
+            return new ModelStatus(State.MISSING, message);
+        }
+
+        static ModelStatus invalid(String message) {
+            return new ModelStatus(State.INVALID, message);
+        }
+
+        public State state() {
+            return state;
+        }
+
+        public String label() {
+            return state.label();
+        }
+
+        public String message() {
+            return message;
+        }
+
+        @Override
+        public String toString() {
+            return message.isEmpty() ? label() : label() + ": " + message;
+        }
     }
 }

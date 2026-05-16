@@ -37,6 +37,19 @@ public final class SegmentationModelImportService {
 
     public Path validateStarDistZip(Path sourceFile) throws IOException {
         Path file = requireProjectFile(sourceFile, "StarDist model");
+        return validateStarDistZipFile(file);
+    }
+
+    public Path validateResolvedStarDistZip(Path modelFile) throws IOException {
+        Path file = requireReadableFile(modelFile, "StarDist model");
+        return validateStarDistZipFile(file);
+    }
+
+    public Path validateResolvedCellposeModelFile(Path modelFile) throws IOException {
+        return requireReadableFile(modelFile, "Cellpose model");
+    }
+
+    private Path validateStarDistZipFile(Path file) throws IOException {
         String name = file.getFileName() == null ? "" : file.getFileName().toString();
         if (!name.toLowerCase(Locale.ROOT).endsWith(".zip")) {
             throw new IOException("StarDist models must be .zip files.");
@@ -114,6 +127,14 @@ public final class SegmentationModelImportService {
         if (!file.startsWith(projectRoot)) {
             throw new IOException(label + " file must be inside the project folder before import: " + file);
         }
+        return requireReadableFile(file, label);
+    }
+
+    private Path requireReadableFile(Path sourceFile, String label) throws IOException {
+        if (sourceFile == null) {
+            throw new IOException(label + " file is required.");
+        }
+        Path file = sourceFile.toAbsolutePath().normalize();
         if (!Files.isRegularFile(file)) {
             throw new IOException(label + " file does not exist: " + file);
         }

@@ -53,6 +53,7 @@ public final class SegmentationModelManagerDialog extends PipelineDialog {
     private final JTable table;
     private final JTextArea detailsArea;
     private final JButton editButton;
+    private final JButton duplicateButton;
     private final JButton deleteButton;
     private final JButton renameKeyButton;
     private List<ModelEntry> visibleEntries = new ArrayList<ModelEntry>();
@@ -107,7 +108,7 @@ public final class SegmentationModelManagerDialog extends PipelineDialog {
         filters.add(tagFilter);
         addComponent(filters);
 
-        tableModel = new DefaultTableModel(new Object[]{"Name", "Engine", "Source", "Date"}, 0) {
+        tableModel = new DefaultTableModel(new Object[]{"Name", "Engine", "Source", "Status", "Date"}, 0) {
             @Override public boolean isCellEditable(int row, int column) {
                 return false;
             }
@@ -119,7 +120,8 @@ public final class SegmentationModelManagerDialog extends PipelineDialog {
         table.getColumnModel().getColumn(0).setPreferredWidth(340);
         table.getColumnModel().getColumn(1).setPreferredWidth(90);
         table.getColumnModel().getColumn(2).setPreferredWidth(150);
-        table.getColumnModel().getColumn(3).setPreferredWidth(90);
+        table.getColumnModel().getColumn(3).setPreferredWidth(80);
+        table.getColumnModel().getColumn(4).setPreferredWidth(90);
         JScrollPane tableScroll = new JScrollPane(table);
         tableScroll.setPreferredSize(new Dimension(760, 230));
         addComponent(tableScroll);
@@ -131,7 +133,9 @@ public final class SegmentationModelManagerDialog extends PipelineDialog {
         JButton bulkImportButton = new JButton("Bulk import...");
         JButton exportButton = new JButton("Export catalog...");
         JButton importButton = new JButton("Import catalog...");
+        JButton validateAllButton = new JButton("Validate all");
         editButton = new JButton("Edit");
+        duplicateButton = new JButton("Duplicate as custom...");
         deleteButton = new JButton("Delete");
         renameKeyButton = new JButton("Rename key...");
         actions.add(addStarDistButton);
@@ -139,7 +143,9 @@ public final class SegmentationModelManagerDialog extends PipelineDialog {
         actions.add(bulkImportButton);
         actions.add(exportButton);
         actions.add(importButton);
+        actions.add(validateAllButton);
         actions.add(editButton);
+        actions.add(duplicateButton);
         actions.add(renameKeyButton);
         actions.add(deleteButton);
         addComponent(actions);
@@ -179,7 +185,9 @@ public final class SegmentationModelManagerDialog extends PipelineDialog {
         bulkImportButton.addActionListener(e -> bulkImport());
         exportButton.addActionListener(e -> exportCatalog());
         importButton.addActionListener(e -> importCatalog());
+        validateAllButton.addActionListener(e -> validateAll());
         editButton.addActionListener(e -> editSelected());
+        duplicateButton.addActionListener(e -> duplicateSelected());
         renameKeyButton.addActionListener(e -> renameSelectedKey());
         deleteButton.addActionListener(e -> deleteSelected());
 
@@ -219,6 +227,7 @@ public final class SegmentationModelManagerDialog extends PipelineDialog {
                     entry,
                     entry.engine.jsonValue(),
                     sourceLabel(entry),
+                    controller.status(entry).label(),
                     dateLabel(entry)
             });
         }
@@ -248,6 +257,7 @@ public final class SegmentationModelManagerDialog extends PipelineDialog {
         editButton.setEnabled(editable);
         deleteButton.setEnabled(editable);
         renameKeyButton.setEnabled(editable);
+        duplicateButton.setEnabled(entry != null && controller.canDuplicate(entry));
         detailsArea.setText(entry == null ? "" : formatDetails(entry));
         detailsArea.setCaretPosition(0);
     }
@@ -488,6 +498,27 @@ public final class SegmentationModelManagerDialog extends PipelineDialog {
         }
     }
 
+    private void validateAll() {
+        String selectedKey = selectedEntry() == null ? null : selectedEntry().modelKey;
+        controller.validateAll();
+        setTransientStatus("Validated " + controller.catalog().all().size() + " model entries.");
+        refreshTable(selectedKey);
+    }
+
+    private void duplicateSelected() {
+        ModelEntry entry = selectedEntry();
+        if (entry == null || !controller.canDuplicate(entry)) {
+            return;
+        }
+        try {
+            ModelEntry duplicate = controller.duplicateAsUser(entry.modelKey);
+            setTransientStatus("Duplicated " + entry.name + " as " + duplicate.name + ".");
+            refreshTable(duplicate.modelKey);
+        } catch (Exception ex) {
+            showError("Could not duplicate model", ex);
+        }
+    }
+
     private void deleteSelected() {
         ModelEntry entry = selectedEntry();
         if (entry == null || !controller.canDelete(entry)) {
@@ -607,6 +638,12 @@ public final class SegmentationModelManagerDialog extends PipelineDialog {
         sb.append("Name: ").append(entry.name).append('\n');
         sb.append("Engine: ").append(entry.engine.jsonValue()).append('\n');
         sb.append("Source: ").append(sourceLabel(entry)).append('\n');
+        SegmentationModelManagerController.ModelStatus status = controller.status(entry);
+        sb.append("Status: ").append(status.label());
+        if (!status.message().isEmpty()) {
+            sb.append(" - ").append(status.message());
+        }
+        sb.append('\n');
         if (entry.description != null && !entry.description.trim().isEmpty()) {
             sb.append("Description: ").append(entry.description).append('\n');
         }
