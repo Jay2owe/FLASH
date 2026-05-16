@@ -2,6 +2,7 @@ package flash.pipeline.ui;
 
 import flash.pipeline.help.AnalysisHelpCatalog;
 import flash.pipeline.help.AnalysisHelpDialog;
+import flash.pipeline.segmentation.catalog.ModelKeyRewriter;
 import flash.pipeline.segmentation.catalog.ModelCatalogIO;
 import flash.pipeline.segmentation.catalog.ModelEntry;
 import ij.IJ;
@@ -52,6 +53,7 @@ public final class SegmentationModelManagerDialog extends PipelineDialog {
     private final JTextArea detailsArea;
     private final JButton editButton;
     private final JButton deleteButton;
+    private final JButton renameKeyButton;
     private List<ModelEntry> visibleEntries = new ArrayList<ModelEntry>();
     private boolean updatingTagFilter;
 
@@ -130,12 +132,14 @@ public final class SegmentationModelManagerDialog extends PipelineDialog {
         JButton importButton = new JButton("Import catalog...");
         editButton = new JButton("Edit");
         deleteButton = new JButton("Delete");
+        renameKeyButton = new JButton("Rename key...");
         actions.add(addStarDistButton);
         actions.add(addCellposeButton);
         actions.add(bulkImportButton);
         actions.add(exportButton);
         actions.add(importButton);
         actions.add(editButton);
+        actions.add(renameKeyButton);
         actions.add(deleteButton);
         addComponent(actions);
 
@@ -175,6 +179,7 @@ public final class SegmentationModelManagerDialog extends PipelineDialog {
         exportButton.addActionListener(e -> exportCatalog());
         importButton.addActionListener(e -> importCatalog());
         editButton.addActionListener(e -> editSelected());
+        renameKeyButton.addActionListener(e -> renameSelectedKey());
         deleteButton.addActionListener(e -> deleteSelected());
 
         refreshTable(null);
@@ -241,6 +246,7 @@ public final class SegmentationModelManagerDialog extends PipelineDialog {
         boolean editable = entry != null && controller.canEdit(entry);
         editButton.setEnabled(editable);
         deleteButton.setEnabled(editable);
+        renameKeyButton.setEnabled(editable);
         detailsArea.setText(entry == null ? "" : formatDetails(entry));
         detailsArea.setCaretPosition(0);
     }
@@ -501,6 +507,42 @@ public final class SegmentationModelManagerDialog extends PipelineDialog {
             refreshTable(null);
         } catch (Exception ex) {
             showError("Could not delete model", ex);
+        }
+    }
+
+    private void renameSelectedKey() {
+        final ModelEntry entry = selectedEntry();
+        if (entry == null || !controller.canEdit(entry)) {
+            return;
+        }
+
+        PipelineDialog dialog = new PipelineDialog(getWindow(), "Rename Model Key");
+        dialog.addHeader("Rename Model Key");
+        dialog.addMessage(ModelKeyRewriterController.warningMessage());
+        dialog.addHelpText("Current key: " + entry.modelKey);
+        final JTextField newKeyField = dialog.addStringField("New key", entry.modelKey, 32);
+        dialog.setPrimaryButtonText("Rename");
+        if (!dialog.showDialog()) {
+            return;
+        }
+        try {
+            final String newKey = newKeyField.getText() == null ? "" : newKeyField.getText().trim();
+            ModelKeyRewriter.RenameResult result = new ModelKeyRewriterController().rename(
+                    entry.modelKey,
+                    newKey,
+                    projectRoot,
+                    new ModelKeyRewriterController.Confirmation() {
+                        @Override
+                        public boolean confirm(String warningMessage) {
+                            return true;
+                        }
+                    });
+            controller.reload();
+            setTransientStatus("Renamed key: " + result.channelsTouched
+                    + " channel reference(s) updated in " + result.binsTouched + " bin(s).");
+            refreshTable(newKey);
+        } catch (Exception ex) {
+            showError("Could not rename model key", ex);
         }
     }
 

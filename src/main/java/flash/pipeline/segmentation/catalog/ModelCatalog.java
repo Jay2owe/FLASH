@@ -132,6 +132,42 @@ public final class ModelCatalog {
         }
     }
 
+    public synchronized boolean rename(String oldKey, String newKey) throws IOException {
+        if (!ModelCatalogIO.isSafeModelKey(oldKey) || !ModelCatalogIO.isSafeModelKey(newKey)) {
+            throw new IOException("Invalid model key.");
+        }
+        if (!entries.containsKey(oldKey)) {
+            throw new IOException("Model entry not found: " + oldKey);
+        }
+        if (entries.containsKey(newKey)) {
+            throw new IOException("Model key already exists: " + newKey);
+        }
+        ModelEntry existing = entries.get(oldKey);
+        ModelEntry renamed = new ModelEntry(newKey, existing.name, existing.description,
+                existing.engine, existing.source,
+                renamedFilePath(existing.filePath.isPresent() ? existing.filePath.get() : null,
+                        oldKey, newKey),
+                existing.resourcePath.isPresent() ? existing.resourcePath.get() : null,
+                existing.pretrainedModel.isPresent() ? existing.pretrainedModel.get() : null,
+                existing.fijiModelChoice.isPresent() ? existing.fijiModelChoice.get() : null,
+                existing.base.isPresent() ? existing.base.get() : null,
+                existing.tags, existing.defaults, existing.metadata,
+                existing.supportsSecondChannel);
+
+        boolean filesRenamed = renameFilesDirectory(oldKey, newKey);
+        LinkedHashMap<String, ModelEntry> reordered = new LinkedHashMap<String, ModelEntry>();
+        for (Map.Entry<String, ModelEntry> entry : entries.entrySet()) {
+            if (oldKey.equals(entry.getKey())) {
+                reordered.put(newKey, renamed);
+            } else {
+                reordered.put(entry.getKey(), entry.getValue());
+            }
+        }
+        entries.clear();
+        entries.putAll(reordered);
+        return filesRenamed;
+    }
+
     public Path resolve(ModelEntry entry) throws IOException {
         if (entry == null || entry.source == null) {
             return null;
@@ -288,5 +324,39 @@ public final class ModelCatalog {
                 || ".".equals(fileName) || "..".equals(fileName)) {
             throw new IOException("Unsafe model file name: " + fileName);
         }
+    }
+
+    private boolean renameFilesDirectory(String oldKey, String newKey) throws IOException {
+        Path filesRoot = filesDirectory().toAbsolutePath().normalize();
+        Path oldDir = filesRoot.resolve(oldKey).normalize();
+        Path newDir = filesRoot.resolve(newKey).normalize();
+        if (!oldDir.startsWith(filesRoot) || !newDir.startsWith(filesRoot)) {
+            throw new IOException("Model key resolves outside catalog files directory.");
+        }
+        if (!Files.exists(oldDir)) {
+            return false;
+        }
+        if (Files.exists(newDir)) {
+            throw new IOException("Model files directory already exists: " + newDir);
+        }
+        Files.createDirectories(newDir.getParent());
+        Files.move(oldDir, newDir);
+        return true;
+    }
+
+    private static String renamedFilePath(String path, String oldKey, String newKey) {
+        if (path == null || path.trim().isEmpty()) {
+            return null;
+        }
+        String normalized = path.replace('\\', '/');
+        String oldPrefix = ModelCatalogIO.FILES_DIR + "/" + oldKey;
+        if (normalized.equals(oldPrefix)) {
+            return ModelCatalogIO.FILES_DIR + "/" + newKey;
+        }
+        if (normalized.startsWith(oldPrefix + "/")) {
+            return ModelCatalogIO.FILES_DIR + "/" + newKey
+                    + normalized.substring(oldPrefix.length());
+        }
+        return path;
     }
 }
