@@ -11,6 +11,6 @@ Completed: 2026-05-15T20:39:21.7558314+01:00
 
 ## Warnings
 
-- Recipe replay currently selects analyses only; catalog-backed model resolution remains a follow-up and was not added during closure.
+- Recipe replay catalog-backed StarDist/Cellpose model resolution has been closed with `RecipeReplayCustomModelTest`; replayed custom model tokens now resolve through the project catalog and missing model keys block instead of falling back.
 - Object analysis details writing does not persist raw segmentation method tokens, so no token truncation/reordering code path was changed and no new audit metadata fields were added.
-- Manual smoke checklist was limited to code-path review, CLI/parser coverage, recipe stability, README/methods stale-reference scan, and audit-details inspection. No interactive Fiji GUI smoke was run during this AFK closure pass.
+- Manual smoke checklist was limited to code-path review, CLI/parser coverage, recipe stability, README/methods stale-reference scan, and audit-details inspection. No interactive Fiji GUI smoke was run during this AFK closure pass; this validation follow-up is tracked in `FOLLOWUPS.md`.

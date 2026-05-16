@@ -500,8 +500,8 @@ public class StarDist3DRunner {
         warningSink = sink == null ? DEFAULT_WARNING_SINK : sink;
     }
 
-    static File resolveStarDistModelFile(SegmentationMethod method, File projectRoot,
-                                         ImagePlus input, String channelName) throws IOException {
+    public static File resolveStarDistModelFile(SegmentationMethod method, File projectRoot,
+                                                ImagePlus input, String channelName) throws IOException {
         SegmentationMethod safe = method == null
                 ? SegmentationMethod.classical("classical")
                 : method;
@@ -509,32 +509,30 @@ public class StarDist3DRunner {
                 projectRoot, input, channelName);
     }
 
-    static File resolveStarDistModelFile(String modelKey, File projectRoot,
-                                         ImagePlus input, String channelName) throws IOException {
+    public static File resolveStarDistModelFile(String modelKey, File projectRoot,
+                                                ImagePlus input, String channelName) throws IOException {
         String requestedKey = safeModelKey(modelKey);
         Path root = projectRootPath(projectRoot);
         ModelCatalog catalog = ModelCatalogIO.read(root);
         ModelEntry entry = starDistEntry(catalog, requestedKey);
         if (entry == null) {
-            warn("WARNING: StarDist model '" + requestedKey
-                    + "' was not found in the segmentation model catalog. Falling back to "
-                    + DEFAULT_STARDIST_MODEL_KEY + ".");
-            entry = starDistEntry(catalog, DEFAULT_STARDIST_MODEL_KEY);
-        }
-        if (entry == null) {
-            return defaultStarDistModelFile();
+            if (DEFAULT_STARDIST_MODEL_KEY.equals(requestedKey)) {
+                return defaultStarDistModelFile();
+            }
+            throw new IllegalArgumentException("StarDist model '" + requestedKey
+                    + "' not found in catalog. Please import it via Manage Models "
+                    + "or select a different model.");
         }
 
         warnIfRgbAdvancedModel(entry, input, channelName);
         Path resolved = catalog.resolve(entry);
         if (resolved == null || !Files.isRegularFile(resolved)) {
-            if (!DEFAULT_STARDIST_MODEL_KEY.equals(entry.modelKey)) {
-                warn("WARNING: StarDist model '" + entry.modelKey
-                        + "' could not be resolved from the catalog. Falling back to "
-                        + DEFAULT_STARDIST_MODEL_KEY + ".");
-                return resolveStarDistModelFile(DEFAULT_STARDIST_MODEL_KEY, projectRoot, input, channelName);
+            if (DEFAULT_STARDIST_MODEL_KEY.equals(entry.modelKey)) {
+                return defaultStarDistModelFile();
             }
-            return defaultStarDistModelFile();
+            throw new IllegalStateException("StarDist model file for '" + entry.modelKey
+                    + "' does not exist: " + resolved
+                    + ". Please import it via Manage Models or select a different model.");
         }
         return resolved.toFile();
     }

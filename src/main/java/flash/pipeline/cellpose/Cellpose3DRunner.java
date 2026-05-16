@@ -433,7 +433,7 @@ public final class Cellpose3DRunner {
         return command;
     }
 
-    static String resolvePretrainedModelArgument(String model, ModelCatalog catalog) {
+    public static String resolvePretrainedModelArgument(String model, ModelCatalog catalog) {
         String modelKey = CellposeModelResolver.normalizeModelKey(model);
         Optional<CellposeModelResolver.Resolved> resolved =
                 new CellposeModelResolver().resolve(modelKey, catalog);

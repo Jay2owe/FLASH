@@ -47,6 +47,7 @@ import flash.pipeline.naming.NameParts;
 import flash.pipeline.naming.ResolvedImageMetadata;
 import flash.pipeline.objects.ObjectsCounter3DWrapper;
 import flash.pipeline.objects.ObjectsCounterOptions;
+import flash.pipeline.recipes.RecipeReplayModelResolver;
 import flash.pipeline.results.ObjectAnalysisDetailsWriter;
 import flash.pipeline.results.ObjectCsvColumnOrder;
 import flash.pipeline.stardist.StarDist3DRunner;
@@ -614,6 +615,7 @@ public class ThreeDObjectAnalysis implements Analysis {
         }
 
         BinConfig cfg = BinConfigIO.readPartialFromDirectory(directory);
+        RecipeReplayModelResolver.validate(new File(directory).toPath(), cfg.segmentationMethods);
         if (usesClassicalSegmentation(cfg)
                 && !FeatureDependencyGate.gate(DependencyId.OBJECTS_COUNTER_3D,
                 "3D Object Analysis", "classical 3D object counting")) {

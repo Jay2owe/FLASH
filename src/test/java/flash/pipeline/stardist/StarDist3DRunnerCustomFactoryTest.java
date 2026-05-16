@@ -32,6 +32,7 @@ import java.util.jar.JarOutputStream;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 public class StarDist3DRunnerCustomFactoryTest {
     @Rule
@@ -93,7 +94,7 @@ public class StarDist3DRunnerCustomFactoryTest {
     }
 
     @Test
-    public void unknownModelKeyLogsWarningAndFallsBackToVersatile() throws Exception {
+    public void unknownModelKeyBlocksRunWithClearError() throws Exception {
         final List<String> warnings = new ArrayList<String>();
         StarDist3DRunner.setWarningSinkForTest(new StarDist3DRunner.WarningSink() {
             @Override public void warn(String message) {
@@ -102,14 +103,15 @@ public class StarDist3DRunnerCustomFactoryTest {
         });
         File root = temp.newFolder("fallback-root");
 
-        File modelFile = StarDist3DRunner.resolveStarDistModelFile(
-                "missing_model", root, image(), "DAPI");
-
-        assertTrue(modelFile.isFile());
-        assertTrue(modelFile.getName().contains("dsb2018_heavy_augment"));
-        assertEquals(1, warnings.size());
-        assertTrue(warnings.get(0).contains("missing_model"));
-        assertTrue(warnings.get(0).contains("stardist_versatile_fluo"));
+        try {
+            StarDist3DRunner.resolveStarDistModelFile("missing_model", root, image(), "DAPI");
+            fail("Expected missing StarDist model key to block resolution.");
+        } catch (IllegalArgumentException expected) {
+            assertTrue(expected.getMessage().contains("missing_model"));
+            assertTrue(expected.getMessage().contains("not found in catalog"));
+            assertTrue(expected.getMessage().contains("select a different model"));
+        }
+        assertTrue(warnings.isEmpty());
     }
 
     @Test
