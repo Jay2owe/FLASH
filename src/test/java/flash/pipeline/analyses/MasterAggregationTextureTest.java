@@ -1,14 +1,19 @@
 package flash.pipeline.analyses;
 
+import flash.pipeline.cli.CLIArgumentParser;
+import flash.pipeline.cli.CLIConfig;
 import flash.pipeline.export.ExcelNameMap;
 import flash.pipeline.io.CsvTableIO;
 import flash.pipeline.io.FlashProjectLayout;
+import ij.IJ;
 
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
 import java.io.File;
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
@@ -64,6 +69,7 @@ public class MasterAggregationTextureTest {
         assertTrue(header.contains("Iba1_MorphTexture_F3D1Mean"));
         assertFalse(header.contains("Iba1_MorphTexture_ClassLabelMean"));
         assertFalse(header.contains("Iba1_MorphTexture_Class3DLabelMean"));
+        assertFalse(header.contains("Iba1_MorphTexture_ClassLabel_Fraction_0"));
 
         assertEquals(3.0, Double.parseDouble(row.get("Iba1_MorphTexture_GLCMContrastMean")), 0.0);
         assertEquals(1.3, Double.parseDouble(row.get("Iba1_MorphTexture_FractalDimMean")), 1e-12);
@@ -71,6 +77,108 @@ public class MasterAggregationTextureTest {
         assertEquals(30.0, Double.parseDouble(row.get("Iba1_MorphTexture_F1Mean")), 0.0);
         assertEquals(2.0, Double.parseDouble(row.get("Iba1_MorphTexture_Class3DLabelMode")), 0.0);
         assertEquals(300.0, Double.parseDouble(row.get("Iba1_MorphTexture_F3D1Mean")), 0.0);
+    }
+
+    @Test
+    public void execute_classFractionsOptInAddsRatiosAlongsideMode() throws Exception {
+        File root = temp.newFolder("master-agg-texture-fractions");
+        File objects = FlashProjectLayout.forDirectory(root.getAbsolutePath()).objectDataWriteDir();
+        assertTrue(objects.mkdirs());
+
+        writeCsv(new File(objects, "Iba1.csv"),
+                "Animal Name,MorphTexture_ClassLabel,MorphTexture_Class3DLabel",
+                "Mouse1,0,1\n"
+                        + "Mouse1,1,1\n"
+                        + "Mouse1,1,2\n"
+                        + "Mouse1,2,2");
+
+        MasterAggregationAnalysis analysis = new MasterAggregationAnalysis();
+        analysis.setSuppressDialogs(true);
+        analysis.setCliConfig(classFractionsConfig(root));
+        analysis.execute(root.getAbsolutePath());
+
+        List<String> lines = Files.readAllLines(
+                aggregationFile(root, "3D Objects.csv").toPath(),
+                StandardCharsets.UTF_8);
+        Map<String, String> row = csvRow(lines.get(0), lines.get(1));
+
+        assertEquals(1.0, Double.parseDouble(row.get("Iba1_MorphTexture_ClassLabelMode")), 0.0);
+        assertEquals(0.25, Double.parseDouble(row.get("Iba1_MorphTexture_ClassLabel_Fraction_0")), 0.0);
+        assertEquals(0.5, Double.parseDouble(row.get("Iba1_MorphTexture_ClassLabel_Fraction_1")), 0.0);
+        assertEquals(0.25, Double.parseDouble(row.get("Iba1_MorphTexture_ClassLabel_Fraction_2")), 0.0);
+
+        assertEquals(1.0, Double.parseDouble(row.get("Iba1_MorphTexture_Class3DLabelMode")), 0.0);
+        assertEquals(0.0, Double.parseDouble(row.get("Iba1_MorphTexture_Class3DLabel_Fraction_0")), 0.0);
+        assertEquals(0.5, Double.parseDouble(row.get("Iba1_MorphTexture_Class3DLabel_Fraction_1")), 0.0);
+        assertEquals(0.5, Double.parseDouble(row.get("Iba1_MorphTexture_Class3DLabel_Fraction_2")), 0.0);
+    }
+
+    @Test
+    public void execute_classFractionsPreserveClassGaps() throws Exception {
+        File root = temp.newFolder("master-agg-texture-fraction-gaps");
+        File objects = FlashProjectLayout.forDirectory(root.getAbsolutePath()).objectDataWriteDir();
+        assertTrue(objects.mkdirs());
+
+        writeCsv(new File(objects, "Iba1.csv"),
+                "Animal Name,MorphTexture_ClassLabel",
+                "Mouse1,0\n"
+                        + "Mouse1,2");
+
+        MasterAggregationAnalysis analysis = new MasterAggregationAnalysis();
+        analysis.setSuppressDialogs(true);
+        analysis.setCliConfig(classFractionsConfig(root));
+        analysis.execute(root.getAbsolutePath());
+
+        List<String> lines = Files.readAllLines(
+                aggregationFile(root, "3D Objects.csv").toPath(),
+                StandardCharsets.UTF_8);
+        Map<String, String> row = csvRow(lines.get(0), lines.get(1));
+
+        assertEquals(0.5, Double.parseDouble(row.get("Iba1_MorphTexture_ClassLabel_Fraction_0")), 0.0);
+        assertEquals(0.0, Double.parseDouble(row.get("Iba1_MorphTexture_ClassLabel_Fraction_1")), 0.0);
+        assertEquals(0.5, Double.parseDouble(row.get("Iba1_MorphTexture_ClassLabel_Fraction_2")), 0.0);
+    }
+
+    @Test
+    public void execute_classFractionsCapAtSixteenColumnsAndLogWarning() throws Exception {
+        File root = temp.newFolder("master-agg-texture-fraction-cap");
+        File objects = FlashProjectLayout.forDirectory(root.getAbsolutePath()).objectDataWriteDir();
+        assertTrue(objects.mkdirs());
+
+        StringBuilder rows = new StringBuilder();
+        for (int label = 0; label < 18; label++) {
+            rows.append("Mouse1,").append(label).append('\n');
+        }
+        writeCsv(new File(objects, "Iba1.csv"),
+                "Animal Name,MorphTexture_ClassLabel",
+                rows.toString());
+
+        final MasterAggregationAnalysis analysis = new MasterAggregationAnalysis();
+        analysis.setSuppressDialogs(true);
+        analysis.setCliConfig(classFractionsConfig(root));
+
+        String log = captureImageJLogOutput(new ThrowingRunnable() {
+            @Override
+            public void run() {
+                analysis.execute(root.getAbsolutePath());
+            }
+        });
+
+        List<String> lines = Files.readAllLines(
+                aggregationFile(root, "3D Objects.csv").toPath(),
+                StandardCharsets.UTF_8);
+        String header = lines.get(0);
+        Map<String, String> row = csvRow(header, lines.get(1));
+
+        for (int label = 0; label < 16; label++) {
+            assertTrue(header.contains("Iba1_MorphTexture_ClassLabel_Fraction_" + label));
+            assertEquals(1.0 / 18.0,
+                    Double.parseDouble(row.get("Iba1_MorphTexture_ClassLabel_Fraction_" + label)),
+                    1e-12);
+        }
+        assertFalse(header.contains("Iba1_MorphTexture_ClassLabel_Fraction_16"));
+        assertFalse(header.contains("Iba1_MorphTexture_ClassLabel_Fraction_17"));
+        assertTrue(log.contains("capped at 16 fraction columns"));
     }
 
     @Test
@@ -113,6 +221,7 @@ public class MasterAggregationTextureTest {
                 "Iba1_MorphTexture_LacunarityMeanMean",
                 "Iba1_MorphTexture_LacunaritySpreadMean",
                 "Iba1_MorphTexture_ClassLabelMode",
+                "Iba1_MorphTexture_ClassLabel_Fraction_0",
                 "Iba1_MorphTexture_ClassDistanceMean",
                 "Iba1_MorphTexture_GLCM3DContrastMean",
                 "Iba1_MorphTexture_GLCM3DASMMean",
@@ -120,6 +229,7 @@ public class MasterAggregationTextureTest {
                 "Iba1_MorphTexture_GLCM3DEntropyMean",
                 "Iba1_MorphTexture_GLCM3DHomogeneityMean",
                 "Iba1_MorphTexture_Class3DLabelMode",
+                "Iba1_MorphTexture_Class3DLabel_Fraction_2",
                 "Iba1_MorphTexture_Class3DDistanceMean"
         };
         for (String col : mapped) {
@@ -178,5 +288,29 @@ public class MasterAggregationTextureTest {
 
     private File aggregationFile(File root, String fileName) {
         return new File(FlashProjectLayout.forDirectory(root.getAbsolutePath()).aggregationWriteDir(), fileName);
+    }
+
+    private CLIConfig classFractionsConfig(File root) {
+        return CLIArgumentParser.parse("dir=[" + root.getAbsolutePath() + "] "
+                + "spatial.texture.classfractions=true");
+    }
+
+    private static String captureImageJLogOutput(ThrowingRunnable action) throws Exception {
+        PrintStream original = System.out;
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        String ijLog = null;
+        try {
+            System.setOut(new PrintStream(out, true, "UTF-8"));
+            if (IJ.getLog() != null) IJ.log("\\Clear");
+            action.run();
+            ijLog = IJ.getLog();
+        } finally {
+            System.setOut(original);
+        }
+        return out.toString("UTF-8") + (ijLog == null ? "" : ijLog);
+    }
+
+    private interface ThrowingRunnable {
+        void run() throws Exception;
     }
 }

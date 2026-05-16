@@ -17,6 +17,7 @@ public class CLISpatialTextureTest {
                 + "spatial.texture.glcm=true "
                 + "spatial.texture.fractal=true "
                 + "spatial.texture.class=true "
+                + "spatial.texture.classfractions=true "
                 + "spatial.texture.native3d=true "
                 + "spatial.texture.k=6");
 
@@ -24,6 +25,7 @@ public class CLISpatialTextureTest {
         assertEquals(Boolean.TRUE, parsed.getSpatial().getTextureGlcm());
         assertEquals(Boolean.TRUE, parsed.getSpatial().getTextureFractal());
         assertEquals(Boolean.TRUE, parsed.getSpatial().getTextureClass());
+        assertEquals(Boolean.TRUE, parsed.getSpatial().getTextureClassFractions());
         assertEquals(Boolean.TRUE, parsed.getSpatial().getTextureNative3D());
         assertEquals(Integer.valueOf(6), parsed.getSpatial().getTextureClassK());
 
@@ -31,6 +33,7 @@ public class CLISpatialTextureTest {
         assertEquals(Boolean.TRUE, reparsed.getSpatial().getTextureGlcm());
         assertEquals(Boolean.TRUE, reparsed.getSpatial().getTextureFractal());
         assertEquals(Boolean.TRUE, reparsed.getSpatial().getTextureClass());
+        assertEquals(Boolean.TRUE, reparsed.getSpatial().getTextureClassFractions());
         assertEquals(Boolean.TRUE, reparsed.getSpatial().getTextureNative3D());
         assertEquals(Integer.valueOf(6), reparsed.getSpatial().getTextureClassK());
     }
@@ -41,6 +44,7 @@ public class CLISpatialTextureTest {
                 + "spatial.texture.glcm=true "
                 + "spatial.texture.fractal=true "
                 + "spatial.texture.class=true "
+                + "spatial.texture.classfractions=true "
                 + "spatial.texture.native3d=true "
                 + "spatial.texture.k=6");
         SpatialAnalysisWizard.DerivedConfig derived =
@@ -54,6 +58,7 @@ public class CLISpatialTextureTest {
         assertTrue(derived.doObjectGLCM);
         assertTrue(derived.doObjectFractal);
         assertTrue(derived.doObjectTextureClass);
+        assertTrue(derived.doObjectTextureClassFractions);
         assertTrue(derived.doNative3DTexture);
         assertEquals(6, derived.textureClassK);
     }

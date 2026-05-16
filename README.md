@@ -77,6 +77,8 @@ The main dialog groups modules into setup, image preparation, display, image ana
 - **Statistical Analysis**: Run configured group comparisons from aggregated result tables.
 - **Excel Summary Export**: Export formatted `.xlsx` workbooks from aggregated and statistical outputs.
 
+  Advanced texture-class feature vectors (`MorphTexture_F1..F8` and native-3D `MorphTexture_F3D1..F3D8`) are hidden from Excel exports by default to keep workbooks compact. Use `excel.texture.features=true` to include them with raw vector labels.
+
 ### Set Up Configuration QC
 
 Interactive configuration quality checks use an embedded FLASH preview screen instead of separate native ImageJ Brightness/Contrast, Threshold, or 3D Objects Counter windows. The preview keeps the original image stacked above the adjusted or output image, and **Large view** opens a bigger raw-vs-adjusted comparison where that helps.

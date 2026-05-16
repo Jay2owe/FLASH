@@ -72,6 +72,7 @@ public class ExcelExportPresetIOTest {
                 true,
                 ExcelExportPreset.SignificanceHighlight.P_GRADIENT,
                 ExcelExportPreset.HeaderStyle.FIGURE_READY,
+                true,
                 true);
         io.save(preset);
 
@@ -83,6 +84,7 @@ public class ExcelExportPresetIOTest {
         assertTrue(loaded.isIncludeMethodsAppendix());
         assertFalse(loaded.isIncludeStatisticsSheet());
         assertTrue(loaded.isSignificanceStars());
+        assertTrue(loaded.isIncludeTextureFeatures());
 
         io.delete("My Custom Preset");
         assertFalse(new File(io.presetDirectory(), "my_custom_preset.json").exists());
@@ -99,5 +101,8 @@ public class ExcelExportPresetIOTest {
 
         ExcelExportPreset methods = overridden.withField("methods_appendix", "true");
         assertTrue(methods.isIncludeMethodsAppendix());
+
+        ExcelExportPreset textureFeatures = methods.withField("texture_features", "true");
+        assertTrue(textureFeatures.isIncludeTextureFeatures());
     }
 }

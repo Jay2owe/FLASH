@@ -40,7 +40,19 @@ Master Aggregation writes:
 - `<channel>_MorphTexture_ClassDistanceMean`: mean distance to assigned centroid.
 - `<channel>_MorphTexture_F1Mean` to `<channel>_MorphTexture_F8Mean`: mean feature-vector values in the master CSV.
 
-Default Excel metric sheets map the class label mode and class distance. The raw `F1` to `F8` feature-vector aggregates stay in the master CSV but are intentionally omitted from default Excel exports to avoid sheet bloat.
+Default Excel metric sheets map the class label mode and class distance. The raw `F1` to `F8` feature-vector aggregates stay in the master CSV but are intentionally omitted from default Excel exports to avoid sheet bloat. Set `excel.texture.features=true` to include those raw feature-vector aggregate columns in the Excel workbook; when enabled, the Excel labels use the raw vector names such as `MorphTexture_F1`.
+
+## Per-class fractions
+
+The default aggregation gives one modal class label per group. For advanced analyses where the mixture of classes matters more than the single most common class, set `spatial.texture.classfractions=true`.
+
+This adds fraction columns alongside the modal label, not instead of it:
+
+- `<channel>_MorphTexture_ClassLabel_Fraction_0`
+- `<channel>_MorphTexture_ClassLabel_Fraction_1`
+- continuing up to the highest class observed in that group
+
+If native-3D texture classes are present, the same flag adds `<channel>_MorphTexture_Class3DLabel_Fraction_<n>` columns. Gaps are kept: if a group contains classes `0` and `2`, the `Fraction_1` column is still written with `0.0`. To avoid runaway column counts from malformed labels, FLASH caps fraction output at classes `0` to `15` and logs a warning if higher labels are observed.
 
 ## 3D vs 2D mode
 
@@ -84,4 +96,5 @@ Spatial Analysis -> Texture question -> Object texture classes (auto-discover su
 It is also enabled by:
 - Spatial Analysis -> Texture question -> All object texture features (exploratory)
 - CLI options `spatial.texture.class=true` and `spatial.texture.k=<2-10>`
+- CLI option `spatial.texture.classfractions=true` for per-class aggregation fractions
 - CLI option `spatial.texture.native3d=true` for native-3D GLCM and texture classes

@@ -231,6 +231,7 @@ public class CLIConfig {
         appendBoolean(parts, "spatial.texture.glcm", spatial.textureGlcm);
         appendBoolean(parts, "spatial.texture.fractal", spatial.textureFractal);
         appendBoolean(parts, "spatial.texture.class", spatial.textureClass);
+        appendBoolean(parts, "spatial.texture.classfractions", spatial.textureClassFractions);
         appendBoolean(parts, "spatial.texture.native3d", spatial.textureNative3D);
         if (spatial.textureClassK != null) {
             parts.add("spatial.texture.k=" + spatial.textureClassK);
@@ -339,6 +340,7 @@ public class CLIConfig {
             parts.add("excel.preset="
                     + (trimmed.contains(" ") ? "[" + trimmed + "]" : trimmed));
         }
+        appendBoolean(parts, "excel.texture.features", excel.includeTextureFeatures);
         for (Map.Entry<String, String> override : excel.fieldOverrides.entrySet()) {
             String key = override.getKey();
             String value = override.getValue();
@@ -625,6 +627,7 @@ public class CLIConfig {
         Boolean textureGlcm = null;
         Boolean textureFractal = null;
         Boolean textureClass = null;
+        Boolean textureClassFractions = null;
         Boolean textureNative3D = null;
         Integer textureClassK = null;
         Double kdeBandwidth = null;
@@ -647,6 +650,10 @@ public class CLIConfig {
         public Boolean getTextureGlcm() { return textureGlcm; }
         public Boolean getTextureFractal() { return textureFractal; }
         public Boolean getTextureClass() { return textureClass; }
+        public Boolean getTextureClassFractions() { return textureClassFractions; }
+        public void setTextureClassFractions(Boolean textureClassFractions) {
+            this.textureClassFractions = textureClassFractions;
+        }
         public Boolean getTextureNative3D() { return textureNative3D; }
         public void setTextureNative3D(Boolean textureNative3D) { this.textureNative3D = textureNative3D; }
         public Integer getTextureClassK() { return textureClassK; }
@@ -671,6 +678,7 @@ public class CLIConfig {
                     || textureGlcm != null
                     || textureFractal != null
                     || textureClass != null
+                    || textureClassFractions != null
                     || textureNative3D != null
                     || textureClassK != null
                     || kdeBandwidth != null
@@ -858,13 +866,19 @@ public class CLIConfig {
 
     public static final class ExcelConfig {
         String presetName = null;
+        Boolean includeTextureFeatures = null;
         final LinkedHashMap<String, String> fieldOverrides = new LinkedHashMap<String, String>();
 
         public String getPresetName() { return presetName; }
+        public Boolean getIncludeTextureFeatures() { return includeTextureFeatures; }
+        public void setIncludeTextureFeatures(Boolean includeTextureFeatures) {
+            this.includeTextureFeatures = includeTextureFeatures;
+        }
         public Map<String, String> getFieldOverrides() { return fieldOverrides; }
 
         public boolean hasConfiguration() {
             return (presetName != null && !presetName.trim().isEmpty())
+                    || includeTextureFeatures != null
                     || !fieldOverrides.isEmpty();
         }
     }

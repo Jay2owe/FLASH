@@ -17,6 +17,8 @@ public final class ExcelNameMap {
 
     static final int EXCEL_MAX_SHEET = 31;
     private static final double COLOC_THRESHOLD = 30.0;
+    private static final Pattern TEXTURE_CLASS_FRACTION_RE = Pattern.compile(
+            "^(.+)_MorphTexture_(Class3DLabel|ClassLabel)_Fraction_(\\d+)$");
 
     private static final String OBJ_COUNTER =
             "Using 3D Object Counter, confocal image stacks were segmented "
@@ -361,6 +363,18 @@ public final class ExcelNameMap {
                 return new String[]{label, desc};
             }
         }
+        String[] textureClassFraction = convertTextureClassFraction(matchName);
+        if (textureClassFraction != null) {
+            if (perMm3) {
+                textureClassFraction[0] = textureClassFraction[0] + " per mm\u00B3";
+                textureClassFraction[1] = textureClassFraction[1]
+                        + " Values are normalized per mm\u00B3 of tissue volume.";
+            }
+            if (textureClassFraction[0].length() > EXCEL_MAX_SHEET) {
+                textureClassFraction[0] = textureClassFraction[0].substring(0, EXCEL_MAX_SHEET);
+            }
+            return textureClassFraction;
+        }
         String[] dynamicIntensity = convertDynamicIntensity(matchName);
         if (dynamicIntensity != null) {
             if (perMm3) {
@@ -395,11 +409,33 @@ public final class ExcelNameMap {
         if (intensity.matches()) {
             return intensity.group(1);
         }
+        Matcher textureClassFraction = TEXTURE_CLASS_FRACTION_RE.matcher(matchName);
+        if (textureClassFraction.matches()) {
+            return textureClassFraction.group(1);
+        }
         Matcher pair = Pattern.compile("^(.+)_ROI_(.+_.+_.+)Mean$").matcher(matchName);
         if (pair.matches()) {
             return pair.group(1);
         }
         return null;
+    }
+
+    private static String[] convertTextureClassFraction(String colName) {
+        Matcher matcher = TEXTURE_CLASS_FRACTION_RE.matcher(colName);
+        if (!matcher.matches()) {
+            return null;
+        }
+        String marker = matcher.group(1);
+        String classToken = matcher.group(2);
+        String classIndex = matcher.group(3);
+        boolean native3d = "Class3DLabel".equals(classToken);
+        String label = marker + (native3d ? " Texture class 3D " : " Texture class ")
+                + classIndex + " fraction";
+        String desc = OBJ_COUNTER + "Fraction of segmented " + marker
+                + " objects assigned to "
+                + (native3d ? "native-3D texture class " : "texture class ")
+                + classIndex + " in the aggregation group.";
+        return new String[] { label, desc };
     }
 
     private static String[] convertDynamicIntensity(String colName) {

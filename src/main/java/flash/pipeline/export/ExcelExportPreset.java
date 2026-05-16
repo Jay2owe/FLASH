@@ -117,6 +117,7 @@ public final class ExcelExportPreset implements Preset<ExcelExportPreset> {
     private final SignificanceHighlight significanceHighlight;
     private final HeaderStyle headerStyle;
     private final boolean significanceStars;
+    private final boolean includeTextureFeatures;
 
     public ExcelExportPreset(String name,
                              String description,
@@ -129,6 +130,24 @@ public final class ExcelExportPreset implements Preset<ExcelExportPreset> {
                              SignificanceHighlight significanceHighlight,
                              HeaderStyle headerStyle,
                              boolean significanceStars) {
+        this(name, description, includeExperimentalConditionsSheet, includeDataSummarySheet,
+                includePerMetricSheets, includeStatisticsSheet, metricSheetDetail,
+                includeMethodsAppendix, significanceHighlight, headerStyle,
+                significanceStars, false);
+    }
+
+    public ExcelExportPreset(String name,
+                             String description,
+                             boolean includeExperimentalConditionsSheet,
+                             boolean includeDataSummarySheet,
+                             boolean includePerMetricSheets,
+                             boolean includeStatisticsSheet,
+                             MetricSheetDetail metricSheetDetail,
+                             boolean includeMethodsAppendix,
+                             SignificanceHighlight significanceHighlight,
+                             HeaderStyle headerStyle,
+                             boolean significanceStars,
+                             boolean includeTextureFeatures) {
         this.name = requireText("name", name);
         this.description = emptyToNull(description);
         this.libraryVersion = CURRENT_LIBRARY_VERSION;
@@ -143,6 +162,7 @@ public final class ExcelExportPreset implements Preset<ExcelExportPreset> {
                 ? SignificanceHighlight.YELLOW : significanceHighlight;
         this.headerStyle = headerStyle == null ? HeaderStyle.STANDARD : headerStyle;
         this.significanceStars = significanceStars;
+        this.includeTextureFeatures = includeTextureFeatures;
     }
 
     /** Stock exploratory default matching the original hard-coded behavior. */
@@ -209,6 +229,10 @@ public final class ExcelExportPreset implements Preset<ExcelExportPreset> {
         return significanceStars;
     }
 
+    public boolean isIncludeTextureFeatures() {
+        return includeTextureFeatures;
+    }
+
     @Override
     public ExcelExportPreset getPayload() {
         return this;
@@ -227,55 +251,70 @@ public final class ExcelExportPreset implements Preset<ExcelExportPreset> {
                 b = JsonIO.booleanValue(value, includeExperimentalConditionsSheet);
                 return copyWith(b, includeDataSummarySheet, includePerMetricSheets,
                         includeStatisticsSheet, metricSheetDetail, includeMethodsAppendix,
-                        significanceHighlight, headerStyle, significanceStars);
+                        significanceHighlight, headerStyle, significanceStars,
+                        includeTextureFeatures);
             case "data_summary_sheet":
                 b = JsonIO.booleanValue(value, includeDataSummarySheet);
                 return copyWith(includeExperimentalConditionsSheet, b, includePerMetricSheets,
                         includeStatisticsSheet, metricSheetDetail, includeMethodsAppendix,
-                        significanceHighlight, headerStyle, significanceStars);
+                        significanceHighlight, headerStyle, significanceStars,
+                        includeTextureFeatures);
             case "per_metric_sheets":
             case "metric_sheets":
                 b = JsonIO.booleanValue(value, includePerMetricSheets);
                 return copyWith(includeExperimentalConditionsSheet, includeDataSummarySheet, b,
                         includeStatisticsSheet, metricSheetDetail, includeMethodsAppendix,
-                        significanceHighlight, headerStyle, significanceStars);
+                        significanceHighlight, headerStyle, significanceStars,
+                        includeTextureFeatures);
             case "stats_sheet":
             case "statistics_sheet":
                 b = JsonIO.booleanValue(value, includeStatisticsSheet);
                 return copyWith(includeExperimentalConditionsSheet, includeDataSummarySheet,
                         includePerMetricSheets, b, metricSheetDetail, includeMethodsAppendix,
-                        significanceHighlight, headerStyle, significanceStars);
+                        significanceHighlight, headerStyle, significanceStars,
+                        includeTextureFeatures);
             case "metric_detail":
             case "metric_sheet_detail":
                 return copyWith(includeExperimentalConditionsSheet, includeDataSummarySheet,
                         includePerMetricSheets, includeStatisticsSheet,
                         MetricSheetDetail.parse(value, metricSheetDetail),
                         includeMethodsAppendix, significanceHighlight, headerStyle,
-                        significanceStars);
+                        significanceStars, includeTextureFeatures);
             case "methods_appendix":
             case "methods":
                 b = JsonIO.booleanValue(value, includeMethodsAppendix);
                 return copyWith(includeExperimentalConditionsSheet, includeDataSummarySheet,
                         includePerMetricSheets, includeStatisticsSheet, metricSheetDetail,
-                        b, significanceHighlight, headerStyle, significanceStars);
+                        b, significanceHighlight, headerStyle, significanceStars,
+                        includeTextureFeatures);
             case "significance_highlight":
             case "highlight":
                 return copyWith(includeExperimentalConditionsSheet, includeDataSummarySheet,
                         includePerMetricSheets, includeStatisticsSheet, metricSheetDetail,
                         includeMethodsAppendix,
                         SignificanceHighlight.parse(value, significanceHighlight),
-                        headerStyle, significanceStars);
+                        headerStyle, significanceStars, includeTextureFeatures);
             case "header_style":
                 return copyWith(includeExperimentalConditionsSheet, includeDataSummarySheet,
                         includePerMetricSheets, includeStatisticsSheet, metricSheetDetail,
                         includeMethodsAppendix, significanceHighlight,
-                        HeaderStyle.parse(value, headerStyle), significanceStars);
+                        HeaderStyle.parse(value, headerStyle), significanceStars,
+                        includeTextureFeatures);
             case "significance_stars":
             case "stars":
                 b = JsonIO.booleanValue(value, significanceStars);
                 return copyWith(includeExperimentalConditionsSheet, includeDataSummarySheet,
                         includePerMetricSheets, includeStatisticsSheet, metricSheetDetail,
-                        includeMethodsAppendix, significanceHighlight, headerStyle, b);
+                        includeMethodsAppendix, significanceHighlight, headerStyle, b,
+                        includeTextureFeatures);
+            case "texture_features":
+            case "include_texture_features":
+            case "includetexturefeatures":
+                b = JsonIO.booleanValue(value, includeTextureFeatures);
+                return copyWith(includeExperimentalConditionsSheet, includeDataSummarySheet,
+                        includePerMetricSheets, includeStatisticsSheet, metricSheetDetail,
+                        includeMethodsAppendix, significanceHighlight, headerStyle,
+                        significanceStars, b);
             default:
                 return this;
         }
@@ -289,9 +328,11 @@ public final class ExcelExportPreset implements Preset<ExcelExportPreset> {
                                        boolean methodsAppendix,
                                        SignificanceHighlight highlight,
                                        HeaderStyle style,
-                                       boolean stars) {
+                                       boolean stars,
+                                       boolean textureFeatures) {
         return new ExcelExportPreset(name, description, conditionsSheet, dataSummarySheet,
-                perMetricSheets, statisticsSheet, detail, methodsAppendix, highlight, style, stars);
+                perMetricSheets, statisticsSheet, detail, methodsAppendix, highlight, style,
+                stars, textureFeatures);
     }
 
     @Override
@@ -311,6 +352,7 @@ public final class ExcelExportPreset implements Preset<ExcelExportPreset> {
         root.put("significanceHighlight", significanceHighlight.token());
         root.put("headerStyle", headerStyle.token());
         root.put("significanceStars", Boolean.valueOf(significanceStars));
+        root.put("includeTextureFeatures", Boolean.valueOf(includeTextureFeatures));
         return root;
     }
 
@@ -340,7 +382,8 @@ public final class ExcelExportPreset implements Preset<ExcelExportPreset> {
                         SignificanceHighlight.YELLOW),
                 HeaderStyle.parse(JsonIO.stringValue(root.get("headerStyle")),
                         HeaderStyle.STANDARD),
-                JsonIO.booleanValue(root.get("significanceStars"), false));
+                JsonIO.booleanValue(root.get("significanceStars"), false),
+                JsonIO.booleanValue(root.get("includeTextureFeatures"), false));
     }
 
     private static String requireText(String label, String value) {

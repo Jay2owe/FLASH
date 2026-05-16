@@ -139,6 +139,7 @@ public class SpatialAnalysisWizard extends WizardFlow {
         out.doObjectGLCM = preset.isDoObjectGLCM();
         out.doObjectFractal = preset.isDoObjectFractal();
         out.doObjectTextureClass = preset.isDoObjectTextureClass();
+        out.doObjectTextureClassFractions = preset.isDoObjectTextureClassFractions();
         out.doNative3DTexture = preset.isDoNative3DTexture();
         out.textureClassK = preset.getTextureClassK();
         out.kdeBandwidth = preset.getKdeBandwidth();
@@ -395,6 +396,7 @@ public class SpatialAnalysisWizard extends WizardFlow {
         public boolean doObjectGLCM;
         public boolean doObjectFractal;
         public boolean doObjectTextureClass;
+        public boolean doObjectTextureClassFractions;
         public boolean doNative3DTexture;
         public boolean forceRerun;
         public double kdeBandwidth = 0.0;

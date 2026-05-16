@@ -5,6 +5,8 @@ import ij.IJ;
 import flash.pipeline.analyses.wizard.AggregationConfig;
 import flash.pipeline.analyses.wizard.AggregationPreset;
 import flash.pipeline.analyses.wizard.AggregationPresetIO;
+import flash.pipeline.analyses.wizard.SpatialPreset;
+import flash.pipeline.analyses.wizard.SpatialPresetIO;
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinConfigIO;
 import flash.pipeline.cli.CLIConfig;
@@ -69,6 +71,7 @@ public class MasterAggregationAnalysis implements Analysis {
     private boolean headless = false;
     private boolean suppressDialogs = false;
     private static final double COLOC_THRESHOLD = 30.0;
+    private static final int MAX_TEXTURE_CLASS_FRACTION_COLUMNS = 16;
     private static final String MASTER_INTENSITIES_MIP_FILENAME = "Image Intensities_MIP.csv";
     private static final String MASTER_INTENSITIES_3D_FILENAME = "Image Intensities_3D.csv";
 
@@ -159,6 +162,8 @@ public class MasterAggregationAnalysis implements Analysis {
     private AggregationConfig aggregationConfig = new AggregationConfig();
     /** True when aggregationConfig was populated from CLI (skip interactive dialog). */
     private boolean configFromCli = false;
+    /** Advanced export toggle: emit one texture-class fraction column per observed class. */
+    private boolean textureClassFractions = false;
 
     /** Composite group key -> parent animal name. Rebuilt per execute(). */
     private final LinkedHashMap<String, String> groupKeyToAnimal =
@@ -185,7 +190,12 @@ public class MasterAggregationAnalysis implements Analysis {
 
     @Override
     public void setCliConfig(CLIConfig config) {
-        if (config == null || config.getAggregate() == null) {
+        if (config == null) {
+            return;
+        }
+        this.textureClassFractions = false;
+        applyCliSpatialAggregationOptions(config);
+        if (config.getAggregate() == null) {
             return;
         }
         CLIConfig.AggregateConfig src = config.getAggregate();
@@ -211,6 +221,34 @@ public class MasterAggregationAnalysis implements Analysis {
         }
         this.aggregationConfig = target;
         this.configFromCli = true;
+    }
+
+    private void applyCliSpatialAggregationOptions(CLIConfig config) {
+        if (config == null || config.getSpatial() == null) {
+            return;
+        }
+        CLIConfig.SpatialConfig spatial = config.getSpatial();
+        Boolean classFractions = null;
+        if (spatial.getPresetName() != null && !spatial.getPresetName().trim().isEmpty()) {
+            try {
+                File projectRoot = config.getDirectory() == null
+                        ? new File(System.getProperty("user.dir", "."))
+                        : new File(config.getDirectory());
+                SpatialPreset preset = new SpatialPresetIO(projectRoot)
+                        .load(spatial.getPresetName().trim());
+                classFractions = Boolean.valueOf(preset.isDoObjectTextureClassFractions());
+            } catch (IOException e) {
+                IJ.log("[CLI] Warning: Could not load spatial.preset '"
+                        + spatial.getPresetName() + "' for aggregation options: "
+                        + e.getMessage());
+            }
+        }
+        if (spatial.getTextureClassFractions() != null) {
+            classFractions = spatial.getTextureClassFractions();
+        }
+        if (classFractions != null) {
+            this.textureClassFractions = classFractions.booleanValue();
+        }
     }
 
     /**
@@ -1038,6 +1076,7 @@ public class MasterAggregationAnalysis implements Analysis {
             for (int i = 0; i < header.length; i++) {
                 colIdx.put(header[i].trim(), i);
             }
+            Set<String> classFractionCapWarnings = new HashSet<String>();
 
             // Find volumetric overlap columns (SOURCE_VolOverlapN_PARTNER),
             // falling back to legacy names if needed.
@@ -1254,6 +1293,18 @@ public class MasterAggregationAnalysis implements Analysis {
                     metrics.put(outCol, modal
                             ? modalIntegerValue(animalRows, hi)
                             : meanFiniteValue(animalRows, hi));
+                    if (textureClassFractions && modal) {
+                        ClassFractionAggregation fractions = classFractionValues(
+                                animalRows, hi, (needsPrefix ? prefix : "") + cleanH + "_Fraction_");
+                        metrics.putAll(fractions.values);
+                        if (fractions.capped
+                                && classFractionCapWarnings.add(channelName + "|" + cleanH)) {
+                            IJ.log("  WARNING: Texture class fraction aggregation for "
+                                    + channelName + " " + cleanH + " observed class label "
+                                    + fractions.maxLabel + " and is capped at "
+                                    + MAX_TEXTURE_CLASS_FRACTION_COLUMNS + " fraction columns.");
+                        }
+                    }
                 }
 
                 // numSections for this group (stored once, not per-channel)
@@ -2125,6 +2176,63 @@ public class MasterAggregationAnalysis implements Analysis {
             }
         }
         return bestCount < 0 ? 0.0 : (double) bestValue;
+    }
+
+    private static ClassFractionAggregation classFractionValues(List<String[]> rows,
+                                                                int columnIndex,
+                                                                String outputPrefix) {
+        LinkedHashMap<String, Double> values = new LinkedHashMap<String, Double>();
+        if (rows == null || rows.isEmpty()) {
+            return new ClassFractionAggregation(values, false, -1);
+        }
+
+        int[] counts = new int[MAX_TEXTURE_CLASS_FRACTION_COLUMNS];
+        int valid = 0;
+        int maxLabel = -1;
+        boolean capped = false;
+
+        for (String[] row : rows) {
+            double parsed = parseDouble(safeGet(row, columnIndex));
+            if (Double.isNaN(parsed)) continue;
+            int label = (int) Math.round(parsed);
+            if (label < 0) continue;
+            valid++;
+            if (label > maxLabel) {
+                maxLabel = label;
+            }
+            if (label >= MAX_TEXTURE_CLASS_FRACTION_COLUMNS) {
+                capped = true;
+                continue;
+            }
+            counts[label]++;
+        }
+
+        if (valid == 0 || maxLabel < 0) {
+            return new ClassFractionAggregation(values, false, maxLabel);
+        }
+        int k = maxLabel + 1;
+        if (k > MAX_TEXTURE_CLASS_FRACTION_COLUMNS) {
+            k = MAX_TEXTURE_CLASS_FRACTION_COLUMNS;
+            capped = true;
+        }
+        for (int i = 0; i < k; i++) {
+            values.put(outputPrefix + i, Double.valueOf(((double) counts[i]) / valid));
+        }
+        return new ClassFractionAggregation(values, capped, maxLabel);
+    }
+
+    private static final class ClassFractionAggregation {
+        final LinkedHashMap<String, Double> values;
+        final boolean capped;
+        final int maxLabel;
+
+        ClassFractionAggregation(LinkedHashMap<String, Double> values,
+                                 boolean capped,
+                                 int maxLabel) {
+            this.values = values;
+            this.capped = capped;
+            this.maxLabel = maxLabel;
+        }
     }
 
     private static final class ClassifiedIntensityCsv {

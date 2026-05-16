@@ -73,6 +73,8 @@ public class ExcelSummaryExportAnalysis implements Analysis {
     // TAG parsing for Analysis Details files
     private static final Pattern TAG_RE = Pattern.compile(
             "<(?<tag>[^>]+)>\\s*(?<body>.*?)\\s*</\\k<tag>>", Pattern.DOTALL);
+    private static final Pattern TEXTURE_FEATURE_METRIC_RE = Pattern.compile(
+            "^(?:(.+)_)?(MorphTexture_F(?:3D)?\\d+)(?:Mean)?(?:_permm3)?$");
 
     @Override
     public void setHeadless(boolean headless) {
@@ -105,6 +107,10 @@ public class ExcelSummaryExportAnalysis implements Analysis {
         }
         for (Map.Entry<String, String> override : src.getFieldOverrides().entrySet()) {
             base = base.withField(override.getKey(), override.getValue());
+        }
+        if (src.getIncludeTextureFeatures() != null) {
+            base = base.withField("texture_features",
+                    Boolean.toString(src.getIncludeTextureFeatures().booleanValue()));
         }
         this.preset = base;
         this.configFromCli = true;
@@ -238,7 +244,45 @@ public class ExcelSummaryExportAnalysis implements Analysis {
     private boolean isMetricColumn(String col) {
         return !col.equals("AnimalName")
                 && !col.equals("numSections")
-                && ExcelNameMap.convert(col) != null;
+                && (ExcelNameMap.convert(col) != null
+                    || includeTextureFeatureColumn(col));
+    }
+
+    private boolean includeTextureFeatureColumn(String col) {
+        return preset != null
+                && preset.isIncludeTextureFeatures()
+                && TEXTURE_FEATURE_METRIC_RE.matcher(col).matches();
+    }
+
+    private String[] metricNameDesc(String col) {
+        String[] mapped = ExcelNameMap.convert(col);
+        if (mapped != null) {
+            return mapped;
+        }
+        if (includeTextureFeatureColumn(col)) {
+            String label = textureFeatureLabel(col);
+            return new String[] {
+                    label,
+                    "Raw MorphTexture feature-vector aggregate column: " + col + "."
+            };
+        }
+        return null;
+    }
+
+    private static String textureFeatureLabel(String col) {
+        Matcher matcher = TEXTURE_FEATURE_METRIC_RE.matcher(col);
+        if (!matcher.matches()) {
+            return col;
+        }
+        return matcher.group(2);
+    }
+
+    private static String textureFeatureMarker(String col) {
+        Matcher matcher = TEXTURE_FEATURE_METRIC_RE.matcher(col);
+        if (!matcher.matches()) {
+            return null;
+        }
+        return matcher.group(1);
     }
 
     /**
@@ -310,6 +354,9 @@ public class ExcelSummaryExportAnalysis implements Analysis {
         final ToggleSwitch methodsToggle = pd.addToggle(
                 "Methods appendix sheet",
                 selected[0].isIncludeMethodsAppendix());
+        final ToggleSwitch textureFeaturesToggle = pd.addToggle(
+                "Include raw object texture feature-vector columns",
+                selected[0].isIncludeTextureFeatures());
         pd.endAdvancedSection();
 
         condToggle.addChangeListener(new Runnable() {
@@ -370,6 +417,14 @@ public class ExcelSummaryExportAnalysis implements Analysis {
                 previewLabel.setText(buildPreviewHtml(selected[0]));
             }
         });
+        textureFeaturesToggle.addChangeListener(new Runnable() {
+            @Override public void run() {
+                if (suppressAdvanced[0]) return;
+                selected[0] = selected[0].withField("texture_features",
+                        Boolean.toString(textureFeaturesToggle.isSelected()));
+                previewLabel.setText(buildPreviewHtml(selected[0]));
+            }
+        });
 
         presetCombo.addActionListener(e -> {
             Object item = presetCombo.getSelectedItem();
@@ -391,6 +446,7 @@ public class ExcelSummaryExportAnalysis implements Analysis {
                             highlightOff, highlightYellow, highlightGradient));
                     starsToggle.setSelected(loaded.isSignificanceStars());
                     methodsToggle.setSelected(loaded.isIncludeMethodsAppendix());
+                    textureFeaturesToggle.setSelected(loaded.isIncludeTextureFeatures());
                 } finally {
                     suppressAdvanced[0] = false;
                 }
@@ -419,7 +475,8 @@ public class ExcelSummaryExportAnalysis implements Analysis {
                     source.isIncludeMethodsAppendix(),
                     source.getSignificanceHighlight(),
                     source.getHeaderStyle(),
-                    source.isSignificanceStars());
+                    source.isSignificanceStars(),
+                    source.isIncludeTextureFeatures());
             try {
                 presetIO.save(toSave);
                 selected[0] = toSave;
@@ -484,7 +541,9 @@ public class ExcelSummaryExportAnalysis implements Analysis {
         if (preset.isIncludeMethodsAppendix()) sheets.append("Methods Appendix, ");
         String trimmed = sheets.length() == 0 ? "(no sheets selected)" : sheets.substring(0, sheets.length() - 2);
         String detail = "Highlight: " + preset.getSignificanceHighlight().token()
-                + " | Headers: " + preset.getHeaderStyle().token();
+                + " | Headers: " + preset.getHeaderStyle().token()
+                + " | Texture vectors: "
+                + (preset.isIncludeTextureFeatures() ? "included" : "hidden");
         return "<html><body style='width:360px'><b>Sheets:</b> " + trimmed
                 + "<br/><i>" + detail + "</i></body></html>";
     }
@@ -641,7 +700,7 @@ public class ExcelSummaryExportAnalysis implements Analysis {
 
             if (preset.isIncludePerMetricSheets()) {
                 for (String col : metricColumns) {
-                    String[] nameDesc = ExcelNameMap.convert(col);
+                    String[] nameDesc = metricNameDesc(col);
                     if (nameDesc == null) continue;
                     writePerMetricSheet(wb, col, nameDesc, conditionOrder, animalToCondition,
                             allAnimals, mergedData, styles, usedSheetNames);
@@ -894,6 +953,9 @@ public class ExcelSummaryExportAnalysis implements Analysis {
         LinkedHashMap<String, List<String>> markerBuckets = new LinkedHashMap<String, List<String>>();
         for (String col : metricColumns) {
             String marker = ExcelNameMap.extractMarker(col);
+            if (marker == null && includeTextureFeatureColumn(col)) {
+                marker = textureFeatureMarker(col);
+            }
             if (marker == null) continue;
             String analysis = ExcelNameMap.isRoiColumn(col) ? "ROI" : "Object";
             String key = marker + "|" + analysis;
@@ -904,7 +966,7 @@ public class ExcelSummaryExportAnalysis implements Analysis {
                 markerBuckets.put(key, labels);
             }
 
-            String[] nameDesc = ExcelNameMap.convert(col);
+            String[] nameDesc = metricNameDesc(col);
             if (nameDesc != null) labels.add(nameDesc[0]);
         }
 

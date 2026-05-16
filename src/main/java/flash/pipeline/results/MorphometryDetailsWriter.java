@@ -139,10 +139,13 @@ public final class MorphometryDetailsWriter {
             w.write("  MorphTexture_ClassDistance     Distance to the assigned texture-class centroid.\n");
             w.write("  MorphTexture_F1..F8            Gabor and wavelet feature-vector values used for texture classes.\n");
             w.write("                                 Texture-class values use 2D per-slice ObjectTextureFeatures results averaged across slices.\n");
+            w.write("                                 Master Aggregation always reports ClassLabelMode. With spatial.texture.classfractions=true,\n");
+            w.write("                                 it also reports ClassLabel_Fraction_0..15 columns for the fraction of objects in each class.\n");
             w.write("  MorphTexture_Class3DLabel      Integer native-3D texture class assigned by 3D Gabor + 3D wavelet k-means.\n");
             w.write("  MorphTexture_Class3DDistance   Distance to the assigned native-3D texture-class centroid.\n");
             w.write("  MorphTexture_F3D1..F3D8        Native-3D Gabor and wavelet feature-vector values.\n");
             w.write("                                 Native-3D texture-class values use ObjectTextureFeatures3D on objects spanning multiple z-slices.\n");
+            w.write("                                 The same class-fraction aggregation flag reports Class3DLabel_Fraction_0..15 columns when present.\n");
             w.write("</Per-Object Texture and Complexity>\n");
         } catch (Exception e) {
             ij.IJ.log("Failed to write morphometry details: " + e.getMessage());

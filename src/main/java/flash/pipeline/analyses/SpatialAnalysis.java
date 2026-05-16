@@ -5974,6 +5974,9 @@ public class SpatialAnalysis implements Analysis {
         if (spatial.getTextureGlcm() != null) config.doObjectGLCM = spatial.getTextureGlcm().booleanValue();
         if (spatial.getTextureFractal() != null) config.doObjectFractal = spatial.getTextureFractal().booleanValue();
         if (spatial.getTextureClass() != null) config.doObjectTextureClass = spatial.getTextureClass().booleanValue();
+        if (spatial.getTextureClassFractions() != null) {
+            config.doObjectTextureClassFractions = spatial.getTextureClassFractions().booleanValue();
+        }
         if (spatial.getTextureNative3D() != null) config.doNative3DTexture = spatial.getTextureNative3D().booleanValue();
         if (spatial.getTextureClassK() != null) config.textureClassK = clampObjectTextureClassK(spatial.getTextureClassK().intValue());
         if (spatial.getKdeBandwidth() != null) config.kdeBandwidth = spatial.getKdeBandwidth().doubleValue();

@@ -250,6 +250,7 @@ public final class CLIArgumentParser {
                 + "  object.nuclear_marker=2\n"
                 + "  spatial.preset=microglia_plaque_contact\n"
                 + "  spatial.heatmaps=true\n"
+                + "  spatial.texture.classfractions=true\n"
                 + "  intensity.preset=threshold_puncta\n"
                 + "  intensity.threshold_channel2=45\n"
                 + "  intensity.spatial=true|false\n"
@@ -277,6 +278,7 @@ public final class CLIArgumentParser {
                 + "  aggregate.granularity=animal|hemisphere|region|section\n"
                 + "  aggregate.output=raw|normalized|both\n"
                 + "  excel.preset=Figure-ready supplement\n"
+                + "  excel.texture.features=true|false\n"
                 + "  excel.stats_sheet=true|false   excel.per_metric_sheets=true|false\n"
                 + "  excel.methods_appendix=true|false   excel.significance_stars=true|false\n"
                 + "  excel.metric_detail=raw_values|summary_statistics|both\n"
@@ -578,6 +580,8 @@ public final class CLIArgumentParser {
         spatial.textureGlcm = parseNullableBoolean(options, "spatial.texture.glcm", spatial.textureGlcm);
         spatial.textureFractal = parseNullableBoolean(options, "spatial.texture.fractal", spatial.textureFractal);
         spatial.textureClass = parseNullableBoolean(options, "spatial.texture.class", spatial.textureClass);
+        spatial.textureClassFractions = parseNullableBoolean(
+                options, "spatial.texture.classfractions", spatial.textureClassFractions);
         spatial.textureNative3D = parseNullableBoolean(options, "spatial.texture.native3d", spatial.textureNative3D);
 
         String textureK = getValue(options, "spatial.texture.k");
@@ -838,6 +842,12 @@ public final class CLIArgumentParser {
         String presetName = getValue(options, "excel.preset");
         if (presetName != null && !presetName.trim().isEmpty()) {
             excel.presetName = presetName.trim();
+        }
+
+        String textureFeatures = getValue(options, "excel.texture.features");
+        if (textureFeatures != null) {
+            excel.includeTextureFeatures = Boolean.valueOf(parseBooleanValue(
+                    "excel.texture.features", textureFeatures, false));
         }
 
         for (String key : EXCEL_FIELD_KEYS) {
