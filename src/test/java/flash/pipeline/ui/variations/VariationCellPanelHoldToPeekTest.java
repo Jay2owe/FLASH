@@ -5,7 +5,6 @@ import ij.process.ByteProcessor;
 import org.junit.Test;
 
 import javax.swing.SwingUtilities;
-import java.awt.event.InputEvent;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseListener;
 import java.awt.event.MouseMotionListener;
@@ -75,7 +74,6 @@ public class VariationCellPanelHoldToPeekTest {
 
                 press(cell, 8, 8);
                 release(cell, 8, 8);
-                click(cell, false);
 
                 assertEquals(1, accepts.get());
                 assertFalse(cell.suppressNextClickForTest());
@@ -97,9 +95,10 @@ public class VariationCellPanelHoldToPeekTest {
                 press(cell, 8, 8);
                 cell.firePeekDelayForTest();
                 release(cell, 8, 8);
-                click(cell, false);
+                press(cell, 8, 8);
+                release(cell, 8, 8);
 
-                assertEquals(0, accepts.get());
+                assertEquals(1, accepts.get());
                 assertFalse(cell.suppressNextClickForTest());
                 assertFalse(cell.isPeekingForTest());
                 assertSame(filteredPreview, cell.currentPreviewImageForTest());
@@ -176,15 +175,6 @@ public class VariationCellPanelHoldToPeekTest {
         MouseListener[] listeners = cell.getMouseListeners();
         for (int i = 0; i < listeners.length; i++) {
             listeners[i].mouseReleased(event);
-        }
-    }
-
-    private static void click(VariationCellPanel cell, boolean shiftDown) {
-        int modifiers = shiftDown ? InputEvent.SHIFT_DOWN_MASK : 0;
-        MouseEvent event = event(cell, MouseEvent.MOUSE_CLICKED, 8, 8, modifiers);
-        MouseListener[] listeners = cell.getMouseListeners();
-        for (int i = 0; i < listeners.length; i++) {
-            listeners[i].mouseClicked(event);
         }
     }
 

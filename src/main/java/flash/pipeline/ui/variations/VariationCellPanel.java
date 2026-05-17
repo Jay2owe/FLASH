@@ -889,13 +889,6 @@ public final class VariationCellPanel extends JPanel {
         MouseAdapter listener = new MouseAdapter() {
             @Override public void mousePressed(MouseEvent e) {
                 handleMousePressed(e);
-            }
-
-            @Override public void mouseReleased(MouseEvent e) {
-                handleMouseReleased();
-            }
-
-            @Override public void mouseClicked(MouseEvent e) {
                 if (suppressNextClick) {
                     suppressNextClick = false;
                     if (e != null) {
@@ -903,13 +896,20 @@ public final class VariationCellPanel extends JPanel {
                     }
                     return;
                 }
-                if (e != null && e.isShiftDown()) {
+                if (e == null || !SwingUtilities.isLeftMouseButton(e)) {
+                    return;
+                }
+                if (e.isShiftDown()) {
                     if (onCompare != null) {
                         onCompare.accept(combo, VariationCellPanel.this);
                     }
                 } else if (acceptEnabled && onAccept != null) {
                     onAccept.accept(combo);
                 }
+            }
+
+            @Override public void mouseReleased(MouseEvent e) {
+                handleMouseReleased();
             }
 
             @Override public void mouseEntered(MouseEvent e) {
@@ -941,7 +941,6 @@ public final class VariationCellPanel extends JPanel {
 
     private void handleMousePressed(MouseEvent e) {
         cancelPeek(true);
-        suppressNextClick = false;
         pressPoint = null;
         if (e == null || !SwingUtilities.isLeftMouseButton(e) || !canPeek()) {
             return;

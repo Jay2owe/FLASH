@@ -99,7 +99,6 @@ public class VariationCellPanelShiftClickTest {
 
                 press(cell, true);
                 release(cell, true);
-                click(cell, true);
 
                 assertTrue(cell.isSelectedForCompareForTest());
                 assertFalse(cell.isPeekDelayRunningForTest());
@@ -274,7 +273,7 @@ public class VariationCellPanelShiftClickTest {
     private static void click(VariationCellPanel cell, boolean shiftDown) {
         int modifiers = shiftDown ? InputEvent.SHIFT_DOWN_MASK : 0;
         MouseEvent event = new MouseEvent(cell,
-                MouseEvent.MOUSE_CLICKED,
+                MouseEvent.MOUSE_PRESSED,
                 System.currentTimeMillis(),
                 modifiers,
                 8,
@@ -284,7 +283,7 @@ public class VariationCellPanelShiftClickTest {
                 MouseEvent.BUTTON1);
         MouseListener[] listeners = cell.getMouseListeners();
         for (int i = 0; i < listeners.length; i++) {
-            listeners[i].mouseClicked(event);
+            listeners[i].mousePressed(event);
         }
     }
 
