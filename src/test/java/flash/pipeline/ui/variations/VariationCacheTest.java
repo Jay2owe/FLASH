@@ -61,6 +61,21 @@ public class VariationCacheTest {
     }
 
     @Test
+    public void putLeavesNoTemporaryTiffBesideFinalFile() throws Exception {
+        File bin = temp.newFolder(".bin");
+        VariationCache cache = new VariationCache(bin);
+
+        cache.put("abababababababab", labelImage("atomic-label", 321));
+
+        File finalFile = cache.fileForTest("abababababababab");
+        assertTrue(finalFile.isFile());
+        File[] leftovers = finalFile.getParentFile().listFiles((dir, name) ->
+                name.contains(".tmp-") && name.endsWith(".tif"));
+        assertNotNull(leftovers);
+        assertEquals(0, leftovers.length);
+    }
+
+    @Test
     public void corruptDiskFileReturnsMiss() throws Exception {
         VariationCache cache = new VariationCache(temp.newFolder(".bin"));
         File file = cache.fileForTest("cccccccccccccccc");

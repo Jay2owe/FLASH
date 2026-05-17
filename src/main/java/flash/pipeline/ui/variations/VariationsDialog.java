@@ -50,6 +50,7 @@ import java.awt.event.ActionListener;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.awt.Rectangle;
+import java.io.File;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -66,6 +67,9 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 public final class VariationsDialog extends PipelineDialog {
+
+    private static final long CACHE_PURGE_MAX_AGE_MILLIS =
+            7L * 24L * 60L * 60L * 1000L;
 
     private final VariationEngineContext context;
     private final Consumer<ParameterCombo> onAccept;
@@ -134,6 +138,7 @@ public final class VariationsDialog extends PipelineDialog {
         installWindowCleanup();
         refreshCellEstimate();
         offerResumeIfAvailable();
+        scheduleCachePurge();
     }
 
     public void start() {
@@ -517,8 +522,7 @@ public final class VariationsDialog extends PipelineDialog {
                 strategy,
                 runCache,
                 (result, index) -> handleResult(workerRef[0], result, index.intValue()),
-                status -> setStatusText(status),
-                stateStore);
+                status -> handleStatus(workerRef[0], status));
         workerRef[0] = worker;
         executor = worker;
         worker.addPropertyChangeListener(evt -> {
@@ -625,6 +629,7 @@ public final class VariationsDialog extends PipelineDialog {
         }
         if (!alreadyCompleted) {
             completedCount++;
+            recordCompletionForCurrentSweep(result);
         }
         failedCount = countFailures();
         updateTileMetrics();
@@ -635,6 +640,35 @@ public final class VariationsDialog extends PipelineDialog {
             applyStabilityHint();
             updateGridWindowProgress();
         }
+    }
+
+    private void handleStatus(final VariationExecutor worker, String status) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            final String safeStatus = status;
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    handleStatus(worker, safeStatus);
+                }
+            });
+            return;
+        }
+        if (worker != executor) {
+            return;
+        }
+        setStatusText(status);
+    }
+
+    private void recordCompletionForCurrentSweep(VariationResult result) {
+        if (currentSweep == null
+                || stateStore == null
+                || result == null
+                || result.hasError()
+                || result.label() == null) {
+            return;
+        }
+        String cacheKey = VariationCache.keyFor(currentSweep, result.combo());
+        stateStore.recordCompletion(currentSweep, result.combo(), cacheKey,
+                result.nObjects(), result.durationMs());
     }
 
     private boolean allCellsSuccessful() {
@@ -948,6 +982,21 @@ public final class VariationsDialog extends PipelineDialog {
         if (worker != null && !worker.isDone()) {
             worker.cancel(true);
         }
+    }
+
+    private void scheduleCachePurge() {
+        final File binFolder = context.binFolder();
+        if (binFolder == null) {
+            return;
+        }
+        Thread worker = new Thread(new Runnable() {
+            @Override public void run() {
+                VariationCache.purgeOlderThan(binFolder,
+                        CACHE_PURGE_MAX_AGE_MILLIS);
+            }
+        }, "flash-variations-cache-purge");
+        worker.setDaemon(true);
+        worker.start();
     }
 
     private void setStatusTextNow(String text) {

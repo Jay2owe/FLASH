@@ -1,7 +1,5 @@
 package flash.pipeline.ui.variations;
 
-import flash.pipeline.ui.variations.state.VariationStateStore;
-
 import javax.swing.SwingWorker;
 import javax.swing.SwingUtilities;
 import java.util.List;
@@ -15,7 +13,6 @@ public final class VariationExecutor extends SwingWorker<Void, VariationResult> 
     private final VariationCache cache;
     private final BiConsumer<VariationResult, Integer> onResult;
     private final Consumer<String> onStatus;
-    private final VariationStateStore stateStore;
     private int deliveredCount;
 
     public VariationExecutor(ParameterSweep sweep,
@@ -23,15 +20,6 @@ public final class VariationExecutor extends SwingWorker<Void, VariationResult> 
                              VariationCache cache,
                              BiConsumer<VariationResult, Integer> onResult,
                              Consumer<String> onStatus) {
-        this(sweep, strategy, cache, onResult, onStatus, null);
-    }
-
-    public VariationExecutor(ParameterSweep sweep,
-                             VariationStrategy strategy,
-                             VariationCache cache,
-                             BiConsumer<VariationResult, Integer> onResult,
-                             Consumer<String> onStatus,
-                             VariationStateStore stateStore) {
         if (sweep == null) {
             throw new IllegalArgumentException("sweep must not be null");
         }
@@ -43,7 +31,6 @@ public final class VariationExecutor extends SwingWorker<Void, VariationResult> 
         this.cache = cache;
         this.onResult = onResult;
         this.onStatus = onStatus;
-        this.stateStore = stateStore;
     }
 
     public VariationCache cache() {
@@ -54,15 +41,15 @@ public final class VariationExecutor extends SwingWorker<Void, VariationResult> 
     protected Void doInBackground() throws Exception {
         postStatus("Running " + strategy.getClass().getSimpleName()
                 + " (" + sweep.cellCount() + " cells)...");
-        strategy.dispatch(sweep, this::publishResult, this::isCancelled);
-        if (!isCancelled()) {
+        strategy.dispatch(sweep, this::publishResult, this::isCancellationRequested);
+        if (!isCancellationRequested()) {
             postStatus("Parameter variations complete.");
         }
         return null;
     }
 
     private void publishResult(VariationResult result) {
-        if (isCancelled() || result == null) {
+        if (isCancellationRequested() || result == null) {
             return;
         }
         publish(result);
@@ -70,11 +57,11 @@ public final class VariationExecutor extends SwingWorker<Void, VariationResult> 
 
     @Override
     protected void process(List<VariationResult> chunks) {
-        if (chunks == null || isCancelled()) {
+        if (chunks == null || isCancellationRequested()) {
             return;
         }
         for (int i = 0; i < chunks.size(); i++) {
-            if (isCancelled()) {
+            if (isCancellationRequested()) {
                 return;
             }
             VariationResult result = chunks.get(i);
@@ -82,22 +69,13 @@ public final class VariationExecutor extends SwingWorker<Void, VariationResult> 
                 if (onResult != null) {
                     onResult.accept(result, Integer.valueOf(deliveredCount));
                 }
-                recordCompletion(result);
                 deliveredCount++;
             }
         }
     }
 
-    private void recordCompletion(VariationResult result) {
-        if (stateStore == null
-                || result == null
-                || result.hasError()
-                || result.label() == null) {
-            return;
-        }
-        String cacheKey = VariationCache.keyFor(sweep, result.combo());
-        stateStore.recordCompletion(sweep, result.combo(), cacheKey,
-                result.nObjects(), result.durationMs());
+    private boolean isCancellationRequested() {
+        return isCancelled() || Thread.currentThread().isInterrupted();
     }
 
     private void postStatus(final String text) {

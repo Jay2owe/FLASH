@@ -32,6 +32,19 @@ public class FilterVariationEngineContextHashTest {
     }
 
     @Test
+    public void sourceImageHashIncludesPixelsAwayFromSamplePoints() {
+        ImagePlus a = stack("C1 (DAPI)", 16, 16, 3, 0);
+        ImagePlus b = stack("C1 (DAPI)", 16, 16, 3, 0);
+        b.getStack().getProcessor(2).set(1, 14, 255);
+
+        String hashA = FilterVariationEngineContext.sourceImageHash(a);
+        String hashB = FilterVariationEngineContext.sourceImageHash(b);
+
+        assertFalse("Changing an off-centre pixel must change the cache key",
+                hashA.equals(hashB));
+    }
+
+    @Test
     public void sourceImageHashHandlesEmptyZeroDimStack() {
         ImagePlus empty = new ZeroDimImagePlus();
 

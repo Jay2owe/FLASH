@@ -268,12 +268,6 @@ public final class FilterVariationEngineContext {
         return sha256(raw);
     }
 
-    /**
-     * Cheap, stable-under-rerun pixel fingerprint: samples one byte per slice
-     * at the centre and the four quadrant centres, folded into an int.
-     * Cost: O(stackSize), no allocation. Distinguishes two same-dim DAPI
-     * sections with overwhelmingly high probability.
-     */
     private static String pixelFingerprint(ImagePlus image) {
         ImageStack stack = image.getStack();
         int n = stack == null ? 0 : stack.getSize();
@@ -283,16 +277,29 @@ public final class FilterVariationEngineContext {
             return Integer.toHexString(17);
         }
 
-        int hash = 17;
+        MessageDigest digest;
+        try {
+            digest = MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException e) {
+            return Integer.toHexString(image.hashCode());
+        }
+        updateInt(digest, w);
+        updateInt(digest, h);
+        updateInt(digest, n);
         for (int s = 1; s <= n; s++) {
             ImageProcessor ip = stack.getProcessor(s);
-            hash = 31 * hash + Float.floatToIntBits(ip.getf(w / 2, h / 2));
-            hash = 31 * hash + Float.floatToIntBits(ip.getf(w / 4, h / 4));
-            hash = 31 * hash + Float.floatToIntBits(ip.getf(3 * w / 4, h / 4));
-            hash = 31 * hash + Float.floatToIntBits(ip.getf(w / 4, 3 * h / 4));
-            hash = 31 * hash + Float.floatToIntBits(ip.getf(3 * w / 4, 3 * h / 4));
+            if (ip == null) {
+                updateInt(digest, 0);
+                continue;
+            }
+            updateInt(digest, ip.getBitDepth());
+            for (int y = 0; y < h; y++) {
+                for (int x = 0; x < w; x++) {
+                    updateInt(digest, Float.floatToIntBits(ip.getf(x, y)));
+                }
+            }
         }
-        return Integer.toHexString(hash);
+        return hex(digest.digest());
     }
 
     private static String sha256(String value) {
@@ -300,15 +307,26 @@ public final class FilterVariationEngineContext {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] bytes = digest.digest(raw.getBytes(StandardCharsets.UTF_8));
-            StringBuilder out = new StringBuilder(bytes.length * 2);
-            for (int i = 0; i < bytes.length; i++) {
-                out.append(String.format(Locale.ROOT, "%02x",
-                        Integer.valueOf(bytes[i] & 0xff)));
-            }
-            return out.toString();
+            return hex(bytes);
         } catch (NoSuchAlgorithmException e) {
             return Integer.toHexString(raw.hashCode());
         }
+    }
+
+    private static void updateInt(MessageDigest digest, int value) {
+        digest.update((byte) (value >>> 24));
+        digest.update((byte) (value >>> 16));
+        digest.update((byte) (value >>> 8));
+        digest.update((byte) value);
+    }
+
+    private static String hex(byte[] bytes) {
+        StringBuilder out = new StringBuilder(bytes.length * 2);
+        for (int i = 0; i < bytes.length; i++) {
+            out.append(String.format(Locale.ROOT, "%02x",
+                    Integer.valueOf(bytes[i] & 0xff)));
+        }
+        return out.toString();
     }
 
     private static String safe(String value) {

@@ -7,6 +7,10 @@ import ij.ImagePlus;
 
 import java.io.File;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.LinkedHashMap;
@@ -146,7 +150,10 @@ public final class VariationCache {
                 //noinspection ResultOfMethodCallIgnored
                 file.getParentFile().mkdirs();
             }
-            IJ.saveAs(label, "Tiff", file.getAbsolutePath());
+            File temp = new File(file.getParentFile(),
+                    key + ".tmp-" + Thread.currentThread().getId() + ".tif");
+            IJ.saveAs(label, "Tiff", temp.getAbsolutePath());
+            moveIntoPlace(temp.toPath(), file.toPath());
         } catch (Throwable ignored) {
             // Disk cache failures should not break a preview sweep.
         }
@@ -210,5 +217,17 @@ public final class VariationCache {
 
     private static String safe(String value) {
         return value == null ? "" : value.trim();
+    }
+
+    private static void moveIntoPlace(Path temp, Path target) throws java.io.IOException {
+        try {
+            Files.move(temp, target,
+                    StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.ATOMIC_MOVE);
+        } catch (AtomicMoveNotSupportedException e) {
+            Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
+        } finally {
+            Files.deleteIfExists(temp);
+        }
     }
 }
