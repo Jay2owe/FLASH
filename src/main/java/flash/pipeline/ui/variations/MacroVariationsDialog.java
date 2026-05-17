@@ -19,7 +19,6 @@ import javax.swing.ButtonGroup;
 import javax.swing.DefaultListCellRenderer;
 import javax.swing.DefaultListModel;
 import javax.swing.JButton;
-import javax.swing.JComboBox;
 import javax.swing.JFileChooser;
 import javax.swing.JLabel;
 import javax.swing.JList;
@@ -260,12 +259,8 @@ public final class MacroVariationsDialog extends PipelineDialog {
         return presetEditor;
     }
 
-    void configurePresetsForTest(List<String> selectedNames,
-                                 String xParamKey,
-                                 List<?> xValues) {
+    void configurePresetsForTest(List<String> selectedNames) {
         presetEditor.setSelectedNamesForTest(selectedNames);
-        presetEditor.setXParamForTest(xParamKey);
-        presetEditor.setXValuesForTest(xValues);
         refreshCellEstimate();
     }
 
@@ -789,19 +784,15 @@ public final class MacroVariationsDialog extends PipelineDialog {
     }
 
     static ParameterSweep buildPresetsSweepForTest(List<String> presetNames,
-                                                   String xParamKey,
-                                                   List<?> xValues,
                                                    CropSpec cropSpec,
                                                    String channelName,
                                                    String sourceImageHash,
                                                    String cacheNamespace) {
-        return buildPresetsSweep(presetNames, xParamKey, xValues, cropSpec,
+        return buildPresetsSweep(presetNames, cropSpec,
                 channelName, sourceImageHash, cacheNamespace);
     }
 
     private static ParameterSweep buildPresetsSweep(List<String> presetNames,
-                                                    String xParamKey,
-                                                    List<?> xValues,
                                                     CropSpec cropSpec,
                                                     String channelName,
                                                     String sourceImageHash,
@@ -818,21 +809,10 @@ public final class MacroVariationsDialog extends PipelineDialog {
         if (names.isEmpty()) {
             throw new IllegalStateException("Choose at least one readable preset.");
         }
-        String paramKey = xParamKey == null ? "" : xParamKey.trim();
-        if (paramKey.isEmpty()) {
-            throw new IllegalStateException("Choose a numeric X-axis parameter.");
-        }
-        if (xValues == null || xValues.isEmpty()) {
-            throw new IllegalStateException("Choose at least one X-axis value.");
-        }
         LinkedHashMap<ParameterKey, ParameterValueList> values =
                 new LinkedHashMap<ParameterKey, ParameterValueList>();
-        values.put(PresetSweepKey.xValue(paramKey),
-                new ParameterValueList(xValues));
         values.put(PresetSweepKey.presetName(),
                 new ParameterValueList(names));
-        values.put(PresetSweepKey.xParamKey(),
-                new ParameterValueList(Collections.singletonList(paramKey)));
         return new ParameterSweep(ParameterSweep.Method.FILTER,
                 values,
                 cropSpec,
@@ -933,8 +913,6 @@ public final class MacroVariationsDialog extends PipelineDialog {
                 new DefaultListModel<PresetListItem>();
         private final JList<PresetListItem> presetList =
                 new JList<PresetListItem>(presetModel);
-        private final JComboBox<String> xParamCombo = new JComboBox<String>();
-        private final ValueChipPanel xValues;
         private final List<ChangeListener> listeners =
                 new ArrayList<ChangeListener>();
         private boolean suppressSelectionEvents;
@@ -949,16 +927,6 @@ public final class MacroVariationsDialog extends PipelineDialog {
                     context == null ? null : context.presetMacroLoader())
                     .enumerate();
             buildPresetModel();
-            String defaultParam = enumeration.defaultXParamKey();
-            List<String> params = orderedParamChoices(defaultParam);
-            for (int i = 0; i < params.size(); i++) {
-                xParamCombo.addItem(params.get(i));
-            }
-            if (defaultParam.length() > 0) {
-                xParamCombo.setSelectedItem(defaultParam);
-            }
-            xValues = new ValueChipPanel(new ParameterValueList(
-                    suggestedValues(defaultParam)), ValueChipPanel.doubleParser());
             buildUi();
             selectAllReadable();
             installListeners();
@@ -978,16 +946,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
             if (selected.isEmpty()) {
                 throw new IllegalStateException(statusMessage());
             }
-            String xParam = selectedXParam();
-            if (xParam.length() == 0) {
-                throw new IllegalStateException(statusMessage());
-            }
-            if (!anySelectedHasParam(selected, xParam)) {
-                throw new IllegalStateException(statusMessage());
-            }
             return buildPresetsSweep(namesFor(selected),
-                    xParam,
-                    xValues.currentValueList().values(),
                     cropSpec,
                     channelName,
                     sourceImageHash,
@@ -1030,35 +989,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
             fireChanged();
         }
 
-        void setXParamForTest(String paramKey) {
-            if (paramKey == null) {
-                return;
-            }
-            if (((javax.swing.DefaultComboBoxModel<String>) xParamCombo.getModel())
-                    .getIndexOf(paramKey) < 0) {
-                xParamCombo.addItem(paramKey);
-            }
-            xParamCombo.setSelectedItem(paramKey);
-            fireChanged();
-        }
-
-        void setXValuesForTest(List<?> values) {
-            xValues.setValues(values);
-            fireChanged();
-        }
-
         private void buildUi() {
-            JPanel controls = new JPanel();
-            controls.setOpaque(false);
-            controls.setLayout(new BoxLayout(controls, BoxLayout.X_AXIS));
-            controls.setBorder(BorderFactory.createEmptyBorder(6, 8, 2, 8));
-            controls.add(new JLabel("X parameter: "));
-            controls.add(xParamCombo);
-            controls.add(Box.createHorizontalStrut(12));
-            controls.add(new JLabel("Values: "));
-            controls.add(xValues);
-            controls.add(Box.createHorizontalGlue());
-
             presetList.setVisibleRowCount(Math.min(6,
                     Math.max(3, presetModel.getSize())));
             presetList.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
@@ -1067,7 +998,6 @@ public final class MacroVariationsDialog extends PipelineDialog {
             scroller.setBorder(BorderFactory.createEmptyBorder(2, 8, 8, 8));
             scroller.setPreferredSize(new Dimension(420, 96));
 
-            add(controls, BorderLayout.NORTH);
             add(scroller, BorderLayout.CENTER);
         }
 
@@ -1078,16 +1008,6 @@ public final class MacroVariationsDialog extends PipelineDialog {
                         removeSkippedSelections();
                         fireChanged();
                     }
-                }
-            });
-            xParamCombo.addActionListener(new ActionListener() {
-                @Override public void actionPerformed(ActionEvent e) {
-                    fireChanged();
-                }
-            });
-            xValues.addChangeListener(new ChangeListener() {
-                @Override public void stateChanged(ChangeEvent e) {
-                    fireChanged();
                 }
             });
         }
@@ -1161,11 +1081,6 @@ public final class MacroVariationsDialog extends PipelineDialog {
             return out;
         }
 
-        private String selectedXParam() {
-            Object selected = xParamCombo.getSelectedItem();
-            return selected == null ? "" : String.valueOf(selected).trim();
-        }
-
         private String statusMessage() {
             if (enumeration.readablePresets().isEmpty()) {
                 return enumeration.skippedPresets().isEmpty()
@@ -1176,24 +1091,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
             if (selected.isEmpty()) {
                 return "Choose at least one readable preset.";
             }
-            String xParam = selectedXParam();
-            if (xParam.length() == 0) {
-                return "Choose a numeric X-axis parameter.";
-            }
-            if (!anySelectedHasParam(selected, xParam)) {
-                return "No selected preset has numeric parameter " + xParam + ".";
-            }
             return "";
-        }
-
-        private boolean anySelectedHasParam(List<PresetEnumerator.PresetInfo> selected,
-                                            String xParam) {
-            for (int i = 0; i < selected.size(); i++) {
-                if (selected.get(i).hasNumericParam(xParam)) {
-                    return true;
-                }
-            }
-            return false;
         }
 
         private List<String> namesFor(List<PresetEnumerator.PresetInfo> selected) {
@@ -1204,62 +1102,11 @@ public final class MacroVariationsDialog extends PipelineDialog {
             return out;
         }
 
-        private List<String> orderedParamChoices(String defaultParam) {
-            List<String> out = new ArrayList<String>();
-            addIfPresent(out, defaultParam);
-            List<String> common = enumeration.commonNumericParamKeys();
-            for (int i = 0; i < common.size(); i++) {
-                addIfPresent(out, common.get(i));
-            }
-            List<String> all = enumeration.allNumericParamKeys();
-            for (int i = 0; i < all.size(); i++) {
-                addIfPresent(out, all.get(i));
-            }
-            return out;
-        }
-
-        private static void addIfPresent(List<String> out, String value) {
-            String safe = value == null ? "" : value.trim();
-            if (safe.length() == 0 || out.contains(safe)) {
-                return;
-            }
-            out.add(safe);
-        }
-
-        private List<Object> suggestedValues(String paramKey) {
-            double base = 1.0d;
-            List<PresetEnumerator.PresetInfo> readable =
-                    enumeration.readablePresets();
-            for (int i = 0; i < readable.size(); i++) {
-                PresetEnumerator.NumericParam param =
-                        readable.get(i).numericParam(paramKey);
-                if (param != null) {
-                    base = param.baseValue();
-                    break;
-                }
-            }
-            List<Object> values = new ArrayList<Object>();
-            if (Math.abs(base) < 0.0000001d) {
-                values.add(Double.valueOf(0.0d));
-                values.add(Double.valueOf(1.0d));
-                values.add(Double.valueOf(2.0d));
-            } else {
-                values.add(Double.valueOf(round(base * 0.5d)));
-                values.add(Double.valueOf(round(base)));
-                values.add(Double.valueOf(round(base * 2.0d)));
-            }
-            return values;
-        }
-
         private void fireChanged() {
             ChangeEvent event = new ChangeEvent(this);
             for (int i = 0; i < listeners.size(); i++) {
                 listeners.get(i).stateChanged(event);
             }
-        }
-
-        private static double round(double value) {
-            return Math.round(value * 1000.0d) / 1000.0d;
         }
 
         private static final class PresetListItem {

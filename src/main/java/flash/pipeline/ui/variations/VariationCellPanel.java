@@ -1460,6 +1460,11 @@ public final class VariationCellPanel extends JPanel {
     private static String presetComboLabel(PresetSweepCombo presetCombo,
                                            List<ParameterKey> keys) {
         String param = presetCombo.xParamKey();
+        if ((param == null || param.trim().isEmpty())
+                && presetCombo.xValue() == null) {
+            String preset = presetCombo.presetName();
+            return preset == null ? "" : preset.trim();
+        }
         String xPart = (param == null || param.trim().isEmpty()
                 ? "value"
                 : param.trim())

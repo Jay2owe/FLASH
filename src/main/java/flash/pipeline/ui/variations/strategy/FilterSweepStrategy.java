@@ -151,18 +151,22 @@ public final class FilterSweepStrategy implements VariationStrategy {
                     + combo.presetName() + ": " + e.getMessage(), e);
         }
         if (presetMacro == null || presetMacro.trim().isEmpty()) {
-            throw new PresetSweepCombo.IncompatiblePresetException(
+            throw new IllegalStateException(
                     "Preset " + combo.presetName() + " has no macro content.");
         }
-        FilterMacroEditorModel.MacroDefinition macro =
-                FilterMacroEditorModel.parse(presetMacro);
-        if (!setFirstMatchingParameterValue(macro, combo.xParamKey(),
-                combo.xValue())) {
-            throw new PresetSweepCombo.IncompatiblePresetException(
-                    "Preset " + combo.presetName() + " has no "
-                            + combo.xParamKey() + " parameter.");
+        String xParamKey = combo.xParamKey();
+        String rendered = presetMacro;
+        if (xParamKey != null && xParamKey.trim().length() > 0) {
+            FilterMacroEditorModel.MacroDefinition macro =
+                    FilterMacroEditorModel.parse(presetMacro);
+            if (!setFirstMatchingParameterValue(macro, xParamKey,
+                    combo.xValue())) {
+                throw new PresetSweepCombo.IncompatiblePresetException(
+                        "Preset " + combo.presetName() + " has no "
+                                + xParamKey + " parameter.");
+            }
+            rendered = macro.render();
         }
-        String rendered = macro.render();
         return macroPostProcessor == null
                 ? rendered
                 : macroPostProcessor.apply(rendered);

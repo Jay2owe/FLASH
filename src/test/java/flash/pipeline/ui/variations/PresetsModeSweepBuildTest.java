@@ -7,27 +7,26 @@ import java.util.List;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 
 public class PresetsModeSweepBuildTest {
 
     @Test
-    public void buildsPresetByXValueCartesianSweep() {
+    public void buildsOneComboPerPresetWithoutXSubstitution() {
         ParameterSweep sweep = MacroVariationsDialog.buildPresetsSweepForTest(
                 Arrays.asList("Default", "Punctate", "Clustered Large"),
-                "sigma",
-                Arrays.<Object>asList(Double.valueOf(0.5d),
-                        Double.valueOf(1.0d),
-                        Double.valueOf(2.0d)),
                 CropSpec.full(),
                 "DAPI",
                 "source-a",
                 "filter:macro:presets");
 
-        assertEquals(9L, sweep.cellCount());
+        assertEquals(3L, sweep.cellCount());
         List<ParameterCombo> combos = sweep.combos();
+        assertEquals(3, combos.size());
         PresetSweepCombo decoded = PresetSweepCombo.from(combos.get(0));
         assertNotNull(decoded);
-        assertEquals("sigma", decoded.xParamKey());
-        assertEquals(Double.valueOf(0.5d), decoded.xValue());
+        assertEquals("Default", decoded.presetName());
+        assertNull(decoded.xParamKey());
+        assertNull(decoded.xValue());
     }
 }

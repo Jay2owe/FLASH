@@ -5,10 +5,13 @@ import flash.pipeline.ui.config.ConfigQcContext;
 import flash.pipeline.ui.config.FilterParameterStage;
 import flash.pipeline.ui.variations.CropSpec;
 import flash.pipeline.ui.variations.FilterParameterId;
+import flash.pipeline.ui.variations.FilterVariationEngineContext;
 import flash.pipeline.ui.variations.ParameterCombo;
 import flash.pipeline.ui.variations.ParameterKey;
 import flash.pipeline.ui.variations.ParameterSweep;
 import flash.pipeline.ui.variations.ParameterValueList;
+import flash.pipeline.ui.variations.PresetSweepCombo;
+import flash.pipeline.ui.variations.PresetSweepKey;
 import flash.pipeline.ui.variations.SlotSubstitutionKey;
 import flash.pipeline.ui.variations.VariationResult;
 
@@ -32,6 +35,7 @@ import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 
 public class FilterSweepStrategyTest {
 
@@ -148,6 +152,36 @@ public class FilterSweepStrategyTest {
         assertEquals("run(\"Gaussian Blur...\", \"sigma=1 stack\");", lines[0]);
         assertEquals("run(\"Median...\", \"radius=2 stack\");", lines[1]);
         assertEquals("run(\"Mean...\", \"radius=8 stack\");", lines[2]);
+    }
+
+    @Test
+    public void renderMacroForPresetOnlyComboLeavesPresetMacroVerbatim() {
+        final String presetMacro =
+                "run(\"Gaussian Blur...\", \"sigma=1 stack\");\n"
+                        + "run(\"Subtract Background...\", \"rolling=4 stack\");\n";
+        PresetSweepCombo presetOnly = PresetSweepCombo.forPresetOnly("Baked");
+        assertNull(presetOnly.xParamKey());
+        assertNull(presetOnly.xValue());
+        Map<ParameterKey, Object> values = new LinkedHashMap<ParameterKey, Object>();
+        values.put(PresetSweepKey.presetName(), presetOnly.presetName());
+        FilterMacroEditorModel.MacroDefinition base = FilterMacroEditorModel.parse(
+                "run(\"Gaussian Blur...\", \"sigma=9 stack\");\n");
+        FilterSweepStrategy strategy = new FilterSweepStrategy(base,
+                new SyntheticPreviewAdapter(), sourceImage(), null,
+                new FilterSweepStrategy.MacroPostProcessor() {
+                    @Override public String apply(String macroContent) {
+                        return macroContent + "// post";
+                    }
+                },
+                new FilterVariationEngineContext.PresetMacroLoader() {
+                    @Override public String loadPresetMacro(String presetName) {
+                        return presetMacro;
+                    }
+                });
+
+        String rendered = strategy.renderMacroForCombo(new ParameterCombo(values));
+
+        assertEquals(presetMacro + "// post", rendered);
     }
 
     @Test

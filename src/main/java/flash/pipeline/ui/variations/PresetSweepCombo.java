@@ -10,8 +10,13 @@ public final class PresetSweepCombo {
 
     private PresetSweepCombo(String presetName, String xParamKey, Object xValue) {
         this.presetName = presetName == null ? "" : presetName.trim();
-        this.xParamKey = xParamKey == null ? "" : xParamKey.trim();
+        String normalizedParam = xParamKey == null ? "" : xParamKey.trim();
+        this.xParamKey = normalizedParam.length() == 0 ? null : normalizedParam;
         this.xValue = xValue;
+    }
+
+    public static PresetSweepCombo forPresetOnly(String presetName) {
+        return new PresetSweepCombo(presetName, null, null);
     }
 
     public static PresetSweepCombo from(ParameterCombo combo) {
@@ -22,6 +27,7 @@ public final class PresetSweepCombo {
         String xParamKey = null;
         Object xValue = null;
         String keyParam = null;
+        boolean hasXValue = false;
         for (Map.Entry<ParameterKey, Object> entry : combo.values().entrySet()) {
             if (!(entry.getKey() instanceof PresetSweepKey)) {
                 continue;
@@ -34,9 +40,16 @@ public final class PresetSweepCombo {
             } else if (key.role() == PresetSweepKey.Role.X_VALUE) {
                 xValue = entry.getValue();
                 keyParam = key.paramKey();
+                hasXValue = true;
             }
         }
-        if (presetName == null || presetName.trim().isEmpty() || xValue == null) {
+        if (presetName == null || presetName.trim().isEmpty()) {
+            return null;
+        }
+        if (!hasXValue) {
+            return forPresetOnly(presetName);
+        }
+        if (xValue == null) {
             return null;
         }
         if (xParamKey == null || xParamKey.trim().isEmpty()) {
