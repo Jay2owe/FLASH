@@ -18,14 +18,16 @@ import static org.junit.Assert.assertEquals;
 public class VariationGridWindowWheelScrollTest {
 
     @Test
-    public void mouseWheelMovesScrollBar() throws Exception {
+    public void mouseWheelMovesSlider() throws Exception {
         Assume.assumeFalse(GraphicsEnvironment.isHeadless());
         SwingUtilities.invokeAndWait(new Runnable() {
             @Override public void run() {
                 VariationGridWindow window = new VariationGridWindow(
                         null, "FLASH variations", cells(4, 5));
                 try {
-                    assertEquals(1, window.zScrollBarForTest().getValue());
+                    assertEquals(1, window.zSliderForTest().getValue());
+                    assertEquals("1 / 5",
+                            window.zSliceLabelForTest().getText());
                     MouseWheelEvent event = new MouseWheelEvent(
                             window.gridPanelForTest(),
                             MouseWheelEvent.MOUSE_WHEEL,
@@ -43,7 +45,9 @@ public class VariationGridWindowWheelScrollTest {
                     for (int i = 0; i < listeners.length; i++) {
                         listeners[i].mouseWheelMoved(event);
                     }
-                    assertEquals(2, window.zScrollBarForTest().getValue());
+                    assertEquals(2, window.zSliderForTest().getValue());
+                    assertEquals("2 / 5",
+                            window.zSliceLabelForTest().getText());
                 } finally {
                     window.dispose();
                 }

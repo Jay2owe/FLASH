@@ -198,7 +198,7 @@ public final class VariationsDialog extends PipelineDialog {
 
     void setGlobalZForTest(int z) {
         if (gridWindow != null) {
-            gridWindow.zScrollBarForTest().setValue(z);
+            gridWindow.zSliderForTest().setValue(z);
         }
     }
 
