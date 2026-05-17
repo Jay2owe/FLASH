@@ -2,16 +2,16 @@
 
 Date: 2026-05-16
 Total stages: 10 (plus PLAN.md)
-Findings: 0 BLOCKER, 0 MAJOR, 1 MINOR, 7 IMPLEMENTED, 3 SUPERSEDED, 6 RESOLVED
+Findings: 0 BLOCKER, 0 MAJOR, 0 MINOR, 7 IMPLEMENTED, 3 SUPERSEDED, 7 RESOLVED
 
 Method note: `python -m graphify query "custom segmentation engine model catalog parser StarDist Cellpose implementation locations" --graph graphify-out/graph.json` was attempted, but local `python.exe` failed with "A specified logon session does not exist. It may already have been terminated." This audit continued with targeted source reads and `rg`.
 
 ## Executive summary
 
-- Top remaining user-impacting gap: the public README still needs the compact runtime/catalog constraints pointer.
-- Resolved gaps: per-channel Object Analysis details now report the selected StarDist/Cellpose/trained-RF model display name plus key; Custom Model Manager delete now keeps copied files by default; the manager now has status, validate-all, and duplicate-as-custom affordances for stock entries; training guidance now has a source-tree guide plus direct help links from the manager and QC model rows; and CLI usage now documents the legacy StarDist form plus legacy token rewrites.
+- Top remaining user-impacting gap: none in the counted custom-engine parity findings.
+- Resolved gaps: per-channel Object Analysis details now report the selected StarDist/Cellpose/trained-RF model display name plus key; Custom Model Manager delete now keeps copied files by default; the manager now has status, validate-all, and duplicate-as-custom affordances for stock entries; training guidance now has a source-tree guide plus direct help links from the manager and QC model rows; CLI usage now documents the legacy StarDist form plus legacy token rewrites; and README now documents runtime/catalog constraints.
 - Stages with 100% functional parity after merged-plan substitutions: 01, 02, 03, 04, 05.
-- Stages with significant divergence: 09. Stage 10 is deliberately deferred/superseded.
+- Stages with significant divergence: none among counted stages. Stage 10 is deliberately deferred/superseded.
 
 ## Stage 01 - Segmentation Config Model
 
@@ -115,17 +115,17 @@ Method note: `python -m graphify query "custom segmentation engine model catalog
 - Status: RESOLVED
 - Severity: MINOR
 - Evidence: The pre-merge spec required CLI usage to list the legacy StarDist form, new StarDist model-key form, and Cellpose form in `docs/custom-segmentation-engines/08_cli-audit-recipe-surfaces.md:76`; current usage includes examples for enhanced classical, StarDist with `model=`, Cellpose with `model=`, and trained RF in `src/main/java/flash/pipeline/cli/CLIArgumentParser.java:239`, but it does not list `stardist:<prob>:<nms>` as a valid legacy form.
-- Resolution: RESOLVED in commit `1ca7495`. `CLIArgumentParser.usage()` now lists `stardist:<prob>:<nms>` as the accepted legacy StarDist form, keeps the canonical StarDist and Cellpose `model=` examples, and clarifies that legacy Cellpose positional tokens are accepted and rewritten to canonical `model=` form internally.
+- Resolution: RESOLVED in commit `7ec6031`. `CLIArgumentParser.usage()` now lists `stardist:<prob>:<nms>` as the accepted legacy StarDist form, keeps the canonical StarDist and Cellpose `model=` examples, and clarifies that legacy Cellpose positional tokens are accepted and rewritten to canonical `model=` form internally.
 - Gap: None.
 
 ## Stage 09 - Validation And Docs
 
 ### Feature: Public docs final pass
-- Status: PARTIAL
+- Status: RESOLVED
 - Severity: MINOR
 - Evidence: The pre-merge validation stage required README coverage for pinned Cellpose 3/no Cellpose 4, Fiji-compatible StarDist zips, per-slice StarDist + Z-linking, and a link to `docs/training_segmentation_models.md` in `docs/custom-segmentation-engines/09_validation-docs.md:35`; current README mentions selectable built-ins/custom model import and external training in `README.md:90` and `README.md:92`, but does not include the Cellpose 4 exclusion, per-slice 2D StarDist caveat, model catalog layout, or the missing training guide link.
-- Gap: Public docs cover the broad feature but not several concrete constraints called out by the pre-merge plan.
-- Suggested fix: Add a compact README subsection for catalog layout and runtime constraints, and link it to the new `docs/training_segmentation_models.md` once Stage 07's doc gap is closed.
+- Resolution: RESOLVED in commit `07a821c`. README now includes a compact runtime and catalog note covering Cellpose 3.1.1.2 pinning, no Cellpose 4 / Cellpose-SAM / cpsam, Fiji-compatible StarDist `.zip` imports, per-slice 2D StarDist with Z-linking, the `<projectRoot>/FLASH/Configuration/Segmentation Models/` catalog layout, and the training guide link.
+- Gap: None.
 
 ## Stage 10 - Few-Shot Interactive Segmentation
 

@@ -91,6 +91,12 @@ FLASH supports built-in and project-specific segmentation models. StarDist and C
 
 Click-driven setup can mark good and bad preview objects, suggest safer filter parameters, and launch the Train Custom Engine wizard. Classical and Enhanced Classical training uses an in-process Smile Random Forest object classifier; StarDist and Cellpose workflows package click-derived datasets for external training and then register the trained model in the project catalog.
 
+#### Runtime And Catalog Notes
+
+FLASH pins Cellpose `3.1.1.2`; Cellpose 4, Cellpose-SAM, and `cpsam` models are not supported. StarDist custom models must be Fiji-compatible TensorFlow SavedModel `.zip` exports. FLASH runs StarDist per slice as 2D detections with Z-linking; full 3D StarDist is not built in.
+
+The project model catalog lives under `<projectRoot>/FLASH/Configuration/Segmentation Models/`, with entries in `catalog.json` and copied model files under `files/<modelKey>/...`. For training and import steps, see [docs/training_segmentation_models.md](docs/training_segmentation_models.md).
+
 Publication-oriented method notes live in [docs/methods/](docs/methods/), including [custom models and click training](docs/methods/Methodology%20-%20Custom%20Models%20and%20Click%20Training.md).
 
 ## Supported Inputs
