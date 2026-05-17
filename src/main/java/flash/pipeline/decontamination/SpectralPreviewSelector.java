@@ -10,7 +10,7 @@ import ij.process.ImageProcessor;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.PrintWriter;
+import java.io.Writer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -182,50 +182,52 @@ public class SpectralPreviewSelector {
             throw new IOException("Could not create " + parent.getAbsolutePath());
         }
 
-        PrintWriter pw = CsvSupport.newWriter(file);
-        try {
-            pw.println(CsvSupport.joinRow(Arrays.asList(
-                    "SeriesIndex",
-                    "SeriesNumber",
-                    "SeriesName",
-                    "AnimalName",
-                    "Condition",
-                    "ConditionRole",
-                    "SelectionRole",
-                    "ConfigVersion",
-                    "ConfigId",
-                    "PipelinePresetId",
-                    "PipelineStackId",
-                    "TargetP99",
-                    "AutofluorescenceP99",
-                    "BleedThroughP99",
-                    "SaturatedFraction",
-                    "ObjectCount")));
-            if (selections == null) return;
-            for (PreviewSelection selection : selections) {
-                PreviewCandidate c = selection.candidate;
-                ImageScores s = selection.scores;
-                pw.println(CsvSupport.joinRow(Arrays.asList(
-                        String.valueOf(c.seriesIndex),
-                        String.valueOf(c.seriesIndex + 1),
-                        c.seriesName,
-                        c.animalName,
-                        c.conditionName,
-                        selection.conditionRole,
-                        selection.selectionRole,
-                        runMetadata == null ? "" : String.valueOf(runMetadata.configVersion),
-                        runMetadata == null ? "" : cleanLabel(runMetadata.configId, ""),
-                        runMetadata == null ? "" : cleanLabel(runMetadata.pipelinePresetId, ""),
-                        runMetadata == null ? "" : cleanLabel(runMetadata.pipelineStackId, ""),
-                        formatDouble(s.targetP99),
-                        formatDouble(s.autofluorescenceP99),
-                        formatDouble(s.bleedThroughP99),
-                        formatDouble(s.saturatedFraction),
-                        s.objectCount < 0 ? "" : String.valueOf(s.objectCount))));
+        AtomicFileWriter.writeUtf8(file, new AtomicFileWriter.WriterAction() {
+            @Override
+            public void write(Writer writer) throws IOException {
+                writer.write(CsvSupport.joinRow(Arrays.asList(
+                        "SeriesIndex",
+                        "SeriesNumber",
+                        "SeriesName",
+                        "AnimalName",
+                        "Condition",
+                        "ConditionRole",
+                        "SelectionRole",
+                        "ConfigVersion",
+                        "ConfigId",
+                        "PipelinePresetId",
+                        "PipelineStackId",
+                        "TargetP99",
+                        "AutofluorescenceP99",
+                        "BleedThroughP99",
+                        "SaturatedFraction",
+                        "ObjectCount")));
+                writer.write("\n");
+                if (selections == null) return;
+                for (PreviewSelection selection : selections) {
+                    PreviewCandidate c = selection.candidate;
+                    ImageScores s = selection.scores;
+                    writer.write(CsvSupport.joinRow(Arrays.asList(
+                            String.valueOf(c.seriesIndex),
+                            String.valueOf(c.seriesIndex + 1),
+                            c.seriesName,
+                            c.animalName,
+                            c.conditionName,
+                            selection.conditionRole,
+                            selection.selectionRole,
+                            runMetadata == null ? "" : String.valueOf(runMetadata.configVersion),
+                            runMetadata == null ? "" : cleanLabel(runMetadata.configId, ""),
+                            runMetadata == null ? "" : cleanLabel(runMetadata.pipelinePresetId, ""),
+                            runMetadata == null ? "" : cleanLabel(runMetadata.pipelineStackId, ""),
+                            formatDouble(s.targetP99),
+                            formatDouble(s.autofluorescenceP99),
+                            formatDouble(s.bleedThroughP99),
+                            formatDouble(s.saturatedFraction),
+                            s.objectCount < 0 ? "" : String.valueOf(s.objectCount))));
+                    writer.write("\n");
+                }
             }
-        } finally {
-            pw.close();
-        }
+        });
     }
 
     private static void addTypical(LinkedHashMap<Integer, MutableSelection> selected,

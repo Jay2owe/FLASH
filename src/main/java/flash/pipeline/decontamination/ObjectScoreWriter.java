@@ -10,7 +10,7 @@ import ij.io.FileSaver;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.PrintWriter;
+import java.io.Writer;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -483,19 +483,21 @@ public final class ObjectScoreWriter {
         }
 
         List<String> columns = orderedColumns(sortedRows, fixedColumns);
-        PrintWriter writer = CsvSupport.newWriter(file);
-        try {
-            writer.println(CsvSupport.joinRow(columns));
-            for (Map<String, String> row : sortedRows) {
-                List<String> values = new ArrayList<String>(columns.size());
-                for (String column : columns) {
-                    values.add(row == null ? "" : clean(row.get(column)));
+        AtomicFileWriter.writeUtf8(file, new AtomicFileWriter.WriterAction() {
+            @Override
+            public void write(Writer writer) throws IOException {
+                writer.write(CsvSupport.joinRow(columns));
+                writer.write("\n");
+                for (Map<String, String> row : sortedRows) {
+                    List<String> values = new ArrayList<String>(columns.size());
+                    for (String column : columns) {
+                        values.add(row == null ? "" : clean(row.get(column)));
+                    }
+                    writer.write(CsvSupport.joinRow(values));
+                    writer.write("\n");
                 }
-                writer.println(CsvSupport.joinRow(values));
             }
-        } finally {
-            writer.close();
-        }
+        });
     }
 
     private static List<String> orderedColumns(List<Map<String, String>> rows, List<String> fixedColumns) {

@@ -7,9 +7,7 @@ import ij.ImagePlus;
 import ij.io.FileSaver;
 
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.OutputStreamWriter;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -333,43 +331,47 @@ public final class SpectralOutputWriter {
             throw new IOException("Could not create " + parent.getAbsolutePath());
         }
 
-        try (Writer writer = new OutputStreamWriter(new FileOutputStream(file), StandardCharsets.UTF_8)) {
-            writer.write("Spectral Decontamination - Analysis Details\n");
-            writer.write("=========================================\n\n");
-            writer.write("Timestamp: " + new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date()) + "\n");
-            writer.write("Goal: " + clean(details.goalLabel) + "\n");
-            writer.write("Config Version: " + details.configVersion + "\n");
-            writer.write("Config ID: " + clean(details.configId) + "\n");
-            writer.write("Correction Preset ID: " + clean(details.pipelinePresetId) + "\n");
-            writer.write("Correction Stack ID: " + clean(details.pipelineStackId) + "\n");
-            writer.write("Target Channel: " + clean(details.targetChannelName) + "\n");
-            writer.write("Bleed-through Channels: " + clean(details.bleedThroughChannels) + "\n");
-            writer.write("Autofluorescence Channels: " + clean(details.autofluorescenceChannels) + "\n");
-            writer.write("Excluded Channels: " + clean(details.excludedChannels) + "\n");
-            writer.write("Condition Source: " + clean(details.conditionSourceLabel) + "\n");
-            writer.write("Control Conditions: " + clean(details.controlConditions) + "\n");
-            writer.write("Experimental Conditions: " + clean(details.experimentalConditions) + "\n");
-            writer.write("Correction Preset: " + clean(details.pipelinePresetLabel) + "\n");
-            writer.write("Correction Stack: " + clean(details.pipelineDescription) + "\n");
-            writer.write("Z-Slice Subset: " + clean(details.zSliceSummary) + "\n");
-            writer.write("Skip Existing: " + details.skipExisting + "\n");
-            writer.write("Parallel Threads: " + details.parallelThreads + "\n");
-            writer.write("Total Images: " + details.totalImages + "\n");
-            writer.write("Images Processed: " + details.processedImages + "\n");
-            writer.write("Images Reused From Existing Outputs: " + details.skippedImages + "\n");
-            writer.write("Images Failed: " + details.failedImages + "\n");
-            writer.write("Corrected Images Written: " + details.correctedImagesWritten + "\n");
-            writer.write("Mask Images Written: " + details.maskImagesWritten + "\n");
-            writer.write("Per-Image Summary: " + clean(details.perImageSummaryPath) + "\n");
-            writer.write("Correction Coefficients: " + clean(details.correctionCoefficientsPath) + "\n");
-            writer.write("Per-Object Scores: " + clean(details.perObjectScoresPath) + "\n");
-            writer.write("Preview Selection: " + clean(details.previewSelectionPath) + "\n");
-            writer.write("Object Score Rows: " + details.objectScoreRows + "\n");
-            writer.write("Cleaned Object Maps Written: " + details.cleanedObjectMapsWritten + "\n");
-            writer.write("Objects Kept: " + details.objectsKept + "\n");
-            writer.write("Objects Removed: " + details.objectsRejected + "\n");
-            writer.write("Runtime: " + formatDuration(details.runtimeMs) + "\n");
-        }
+        AtomicFileWriter.writeUtf8(file, new AtomicFileWriter.WriterAction() {
+            @Override
+            public void write(Writer writer) throws IOException {
+                writer.write("Spectral Decontamination - Analysis Details\n");
+                writer.write("=========================================\n\n");
+                writer.write("Timestamp: "
+                        + new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date()) + "\n");
+                writer.write("Goal: " + clean(details.goalLabel) + "\n");
+                writer.write("Config Version: " + details.configVersion + "\n");
+                writer.write("Config ID: " + clean(details.configId) + "\n");
+                writer.write("Correction Preset ID: " + clean(details.pipelinePresetId) + "\n");
+                writer.write("Correction Stack ID: " + clean(details.pipelineStackId) + "\n");
+                writer.write("Target Channel: " + clean(details.targetChannelName) + "\n");
+                writer.write("Bleed-through Channels: " + clean(details.bleedThroughChannels) + "\n");
+                writer.write("Autofluorescence Channels: " + clean(details.autofluorescenceChannels) + "\n");
+                writer.write("Excluded Channels: " + clean(details.excludedChannels) + "\n");
+                writer.write("Condition Source: " + clean(details.conditionSourceLabel) + "\n");
+                writer.write("Control Conditions: " + clean(details.controlConditions) + "\n");
+                writer.write("Experimental Conditions: " + clean(details.experimentalConditions) + "\n");
+                writer.write("Correction Preset: " + clean(details.pipelinePresetLabel) + "\n");
+                writer.write("Correction Stack: " + clean(details.pipelineDescription) + "\n");
+                writer.write("Z-Slice Subset: " + clean(details.zSliceSummary) + "\n");
+                writer.write("Skip Existing: " + details.skipExisting + "\n");
+                writer.write("Parallel Threads: " + details.parallelThreads + "\n");
+                writer.write("Total Images: " + details.totalImages + "\n");
+                writer.write("Images Processed: " + details.processedImages + "\n");
+                writer.write("Images Reused From Existing Outputs: " + details.skippedImages + "\n");
+                writer.write("Images Failed: " + details.failedImages + "\n");
+                writer.write("Corrected Images Written: " + details.correctedImagesWritten + "\n");
+                writer.write("Mask Images Written: " + details.maskImagesWritten + "\n");
+                writer.write("Per-Image Summary: " + clean(details.perImageSummaryPath) + "\n");
+                writer.write("Correction Coefficients: " + clean(details.correctionCoefficientsPath) + "\n");
+                writer.write("Per-Object Scores: " + clean(details.perObjectScoresPath) + "\n");
+                writer.write("Preview Selection: " + clean(details.previewSelectionPath) + "\n");
+                writer.write("Object Score Rows: " + details.objectScoreRows + "\n");
+                writer.write("Cleaned Object Maps Written: " + details.cleanedObjectMapsWritten + "\n");
+                writer.write("Objects Kept: " + details.objectsKept + "\n");
+                writer.write("Objects Removed: " + details.objectsRejected + "\n");
+                writer.write("Runtime: " + formatDuration(details.runtimeMs) + "\n");
+            }
+        });
 
         return file;
     }
@@ -486,18 +488,21 @@ public final class SpectralOutputWriter {
         }
 
         List<String> columns = orderedColumns(sortedRows, fixedColumns);
-        try (Writer writer = new OutputStreamWriter(new FileOutputStream(file), StandardCharsets.UTF_8)) {
-            writer.write(CsvSupport.joinRow(columns));
-            writer.write("\n");
-            for (Map<String, String> row : sortedRows) {
-                List<String> values = new ArrayList<String>(columns.size());
-                for (String column : columns) {
-                    values.add(row == null ? "" : clean(row.get(column)));
-                }
-                writer.write(CsvSupport.joinRow(values));
+        AtomicFileWriter.writeUtf8(file, new AtomicFileWriter.WriterAction() {
+            @Override
+            public void write(Writer writer) throws IOException {
+                writer.write(CsvSupport.joinRow(columns));
                 writer.write("\n");
+                for (Map<String, String> row : sortedRows) {
+                    List<String> values = new ArrayList<String>(columns.size());
+                    for (String column : columns) {
+                        values.add(row == null ? "" : clean(row.get(column)));
+                    }
+                    writer.write(CsvSupport.joinRow(values));
+                    writer.write("\n");
+                }
             }
-        }
+        });
     }
 
     private static List<String> orderedColumns(List<Map<String, String>> rows, List<String> fixedColumns) {
