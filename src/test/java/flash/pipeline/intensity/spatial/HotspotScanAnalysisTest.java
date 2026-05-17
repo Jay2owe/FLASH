@@ -6,6 +6,7 @@ import flash.pipeline.runtime.DependencyService;
 import flash.pipeline.runtime.DependencyStatus;
 import flash.pipeline.runtime.FeatureDependencyGate;
 import ij.ImagePlus;
+import ij.gui.Roi;
 import ij.measure.Calibration;
 import ij.process.FloatProcessor;
 import org.junit.After;
@@ -61,6 +62,20 @@ public class HotspotScanAnalysisTest {
         assertTrue(result.value("Intensity_HotspotFraction") > 0.0);
         assertTrue(Double.isFinite(result.value("Intensity_HotspotMoransI")));
         assertTrue(Double.isFinite(result.value("Intensity_HotspotP")));
+    }
+
+    @Test
+    public void roiOutsideImageReturnsNanInsteadOfThrowing() {
+        IntensitySpatialContext context = new IntensitySpatialContext(
+                config(), gaussianHotspotImage(32, 32), null, 1,
+                new Roi(100, 100, 10, 10),
+                IntensitySpatialOutputMode.BASE, "synthetic", "DAPI", "", null);
+
+        IntensitySpatialResult result = new HotspotScanAnalysis().measure(context);
+
+        assertTrue(Double.isNaN(result.value("Intensity_HotspotFraction")));
+        assertTrue(Double.isNaN(result.value("Intensity_HotspotMoransI")));
+        assertTrue(Double.isNaN(result.value("Intensity_HotspotP")));
     }
 
     private static void installDependencyStatuses(final DependencyId missing) throws Exception {

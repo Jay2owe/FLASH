@@ -75,6 +75,20 @@ public class IntensityMaskingTest {
     }
 
     @Test
+    public void createRoiChannelMaskAllowsAllZeroMaskWhenThresholdExcludesEveryPixel() {
+        ImageStack sourceStack = new ImageStack(3, 1);
+        sourceStack.addSlice(new FloatProcessor(3, 1,
+                new float[]{1.0f, 2.0f, 3.0f}, null));
+
+        ImagePlus mask = IntensityAnalysisV2.createRoiChannelMask(
+                new ImagePlus("source", sourceStack), null, false, 10.0, true);
+
+        assertEquals(0, mask.getStack().getProcessor(1).get(0, 0));
+        assertEquals(0, mask.getStack().getProcessor(1).get(1, 0));
+        assertEquals(0, mask.getStack().getProcessor(1).get(2, 0));
+    }
+
+    @Test
     public void writeMeasurementColumnsWithoutBinarizationEmitsRawFirstBaseSchema() {
         ResultsTable table = new ResultsTable();
         table.incrementCounter();

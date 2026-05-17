@@ -490,10 +490,59 @@ public class IntensityAnalysisV2Test {
                     "Intensity analysis failed for 1 channel(s)"));
             assertEquals(1, cause.getSuppressed().length);
             assertTrue(cause.getSuppressed()[0] instanceof NumberFormatException);
+            assertTrue(cause.getSuppressed()[0].getMessage(),
+                    cause.getSuppressed()[0].getMessage().contains("channel 'GFAP'"));
         }
 
         assertEquals(0, tableFor(totalTables, IntensitySpatialOutputKey.base("DAPI")).size());
         assertEquals(0, tableFor(totalTables, IntensitySpatialOutputKey.base("GFAP")).size());
+    }
+
+    @Test
+    public void negativeThresholdFailureIncludesChannelImageAndRoiContext() throws Exception {
+        File dir = temp.newFolder("negative-threshold-failure");
+        File binDir = new File(dir, ".bin");
+        assertTrue(binDir.mkdirs());
+        File outputRoot = IntensityAnalysisV2.intensityWriteRoot(dir.getAbsolutePath());
+        assertTrue(outputRoot.mkdirs());
+
+        String[] channelNames = {"DAPI"};
+        boolean[] binarization = {true};
+        String[] thresholds = {"-1"};
+        String[] filterSources = {"Basic background and noise removal"};
+        IntensitySpatialConfig spatial = IntensitySpatialConfig.disabled();
+        IntensityAnalysisV2.IntensityOutputPlan plan = IntensityAnalysisV2.buildOutputPlan(
+                outputRoot, channelNames, false, -1, spatial, 1, false);
+        Object totalTables = newOutputTables(plan);
+
+        try {
+            invokeRunIntensityMeasurementsForThisImage(
+                    new IntensityAnalysisV2(),
+                    new NameParts("", "SyntheticMouse", "LH", "SCN"),
+                    new ImagePlus[]{syntheticImage(8, 8)},
+                    1,
+                    binarization,
+                    thresholds,
+                    channelNames,
+                    -1,
+                    plan,
+                    totalTables,
+                    1,
+                    "LH",
+                    intensityConfig("DAPI", "-1"),
+                    filterSources,
+                    binDir,
+                    "",
+                    null);
+            fail("Expected negative threshold to abort intensity analysis");
+        } catch (InvocationTargetException e) {
+            Throwable cause = e.getCause();
+            assertTrue(cause instanceof NumberFormatException);
+            assertTrue(cause.getMessage(), cause.getMessage().contains("channel 'DAPI'"));
+            assertTrue(cause.getMessage(), cause.getMessage().contains("SyntheticMouse"));
+            assertTrue(cause.getMessage(), cause.getMessage().contains("ROI"));
+            assertEquals(0, tableFor(totalTables, IntensitySpatialOutputKey.base("DAPI")).size());
+        }
     }
 
     private static void installDispatcherChoice(final BinSetupChooser.Choice choice,

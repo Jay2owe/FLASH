@@ -49,6 +49,8 @@ public class IntensityDetailsWriterTest {
         assertTrue(text.contains("<Filter Macro>\n" + macro + "</Filter Macro>"));
         assertTrue(text.contains("setThreshold(125, 65535);"));
         assertTrue(text.contains("<In ROI>\nDAPI\n</In ROI>"));
+        File[] leftovers = analysisDetailsDir.listFiles((dir, name) -> name.endsWith(".tmp"));
+        assertTrue(leftovers == null || leftovers.length == 0);
     }
 
     @Test

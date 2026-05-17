@@ -10,6 +10,10 @@ import java.io.FileOutputStream;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 
 /**
  * Writes macro-style per-channel Analysis Details for Intensity Analysis.
@@ -84,6 +88,7 @@ public final class IntensityDetailsWriter {
         flash.pipeline.io.IoUtils.mustMkdirs(analysisDetailsDir);
 
         File out = new File(analysisDetailsDir, ChannelFilenameCodec.toSafe(channelName) + ".txt");
+        File tmp = File.createTempFile(out.getName(), ".tmp", analysisDetailsDir);
 
         String filterMacro = "";
         if (filterEnabled && actualMacroText != null) {
@@ -91,61 +96,79 @@ public final class IntensityDetailsWriter {
             if (!filterMacro.endsWith("\n")) filterMacro += "\n";
         }
 
-        try (Writer w = new OutputStreamWriter(new FileOutputStream(out), StandardCharsets.UTF_8)) {
-            w.write("// Fluorescence Intensity Analysis - " + channelName + "\n");
-            w.write("// Filter source: " + (filterSourceLabel == null ? "" : filterSourceLabel) + "\n");
+        boolean moved = false;
+        try {
+            try (Writer w = new OutputStreamWriter(new FileOutputStream(tmp), StandardCharsets.UTF_8)) {
+                w.write("// Fluorescence Intensity Analysis - " + channelName + "\n");
+                w.write("// Filter source: " + (filterSourceLabel == null ? "" : filterSourceLabel) + "\n");
 
-            // Filter Macro - matches ObjectAnalysisDetailsWriter tag name.
-            w.write("\n");
-            w.write("<Filter Macro>\n");
-            w.write(filterMacro);
-            w.write("</Filter Macro>\n");
-
-            // Analysis Macro - documents the measurement steps.
-            w.write("\n");
-            w.write("<Analysis Macro>\n");
-            w.write("// Base CSV columns: IntDen and %Area are measured on the filtered full ROI.\n");
-            w.write("selectImage(" + channelName + "_filtered);\n");
-            w.write("run(\"Set Measurements...\", \"integrated area_fraction redirect=None decimal=3\");\n");
-            w.write("// Per-slice: run(\"Measure\");\n");
-            if (binarized) {
+                // Filter Macro - matches ObjectAnalysisDetailsWriter tag name.
                 w.write("\n");
-                w.write("// Binarized CSV columns: IntDen_binarized and %Area_binarized.\n");
+                w.write("<Filter Macro>\n");
+                w.write(filterMacro);
+                w.write("</Filter Macro>\n");
+
+                // Analysis Macro - documents the measurement steps.
+                w.write("\n");
+                w.write("<Analysis Macro>\n");
+                w.write("// Base CSV columns: IntDen and %Area are measured on the filtered full ROI.\n");
                 w.write("selectImage(" + channelName + "_filtered);\n");
-                w.write("setThreshold(" + (thresholdValue != null ? thresholdValue : "0")
-                        + ", 65535);\n");
-                w.write("run(\"Convert to Mask\", \"background=Light\");\n");
-                w.write("// Apply binary mask to raw signal: mask>0 keeps the raw pixel, mask==0 sets 0.\n");
                 w.write("run(\"Set Measurements...\", \"integrated area_fraction redirect=None decimal=3\");\n");
                 w.write("// Per-slice: run(\"Measure\");\n");
-            }
-            if (inRoi != null && !"None".equals(inRoi)) {
-                w.write("// ROI channel mask: " + inRoi + "\n");
-                w.write("// Apply ROI channel mask: mask>0 keeps the measurement pixel, mask==0 sets 0.\n");
-            }
-            w.write("\n");
-            w.write("// IntDen_Unfiltered CSV column: raw signal measurement (no filter).\n");
-            w.write("selectImage(" + channelName + "_raw);\n");
-            w.write("run(\"Set Measurements...\", \"integrated redirect=None decimal=3\");\n");
-            w.write("// Per-slice: run(\"Measure\");\n");
-            w.write("</Analysis Macro>\n");
-
-            if (binarized) {
+                if (binarized) {
+                    w.write("\n");
+                    w.write("// Binarized CSV columns: IntDen_binarized and %Area_binarized.\n");
+                    w.write("selectImage(" + channelName + "_filtered);\n");
+                    w.write("setThreshold(" + (thresholdValue != null ? thresholdValue : "0")
+                            + ", 65535);\n");
+                    w.write("run(\"Convert to Mask\", \"background=Light\");\n");
+                    w.write("// Apply binary mask to raw signal: mask>0 keeps the raw pixel, mask==0 sets 0.\n");
+                    w.write("run(\"Set Measurements...\", \"integrated area_fraction redirect=None decimal=3\");\n");
+                    w.write("// Per-slice: run(\"Measure\");\n");
+                }
+                if (inRoi != null && !"None".equals(inRoi)) {
+                    w.write("// ROI channel mask: " + inRoi + "\n");
+                    w.write("// Apply ROI channel mask: mask>0 keeps the measurement pixel, mask==0 sets 0.\n");
+                }
                 w.write("\n");
-                w.write("<Threshold>\n");
-                w.write(thresholdValue == null ? "" : thresholdValue);
-                w.write("\n</Threshold>\n");
+                w.write("// IntDen_Unfiltered CSV column: raw signal measurement (no filter).\n");
+                w.write("selectImage(" + channelName + "_raw);\n");
+                w.write("run(\"Set Measurements...\", \"integrated redirect=None decimal=3\");\n");
+                w.write("// Per-slice: run(\"Measure\");\n");
+                w.write("</Analysis Macro>\n");
+
+                if (binarized) {
+                    w.write("\n");
+                    w.write("<Threshold>\n");
+                    w.write(thresholdValue == null ? "" : thresholdValue);
+                    w.write("\n</Threshold>\n");
+                }
+
+                if (inRoi != null) {
+                    w.write("\n");
+                    w.write("<In ROI>\n");
+                    w.write(inRoi);
+                    w.write("\n</In ROI>\n");
+                }
+
+                writeSpatialDetails(w, spatialConfig, zSliceSummary, binarized, inRoi,
+                        overlayPath, dependencySummary, partialFailureSummary);
             }
 
-            if (inRoi != null) {
-                w.write("\n");
-                w.write("<In ROI>\n");
-                w.write(inRoi);
-                w.write("\n</In ROI>\n");
+            moveIntoPlace(tmp.toPath(), out.toPath());
+            moved = true;
+        } finally {
+            if (!moved) {
+                Files.deleteIfExists(tmp.toPath());
             }
+        }
+    }
 
-            writeSpatialDetails(w, spatialConfig, zSliceSummary, binarized, inRoi,
-                    overlayPath, dependencySummary, partialFailureSummary);
+    private static void moveIntoPlace(Path tmp, Path out) throws Exception {
+        try {
+            Files.move(tmp, out, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        } catch (AtomicMoveNotSupportedException e) {
+            Files.move(tmp, out, StandardCopyOption.REPLACE_EXISTING);
         }
     }
 

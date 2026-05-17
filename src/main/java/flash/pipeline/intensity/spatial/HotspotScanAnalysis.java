@@ -82,7 +82,8 @@ public final class HotspotScanAnalysis implements IntensitySpatialAnalysis {
         }
 
         Stats stats = Stats.from(grid);
-        if (stats.varianceSum <= 0.0 || Double.isNaN(stats.varianceSum)) {
+        if (stats.varianceSum <= 0.0 || Double.isNaN(stats.varianceSum)
+                || Double.isInfinite(stats.varianceSum)) {
             values.put(COLUMN_FRACTION + suffix, Double.valueOf(0.0));
             values.put(COLUMN_MORANS_I + suffix, Double.valueOf(0.0));
             values.put(COLUMN_P + suffix, Double.valueOf(1.0));
@@ -90,6 +91,12 @@ public final class HotspotScanAnalysis implements IntensitySpatialAnalysis {
         }
 
         double observedGlobal = globalMoransI(grid, stats.values, stats.mean, stats.varianceSum);
+        if (Double.isNaN(observedGlobal) || Double.isInfinite(observedGlobal)) {
+            values.put(COLUMN_FRACTION + suffix, Double.valueOf(Double.NaN));
+            values.put(COLUMN_MORANS_I + suffix, Double.valueOf(Double.NaN));
+            values.put(COLUMN_P + suffix, Double.valueOf(Double.NaN));
+            return;
+        }
         LocalStats localStats = localHotspotStats(grid, stats, context.config().getPermutations(),
                 context.config().getSeed());
         double p = globalPermutationP(grid, stats, observedGlobal,
@@ -316,7 +323,7 @@ public final class HotspotScanAnalysis implements IntensitySpatialAnalysis {
         }
 
         static Grid from(ImagePlus image, int slice, Roi roi) {
-            if (image == null || image.getStackSize() < slice) {
+            if (image == null || slice < 1 || image.getStackSize() < slice) {
                 return new Grid(0, 0, new Cell[0], 0);
             }
             ImageProcessor ip = image.getStack().getProcessor(slice);

@@ -205,6 +205,14 @@ public class IntensityAnalysisV2 implements Analysis {
 
         BinConfig cfg = BinConfigIO.readPartialFromDirectory(directory);
         String[] channelNames = cfg.channelNames.toArray(new String[0]);
+        if (safeChannels(channelNames).isEmpty()) {
+            String message = "Intensity Analysis requires at least one configured channel name.";
+            IJ.log("ERROR: " + message);
+            if (!headless && !suppressDialogs) {
+                IJ.error("Intensity Analysis", message);
+            }
+            return;
+        }
         IJ.log("==========================================================");
         IJ.log("FLUORESCENCE INTENSITY ANALYSIS");
         IJ.log("==========================================================");
@@ -516,6 +524,16 @@ public class IntensityAnalysisV2 implements Analysis {
             } else {
                 intensitySpatialConfig = IntensitySpatialConfig.disabled();
             }
+        }
+
+        String validationError = validateIntensityConfiguration(
+                binarization, thresholds, channelNames, roiAnalysis, roiChannelIndex1Based);
+        if (validationError != null) {
+            IJ.log("ERROR: " + validationError);
+            if (!headless && !suppressDialogs) {
+                IJ.error("Fluorescence Intensity Analysis", validationError);
+            }
+            return;
         }
 
         // Log user selections
@@ -845,8 +863,12 @@ public class IntensityAnalysisV2 implements Analysis {
 
             try {
                 ImagePlus[] chans = ChannelSplitter.split(imp);
-                int n = Math.min(chans.length, channelNames.length);
+                int n = resolveProcessableChannelCount(imp, chans, channelNames, idx);
                 IJ.log("  Channels split: " + n);
+                if (n <= 0) {
+                    IJ.log("  WARNING: no processable channels for " + imp.getTitle() + "; skipping image.");
+                    continue;
+                }
 
                 if (roiAnalysis) {
                     for (int rSet = 0; rSet < roiZips.size(); rSet++) {
@@ -983,7 +1005,15 @@ public class IntensityAnalysisV2 implements Analysis {
                             OrientationOps.applyTransform(imp, metadata);
 
                             ImagePlus[] chans = ChannelSplitter.split(imp);
-                            int n = Math.min(chans.length, channelNames.length);
+                            int n = resolveProcessableChannelCount(imp, chans, channelNames, idx);
+                            if (n <= 0) {
+                                IJ.log("[" + (idx + 1) + "/" + total
+                                        + "] WARNING: no processable channels for " + imp.getTitle()
+                                        + "; skipping image.");
+                                int done = completed.incrementAndGet();
+                                IJ.showProgress(done, total);
+                                continue;
+                            }
 
                             // Per-image local tables to collect results before merging
                             IntensityOutputTables localTables = outputPlan.newTables();
@@ -1117,6 +1147,22 @@ public class IntensityAnalysisV2 implements Analysis {
         return combined;
     }
 
+    private int resolveProcessableChannelCount(ImagePlus imp,
+                                               ImagePlus[] chans,
+                                               String[] channelNames,
+                                               int zeroBasedImageIndex) {
+        int actual = chans == null ? 0 : chans.length;
+        int configured = channelNames == null ? 0 : channelNames.length;
+        int n = Math.min(actual, configured);
+        if (actual != configured) {
+            String title = imp == null ? "image " + (zeroBasedImageIndex + 1) : imp.getTitle();
+            IJ.log("  WARNING: channel count mismatch for " + title
+                    + ": image has " + actual + ", configuration has " + configured
+                    + "; processing " + n + ".");
+        }
+        return n;
+    }
+
     // ── Per-image measurement (thread-safe) ──
 
     private void runIntensityMeasurementsForThisImage(
@@ -1141,6 +1187,17 @@ public class IntensityAnalysisV2 implements Analysis {
         // the chosen channel's resolved filter (bin or basic) and the user's
         // explicit threshold for that channel - never an auto-threshold.
         ImagePlus maskStack = null;
+        if (roiChannelIndex1Based > n) {
+            String maskName = roiChannelIndex1Based > 0
+                    && channelNames != null
+                    && roiChannelIndex1Based <= channelNames.length
+                    ? channelNames[roiChannelIndex1Based - 1]
+                    : "index " + roiChannelIndex1Based;
+            throw new IllegalStateException("Channel ROI mask '" + maskName
+                    + "' is not present in image "
+                    + (parts == null ? "unknown" : parts.displayLabel())
+                    + roiLogSuffix(roiSetName) + ".");
+        }
         if (roiChannelIndex1Based > 0 && roiChannelIndex1Based <= n) {
             int mc = roiChannelIndex1Based - 1;
             if (!compactLog) IJ.log("    Creating ROI channel mask from: " + channelNames[mc]);
@@ -1167,14 +1224,8 @@ public class IntensityAnalysisV2 implements Analysis {
             String maskFilterLabel = useBinFilterForMask
                     ? savedFilterChoiceLabel(mc, cfg)
                     : "Basic background and noise removal";
-            double maskThreshold;
-            try {
-                maskThreshold = Double.parseDouble(thresholds[mc]);
-            } catch (NumberFormatException ex) {
-                if (!compactLog) IJ.log("    - ROI mask: WARN unparseable threshold '"
-                        + thresholds[mc] + "' for " + channelNames[mc] + ", using 0");
-                maskThreshold = 0.0;
-            }
+            double maskThreshold = parseIntensityThreshold(thresholds, mc, channelNames,
+                    null, roiSetName);
             maskStack = createRoiChannelMask(chans[mc],
                     filterMacroOrPath, isMacroFile, maskThreshold, !compactLog, maskFilterLabel);
         }
@@ -1415,7 +1466,7 @@ public class IntensityAnalysisV2 implements Analysis {
 
         if (binarization[c]) {
             if (!compactLog) IJ.log("    - Binarization: applying threshold=" + thresholds[c]);
-            double thr = Double.parseDouble(thresholds[c]);
+            double thr = parseIntensityThreshold(thresholds, c, channelNames, parts, roiLabel);
 
             // Thread-safe binarization
             ij.ImageStack binStack = binary.getStack();
@@ -1465,11 +1516,11 @@ public class IntensityAnalysisV2 implements Analysis {
         double[] intDenBinarizedRawInMask = new double[sliceResults.length];
         double[] areaFractionBinarized = new double[sliceResults.length];
         for (int sr = 0; sr < sliceResults.length; sr++) {
-            intDenFilteredFullRoi[sr] = sliceResults[sr].intDenFilteredFullRoi;
-            areaFractionFilteredFullRoi[sr] = sliceResults[sr].areaFractionFilteredFullRoi;
-            intDenUnfilteredFullRoi[sr] = sliceResults[sr].intDenUnfilteredFullRoi;
-            intDenBinarizedRawInMask[sr] = sliceResults[sr].intDenBinarizedRawInMask;
-            areaFractionBinarized[sr] = sliceResults[sr].areaFractionBinarized;
+            intDenFilteredFullRoi[sr] = finiteOrNaN(sliceResults[sr].intDenFilteredFullRoi);
+            areaFractionFilteredFullRoi[sr] = finiteOrNaN(sliceResults[sr].areaFractionFilteredFullRoi);
+            intDenUnfilteredFullRoi[sr] = finiteOrNaN(sliceResults[sr].intDenUnfilteredFullRoi);
+            intDenBinarizedRawInMask[sr] = finiteOrNaN(sliceResults[sr].intDenBinarizedRawInMask);
+            areaFractionBinarized[sr] = finiteOrNaN(sliceResults[sr].areaFractionBinarized);
         }
         if (!compactLog) IJ.log("    - Measured signal + raw: " + sliceResults.length + " slices");
 
@@ -1964,6 +2015,89 @@ public class IntensityAnalysisV2 implements Analysis {
         }
     }
 
+    private static String validateIntensityConfiguration(boolean[] binarization,
+                                                        String[] thresholds,
+                                                        String[] channelNames,
+                                                        boolean roiAnalysis,
+                                                        int roiChannelIndex1Based) {
+        if (binarization == null || channelNames == null) {
+            return "Intensity configuration is incomplete.";
+        }
+        for (int c = 0; c < channelNames.length && c < binarization.length; c++) {
+            if (binarization[c]) {
+                try {
+                    parseIntensityThreshold(thresholds, c, channelNames, null, null);
+                } catch (NumberFormatException e) {
+                    return e.getMessage();
+                }
+            }
+        }
+        if (roiAnalysis && roiChannelIndex1Based > 0) {
+            int index = roiChannelIndex1Based - 1;
+            if (index < 0 || index >= channelNames.length) {
+                return "Channel ROI mask index " + roiChannelIndex1Based
+                        + " is outside the configured channel list.";
+            }
+            if (index >= binarization.length || !binarization[index]) {
+                return "Channel ROI mask is set to '" + channelNames[index]
+                        + "', but binarisation is not enabled for that channel.";
+            }
+            try {
+                parseIntensityThreshold(thresholds, index, channelNames, null, null);
+            } catch (NumberFormatException e) {
+                return e.getMessage();
+            }
+        }
+        return null;
+    }
+
+    private static double parseIntensityThreshold(String[] thresholds,
+                                                  int channelIndex,
+                                                  String[] channelNames,
+                                                  NameParts parts,
+                                                  String roiLabel) {
+        String channelName = channelIndex >= 0
+                && channelNames != null
+                && channelIndex < channelNames.length
+                ? channelNames[channelIndex]
+                : "channel " + (channelIndex + 1);
+        String raw = channelIndex >= 0
+                && thresholds != null
+                && channelIndex < thresholds.length
+                ? thresholds[channelIndex]
+                : null;
+        try {
+            double parsed = Double.parseDouble(raw == null ? "" : raw.trim());
+            if (Double.isNaN(parsed) || Double.isInfinite(parsed) || parsed < 0.0) {
+                throw new NumberFormatException("not finite and non-negative");
+            }
+            return parsed;
+        } catch (NumberFormatException e) {
+            NumberFormatException wrapped = new NumberFormatException(
+                    "Invalid intensity threshold for " + thresholdContext(channelName, parts, roiLabel)
+                            + ": '" + (raw == null ? "" : raw)
+                            + "' (must be a finite number >= 0).");
+            wrapped.initCause(e);
+            throw wrapped;
+        }
+    }
+
+    private static String thresholdContext(String channelName, NameParts parts, String roiLabel) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("channel '").append(channelName == null ? "" : channelName).append("'");
+        if (parts != null) {
+            sb.append(" on image '").append(parts.displayLabel()).append("'");
+        }
+        if (roiLabel != null && !roiLabel.trim().isEmpty()) {
+            sb.append(" ROI '").append(roiLabel.trim()).append("'");
+        }
+        return sb.toString();
+    }
+
+    private static double finiteOrNaN(double value) {
+        return Double.isNaN(value) || Double.isInfinite(value) ? Double.NaN : value;
+    }
+
     /**
      * Build the ROI-channel mask using the chosen channel's resolved filter and
      * the explicit threshold value the user picked for that channel. The bin
@@ -2002,14 +2136,25 @@ public class IntensityAnalysisV2 implements Analysis {
             if (log) IJ.log("    - ROI mask: basic background and noise removal applied");
         }
 
+        if (Double.isNaN(threshold) || Double.isInfinite(threshold) || threshold < 0.0) {
+            throw new NumberFormatException("ROI channel mask threshold must be a finite number >= 0: "
+                    + threshold);
+        }
+
+        int foregroundPixels = 0;
         ij.ImageStack roiStack = roiCh.getStack();
         for (int s = 1; s <= roiStack.getSize(); s++) {
             ij.process.ImageProcessor ip = roiStack.getProcessor(s);
             for (int p = 0; p < ip.getWidth() * ip.getHeight(); p++) {
-                ip.set(p, ip.getf(p) >= threshold ? 255 : 0);
+                boolean foreground = ip.getf(p) >= threshold;
+                if (foreground) foregroundPixels++;
+                ip.set(p, foreground ? 255 : 0);
             }
         }
         if (log) IJ.log("    - ROI mask: filter applied + threshold " + (int) threshold);
+        if (log && foregroundPixels == 0) {
+            IJ.log("    - ROI mask: WARNING threshold produced an all-zero mask.");
+        }
         return roiCh;
     }
 
