@@ -44,6 +44,7 @@ public class MacroVariationsDialogIntegrationTest {
                         accepted.set(macro);
                     }
                 });
+                dialog.setMode(MacroVariationsDialog.Mode.FULL_SWEEP);
                 configureOneComboSweep(dialog.editorForTest());
                 assertFalse(dialog.exportPipelineFigureButtonForTest().isEnabled());
                 assertFalse(dialog.useComboButtonForTest().isEnabled());

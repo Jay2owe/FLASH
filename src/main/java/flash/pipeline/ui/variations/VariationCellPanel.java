@@ -36,7 +36,10 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.geom.Path2D;
 import java.awt.geom.RoundRectangle2D;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
@@ -65,6 +68,7 @@ public final class VariationCellPanel extends JPanel {
     private static final int PEEK_DELAY_MS = 120;
     private static final int PEEK_DRAG_CANCEL_PX = 4;
     private static final int OTSU_HISTOGRAM_BINS = 256;
+    private static final int FILTER_PARAM_LABEL_MAX_CHARS = 56;
     private static final String ERROR_BADGE = "\u26a0";
 
     public enum BorderHint {
@@ -96,6 +100,8 @@ public final class VariationCellPanel extends JPanel {
             new JLabel("", SwingConstants.CENTER);
     private final JLabel filterSnrLabel = new JLabel("", SwingConstants.CENTER);
     private final JLabel filterBgSigmaLabel = new JLabel("", SwingConstants.CENTER);
+    private final List<ParameterKey> footerParameterKeys =
+            new ArrayList<ParameterKey>();
     private final Timer haloTimer;
     private final Timer peekDelayTimer;
 
@@ -118,6 +124,7 @@ public final class VariationCellPanel extends JPanel {
     private double filterBgSigma = Double.NaN;
     private int downstreamDeltaN = UNKNOWN_DELTA;
     private String errorText = "";
+    private String filterParameterText = "";
     private String ribbonLabelOverride;
     private String downstreamRibbonLabel;
     private boolean filterFooterActive;
@@ -213,6 +220,30 @@ public final class VariationCellPanel extends JPanel {
         return combo;
     }
 
+    public void setFooterParameterKeys(final List<ParameterKey> keys) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setFooterParameterKeys(keys);
+                }
+            });
+            return;
+        }
+        footerParameterKeys.clear();
+        if (keys != null) {
+            for (int i = 0; i < keys.size(); i++) {
+                ParameterKey key = keys.get(i);
+                if (key != null && !footerParameterKeys.contains(key)) {
+                    footerParameterKeys.add(key);
+                }
+            }
+        }
+        if (filterFooterActive) {
+            refreshFilterParameterLabel(combo);
+            refreshTooltip();
+        }
+    }
+
     public ImagePreviewPanel preview() {
         return preview;
     }
@@ -256,6 +287,7 @@ public final class VariationCellPanel extends JPanel {
         filterSnr = Double.NaN;
         filterBgSigma = Double.NaN;
         clearDownstreamVerdictState();
+        filterParameterText = "";
         filterChipLabel.setText("");
         filterChipLabel.setVisible(false);
         setDisplayedPreviewImage(null);
@@ -329,13 +361,7 @@ public final class VariationCellPanel extends JPanel {
         acceptEnabled = true;
         filterSnr = result.snr();
         filterBgSigma = result.bgSigma();
-        SlotSubstitutionCombo substitution = SlotSubstitutionCombo.from(result.combo());
-        PresetSweepCombo presetCombo = PresetSweepCombo.from(result.combo());
-        String chip = presetCombo == null
-                ? (substitution == null ? "" : substitution.displayLabel())
-                : presetCombo.displayValue();
-        filterChipLabel.setText(chip);
-        filterChipLabel.setVisible(chip.length() > 0);
+        refreshFilterParameterLabel(result.combo());
         filterSnrLabel.setText("SNR " + formatOneDecimal(filterSnr));
         filterBgSigmaLabel.setText("bg \u03c3 " + formatInteger(filterBgSigma));
         showFilterFooter();
@@ -367,6 +393,7 @@ public final class VariationCellPanel extends JPanel {
         iouToNeighbours = Double.NaN;
         filterSnr = Double.NaN;
         filterBgSigma = Double.NaN;
+        filterParameterText = "";
         filterChipLabel.setText("");
         filterChipLabel.setVisible(false);
         durationMs = -1L;
@@ -405,6 +432,7 @@ public final class VariationCellPanel extends JPanel {
         this.acceptEnabled = true;
         this.filterSnr = Double.NaN;
         this.filterBgSigma = Double.NaN;
+        this.filterParameterText = "";
         clearDownstreamVerdictState();
         showSegmentationFooter();
 
@@ -1053,8 +1081,8 @@ public final class VariationCellPanel extends JPanel {
             return;
         }
         if (filterFooterActive) {
-            if (filterChipLabel.isVisible()) {
-                sb.append("<br>").append(html(filterChipLabel.getText()));
+            if (filterParameterText.length() > 0) {
+                sb.append("<br>").append(html(filterParameterText));
             }
             if (filterDownstreamDeltaLabel.isVisible()) {
                 sb.append("<br>").append(html(filterDownstreamDeltaLabel.getText()))
@@ -1281,6 +1309,15 @@ public final class VariationCellPanel extends JPanel {
         footerPanel.repaint();
     }
 
+    private void refreshFilterParameterLabel(ParameterCombo sourceCombo) {
+        filterParameterText = filterComboLabel(sourceCombo, footerParameterKeys);
+        filterChipLabel.setText(abbreviate(filterParameterText,
+                FILTER_PARAM_LABEL_MAX_CHARS));
+        filterChipLabel.setVisible(filterParameterText.length() > 0);
+        footerPanel.revalidate();
+        footerPanel.repaint();
+    }
+
     private String[] filterLines(boolean hasFilterChip) {
         java.util.List<String> lines = new java.util.ArrayList<String>();
         if (hasFilterChip) {
@@ -1350,6 +1387,170 @@ public final class VariationCellPanel extends JPanel {
     private static String formatInteger(double value) {
         double safeValue = Double.isFinite(value) ? value : 0.0d;
         return String.format(Locale.ROOT, "%.0f", Double.valueOf(safeValue));
+    }
+
+    private static String filterComboLabel(ParameterCombo combo,
+                                           List<ParameterKey> preferredKeys) {
+        if (combo == null || combo.values().isEmpty()) {
+            return "";
+        }
+        PresetSweepCombo presetCombo = PresetSweepCombo.from(combo);
+        if (presetCombo != null && shouldUsePresetSummary(preferredKeys)) {
+            return presetComboLabel(presetCombo, preferredKeys);
+        }
+        SlotSubstitutionCombo substitution = SlotSubstitutionCombo.from(combo);
+        if (substitution != null && shouldUseSlotSummary(preferredKeys)) {
+            return substitution.displayLabel();
+        }
+
+        List<ParameterKey> keys = keysForSummary(combo, preferredKeys);
+        if (keys.isEmpty()) {
+            return "";
+        }
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < keys.size(); i++) {
+            ParameterKey key = keys.get(i);
+            if (key instanceof PresetSweepKey
+                    && ((PresetSweepKey) key).role()
+                    == PresetSweepKey.Role.X_PARAM_KEY) {
+                continue;
+            }
+            if (!combo.contains(key)) {
+                continue;
+            }
+            if (out.length() > 0) {
+                out.append(", ");
+            }
+            out.append(keyLabelForFooter(key))
+                    .append("=")
+                    .append(formatFooterValue(combo.get(key)));
+        }
+        return out.toString();
+    }
+
+    private static boolean shouldUsePresetSummary(List<ParameterKey> keys) {
+        if (keys == null || keys.isEmpty()) {
+            return true;
+        }
+        for (int i = 0; i < keys.size(); i++) {
+            ParameterKey key = keys.get(i);
+            if (key instanceof PresetSweepKey) {
+                PresetSweepKey presetKey = (PresetSweepKey) key;
+                if (presetKey.role() == PresetSweepKey.Role.X_VALUE
+                        || presetKey.role() == PresetSweepKey.Role.PRESET_NAME) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean shouldUseSlotSummary(List<ParameterKey> keys) {
+        if (keys == null || keys.isEmpty()) {
+            return true;
+        }
+        for (int i = 0; i < keys.size(); i++) {
+            if (keys.get(i) instanceof SlotSubstitutionKey) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String presetComboLabel(PresetSweepCombo presetCombo,
+                                           List<ParameterKey> keys) {
+        String param = presetCombo.xParamKey();
+        String xPart = (param == null || param.trim().isEmpty()
+                ? "value"
+                : param.trim())
+                + "=" + formatFooterValue(presetCombo.xValue());
+        boolean includePreset = false;
+        if (keys != null) {
+            for (int i = 0; i < keys.size(); i++) {
+                ParameterKey key = keys.get(i);
+                if (key instanceof PresetSweepKey
+                        && ((PresetSweepKey) key).role()
+                        == PresetSweepKey.Role.PRESET_NAME) {
+                    includePreset = true;
+                    break;
+                }
+            }
+        }
+        if (!includePreset) {
+            return xPart;
+        }
+        String preset = presetCombo.presetName();
+        return preset == null || preset.trim().isEmpty()
+                ? xPart
+                : preset.trim() + " | " + xPart;
+    }
+
+    private static List<ParameterKey> keysForSummary(
+            ParameterCombo combo,
+            List<ParameterKey> preferredKeys) {
+        List<ParameterKey> out = new ArrayList<ParameterKey>();
+        if (preferredKeys != null && !preferredKeys.isEmpty()) {
+            for (int i = 0; i < preferredKeys.size(); i++) {
+                ParameterKey key = preferredKeys.get(i);
+                if (key != null && combo.contains(key) && !out.contains(key)) {
+                    out.add(key);
+                }
+            }
+            return out;
+        }
+        for (Map.Entry<ParameterKey, Object> entry : combo.values().entrySet()) {
+            ParameterKey key = entry.getKey();
+            if (key != null && !out.contains(key)) {
+                out.add(key);
+            }
+        }
+        return out;
+    }
+
+    private static String keyLabelForFooter(ParameterKey key) {
+        if (key instanceof FilterParameterId) {
+            FilterParameterId filterKey = (FilterParameterId) key;
+            String command = compactCommandLabel(filterKey.commandLabel());
+            String param = filterKey.paramKey();
+            if (command.length() == 0) {
+                return param;
+            }
+            return command + " " + param;
+        }
+        return key == null ? "" : key.displayLabel();
+    }
+
+    private static String compactCommandLabel(String commandLabel) {
+        String text = commandLabel == null ? "" : commandLabel.trim();
+        if (text.endsWith("...")) {
+            text = text.substring(0, text.length() - 3).trim();
+        }
+        while (text.endsWith(".")) {
+            text = text.substring(0, text.length() - 1).trim();
+        }
+        return text;
+    }
+
+    private static String formatFooterValue(Object value) {
+        if (value instanceof Number) {
+            double number = ((Number) value).doubleValue();
+            if (Double.isFinite(number)
+                    && Math.abs(number - Math.rint(number)) < 0.0000001d
+                    && Math.abs(number) < 1000000000.0d) {
+                return String.valueOf((long) Math.rint(number));
+            }
+            String text = String.format(Locale.ROOT, "%.3f", Double.valueOf(number));
+            return text.replaceAll("0+$", "").replaceAll("\\.$", "");
+        }
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    private static String abbreviate(String text, int maxLength) {
+        String safe = text == null ? "" : text;
+        if (maxLength < 4 || safe.length() <= maxLength) {
+            return safe;
+        }
+        return safe.substring(0, maxLength - 3) + "...";
     }
 
     private static String formatSigned(int value) {

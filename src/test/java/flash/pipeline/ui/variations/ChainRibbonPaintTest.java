@@ -16,15 +16,12 @@ import static org.junit.Assert.assertTrue;
 public class ChainRibbonPaintTest {
 
     @Test
-    public void mixedStatesPaintExpectedPillColours() {
+    public void fixedAndSweptStepsPaintExpectedPillColours() {
         ChainRibbon ribbon = new ChainRibbon(FilterMacroEditorModel.parse(
                 "run(\"Gaussian Blur...\", \"sigma=2 stack\");\n"
                         + "run(\"Subtract Background...\", \"rolling=20 stack\");\n"
-                        + "run(\"Median...\", \"radius=1 stack\");\n"
-                        + "run(\"Add...\", \"value=4 stack\");"));
+                        + "run(\"Median...\", \"radius=1 stack\");"));
         ribbon.setStepState(1, ChainRibbon.StepState.SWEPT);
-        ribbon.setStepState(2, ChainRibbon.StepState.BYPASSED);
-        ribbon.setStepState(3, ChainRibbon.StepState.OFF);
 
         Dimension size = ribbon.getPreferredSize();
         ribbon.setSize(size);
@@ -41,14 +38,8 @@ public class ChainRibbonPaintTest {
                 ChainRibbon.FIXED_FILL, 10);
         assertNear(sample(image, ribbon.stepBoundsForTest(1), 8, 0),
                 ChainRibbon.SWEPT_FILL, 10);
-        Rectangle bypassed = ribbon.stepBoundsForTest(2);
-        // BYPASSED is stroke-only; sample on the top edge midpoint where the
-        // border is straight (avoids the rounded-corner antialias blend).
-        assertNear(new Color(image.getRGB(bypassed.x + bypassed.width / 2,
-                bypassed.y + 1), true),
-                ChainRibbon.BYPASSED_STROKE, 35);
-        assertNear(sample(image, ribbon.stepBoundsForTest(3), 8, 0),
-                blend(ChainRibbon.FIXED_FILL, Color.WHITE, 102), 18);
+        assertNear(sample(image, ribbon.stepBoundsForTest(2), 8, 0),
+                ChainRibbon.FIXED_FILL, 10);
     }
 
     @Test
@@ -77,17 +68,6 @@ public class ChainRibbonPaintTest {
         int x = bounds.x + insetX;
         int y = bounds.y + bounds.height / 2 + offsetY;
         return new Color(image.getRGB(x, y), true);
-    }
-
-    private static Color blend(Color base, Color overlay, int alpha) {
-        double a = alpha / 255.0d;
-        int red = (int) Math.round(base.getRed() * (1.0d - a)
-                + overlay.getRed() * a);
-        int green = (int) Math.round(base.getGreen() * (1.0d - a)
-                + overlay.getGreen() * a);
-        int blue = (int) Math.round(base.getBlue() * (1.0d - a)
-                + overlay.getBlue() * a);
-        return new Color(red, green, blue);
     }
 
     private static void assertNear(Color actual, Color expected, int tolerance) {

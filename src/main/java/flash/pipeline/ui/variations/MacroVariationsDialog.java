@@ -3,19 +3,10 @@ package flash.pipeline.ui.variations;
 import flash.pipeline.image.FilterMacroEditorModel;
 import flash.pipeline.image.FilterMacroParser;
 import flash.pipeline.image.FilterMacroParser.OpType;
-import flash.pipeline.image.dag.DagIR;
-import flash.pipeline.image.dag.DagLine;
-import flash.pipeline.image.dag.DagNode;
-import flash.pipeline.image.dag.DagToIjmEmitter;
-import flash.pipeline.image.dag.IjmToDagLoader;
 import flash.pipeline.ui.PipelineDialog;
-import flash.pipeline.ui.preview.PreviewDisplaySettings;
-import flash.pipeline.ui.preview.VariationMontageDialog;
 import flash.pipeline.ui.preview.PipelineFigureExporter;
 import flash.pipeline.ui.sandbox.FilterAlternatives;
-import flash.pipeline.ui.sandbox.FilterAlternatives.Alternative;
 import flash.pipeline.ui.sandbox.FilterAlternatives.SlotRole;
-import flash.pipeline.ui.variations.analysis.HistogramShapeStability;
 import flash.pipeline.ui.variations.strategy.FilterSweepStrategy;
 
 import ij.ImagePlus;
@@ -28,7 +19,6 @@ import javax.swing.ButtonGroup;
 import javax.swing.DefaultListCellRenderer;
 import javax.swing.DefaultListModel;
 import javax.swing.JButton;
-import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JFileChooser;
 import javax.swing.JLabel;
@@ -36,17 +26,16 @@ import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JRadioButton;
 import javax.swing.JScrollPane;
-import javax.swing.JSlider;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingWorker;
 import javax.swing.JToggleButton;
-import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
 import javax.swing.event.ListSelectionEvent;
 import javax.swing.event.ListSelectionListener;
 import java.awt.BorderLayout;
+import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
@@ -61,10 +50,8 @@ import java.awt.event.WindowEvent;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -75,38 +62,39 @@ import java.util.function.Consumer;
 
 public final class MacroVariationsDialog extends PipelineDialog {
 
-    enum Mode {
-        PARAMS,
-        STEPS,
-        PRESETS
+    public enum Mode {
+        SWEEP_PARAMETER,
+        SWEEP_STEP,
+        SWEEP_PRESETS,
+        FULL_SWEEP
     }
+
+    private static final String CARD_SWEEP_PARAMETER = "sweep-parameter";
+    private static final String CARD_SWEEP_STEP = "sweep-step";
+    private static final String CARD_SWEEP_PRESETS = "sweep-presets";
+    private static final String CARD_FULL_SWEEP = "full-sweep";
 
     private final FilterVariationEngineContext context;
     private final Consumer<String> onAccept;
     private final ParameterSweepEditor editor;
     private final PresetPickerPanel presetEditor;
+    private final SweepRangeEditor sweepRangeEditor;
+    private final StepSwapEditor stepSwapEditor;
+    private final CardLayout editorCards = new CardLayout();
+    private final JPanel editorCardsPanel = new JPanel(editorCards);
     private final ChainRibbon chainRibbon;
-    private final List<Integer> chainEntryLineIndexes;
-    private final VariationGridPanel gridPanel = new VariationGridPanel();
-    private final JPanel histogramShapeSlot = new JPanel(new BorderLayout());
     private final JLabel cellsLabel = new JLabel("Cells: 1");
-    private final JLabel zLabel = new JLabel("1/1");
     private final JLabel suggestionLabel = new JLabel("Most stable: pending");
     private final JLabel statusLabel = new JLabel("Idle");
     private final JLabel strategyLabel = new JLabel(" ");
     private final JLabel chainRibbonLabel = new JLabel();
-    private final JSlider zSlider = new JSlider(1, 1, 1);
     private final JRadioButton fullCrop = new JRadioButton("full image");
     private final JRadioButton centreCrop = new JRadioButton("centered 256 x 256");
     private final JRadioButton customCrop = new JRadioButton("custom...");
-    private final JToggleButton paramsButton = new JToggleButton("Params");
-    private final JToggleButton stepsButton = new JToggleButton("Steps");
-    private final JToggleButton presetsButton = new JToggleButton("Presets");
-    private final JCheckBox otsuOverlayCheckBox =
-            new JCheckBox("Show Otsu overlay");
-    private final JCheckBox downstreamVerdictCheckBox =
-            new JCheckBox("Show downstream verdict");
-    private final JButton stopDownstreamButton = new JButton("Stop downstream");
+    private final JToggleButton sweepParamButton = new JToggleButton("Sweep parameter");
+    private final JToggleButton sweepStepButton = new JToggleButton("Sweep step");
+    private final JToggleButton sweepPresetsButton = new JToggleButton("Sweep presets");
+    private final JToggleButton fullSweepButton = new JToggleButton("Full sweep");
     private final Map<String, VariationCellPanel> cellsByCombo =
             new HashMap<String, VariationCellPanel>();
     private final Map<String, Integer> cellIndexesByCombo =
@@ -118,7 +106,6 @@ public final class MacroVariationsDialog extends PipelineDialog {
             new HashMap<String, DownstreamVerdict.Verdict>();
     private final DownstreamSegmenter.Resolution downstreamResolution;
 
-    private JButton openLargeMontageButton;
     private JButton exportPipelineFigureButton;
     private JButton useComboButton;
     private JButton runButton;
@@ -128,16 +115,14 @@ public final class MacroVariationsDialog extends PipelineDialog {
     private ParameterSweep currentSweep;
     private VariationCache currentRunCache;
     private ImagePlus currentBaselineCrop;
-    private VariationMontageDialog montageDialog;
-    private ImagePlus montageRawSourceChoice;
-    private ImagePlus montageFilteredSourceChoice;
-    private HistogramShapeStrip histogramShapeStrip;
-    private Mode mode = Mode.PARAMS;
+    private VariationGridWindow gridWindow;
+    private Mode mode = Mode.SWEEP_PARAMETER;
     private CropSpec currentCropSpec;
     private ParameterCombo selectedCombo;
     private FilterSweepStrategy selectedStrategy;
     private VariationCellPanel selectedCell;
     private boolean showOtsuOverlay;
+    private boolean downstreamVerdictSelected;
     private boolean suppressCropEvents;
     private boolean downstreamStartedForCurrentResults;
     private File pipelineFigureExportFileForTest;
@@ -155,22 +140,23 @@ public final class MacroVariationsDialog extends PipelineDialog {
         this.onAccept = onAccept;
         this.editor = ParameterSweepEditor.forFilter(context);
         this.presetEditor = new PresetPickerPanel(context);
+        this.sweepRangeEditor = new SweepRangeEditor(context);
+        this.stepSwapEditor = new StepSwapEditor(context);
         this.chainRibbon = new ChainRibbon(context.baseMacro());
-        this.chainEntryLineIndexes = ChainRibbon.entryLineIndexes(context.baseMacro());
         this.downstreamResolution = DownstreamSegmenter.resolve(context);
-        this.editor.setChainStepFilter(Collections.<Integer>emptySet(),
-                Collections.<Integer>emptySet());
+        this.editor.setSelectedChainStepIndexes(Collections.<Integer>emptySet());
         this.currentCropSpec = context.initialCropSpec();
         setDefaultButtonsVisible(false);
         buildUi();
         installWindowCleanup();
+        applyInteractionModeForMode();
         refreshCellEstimate();
     }
 
     public void dispose() {
         cancelExecutor();
         cancelDownstreamWorker();
-        disposeMontageDialog();
+        disposeGridWindow();
         disposeCells();
         Window window = getWindow();
         if (window != null) {
@@ -178,43 +164,88 @@ public final class MacroVariationsDialog extends PipelineDialog {
         }
     }
 
-    void setMode(Mode mode) {
-        Mode requested = mode == null ? Mode.PARAMS : mode;
+    public void setMode(Mode mode) {
+        Mode requested = mode == null ? Mode.SWEEP_PARAMETER : mode;
         if (this.mode == requested) {
             modeButtonFor(requested).setSelected(true);
-            if (requested == Mode.STEPS && chainRibbon.focusedStepIndex() < 0) {
-                defaultFocusFirstStepsSlot();
+            if ((requested == Mode.SWEEP_PARAMETER || requested == Mode.SWEEP_STEP)
+                    && chainRibbon.focusedStepIndex() < 0) {
+                defaultFocusFirstFocusableStep();
             }
             refreshCellEstimate();
             return;
         }
         this.mode = requested;
-        paramsButton.setSelected(requested == Mode.PARAMS);
-        stepsButton.setSelected(requested == Mode.STEPS);
-        presetsButton.setSelected(requested == Mode.PRESETS);
-        updateModeEditorVisibility();
-        chainRibbon.setInteractionEnabled(requested != Mode.PRESETS);
-        chainRibbon.setStepsMode(requested == Mode.STEPS);
-        if (requested == Mode.STEPS) {
-            configureStepsFocusability();
-            if (!defaultFocusFirstStepsSlot()) {
+        sweepParamButton.setSelected(requested == Mode.SWEEP_PARAMETER);
+        sweepStepButton.setSelected(requested == Mode.SWEEP_STEP);
+        sweepPresetsButton.setSelected(requested == Mode.SWEEP_PRESETS);
+        fullSweepButton.setSelected(requested == Mode.FULL_SWEEP);
+        showEditorCardFor(requested);
+        applyInteractionModeForMode();
+        if (requested == Mode.SWEEP_PARAMETER || requested == Mode.SWEEP_STEP) {
+            configureFocusabilityFor(requested);
+            if (!defaultFocusFirstFocusableStep()) {
                 refreshCellEstimate();
             }
-        } else if (requested == Mode.PRESETS) {
-            refreshCellEstimate();
         } else {
             refreshCellEstimate();
         }
     }
 
     private JToggleButton modeButtonFor(Mode value) {
-        if (value == Mode.STEPS) {
-            return stepsButton;
+        if (value == Mode.SWEEP_STEP) {
+            return sweepStepButton;
         }
-        if (value == Mode.PRESETS) {
-            return presetsButton;
+        if (value == Mode.SWEEP_PRESETS) {
+            return sweepPresetsButton;
         }
-        return paramsButton;
+        if (value == Mode.FULL_SWEEP) {
+            return fullSweepButton;
+        }
+        return sweepParamButton;
+    }
+
+    private void applyInteractionModeForMode() {
+        if (chainRibbon == null) {
+            return;
+        }
+        switch (mode) {
+            case SWEEP_PARAMETER:
+            case SWEEP_STEP:
+                chainRibbon.setInteractionMode(ChainRibbon.InteractionMode.FOCUS);
+                break;
+            case FULL_SWEEP:
+                chainRibbon.setInteractionMode(ChainRibbon.InteractionMode.SWEEP_TOGGLE);
+                break;
+            case SWEEP_PRESETS:
+            default:
+                chainRibbon.setInteractionMode(ChainRibbon.InteractionMode.PASSIVE);
+                break;
+        }
+    }
+
+    private void showEditorCardFor(Mode requested) {
+        String card;
+        switch (requested) {
+            case SWEEP_STEP:
+                card = CARD_SWEEP_STEP;
+                break;
+            case SWEEP_PRESETS:
+                card = CARD_SWEEP_PRESETS;
+                break;
+            case FULL_SWEEP:
+                card = CARD_FULL_SWEEP;
+                break;
+            case SWEEP_PARAMETER:
+            default:
+                card = CARD_SWEEP_PARAMETER;
+                break;
+        }
+        editorCards.show(editorCardsPanel, card);
+        Window window = getWindow();
+        if (window != null) {
+            window.validate();
+        }
     }
 
     Mode modeForTest() {
@@ -238,28 +269,28 @@ public final class MacroVariationsDialog extends PipelineDialog {
         refreshCellEstimate();
     }
 
-    VariationGridPanel gridPanelForTest() {
-        return gridPanel;
+    JToggleButton sweepParamButtonForTest() {
+        return sweepParamButton;
     }
 
-    JToggleButton paramsButtonForTest() {
-        return paramsButton;
+    JToggleButton sweepStepButtonForTest() {
+        return sweepStepButton;
     }
 
-    JToggleButton stepsButtonForTest() {
-        return stepsButton;
+    JToggleButton sweepPresetsButtonForTest() {
+        return sweepPresetsButton;
     }
 
-    JToggleButton presetsButtonForTest() {
-        return presetsButton;
+    JToggleButton fullSweepButtonForTest() {
+        return fullSweepButton;
     }
 
-    JButton openLargeMontageButtonForTest() {
-        return openLargeMontageButton;
+    SweepRangeEditor sweepRangeEditorForTest() {
+        return sweepRangeEditor;
     }
 
-    VariationMontageDialog montageDialogForTest() {
-        return montageDialog;
+    StepSwapEditor stepSwapEditorForTest() {
+        return stepSwapEditor;
     }
 
     JButton exportPipelineFigureButtonForTest() {
@@ -282,16 +313,8 @@ public final class MacroVariationsDialog extends PipelineDialog {
         cancelExecutor();
     }
 
-    JCheckBox otsuOverlayCheckBoxForTest() {
-        return otsuOverlayCheckBox;
-    }
-
-    JCheckBox downstreamVerdictCheckBoxForTest() {
-        return downstreamVerdictCheckBox;
-    }
-
-    JButton stopDownstreamButtonForTest() {
-        return stopDownstreamButton;
+    VariationGridWindow gridWindowForTest() {
+        return gridWindow;
     }
 
     JLabel chainRibbonLabelForTest() {
@@ -316,10 +339,6 @@ public final class MacroVariationsDialog extends PipelineDialog {
 
     List<VariationCellPanel> cellsForTest() {
         return new ArrayList<VariationCellPanel>(cells);
-    }
-
-    HistogramShapeStrip histogramShapeStripForTest() {
-        return histogramShapeStrip;
     }
 
     JLabel suggestionLabelForTest() {
@@ -366,23 +385,16 @@ public final class MacroVariationsDialog extends PipelineDialog {
         addComponent(modeToggleRow());
         addComponent(chainRibbonRow());
         addHeader("Parameters to sweep");
-        addComponent(editor);
-        addComponent(presetEditor);
-        presetEditor.setVisible(false);
+        editorCardsPanel.setOpaque(false);
+        editorCardsPanel.add(sweepRangeEditor, CARD_SWEEP_PARAMETER);
+        editorCardsPanel.add(stepSwapEditor, CARD_SWEEP_STEP);
+        editorCardsPanel.add(presetEditor, CARD_SWEEP_PRESETS);
+        editorCardsPanel.add(editor, CARD_FULL_SWEEP);
+        editorCards.show(editorCardsPanel, CARD_SWEEP_PARAMETER);
+        addComponent(editorCardsPanel);
         addComponent(cropRow());
-        addComponent(histogramShapeSlot());
-        addHeader("Preview grid");
-        addComponent(gridScrollPane());
-        addComponent(zRow());
         addComponent(statusPanel());
 
-        openLargeMontageButton = addFooterButton("Open large montage");
-        openLargeMontageButton.setEnabled(false);
-        openLargeMontageButton.addActionListener(new ActionListener() {
-            @Override public void actionPerformed(ActionEvent e) {
-                openMontage();
-            }
-        });
         exportPipelineFigureButton = addFooterButton("Export pipeline figure");
         exportPipelineFigureButton.setEnabled(false);
         exportPipelineFigureButton.addActionListener(new ActionListener() {
@@ -425,12 +437,16 @@ public final class MacroVariationsDialog extends PipelineDialog {
                 refreshCellEstimate();
             }
         });
-    }
-
-    private JPanel histogramShapeSlot() {
-        histogramShapeSlot.setOpaque(false);
-        histogramShapeSlot.setVisible(false);
-        return histogramShapeSlot;
+        sweepRangeEditor.addChangeListener(new ChangeListener() {
+            @Override public void stateChanged(ChangeEvent e) {
+                refreshCellEstimate();
+            }
+        });
+        stepSwapEditor.addChangeListener(new ChangeListener() {
+            @Override public void stateChanged(ChangeEvent e) {
+                refreshCellEstimate();
+            }
+        });
     }
 
     public void start() {
@@ -452,14 +468,14 @@ public final class MacroVariationsDialog extends PipelineDialog {
     private void startOnEdt() {
         cancelExecutor();
         cancelDownstreamWorker();
-        disposeMontageDialog();
+        disposeGridWindow();
         try {
             currentSweep = withChainCacheNamespace(currentSweepForMode());
         } catch (RuntimeException e) {
             showMessage(e.getMessage());
-            setStatusTextNow(mode == Mode.STEPS || mode == Mode.PRESETS
-                    ? safe(e.getMessage())
-                    : "Choose at least one value for each selected parameter.");
+            setStatusTextNow(mode == Mode.FULL_SWEEP
+                    ? "Choose at least one value for each selected parameter."
+                    : safe(e.getMessage()));
             return;
         }
         ImagePlus source = context.sourceImage();
@@ -480,7 +496,6 @@ public final class MacroVariationsDialog extends PipelineDialog {
             selectedCell.setSelectedForCompare(false);
             selectedCell = null;
         }
-        clearHistogramShapeIndicator();
         clearDownstreamVerdicts();
         disposeCells();
         cells.clear();
@@ -491,7 +506,6 @@ public final class MacroVariationsDialog extends PipelineDialog {
             runButton.setEnabled(false);
         }
         useComboButton.setEnabled(false);
-        updateMontageButtonState();
         exportPipelineFigureButton.setEnabled(false);
 
         final ImagePlus croppedSource = currentSweep.cropSpec().apply(source);
@@ -504,7 +518,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
                 context.previewAdapter(),
                 croppedSource,
                 runCache,
-                chainMacroPostProcessor(),
+                null,
                 context.presetMacroLoader());
 
         for (int i = 0; i < combos.size(); i++) {
@@ -518,7 +532,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
                     null,
                     i);
             cell.setState("running");
-            cell.setZ(zSlider.getValue());
+            cell.setZ(1);
             cell.setOverlayMode(currentOverlayMode());
             cells.add(cell);
             cellsByCombo.put(combo.toCanonicalJson(), cell);
@@ -526,12 +540,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
             resultsByCell.add(null);
         }
 
-        gridPanel.setSweep(currentSweep);
-        gridPanel.setPresetRowCaptions(mode == Mode.PRESETS
-                ? presetEditor.rowCaptionsForSelected()
-                : Collections.<String, String>emptyMap());
-        gridPanel.setRawSource(croppedSource);
-        gridPanel.setCells(cells);
+        openGridWindowForRun();
         setStatusTextNow(progressStatus());
         setSuggestionText("Most stable: pending");
         setStrategyText(strategyTextForMode(combos.size()));
@@ -558,6 +567,44 @@ public final class MacroVariationsDialog extends PipelineDialog {
         worker.execute();
     }
 
+    private void openGridWindowForRun() {
+        gridWindow = new VariationGridWindow(getWindow(), gridWindowTitle(), cells);
+        gridWindow.setOtsuOverlaySelected(showOtsuOverlay);
+        gridWindow.setDownstreamVerdictSelected(downstreamVerdictSelected);
+        gridWindow.setDownstreamControlsEnabled(
+                downstreamResolution.isAvailable(),
+                false,
+                downstreamTooltip());
+        gridWindow.attachOtsuOverlayActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                setShowOtsuOverlay(gridWindow != null
+                        && gridWindow.otsuOverlayCheckBoxForTest().isSelected());
+            }
+        });
+        gridWindow.attachDownstreamVerdictActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                handleDownstreamToggle();
+            }
+        });
+        gridWindow.attachStopDownstreamActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                cancelDownstreamWorker();
+                setStatusTextNow("Downstream cancelled");
+            }
+        });
+        gridWindow.setVisible(true);
+    }
+
+    private String gridWindowTitle() {
+        return "FLASH variations";
+    }
+
+    private String downstreamTooltip() {
+        return downstreamResolution.isAvailable()
+                ? "Runs the active segmenter on each filter output. May take 30-60 s."
+                : downstreamResolution.unavailableReason();
+    }
+
     private JPanel headerPanel() {
         JPanel panel = new JPanel();
         panel.setLayout(new BoxLayout(panel, BoxLayout.X_AXIS));
@@ -570,53 +617,14 @@ public final class MacroVariationsDialog extends PipelineDialog {
         panel.add(Box.createHorizontalStrut(24));
         panel.add(new JLabel("Channel: " + safe(context.channelName())));
         panel.add(Box.createHorizontalGlue());
-        otsuOverlayCheckBox.setOpaque(false);
-        otsuOverlayCheckBox.setSelected(showOtsuOverlay);
-        otsuOverlayCheckBox.addActionListener(new ActionListener() {
-            @Override public void actionPerformed(ActionEvent e) {
-                setShowOtsuOverlay(otsuOverlayCheckBox.isSelected());
-            }
-        });
-        panel.add(otsuOverlayCheckBox);
-        panel.add(Box.createHorizontalStrut(18));
-        configureDownstreamControls();
-        panel.add(downstreamVerdictCheckBox);
-        panel.add(Box.createHorizontalStrut(6));
-        panel.add(stopDownstreamButton);
-        panel.add(Box.createHorizontalStrut(18));
         panel.add(cellsLabel);
         return panel;
     }
 
-    private void configureDownstreamControls() {
-        downstreamVerdictCheckBox.setOpaque(false);
-        downstreamVerdictCheckBox.setSelected(false);
-        if (!downstreamResolution.isAvailable()) {
-            downstreamVerdictCheckBox.setEnabled(false);
-            downstreamVerdictCheckBox.setToolTipText(
-                    downstreamResolution.unavailableReason());
-        } else {
-            downstreamVerdictCheckBox.setEnabled(true);
-            downstreamVerdictCheckBox.setToolTipText(
-                    "Runs the active segmenter on each filter output. May take 30-60 s.");
-        }
-        downstreamVerdictCheckBox.addActionListener(new ActionListener() {
-            @Override public void actionPerformed(ActionEvent e) {
-                handleDownstreamToggle();
-            }
-        });
-        stopDownstreamButton.setEnabled(false);
-        stopDownstreamButton.setOpaque(false);
-        stopDownstreamButton.addActionListener(new ActionListener() {
-            @Override public void actionPerformed(ActionEvent e) {
-                cancelDownstreamWorker();
-                setStatusTextNow("Downstream cancelled");
-            }
-        });
-    }
-
     private void handleDownstreamToggle() {
-        if (!downstreamVerdictCheckBox.isSelected()) {
+        downstreamVerdictSelected = gridWindow != null
+                && gridWindow.downstreamVerdictCheckBoxForTest().isSelected();
+        if (!downstreamVerdictSelected) {
             cancelDownstreamWorker();
             downstreamStartedForCurrentResults = false;
             clearDownstreamVerdicts();
@@ -624,7 +632,10 @@ public final class MacroVariationsDialog extends PipelineDialog {
             return;
         }
         if (!downstreamResolution.isAvailable()) {
-            downstreamVerdictCheckBox.setSelected(false);
+            downstreamVerdictSelected = false;
+            if (gridWindow != null) {
+                gridWindow.setDownstreamVerdictSelected(false);
+            }
             setStatusTextNow(downstreamResolution.unavailableReason());
             return;
         }
@@ -637,6 +648,9 @@ public final class MacroVariationsDialog extends PipelineDialog {
 
     private void setShowOtsuOverlay(boolean show) {
         showOtsuOverlay = show;
+        if (gridWindow != null) {
+            gridWindow.setOtsuOverlaySelected(show);
+        }
         VariationCellPanel.OverlayMode mode = currentOverlayMode();
         for (VariationCellPanel cell : cellsByCombo.values()) {
             if (cell != null) {
@@ -658,37 +672,48 @@ public final class MacroVariationsDialog extends PipelineDialog {
         row.setBorder(BorderFactory.createEmptyBorder(0, 4, 2, 4));
 
         ButtonGroup group = new ButtonGroup();
-        group.add(paramsButton);
-        group.add(stepsButton);
-        group.add(presetsButton);
-        paramsButton.setSelected(true);
-        stepsButton.setEnabled(true);
-        presetsButton.setEnabled(true);
-        stepsButton.setToolTipText("Try native filter alternatives at one chain step");
-        presetsButton.setToolTipText("Compare readable filter presets");
+        group.add(sweepParamButton);
+        group.add(sweepStepButton);
+        group.add(sweepPresetsButton);
+        group.add(fullSweepButton);
+        sweepParamButton.setSelected(true);
+        sweepParamButton.setToolTipText(
+                "Sweep one numeric parameter on one chain step across a range of values");
+        sweepStepButton.setToolTipText(
+                "Swap one chain step for native filter alternatives");
+        sweepPresetsButton.setToolTipText("Compare readable filter presets");
+        fullSweepButton.setToolTipText(
+                "Click multiple chain steps to sweep them together as a cartesian grid");
 
-        paramsButton.addActionListener(new ActionListener() {
+        sweepParamButton.addActionListener(new ActionListener() {
             @Override public void actionPerformed(ActionEvent e) {
-                setMode(Mode.PARAMS);
+                setMode(Mode.SWEEP_PARAMETER);
             }
         });
-        stepsButton.addActionListener(new ActionListener() {
+        sweepStepButton.addActionListener(new ActionListener() {
             @Override public void actionPerformed(ActionEvent e) {
-                setMode(Mode.STEPS);
+                setMode(Mode.SWEEP_STEP);
             }
         });
-        presetsButton.addActionListener(new ActionListener() {
+        sweepPresetsButton.addActionListener(new ActionListener() {
             @Override public void actionPerformed(ActionEvent e) {
-                setMode(Mode.PRESETS);
+                setMode(Mode.SWEEP_PRESETS);
+            }
+        });
+        fullSweepButton.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                setMode(Mode.FULL_SWEEP);
             }
         });
 
         row.add(new JLabel("Mode: "));
-        row.add(paramsButton);
+        row.add(sweepParamButton);
         row.add(Box.createHorizontalStrut(6));
-        row.add(stepsButton);
+        row.add(sweepStepButton);
         row.add(Box.createHorizontalStrut(6));
-        row.add(presetsButton);
+        row.add(sweepPresetsButton);
+        row.add(Box.createHorizontalStrut(6));
+        row.add(fullSweepButton);
         row.add(Box.createHorizontalGlue());
         return row;
     }
@@ -711,78 +736,56 @@ public final class MacroVariationsDialog extends PipelineDialog {
 
     private void handleChainStateChanged(int stepIndex,
                                          ChainRibbon.StepState newState) {
-        if (mode == Mode.PRESETS) {
+        if (mode == Mode.SWEEP_PRESETS) {
             return;
         }
-        if (mode == Mode.STEPS) {
-            handleStepsChainStateChanged(stepIndex, newState);
+        if (mode == Mode.FULL_SWEEP) {
+            Set<Integer> swept = chainRibbon.stepIndexesInState(
+                    ChainRibbon.StepState.SWEPT);
+            editor.setSelectedChainStepIndexes(swept);
+            refreshCellEstimate();
+            start();
             return;
         }
-        Set<Integer> swept = chainRibbon.stepIndexesInState(
-                ChainRibbon.StepState.SWEPT);
-        Set<Integer> disabled = chainRibbon.disabledStepIndexes();
-        editor.setChainStepFilter(swept, disabled);
-        refreshCellEstimate();
-        if (!disabled.isEmpty() && !isLinearMacro(context.baseMacro().render())) {
-            setStatusTextNow("Open the visual builder to vary branched macros.");
-            showMessage("Open the visual builder to vary branched macros.");
+        // SWEEP_PARAMETER or SWEEP_STEP (focus modes)
+        if (newState != ChainRibbon.StepState.FOCUSED) {
             return;
         }
-        start();
-    }
-
-    private void updateModeEditorVisibility() {
-        if (editor != null) {
-            editor.setVisible(mode != Mode.PRESETS);
-        }
-        if (presetEditor != null) {
-            presetEditor.setVisible(mode == Mode.PRESETS);
-        }
-        Window window = getWindow();
-        if (window != null) {
-            window.validate();
-        }
-    }
-
-    private void handleStepsChainStateChanged(int stepIndex,
-                                              ChainRibbon.StepState newState) {
-        configureStepsFocusability();
-        Set<Integer> disabled = chainRibbon.disabledStepIndexes();
-        if (!disabled.isEmpty() && !isLinearMacro(context.baseMacro().render())) {
-            setStatusTextNow("Open the visual builder to vary branched macros.");
-            showMessage("Open the visual builder to vary branched macros.");
-            return;
-        }
-        if (chainRibbon.focusedStepIndex() < 0) {
-            if (!defaultFocusFirstStepsSlot()) {
-                refreshCellEstimate();
-            }
-            return;
+        if (mode == Mode.SWEEP_PARAMETER) {
+            sweepRangeEditor.setFocusedStepIndex(stepIndex);
+        } else if (mode == Mode.SWEEP_STEP) {
+            stepSwapEditor.setFocusedStepIndex(stepIndex);
         }
         refreshCellEstimate();
         start();
     }
 
     private ParameterSweep currentSweepForMode() {
-        if (mode == Mode.PRESETS) {
+        if (mode == Mode.SWEEP_PRESETS) {
             return presetEditor.currentSweep(currentCropSpec,
                     context.channelName(),
                     context.sourceImageHash(),
                     context.cacheNamespace() + ":presets");
         }
-        if (mode == Mode.STEPS) {
+        if (mode == Mode.SWEEP_STEP) {
             int focused = chainRibbon.focusedStepIndex();
             if (focused < 0) {
                 throw new IllegalStateException("Choose a focusable chain step.");
             }
-            return buildStepsSubstitutionSweep(context.baseMacro(),
-                    currentCropSpec,
-                    context.channelName(),
-                    context.sourceImageHash(),
-                    context.cacheNamespace() + ":steps:" + focused,
-                    focused);
+            return stepSwapEditor.currentSweep(currentCropSpec);
         }
-        return editor.currentSweep();
+        if (mode == Mode.SWEEP_PARAMETER) {
+            int focused = chainRibbon.focusedStepIndex();
+            if (focused < 0) {
+                throw new IllegalStateException("Choose a chain step to sweep.");
+            }
+            return sweepRangeEditor.currentSweep(currentCropSpec);
+        }
+        // FULL_SWEEP
+        ParameterSweep sweep = editor.currentSweep();
+        return new ParameterSweep(sweep.method(), sweep.valueLists(),
+                currentCropSpec, sweep.channelName(), sweep.sourceImageHash(),
+                sweep.cacheNamespace() + ":full", sweep.macroVariations());
     }
 
     static ParameterSweep buildPresetsSweepForTest(List<String> presetNames,
@@ -838,23 +841,31 @@ public final class MacroVariationsDialog extends PipelineDialog {
                 cacheNamespace);
     }
 
-    private void configureStepsFocusability() {
+    private void configureFocusabilityFor(Mode requested) {
         StepFocusModel focusModel = stepsFocusModel(context.baseMacro(),
-                chainRibbon.disabledStepIndexes());
+                requested == Mode.SWEEP_STEP);
         chainRibbon.setFocusableStepIndexes(focusModel.focusable,
                 focusModel.reasons);
     }
 
-    private boolean defaultFocusFirstStepsSlot() {
-        configureStepsFocusability();
+    private boolean defaultFocusFirstFocusableStep() {
+        configureFocusabilityFor(mode);
         StepFocusModel focusModel = stepsFocusModel(context.baseMacro(),
-                chainRibbon.disabledStepIndexes());
+                mode == Mode.SWEEP_STEP);
         if (focusModel.focusable.isEmpty()) {
-            setStatusTextNow("No native alternatives available for Steps mode.");
+            setStatusTextNow(mode == Mode.SWEEP_STEP
+                    ? "No native alternatives available for any chain step."
+                    : "No sweepable parameters available on any chain step.");
             return false;
         }
         int focused = chainRibbon.focusedStepIndex();
         if (focusModel.focusable.contains(Integer.valueOf(focused))) {
+            // Already focused on a valid step, so push it into the active editor and run.
+            if (mode == Mode.SWEEP_PARAMETER) {
+                sweepRangeEditor.setFocusedStepIndex(focused);
+            } else if (mode == Mode.SWEEP_STEP) {
+                stepSwapEditor.setFocusedStepIndex(focused);
+            }
             start();
             return true;
         }
@@ -862,106 +873,24 @@ public final class MacroVariationsDialog extends PipelineDialog {
         return true;
     }
 
-    static ParameterSweep buildStepsSubstitutionSweepForTest(
-            FilterMacroEditorModel.MacroDefinition macro,
-            CropSpec cropSpec,
-            String channelName,
-            String sourceImageHash,
-            String cacheNamespace,
-            int stepIndex) {
-        return buildStepsSubstitutionSweep(macro, cropSpec, channelName,
-                sourceImageHash, cacheNamespace, stepIndex);
-    }
-
-    private static ParameterSweep buildStepsSubstitutionSweep(
-            FilterMacroEditorModel.MacroDefinition macro,
-            CropSpec cropSpec,
-            String channelName,
-            String sourceImageHash,
-            String cacheNamespace,
-            int stepIndex) {
-        OpType focusedType = opTypeForStep(macro, stepIndex);
-        SlotRole role = FilterAlternatives.slotRoleFor(focusedType);
-        if (role == null || !FilterAlternatives.hasUsefulAlternatives(role)) {
-            throw new IllegalStateException("No native alternatives available");
-        }
-
-        List<Alternative> alternatives = FilterAlternatives.alternativesFor(role);
-        List<String> filterLabels = new ArrayList<String>();
-        for (int i = 0; i < alternatives.size(); i++) {
-            filterLabels.add(alternatives.get(i).label());
-        }
-
-        List<String> scaleLabels = scaleLabelsFor(alternatives);
-        LinkedHashMap<ParameterKey, ParameterValueList> values =
-                new LinkedHashMap<ParameterKey, ParameterValueList>();
-        values.put(SlotSubstitutionKey.filterAxis(stepIndex, role.name()),
-                new ParameterValueList(filterLabels));
-        values.put(SlotSubstitutionKey.scaleAxis(stepIndex, role.name()),
-                new ParameterValueList(scaleLabels));
-        return new ParameterSweep(ParameterSweep.Method.FILTER,
-                values,
-                cropSpec,
-                channelName,
-                sourceImageHash,
-                cacheNamespace);
-    }
-
     private static StepFocusModel stepsFocusModel(
             FilterMacroEditorModel.MacroDefinition macro,
-            Set<Integer> disabledStepIndexes) {
+            boolean requireFilterAlternatives) {
         StepFocusModel model = new StepFocusModel();
         List<OpType> types = opTypesForSteps(macro);
         for (int i = 0; i < types.size(); i++) {
-            if (disabledStepIndexes != null
-                    && disabledStepIndexes.contains(Integer.valueOf(i))) {
-                model.reasons.put(Integer.valueOf(i), "Step is bypassed or off");
-                continue;
-            }
             SlotRole role = FilterAlternatives.slotRoleFor(types.get(i));
-            if (role == null) {
-                model.reasons.put(Integer.valueOf(i),
-                        "No native alternatives available");
-                continue;
-            }
-            if (!FilterAlternatives.hasUsefulAlternatives(role)) {
-                model.reasons.put(Integer.valueOf(i),
-                        "No native alternatives available");
-                continue;
+            if (requireFilterAlternatives) {
+                if (role == null
+                        || !FilterAlternatives.hasUsefulAlternatives(role)) {
+                    model.reasons.put(Integer.valueOf(i),
+                            "No native alternatives available");
+                    continue;
+                }
             }
             model.focusable.add(Integer.valueOf(i));
         }
         return model;
-    }
-
-    private static List<String> scaleLabelsFor(List<Alternative> alternatives) {
-        boolean anyScaled = false;
-        if (alternatives != null) {
-            for (int i = 0; i < alternatives.size(); i++) {
-                Alternative alternative = alternatives.get(i);
-                if (alternative != null
-                        && !CanonicalScale.isParameterless(alternative.type())) {
-                    anyScaled = true;
-                    break;
-                }
-            }
-        }
-        if (!anyScaled) {
-            return Collections.singletonList(SlotSubstitutionCombo.DEFAULT_SCALE_LABEL);
-        }
-        return Arrays.asList(CanonicalScale.SMALL.label(),
-                CanonicalScale.MEDIUM.label(),
-                CanonicalScale.LARGE.label());
-    }
-
-    private static OpType opTypeForStep(FilterMacroEditorModel.MacroDefinition macro,
-                                        int stepIndex) {
-        List<OpType> types = opTypesForSteps(macro);
-        if (stepIndex < 0 || stepIndex >= types.size()) {
-            throw new IllegalArgumentException("Filter step index is out of bounds: "
-                    + stepIndex);
-        }
-        return types.get(stepIndex);
     }
 
     private static List<OpType> opTypesForSteps(
@@ -1400,29 +1329,11 @@ public final class MacroVariationsDialog extends PipelineDialog {
         }
     }
 
-    private FilterSweepStrategy.MacroPostProcessor chainMacroPostProcessor() {
-        if (mode == Mode.PRESETS) {
-            return null;
-        }
-        final Set<Integer> disabled = chainRibbon.disabledStepIndexes();
-        if (disabled.isEmpty()) {
-            return null;
-        }
-        final List<Integer> entryLineIndexes =
-                new ArrayList<Integer>(chainEntryLineIndexes);
-        return new FilterSweepStrategy.MacroPostProcessor() {
-            @Override public String apply(String macroContent) {
-                return renderMacroWithDisabledSteps(macroContent, disabled,
-                        entryLineIndexes);
-            }
-        };
-    }
-
     private ParameterSweep withChainCacheNamespace(ParameterSweep sweep) {
         if (sweep == null) {
             return null;
         }
-        if (mode == Mode.PRESETS) {
+        if (mode == Mode.SWEEP_PRESETS) {
             return sweep;
         }
         String key = chainStateKey();
@@ -1455,101 +1366,6 @@ public final class MacroVariationsDialog extends PipelineDialog {
             out.append(i).append('=').append(state.name());
         }
         return anyNonFixed ? out.toString() : "";
-    }
-
-    private static boolean isLinearMacro(String macroContent) {
-        try {
-            return IjmToDagLoader.load(macroContent).isLinear();
-        } catch (RuntimeException e) {
-            return false;
-        }
-    }
-
-    static String renderMacroWithDisabledStepsForTest(String macroContent,
-                                                      Set<Integer> disabledStepIndexes,
-                                                      List<Integer> entryLineIndexes) {
-        return renderMacroWithDisabledSteps(macroContent, disabledStepIndexes,
-                entryLineIndexes);
-    }
-
-    private static String renderMacroWithDisabledSteps(String macroContent,
-                                                       Set<Integer> disabledStepIndexes,
-                                                       List<Integer> entryLineIndexes) {
-        if (disabledStepIndexes == null || disabledStepIndexes.isEmpty()) {
-            return macroContent;
-        }
-        DagIR dag = IjmToDagLoader.load(macroContent);
-        if (!dag.isLinear()) {
-            throw new IllegalStateException(
-                    "Open the visual builder to vary branched macros.");
-        }
-        if (dag.lines.isEmpty()) {
-            return macroContent;
-        }
-        Set<Integer> disabledOps = disabledOpIndexes(macroContent,
-                disabledStepIndexes, entryLineIndexes);
-        DagLine line = dag.lines.get(0);
-        List<DagNode> clonedOps = new ArrayList<DagNode>();
-        for (int i = 0; i < line.ops.size(); i++) {
-            DagNode source = line.ops.get(i);
-            DagNode copy = new DagNode(source.id, source.type, source.args,
-                    source.commandName, source.menuPath);
-            copy.disabled = source.disabled || disabledOps.contains(Integer.valueOf(i));
-            clonedOps.add(copy);
-        }
-        DagIR modified = new DagIR(dag.version,
-                Collections.singletonList(new DagLine(line.id, clonedOps)),
-                dag.combiners,
-                dag.output,
-                dag.executionTier);
-        return DagToIjmEmitter.emit(modified);
-    }
-
-    private static Set<Integer> disabledOpIndexes(String macroContent,
-                                                  Set<Integer> disabledStepIndexes,
-                                                  List<Integer> entryLineIndexes) {
-        Set<Integer> disabledLines = new HashSet<Integer>();
-        if (entryLineIndexes != null) {
-            for (Integer stepIndex : disabledStepIndexes) {
-                if (stepIndex != null
-                        && stepIndex.intValue() >= 0
-                        && stepIndex.intValue() < entryLineIndexes.size()) {
-                    disabledLines.add(entryLineIndexes.get(stepIndex.intValue()));
-                }
-            }
-        }
-
-        Set<Integer> out = new LinkedHashSet<Integer>();
-        String[] lines = (macroContent == null ? "" : macroContent)
-                .replace("\r\n", "\n")
-                .replace('\r', '\n')
-                .split("\n", -1);
-        int opIndex = 0;
-        for (int lineIndex = 0; lineIndex < lines.length; lineIndex++) {
-            if (!isDagOpLine(lines[lineIndex])) {
-                continue;
-            }
-            if (disabledLines.contains(Integer.valueOf(lineIndex))) {
-                out.add(Integer.valueOf(opIndex));
-            }
-            opIndex++;
-        }
-        if (out.size() < disabledStepIndexes.size()) {
-            for (Integer stepIndex : disabledStepIndexes) {
-                if (stepIndex != null && stepIndex.intValue() >= 0) {
-                    out.add(stepIndex);
-                }
-            }
-        }
-        return out;
-    }
-
-    private static boolean isDagOpLine(String line) {
-        String trimmed = line == null ? "" : line.trim();
-        return !trimmed.isEmpty()
-                && !trimmed.startsWith("//")
-                && !trimmed.startsWith("/*")
-                && !trimmed.startsWith("*");
     }
 
     private JPanel cropRow() {
@@ -1586,27 +1402,6 @@ public final class MacroVariationsDialog extends PipelineDialog {
         return row;
     }
 
-    private JScrollPane gridScrollPane() {
-        JScrollPane scrollPane = new JScrollPane(gridPanel);
-        scrollPane.setBorder(BorderFactory.createLineBorder(new Color(0x3A, 0x40, 0x46)));
-        scrollPane.setPreferredSize(new Dimension(780, 440));
-        scrollPane.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
-        scrollPane.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED);
-        scrollPane.getViewport().setBackground(new Color(0x1E, 0x20, 0x24));
-        return scrollPane;
-    }
-
-    private JPanel zRow() {
-        JPanel row = new JPanel(new BorderLayout(8, 0));
-        row.setOpaque(false);
-        row.setBorder(BorderFactory.createEmptyBorder(4, 4, 4, 4));
-        row.add(new JLabel("z:"), BorderLayout.WEST);
-        configureZSlider();
-        row.add(zSlider, BorderLayout.CENTER);
-        row.add(zLabel, BorderLayout.EAST);
-        return row;
-    }
-
     private JPanel statusPanel() {
         JPanel panel = new JPanel();
         panel.setOpaque(false);
@@ -1621,22 +1416,6 @@ public final class MacroVariationsDialog extends PipelineDialog {
         return panel;
     }
 
-    private void configureZSlider() {
-        int slices = sourceSliceCount();
-        zSlider.setMinimum(1);
-        zSlider.setMaximum(Math.max(1, slices));
-        zSlider.setValue(1);
-        zSlider.setEnabled(slices > 1);
-        zLabel.setText("1/" + Math.max(1, slices));
-        zSlider.addChangeListener(new ChangeListener() {
-            @Override public void stateChanged(ChangeEvent e) {
-                int z = zSlider.getValue();
-                zLabel.setText(z + "/" + Math.max(1, zSlider.getMaximum()));
-                gridPanel.broadcastZ(z);
-            }
-        });
-    }
-
     private void refreshCellEstimate() {
         try {
             ParameterSweep sweep = currentSweepForMode();
@@ -1646,19 +1425,15 @@ public final class MacroVariationsDialog extends PipelineDialog {
                         + cropSummary(sweep.cropSpec()));
                 setStrategyText(" ");
             }
-            gridPanel.setSweep(sweep);
-            gridPanel.setPresetRowCaptions(mode == Mode.PRESETS
-                    ? presetEditor.rowCaptionsForSelected()
-                    : Collections.<String, String>emptyMap());
             if (runButton != null && !isExecutorActive()) {
                 runButton.setEnabled(true);
             }
         } catch (RuntimeException e) {
             cellsLabel.setText("Cells: ?");
             if (!isExecutorActive()) {
-                setStatusTextNow(mode == Mode.STEPS || mode == Mode.PRESETS
-                        ? safe(e.getMessage())
-                        : "Choose at least one value for each selected parameter.");
+                setStatusTextNow(mode == Mode.FULL_SWEEP
+                        ? "Choose at least one value for each selected parameter."
+                        : safe(e.getMessage()));
                 setStrategyText(" ");
             }
             if (runButton != null && !isExecutorActive()) {
@@ -1708,11 +1483,10 @@ public final class MacroVariationsDialog extends PipelineDialog {
             completedCount++;
         }
         failedCount = countFailures();
-        updateMontageButtonState();
+        updateGridWindowProgress();
         setStatusTextNow(progressStatus());
         if (completedCount >= cells.size() && !cells.isEmpty()) {
-            updateHistogramShapeIndicator();
-            if (downstreamVerdictCheckBox.isSelected()) {
+            if (downstreamVerdictSelected) {
                 startDownstreamVerdict();
             }
         }
@@ -1741,388 +1515,23 @@ public final class MacroVariationsDialog extends PipelineDialog {
         if (worker.isCancelled()) {
             setStatusTextNow("Cancelled");
             markRunningCellsCancelled();
-            updateMontageButtonState();
+            updateGridWindowProgress();
             return;
         }
         try {
             worker.get();
             failedCount = countFailures();
-            updateMontageButtonState();
-            updateHistogramShapeIndicator();
+            updateGridWindowProgress();
             setStatusTextNow(completionStatus());
-            if (downstreamVerdictCheckBox.isSelected()) {
+            if (downstreamVerdictSelected) {
                 startDownstreamVerdict();
             }
         } catch (Exception e) {
             failedCount = countFailures();
-            updateMontageButtonState();
+            updateGridWindowProgress();
             setStatusTextNow("Error: " + safe(e.getMessage()));
             showMessage(e.getMessage());
         }
-    }
-
-    private void openMontage() {
-        List<VariationMontageDialog.MontageTile> montageTiles = buildMontageTiles();
-        if (montageTiles.isEmpty()) {
-            updateMontageButtonState();
-            showMessage("Wait for at least one successful tile before opening the montage.");
-            return;
-        }
-        VariationMontageDialog dialog = montageDialog();
-        dialog.setTiles(montageTiles, currentSweep, zSlider.getValue());
-        setMontageSourceChoices(dialog);
-        PreviewDisplaySettings settings =
-                PreviewDisplaySettings.defaultFor(context.channelName());
-        dialog.setDisplaySettings(settings, settings);
-        wireMontageDisplayActions(dialog, context.montageDisplayActionDelegate());
-        dialog.raiseForUser();
-    }
-
-    private void wireMontageDisplayActions(
-            final VariationMontageDialog dialog,
-            final MontageDisplayActionDelegate delegate) {
-        if (delegate == null) {
-            dialog.setDisplayActionListener(null);
-            dialog.setDisplayActionState("Grey LUT",
-                    "Display controls require an active main preview.");
-            dialog.setDisplayActionsEnabled(false,
-                    "Display controls require an active main preview.");
-            return;
-        }
-        dialog.setDisplayActionListener(new VariationMontageDialog.DisplayActionListener() {
-            @Override public void adjustBrightnessContrastRequested() {
-                delegate.adjustBrightnessContrast();
-                updateMontageDisplayActionState(dialog, delegate);
-            }
-
-            @Override public void lutToggleRequested() {
-                delegate.toggleGreyLut();
-                updateMontageDisplayActionState(dialog, delegate);
-            }
-        });
-        updateMontageDisplayActionState(dialog, delegate);
-    }
-
-    private void updateMontageDisplayActionState(
-            VariationMontageDialog dialog,
-            MontageDisplayActionDelegate delegate) {
-        if (dialog == null || delegate == null) {
-            return;
-        }
-        dialog.setDisplayActionState(delegate.lutButtonText(),
-                delegate.lutButtonTooltip());
-        dialog.setDisplayActionsEnabled(true, delegate.lutButtonTooltip());
-    }
-
-    private VariationMontageDialog montageDialog() {
-        if (montageDialog == null || !montageDialog.isDisplayable()) {
-            montageDialog = new VariationMontageDialog(
-                    SwingUtilities.getWindowAncestor(gridPanel));
-        }
-        return montageDialog;
-    }
-
-    private List<VariationMontageDialog.MontageTile> buildMontageTiles() {
-        List<VariationResult> results = montageResults();
-        if (results.isEmpty()) {
-            return Collections.emptyList();
-        }
-        List<VariationMontageDialog.MontageTile> tiles =
-                new ArrayList<VariationMontageDialog.MontageTile>(results.size());
-        for (int i = 0; i < results.size(); i++) {
-            VariationResult result = results.get(i);
-            tiles.add(new VariationMontageDialog.MontageTile(
-                    result.combo(),
-                    result.label(),
-                    result.nObjects(),
-                    result.meanNeighbourIou()));
-        }
-        return tiles;
-    }
-
-    private List<VariationResult> montageResults() {
-        List<VariationResult> results = new ArrayList<VariationResult>();
-        for (int i = 0; i < resultsByCell.size(); i++) {
-            VariationResult result = resultsByCell.get(i);
-            if (isMontageResult(result)) {
-                results.add(result);
-            }
-        }
-        return results;
-    }
-
-    private void updateMontageButtonState() {
-        if (openLargeMontageButton != null) {
-            openLargeMontageButton.setEnabled(hasMontageResult());
-        }
-    }
-
-    private boolean hasMontageResult() {
-        for (int i = 0; i < resultsByCell.size(); i++) {
-            if (isMontageResult(resultsByCell.get(i))) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static boolean isMontageResult(VariationResult result) {
-        return result != null && !result.hasError();
-    }
-
-    private void disposeMontageDialog() {
-        if (montageDialog != null) {
-            montageDialog.dispose();
-            montageDialog = null;
-        }
-        disposeMontageSourceChoices();
-    }
-
-    private void setMontageSourceChoices(VariationMontageDialog dialog) {
-        disposeMontageSourceChoices();
-        montageRawSourceChoice = croppedForComparison(context.sourceImage());
-        montageFilteredSourceChoice = croppedForComparison(context.filteredSource());
-        dialog.setSourceChoices(montageRawSourceChoice, montageFilteredSourceChoice);
-    }
-
-    private void disposeMontageSourceChoices() {
-        ImagePlus rawChoice = montageRawSourceChoice;
-        ImagePlus filteredChoice = montageFilteredSourceChoice;
-        montageRawSourceChoice = null;
-        montageFilteredSourceChoice = null;
-        disposeIfOwnedImage(rawChoice, context.sourceImage(), context.filteredSource());
-        disposeIfOwnedImage(filteredChoice, context.sourceImage(),
-                context.filteredSource(), rawChoice);
-    }
-
-    private static void disposeIfOwnedImage(ImagePlus image,
-                                            ImagePlus... externalReferences) {
-        if (image == null) {
-            return;
-        }
-        if (externalReferences != null) {
-            for (int i = 0; i < externalReferences.length; i++) {
-                if (image == externalReferences[i]) {
-                    return;
-                }
-            }
-        }
-        try {
-            image.changes = false;
-        } catch (Throwable ignored) {
-        }
-        try {
-            image.close();
-        } catch (Throwable ignored) {
-        }
-        try {
-            image.flush();
-        } catch (Throwable ignored) {
-        }
-    }
-
-    private void updateHistogramShapeIndicator() {
-        clearStableShapeRibbons();
-        if (mode == Mode.PRESETS) {
-            updatePresetHistogramShapeIndicator();
-            return;
-        }
-        if (currentSweep == null
-                || cells.isEmpty()
-                || resultsByCell.size() != cells.size()
-                || completedCount < cells.size()
-                || !allCellsSuccessful()) {
-            clearHistogramShapeStrip();
-            setSuggestionText("No stable shape plateau detected");
-            return;
-        }
-
-        ParameterKey axis = singleNumericFilterAxis();
-        if (axis == null) {
-            clearHistogramShapeStrip();
-            setSuggestionText("No stable shape plateau detected");
-            return;
-        }
-
-        HistogramShapeStability.Result result =
-                HistogramShapeStability.detect(resultsByCell, axis);
-        if (result == null || !result.hasPlateau()) {
-            clearHistogramShapeStrip();
-            setSuggestionText("No stable shape plateau detected");
-            return;
-        }
-
-        ensureHistogramShapeStrip(result);
-        VariationCellPanel winner = cellsByCombo.get(
-                result.winnerCombo.toCanonicalJson());
-        if (winner != null) {
-            winner.setRibbonLabel("STABLE SHAPE");
-            winner.setBorderHint(VariationCellPanel.BorderHint.KNEE);
-        }
-        setSuggestionText("Most stable shape at "
-                + axisLabelForStatus(axis)
-                + " = "
-                + formatValue(result.winnerCombo.get(axis)));
-    }
-
-    private void updatePresetHistogramShapeIndicator() {
-        if (currentSweep == null
-                || cells.isEmpty()
-                || resultsByCell.size() != cells.size()
-                || completedCount < cells.size()) {
-            clearHistogramShapeStrip();
-            setSuggestionText("No stable shape plateau detected");
-            return;
-        }
-        ParameterKey xAxis = presetXValueAxis();
-        ParameterKey presetAxis = presetNameAxis();
-        if (xAxis == null || presetAxis == null) {
-            clearHistogramShapeStrip();
-            setSuggestionText("No stable shape plateau detected");
-            return;
-        }
-
-        HistogramShapeStability.Result best = null;
-        double bestScore = Double.POSITIVE_INFINITY;
-        List<Object> presetNames = currentSweep.valueLists().get(presetAxis).values();
-        for (int i = 0; i < presetNames.size(); i++) {
-            List<VariationResult> row = successfulPresetResults(
-                    presetAxis, presetNames.get(i));
-            HistogramShapeStability.Result result =
-                    HistogramShapeStability.detect(row, xAxis);
-            if (result == null || !result.hasPlateau()) {
-                continue;
-            }
-            VariationCellPanel rowWinner = cellsByCombo.get(
-                    result.winnerCombo.toCanonicalJson());
-            if (rowWinner != null) {
-                rowWinner.setRibbonLabel("STABLE SHAPE");
-                rowWinner.setBorderHint(VariationCellPanel.BorderHint.KNEE);
-            }
-            double score = plateauScore(result);
-            if (score < bestScore) {
-                bestScore = score;
-                best = result;
-            }
-        }
-
-        if (best == null) {
-            clearHistogramShapeStrip();
-            setSuggestionText("No stable shape plateau detected");
-            return;
-        }
-
-        ensureHistogramShapeStrip(best);
-        PresetSweepCombo winner = PresetSweepCombo.from(best.winnerCombo);
-        String presetName = winner == null ? "" : winner.presetName();
-        setSuggestionText("Most stable shape: "
-                + presetName
-                + " at "
-                + axisLabelForStatus(xAxis)
-                + " = "
-                + formatValue(best.winnerCombo.get(xAxis)));
-    }
-
-    private List<VariationResult> successfulPresetResults(ParameterKey presetAxis,
-                                                          Object presetName) {
-        List<VariationResult> out = new ArrayList<VariationResult>();
-        for (int i = 0; i < resultsByCell.size(); i++) {
-            VariationResult result = resultsByCell.get(i);
-            if (result == null
-                    || result.hasError()
-                    || result.kind() != VariationResult.Kind.FILTER
-                    || !valueEquals(result.combo().get(presetAxis), presetName)) {
-                continue;
-            }
-            out.add(result);
-        }
-        return out;
-    }
-
-    private ParameterKey presetXValueAxis() {
-        if (currentSweep == null) {
-            return null;
-        }
-        for (ParameterKey key : currentSweep.valueLists().keySet()) {
-            if (key instanceof PresetSweepKey
-                    && ((PresetSweepKey) key).role() == PresetSweepKey.Role.X_VALUE) {
-                return key;
-            }
-        }
-        return null;
-    }
-
-    private ParameterKey presetNameAxis() {
-        if (currentSweep == null) {
-            return null;
-        }
-        for (ParameterKey key : currentSweep.valueLists().keySet()) {
-            if (key instanceof PresetSweepKey
-                    && ((PresetSweepKey) key).role() == PresetSweepKey.Role.PRESET_NAME) {
-                return key;
-            }
-        }
-        return null;
-    }
-
-    private static double plateauScore(HistogramShapeStability.Result result) {
-        if (result == null || result.distances.length == 0) {
-            return Double.POSITIVE_INFINITY;
-        }
-        int[] range = result.plateauRange();
-        if (range == null || range.length < 2) {
-            return Double.POSITIVE_INFINITY;
-        }
-        int start = Math.max(0, Math.min(range[0], range[1]));
-        int end = Math.min(result.distances.length - 1,
-                Math.max(range[0], range[1]) - 1);
-        if (end < start) {
-            return Double.POSITIVE_INFINITY;
-        }
-        double total = 0.0d;
-        int count = 0;
-        for (int i = start; i <= end; i++) {
-            total += result.distances[i];
-            count++;
-        }
-        return count == 0 ? Double.POSITIVE_INFINITY : total / count;
-    }
-
-    private void ensureHistogramShapeStrip(HistogramShapeStability.Result result) {
-        if (histogramShapeStrip == null) {
-            histogramShapeStrip = new HistogramShapeStrip(result);
-            histogramShapeSlot.removeAll();
-            histogramShapeSlot.add(histogramShapeStrip, BorderLayout.CENTER);
-        } else {
-            histogramShapeStrip.setData(result);
-        }
-        histogramShapeStrip.setVisible(true);
-        histogramShapeSlot.setVisible(true);
-        histogramShapeSlot.revalidate();
-        histogramShapeSlot.repaint();
-        Window window = getWindow();
-        if (window != null) {
-            window.validate();
-        }
-    }
-
-    private void clearHistogramShapeIndicator() {
-        clearStableShapeRibbons();
-        clearHistogramShapeStrip();
-    }
-
-    private void clearStableShapeRibbons() {
-        for (int i = 0; i < cells.size(); i++) {
-            cells.get(i).setBorderHint(VariationCellPanel.BorderHint.NONE);
-        }
-    }
-
-    private void clearHistogramShapeStrip() {
-        histogramShapeStrip = null;
-        histogramShapeSlot.removeAll();
-        histogramShapeSlot.setVisible(false);
-        histogramShapeSlot.revalidate();
-        histogramShapeSlot.repaint();
     }
 
     private boolean allCellsSuccessful() {
@@ -2132,40 +1541,6 @@ public final class MacroVariationsDialog extends PipelineDialog {
         for (int i = 0; i < resultsByCell.size(); i++) {
             VariationResult result = resultsByCell.get(i);
             if (result == null || result.hasError()) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private ParameterKey singleNumericFilterAxis() {
-        if (currentSweep == null) {
-            return null;
-        }
-        List<ParameterKey> swept = new ArrayList<ParameterKey>();
-        for (Map.Entry<ParameterKey, ParameterValueList> entry
-                : currentSweep.valueLists().entrySet()) {
-            ParameterValueList values = entry.getValue();
-            if (values == null || values.size() <= 1) {
-                continue;
-            }
-            ParameterKey key = entry.getKey();
-            if (key == null
-                    || key.valueKind() != ParameterKey.ValueKind.NUMBER
-                    || !allNumeric(values)) {
-                return null;
-            }
-            swept.add(key);
-        }
-        return swept.size() == 1 ? swept.get(0) : null;
-    }
-
-    private static boolean allNumeric(ParameterValueList values) {
-        if (values == null) {
-            return false;
-        }
-        for (int i = 0; i < values.size(); i++) {
-            if (!(values.get(i) instanceof Number)) {
                 return false;
             }
         }
@@ -2192,6 +1567,14 @@ public final class MacroVariationsDialog extends PipelineDialog {
         return failures;
     }
 
+    private void updateGridWindowProgress() {
+        if (gridWindow == null) {
+            return;
+        }
+        gridWindow.setSliceMax(gridWindow.controllerForTest().maxSlice());
+        gridWindow.setCompletedCount(completedCount, cells.size(), failedCount);
+    }
+
     private void startDownstreamVerdict() {
         if (!downstreamResolution.isAvailable()
                 || currentSweep == null
@@ -2204,7 +1587,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
         }
         downstreamStartedForCurrentResults = true;
         clearDownstreamVerdicts();
-        stopDownstreamButton.setEnabled(true);
+        updateGridWindowDownstreamControls(true);
         setStatusTextNow("Downstream: starting");
         final DownstreamSegmenter segmenter =
                 downstreamResolution.segmenter().forFilterSweep(currentSweep);
@@ -2242,7 +1625,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
                 if (this != downstreamWorker) {
                     return;
                 }
-                stopDownstreamButton.setEnabled(false);
+                updateGridWindowDownstreamControls(false);
                 if (isCancelled()) {
                     setStatusTextNow("Downstream cancelled");
                     applyBestDownstreamRibbon();
@@ -2337,7 +1720,17 @@ public final class MacroVariationsDialog extends PipelineDialog {
         if (worker != null && !worker.isDone()) {
             worker.cancel(true);
         }
-        stopDownstreamButton.setEnabled(false);
+        updateGridWindowDownstreamControls(false);
+    }
+
+    private void updateGridWindowDownstreamControls(boolean stopEnabled) {
+        if (gridWindow == null) {
+            return;
+        }
+        gridWindow.setDownstreamControlsEnabled(
+                downstreamResolution.isAvailable(),
+                stopEnabled,
+                downstreamTooltip());
     }
 
     private void installWindowCleanup() {
@@ -2349,15 +1742,22 @@ public final class MacroVariationsDialog extends PipelineDialog {
             @Override public void windowClosing(WindowEvent e) {
                 cancelExecutor();
                 cancelDownstreamWorker();
-                disposeMontageDialog();
+                disposeGridWindow();
             }
 
             @Override public void windowClosed(WindowEvent e) {
                 cancelExecutor();
                 cancelDownstreamWorker();
-                disposeMontageDialog();
+                disposeGridWindow();
             }
         });
+    }
+
+    private void disposeGridWindow() {
+        if (gridWindow != null) {
+            gridWindow.dispose();
+            gridWindow = null;
+        }
     }
 
     private void disposeCells() {
@@ -2593,10 +1993,10 @@ public final class MacroVariationsDialog extends PipelineDialog {
     }
 
     private String strategyTextForMode(int comboCount) {
-        if (mode == Mode.STEPS) {
+        if (mode == Mode.SWEEP_STEP) {
             return "Using Filter substitution (" + comboCount + " cells)";
         }
-        if (mode == Mode.PRESETS) {
+        if (mode == Mode.SWEEP_PRESETS) {
             return "Using Filter presets (" + comboCount + " cells)";
         }
         return "Using Filter sweep (" + comboCount + " cells)";
@@ -2691,21 +2091,6 @@ public final class MacroVariationsDialog extends PipelineDialog {
         }
         editor.setCropSpec(currentCropSpec);
         refreshCellEstimate();
-    }
-
-    private ImagePlus croppedForComparison(ImagePlus source) {
-        if (source == null) {
-            return null;
-        }
-        CropSpec spec = currentSweep == null ? currentCropSpec : currentSweep.cropSpec();
-        if (spec == null) {
-            return source;
-        }
-        try {
-            return spec.apply(source);
-        } catch (RuntimeException e) {
-            return source;
-        }
     }
 
     private void selectCropButton(CropSpec spec) {

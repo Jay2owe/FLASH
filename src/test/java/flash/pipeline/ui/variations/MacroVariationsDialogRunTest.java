@@ -44,6 +44,7 @@ public class MacroVariationsDialogRunTest {
                             @Override public void accept(String macro) {
                             }
                         });
+                dialog.setMode(MacroVariationsDialog.Mode.FULL_SWEEP);
                 configureSweep(dialog.editorForTest());
                 dialog.runButtonForTest().doClick();
                 ref.set(dialog);
@@ -56,7 +57,7 @@ public class MacroVariationsDialogRunTest {
             SwingUtilities.invokeAndWait(new Runnable() {
                 @Override public void run() {
                     MacroVariationsDialog d = ref.get();
-                    assertEquals(6, d.gridPanelForTest().cellCountForTest());
+                    assertEquals(6, d.gridWindowForTest().cellsForTest().size());
                     assertEquals(6, d.completedCountForTest());
                     assertEquals(0, d.failedCountForTest());
                     List<VariationResult> results = d.resultsForTest();
@@ -97,6 +98,7 @@ public class MacroVariationsDialogRunTest {
                             @Override public void accept(String macro) {
                             }
                         });
+                dialog.setMode(MacroVariationsDialog.Mode.FULL_SWEEP);
                 configureSweep(dialog.editorForTest());
                 dialog.runButtonForTest().doClick();
                 ref.set(dialog);

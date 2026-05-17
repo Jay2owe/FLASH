@@ -1,7 +1,6 @@
 package flash.pipeline.ui.variations;
 
 import flash.pipeline.ui.config.ConfigQcContext;
-import flash.pipeline.ui.preview.VariationMontageDialog;
 
 import ij.ImagePlus;
 import ij.ImageStack;
@@ -9,15 +8,12 @@ import ij.process.ByteProcessor;
 import org.junit.Assume;
 import org.junit.Test;
 
-import javax.swing.JButton;
 import javax.swing.SwingUtilities;
 import java.awt.GraphicsEnvironment;
 import java.io.File;
-import java.lang.reflect.Field;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.Assert.assertEquals;
@@ -53,13 +49,13 @@ public class VariationsDialogTest {
 
         assertEquals(6, holder[0].cellCountForTest());
         assertEquals(6, holder[0].completedCountForTest());
-        assertEquals(6, holder[0].gridPanelForTest().cellCountForTest());
+        assertEquals(6, holder[0].gridWindowForTest().cellsForTest().size());
 
         SwingUtilities.invokeAndWait(new Runnable() {
             @Override public void run() {
                 holder[0].setGlobalZForTest(3);
                 java.util.List<VariationCellPanel> cells =
-                        holder[0].gridPanelForTest().cellsForTest();
+                        holder[0].gridWindowForTest().cellsForTest();
                 for (int i = 0; i < cells.size(); i++) {
                     assertEquals(3, cells.get(i).currentZForTest());
                     assertTrue(cells.get(i).cachedLabelForTest() != null);
@@ -75,88 +71,6 @@ public class VariationsDialogTest {
                 holder[0].dispose();
             }
         });
-    }
-
-    @Test
-    public void openMontageUsesCroppedSourceChoices() throws Exception {
-        Assume.assumeFalse("Variation montage creates a JDialog.",
-                GraphicsEnvironment.isHeadless());
-
-        final ImagePlus raw = stack("raw-large", 3, 320, 300);
-        final ImagePlus filtered = stack("filtered-large", 3, 320, 300);
-        final VariationsDialog dialog =
-                startedDialog(context(raw, filtered), oneCellSweep());
-        try {
-            SwingUtilities.invokeAndWait(new Runnable() {
-                @Override public void run() {
-                    dialog.openMontageForTest();
-                    VariationMontageDialog montage = dialog.montageDialogForTest();
-                    assertTrue(montage != null);
-
-                    ImagePlus actualRaw = (ImagePlus) field(montage, "rawSourceImage");
-                    ImagePlus actualFiltered =
-                            (ImagePlus) field(montage, "filteredSourceImage");
-                    ImagePlus expectedRaw = dialog.croppedForComparisonForTest(raw);
-                    ImagePlus expectedFiltered =
-                            dialog.croppedForComparisonForTest(filtered);
-
-                    assertSameDimensions(expectedRaw, actualRaw);
-                    assertSameDimensions(expectedFiltered, actualFiltered);
-                    assertEquals(256, actualRaw.getWidth());
-                    assertEquals(256, actualRaw.getHeight());
-                    assertEquals(256, actualFiltered.getWidth());
-                    assertEquals(256, actualFiltered.getHeight());
-                }
-            });
-        } finally {
-            dispose(dialog);
-            raw.flush();
-            filtered.flush();
-        }
-    }
-
-    @Test
-    public void montageDisplayButtonsInvokeContextDelegate() throws Exception {
-        Assume.assumeFalse("Variation montage creates a JDialog.",
-                GraphicsEnvironment.isHeadless());
-
-        final AtomicInteger brightnessRequests = new AtomicInteger();
-        final AtomicInteger lutRequests = new AtomicInteger();
-        final ImagePlus source = stack("delegate-source", 2, 320, 300);
-        VariationEngineContext context = context(source, source);
-        context.setMontageDisplayActionDelegate(new MontageDisplayActionDelegate() {
-            @Override public void adjustBrightnessContrast() {
-                brightnessRequests.incrementAndGet();
-            }
-
-            @Override public void toggleGreyLut() {
-                lutRequests.incrementAndGet();
-            }
-        });
-
-        final VariationsDialog dialog = startedDialog(context, oneCellSweep());
-        try {
-            SwingUtilities.invokeAndWait(new Runnable() {
-                @Override public void run() {
-                    dialog.openMontageForTest();
-                    VariationMontageDialog montage = dialog.montageDialogForTest();
-                    assertTrue(montage != null);
-
-                    JButton brightnessButton =
-                            (JButton) field(montage, "displayControlsButton");
-                    JButton lutButton = (JButton) field(montage, "lutToggleButton");
-
-                    brightnessButton.doClick();
-                    lutButton.doClick();
-
-                    assertEquals(1, brightnessRequests.get());
-                    assertEquals(1, lutRequests.get());
-                }
-            });
-        } finally {
-            dispose(dialog);
-            source.flush();
-        }
     }
 
     private static VariationEngineContext context() {
@@ -253,21 +167,4 @@ public class VariationsDialogTest {
         return image;
     }
 
-    private static void assertSameDimensions(ImagePlus expected, ImagePlus actual) {
-        assertTrue(expected != null);
-        assertTrue(actual != null);
-        assertEquals(expected.getWidth(), actual.getWidth());
-        assertEquals(expected.getHeight(), actual.getHeight());
-        assertEquals(expected.getNSlices(), actual.getNSlices());
-    }
-
-    private static Object field(Object target, String fieldName) {
-        try {
-            Field field = target.getClass().getDeclaredField(fieldName);
-            field.setAccessible(true);
-            return field.get(target);
-        } catch (Exception e) {
-            throw new AssertionError(e);
-        }
-    }
 }

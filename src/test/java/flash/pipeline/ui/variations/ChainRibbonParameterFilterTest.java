@@ -15,7 +15,6 @@ import java.util.List;
 import java.util.Set;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class ChainRibbonParameterFilterTest {
@@ -26,7 +25,7 @@ public class ChainRibbonParameterFilterTest {
         Set<Integer> selected = new LinkedHashSet<Integer>();
         selected.add(Integer.valueOf(2));
 
-        editor.setChainStepFilter(selected, Collections.<Integer>emptySet());
+        editor.setSelectedChainStepIndexes(selected);
 
         List<ParameterKey> keys = editor.parameterKeysForTest();
         assertEquals(1, keys.size());
@@ -35,34 +34,6 @@ public class ChainRibbonParameterFilterTest {
         assertEquals(2, id.entryIndex());
         assertEquals("radius", id.paramKey());
         assertEquals(1, editor.currentSweep().valueLists().size());
-    }
-
-    @Test
-    public void bypassedAndOffStepParametersAreAbsent() {
-        ParameterSweepEditor editor = ParameterSweepEditor.forFilter(context());
-        Set<Integer> disabled = new LinkedHashSet<Integer>();
-        disabled.add(Integer.valueOf(1));
-
-        editor.setChainStepFilter(Collections.<Integer>emptySet(), disabled);
-
-        List<ParameterKey> keys = editor.parameterKeysForTest();
-        assertEquals(2, keys.size());
-        assertTrue(containsParam(keys, "sigma"));
-        assertTrue(containsParam(keys, "radius"));
-        assertFalse(containsParam(keys, "rolling"));
-        assertFalse(containsParam(keys, "method"));
-        assertEquals(2, editor.currentSweep().valueLists().size());
-    }
-
-    private static boolean containsParam(List<ParameterKey> keys, String paramKey) {
-        for (int i = 0; i < keys.size(); i++) {
-            ParameterKey key = keys.get(i);
-            if (key instanceof FilterParameterId
-                    && paramKey.equals(((FilterParameterId) key).paramKey())) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private static FilterVariationEngineContext context() {

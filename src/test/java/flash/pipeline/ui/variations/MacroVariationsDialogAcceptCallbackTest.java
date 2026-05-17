@@ -40,6 +40,7 @@ public class MacroVariationsDialogAcceptCallbackTest {
                         accepted.set(macro);
                     }
                 });
+                dialog.setMode(MacroVariationsDialog.Mode.FULL_SWEEP);
                 configureOneComboSweep(dialog.editorForTest());
                 assertFalse(dialog.useComboButtonForTest().isEnabled());
                 dialog.runButtonForTest().doClick();

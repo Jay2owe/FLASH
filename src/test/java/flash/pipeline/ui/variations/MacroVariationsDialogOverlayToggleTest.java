@@ -40,6 +40,7 @@ public class MacroVariationsDialogOverlayToggleTest {
                             @Override public void accept(String macro) {
                             }
                         });
+                dialog.setMode(MacroVariationsDialog.Mode.FULL_SWEEP);
                 configureSweep(dialog.editorForTest());
                 dialog.runButtonForTest().doClick();
                 ref.set(dialog);
@@ -51,23 +52,26 @@ public class MacroVariationsDialogOverlayToggleTest {
             dialog.waitForDoneForTest(5000L);
             SwingUtilities.invokeAndWait(new Runnable() {
                 @Override public void run() {
-                    assertFalse(dialog.otsuOverlayCheckBoxForTest().isSelected());
+                    assertFalse(dialog.gridWindowForTest()
+                            .otsuOverlayCheckBoxForTest().isSelected());
                     assertCellsHaveMode(dialog.cellsForTest(),
                             VariationCellPanel.OverlayMode.NONE);
 
-                    dialog.otsuOverlayCheckBoxForTest().doClick();
-                    assertTrue(dialog.otsuOverlayCheckBoxForTest().isSelected());
+                    dialog.gridWindowForTest().otsuOverlayCheckBoxForTest().doClick();
+                    assertTrue(dialog.gridWindowForTest()
+                            .otsuOverlayCheckBoxForTest().isSelected());
                     assertCellsHaveMode(dialog.cellsForTest(),
                             VariationCellPanel.OverlayMode.OTSU_MASK);
                     assertOverlayImages(dialog);
 
-                    dialog.otsuOverlayCheckBoxForTest().doClick();
-                    assertFalse(dialog.otsuOverlayCheckBoxForTest().isSelected());
+                    dialog.gridWindowForTest().otsuOverlayCheckBoxForTest().doClick();
+                    assertFalse(dialog.gridWindowForTest()
+                            .otsuOverlayCheckBoxForTest().isSelected());
                     assertCellsHaveMode(dialog.cellsForTest(),
                             VariationCellPanel.OverlayMode.NONE);
                     assertPlainImages(dialog);
 
-                    dialog.otsuOverlayCheckBoxForTest().doClick();
+                    dialog.gridWindowForTest().otsuOverlayCheckBoxForTest().doClick();
                     dialog.runButtonForTest().doClick();
                     assertCellsHaveMode(dialog.cellsForTest(),
                             VariationCellPanel.OverlayMode.OTSU_MASK);

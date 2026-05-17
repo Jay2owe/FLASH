@@ -47,8 +47,6 @@ public final class ParameterSweepEditor extends JPanel {
     private boolean chainStepFilterActive;
     private Set<Integer> selectedChainStepIndexes =
             Collections.<Integer>emptySet();
-    private Set<Integer> disabledChainStepIndexes =
-            Collections.<Integer>emptySet();
 
     public ParameterSweepEditor(VariationEngineContext context) {
         this(context == null ? ParameterSweep.Method.CLASSICAL : context.method(),
@@ -182,14 +180,8 @@ public final class ParameterSweepEditor extends JPanel {
     }
 
     public void setSelectedChainStepIndexes(Set<Integer> selectedStepIndexes) {
-        setChainStepFilter(selectedStepIndexes, Collections.<Integer>emptySet());
-    }
-
-    public void setChainStepFilter(Set<Integer> selectedStepIndexes,
-                                   Set<Integer> disabledStepIndexes) {
         chainStepFilterActive = true;
         selectedChainStepIndexes = copyNonNegative(selectedStepIndexes);
-        disabledChainStepIndexes = copyNonNegative(disabledStepIndexes);
         applyChainStepFilter();
         fireChanged();
     }
@@ -394,9 +386,6 @@ public final class ParameterSweepEditor extends JPanel {
     private boolean shouldShowRow(Row row) {
         if (row == null || !chainStepFilterActive || row.chainStepIndex < 0) {
             return true;
-        }
-        if (disabledChainStepIndexes.contains(Integer.valueOf(row.chainStepIndex))) {
-            return false;
         }
         if (row.id == null || row.id.valueKind() != ParameterKey.ValueKind.NUMBER) {
             return false;

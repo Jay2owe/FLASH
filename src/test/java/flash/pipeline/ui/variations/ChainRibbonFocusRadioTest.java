@@ -11,12 +11,12 @@ import static org.junit.Assert.assertEquals;
 public class ChainRibbonFocusRadioTest {
 
     @Test
-    public void stepsModeFocusUsesRadioSemantics() {
+    public void focusModeClickUsesRadioSemantics() {
         ChainRibbon ribbon = new ChainRibbon(FilterMacroEditorModel.parse(
                 "run(\"Gaussian Blur...\", \"sigma=2 stack\");\n"
                         + "run(\"Median...\", \"radius=1 stack\");\n"
                         + "run(\"Mean...\", \"radius=1 stack\");"));
-        ribbon.setStepsMode(true);
+        ribbon.setInteractionMode(ChainRibbon.InteractionMode.FOCUS);
 
         ribbon.clickStepForTest(0, MouseEvent.BUTTON1);
         assertEquals(ChainRibbon.StepState.FOCUSED, ribbon.getStepState(0));
@@ -30,20 +30,44 @@ public class ChainRibbonFocusRadioTest {
     }
 
     @Test
-    public void bypassedAndOffStepsAreNotFocusedByClick() {
+    public void clicksInPassiveModeDoNothing() {
         ChainRibbon ribbon = new ChainRibbon(FilterMacroEditorModel.parse(
                 "run(\"Gaussian Blur...\", \"sigma=2 stack\");\n"
                         + "run(\"Median...\", \"radius=1 stack\");"));
-        ribbon.setStepsMode(true);
-        ribbon.setStepState(0, ChainRibbon.StepState.BYPASSED);
-        ribbon.setStepState(1, ChainRibbon.StepState.OFF);
+        ribbon.setInteractionMode(ChainRibbon.InteractionMode.PASSIVE);
 
         ribbon.clickStepForTest(0, MouseEvent.BUTTON1);
         ribbon.clickStepForTest(1, MouseEvent.BUTTON1);
 
-        assertEquals(ChainRibbon.StepState.BYPASSED, ribbon.getStepState(0));
-        assertEquals(ChainRibbon.StepState.OFF, ribbon.getStepState(1));
-        assertEquals(0, ribbon.stepIndexesInState(
-                ChainRibbon.StepState.FOCUSED).size());
+        assertEquals(ChainRibbon.StepState.FIXED, ribbon.getStepState(0));
+        assertEquals(ChainRibbon.StepState.FIXED, ribbon.getStepState(1));
+    }
+
+    @Test
+    public void sweepToggleModeClickTogglesFixedAndSwept() {
+        ChainRibbon ribbon = new ChainRibbon(FilterMacroEditorModel.parse(
+                "run(\"Gaussian Blur...\", \"sigma=2 stack\");\n"
+                        + "run(\"Median...\", \"radius=1 stack\");"));
+        ribbon.setInteractionMode(ChainRibbon.InteractionMode.SWEEP_TOGGLE);
+
+        ribbon.clickStepForTest(0, MouseEvent.BUTTON1);
+        assertEquals(ChainRibbon.StepState.SWEPT, ribbon.getStepState(0));
+        ribbon.clickStepForTest(0, MouseEvent.BUTTON1);
+        assertEquals(ChainRibbon.StepState.FIXED, ribbon.getStepState(0));
+    }
+
+    @Test
+    public void switchingFromSweepToFocusClearsSweptStates() {
+        ChainRibbon ribbon = new ChainRibbon(FilterMacroEditorModel.parse(
+                "run(\"Gaussian Blur...\", \"sigma=2 stack\");\n"
+                        + "run(\"Median...\", \"radius=1 stack\");"));
+        ribbon.setInteractionMode(ChainRibbon.InteractionMode.SWEEP_TOGGLE);
+        ribbon.setStepState(0, ChainRibbon.StepState.SWEPT);
+        ribbon.setStepState(1, ChainRibbon.StepState.SWEPT);
+
+        ribbon.setInteractionMode(ChainRibbon.InteractionMode.FOCUS);
+
+        assertEquals(ChainRibbon.StepState.FIXED, ribbon.getStepState(0));
+        assertEquals(ChainRibbon.StepState.FIXED, ribbon.getStepState(1));
     }
 }

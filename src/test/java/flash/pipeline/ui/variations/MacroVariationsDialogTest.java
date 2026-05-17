@@ -19,6 +19,7 @@ import java.util.function.Consumer;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 public class MacroVariationsDialogTest {
@@ -44,23 +45,19 @@ public class MacroVariationsDialogTest {
                 @Override public void run() {
                     MacroVariationsDialog dialog = holder[0];
                     assertNotNull(dialog);
-                    assertEquals(MacroVariationsDialog.Mode.PARAMS,
+                    assertEquals(MacroVariationsDialog.Mode.SWEEP_PARAMETER,
                             dialog.modeForTest());
-                    assertTrue(dialog.paramsButtonForTest().isEnabled());
-                    assertTrue(dialog.paramsButtonForTest().isSelected());
-                    assertTrue(dialog.stepsButtonForTest().isEnabled());
-                    assertTrue(dialog.presetsButtonForTest().isEnabled());
-                    assertEquals("Try native filter alternatives at one chain step",
-                            dialog.stepsButtonForTest().getToolTipText());
+                    assertTrue(dialog.sweepParamButtonForTest().isEnabled());
+                    assertTrue(dialog.sweepParamButtonForTest().isSelected());
+                    assertTrue(dialog.sweepStepButtonForTest().isEnabled());
+                    assertTrue(dialog.sweepPresetsButtonForTest().isEnabled());
+                    assertTrue(dialog.fullSweepButtonForTest().isEnabled());
+                    assertTrue(dialog.sweepStepButtonForTest()
+                            .getToolTipText().contains("alternatives"));
                     assertEquals("Compare readable filter presets",
-                            dialog.presetsButtonForTest().getToolTipText());
-                    assertNotNull(dialog.gridPanelForTest());
-                    assertEquals(0, dialog.gridPanelForTest().cellCountForTest());
-                    assertFalse(dialog.openLargeMontageButtonForTest().isEnabled());
+                            dialog.sweepPresetsButtonForTest().getToolTipText());
+                    assertNull(dialog.gridWindowForTest());
                     assertFalse(dialog.useComboButtonForTest().isEnabled());
-                    assertFalse(dialog.downstreamVerdictCheckBoxForTest().isEnabled());
-                    assertTrue(dialog.downstreamVerdictCheckBoxForTest()
-                            .getToolTipText().contains("BinConfig"));
                     assertTrue(dialog.chainRibbonLabelForTest().getText()
                             .contains("Gaussian Blur"));
                     assertEquals(ParameterSweep.Method.FILTER,

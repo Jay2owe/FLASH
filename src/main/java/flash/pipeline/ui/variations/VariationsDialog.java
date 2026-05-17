@@ -4,7 +4,6 @@ import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.preview.ComparisonPreviewDialog;
 import flash.pipeline.ui.preview.PreviewDisplaySettings;
 import flash.pipeline.ui.preview.VariationComparisonPreview;
-import flash.pipeline.ui.preview.VariationMontageDialog;
 import flash.pipeline.ui.variations.analysis.IouStability;
 import flash.pipeline.ui.variations.analysis.KneeDetector;
 import flash.pipeline.ui.variations.state.VariationState;
@@ -31,10 +30,7 @@ import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JRadioButton;
 import javax.swing.JRootPane;
-import javax.swing.JScrollPane;
-import javax.swing.JSlider;
 import javax.swing.KeyStroke;
-import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.event.ChangeEvent;
@@ -75,17 +71,12 @@ public final class VariationsDialog extends PipelineDialog {
     private final Consumer<ParameterCombo> onAccept;
     private final ParameterSweepEditor editor;
     private final VariationStateStore stateStore;
-    private final VariationGridPanel gridPanel = new VariationGridPanel();
-    private final JPanel countCurveSlot = new JPanel(new BorderLayout());
     private final JLabel cellsLabel = new JLabel("Cells: 1");
-    private final JLabel zLabel = new JLabel("1/1");
     private final JLabel suggestionLabel = new JLabel("Most stable: pending");
     private final JLabel statusLabel = new JLabel("Idle");
     private final JLabel strategyLabel = new JLabel(" ");
     private final ProgressSliverPanel progressSliver = new ProgressSliverPanel();
-    private final JSlider zSlider = new JSlider(1, 1, 1);
     private final JButton suggestButton = new JButton("Suggest ranges from image");
-    private JButton montageButton;
     private final JRadioButton fullCrop = new JRadioButton("full image");
     private final JRadioButton centreCrop = new JRadioButton("centered 256 x 256");
     private final JRadioButton customCrop = new JRadioButton("custom...");
@@ -96,18 +87,13 @@ public final class VariationsDialog extends PipelineDialog {
     private final List<VariationCellPanel> cells = new ArrayList<VariationCellPanel>();
     private final List<VariationResult> resultsByCell =
             new ArrayList<VariationResult>();
-    private final List<Integer> mainCountCurveCellIndexes =
-            new ArrayList<Integer>();
     private final VariationComparisonSelection comparisonSelection;
 
     private VariationExecutor executor;
     private ParameterSweep currentSweep;
-    private CountCurveStrip mainCountCurve;
     private VariationState resumeState;
     private ComparisonPreviewDialog comparisonDialog;
-    private VariationMontageDialog montageDialog;
-    private ImagePlus montageRawSourceChoice;
-    private ImagePlus montageFilteredSourceChoice;
+    private VariationGridWindow gridWindow;
     private CropSpec currentCropSpec = CropSpec.centre256();
     private boolean suppressCropEvents;
     private int completedCount;
@@ -173,7 +159,7 @@ public final class VariationsDialog extends PipelineDialog {
             comparisonDialog.dispose();
             comparisonDialog = null;
         }
-        disposeMontageDialog();
+        disposeGridWindow();
         disposeCells();
         Window window = getWindow();
         if (window != null) {
@@ -185,12 +171,8 @@ public final class VariationsDialog extends PipelineDialog {
         return editor;
     }
 
-    VariationGridPanel gridPanelForTest() {
-        return gridPanel;
-    }
-
-    CountCurveStrip mainCountCurveForTest() {
-        return mainCountCurve;
+    VariationGridWindow gridWindowForTest() {
+        return gridWindow;
     }
 
     int cellCountForTest() {
@@ -215,7 +197,9 @@ public final class VariationsDialog extends PipelineDialog {
     }
 
     void setGlobalZForTest(int z) {
-        zSlider.setValue(z);
+        if (gridWindow != null) {
+            gridWindow.zScrollBarForTest().setValue(z);
+        }
     }
 
     void cancelForTest() {
@@ -245,14 +229,6 @@ public final class VariationsDialog extends PipelineDialog {
         });
     }
 
-    void openMontageForTest() {
-        openMontage();
-    }
-
-    VariationMontageDialog montageDialogForTest() {
-        return montageDialog;
-    }
-
     ImagePlus croppedForComparisonForTest(ImagePlus source) {
         return croppedForComparison(source);
     }
@@ -263,29 +239,12 @@ public final class VariationsDialog extends PipelineDialog {
         addComponent(editor);
         addComponent(rangeRow());
         addComponent(cropRow());
-        addComponent(countCurveSlot());
-        addHeader("Preview grid");
-        addComponent(gridScrollPane());
-        addComponent(zRow());
         addComponent(statusPanel());
 
-        montageButton = addFooterButton("Open in large montage");
-        montageButton.setEnabled(false);
-        montageButton.addActionListener(e -> openMontage());
         JButton cancel = addRightFooterButton("Cancel");
         cancel.addActionListener(e -> dispose());
         JButton start = addRightFooterButton("Start");
         start.addActionListener(e -> start());
-
-        gridPanel.setFacetSelectionListener(new FacetChipRow.FacetSelectionListener() {
-            @Override public void facetSelected(ParameterKey axis, Object value) {
-                SwingUtilities.invokeLater(new Runnable() {
-                    @Override public void run() {
-                        updateCountCurves();
-                    }
-                });
-            }
-        });
 
         editor.addChangeListener(new ChangeListener() {
             @Override public void stateChanged(ChangeEvent e) {
@@ -318,12 +277,6 @@ public final class VariationsDialog extends PipelineDialog {
         row.add(suggestButton);
         row.add(Box.createHorizontalGlue());
         return row;
-    }
-
-    private JPanel countCurveSlot() {
-        countCurveSlot.setOpaque(false);
-        countCurveSlot.setVisible(false);
-        return countCurveSlot;
     }
 
     private JPanel cropRow() {
@@ -360,47 +313,10 @@ public final class VariationsDialog extends PipelineDialog {
         return row;
     }
 
-    private JScrollPane gridScrollPane() {
-        JScrollPane scrollPane = new JScrollPane(gridPanel);
-        scrollPane.setBorder(BorderFactory.createLineBorder(new Color(0x3A, 0x40, 0x46)));
-        scrollPane.setPreferredSize(new Dimension(780, 440));
-        scrollPane.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
-        scrollPane.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED);
-        scrollPane.getViewport().setBackground(new Color(0x1E, 0x20, 0x24));
-        return scrollPane;
-    }
-
-    private JPanel zRow() {
-        JPanel row = new JPanel(new BorderLayout(8, 0));
-        row.setOpaque(false);
-        row.setBorder(BorderFactory.createEmptyBorder(4, 4, 4, 4));
-        row.add(new JLabel("z:"), BorderLayout.WEST);
-        configureZSlider();
-        row.add(zSlider, BorderLayout.CENTER);
-        row.add(zLabel, BorderLayout.EAST);
-        return row;
-    }
-
     private JPanel statusPanel() {
         progressSliver.setBorder(BorderFactory.createEmptyBorder(2, 4, 2, 4));
         updateProgressSliver();
         return progressSliver;
-    }
-
-    private void configureZSlider() {
-        int slices = sourceSliceCount();
-        zSlider.setMinimum(1);
-        zSlider.setMaximum(Math.max(1, slices));
-        zSlider.setValue(1);
-        zSlider.setEnabled(slices > 1);
-        zLabel.setText("1/" + Math.max(1, slices));
-        zSlider.addChangeListener(new ChangeListener() {
-            @Override public void stateChanged(ChangeEvent e) {
-                int z = zSlider.getValue();
-                zLabel.setText(z + "/" + Math.max(1, zSlider.getMaximum()));
-                gridPanel.broadcastZ(z);
-            }
-        });
     }
 
     private void installWindowCleanup() {
@@ -411,12 +327,12 @@ public final class VariationsDialog extends PipelineDialog {
         window.addWindowListener(new WindowAdapter() {
             @Override public void windowClosing(WindowEvent e) {
                 cancelExecutor();
-                disposeMontageDialog();
+                disposeGridWindow();
             }
 
             @Override public void windowClosed(WindowEvent e) {
                 cancelExecutor();
-                disposeMontageDialog();
+                disposeGridWindow();
             }
         });
     }
@@ -489,12 +405,11 @@ public final class VariationsDialog extends PipelineDialog {
         setStatusTextNow("Resume ready ("
                 + state.completed().size() + "/" + state.sweep().cellCount()
                 + " complete)");
-        updateMontageButtonState();
     }
 
     private void startOnEdt() {
         cancelExecutor();
-        disposeMontageDialog();
+        disposeGridWindow();
         currentSweep = editor.currentSweep();
         ImagePlus source = context.filteredSource();
         ResourceGuard.Feasibility feasibility =
@@ -511,12 +426,10 @@ public final class VariationsDialog extends PipelineDialog {
         stableCountStatus = "";
         stableMasksStatus = "";
         comparisonSelection.clearForAccept();
-        clearCountCurves();
         setSuggestionText("Most stable: pending");
         suggestButton.setEnabled(false);
         runStartedAtMs = System.currentTimeMillis();
         ImagePlus croppedSource = currentSweep.cropSpec().apply(source);
-        ImagePlus croppedRawSource = croppedRawSourceForPeek(currentSweep.cropSpec());
         List<ParameterCombo> combos = currentSweep.combos();
         VariationCache runCache = new VariationCache(context.configContext());
         VariationState activeResume = compatibleResumeState(currentSweep);
@@ -531,7 +444,6 @@ public final class VariationsDialog extends PipelineDialog {
         cellsByCombo.clear();
         cellIndexesByCombo.clear();
         resultsByCell.clear();
-        updateMontageButtonState();
         BiConsumer<ParameterCombo, VariationCellPanel> compare =
                 new BiConsumer<ParameterCombo, VariationCellPanel>() {
                     @Override public void accept(ParameterCombo combo, VariationCellPanel cell) {
@@ -549,7 +461,7 @@ public final class VariationsDialog extends PipelineDialog {
                     compare,
                     i);
             cell.setState("running");
-            cell.setZ(zSlider.getValue());
+            cell.setZ(1);
             cells.add(cell);
             cellsByCombo.put(combo.toCanonicalJson(), cell);
             cellIndexesByCombo.put(combo.toCanonicalJson(), Integer.valueOf(i));
@@ -567,17 +479,14 @@ public final class VariationsDialog extends PipelineDialog {
                 }
             }
         }
-        updateMontageButtonState();
-        gridPanel.setSweep(currentSweep);
-        gridPanel.setRawSource(croppedRawSource);
-        gridPanel.setCells(cells);
+        openGridWindowForRun();
         setStatusTextNow(progressStatus(combos.size(), false));
         setSuggestionText("Most stable: pending");
         if (completedCount >= cells.size() && !cells.isEmpty()) {
             updateTileMetrics();
             applyKneeHint();
             applyStabilityHint();
-            updateCountCurves();
+            updateGridWindowProgress();
             setStatusTextNow(completionStatus());
             suggestButton.setEnabled(true);
             stateStore.clear();
@@ -616,6 +525,24 @@ public final class VariationsDialog extends PipelineDialog {
             }
         });
         worker.execute();
+    }
+
+    private void openGridWindowForRun() {
+        gridWindow = new VariationGridWindow(getWindow(), "FLASH variations", cells);
+        gridWindow.setOtsuOverlaySelected(false);
+        gridWindow.setDownstreamVerdictSelected(false);
+        gridWindow.setDownstreamControlsEnabled(false, false,
+                "Downstream verdicts are only available for macro variations.");
+        gridWindow.setVisible(true);
+        updateGridWindowProgress();
+    }
+
+    private void updateGridWindowProgress() {
+        if (gridWindow == null) {
+            return;
+        }
+        gridWindow.setSliceMax(gridWindow.controllerForTest().maxSlice());
+        gridWindow.setCompletedCount(completedCount, cells.size(), failedCount);
     }
 
     private VariationState compatibleResumeState(ParameterSweep sweep) {
@@ -698,12 +625,12 @@ public final class VariationsDialog extends PipelineDialog {
         }
         failedCount = countFailures();
         updateTileMetrics();
-        updateMontageButtonState();
+        updateGridWindowProgress();
         setStatusTextNow(progressStatus(cells.size(), false));
         if (completedCount >= cells.size()) {
             applyKneeHint();
             applyStabilityHint();
-            updateCountCurves();
+            updateGridWindowProgress();
         }
     }
 
@@ -785,6 +712,7 @@ public final class VariationsDialog extends PipelineDialog {
                     cells.get(i).setState("cancelled");
                 }
             }
+            updateGridWindowProgress();
             return;
         }
         try {
@@ -792,8 +720,8 @@ public final class VariationsDialog extends PipelineDialog {
             updateTileMetrics();
             applyKneeHint();
             applyStabilityHint();
-            updateCountCurves();
             failedCount = countFailures();
+            updateGridWindowProgress();
             setStatusTextNow(completionStatus());
             if (allCellsSuccessful()) {
                 stateStore.clear();
@@ -851,162 +779,15 @@ public final class VariationsDialog extends PipelineDialog {
         setSuggestionText(indicatorSummary());
     }
 
-    private void updateCountCurves() {
-        if (currentSweep == null) {
-            clearCountCurves();
-            return;
-        }
-        ParameterId driver = PrimaryAxisPicker.pickCountCurveDriver(currentSweep);
-        if (driver == null) {
-            clearCountCurves();
-            return;
-        }
-
-        CountCurveData mainData = countCurveData(driver,
-                visibleCompletedCountCurveIndexes(driver));
-        ensureMainCountCurve(mainData);
-        mainCountCurveCellIndexes.clear();
-        mainCountCurveCellIndexes.addAll(mainData.cellIndexes);
-
-        boolean visible = mainData.size() >= 2;
-        mainCountCurve.setVisible(visible);
-        countCurveSlot.setVisible(visible);
-        gridPanel.setRowCountCurves(rowCountCurves(driver));
-        countCurveSlot.revalidate();
-        countCurveSlot.repaint();
-        Window window = getWindow();
-        if (window != null) {
-            window.validate();
-        }
-    }
-
-    private void ensureMainCountCurve(CountCurveData data) {
-        if (mainCountCurve == null) {
-            mainCountCurve = new CountCurveStrip(data.xs, data.ys,
-                    data.stableCountIndex, data.plateauRange);
-            mainCountCurve.addChangeListener(new ChangeListener() {
-                @Override public void stateChanged(ChangeEvent e) {
-                    scrollToCountCurveSelection();
-                }
-            });
-            countCurveSlot.removeAll();
-            countCurveSlot.add(mainCountCurve, BorderLayout.CENTER);
-        } else {
-            mainCountCurve.setData(data.xs, data.ys,
-                    data.stableCountIndex, data.plateauRange);
-        }
-    }
-
-    private void clearCountCurves() {
-        mainCountCurve = null;
-        mainCountCurveCellIndexes.clear();
-        countCurveSlot.removeAll();
-        countCurveSlot.setVisible(false);
-        gridPanel.setRowCountCurves(Collections.<CountCurveMini>emptyList());
-        countCurveSlot.revalidate();
-        countCurveSlot.repaint();
-    }
-
-    private void scrollToCountCurveSelection() {
-        if (mainCountCurve == null || !mainCountCurve.selectedIndex().isPresent()) {
-            return;
-        }
-        int pointIndex = mainCountCurve.selectedIndex().getAsInt();
-        if (pointIndex < 0 || pointIndex >= mainCountCurveCellIndexes.size()) {
-            return;
-        }
-        int cellIndex = mainCountCurveCellIndexes.get(pointIndex).intValue();
-        if (cellIndex < 0 || cellIndex >= cells.size()) {
-            return;
-        }
-        VariationCellPanel cell = cells.get(cellIndex);
-        cell.scrollRectToVisible(new Rectangle(0, 0,
-                Math.max(1, cell.getWidth()), Math.max(1, cell.getHeight())));
-    }
-
     private List<Integer> visibleCompletedCountCurveIndexes(ParameterId driver) {
-        Map<ParameterKey, Object> activeFacets = gridPanel.activeFacetValues();
         List<Integer> indexes = new ArrayList<Integer>();
         for (int i = 0; i < cells.size(); i++) {
             if (!isCompletedCountCurveCell(i, driver)) {
                 continue;
             }
-            if (!matchesActiveFacets(cells.get(i).combo(), activeFacets)) {
-                continue;
-            }
             indexes.add(Integer.valueOf(i));
         }
         return indexes;
-    }
-
-    private List<CountCurveMini> rowCountCurves(ParameterId driver) {
-        if (sweptAxisCount(currentSweep) != 2) {
-            return Collections.emptyList();
-        }
-        List<ParameterKey> spatialAxes = VariationGridPanel.pickSpatialAxes(
-                currentSweep.method(), currentSweep);
-        if (spatialAxes.size() < 2) {
-            return Collections.emptyList();
-        }
-        ParameterKey yAxis = spatialAxes.get(1);
-        List<Object> rowValues = valuesForAxis(yAxis);
-        List<CountCurveData> rowData = new ArrayList<CountCurveData>();
-        double sharedYMax = 1.0d;
-        for (int i = 0; i < rowValues.size(); i++) {
-            CountCurveData data = countCurveData(driver,
-                    rowCompletedCountCurveIndexes(driver, yAxis, rowValues.get(i)));
-            rowData.add(data);
-            for (int y = 0; y < data.ys.length; y++) {
-                if (Double.isFinite(data.ys[y]) && data.ys[y] > sharedYMax) {
-                    sharedYMax = data.ys[y];
-                }
-            }
-        }
-
-        List<CountCurveMini> minis = new ArrayList<CountCurveMini>();
-        for (int i = 0; i < rowData.size(); i++) {
-            CountCurveData data = rowData.get(i);
-            CountCurveMini mini = new CountCurveMini(data.xs, data.ys,
-                    data.stableCountIndex, data.plateauRange, sharedYMax);
-            mini.setVisible(data.size() >= 2);
-            minis.add(mini);
-        }
-        return minis;
-    }
-
-    private List<Integer> rowCompletedCountCurveIndexes(ParameterId driver,
-                                                        ParameterKey yAxis,
-                                                        Object yValue) {
-        List<Integer> indexes = new ArrayList<Integer>();
-        for (int i = 0; i < cells.size(); i++) {
-            if (!isCompletedCountCurveCell(i, driver)) {
-                continue;
-            }
-            if (!valueEquals(cells.get(i).combo().get(yAxis), yValue)) {
-                continue;
-            }
-            indexes.add(Integer.valueOf(i));
-        }
-        return indexes;
-    }
-
-    private CountCurveData countCurveData(ParameterId driver, List<Integer> indexes) {
-        int size = indexes == null ? 0 : indexes.size();
-        double[] xs = new double[size];
-        double[] ys = new double[size];
-        List<Integer> cellIndexes = new ArrayList<Integer>(size);
-        for (int i = 0; i < size; i++) {
-            int cellIndex = indexes.get(i).intValue();
-            VariationResult result = resultsByCell.get(cellIndex);
-            Object value = result.combo().get(driver);
-            xs[i] = ((Number) value).doubleValue();
-            ys[i] = result.nObjects();
-            cellIndexes.add(Integer.valueOf(cellIndex));
-        }
-        return new CountCurveData(xs, ys,
-                KneeDetector.findKneeIndex(xs, ys),
-                KneeDetector.findPlateauRange(xs, ys),
-                cellIndexes);
     }
 
     private boolean isCompletedCountCurveCell(int index, ParameterId driver) {
@@ -1019,50 +800,6 @@ public final class VariationsDialog extends PipelineDialog {
         }
         Object value = result.combo().get(driver);
         return value instanceof Number;
-    }
-
-    private boolean matchesActiveFacets(ParameterCombo combo,
-                                        Map<ParameterKey, Object> activeFacets) {
-        if (combo == null || activeFacets == null || activeFacets.isEmpty()) {
-            return true;
-        }
-        for (Map.Entry<ParameterKey, Object> entry : activeFacets.entrySet()) {
-            if (!valueEquals(combo.get(entry.getKey()), entry.getValue())) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private int sweptAxisCount(ParameterSweep sweep) {
-        if (sweep == null) {
-            return 0;
-        }
-        int count = 0;
-        for (Map.Entry<ParameterKey, ParameterValueList> entry
-                : sweep.valueLists().entrySet()) {
-            ParameterValueList values = entry.getValue();
-            if (values != null && values.size() > 1) {
-                count++;
-            }
-        }
-        return count;
-    }
-
-    private List<Object> valuesForAxis(ParameterKey axis) {
-        List<Object> values = new ArrayList<Object>();
-        if (currentSweep == null || axis == null) {
-            return values;
-        }
-        ParameterValueList valueList = currentSweep.valueLists().get(axis);
-        if (valueList != null) {
-            values.addAll(valueList.values());
-        }
-        return values;
-    }
-
-    private static boolean valueEquals(Object left, Object right) {
-        return left == null ? right == null : left.equals(right);
     }
 
     private void applyStabilityHint() {
@@ -1123,9 +860,20 @@ public final class VariationsDialog extends PipelineDialog {
         if (currentSweep == null) {
             return null;
         }
-        // STABLE COUNT is only meaningful for one swept numeric/orderable axis
-        // in the current facet slice; categorical MODEL/MACRO axes are facets.
-        List<ParameterId> axes = PrimaryAxisPicker.sweptNumericAxes(currentSweep);
+        List<ParameterId> axes = new ArrayList<ParameterId>();
+        for (Map.Entry<ParameterKey, ParameterValueList> entry
+                : currentSweep.valueLists().entrySet()) {
+            if (!(entry.getKey() instanceof ParameterId)) {
+                continue;
+            }
+            ParameterId id = (ParameterId) entry.getKey();
+            ParameterValueList values = entry.getValue();
+            if (values == null || values.size() <= 1
+                    || id.valueKind() != ParameterKey.ValueKind.NUMBER) {
+                continue;
+            }
+            axes.add(id);
+        }
         return axes.size() == 1 ? axes.get(0) : null;
     }
 
@@ -1141,7 +889,7 @@ public final class VariationsDialog extends PipelineDialog {
         }
         if (comparisonDialog == null) {
             comparisonDialog = new ComparisonPreviewDialog(
-                    SwingUtilities.getWindowAncestor(gridPanel));
+                    gridWindow == null ? getWindow() : gridWindow);
         }
         PreviewDisplaySettings settings =
                 PreviewDisplaySettings.defaultFor(context.channelName());
@@ -1155,184 +903,24 @@ public final class VariationsDialog extends PipelineDialog {
                 settings,
                 croppedForComparison(context.filteredSource()),
                 settings,
-                zSlider.getValue());
-    }
-
-    private void openMontage() {
-        List<VariationMontageDialog.MontageTile> montageTiles = buildMontageTiles();
-        if (montageTiles.isEmpty()) {
-            updateMontageButtonState();
-            showMessage("Wait for at least one successful tile before opening the montage.");
-            return;
-        }
-        VariationMontageDialog dialog = montageDialog();
-        dialog.setTiles(montageTiles, currentSweep, zSlider.getValue());
-        setMontageSourceChoices(dialog);
-        PreviewDisplaySettings settings =
-                PreviewDisplaySettings.defaultFor(context.channelName());
-        dialog.setDisplaySettings(settings, settings);
-        wireMontageDisplayActions(dialog, context.montageDisplayActionDelegate());
-        dialog.raiseForUser();
-    }
-
-    private void wireMontageDisplayActions(
-            final VariationMontageDialog dialog,
-            final MontageDisplayActionDelegate delegate) {
-        if (delegate == null) {
-            dialog.setDisplayActionListener(null);
-            dialog.setDisplayActionState("Grey LUT",
-                    "Display controls require an active main preview.");
-            dialog.setDisplayActionsEnabled(false,
-                    "Display controls require an active main preview.");
-            return;
-        }
-        dialog.setDisplayActionListener(new VariationMontageDialog.DisplayActionListener() {
-            @Override public void adjustBrightnessContrastRequested() {
-                delegate.adjustBrightnessContrast();
-                updateMontageDisplayActionState(dialog, delegate);
-            }
-
-            @Override public void lutToggleRequested() {
-                delegate.toggleGreyLut();
-                updateMontageDisplayActionState(dialog, delegate);
-            }
-        });
-        updateMontageDisplayActionState(dialog, delegate);
-    }
-
-    private void updateMontageDisplayActionState(
-            VariationMontageDialog dialog,
-            MontageDisplayActionDelegate delegate) {
-        if (dialog == null || delegate == null) {
-            return;
-        }
-        dialog.setDisplayActionState(delegate.lutButtonText(),
-                delegate.lutButtonTooltip());
-        dialog.setDisplayActionsEnabled(true, delegate.lutButtonTooltip());
-    }
-
-    private VariationMontageDialog montageDialog() {
-        if (montageDialog == null || !montageDialog.isDisplayable()) {
-            montageDialog = new VariationMontageDialog(
-                    SwingUtilities.getWindowAncestor(gridPanel));
-        }
-        return montageDialog;
-    }
-
-    private List<VariationMontageDialog.MontageTile> buildMontageTiles() {
-        List<VariationResult> results = montageResults();
-        if (results.isEmpty()) {
-            return Collections.emptyList();
-        }
-        List<ParameterCombo> combos = new ArrayList<ParameterCombo>(results.size());
-        List<ImagePlus> labels = new ArrayList<ImagePlus>(results.size());
-        for (int i = 0; i < results.size(); i++) {
-            VariationResult result = results.get(i);
-            combos.add(result.combo());
-            labels.add(result.label());
-        }
-        List<VariationMontageDialog.MontageTile> tiles =
-                new ArrayList<VariationMontageDialog.MontageTile>(results.size());
-        for (int i = 0; i < results.size(); i++) {
-            VariationResult result = results.get(i);
-            double mean = result.meanNeighbourIou();
-            if (!Double.isFinite(mean)) {
-                mean = IouStability.meanNeighbourIou(combos, labels, i);
-            }
-            tiles.add(new VariationMontageDialog.MontageTile(
-                    result.combo(),
-                    result.label(),
-                    result.nObjects(),
-                    mean));
-        }
-        return tiles;
-    }
-
-    private List<VariationResult> montageResults() {
-        List<VariationResult> results = new ArrayList<VariationResult>();
-        for (int i = 0; i < resultsByCell.size(); i++) {
-            VariationResult result = resultsByCell.get(i);
-            if (isMontageResult(result)) {
-                results.add(result);
-            }
-        }
-        return results;
-    }
-
-    private void updateMontageButtonState() {
-        if (montageButton != null) {
-            montageButton.setEnabled(hasMontageResult());
-        }
-    }
-
-    private boolean hasMontageResult() {
-        for (int i = 0; i < resultsByCell.size(); i++) {
-            if (isMontageResult(resultsByCell.get(i))) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static boolean isMontageResult(VariationResult result) {
-        return result != null && !result.hasError();
-    }
-
-    private void disposeMontageDialog() {
-        if (montageDialog != null) {
-            montageDialog.dispose();
-            montageDialog = null;
-        }
-        disposeMontageSourceChoices();
-    }
-
-    private void setMontageSourceChoices(VariationMontageDialog dialog) {
-        disposeMontageSourceChoices();
-        montageRawSourceChoice = croppedForComparison(context.rawSource());
-        montageFilteredSourceChoice = croppedForComparison(context.filteredSource());
-        dialog.setSourceChoices(montageRawSourceChoice, montageFilteredSourceChoice);
-    }
-
-    private void disposeMontageSourceChoices() {
-        ImagePlus rawChoice = montageRawSourceChoice;
-        ImagePlus filteredChoice = montageFilteredSourceChoice;
-        montageRawSourceChoice = null;
-        montageFilteredSourceChoice = null;
-        disposeIfOwnedImage(rawChoice, context.rawSource(), context.filteredSource());
-        disposeIfOwnedImage(filteredChoice, context.rawSource(), context.filteredSource(),
-                rawChoice);
-    }
-
-    private static void disposeIfOwnedImage(ImagePlus image,
-                                            ImagePlus... externalReferences) {
-        if (image == null) {
-            return;
-        }
-        if (externalReferences != null) {
-            for (int i = 0; i < externalReferences.length; i++) {
-                if (image == externalReferences[i]) {
-                    return;
-                }
-            }
-        }
-        try {
-            image.changes = false;
-        } catch (Throwable ignored) {
-        }
-        try {
-            image.close();
-        } catch (Throwable ignored) {
-        }
-        try {
-            image.flush();
-        } catch (Throwable ignored) {
-        }
+                currentGridSlice());
     }
 
     private void disposeCells() {
         for (int i = 0; i < cells.size(); i++) {
             cells.get(i).disposeImages();
         }
+    }
+
+    private void disposeGridWindow() {
+        if (gridWindow != null) {
+            gridWindow.dispose();
+            gridWindow = null;
+        }
+    }
+
+    private int currentGridSlice() {
+        return gridWindow == null ? 1 : gridWindow.controllerForTest().currentSlice();
     }
 
     private void acceptAndClose(ParameterCombo combo) {
@@ -1650,18 +1238,6 @@ public final class VariationsDialog extends PipelineDialog {
         }
     }
 
-    private ImagePlus croppedRawSourceForPeek(CropSpec spec) {
-        ImagePlus rawSource = context.rawSource();
-        if (rawSource == null || spec == null) {
-            return null;
-        }
-        try {
-            return spec.apply(rawSource);
-        } catch (RuntimeException e) {
-            return null;
-        }
-    }
-
     private void handleCropSelection(JRadioButton selected) {
         if (suppressCropEvents) {
             return;
@@ -1727,34 +1303,6 @@ public final class VariationsDialog extends PipelineDialog {
                         "Parameter Variations", JOptionPane.WARNING_MESSAGE);
             }
         });
-    }
-
-    private static final class CountCurveData {
-        final double[] xs;
-        final double[] ys;
-        final OptionalInt stableCountIndex;
-        final int[] plateauRange;
-        final List<Integer> cellIndexes;
-
-        CountCurveData(double[] xs,
-                       double[] ys,
-                       OptionalInt stableCountIndex,
-                       int[] plateauRange,
-                       List<Integer> cellIndexes) {
-            this.xs = xs == null ? new double[0] : xs;
-            this.ys = ys == null ? new double[0] : ys;
-            this.stableCountIndex = stableCountIndex == null
-                    ? OptionalInt.empty()
-                    : stableCountIndex;
-            this.plateauRange = plateauRange;
-            this.cellIndexes = cellIndexes == null
-                    ? Collections.<Integer>emptyList()
-                    : new ArrayList<Integer>(cellIndexes);
-        }
-
-        int size() {
-            return Math.min(xs.length, ys.length);
-        }
     }
 
     private static final class ProgressSliverPanel extends JPanel {
