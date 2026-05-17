@@ -829,6 +829,12 @@ public class CreateBinFileAnalysis implements Analysis {
         }
 
         // ── Override existing .bin ───────────────────────────────────────
+        if (headless || GraphicsEnvironment.isHeadless()) {
+            IJ.log("[FLASH] Set Up Configuration is interactive and cannot run headless "
+                    + "without bin.* CLI parameters. Skipping.");
+            return;
+        }
+
         boolean overrideMode = false;
         boolean overrideAll = false;
         boolean overrideMinMax = false;

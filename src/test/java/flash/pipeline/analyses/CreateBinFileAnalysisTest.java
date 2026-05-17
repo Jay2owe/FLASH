@@ -72,6 +72,18 @@ public class CreateBinFileAnalysisTest {
     }
 
     @Test
+    public void execute_headlessWithoutCliBinConfigDoesNotOpenInteractiveSetup() throws Exception {
+        File dir = temp.newFolder("headless-no-bin-cli");
+        CreateBinFileAnalysis analysis = new CreateBinFileAnalysis();
+        analysis.setHeadless(true);
+
+        analysis.execute(dir.getAbsolutePath());
+
+        assertFalse(new File(dir, ".bin/Channel_Data.txt").exists());
+        assertFalse(new File(dir, "FLASH/Set Up Configuration/.settings/Channel_Data.txt").exists());
+    }
+
+    @Test
     public void escapeHtmlText_escapesHtmlSensitiveCharacters() {
         String raw = "A&B <tag> \"quote\" 'apostrophe'";
 
