@@ -279,6 +279,26 @@ public class TrainCustomEngineWorkflowTest {
         assertTrue(workflow.warningMessage().contains("0.62"));
     }
 
+    @Test
+    public void interruptedTrainingProgressCancelsWorkflowBeforeSavingResult() throws Exception {
+        TrainCustomEngineWorkflow workflow = workflow(
+                new RecordingMethodStore("classical"),
+                clickStore(25, 25),
+                services(interruptingRf(), null, null, new RecordingCatalogService(), "rf_cancelled"));
+        workflow.selectBase(TrainCustomEngineWorkflow.Base.CLASSICAL);
+
+        try {
+            workflow.runTrainingStep(TrainCustomEngineWorkflow.NO_PROGRESS);
+            fail("Expected interrupted training to cancel.");
+        } catch (java.util.concurrent.CancellationException expected) {
+            assertTrue(expected.getMessage().contains("cancelled"));
+        } finally {
+            Thread.interrupted();
+        }
+
+        assertFalse(workflow.isTrainingComplete());
+    }
+
     private TrainCustomEngineWorkflow workflow(RecordingMethodStore store,
                                                ClickStore clicks,
                                                TrainCustomEngineWorkflow.Services services) throws Exception {
@@ -361,6 +381,27 @@ public class TrainCustomEngineWorkflowTest {
 
     private static TrainCustomEngineWorkflow.RfTrainingService lowRf() {
         return rf(ObjectClassifierTrainer.QualityFlag.LOW, 0.62);
+    }
+
+    private static TrainCustomEngineWorkflow.RfTrainingService interruptingRf() {
+        return new TrainCustomEngineWorkflow.RfTrainingService() {
+            @Override public ObjectClassifierTrainer.TrainingResult train(
+                    TrainCustomEngineWorkflow.Base base,
+                    TrainCustomEngineWorkflow.ClickSelection selection,
+                    TrainCustomEngineWorkflow.ProgressListener progress) {
+                progress.update(0.25, "Extracting features...");
+                Thread.currentThread().interrupt();
+                progress.update(0.50, "This update should cancel.");
+                return new ObjectClassifierTrainer.TrainingResult(
+                        null,
+                        new String[] {"volume"},
+                        0.91,
+                        new double[] {1.0},
+                        selection.summary.positive,
+                        selection.summary.negative,
+                        ObjectClassifierTrainer.QualityFlag.OK);
+            }
+        };
     }
 
     private static TrainCustomEngineWorkflow.RfTrainingService rf(

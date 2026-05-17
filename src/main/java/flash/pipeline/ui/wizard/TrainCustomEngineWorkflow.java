@@ -472,6 +472,7 @@ public final class TrainCustomEngineWorkflow {
     private ModelEntry savedEntry;
     private String recommendedMethodToken;
     private String warningMessage = "";
+    private volatile boolean trainingCancelRequested;
 
     public TrainCustomEngineWorkflow(Path projectRoot,
                                      int channelOneBased,
@@ -584,6 +585,7 @@ public final class TrainCustomEngineWorkflow {
         savedEntry = null;
         recommendedMethodToken = null;
         warningMessage = "";
+        trainingCancelRequested = false;
         step = Step.REVIEW_CLICKS;
     }
 
@@ -665,8 +667,10 @@ public final class TrainCustomEngineWorkflow {
         if (!canProceedFromClicks()) {
             throw new IllegalStateException(clickGateMessage());
         }
-        ProgressListener safe = safeProgress(progress);
+        trainingCancelRequested = false;
+        ProgressListener safe = cancellableProgress(progress);
         ClickSelection selection = clickSelection();
+        checkTrainingCancelled();
         step = Step.TRAIN;
         warningMessage = "";
         if (selectedBase == Base.STARDIST) {
@@ -682,6 +686,7 @@ public final class TrainCustomEngineWorkflow {
             }
             safe.update(0.05, "Training Random Forest...");
             rfResult = services.rfTrainingService.train(selectedBase, selection, safe);
+            checkTrainingCancelled();
             safe.update(1.0, "Random Forest training complete.");
             if (rfResult != null
                     && rfResult.quality == ObjectClassifierTrainer.QualityFlag.LOW) {
@@ -700,6 +705,7 @@ public final class TrainCustomEngineWorkflow {
             }
             starDistPackage = services.starDistPackagingService.packageDataset(
                     selection, sessionName, safe);
+            checkTrainingCancelled();
             step = Step.RESULT_REVIEW;
             if (services.starDistTrainingService != null
                     && services.starDistTrainingService.isEnabled()) {
@@ -707,6 +713,7 @@ public final class TrainCustomEngineWorkflow {
                     safe.update(0.05, "Starting local StarDist training...");
                     starDistTraining = services.starDistTrainingService.train(
                             starDistPackage, defaultModelName(), safe);
+                    checkTrainingCancelled();
                     externalModelFile = starDistTraining.outputZip;
                     safe.update(1.0, "Local StarDist training complete.");
                     return new TrainStepResult(selectedBase, null, starDistPackage,
@@ -727,6 +734,7 @@ public final class TrainCustomEngineWorkflow {
         }
         cellposePackage = services.cellposePackagingService.packageDataset(
                 selection, sessionName, cellposeBaseModel(), safe);
+        checkTrainingCancelled();
         step = Step.RESULT_REVIEW;
         if (cellposePackage != null && cellposePackage.trainingWarning != null
                 && !cellposePackage.trainingWarning.isEmpty()) {
@@ -738,6 +746,7 @@ public final class TrainCustomEngineWorkflow {
                 safe.update(0.05, "Starting local Cellpose training...");
                 cellposeTraining = services.cellposeTrainingService.train(
                         cellposePackage, defaultModelName(), safe);
+                checkTrainingCancelled();
                 externalModelFile = cellposeTraining.modelFile;
                 safe.update(1.0, "Local Cellpose training complete.");
                 return new TrainStepResult(selectedBase, null, null, null,
@@ -836,8 +845,23 @@ public final class TrainCustomEngineWorkflow {
     }
 
     public void cancel() {
+        cancelActiveTraining();
         methodStore.setMethodToken(previousMethodToken);
         step = Step.CANCELLED;
+    }
+
+    public void cancelActiveTraining() {
+        trainingCancelRequested = true;
+    }
+
+    public boolean isTrainingComplete() {
+        if (selectedBase.trainsRf()) {
+            return rfResult != null;
+        }
+        if (selectedBase == Base.STARDIST) {
+            return starDistPackage != null || starDistTraining != null || externalModelFile != null;
+        }
+        return cellposePackage != null || cellposeTraining != null || externalModelFile != null;
     }
 
     private String trainedRfToken(String modelKey, String baseToken) {
@@ -904,6 +928,24 @@ public final class TrainCustomEngineWorkflow {
 
     private static ProgressListener safeProgress(ProgressListener progress) {
         return progress == null ? NO_PROGRESS : progress;
+    }
+
+    private ProgressListener cancellableProgress(final ProgressListener progress) {
+        final ProgressListener safe = safeProgress(progress);
+        return new ProgressListener() {
+            @Override public void update(double fraction, String message) {
+                checkTrainingCancelled();
+                safe.update(fraction, message);
+                checkTrainingCancelled();
+            }
+        };
+    }
+
+    private void checkTrainingCancelled() {
+        if (trainingCancelRequested || Thread.currentThread().isInterrupted()) {
+            trainingCancelRequested = true;
+            throw new java.util.concurrent.CancellationException("Training cancelled.");
+        }
     }
 
     private static String formatAccuracy(double accuracy) {

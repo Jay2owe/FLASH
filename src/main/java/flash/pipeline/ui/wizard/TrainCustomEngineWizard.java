@@ -23,6 +23,7 @@ import javax.swing.JProgressBar;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import java.awt.Desktop;
+import java.awt.GraphicsEnvironment;
 import java.awt.Toolkit;
 import java.awt.Window;
 import java.awt.datatransfer.StringSelection;
@@ -53,6 +54,10 @@ public final class TrainCustomEngineWizard {
 
     public static Result showResult(Window owner, TrainCustomEngineWorkflow workflow) {
         if (workflow == null) {
+            return Result.CANCELLED;
+        }
+        if (GraphicsEnvironment.isHeadless()) {
+            workflow.cancel();
             return Result.CANCELLED;
         }
         int step = STEP_BASE;
@@ -203,11 +208,29 @@ public final class TrainCustomEngineWizard {
         progress.setValue(0);
         dialog.addComponent(progress);
 
+        if (workflow.isTrainingComplete()) {
+            status.setText(rfTrainingCompleteText(workflow));
+            progress.setValue(100);
+            dialog.setPrimaryButtonEnabled(true);
+            boolean ok = dialog.showDialog();
+            if (!ok) {
+                return dialog.wasBackPressed() ? StepResult.BACK : StepResult.CANCEL;
+            }
+            return StepResult.NEXT;
+        }
+
         final SwingWorker<TrainCustomEngineWorkflow.TrainStepResult, ProgressUpdate> worker =
                 new SwingWorker<TrainCustomEngineWorkflow.TrainStepResult, ProgressUpdate>() {
                     @Override protected TrainCustomEngineWorkflow.TrainStepResult doInBackground() throws Exception {
+                        if (isCancelled() || Thread.currentThread().isInterrupted()) {
+                            throw new java.util.concurrent.CancellationException("Training cancelled.");
+                        }
                         return workflow.runTrainingStep(new TrainCustomEngineWorkflow.ProgressListener() {
                             @Override public void update(double fraction, String message) {
+                                if (isCancelled() || Thread.currentThread().isInterrupted()) {
+                                    workflow.cancelActiveTraining();
+                                    throw new java.util.concurrent.CancellationException("Training cancelled.");
+                                }
                                 publish(new ProgressUpdate(fraction, message));
                             }
                         });
@@ -221,13 +244,17 @@ public final class TrainCustomEngineWizard {
                     }
 
                     @Override protected void done() {
+                        if (isCancelled()) {
+                            workflow.cancelActiveTraining();
+                            status.setText("Training cancelled.");
+                            dialog.setTransientStatus("Training cancelled.");
+                            return;
+                        }
                         try {
                             TrainCustomEngineWorkflow.TrainStepResult result = get();
                             ObjectClassifierTrainer.TrainingResult rf = result.rfResult;
                             if (rf != null) {
-                                status.setText("Training complete. Cross-val accuracy: "
-                                        + String.format(java.util.Locale.ROOT, "%.2f", Double.valueOf(rf.crossValAccuracy))
-                                        + ". Quality flag: " + rf.quality + ".");
+                                status.setText(rfTrainingCompleteText(workflow));
                             } else {
                                 status.setText("Training complete.");
                             }
@@ -249,6 +276,7 @@ public final class TrainCustomEngineWizard {
 
             @Override public void windowClosed(WindowEvent e) {
                 if (!worker.isDone()) {
+                    workflow.cancelActiveTraining();
                     worker.cancel(true);
                 }
             }
@@ -292,6 +320,15 @@ public final class TrainCustomEngineWizard {
         buttons.add(choose);
         dialog.addComponent(buttons);
 
+        if (workflow.isTrainingComplete()) {
+            progress.setValue(100);
+            status.setText(packageSummary(workflow));
+            openFolder.setEnabled(true);
+            helper.setEnabled(true);
+            choose.setEnabled(true);
+            dialog.setPrimaryButtonEnabled(workflow.externalModelFile() != null);
+        }
+
         openFolder.addActionListener(e -> openDatasetFolder(workflow));
         helper.addActionListener(e -> {
             if (workflow.selectedBase() == TrainCustomEngineWorkflow.Base.STARDIST) {
@@ -316,8 +353,15 @@ public final class TrainCustomEngineWizard {
         final SwingWorker<TrainCustomEngineWorkflow.TrainStepResult, ProgressUpdate> worker =
                 new SwingWorker<TrainCustomEngineWorkflow.TrainStepResult, ProgressUpdate>() {
                     @Override protected TrainCustomEngineWorkflow.TrainStepResult doInBackground() throws Exception {
+                        if (isCancelled() || Thread.currentThread().isInterrupted()) {
+                            throw new java.util.concurrent.CancellationException("Training cancelled.");
+                        }
                         return workflow.runTrainingStep(new TrainCustomEngineWorkflow.ProgressListener() {
                             @Override public void update(double fraction, String message) {
+                                if (isCancelled() || Thread.currentThread().isInterrupted()) {
+                                    workflow.cancelActiveTraining();
+                                    throw new java.util.concurrent.CancellationException("Training cancelled.");
+                                }
                                 publish(new ProgressUpdate(fraction, message));
                             }
                         });
@@ -331,6 +375,12 @@ public final class TrainCustomEngineWizard {
                     }
 
                     @Override protected void done() {
+                        if (isCancelled()) {
+                            workflow.cancelActiveTraining();
+                            status.setText("Dataset packaging cancelled.");
+                            dialog.setTransientStatus("Dataset packaging cancelled.");
+                            return;
+                        }
                         try {
                             get();
                             progress.setValue(100);
@@ -350,11 +400,15 @@ public final class TrainCustomEngineWizard {
                 };
         dialog.getWindow().addWindowListener(new WindowAdapter() {
             @Override public void windowOpened(WindowEvent e) {
+                if (workflow.isTrainingComplete()) {
+                    return;
+                }
                 worker.execute();
             }
 
             @Override public void windowClosed(WindowEvent e) {
                 if (!worker.isDone()) {
+                    workflow.cancelActiveTraining();
                     worker.cancel(true);
                 }
             }
@@ -437,6 +491,17 @@ public final class TrainCustomEngineWizard {
         if (result == null) return "Cellpose dataset packaged.";
         return "Dataset packaged: " + result.imagesWritten + " images, "
                 + result.slicesWritten + " slices. Folder: " + result.outputDir;
+    }
+
+    private static String rfTrainingCompleteText(TrainCustomEngineWorkflow workflow) {
+        ObjectClassifierTrainer.TrainingResult rf = workflow.rfResult();
+        if (rf == null) {
+            return "Training complete.";
+        }
+        return "Training complete. Cross-val accuracy: "
+                + String.format(java.util.Locale.ROOT, "%.2f",
+                        Double.valueOf(rf.crossValAccuracy))
+                + ". Quality flag: " + rf.quality + ".";
     }
 
     private static void openDatasetFolder(TrainCustomEngineWorkflow workflow) {
