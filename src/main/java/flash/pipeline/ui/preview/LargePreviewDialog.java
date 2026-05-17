@@ -563,6 +563,16 @@ public final class LargePreviewDialog extends JDialog {
     }
 
     @Override public void dispose() {
+        sliceListener = null;
+        sourceChoiceListener = null;
+        displayActionListener = null;
+        objectClickListener = null;
+        originalPreview.setZSliceChangeListener(null);
+        adjustedPreview.setZSliceChangeListener(null);
+        extraPreview.setZSliceChangeListener(null);
+        originalPreview.setPixelClickListener(null);
+        adjustedPreview.setPixelClickListener(null);
+        extraPreview.setPixelClickListener(null);
         closeGeneratedOverlayImage();
         super.dispose();
     }

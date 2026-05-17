@@ -35,8 +35,8 @@ import java.awt.image.ColorModel;
 import java.awt.image.IndexColorModel;
 
 public final class ImagePreviewPanel extends JPanel {
-    private static final Dimension DEFAULT_CANVAS_SIZE = new Dimension(260, 220);
-    private static final Dimension SLIM_CANVAS_SIZE = new Dimension(340, 280);
+    private static final Dimension DEFAULT_CANVAS_SIZE = new Dimension(240, 240);
+    private static final Dimension SLIM_CANVAS_SIZE = new Dimension(280, 280);
     private static final int DEFAULT_PANEL_GAP = 6;
     private static final int SLIM_PANEL_GAP = 2;
 

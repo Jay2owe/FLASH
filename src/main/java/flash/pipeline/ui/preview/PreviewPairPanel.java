@@ -126,6 +126,7 @@ public final class PreviewPairPanel extends JPanel {
     private ImagePlus displayControlImage;
     private PreviewState adjustedState = PreviewState.EMPTY;
     private String adjustedMessage = "";
+    private long adjustedPreviewGeneration;
     private int currentZ = 1;
     private boolean syncingSlices;
     private boolean updatingDisplayControls;
@@ -197,7 +198,12 @@ public final class PreviewPairPanel extends JPanel {
         setAdjustedState(PreviewState.EMPTY, null);
     }
 
-    public void setOriginal(ImagePlus image) {
+    public void setOriginal(final ImagePlus image) {
+        if (invokeOnEdtIfNeeded(new Runnable() {
+            @Override public void run() {
+                setOriginal(image);
+            }
+        })) return;
         this.originalImage = image;
         originalPreview.setImage(image);
         updateAdjustedPreviewImage();
@@ -206,7 +212,12 @@ public final class PreviewPairPanel extends JPanel {
         updateLargeImages();
     }
 
-    public void setAdjusted(ImagePlus image) {
+    public void setAdjusted(final ImagePlus image) {
+        if (invokeOnEdtIfNeeded(new Runnable() {
+            @Override public void run() {
+                setAdjusted(image);
+            }
+        })) return;
         this.adjustedImage = image;
         updateObjectOverlayControls();
         updateAdjustedPreviewImage();
@@ -221,6 +232,11 @@ public final class PreviewPairPanel extends JPanel {
     }
 
     public void clearImages() {
+        if (invokeOnEdtIfNeeded(new Runnable() {
+            @Override public void run() {
+                clearImages();
+            }
+        })) return;
         closeGeneratedObjectOverlayImage();
         originalImage = null;
         adjustedImage = null;
@@ -258,25 +274,82 @@ public final class PreviewPairPanel extends JPanel {
         refreshSharedZRow();
     }
 
-    public void setAdjustedState(PreviewState state, String message) {
-        adjustedState = state == null ? PreviewState.EMPTY : state;
-        adjustedMessage = message == null ? "" : message.trim();
-        applyAdjustedStatus();
+    public void setAdjustedState(final PreviewState state, final String message) {
+        if (invokeOnEdtIfNeeded(new Runnable() {
+            @Override public void run() {
+                setAdjustedState(state, message);
+            }
+        })) return;
+        if (state == PreviewState.RUNNING) {
+            adjustedPreviewGeneration++;
+        }
+        setAdjustedStateOnEdt(state, message);
+    }
+
+    public long beginAdjustedPreviewRequest(final String message) {
+        if (SwingUtilities.isEventDispatchThread()) {
+            adjustedPreviewGeneration++;
+            setAdjustedStateOnEdt(PreviewState.RUNNING, message);
+            return adjustedPreviewGeneration;
+        }
+        final long[] generation = new long[] {0L};
+        invokeOnEdtIfNeeded(new Runnable() {
+            @Override public void run() {
+                generation[0] = beginAdjustedPreviewRequest(message);
+            }
+        });
+        return generation[0];
+    }
+
+    public boolean applyAdjustedPreviewResult(final long generation,
+                                              final ImagePlus image,
+                                              final PreviewState state,
+                                              final String message) {
+        if (SwingUtilities.isEventDispatchThread()) {
+            if (generation != adjustedPreviewGeneration) {
+                return false;
+            }
+            setAdjusted(image);
+            setAdjustedStateOnEdt(state, message);
+            return true;
+        }
+        final boolean[] applied = new boolean[] {false};
+        invokeOnEdtIfNeeded(new Runnable() {
+            @Override public void run() {
+                applied[0] = applyAdjustedPreviewResult(generation, image, state, message);
+            }
+        });
+        return applied[0];
     }
 
     public int getCurrentZ() {
         return currentZ;
     }
 
-    public void setCurrentZ(int zSlice) {
+    public void setCurrentZ(final int zSlice) {
+        if (invokeOnEdtIfNeeded(new Runnable() {
+            @Override public void run() {
+                setCurrentZ(zSlice);
+            }
+        })) return;
         applyCurrentZ(zSlice);
     }
 
     public void resetZ() {
+        if (invokeOnEdtIfNeeded(new Runnable() {
+            @Override public void run() {
+                resetZ();
+            }
+        })) return;
         applyCurrentZ(1);
     }
 
-    public void setChannelLutName(String channelLutName) {
+    public void setChannelLutName(final String channelLutName) {
+        if (invokeOnEdtIfNeeded(new Runnable() {
+            @Override public void run() {
+                setChannelLutName(channelLutName);
+            }
+        })) return;
         this.channelLutName = PreviewDisplaySettings.normalizeLutName(channelLutName);
         updateLutModeLabels();
         displaySettings = displaySettings.withChannelLutName(this.channelLutName);
@@ -296,7 +369,12 @@ public final class PreviewPairPanel extends JPanel {
         return displaySettings;
     }
 
-    public void setObjectSizeGuide(ObjectSizeFilterPreview.Summary summary) {
+    public void setObjectSizeGuide(final ObjectSizeFilterPreview.Summary summary) {
+        if (invokeOnEdtIfNeeded(new Runnable() {
+            @Override public void run() {
+                setObjectSizeGuide(summary);
+            }
+        })) return;
         objectSizeGuide = summary;
         originalPreview.setObjectSizeGuide(summary);
         adjustedPreview.setObjectSizeGuide(summary);
@@ -308,7 +386,12 @@ public final class PreviewPairPanel extends JPanel {
         }
     }
 
-    public void setComparisonPreviewVisible(boolean visible) {
+    public void setComparisonPreviewVisible(final boolean visible) {
+        if (invokeOnEdtIfNeeded(new Runnable() {
+            @Override public void run() {
+                setComparisonPreviewVisible(visible);
+            }
+        })) return;
         comparisonPreviewVisible = visible;
         comparePreviewButton.setVisible(visible);
         if (!visible && comparisonPreviewDialog != null) {
@@ -321,7 +404,13 @@ public final class PreviewPairPanel extends JPanel {
         }
     }
 
-    public void setPreviousComparisonPreview(ImagePlus previousImage, String previousStatus) {
+    public void setPreviousComparisonPreview(final ImagePlus previousImage,
+                                             final String previousStatus) {
+        if (invokeOnEdtIfNeeded(new Runnable() {
+            @Override public void run() {
+                setPreviousComparisonPreview(previousImage, previousStatus);
+            }
+        })) return;
         comparisonPreviousImage = previousImage;
         comparisonPreviousStatus = previousStatus == null ? "" : previousStatus.trim();
         updateComparisonImages();
@@ -335,6 +424,11 @@ public final class PreviewPairPanel extends JPanel {
     }
 
     public void clearComparisonPreview() {
+        if (invokeOnEdtIfNeeded(new Runnable() {
+            @Override public void run() {
+                clearComparisonPreview();
+            }
+        })) return;
         comparisonPreviousImage = null;
         comparisonPreviousStatus = "";
         comparisonRestoreAction = null;
@@ -348,8 +442,13 @@ public final class PreviewPairPanel extends JPanel {
         setComparisonPreviewVisible(false);
     }
 
-    public void setLargePreviewImages(ImagePlus firstImage, ImagePlus secondImage,
-                                      ImagePlus thirdImage) {
+    public void setLargePreviewImages(final ImagePlus firstImage, final ImagePlus secondImage,
+                                      final ImagePlus thirdImage) {
+        if (invokeOnEdtIfNeeded(new Runnable() {
+            @Override public void run() {
+                setLargePreviewImages(firstImage, secondImage, thirdImage);
+            }
+        })) return;
         rememberCurrentDisplaySettings();
         usingCustomLargePreviewImages = true;
         largePreviewFirstImage = firstImage;
@@ -364,7 +463,13 @@ public final class PreviewPairPanel extends JPanel {
         updateComparisonButtonState();
     }
 
-    public void setLargePreviewSourceChoices(ImagePlus originalSource, ImagePlus filteredSource) {
+    public void setLargePreviewSourceChoices(final ImagePlus originalSource,
+                                             final ImagePlus filteredSource) {
+        if (invokeOnEdtIfNeeded(new Runnable() {
+            @Override public void run() {
+                setLargePreviewSourceChoices(originalSource, filteredSource);
+            }
+        })) return;
         rememberCurrentDisplaySettings();
         largePreviewOriginalSourceImage = originalSource;
         largePreviewFilteredSourceImage = filteredSource;
@@ -377,6 +482,11 @@ public final class PreviewPairPanel extends JPanel {
     }
 
     public void clearLargePreviewSourceChoices() {
+        if (invokeOnEdtIfNeeded(new Runnable() {
+            @Override public void run() {
+                clearLargePreviewSourceChoices();
+            }
+        })) return;
         rememberCurrentDisplaySettings();
         forgetDisplaySettings(largePreviewOriginalSourceImage);
         forgetDisplaySettings(largePreviewFilteredSourceImage);
@@ -388,7 +498,12 @@ public final class PreviewPairPanel extends JPanel {
         updateComparisonImages();
     }
 
-    public void setLargePreviewSourceMode(SourceMode mode) {
+    public void setLargePreviewSourceMode(final SourceMode mode) {
+        if (invokeOnEdtIfNeeded(new Runnable() {
+            @Override public void run() {
+                setLargePreviewSourceMode(mode);
+            }
+        })) return;
         SourceMode next = availableLargePreviewSourceMode(
                 mode == SourceMode.FILTERED ? SourceMode.FILTERED : SourceMode.RAW);
         if (largePreviewSourceMode == next) return;
@@ -401,6 +516,11 @@ public final class PreviewPairPanel extends JPanel {
     }
 
     public void clearLargePreviewImages() {
+        if (invokeOnEdtIfNeeded(new Runnable() {
+            @Override public void run() {
+                clearLargePreviewImages();
+            }
+        })) return;
         forgetDisplaySettings(largePreviewFirstImage);
         forgetDisplaySettings(largePreviewSecondImage);
         forgetDisplaySettings(largePreviewThirdImage);
@@ -540,8 +660,13 @@ public final class PreviewPairPanel extends JPanel {
         sourceModeListener = listener;
     }
 
-    public void setClickCapture(File binFolder, ClickStore store,
-                                String imageName, int channelOneBased) {
+    public void setClickCapture(final File binFolder, final ClickStore store,
+                                final String imageName, final int channelOneBased) {
+        if (invokeOnEdtIfNeeded(new Runnable() {
+            @Override public void run() {
+                setClickCapture(binFolder, store, imageName, channelOneBased);
+            }
+        })) return;
         clickBinFolder = binFolder;
         clickStore = store;
         clickImageName = imageName == null ? "" : imageName;
@@ -553,6 +678,11 @@ public final class PreviewPairPanel extends JPanel {
     }
 
     public void clearClickCapture() {
+        if (invokeOnEdtIfNeeded(new Runnable() {
+            @Override public void run() {
+                clearClickCapture();
+            }
+        })) return;
         flushClicksSync();
         clearClickOverlaysFromKnownImages();
         clickBinFolder = null;
@@ -1689,6 +1819,12 @@ public final class PreviewPairPanel extends JPanel {
         }
     }
 
+    private void setAdjustedStateOnEdt(PreviewState state, String message) {
+        adjustedState = state == null ? PreviewState.EMPTY : state;
+        adjustedMessage = message == null ? "" : message.trim();
+        applyAdjustedStatus();
+    }
+
     static String statusText(PreviewState state, String message) {
         String text = message == null ? "" : message.trim();
         PreviewState safeState = state == null ? PreviewState.EMPTY : state;
@@ -1943,6 +2079,27 @@ public final class PreviewPairPanel extends JPanel {
         } catch (SecurityException ignored) {
             // Best-effort only; the dialog still remains modeless.
         }
+    }
+
+    private static boolean invokeOnEdtIfNeeded(Runnable task) {
+        if (SwingUtilities.isEventDispatchThread()) {
+            return false;
+        }
+        try {
+            SwingUtilities.invokeAndWait(task);
+        } catch (Exception e) {
+            Throwable cause = e instanceof java.lang.reflect.InvocationTargetException
+                    ? ((java.lang.reflect.InvocationTargetException) e).getCause()
+                    : e;
+            if (cause instanceof RuntimeException) {
+                throw (RuntimeException) cause;
+            }
+            if (cause instanceof Error) {
+                throw (Error) cause;
+            }
+            throw new IllegalStateException("Could not update preview on the Swing event thread.", cause);
+        }
+        return true;
     }
 
     private void closeGeneratedObjectOverlayImage() {

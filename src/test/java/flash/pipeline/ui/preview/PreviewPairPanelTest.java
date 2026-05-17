@@ -45,9 +45,9 @@ public class PreviewPairPanelTest {
         assertFalse(pair.adjustedPreviewForTest().zRowVisibleForTest());
         assertNotNull(pair.originalPreviewForTest().slimTitleLabelForTest());
         assertNotNull(pair.adjustedPreviewForTest().slimTitleLabelForTest());
-        assertEquals(new Dimension(340, 280),
+        assertEquals(new Dimension(280, 280),
                 pair.originalPreviewForTest().canvasPreferredSizeForTest());
-        assertEquals(new Dimension(340, 280),
+        assertEquals(new Dimension(280, 280),
                 pair.adjustedPreviewForTest().canvasPreferredSizeForTest());
         assertEquals(2, pair.originalPreviewForTest().layoutVerticalGapForTest());
         assertEquals(2, pair.adjustedPreviewForTest().layoutVerticalGapForTest());
@@ -705,6 +705,29 @@ public class PreviewPairPanelTest {
 
         pair.setAdjustedState(PreviewPairPanel.PreviewState.ERROR, "Filter failed");
         assertEquals("Preview failed: Filter failed", pair.adjustedStatusTextForTest());
+    }
+
+    @Test
+    public void adjustedPreviewRequestTokenRejectsStaleResults() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
+        long first = pair.beginAdjustedPreviewRequest("Rendering first preview...");
+        long second = pair.beginAdjustedPreviewRequest("Rendering second preview...");
+
+        boolean staleApplied = pair.applyAdjustedPreviewResult(
+                first,
+                stack("stale", 1),
+                PreviewPairPanel.PreviewState.READY,
+                "Stale preview ready.");
+        boolean currentApplied = pair.applyAdjustedPreviewResult(
+                second,
+                stack("current", 1),
+                PreviewPairPanel.PreviewState.READY,
+                "Current preview ready.");
+
+        assertFalse(staleApplied);
+        assertTrue(currentApplied);
+        assertEquals("current", pair.adjustedImageTitleForTest());
+        assertEquals("Current preview ready.", pair.adjustedStatusTextForTest());
     }
 
     @Test

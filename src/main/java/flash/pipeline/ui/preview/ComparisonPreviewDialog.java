@@ -249,6 +249,14 @@ public final class ComparisonPreviewDialog extends JDialog {
 
     @Override
     public void dispose() {
+        sliceListener = null;
+        displayActionListener = null;
+        restoreActionListener = null;
+        objectClickListener = null;
+        currentPreview.setZSliceChangeListener(null);
+        previousPreview.setZSliceChangeListener(null);
+        currentPreview.setPixelClickListener(null);
+        previousPreview.setPixelClickListener(null);
         closeGeneratedOverlayImages();
         super.dispose();
     }
