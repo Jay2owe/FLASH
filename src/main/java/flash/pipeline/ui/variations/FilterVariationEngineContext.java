@@ -8,6 +8,8 @@ import flash.pipeline.ui.config.FilterParameterStage;
 import flash.pipeline.ui.config.StarDistParameterStage;
 
 import ij.ImagePlus;
+import ij.ImageStack;
+import ij.process.ImageProcessor;
 
 import java.io.File;
 import java.nio.charset.StandardCharsets;
@@ -261,8 +263,36 @@ public final class FilterVariationEngineContext {
         String raw = safe(image.getTitle()) + ":"
                 + image.getWidth() + "x"
                 + image.getHeight() + "x"
-                + image.getStackSize();
+                + image.getStackSize() + ":"
+                + pixelFingerprint(image);
         return sha256(raw);
+    }
+
+    /**
+     * Cheap, stable-under-rerun pixel fingerprint: samples one byte per slice
+     * at the centre and the four quadrant centres, folded into an int.
+     * Cost: O(stackSize), no allocation. Distinguishes two same-dim DAPI
+     * sections with overwhelmingly high probability.
+     */
+    private static String pixelFingerprint(ImagePlus image) {
+        ImageStack stack = image.getStack();
+        int n = stack == null ? 0 : stack.getSize();
+        int w = image.getWidth();
+        int h = image.getHeight();
+        if (w <= 0 || h <= 0 || n <= 0) {
+            return Integer.toHexString(17);
+        }
+
+        int hash = 17;
+        for (int s = 1; s <= n; s++) {
+            ImageProcessor ip = stack.getProcessor(s);
+            hash = 31 * hash + Float.floatToIntBits(ip.getf(w / 2, h / 2));
+            hash = 31 * hash + Float.floatToIntBits(ip.getf(w / 4, h / 4));
+            hash = 31 * hash + Float.floatToIntBits(ip.getf(3 * w / 4, h / 4));
+            hash = 31 * hash + Float.floatToIntBits(ip.getf(w / 4, 3 * h / 4));
+            hash = 31 * hash + Float.floatToIntBits(ip.getf(3 * w / 4, 3 * h / 4));
+        }
+        return Integer.toHexString(hash);
     }
 
     private static String sha256(String value) {
