@@ -8,10 +8,19 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Deque;
+import java.util.Enumeration;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 
 /**
  * Hidden local StarDist 2D training runner for datasets exported by FLASH.
@@ -35,6 +44,10 @@ public final class StarDistLocalTrainingService {
             "flash.stardist.training.learningRate";
     public static final String USE_GPU_PROPERTY =
             "flash.stardist.training.useGpu";
+    public static final String TIMEOUT_SECONDS_PROPERTY =
+            "flash.stardist.training.timeoutSeconds";
+    public static final String STALL_TIMEOUT_SECONDS_PROPERTY =
+            "flash.stardist.training.stallTimeoutSeconds";
 
     private static final String SCRIPT_FILENAME = "train_stardist_flash.py";
     private static final String COMMAND_FILENAME = "train_stardist_command.txt";
@@ -74,10 +87,13 @@ public final class StarDistLocalTrainingService {
             throw new IOException("Local StarDist training is disabled. Set -D"
                     + LOCAL_ENABLED_PROPERTY + "=true to enable the hidden backend.");
         }
+        validateTrainingDataset(datasetDir);
         TrainingArtifacts artifacts = prepareTrainingArtifacts(datasetDir, modelName, config);
         final Path[] reportedZip = new Path[] {null};
         final IOException[] logFailure = new IOException[] {null};
         final Object logLock = new Object();
+        final StreamTail stdoutTail = new StreamTail();
+        final StreamTail stderrTail = new StreamTail();
         ProgressSink safeProgress = progress == null ? NO_PROGRESS : progress;
         safeProgress.update(0.0, "Starting local StarDist training...");
 
@@ -87,19 +103,20 @@ public final class StarDistLocalTrainingService {
         try {
             writeLog(writer, logLock, logFailure, "FLASH",
                     "Command: " + displayCommand(artifacts.command));
-            ProcessSpec spec = new ProcessSpec(artifacts.command, artifacts.datasetDir);
+            ProcessSpec spec = new ProcessSpec(artifacts.command, artifacts.datasetDir,
+                    config.timeoutSeconds, config.stallTimeoutSeconds);
             ProcessResult result = runner.run(spec,
                     new LoggingLineConsumer(writer, logLock, logFailure, "STDOUT",
-                            artifacts.datasetDir, reportedZip, safeProgress),
+                            artifacts.datasetDir, reportedZip, safeProgress, stdoutTail),
                     new LoggingLineConsumer(writer, logLock, logFailure, "STDERR",
-                            artifacts.datasetDir, reportedZip, safeProgress));
+                            artifacts.datasetDir, reportedZip, safeProgress, stderrTail));
             if (logFailure[0] != null) {
                 throw logFailure[0];
             }
             int exitCode = result == null ? -1 : result.exitCode;
             if (exitCode != 0) {
-                throw new IOException("Local StarDist training failed with exit code "
-                        + exitCode + ". Log: " + artifacts.logFile);
+                throw new IOException(failureMessage("Local StarDist training",
+                        exitCode, artifacts.logFile, stdoutTail, stderrTail));
             }
         } finally {
             writer.close();
@@ -110,9 +127,183 @@ public final class StarDistLocalTrainingService {
             throw new IOException("Local StarDist training finished but no model zip was found: "
                     + zip + ". Log: " + artifacts.logFile);
         }
+        validateStarDistZip(zip);
         safeProgress.update(1.0, "Local StarDist training complete.");
         return new TrainingResult(zip, artifacts.logFile, artifacts.scriptFile,
                 artifacts.commandFile, 0);
+    }
+
+    private static void validateTrainingDataset(Path datasetDir) throws IOException {
+        Path dir = datasetDir == null ? null : datasetDir.toAbsolutePath().normalize();
+        if (dir == null || !Files.isDirectory(dir)) {
+            throw new IOException("StarDist training dataset directory does not exist: " + dir);
+        }
+        Path rawDir = dir.resolve("raw");
+        Path labelsDir = dir.resolve("labels");
+        if (!Files.isDirectory(rawDir) || !Files.isDirectory(labelsDir)) {
+            throw new IOException("StarDist dataset must contain raw/ and labels/ folders: " + dir);
+        }
+        Set<String> rawNames = tiffNames(rawDir);
+        Set<String> labelNames = tiffNames(labelsDir);
+        if (rawNames.isEmpty()) {
+            throw new IOException("StarDist training dataset has no raw TIFFs: " + rawDir);
+        }
+        Set<String> missingLabels = new HashSet<String>(rawNames);
+        missingLabels.removeAll(labelNames);
+        if (!missingLabels.isEmpty()) {
+            throw new IOException("StarDist training dataset is missing label TIFFs in "
+                    + labelsDir + ": " + missingLabels);
+        }
+        Set<String> extraLabels = new HashSet<String>(labelNames);
+        extraLabels.removeAll(rawNames);
+        if (!extraLabels.isEmpty()) {
+            throw new IOException("StarDist training dataset has label TIFFs without raw pairs in "
+                    + labelsDir + ": " + extraLabels);
+        }
+    }
+
+    private static Set<String> tiffNames(Path dir) throws IOException {
+        Set<String> out = new HashSet<String>();
+        java.util.stream.Stream<Path> stream = Files.list(dir);
+        try {
+            java.util.Iterator<Path> iterator = stream.iterator();
+            while (iterator.hasNext()) {
+                Path path = iterator.next();
+                if (!Files.isRegularFile(path)) {
+                    continue;
+                }
+                Path name = path.getFileName();
+                String fileName = name == null ? "" : name.toString();
+                String lower = fileName.toLowerCase(Locale.ROOT);
+                if (lower.endsWith(".tif") || lower.endsWith(".tiff")) {
+                    out.add(fileName);
+                }
+            }
+        } finally {
+            stream.close();
+        }
+        return out;
+    }
+
+    private static void validateStarDistZip(Path zipPath) throws IOException {
+        Path file = zipPath == null ? null : zipPath.toAbsolutePath().normalize();
+        if (file == null || !Files.isRegularFile(file)) {
+            throw new IOException("StarDist model zip does not exist: " + file);
+        }
+        String name = file.getFileName() == null ? "" : file.getFileName().toString();
+        if (!name.toLowerCase(Locale.ROOT).endsWith(".zip")) {
+            throw new IOException("StarDist model output must be a .zip file: " + file);
+        }
+        StarDistZipScan scan;
+        try (ZipFile zip = new ZipFile(file.toFile())) {
+            scan = scanStarDistZip(zip);
+        } catch (IOException e) {
+            throw new IOException("StarDist model zip could not be read: "
+                    + file + ": " + e.getMessage(), e);
+        }
+        if (!scan.hasFileEntry) {
+            throw new IOException("StarDist model zip is empty: " + file);
+        }
+        if (scan.marker == null) {
+            throw new IOException("Not a StarDist / CSBDeep SavedModel: missing saved_model.pb "
+                    + "(or config.json + thresholds.json): " + file);
+        }
+    }
+
+    private static StarDistZipScan scanStarDistZip(ZipFile zip) {
+        boolean hasFileEntry = false;
+        boolean hasTopLevelSavedModel = false;
+        boolean hasSingleDirectorySavedModel = false;
+        boolean hasModelTfSavedModel = false;
+        Set<String> configParents = new HashSet<String>();
+        Set<String> thresholdsParents = new HashSet<String>();
+
+        Enumeration<? extends ZipEntry> entries = zip.entries();
+        while (entries.hasMoreElements()) {
+            ZipEntry entry = entries.nextElement();
+            if (entry.isDirectory()) {
+                continue;
+            }
+            String entryName = normalizedZipEntryName(entry.getName());
+            if (entryName.isEmpty()) {
+                continue;
+            }
+            hasFileEntry = true;
+            if ("saved_model.pb".equals(entryName)) {
+                hasTopLevelSavedModel = true;
+            }
+            if (isSingleDirectorySavedModel(entryName)) {
+                hasSingleDirectorySavedModel = true;
+            }
+            if (isModelTfSavedModel(entryName)) {
+                hasModelTfSavedModel = true;
+            }
+            String fileName = zipFileName(entryName);
+            String parent = zipParent(entryName);
+            if ("config.json".equals(fileName)) {
+                configParents.add(parent);
+            } else if ("thresholds.json".equals(fileName)) {
+                thresholdsParents.add(parent);
+            }
+        }
+
+        String marker = null;
+        if (hasTopLevelSavedModel) {
+            marker = "top-level saved_model.pb";
+        } else if (hasModelTfSavedModel) {
+            marker = "model.tf SavedModel layout";
+        } else if (hasSingleDirectorySavedModel) {
+            marker = "single-directory saved_model.pb";
+        } else if (hasMatchingCsbDeepMetadata(configParents, thresholdsParents)) {
+            marker = "CSBDeep config.json + thresholds.json";
+        }
+        return new StarDistZipScan(hasFileEntry, marker);
+    }
+
+    private static String normalizedZipEntryName(String rawName) {
+        String name = rawName == null ? "" : rawName.replace('\\', '/').trim();
+        while (name.startsWith("/")) {
+            name = name.substring(1);
+        }
+        while (name.startsWith("./")) {
+            name = name.substring(2);
+        }
+        while (name.indexOf("//") >= 0) {
+            name = name.replace("//", "/");
+        }
+        return name;
+    }
+
+    private static boolean isSingleDirectorySavedModel(String name) {
+        int firstSlash = name.indexOf('/');
+        return firstSlash > 0
+                && firstSlash == name.lastIndexOf('/')
+                && name.endsWith("/saved_model.pb");
+    }
+
+    private static boolean isModelTfSavedModel(String name) {
+        return "model.tf/saved_model.pb".equals(name)
+                || name.endsWith("/model.tf/saved_model.pb");
+    }
+
+    private static boolean hasMatchingCsbDeepMetadata(Set<String> configParents,
+                                                      Set<String> thresholdsParents) {
+        for (String parent : configParents) {
+            if (thresholdsParents.contains(parent)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String zipParent(String name) {
+        int slash = name.lastIndexOf('/');
+        return slash < 0 ? "" : name.substring(0, slash);
+    }
+
+    private static String zipFileName(String name) {
+        int slash = name.lastIndexOf('/');
+        return slash < 0 ? name : name.substring(slash + 1);
     }
 
     public static TrainingArtifacts prepareTrainingArtifacts(Path datasetDir,
@@ -324,6 +515,33 @@ public final class StarDistLocalTrainingService {
         }
     }
 
+    private static String failureMessage(String label,
+                                         int exitCode,
+                                         Path logFile,
+                                         StreamTail stdout,
+                                         StreamTail stderr) {
+        StringBuilder message = new StringBuilder(label)
+                .append(" failed with exit code ")
+                .append(exitCode)
+                .append(". Log: ")
+                .append(logFile);
+        appendTail(message, "stderr", stderr);
+        appendTail(message, "stdout", stdout);
+        return message.toString();
+    }
+
+    private static void appendTail(StringBuilder message, String name, StreamTail tail) {
+        List<String> lines = tail == null ? Collections.<String>emptyList() : tail.lines();
+        if (lines.isEmpty()) {
+            return;
+        }
+        message.append(". Last ").append(name).append(": ");
+        for (int i = 0; i < lines.size(); i++) {
+            if (i > 0) message.append(" | ");
+            message.append(lines.get(i));
+        }
+    }
+
     private static Path parseExportZip(Path datasetDir, String line) {
         String marker = "FLASH_EXPORT_ZIP=";
         String text = line == null ? "" : line.trim();
@@ -448,6 +666,8 @@ public final class StarDistLocalTrainingService {
         public final double validationFraction;
         public final int seed;
         public final boolean useGpu;
+        public final int timeoutSeconds;
+        public final int stallTimeoutSeconds;
 
         public Config(boolean enabled,
                       String pythonExecutable,
@@ -462,6 +682,28 @@ public final class StarDistLocalTrainingService {
                       double validationFraction,
                       int seed,
                       boolean useGpu) {
+            this(enabled, pythonExecutable, condaEnvironment, condaExecutable,
+                    epochs, batchSize, stepsPerEpoch, learningRate, nRays, grid,
+                    validationFraction, seed, useGpu,
+                    intProperty(TIMEOUT_SECONDS_PROPERTY, 6 * 60 * 60, 0),
+                    intProperty(STALL_TIMEOUT_SECONDS_PROPERTY, 30 * 60, 0));
+        }
+
+        public Config(boolean enabled,
+                      String pythonExecutable,
+                      String condaEnvironment,
+                      String condaExecutable,
+                      int epochs,
+                      int batchSize,
+                      int stepsPerEpoch,
+                      double learningRate,
+                      int nRays,
+                      int grid,
+                      double validationFraction,
+                      int seed,
+                      boolean useGpu,
+                      int timeoutSeconds,
+                      int stallTimeoutSeconds) {
             this.enabled = enabled;
             this.pythonExecutable = cleanOrDefault(pythonExecutable, "python");
             this.condaEnvironment = clean(condaEnvironment);
@@ -475,6 +717,8 @@ public final class StarDistLocalTrainingService {
             this.validationFraction = Math.max(0.0, Math.min(0.9, validationFraction));
             this.seed = seed;
             this.useGpu = useGpu;
+            this.timeoutSeconds = Math.max(0, timeoutSeconds);
+            this.stallTimeoutSeconds = Math.max(0, stallTimeoutSeconds);
         }
 
         public static Config fromSystemProperties() {
@@ -491,7 +735,9 @@ public final class StarDistLocalTrainingService {
                     2,
                     0.2,
                     42,
-                    Boolean.getBoolean(USE_GPU_PROPERTY));
+                    Boolean.getBoolean(USE_GPU_PROPERTY),
+                    intProperty(TIMEOUT_SECONDS_PROPERTY, 6 * 60 * 60, 0),
+                    intProperty(STALL_TIMEOUT_SECONDS_PROPERTY, 30 * 60, 0));
         }
     }
 
@@ -544,11 +790,22 @@ public final class StarDistLocalTrainingService {
     public static final class ProcessSpec {
         public final List<String> command;
         public final Path workingDirectory;
+        public final int timeoutSeconds;
+        public final int stallTimeoutSeconds;
 
         ProcessSpec(List<String> command, Path workingDirectory) {
+            this(command, workingDirectory, 0, 0);
+        }
+
+        ProcessSpec(List<String> command,
+                    Path workingDirectory,
+                    int timeoutSeconds,
+                    int stallTimeoutSeconds) {
             this.command = Collections.unmodifiableList(new ArrayList<String>(
                     command == null ? Collections.<String>emptyList() : command));
             this.workingDirectory = workingDirectory;
+            this.timeoutSeconds = Math.max(0, timeoutSeconds);
+            this.stallTimeoutSeconds = Math.max(0, stallTimeoutSeconds);
         }
     }
 
@@ -568,6 +825,7 @@ public final class StarDistLocalTrainingService {
         private final Path datasetDir;
         private final Path[] reportedZip;
         private final ProgressSink progress;
+        private final StreamTail tail;
 
         LoggingLineConsumer(BufferedWriter writer,
                             Object logLock,
@@ -575,7 +833,8 @@ public final class StarDistLocalTrainingService {
                             String stream,
                             Path datasetDir,
                             Path[] reportedZip,
-                            ProgressSink progress) {
+                            ProgressSink progress,
+                            StreamTail tail) {
             this.writer = writer;
             this.logLock = logLock;
             this.logFailure = logFailure;
@@ -583,9 +842,13 @@ public final class StarDistLocalTrainingService {
             this.datasetDir = datasetDir;
             this.reportedZip = reportedZip;
             this.progress = progress;
+            this.tail = tail;
         }
 
         @Override public void accept(String line) {
+            if (tail != null) {
+                tail.add(line);
+            }
             writeLog(writer, logLock, logFailure, stream, line);
             Path zip = parseExportZip(datasetDir, line);
             if (zip != null) {
@@ -599,6 +862,36 @@ public final class StarDistLocalTrainingService {
         }
     }
 
+    private static final class StarDistZipScan {
+        final boolean hasFileEntry;
+        final String marker;
+
+        StarDistZipScan(boolean hasFileEntry, String marker) {
+            this.hasFileEntry = hasFileEntry;
+            this.marker = marker;
+        }
+    }
+
+    private static final class StreamTail {
+        private static final int MAX_LINES = 12;
+        private final Deque<String> lines = new ArrayDeque<String>();
+
+        synchronized void add(String line) {
+            String value = line == null ? "" : line.trim();
+            if (value.length() > 500) {
+                value = value.substring(0, 500) + "...";
+            }
+            lines.addLast(value);
+            while (lines.size() > MAX_LINES) {
+                lines.removeFirst();
+            }
+        }
+
+        synchronized List<String> lines() {
+            return new ArrayList<String>(lines);
+        }
+    }
+
     private static final class DefaultProcessRunner implements ProcessRunner {
         @Override public ProcessResult run(ProcessSpec spec,
                                            LineConsumer stdout,
@@ -608,15 +901,16 @@ public final class StarDistLocalTrainingService {
                 builder.directory(spec.workingDirectory.toFile());
             }
             final Process process = builder.start();
-            Thread outThread = streamThread(process, true, stdout);
-            Thread errThread = streamThread(process, false, stderr);
+            final AtomicLong lastOutputMs = new AtomicLong(System.currentTimeMillis());
+            Thread outThread = streamThread(process, true, stdout, lastOutputMs);
+            Thread errThread = streamThread(process, false, stderr, lastOutputMs);
             outThread.start();
             errThread.start();
             int exit;
             try {
-                exit = process.waitFor();
+                exit = waitForProcess(process, spec, lastOutputMs);
             } catch (InterruptedException e) {
-                process.destroy();
+                terminateProcess(process);
                 throw e;
             } finally {
                 outThread.join();
@@ -627,7 +921,8 @@ public final class StarDistLocalTrainingService {
 
         private static Thread streamThread(final Process process,
                                            final boolean stdout,
-                                           final LineConsumer consumer) {
+                                           final LineConsumer consumer,
+                                           final AtomicLong lastOutputMs) {
             return new Thread(new Runnable() {
                 @Override public void run() {
                     BufferedReader reader = new BufferedReader(new InputStreamReader(
@@ -636,6 +931,7 @@ public final class StarDistLocalTrainingService {
                     try {
                         String line;
                         while ((line = reader.readLine()) != null) {
+                            lastOutputMs.set(System.currentTimeMillis());
                             if (consumer != null) {
                                 consumer.accept(line);
                             }
@@ -649,6 +945,42 @@ public final class StarDistLocalTrainingService {
                     }
                 }
             }, stdout ? "flash-stardist-train-stdout" : "flash-stardist-train-stderr");
+        }
+
+        private static int waitForProcess(Process process,
+                                          ProcessSpec spec,
+                                          AtomicLong lastOutputMs) throws IOException, InterruptedException {
+            long started = System.currentTimeMillis();
+            long maxRuntimeMs = spec.timeoutSeconds <= 0
+                    ? 0L
+                    : TimeUnit.SECONDS.toMillis(spec.timeoutSeconds);
+            long stallMs = spec.stallTimeoutSeconds <= 0
+                    ? 0L
+                    : TimeUnit.SECONDS.toMillis(spec.stallTimeoutSeconds);
+            while (true) {
+                if (process.waitFor(1, TimeUnit.SECONDS)) {
+                    return process.exitValue();
+                }
+                long now = System.currentTimeMillis();
+                if (maxRuntimeMs > 0L && now - started > maxRuntimeMs) {
+                    terminateProcess(process);
+                    throw new IOException("Local StarDist training timed out after "
+                            + spec.timeoutSeconds + " seconds.");
+                }
+                if (stallMs > 0L && now - lastOutputMs.get() > stallMs) {
+                    terminateProcess(process);
+                    throw new IOException("Local StarDist training produced no output for "
+                            + spec.stallTimeoutSeconds + " seconds.");
+                }
+            }
+        }
+
+        private static void terminateProcess(Process process) throws InterruptedException {
+            process.destroy();
+            if (!process.waitFor(5, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                process.waitFor(5, TimeUnit.SECONDS);
+            }
         }
     }
 }

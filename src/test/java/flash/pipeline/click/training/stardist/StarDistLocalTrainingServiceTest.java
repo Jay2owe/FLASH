@@ -10,6 +10,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -109,6 +111,7 @@ public class StarDistLocalTrainingServiceTest {
             fail("Expected failing process to throw.");
         } catch (IOException expected) {
             assertTrue(expected.getMessage().contains("exit code 5"));
+            assertTrue(expected.getMessage().contains("ModuleNotFoundError"));
             Path logFile = dataset.resolve("stardist_training.log");
             assertTrue(Files.isRegularFile(logFile));
             String log = new String(Files.readAllBytes(logFile), StandardCharsets.UTF_8);
@@ -116,10 +119,52 @@ public class StarDistLocalTrainingServiceTest {
         }
     }
 
+    @Test
+    public void trainRefusesUnpairedDatasetBeforeLaunchingProcess() throws Exception {
+        Path dataset = temp.newFolder("stardist-unpaired").toPath();
+        Files.createDirectories(dataset.resolve("raw"));
+        Files.createDirectories(dataset.resolve("labels"));
+        Files.write(dataset.resolve("raw").resolve("image_001.tif"),
+                "raw".getBytes(StandardCharsets.UTF_8));
+        FakeRunner runner = new FakeRunner(0);
+        StarDistLocalTrainingService service = new StarDistLocalTrainingService(
+                config(true, "python", "", "conda", 3), runner);
+
+        try {
+            service.train(new StarDistDatasetPackager.PackagingResult(dataset, 1, 1, 0),
+                    "Bad model", StarDistLocalTrainingService.NO_PROGRESS);
+            fail("Expected unpaired dataset to throw.");
+        } catch (IOException expected) {
+            assertTrue(expected.getMessage().contains("missing label TIFFs"));
+            assertEquals(null, runner.command);
+        }
+    }
+
+    @Test
+    public void trainRejectsInvalidOutputZipAfterSuccessfulProcess() throws Exception {
+        Path dataset = datasetDir();
+        FakeRunner runner = new FakeRunner(0);
+        runner.writeValidZip = false;
+        StarDistLocalTrainingService service = new StarDistLocalTrainingService(
+                config(true, "python", "", "conda", 3), runner);
+
+        try {
+            service.train(new StarDistDatasetPackager.PackagingResult(dataset, 1, 1, 0),
+                    "Invalid zip", StarDistLocalTrainingService.NO_PROGRESS);
+            fail("Expected invalid StarDist zip to throw.");
+        } catch (IOException expected) {
+            assertTrue(expected.getMessage().contains("StarDist model zip"));
+        }
+    }
+
     private Path datasetDir() throws IOException {
         Path dataset = temp.newFolder("stardist-dataset").toPath();
         Files.createDirectories(dataset.resolve("raw"));
         Files.createDirectories(dataset.resolve("labels"));
+        Files.write(dataset.resolve("raw").resolve("image_001.tif"),
+                "raw".getBytes(StandardCharsets.UTF_8));
+        Files.write(dataset.resolve("labels").resolve("image_001.tif"),
+                "labels".getBytes(StandardCharsets.UTF_8));
         return dataset;
     }
 
@@ -148,6 +193,7 @@ public class StarDistLocalTrainingServiceTest {
         final int exitCode;
         final List<String> stdout = new ArrayList<String>();
         final List<String> stderr = new ArrayList<String>();
+        boolean writeValidZip = true;
         List<String> command;
 
         FakeRunner(int exitCode) {
@@ -167,7 +213,11 @@ public class StarDistLocalTrainingServiceTest {
             }
             if (exitCode == 0) {
                 Path zip = argumentAfter(spec.command, "--output-zip");
-                Files.write(zip, "zip".getBytes(StandardCharsets.UTF_8));
+                if (writeValidZip) {
+                    writeValidStarDistZip(zip);
+                } else {
+                    Files.write(zip, "zip".getBytes(StandardCharsets.UTF_8));
+                }
                 out.accept("FLASH_EXPORT_ZIP=" + zip.toString());
             }
             return new StarDistLocalTrainingService.ProcessResult(exitCode);
@@ -179,6 +229,14 @@ public class StarDistLocalTrainingServiceTest {
                 throw new IllegalArgumentException("Missing command argument: " + key);
             }
             return java.nio.file.Paths.get(command.get(index + 1));
+        }
+
+        private static void writeValidStarDistZip(Path path) throws IOException {
+            try (ZipOutputStream zip = new ZipOutputStream(Files.newOutputStream(path))) {
+                zip.putNextEntry(new ZipEntry("saved_model.pb"));
+                zip.write("model".getBytes(StandardCharsets.UTF_8));
+                zip.closeEntry();
+            }
         }
     }
 }

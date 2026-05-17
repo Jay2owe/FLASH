@@ -11,13 +11,17 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Stream;
 
 /**
@@ -36,6 +40,10 @@ public final class CellposeLocalTrainingService {
             "flash.cellpose.training.learningRate";
     public static final String WEIGHT_DECAY_PROPERTY =
             "flash.cellpose.training.weightDecay";
+    public static final String TIMEOUT_SECONDS_PROPERTY =
+            "flash.cellpose.training.timeoutSeconds";
+    public static final String STALL_TIMEOUT_SECONDS_PROPERTY =
+            "flash.cellpose.training.stallTimeoutSeconds";
 
     static final String COMMAND_FILENAME = "train_command.txt";
     static final String LOG_FILENAME = "cellpose_training.log";
@@ -74,11 +82,14 @@ public final class CellposeLocalTrainingService {
             throw new IOException("Local Cellpose training is disabled. Set -D"
                     + LOCAL_ENABLED_PROPERTY + "=true to enable the hidden backend.");
         }
+        validateTrainingDataset(datasetDir);
         TrainingArtifacts artifacts = prepareTrainingArtifacts(
                 datasetDir, trainCommandFile, metadataBaseModel(datasetDir), config);
         final Path[] reportedModel = new Path[] {null};
         final IOException[] logFailure = new IOException[] {null};
         final Object logLock = new Object();
+        final StreamTail stdoutTail = new StreamTail();
+        final StreamTail stderrTail = new StreamTail();
         ProgressSink safeProgress = progress == null ? NO_PROGRESS : progress;
         Map<String, Long> preexistingModels = snapshotModelFiles(artifacts.modelsDir);
         safeProgress.update(0.0, "Starting local Cellpose training...");
@@ -89,19 +100,22 @@ public final class CellposeLocalTrainingService {
         try {
             writeLog(writer, logLock, logFailure, "FLASH",
                     "Command: " + displayCommand(artifacts.command));
-            ProcessSpec spec = new ProcessSpec(artifacts.command, artifacts.datasetDir);
+            ProcessSpec spec = new ProcessSpec(artifacts.command, artifacts.datasetDir,
+                    config.timeoutSeconds, config.stallTimeoutSeconds);
             ProcessResult result = runner.run(spec,
                     new LoggingLineConsumer(writer, logLock, logFailure, "STDOUT",
-                            artifacts.datasetDir, artifacts.modelsDir, reportedModel, safeProgress),
+                            artifacts.datasetDir, artifacts.modelsDir, reportedModel,
+                            safeProgress, stdoutTail),
                     new LoggingLineConsumer(writer, logLock, logFailure, "STDERR",
-                            artifacts.datasetDir, artifacts.modelsDir, reportedModel, safeProgress));
+                            artifacts.datasetDir, artifacts.modelsDir, reportedModel,
+                            safeProgress, stderrTail));
             if (logFailure[0] != null) {
                 throw logFailure[0];
             }
             int exitCode = result == null ? -1 : result.exitCode;
             if (exitCode != 0) {
-                throw new IOException("Local Cellpose training failed with exit code "
-                        + exitCode + ". Log: " + artifacts.logFile);
+                throw new IOException(failureMessage("Local Cellpose training",
+                        exitCode, artifacts.logFile, stdoutTail, stderrTail));
             }
         } finally {
             writer.close();
@@ -118,6 +132,80 @@ public final class CellposeLocalTrainingService {
         safeProgress.update(1.0, "Local Cellpose training complete.");
         return new TrainingResult(modelFile, artifacts.logFile, artifacts.commandFile,
                 artifacts.modelsDir, 0);
+    }
+
+    private static void validateTrainingDataset(Path datasetDir) throws IOException {
+        Path dir = datasetDir == null ? null : datasetDir.toAbsolutePath().normalize();
+        if (dir == null || !Files.isDirectory(dir)) {
+            throw new IOException("Cellpose training dataset directory does not exist: " + dir);
+        }
+        List<Path> images = new ArrayList<Path>();
+        List<Path> masks = new ArrayList<Path>();
+        Stream<Path> stream = Files.list(dir);
+        try {
+            Iterator<Path> iterator = stream.iterator();
+            while (iterator.hasNext()) {
+                Path path = iterator.next();
+                if (!Files.isRegularFile(path)) {
+                    continue;
+                }
+                String name = lowerName(path);
+                if (!isTiffName(name)) {
+                    continue;
+                }
+                if (isMaskName(name)) {
+                    masks.add(path);
+                } else {
+                    images.add(path);
+                }
+            }
+        } finally {
+            stream.close();
+        }
+        if (images.isEmpty()) {
+            throw new IOException("Cellpose training dataset has no image TIFFs: " + dir);
+        }
+        List<String> missingMasks = new ArrayList<String>();
+        for (int i = 0; i < images.size(); i++) {
+            Path image = images.get(i);
+            Path mask = dir.resolve(maskNameFor(image.getFileName().toString()));
+            if (!Files.isRegularFile(mask)) {
+                missingMasks.add(image.getFileName().toString() + " -> " + mask.getFileName());
+            }
+        }
+        if (!missingMasks.isEmpty()) {
+            throw new IOException("Cellpose training dataset is missing mask TIFF pairs in "
+                    + dir + ": " + missingMasks);
+        }
+        if (masks.size() != images.size()) {
+            throw new IOException("Cellpose training dataset image/mask count mismatch in "
+                    + dir + ": " + images.size() + " images, " + masks.size() + " masks.");
+        }
+    }
+
+    private static boolean isTiffName(String lowerName) {
+        return lowerName.endsWith(".tif") || lowerName.endsWith(".tiff");
+    }
+
+    private static boolean isMaskName(String lowerName) {
+        return lowerName.endsWith("_masks.tif") || lowerName.endsWith("_masks.tiff");
+    }
+
+    private static String maskNameFor(String imageName) {
+        String name = imageName == null ? "" : imageName;
+        String lower = name.toLowerCase(Locale.ROOT);
+        if (lower.endsWith(".tiff")) {
+            return name.substring(0, name.length() - 5) + "_masks.tiff";
+        }
+        if (lower.endsWith(".tif")) {
+            return name.substring(0, name.length() - 4) + "_masks.tif";
+        }
+        return name + "_masks.tif";
+    }
+
+    private static String lowerName(Path path) {
+        Path name = path == null ? null : path.getFileName();
+        return name == null ? "" : name.toString().toLowerCase(Locale.ROOT);
     }
 
     public static TrainingArtifacts prepareTrainingArtifacts(Path datasetDir,
@@ -319,6 +407,33 @@ public final class CellposeLocalTrainingService {
         }
     }
 
+    private static String failureMessage(String label,
+                                         int exitCode,
+                                         Path logFile,
+                                         StreamTail stdout,
+                                         StreamTail stderr) {
+        StringBuilder message = new StringBuilder(label)
+                .append(" failed with exit code ")
+                .append(exitCode)
+                .append(". Log: ")
+                .append(logFile);
+        appendTail(message, "stderr", stderr);
+        appendTail(message, "stdout", stdout);
+        return message.toString();
+    }
+
+    private static void appendTail(StringBuilder message, String name, StreamTail tail) {
+        List<String> lines = tail == null ? Collections.<String>emptyList() : tail.lines();
+        if (lines.isEmpty()) {
+            return;
+        }
+        message.append(". Last ").append(name).append(": ");
+        for (int i = 0; i < lines.size(); i++) {
+            if (i > 0) message.append(" | ");
+            message.append(lines.get(i));
+        }
+    }
+
     private static Path parseReportedModel(Path datasetDir, Path modelsDir, String line) {
         String text = line == null ? "" : line.trim();
         if (text.isEmpty()) {
@@ -459,6 +574,8 @@ public final class CellposeLocalTrainingService {
         public final int batchSize;
         public final double learningRate;
         public final double weightDecay;
+        public final int timeoutSeconds;
+        public final int stallTimeoutSeconds;
 
         public Config(boolean enabled,
                       String pythonExecutable,
@@ -466,12 +583,27 @@ public final class CellposeLocalTrainingService {
                       int batchSize,
                       double learningRate,
                       double weightDecay) {
+            this(enabled, pythonExecutable, epochs, batchSize, learningRate, weightDecay,
+                    intProperty(TIMEOUT_SECONDS_PROPERTY, 6 * 60 * 60, 0),
+                    intProperty(STALL_TIMEOUT_SECONDS_PROPERTY, 30 * 60, 0));
+        }
+
+        public Config(boolean enabled,
+                      String pythonExecutable,
+                      int epochs,
+                      int batchSize,
+                      double learningRate,
+                      double weightDecay,
+                      int timeoutSeconds,
+                      int stallTimeoutSeconds) {
             this.enabled = enabled;
             this.pythonExecutable = cleanOrDefault(pythonExecutable, "python");
             this.epochs = Math.max(1, epochs);
             this.batchSize = Math.max(1, batchSize);
             this.learningRate = Math.max(0.0, learningRate);
             this.weightDecay = Math.max(0.0, weightDecay);
+            this.timeoutSeconds = Math.max(0, timeoutSeconds);
+            this.stallTimeoutSeconds = Math.max(0, stallTimeoutSeconds);
         }
 
         public static Config fromSystemProperties() {
@@ -488,7 +620,9 @@ public final class CellposeLocalTrainingService {
                     intProperty(EPOCHS_PROPERTY, 100, 1),
                     intProperty(BATCH_SIZE_PROPERTY, 1, 1),
                     doubleProperty(LEARNING_RATE_PROPERTY, 0.00001, 0.0),
-                    doubleProperty(WEIGHT_DECAY_PROPERTY, 0.1, 0.0));
+                    doubleProperty(WEIGHT_DECAY_PROPERTY, 0.1, 0.0),
+                    intProperty(TIMEOUT_SECONDS_PROPERTY, 6 * 60 * 60, 0),
+                    intProperty(STALL_TIMEOUT_SECONDS_PROPERTY, 30 * 60, 0));
         }
     }
 
@@ -539,11 +673,22 @@ public final class CellposeLocalTrainingService {
     public static final class ProcessSpec {
         public final List<String> command;
         public final Path workingDirectory;
+        public final int timeoutSeconds;
+        public final int stallTimeoutSeconds;
 
         ProcessSpec(List<String> command, Path workingDirectory) {
+            this(command, workingDirectory, 0, 0);
+        }
+
+        ProcessSpec(List<String> command,
+                    Path workingDirectory,
+                    int timeoutSeconds,
+                    int stallTimeoutSeconds) {
             this.command = Collections.unmodifiableList(new ArrayList<String>(
                     command == null ? Collections.<String>emptyList() : command));
             this.workingDirectory = workingDirectory;
+            this.timeoutSeconds = Math.max(0, timeoutSeconds);
+            this.stallTimeoutSeconds = Math.max(0, stallTimeoutSeconds);
         }
     }
 
@@ -564,6 +709,7 @@ public final class CellposeLocalTrainingService {
         private final Path modelsDir;
         private final Path[] reportedModel;
         private final ProgressSink progress;
+        private final StreamTail tail;
 
         LoggingLineConsumer(BufferedWriter writer,
                             Object logLock,
@@ -572,7 +718,8 @@ public final class CellposeLocalTrainingService {
                             Path datasetDir,
                             Path modelsDir,
                             Path[] reportedModel,
-                            ProgressSink progress) {
+                            ProgressSink progress,
+                            StreamTail tail) {
             this.writer = writer;
             this.logLock = logLock;
             this.logFailure = logFailure;
@@ -581,9 +728,13 @@ public final class CellposeLocalTrainingService {
             this.modelsDir = modelsDir;
             this.reportedModel = reportedModel;
             this.progress = progress;
+            this.tail = tail;
         }
 
         @Override public void accept(String line) {
+            if (tail != null) {
+                tail.add(line);
+            }
             writeLog(writer, logLock, logFailure, stream, line);
             Path model = parseReportedModel(datasetDir, modelsDir, line);
             if (model != null) {
@@ -597,6 +748,26 @@ public final class CellposeLocalTrainingService {
         }
     }
 
+    private static final class StreamTail {
+        private static final int MAX_LINES = 12;
+        private final Deque<String> lines = new ArrayDeque<String>();
+
+        synchronized void add(String line) {
+            String value = line == null ? "" : line.trim();
+            if (value.length() > 500) {
+                value = value.substring(0, 500) + "...";
+            }
+            lines.addLast(value);
+            while (lines.size() > MAX_LINES) {
+                lines.removeFirst();
+            }
+        }
+
+        synchronized List<String> lines() {
+            return new ArrayList<String>(lines);
+        }
+    }
+
     private static final class DefaultProcessRunner implements ProcessRunner {
         @Override public ProcessResult run(ProcessSpec spec,
                                            LineConsumer stdout,
@@ -606,15 +777,16 @@ public final class CellposeLocalTrainingService {
                 builder.directory(spec.workingDirectory.toFile());
             }
             final Process process = builder.start();
-            Thread outThread = streamThread(process, true, stdout);
-            Thread errThread = streamThread(process, false, stderr);
+            final AtomicLong lastOutputMs = new AtomicLong(System.currentTimeMillis());
+            Thread outThread = streamThread(process, true, stdout, lastOutputMs);
+            Thread errThread = streamThread(process, false, stderr, lastOutputMs);
             outThread.start();
             errThread.start();
             int exit;
             try {
-                exit = process.waitFor();
+                exit = waitForProcess(process, spec, lastOutputMs);
             } catch (InterruptedException e) {
-                process.destroy();
+                terminateProcess(process);
                 throw e;
             } finally {
                 outThread.join();
@@ -625,7 +797,8 @@ public final class CellposeLocalTrainingService {
 
         private static Thread streamThread(final Process process,
                                            final boolean stdout,
-                                           final LineConsumer consumer) {
+                                           final LineConsumer consumer,
+                                           final AtomicLong lastOutputMs) {
             return new Thread(new Runnable() {
                 @Override public void run() {
                     BufferedReader reader = new BufferedReader(new InputStreamReader(
@@ -634,6 +807,7 @@ public final class CellposeLocalTrainingService {
                     try {
                         String line;
                         while ((line = reader.readLine()) != null) {
+                            lastOutputMs.set(System.currentTimeMillis());
                             if (consumer != null) {
                                 consumer.accept(line);
                             }
@@ -647,6 +821,42 @@ public final class CellposeLocalTrainingService {
                     }
                 }
             }, stdout ? "flash-cellpose-train-stdout" : "flash-cellpose-train-stderr");
+        }
+
+        private static int waitForProcess(Process process,
+                                          ProcessSpec spec,
+                                          AtomicLong lastOutputMs) throws IOException, InterruptedException {
+            long started = System.currentTimeMillis();
+            long maxRuntimeMs = spec.timeoutSeconds <= 0
+                    ? 0L
+                    : TimeUnit.SECONDS.toMillis(spec.timeoutSeconds);
+            long stallMs = spec.stallTimeoutSeconds <= 0
+                    ? 0L
+                    : TimeUnit.SECONDS.toMillis(spec.stallTimeoutSeconds);
+            while (true) {
+                if (process.waitFor(1, TimeUnit.SECONDS)) {
+                    return process.exitValue();
+                }
+                long now = System.currentTimeMillis();
+                if (maxRuntimeMs > 0L && now - started > maxRuntimeMs) {
+                    terminateProcess(process);
+                    throw new IOException("Local Cellpose training timed out after "
+                            + spec.timeoutSeconds + " seconds.");
+                }
+                if (stallMs > 0L && now - lastOutputMs.get() > stallMs) {
+                    terminateProcess(process);
+                    throw new IOException("Local Cellpose training produced no output for "
+                            + spec.stallTimeoutSeconds + " seconds.");
+                }
+            }
+        }
+
+        private static void terminateProcess(Process process) throws InterruptedException {
+            process.destroy();
+            if (!process.waitFor(5, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                process.waitFor(5, TimeUnit.SECONDS);
+            }
         }
     }
 }

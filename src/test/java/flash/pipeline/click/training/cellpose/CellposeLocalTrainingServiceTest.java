@@ -81,6 +81,7 @@ public class CellposeLocalTrainingServiceTest {
     @Test
     public void successfulFakeProcessWritesLogAndDetectsModelFile() throws Exception {
         Path dataset = temp.newFolder("cp-fake-success").toPath();
+        writeMinimalDataset(dataset);
         Path commandFile = commandFile(dataset);
         FakeRunner runner = new FakeRunner(0, false);
         runner.stdout.add("Epoch 2/4");
@@ -116,6 +117,7 @@ public class CellposeLocalTrainingServiceTest {
     @Test
     public void failingFakeProcessThrowsAndKeepsLogFile() throws Exception {
         Path dataset = temp.newFolder("cp-fake-failure").toPath();
+        writeMinimalDataset(dataset);
         Path commandFile = commandFile(dataset);
         FakeRunner runner = new FakeRunner(7, false);
         runner.stderr.add("ModuleNotFoundError: No module named 'cellpose'");
@@ -129,10 +131,32 @@ public class CellposeLocalTrainingServiceTest {
             fail("Expected failing process to throw.");
         } catch (IOException expected) {
             assertTrue(expected.getMessage().contains("exit code 7"));
+            assertTrue(expected.getMessage().contains("ModuleNotFoundError"));
             Path logFile = dataset.resolve("cellpose_training.log");
             assertTrue(Files.isRegularFile(logFile));
             String log = new String(Files.readAllBytes(logFile), StandardCharsets.UTF_8);
             assertTrue(log.contains("[STDERR] ModuleNotFoundError"));
+        }
+    }
+
+    @Test
+    public void trainRefusesMissingMaskPairBeforeLaunchingProcess() throws Exception {
+        Path dataset = temp.newFolder("cp-missing-mask").toPath();
+        Files.write(dataset.resolve("image_001.tif"),
+                "image".getBytes(StandardCharsets.UTF_8));
+        Path commandFile = commandFile(dataset);
+        FakeRunner runner = new FakeRunner(0, false);
+        CellposeLocalTrainingService service =
+                new CellposeLocalTrainingService(config(true), runner);
+
+        try {
+            service.train(new CellposeDatasetPackager.PackagingResult(
+                            dataset, commandFile, 1, 1, 1, 1),
+                    "Bad dataset", CellposeLocalTrainingService.NO_PROGRESS);
+            fail("Expected missing mask pair to throw.");
+        } catch (IOException expected) {
+            assertTrue(expected.getMessage().contains("missing mask TIFF pairs"));
+            assertEquals(null, runner.command);
         }
     }
 
@@ -144,6 +168,13 @@ public class CellposeLocalTrainingServiceTest {
                         + "\" --pretrained_model cyto3"),
                 StandardCharsets.UTF_8);
         return commandFile;
+    }
+
+    private static void writeMinimalDataset(Path dataset) throws IOException {
+        Files.write(dataset.resolve("image_001.tif"),
+                "image".getBytes(StandardCharsets.UTF_8));
+        Files.write(dataset.resolve("image_001_masks.tif"),
+                "mask".getBytes(StandardCharsets.UTF_8));
     }
 
     private static CellposeLocalTrainingService.Config config(boolean enabled) {
