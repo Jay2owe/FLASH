@@ -9,8 +9,10 @@ import javax.swing.SwingUtilities;
 import java.util.Arrays;
 
 import static org.junit.Assert.assertArrayEquals;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertTrue;
 
 public class VariationCellPanelFilterModeTest {
 
@@ -31,6 +33,9 @@ public class VariationCellPanelFilterModeTest {
 
         assertArrayEquals(new String[] { "SNR 6.8", "bg \u03c3 14" },
                 cell.footerLinesForTest());
+        assertEquals("SNR 6.8", cell.filterSnrTextForTest());
+        assertEquals("bg \u03c3 14", cell.filterBgSigmaTextForTest());
+        assertFalse(cell.filterChipVisibleForTest());
         assertSame(filtered, cell.currentPreviewImageForTest());
         assertFalse(cell.hasCachedLabel());
     }
@@ -63,6 +68,9 @@ public class VariationCellPanelFilterModeTest {
                 "SNR 6.8",
                 "bg \u03c3 14"
         }, cell.footerLinesForTest());
+        assertTrue(cell.filterChipVisibleForTest());
+        assertEquals("Median radius=2, Subtract Background rolling=50",
+                cell.filterChipTextForTest());
     }
 
     private static ImagePlus image(String title, int value) {

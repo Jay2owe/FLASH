@@ -13,20 +13,16 @@ import ij.process.ByteProcessor;
 import ij.process.ImageProcessor;
 
 import javax.swing.BorderFactory;
-import javax.swing.Box;
-import javax.swing.BoxLayout;
-import javax.swing.JLabel;
 import javax.swing.JPanel;
-import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import java.awt.BasicStroke;
 import java.awt.BorderLayout;
-import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Font;
+import java.awt.FontMetrics;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Point;
@@ -69,6 +65,15 @@ public final class VariationCellPanel extends JPanel {
     private static final int PEEK_DRAG_CANCEL_PX = 4;
     private static final int OTSU_HISTOGRAM_BINS = 256;
     private static final int FILTER_PARAM_LABEL_MAX_CHARS = 56;
+    private static final int CELL_SIZE = 260;
+    private static final int METRIC_STRIP_HEIGHT = 24;
+    private static final int FILTER_PARAM_STRIP_HEIGHT = 22;
+    private static final int METRIC_TEXT_INSET = 8;
+    private static final int OVERLAY_PILL_HEIGHT = 18;
+    private static final int OVERLAY_PILL_RADIUS = 6;
+    private static final int OVERLAY_PILL_X_PAD = 7;
+    private static final Color OVERLAY_STRIP = new Color(0, 0, 0, 140);
+    private static final Color OVERLAY_TEXT = Color.WHITE;
     private static final String ERROR_BADGE = "\u26a0";
 
     public enum BorderHint {
@@ -89,17 +94,6 @@ public final class VariationCellPanel extends JPanel {
     private final BiConsumer<ParameterCombo, VariationCellPanel> onCompare;
     private final int placeholderIndex;
     private final ImagePreviewPanel preview = new ImagePreviewPanel("Variation");
-    private final JPanel footerPanel = new JPanel();
-    private final JPanel segmentationFooterPanel = new JPanel();
-    private final JPanel filterFooterPanel = new JPanel();
-    private final JLabel countLabel = new JLabel("pending", SwingConstants.CENTER);
-    private final JLabel deltaLabel = new JLabel("", SwingConstants.CENTER);
-    private final JLabel iouLabel = new JLabel("", SwingConstants.CENTER);
-    private final JLabel filterChipLabel = new JLabel("", SwingConstants.CENTER);
-    private final JLabel filterDownstreamDeltaLabel =
-            new JLabel("", SwingConstants.CENTER);
-    private final JLabel filterSnrLabel = new JLabel("", SwingConstants.CENTER);
-    private final JLabel filterBgSigmaLabel = new JLabel("", SwingConstants.CENTER);
     private final List<ParameterKey> footerParameterKeys =
             new ArrayList<ParameterKey>();
     private final Timer haloTimer;
@@ -125,8 +119,21 @@ public final class VariationCellPanel extends JPanel {
     private int downstreamDeltaN = UNKNOWN_DELTA;
     private String errorText = "";
     private String filterParameterText = "";
+    private String countLabelText = "pending";
+    private String deltaLabelText = "";
+    private String iouLabelText = "";
+    private String filterChipText = "";
+    private String filterDownstreamDeltaText = "";
+    private String filterSnrText = "";
+    private String filterBgSigmaText = "";
     private String ribbonLabelOverride;
     private String downstreamRibbonLabel;
+    private Color countLabelColor = FOOTER_COLOR;
+    private Color filterDownstreamDeltaFill = DOWNSTREAM_NEUTRAL;
+    private boolean deltaLabelVisible;
+    private boolean iouLabelVisible;
+    private boolean filterChipVisible;
+    private boolean filterDownstreamDeltaVisible;
     private boolean filterFooterActive;
     private boolean hover;
     private boolean kneeWinner;
@@ -167,49 +174,11 @@ public final class VariationCellPanel extends JPanel {
 
         setOpaque(false);
         setBackground(CARD_BACKGROUND);
-        setPreferredSize(new Dimension(360, 330));
+        setPreferredSize(new Dimension(CELL_SIZE, CELL_SIZE));
         setBorder(BorderFactory.createEmptyBorder(6, 6, 6, 6));
         preview.setSlim(true);
         preview.setZRowVisible(false);
         add(preview, BorderLayout.CENTER);
-
-        footerPanel.setOpaque(false);
-        footerPanel.setLayout(new CardLayout());
-        footerPanel.setBorder(BorderFactory.createEmptyBorder(0, 2, 0, 2));
-        segmentationFooterPanel.setOpaque(false);
-        segmentationFooterPanel.setLayout(new BoxLayout(segmentationFooterPanel,
-                BoxLayout.X_AXIS));
-        filterFooterPanel.setOpaque(false);
-        filterFooterPanel.setLayout(new BoxLayout(filterFooterPanel, BoxLayout.Y_AXIS));
-        configureFooterLabel(countLabel, FlashTheme.mono(11f));
-        configureFooterLabel(deltaLabel, FlashTheme.mono(11f));
-        configureFooterLabel(iouLabel, FlashTheme.mono(11f));
-        configureFooterLabel(filterChipLabel, FlashTheme.mono(10f).deriveFont(Font.BOLD));
-        configureFooterLabel(filterDownstreamDeltaLabel,
-                FlashTheme.mono(10f).deriveFont(Font.BOLD));
-        configureFooterLabel(filterSnrLabel, FlashTheme.mono(11f).deriveFont(Font.BOLD));
-        configureFooterLabel(filterBgSigmaLabel, FlashTheme.mono(10f));
-        filterChipLabel.setAlignmentX(CENTER_ALIGNMENT);
-        filterDownstreamDeltaLabel.setAlignmentX(CENTER_ALIGNMENT);
-        filterDownstreamDeltaLabel.setBorder(BorderFactory.createEmptyBorder(1, 6, 1, 6));
-        filterDownstreamDeltaLabel.setOpaque(true);
-        filterDownstreamDeltaLabel.setVisible(false);
-        filterSnrLabel.setAlignmentX(CENTER_ALIGNMENT);
-        filterBgSigmaLabel.setAlignmentX(CENTER_ALIGNMENT);
-        segmentationFooterPanel.add(Box.createHorizontalGlue());
-        segmentationFooterPanel.add(countLabel);
-        segmentationFooterPanel.add(Box.createHorizontalStrut(12));
-        segmentationFooterPanel.add(deltaLabel);
-        segmentationFooterPanel.add(Box.createHorizontalStrut(12));
-        segmentationFooterPanel.add(iouLabel);
-        segmentationFooterPanel.add(Box.createHorizontalGlue());
-        filterFooterPanel.add(filterChipLabel);
-        filterFooterPanel.add(filterDownstreamDeltaLabel);
-        filterFooterPanel.add(filterSnrLabel);
-        filterFooterPanel.add(filterBgSigmaLabel);
-        footerPanel.add(segmentationFooterPanel, "segmentation");
-        footerPanel.add(filterFooterPanel, "filter");
-        add(footerPanel, BorderLayout.SOUTH);
         installMouseHandlers();
         refreshFooter();
         refreshBorder();
@@ -288,8 +257,10 @@ public final class VariationCellPanel extends JPanel {
         filterBgSigma = Double.NaN;
         clearDownstreamVerdictState();
         filterParameterText = "";
-        filterChipLabel.setText("");
-        filterChipLabel.setVisible(false);
+        filterChipText = "";
+        filterChipVisible = false;
+        filterSnrText = "";
+        filterBgSigmaText = "";
         setDisplayedPreviewImage(null);
         setStateText(state == null || state.trim().isEmpty() ? "pending" : state,
                 FOOTER_COLOR);
@@ -362,8 +333,8 @@ public final class VariationCellPanel extends JPanel {
         filterSnr = result.snr();
         filterBgSigma = result.bgSigma();
         refreshFilterParameterLabel(result.combo());
-        filterSnrLabel.setText("SNR " + formatOneDecimal(filterSnr));
-        filterBgSigmaLabel.setText("bg \u03c3 " + formatInteger(filterBgSigma));
+        filterSnrText = "SNR " + formatOneDecimal(filterSnr);
+        filterBgSigmaText = "bg \u03c3 " + formatInteger(filterBgSigma);
         showFilterFooter();
         setDisplayedPreviewImage(previewImageForOverlayMode());
         refreshTooltip();
@@ -394,8 +365,10 @@ public final class VariationCellPanel extends JPanel {
         filterSnr = Double.NaN;
         filterBgSigma = Double.NaN;
         filterParameterText = "";
-        filterChipLabel.setText("");
-        filterChipLabel.setVisible(false);
+        filterChipText = "";
+        filterChipVisible = false;
+        filterSnrText = "";
+        filterBgSigmaText = "";
         durationMs = -1L;
         setDisplayedPreviewImage(null);
         if (PresetSweepCombo.isIncompatible(error)) {
@@ -433,6 +406,10 @@ public final class VariationCellPanel extends JPanel {
         this.filterSnr = Double.NaN;
         this.filterBgSigma = Double.NaN;
         this.filterParameterText = "";
+        this.filterChipText = "";
+        this.filterChipVisible = false;
+        this.filterSnrText = "";
+        this.filterBgSigmaText = "";
         clearDownstreamVerdictState();
         showSegmentationFooter();
 
@@ -691,7 +668,7 @@ public final class VariationCellPanel extends JPanel {
 
     String[] footerLinesForTest() {
         if (filterFooterActive) {
-            if (filterChipLabel.isVisible()) {
+            if (filterChipVisible) {
                 return filterLines(true);
             }
             return filterLines(false);
@@ -701,21 +678,21 @@ public final class VariationCellPanel extends JPanel {
 
     String badgeText() {
         if (filterFooterActive) {
-            String prefix = filterChipLabel.isVisible()
-                    ? filterChipLabel.getText() + " "
+            String prefix = filterChipVisible
+                    ? filterChipText + " "
                     : "";
-            String downstream = filterDownstreamDeltaLabel.isVisible()
-                    ? filterDownstreamDeltaLabel.getText() + " "
+            String downstream = filterDownstreamDeltaVisible
+                    ? filterDownstreamDeltaText + " "
                     : "";
-            return prefix + downstream + filterSnrLabel.getText() + " "
-                    + filterBgSigmaLabel.getText();
+            return prefix + downstream + filterSnrText + " "
+                    + filterBgSigmaText;
         }
-        StringBuilder out = new StringBuilder(countLabel.getText());
-        if (deltaLabel.isVisible() && deltaLabel.getText().length() > 0) {
-            out.append(' ').append(deltaLabel.getText());
+        StringBuilder out = new StringBuilder(countLabelText);
+        if (deltaLabelVisible && deltaLabelText.length() > 0) {
+            out.append(' ').append(deltaLabelText);
         }
-        if (iouLabel.isVisible() && iouLabel.getText().length() > 0) {
-            out.append(' ').append(iouLabel.getText());
+        if (iouLabelVisible && iouLabelText.length() > 0) {
+            out.append(' ').append(iouLabelText);
         }
         return out.toString();
     }
@@ -768,6 +745,50 @@ public final class VariationCellPanel extends JPanel {
         return downstreamRibbonLabel;
     }
 
+    String countLabelTextForTest() {
+        return countLabelText;
+    }
+
+    String deltaLabelTextForTest() {
+        return deltaLabelText;
+    }
+
+    boolean deltaLabelVisibleForTest() {
+        return deltaLabelVisible;
+    }
+
+    String iouLabelTextForTest() {
+        return iouLabelText;
+    }
+
+    boolean iouLabelVisibleForTest() {
+        return iouLabelVisible;
+    }
+
+    String filterChipTextForTest() {
+        return filterChipText;
+    }
+
+    boolean filterChipVisibleForTest() {
+        return filterChipVisible;
+    }
+
+    String filterDownstreamDeltaTextForTest() {
+        return filterDownstreamDeltaText;
+    }
+
+    boolean filterDownstreamDeltaVisibleForTest() {
+        return filterDownstreamDeltaVisible;
+    }
+
+    String filterSnrTextForTest() {
+        return filterSnrText;
+    }
+
+    String filterBgSigmaTextForTest() {
+        return filterBgSigmaText;
+    }
+
     void firePeekDelayForTest() {
         beginPeek();
     }
@@ -810,6 +831,7 @@ public final class VariationCellPanel extends JPanel {
             paintHalo(g);
             paintCompareBadge(g);
             paintRibbons(g);
+            paintMetricOverlays(g);
         }
     }
 
@@ -899,16 +921,6 @@ public final class VariationCellPanel extends JPanel {
         };
         installMouseHandler(this, listener);
         installMouseHandler(preview, listener);
-        installMouseHandler(footerPanel, listener);
-        installMouseHandler(segmentationFooterPanel, listener);
-        installMouseHandler(filterFooterPanel, listener);
-        installMouseHandler(countLabel, listener);
-        installMouseHandler(deltaLabel, listener);
-        installMouseHandler(iouLabel, listener);
-        installMouseHandler(filterChipLabel, listener);
-        installMouseHandler(filterDownstreamDeltaLabel, listener);
-        installMouseHandler(filterSnrLabel, listener);
-        installMouseHandler(filterBgSigmaLabel, listener);
     }
 
     private void installMouseHandler(Component component, MouseAdapter listener) {
@@ -1048,25 +1060,18 @@ public final class VariationCellPanel extends JPanel {
         if (objectCount < 0) {
             return;
         }
-        countLabel.setText(String.valueOf(objectCount));
-        countLabel.setForeground(FOOTER_COLOR);
-        countLabel.setFont(FlashTheme.mono(11f));
+        countLabelText = String.valueOf(objectCount);
+        countLabelColor = OVERLAY_TEXT;
 
-        deltaLabel.setText(deltaN == UNKNOWN_DELTA ? "" : formatDelta(deltaN));
-        deltaLabel.setVisible(deltaN != UNKNOWN_DELTA);
-        deltaLabel.setForeground(FOOTER_COLOR);
-        deltaLabel.setFont(FlashTheme.mono(11f).deriveFont(
-                kneeWinner ? Font.BOLD : Font.PLAIN));
+        deltaLabelText = deltaN == UNKNOWN_DELTA ? "" : formatDelta(deltaN);
+        deltaLabelVisible = deltaN != UNKNOWN_DELTA;
 
         boolean hasIou = !Double.isNaN(iouToNeighbours);
-        iouLabel.setText(hasIou ? "IoU "
-                + String.format(Locale.ROOT, "%.2f", Double.valueOf(iouToNeighbours)) : "");
-        iouLabel.setVisible(hasIou);
-        iouLabel.setForeground(FOOTER_COLOR);
-        iouLabel.setFont(FlashTheme.mono(11f).deriveFont(
-                stabilityWinner ? Font.BOLD : Font.PLAIN));
-        footerPanel.revalidate();
-        footerPanel.repaint();
+        iouLabelText = hasIou ? "IoU "
+                + String.format(Locale.ROOT, "%.2f",
+                Double.valueOf(iouToNeighbours)) : "";
+        iouLabelVisible = hasIou;
+        repaint();
     }
 
     private void refreshTooltip() {
@@ -1084,12 +1089,12 @@ public final class VariationCellPanel extends JPanel {
             if (filterParameterText.length() > 0) {
                 sb.append("<br>").append(html(filterParameterText));
             }
-            if (filterDownstreamDeltaLabel.isVisible()) {
-                sb.append("<br>").append(html(filterDownstreamDeltaLabel.getText()))
+            if (filterDownstreamDeltaVisible) {
+                sb.append("<br>").append(html(filterDownstreamDeltaText))
                         .append(" vs no-filter downstream baseline");
             }
-            sb.append("<br>").append(html(filterSnrLabel.getText()));
-            sb.append("<br>").append(html(filterBgSigmaLabel.getText()));
+            sb.append("<br>").append(html(filterSnrText));
+            sb.append("<br>").append(html(filterBgSigmaText));
             if (durationMs >= 0L) {
                 sb.append("<br>durationMs: ").append(durationMs).append(" ms");
             }
@@ -1127,42 +1132,26 @@ public final class VariationCellPanel extends JPanel {
     private void setTooltips(String text) {
         setToolTipText(text);
         preview.setToolTipText(text);
-        footerPanel.setToolTipText(text);
-        segmentationFooterPanel.setToolTipText(text);
-        filterFooterPanel.setToolTipText(text);
-        countLabel.setToolTipText(text);
-        deltaLabel.setToolTipText(text);
-        iouLabel.setToolTipText(text);
-        filterChipLabel.setToolTipText(text);
-        filterDownstreamDeltaLabel.setToolTipText(text);
-        filterSnrLabel.setToolTipText(text);
-        filterBgSigmaLabel.setToolTipText(text);
     }
 
     private void setStateText(String text, Color color) {
-        countLabel.setText(text);
-        countLabel.setForeground(color);
-        countLabel.setFont(FlashTheme.caption());
-        deltaLabel.setText("");
-        deltaLabel.setVisible(false);
-        iouLabel.setText("");
-        iouLabel.setVisible(false);
-        footerPanel.revalidate();
-        footerPanel.repaint();
+        countLabelText = text;
+        countLabelColor = color == null ? FOOTER_COLOR : color;
+        deltaLabelText = "";
+        deltaLabelVisible = false;
+        iouLabelText = "";
+        iouLabelVisible = false;
+        repaint();
     }
 
     private void showSegmentationFooter() {
         filterFooterActive = false;
-        CardLayout layout = (CardLayout) footerPanel.getLayout();
-        layout.show(footerPanel, "segmentation");
+        repaint();
     }
 
     private void showFilterFooter() {
         filterFooterActive = true;
-        CardLayout layout = (CardLayout) footerPanel.getLayout();
-        layout.show(footerPanel, "filter");
-        footerPanel.revalidate();
-        footerPanel.repaint();
+        repaint();
     }
 
     private void paintHoverTint(Graphics g) {
@@ -1281,6 +1270,126 @@ public final class VariationCellPanel extends JPanel {
         g2.dispose();
     }
 
+    private void paintMetricOverlays(Graphics g) {
+        int width = getWidth();
+        int height = getHeight();
+        if (width <= 0 || height <= 0) {
+            return;
+        }
+        Graphics2D g2 = (Graphics2D) g.create();
+        try {
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                    RenderingHints.VALUE_ANTIALIAS_ON);
+            g2.setClip(cardShape());
+            if (filterFooterActive) {
+                paintFilterOverlays(g2, width, height);
+            } else {
+                paintSegmentationOverlay(g2, width, height);
+            }
+        } finally {
+            g2.dispose();
+        }
+    }
+
+    private void paintFilterOverlays(Graphics2D g2, int width, int height) {
+        if (filterChipVisible || filterDownstreamDeltaVisible) {
+            paintFilterTopStrip(g2, width);
+        }
+        paintBottomStrip(g2, width, height, filterMetricsOverlayText(),
+                OVERLAY_TEXT);
+    }
+
+    private void paintFilterTopStrip(Graphics2D g2, int width) {
+        int stripHeight = Math.min(FILTER_PARAM_STRIP_HEIGHT,
+                Math.max(1, getHeight()));
+        g2.setColor(OVERLAY_STRIP);
+        g2.fillRect(0, 0, width, stripHeight);
+
+        g2.setFont(FlashTheme.mono(10f).deriveFont(Font.BOLD));
+        FontMetrics fm = g2.getFontMetrics();
+        int right = width - METRIC_TEXT_INSET;
+        if (filterDownstreamDeltaVisible) {
+            int pillWidth = pillWidth(fm, filterDownstreamDeltaText);
+            int x = Math.max(METRIC_TEXT_INSET, width - METRIC_TEXT_INSET
+                    - pillWidth);
+            int y = Math.max(2, (stripHeight - OVERLAY_PILL_HEIGHT) / 2);
+            paintPill(g2, x, y, pillWidth, OVERLAY_PILL_HEIGHT,
+                    filterDownstreamDeltaFill, CHIP_TEXT,
+                    filterDownstreamDeltaText);
+            right = Math.max(METRIC_TEXT_INSET, x - 6);
+        }
+        if (filterChipVisible && right > METRIC_TEXT_INSET) {
+            drawOverlayText(g2, filterParameterText, METRIC_TEXT_INSET,
+                    right, 0, stripHeight, OVERLAY_TEXT);
+        }
+    }
+
+    private void paintSegmentationOverlay(Graphics2D g2, int width, int height) {
+        paintBottomStrip(g2, width, height, segmentationMetricsOverlayText(),
+                countLabelColor == null ? OVERLAY_TEXT : countLabelColor);
+    }
+
+    private void paintBottomStrip(Graphics2D g2, int width, int height,
+                                  String text, Color textColor) {
+        int stripHeight = Math.min(METRIC_STRIP_HEIGHT, Math.max(1, height));
+        int y = Math.max(0, height - stripHeight);
+        g2.setColor(OVERLAY_STRIP);
+        g2.fillRect(0, y, width, stripHeight);
+        g2.setFont(FlashTheme.mono(11f).deriveFont(Font.BOLD));
+        drawOverlayText(g2, text, METRIC_TEXT_INSET,
+                Math.max(METRIC_TEXT_INSET, width - METRIC_TEXT_INSET),
+                y, stripHeight, textColor);
+    }
+
+    private void drawOverlayText(Graphics2D g2, String text, int left, int right,
+                                 int y, int height, Color color) {
+        FontMetrics fm = g2.getFontMetrics();
+        int maxWidth = Math.max(0, right - left);
+        String visibleText = ellipsizeToWidth(text, fm, maxWidth);
+        if (visibleText.length() == 0) {
+            return;
+        }
+        int baseline = y + (height - fm.getHeight()) / 2 + fm.getAscent();
+        g2.setColor(color == null ? OVERLAY_TEXT : color);
+        g2.drawString(visibleText, left, baseline);
+    }
+
+    private void paintPill(Graphics2D g2, int x, int y, int width, int height,
+                           Color fill, Color textColor, String text) {
+        g2.setColor(fill == null ? DOWNSTREAM_NEUTRAL : fill);
+        g2.fillRoundRect(x, y, width, height, OVERLAY_PILL_RADIUS,
+                OVERLAY_PILL_RADIUS);
+        g2.setColor(new Color(0, 0, 0, 80));
+        g2.drawRoundRect(x, y, width - 1, height - 1, OVERLAY_PILL_RADIUS,
+                OVERLAY_PILL_RADIUS);
+        FontMetrics fm = g2.getFontMetrics();
+        int baseline = y + (height - fm.getHeight()) / 2 + fm.getAscent();
+        g2.setColor(textColor == null ? CHIP_TEXT : textColor);
+        g2.drawString(text == null ? "" : text, x + OVERLAY_PILL_X_PAD,
+                baseline);
+    }
+
+    private int pillWidth(FontMetrics fm, String text) {
+        int textWidth = fm == null ? 0 : fm.stringWidth(text == null ? "" : text);
+        return textWidth + OVERLAY_PILL_X_PAD * 2;
+    }
+
+    private String filterMetricsOverlayText() {
+        return "SNR " + formatOneDecimal(filterSnr)
+                + "   bg \u03c3 " + formatInteger(filterBgSigma);
+    }
+
+    private String segmentationMetricsOverlayText() {
+        StringBuilder out = new StringBuilder(countLabelText);
+        if (deltaLabelVisible && deltaLabelText.length() > 0) {
+            out.append("   ").append(deltaLabelText);
+        }
+        if (iouLabelVisible && iouLabelText.length() > 0) {
+            out.append("   ").append(iouLabelText);
+        }
+        return out.toString();
+    }
+
     private void clearRibbonLabelOverride() {
         ribbonLabelOverride = null;
     }
@@ -1288,46 +1397,44 @@ public final class VariationCellPanel extends JPanel {
     private void clearDownstreamVerdictState() {
         downstreamRibbonLabel = null;
         downstreamDeltaN = UNKNOWN_DELTA;
-        filterDownstreamDeltaLabel.setText("");
-        filterDownstreamDeltaLabel.setVisible(false);
+        filterDownstreamDeltaText = "";
+        filterDownstreamDeltaVisible = false;
+        filterDownstreamDeltaFill = DOWNSTREAM_NEUTRAL;
     }
 
     private void refreshDownstreamChip() {
         if (downstreamDeltaN == UNKNOWN_DELTA) {
-            filterDownstreamDeltaLabel.setText("");
-            filterDownstreamDeltaLabel.setVisible(false);
+            filterDownstreamDeltaText = "";
+            filterDownstreamDeltaVisible = false;
+            filterDownstreamDeltaFill = DOWNSTREAM_NEUTRAL;
         } else {
-            filterDownstreamDeltaLabel.setText("delta "
-                    + formatSignedCompact(downstreamDeltaN));
-            filterDownstreamDeltaLabel.setForeground(CHIP_TEXT);
-            filterDownstreamDeltaLabel.setBackground(downstreamDeltaN > 0
+            filterDownstreamDeltaText = "delta "
+                    + formatSignedCompact(downstreamDeltaN);
+            filterDownstreamDeltaFill = downstreamDeltaN > 0
                     ? DOWNSTREAM_HELP
-                    : downstreamDeltaN < 0 ? DOWNSTREAM_HURT : DOWNSTREAM_NEUTRAL);
-            filterDownstreamDeltaLabel.setVisible(true);
+                    : downstreamDeltaN < 0 ? DOWNSTREAM_HURT : DOWNSTREAM_NEUTRAL;
+            filterDownstreamDeltaVisible = true;
         }
-        footerPanel.revalidate();
-        footerPanel.repaint();
+        repaint();
     }
 
     private void refreshFilterParameterLabel(ParameterCombo sourceCombo) {
         filterParameterText = filterComboLabel(sourceCombo, footerParameterKeys);
-        filterChipLabel.setText(abbreviate(filterParameterText,
-                FILTER_PARAM_LABEL_MAX_CHARS));
-        filterChipLabel.setVisible(filterParameterText.length() > 0);
-        footerPanel.revalidate();
-        footerPanel.repaint();
+        filterChipText = abbreviate(filterParameterText, FILTER_PARAM_LABEL_MAX_CHARS);
+        filterChipVisible = filterParameterText.length() > 0;
+        repaint();
     }
 
     private String[] filterLines(boolean hasFilterChip) {
         java.util.List<String> lines = new java.util.ArrayList<String>();
         if (hasFilterChip) {
-            lines.add(filterChipLabel.getText());
+            lines.add(filterChipText);
         }
-        if (filterDownstreamDeltaLabel.isVisible()) {
-            lines.add(filterDownstreamDeltaLabel.getText());
+        if (filterDownstreamDeltaVisible) {
+            lines.add(filterDownstreamDeltaText);
         }
-        lines.add(filterSnrLabel.getText());
-        lines.add(filterBgSigmaLabel.getText());
+        lines.add(filterSnrText);
+        lines.add(filterBgSigmaText);
         return lines.toArray(new String[lines.size()]);
     }
 
@@ -1366,13 +1473,6 @@ public final class VariationCellPanel extends JPanel {
                 Math.max(1.0d, getWidth() - 2.0d * inset),
                 Math.max(1.0d, getHeight() - 2.0d * inset),
                 CARD_RADIUS, CARD_RADIUS);
-    }
-
-    private static void configureFooterLabel(JLabel label, Font font) {
-        label.setFont(font);
-        label.setForeground(FOOTER_COLOR);
-        label.setHorizontalAlignment(SwingConstants.CENTER);
-        label.setOpaque(false);
     }
 
     private static String formatDelta(int value) {
@@ -1556,6 +1656,29 @@ public final class VariationCellPanel extends JPanel {
             return safe;
         }
         return safe.substring(0, maxLength - 3) + "...";
+    }
+
+    private static String ellipsizeToWidth(String text, FontMetrics fm,
+                                           int maxWidth) {
+        String safe = text == null ? "" : text;
+        if (fm == null || maxWidth <= 0 || safe.length() == 0) {
+            return "";
+        }
+        if (fm.stringWidth(safe) <= maxWidth) {
+            return safe;
+        }
+        String ellipsis = "...";
+        int ellipsisWidth = fm.stringWidth(ellipsis);
+        if (ellipsisWidth > maxWidth) {
+            return "";
+        }
+        int end = safe.length();
+        while (end > 0
+                && fm.stringWidth(safe.substring(0, end)) + ellipsisWidth
+                > maxWidth) {
+            end--;
+        }
+        return end <= 0 ? "" : safe.substring(0, end) + ellipsis;
     }
 
     private static String formatSigned(int value) {
