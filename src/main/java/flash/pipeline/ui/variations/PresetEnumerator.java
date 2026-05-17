@@ -4,11 +4,9 @@ import flash.pipeline.image.FilterMacroEditorModel;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
 
 public final class PresetEnumerator {
@@ -50,47 +48,12 @@ public final class PresetEnumerator {
                 FilterMacroEditorModel.MacroDefinition parsed =
                         FilterMacroEditorModel.parse(macro);
                 readable.add(new PresetInfo(name, macro, parsed,
-                        chainSummary(parsed), numericParams(parsed)));
+                        chainSummary(parsed)));
             } catch (Exception e) {
                 skipped.add(new SkippedPreset(name, reasonFor(e)));
             }
         }
         return new Result(readable, skipped);
-    }
-
-    private static LinkedHashMap<String, NumericParam> numericParams(
-            FilterMacroEditorModel.MacroDefinition macro) {
-        LinkedHashMap<String, NumericParam> out =
-                new LinkedHashMap<String, NumericParam>();
-        if (macro == null) {
-            return out;
-        }
-        List<FilterMacroEditorModel.Section> sections = macro.getSections();
-        for (int i = 0; i < sections.size(); i++) {
-            FilterMacroEditorModel.Section section = sections.get(i);
-            for (int j = 0; j < section.entries.size(); j++) {
-                FilterMacroEditorModel.Entry entry = section.entries.get(j);
-                for (int k = 0; k < entry.parameters.size(); k++) {
-                    FilterMacroEditorModel.Parameter parameter =
-                            entry.parameters.get(k);
-                    if (parameter == null || parameter.key == null) {
-                        continue;
-                    }
-                    String key = parameter.key.trim();
-                    if (key.isEmpty() || out.containsKey(key)) {
-                        continue;
-                    }
-                    Double value = finiteDouble(parameter.getValue());
-                    if (value == null) {
-                        value = finiteDouble(parameter.defaultValue);
-                    }
-                    if (value != null) {
-                        out.put(key, new NumericParam(key, value.doubleValue()));
-                    }
-                }
-            }
-        }
-        return out;
     }
 
     private static String chainSummary(FilterMacroEditorModel.MacroDefinition macro) {
@@ -121,17 +84,6 @@ public final class PresetEnumerator {
             out.append(names.get(i));
         }
         return out.toString();
-    }
-
-    private static Double finiteDouble(String value) {
-        try {
-            double parsed = Double.parseDouble(value == null ? "" : value.trim());
-            return Double.isNaN(parsed) || Double.isInfinite(parsed)
-                    ? null
-                    : Double.valueOf(parsed);
-        } catch (RuntimeException e) {
-            return null;
-        }
     }
 
     private static String reasonFor(Exception e) {
@@ -200,40 +152,6 @@ public final class PresetEnumerator {
             }
             return out;
         }
-
-        public List<String> allNumericParamKeys() {
-            LinkedHashSet<String> out = new LinkedHashSet<String>();
-            for (int i = 0; i < readablePresets.size(); i++) {
-                out.addAll(readablePresets.get(i).numericParamKeys());
-            }
-            return new ArrayList<String>(out);
-        }
-
-        public List<String> commonNumericParamKeys() {
-            LinkedHashSet<String> common = new LinkedHashSet<String>();
-            if (readablePresets.isEmpty()) {
-                return new ArrayList<String>();
-            }
-            common.addAll(readablePresets.get(0).numericParamKeys());
-            for (int i = 1; i < readablePresets.size(); i++) {
-                common.retainAll(readablePresets.get(i).numericParamKeys());
-            }
-            return new ArrayList<String>(common);
-        }
-
-        public String defaultXParamKey() {
-            List<String> common = commonNumericParamKeys();
-            if (!common.isEmpty()) {
-                return common.get(0);
-            }
-            List<String> all = allNumericParamKeys();
-            for (int i = 0; i < all.size(); i++) {
-                if ("sigma".equalsIgnoreCase(all.get(i))) {
-                    return all.get(i);
-                }
-            }
-            return all.isEmpty() ? "" : all.get(0);
-        }
     }
 
     public static final class PresetInfo {
@@ -241,21 +159,15 @@ public final class PresetEnumerator {
         private final String macroContent;
         private final FilterMacroEditorModel.MacroDefinition macroDefinition;
         private final String chainSummary;
-        private final LinkedHashMap<String, NumericParam> numericParams;
 
         PresetInfo(String name,
                    String macroContent,
                    FilterMacroEditorModel.MacroDefinition macroDefinition,
-                   String chainSummary,
-                   LinkedHashMap<String, NumericParam> numericParams) {
+                   String chainSummary) {
             this.name = safeName(name);
             this.macroContent = macroContent == null ? "" : macroContent;
             this.macroDefinition = macroDefinition;
             this.chainSummary = chainSummary == null ? "" : chainSummary;
-            this.numericParams = new LinkedHashMap<String, NumericParam>(
-                    numericParams == null
-                            ? Collections.<String, NumericParam>emptyMap()
-                            : numericParams);
         }
 
         public String name() {
@@ -272,40 +184,6 @@ public final class PresetEnumerator {
 
         public String chainSummary() {
             return chainSummary;
-        }
-
-        public boolean hasNumericParam(String key) {
-            return numericParams.containsKey(key);
-        }
-
-        public NumericParam numericParam(String key) {
-            return numericParams.get(key);
-        }
-
-        public List<String> numericParamKeys() {
-            return new ArrayList<String>(numericParams.keySet());
-        }
-
-        public Map<String, NumericParam> numericParams() {
-            return Collections.unmodifiableMap(numericParams);
-        }
-    }
-
-    public static final class NumericParam {
-        private final String key;
-        private final double baseValue;
-
-        NumericParam(String key, double baseValue) {
-            this.key = safeName(key);
-            this.baseValue = baseValue;
-        }
-
-        public String key() {
-            return key;
-        }
-
-        public double baseValue() {
-            return baseValue;
         }
     }
 

@@ -6,7 +6,6 @@ import java.util.Arrays;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
 
 public class PresetEnumeratorTest {
 
@@ -22,10 +21,10 @@ public class PresetEnumeratorTest {
 
         List<String> names = result.readableNames();
         assertEquals(Arrays.asList("Default", "Clustered Large"), names);
-        assertTrue(result.readablePreset("Default").numericParamKeys()
-                .contains("sigma"));
-        assertTrue(result.readablePreset("Clustered Large").numericParamKeys()
-                .contains("radius"));
+        assertEquals("Gaussian Blur", result.readablePreset("Default")
+                .chainSummary());
+        assertEquals("Median", result.readablePreset("Clustered Large")
+                .chainSummary());
     }
 
     private static String macroFor(String presetName) {
