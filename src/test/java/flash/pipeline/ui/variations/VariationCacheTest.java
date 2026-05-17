@@ -9,6 +9,7 @@ import org.junit.rules.TemporaryFolder;
 
 import java.io.File;
 import java.io.FileOutputStream;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -74,6 +75,27 @@ public class VariationCacheTest {
         assertNull(cache.get("cccccccccccccccc"));
     }
 
+    @Test
+    public void purgeOlderThanDeletesOnlyOldTiffs() throws Exception {
+        File bin = temp.newFolder(".bin");
+        VariationCache cache = new VariationCache(bin);
+        File oldFile = cache.fileForTest("dddddddddddddddd");
+        File newFile = cache.fileForTest("eeeeeeeeeeeeeeee");
+        assertTrue(oldFile.getParentFile().mkdirs());
+        touch(oldFile);
+        touch(newFile);
+        long now = System.currentTimeMillis();
+        assertTrue(oldFile.setLastModified(now - TimeUnit.DAYS.toMillis(8)));
+        assertTrue(newFile.setLastModified(now - TimeUnit.DAYS.toMillis(1)));
+
+        int deleted = VariationCache.purgeOlderThan(bin,
+                TimeUnit.DAYS.toMillis(7));
+
+        assertEquals(1, deleted);
+        assertFalse(oldFile.exists());
+        assertTrue(newFile.exists());
+    }
+
     private static ImagePlus labelImage(String title, int value) {
         ShortProcessor processor = new ShortProcessor(2, 2);
         processor.set(0, 0, value);
@@ -81,5 +103,14 @@ public class VariationCacheTest {
         processor.set(0, 1, value + 2);
         processor.set(1, 1, value + 3);
         return new ImagePlus(title, processor);
+    }
+
+    private static void touch(File file) throws Exception {
+        FileOutputStream out = new FileOutputStream(file);
+        try {
+            out.write(1);
+        } finally {
+            out.close();
+        }
     }
 }

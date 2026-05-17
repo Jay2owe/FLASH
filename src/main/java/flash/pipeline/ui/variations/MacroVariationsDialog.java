@@ -72,6 +72,8 @@ public final class MacroVariationsDialog extends PipelineDialog {
     private static final String CARD_SWEEP_STEP = "sweep-step";
     private static final String CARD_SWEEP_PRESETS = "sweep-presets";
     private static final String CARD_FULL_SWEEP = "full-sweep";
+    private static final long CACHE_PURGE_MAX_AGE_MILLIS =
+            7L * 24L * 60L * 60L * 1000L;
 
     private final FilterVariationEngineContext context;
     private final Consumer<String> onAccept;
@@ -145,6 +147,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
         this.downstreamResolution = DownstreamSegmenter.resolve(context);
         this.editor.setSelectedChainStepIndexes(Collections.<Integer>emptySet());
         this.currentCropSpec = context.initialCropSpec();
+        scheduleCachePurge();
         setDefaultButtonsVisible(false);
         buildUi();
         installWindowCleanup();
@@ -221,6 +224,21 @@ public final class MacroVariationsDialog extends PipelineDialog {
                 chainRibbon.setInteractionMode(ChainRibbon.InteractionMode.PASSIVE);
                 break;
         }
+    }
+
+    private void scheduleCachePurge() {
+        final File binFolder = context.binFolder();
+        if (binFolder == null) {
+            return;
+        }
+        Thread worker = new Thread(new Runnable() {
+            @Override public void run() {
+                VariationCache.purgeOlderThan(binFolder,
+                        CACHE_PURGE_MAX_AGE_MILLIS);
+            }
+        }, "flash-variations-cache-purge");
+        worker.setDaemon(true);
+        worker.start();
     }
 
     private void showEditorCardFor(Mode requested) {

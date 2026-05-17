@@ -30,7 +30,44 @@ public final class VariationCache {
     }
 
     public VariationCache(File binFolder) {
-        this.cacheDir = binFolder == null ? null : new File(binFolder, "variations_cache");
+        this.cacheDir = cacheDir(binFolder);
+    }
+
+    public static int purgeOlderThan(File binFolder, long maxAgeMillis) {
+        File dir = cacheDir(binFolder);
+        if (dir == null) {
+            return 0;
+        }
+        File[] files;
+        try {
+            files = dir.listFiles();
+        } catch (RuntimeException ignored) {
+            return 0;
+        }
+        if (files == null || files.length == 0) {
+            return 0;
+        }
+        long cutoff = System.currentTimeMillis() - maxAgeMillis;
+        int deleted = 0;
+        for (int i = 0; i < files.length; i++) {
+            File file = files[i];
+            if (file == null || !file.isFile()) {
+                continue;
+            }
+            String name = file.getName();
+            if (name == null
+                    || !name.toLowerCase(java.util.Locale.ROOT).endsWith(".tif")) {
+                continue;
+            }
+            try {
+                if (file.lastModified() < cutoff && file.delete()) {
+                    deleted++;
+                }
+            } catch (RuntimeException ignored) {
+                // Best-effort cleanup only; preview sweeps should not fail here.
+            }
+        }
+        return deleted;
     }
 
     public static String keyFor(ParameterSweep sweep, ParameterCombo combo) {
@@ -132,6 +169,10 @@ public final class VariationCache {
             return null;
         }
         return new File(cacheDir, key + ".tif");
+    }
+
+    private static File cacheDir(File binFolder) {
+        return binFolder == null ? null : new File(binFolder, "variations_cache");
     }
 
     private static String macroIdentityForCombo(ParameterSweep sweep,
