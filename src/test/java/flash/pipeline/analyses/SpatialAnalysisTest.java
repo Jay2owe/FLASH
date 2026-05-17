@@ -293,6 +293,29 @@ public class SpatialAnalysisTest {
     }
 
     @Test
+    public void execute_lineDistanceDiscoversLineSetsFromFlashLayout() throws Exception {
+        File root = temp.newFolder("spatial-line-distance-new-layout");
+        File objectsDir = objectsDir(root);
+        writeChannel(objectsDir, "A.csv",
+                "Region,XM,YM",
+                "SCN1,10,20");
+
+        File lineSets = LineDistanceAnalysis.lineSetWriteDir(root.getAbsolutePath());
+        assertTrue(lineSets.mkdirs());
+        assertTrue(new File(lineSets, "Boundary.zip").createNewFile());
+
+        SpatialAnalysisWizard.DerivedConfig config = new SpatialAnalysisWizard.DerivedConfig();
+        config.doLineDistance = true;
+        SpatialAnalysis analysis = new SpatialAnalysis();
+        analysis.setSuppressDialogs(true);
+        analysis.setWizardConfig(config);
+        analysis.execute(root.getAbsolutePath());
+
+        assertTrue(new File(root,
+                "FLASH/Image Analysis/Line Distance Analysis/A.csv").isFile());
+    }
+
+    @Test
     public void spatialPresetSaveButtonIsAvailableAndWired() throws Exception {
         SpatialAnalysis analysis = new SpatialAnalysis();
         PipelineDialog dialog = new PipelineDialog("Spatial Preset Save");

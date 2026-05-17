@@ -390,6 +390,17 @@ public class LineDistanceAnalysis implements Analysis {
                                 String lineName,
                                 BinConfig configuredBinConfig,
                                 boolean drawOnSubset) {
+        if (directory == null || directory.trim().isEmpty()) {
+            IJ.log("[FLASH] Cannot draw line set: directory is empty.");
+            return false;
+        }
+        String safeLineName = lineName == null ? "" : lineName.trim();
+        if (safeLineName.isEmpty()) {
+            IJ.log("[FLASH] Cannot draw line set: line set name is empty.");
+            return false;
+        }
+        File targetLinesDir = linesDir == null ? lineSetWriteDir(directory) : linesDir;
+
         if (!FeatureDependencyGate.gate(DependencyId.BIO_FORMATS_RUNTIME,
                 "Line Distance Analysis", "Bio-Formats image loading for drawing a new line set")) {
             return false;
@@ -397,7 +408,7 @@ public class LineDistanceAnalysis implements Analysis {
 
         // Ensure directory exists
         try {
-            IoUtils.mustMkdirs(linesDir);
+            IoUtils.mustMkdirs(targetLinesDir);
         } catch (IOException e) {
             IJ.log("[FLASH] Could not create line set directory: " + e.getMessage());
             return false;
@@ -470,7 +481,7 @@ public class LineDistanceAnalysis implements Analysis {
             WaitForUserDialog wfud = new WaitForUserDialog(
                     "Draw Polyline",
                     "Image " + (i + 1) + "/" + totalImages + "\n"
-                    + "Draw a polyline on the image for '" + lineName + "'.\n"
+                    + "Draw a polyline on the image for '" + safeLineName + "'.\n"
                     + "(Click to add vertices, double-click to finish)\n"
                     + "Image: " + imgTitle + "\n\n"
                     + "Click OK when done.");
@@ -501,7 +512,7 @@ public class LineDistanceAnalysis implements Analysis {
         }
 
         // Save ROI zip
-        File zipFile = new File(linesDir, lineName + ".zip");
+        File zipFile = new File(targetLinesDir, safeLineName + ".zip");
         rm.runCommand("Save", zipFile.getAbsolutePath());
         rm.close();
 
@@ -526,6 +537,12 @@ public class LineDistanceAnalysis implements Analysis {
      */
     public void computeDistances(String directory, File linesDir,
                                  List<String> selectedSets) {
+        List<String> safeSelectedSets = normaliseLineSetSelection(selectedSets);
+        if (safeSelectedSets.isEmpty()) {
+            IJ.log("  No line sets selected.");
+            return;
+        }
+
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
         File objectsDir = firstExistingDirectory(layout.objectDataReadDirs());
         if (objectsDir == null) {
@@ -594,7 +611,7 @@ public class LineDistanceAnalysis implements Analysis {
         }
 
         // Process each selected line set
-        for (String lineName : selectedSets) {
+        for (String lineName : safeSelectedSets) {
             File zipFile = resolveLineSetZip(directory, linesDir, lineName);
             if (!zipFile.exists()) {
                 IJ.log("  Line set zip not found: " + lineName + ".zip");
@@ -648,6 +665,11 @@ public class LineDistanceAnalysis implements Analysis {
                     }
 
                     Roi lineRoi = lineRois[roiIdx];
+                    if (lineRoi == null) {
+                        cd.set(r, distCol, "Inf");
+                        skipped++;
+                        continue;
+                    }
                     java.awt.Polygon polygon = lineRoi.getPolygon();
                     if (polygon == null || polygon.npoints < 2) {
                         cd.set(r, distCol, "Inf");
@@ -658,6 +680,11 @@ public class LineDistanceAnalysis implements Analysis {
                     // Object coords (pixel units from CSV)
                     double objXPx = cd.getDouble(r, "XM");
                     double objYPx = cd.getDouble(r, "YM");
+                    if (!Double.isFinite(objXPx) || !Double.isFinite(objYPx)) {
+                        cd.set(r, distCol, "Inf");
+                        skipped++;
+                        continue;
+                    }
 
                     // Compute min perpendicular distance to line segments
                     double minDistPx = minDistToPolyline(
@@ -688,6 +715,18 @@ public class LineDistanceAnalysis implements Analysis {
             CsvTableIO.writeChannelCsv(outFile, cd);
             IJ.log("  Updated: " + outFile.getName());
         }
+    }
+
+    private static List<String> normaliseLineSetSelection(List<String> selectedSets) {
+        List<String> safe = new ArrayList<String>();
+        if (selectedSets == null) return safe;
+        for (String selectedSet : selectedSets) {
+            String trimmed = selectedSet == null ? "" : selectedSet.trim();
+            if (!trimmed.isEmpty() && !containsIgnoreCase(safe, trimmed)) {
+                safe.add(trimmed);
+            }
+        }
+        return safe;
     }
 
     private static File firstExistingDirectory(List<File> dirs) {

@@ -3,12 +3,17 @@ package flash.pipeline.analyses;
 import flash.pipeline.bin.BinField;
 import flash.pipeline.bin.BinSetupChooser;
 import flash.pipeline.bin.BinSetupDispatcher;
+import flash.pipeline.io.CsvTableIO;
 import flash.pipeline.io.FlashProjectLayout;
+import ij.gui.PolygonRoi;
+import ij.gui.Roi;
+import ij.io.RoiEncoder;
 import org.junit.After;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
@@ -17,9 +22,12 @@ import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 public class LineDistanceAnalysisTest {
@@ -128,6 +136,42 @@ public class LineDistanceAnalysisTest {
                 .contains("Region,XM,YM"));
     }
 
+    @Test
+    public void computeDistancesReturnsGracefullyWhenSelectedSetsMissing() throws Exception {
+        File dir = temp.newFolder("noSelectedLineSets");
+        File legacyObjects = new File(dir, "Data Analysis/Objects");
+        assertTrue(legacyObjects.mkdirs());
+        writeCsv(new File(legacyObjects, "Marker_A.csv"),
+                "Region,XM,YM\nSCN1,10,20\n");
+
+        new LineDistanceAnalysis().computeDistances(dir.getAbsolutePath(),
+                LineDistanceAnalysis.lineSetWriteDir(dir.getAbsolutePath()), null);
+
+        assertFalse(new File(dir, "FLASH/Image Analysis/Line Distance Analysis/Marker_A.csv").exists());
+    }
+
+    @Test
+    public void computeDistancesSkipsNonFiniteObjectCoordinates() throws Exception {
+        File dir = temp.newFolder("nonFiniteLineDistance");
+        File legacyObjects = new File(dir, "Data Analysis/Objects");
+        assertTrue(legacyObjects.mkdirs());
+        writeCsv(new File(legacyObjects, "Marker_A.csv"),
+                "Region,XM,YM\nSCN1,NaN,20\nSCN1,3,4\n");
+
+        File lines = LineDistanceAnalysis.lineSetWriteDir(dir.getAbsolutePath());
+        assertTrue(lines.mkdirs());
+        writeLineZip(new File(lines, "Boundary.zip"));
+
+        new LineDistanceAnalysis().computeDistances(dir.getAbsolutePath(), lines,
+                Arrays.asList(" Boundary ", "", null, "Boundary"));
+
+        File out = new File(dir, "FLASH/Image Analysis/Line Distance Analysis/Marker_A.csv");
+        CsvTableIO.ChannelData cd = CsvTableIO.loadChannelCsv(out, "Marker_A");
+        assertNotNull(cd);
+        assertEquals("Inf", cd.get(0, "Marker_A_DistTo_Boundary"));
+        assertEquals("4.000000", cd.get(1, "Marker_A_DistTo_Boundary"));
+    }
+
     private static void installDispatcherChoice(final BinSetupChooser.Choice choice,
                                                 final AtomicInteger chooserCalls) throws Exception {
         setDispatcherHook("setHeadlessProbeForTest",
@@ -178,6 +222,26 @@ public class LineDistanceAnalysisTest {
 
     private static void writeCsv(File file, String content) throws Exception {
         Files.write(file.toPath(), content.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static void writeLineZip(File zipFile) throws Exception {
+        int[] xs = new int[]{0, 10};
+        int[] ys = new int[]{0, 0};
+        PolygonRoi roi = new PolygonRoi(xs, ys, xs.length, Roi.POLYLINE);
+        roi.setName("SCN1");
+
+        ByteArrayOutputStream roiBytes = new ByteArrayOutputStream();
+        RoiEncoder encoder = new RoiEncoder(roiBytes);
+        encoder.write(roi);
+
+        ZipOutputStream zip = new ZipOutputStream(Files.newOutputStream(zipFile.toPath()));
+        try {
+            zip.putNextEntry(new ZipEntry("0001.roi"));
+            zip.write(roiBytes.toByteArray());
+            zip.closeEntry();
+        } finally {
+            zip.close();
+        }
     }
 
     private interface InvocationResult {

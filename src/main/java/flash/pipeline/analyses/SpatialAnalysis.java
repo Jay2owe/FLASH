@@ -746,8 +746,8 @@ public class SpatialAnalysis implements Analysis {
         SpatialArtifactStatus artifactStatus =
                 new SpatialArtifactScanner().scan(directory, channelNames, artifactSections);
         spatialArtifactStatus = artifactStatus;
-        File linesDir = new File(directory, "Data Analysis" + File.separator + "Lines");
-        List<String> availableLineSets = lineSetNames(linesDir);
+        File linesDir = LineDistanceAnalysis.lineSetWriteDir(directory);
+        List<String> availableLineSets = LineDistanceAnalysis.lineSetNames(directory);
         boolean hasLineRoiSets = !availableLineSets.isEmpty();
 
         // Options dialog
@@ -1247,7 +1247,7 @@ public class SpatialAnalysis implements Analysis {
         List<String> safeChannelNames = channelNames == null
                 ? new ArrayList<String>()
                 : new ArrayList<String>(channelNames);
-        File linesDir = new File(directory, "Data Analysis" + File.separator + "Lines");
+        File linesDir = LineDistanceAnalysis.lineSetWriteDir(directory);
         SpatialObjectDataAvailability existingObjectData =
                 SpatialObjectDataAvailability.detect(null, safeChannelNames);
         LinkedHashMap<String, ChannelData> existingChannels =
@@ -1260,7 +1260,7 @@ public class SpatialAnalysis implements Analysis {
                 new SpatialArtifactScanner().scan(directory, safeChannelNames, artifactSections);
         spatialArtifactStatus = artifactStatus;
         return showSpatialOptionsDialog(directory, safeChannelNames, existingObjectData,
-                lineSetNames(linesDir), artifactStatus, configuredOptions,
+                LineDistanceAnalysis.lineSetNames(directory), artifactStatus, configuredOptions,
                 lockVolumetricColoc, lockCpcColoc);
     }
 
