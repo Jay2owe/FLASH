@@ -182,6 +182,31 @@ src/main/resources/plugins.config
 src/test/java/flash/pipeline/
 ```
 
+## Citing FLASH
+
+If you use FLASH in published work, please cite it as:
+
+> Malcolm, J. (2026). *FLASH: Fluorescence Automated Spatial Histology* (Version X.Y.Z) [Computer software]. Manuscript in preparation. https://github.com/Jay2owe/FLASH
+
+A Zenodo concept DOI will be minted from the first tagged GitHub release after the BSD-3 cutover; this README will be updated with the DOI badge once available. Citation metadata is also available in [`CITATION.cff`](CITATION.cff) (use the "Cite this repository" button on GitHub).
+
+If you use specific features, please also cite their upstream tools:
+
+- [Fiji](https://fiji.sc/) (Schindelin et al., *Nature Methods*, 2012, doi:10.1038/nmeth.2019)
+- [Bio-Formats](https://www.openmicroscopy.org/bio-formats/) (Linkert et al., *J Cell Biol*, 2010, doi:10.1083/jcb.201004104)
+- [3D ImageJ Suite / mcib3d-core](https://mcib3d.frama.io/3d-suite-imagej/) (Ollion et al., *Bioinformatics*, 2013, doi:10.1093/bioinformatics/btt276) for 3D measurement
+- [StarDist](https://github.com/stardist/stardist) (Schmidt et al., MICCAI 2018; Weigert et al., WACV 2020) for star-convex segmentation
+- [Cellpose](https://www.cellpose.org/) (Stringer et al., *Nature Methods*, 2021, doi:10.1038/s41592-020-01018-x) for generalist cell segmentation
+- [TrackMate](https://imagej.net/plugins/trackmate/) (Tinevez et al., *Methods*, 2017, doi:10.1016/j.ymeth.2016.09.016) for tracking
+
+## Acknowledgements
+
+Developed by Jamie Malcolm in the [Brancaccio Lab](https://www.ukdri.ac.uk/labs/brancaccio-lab) at the [UK Dementia Research Institute](https://ukdri.ac.uk/centres/imperial), Imperial College London.
+
+This work was supported by the UK Dementia Research Institute, which receives its core funding from the UK Medical Research Council, the Alzheimer's Society, and Alzheimer's Research UK.
+
+Built on the [Fiji](https://fiji.sc/) / [ImageJ](https://imagej.net/) ecosystem; we thank the SciJava community for the platform.
+
 ## License
 
-This project is released under CC0 as declared in `pom.xml`.
+BSD 3-Clause License. See [`LICENSE`](LICENSE) for the full text.

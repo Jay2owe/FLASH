@@ -27,13 +27,13 @@
 	<url>https://github.com/Jay2owe/FLASH</url>
 	<inceptionYear>2026</inceptionYear>
 	<organization>
-		<name>UK Dementia Research Institute</name>
-		<url>https://ukdri.ac.uk/</url>
+		<name>UK Dementia Research Institute at Imperial College London</name>
+		<url>https://ukdri.ac.uk/centres/imperial</url>
 	</organization>
 	<licenses>
 		<license>
-			<name>CC0</name>
-			<url>https://creativecommons.org/publicdomain/zero/1.0/</url>
+			<name>BSD 3-Clause License</name>
+			<url>https://opensource.org/licenses/BSD-3-Clause</url>
 			<distribution>repo</distribution>
 		</license>
 	</licenses>
@@ -43,7 +43,13 @@
 		<developer>
 			<id>Jay2owe</id>
 			<name>Jamie Malcolm</name>
+			<email>jamiemalcolm12@gmail.com</email>
 			<url>https://github.com/Jay2owe</url>
+			<organization>UK Dementia Research Institute at Imperial College London</organization>
+			<organizationUrl>https://www.ukdri.ac.uk/labs/brancaccio-lab</organizationUrl>
+			<properties>
+				<orcid>0009-0008-3862-2776</orcid>
+			</properties>
 			<roles>
 				<role>founder</role>
 				<role>lead</role>

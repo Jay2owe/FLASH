@@ -1,0 +1,31 @@
+cff-version: 1.2.0
+message: "If you use FLASH in published work, please cite it as below."
+type: software
+title: "FLASH: Fluorescence Automated Spatial Histology"
+abstract: >-
+  An ImageJ/Fiji plugin providing an end-to-end pipeline for fluorescence
+  microscopy analysis: channel setup, ROI management, image preparation,
+  fluorescence intensity measurement, 3D object analysis, spatial analysis,
+  morphometry, statistics, and Excel export.
+authors:
+  - given-names: Jamie
+    family-names: Malcolm
+    orcid: "https://orcid.org/0009-0008-3862-2776"
+    affiliation: "UK Dementia Research Institute at Imperial College London"
+    email: jamiemalcolm12@gmail.com
+repository-code: "https://github.com/Jay2owe/FLASH"
+url: "https://github.com/Jay2owe/FLASH"
+license: BSD-3-Clause
+keywords:
+  - fiji
+  - imagej
+  - microscopy
+  - fluorescence
+  - histology
+  - spatial-analysis
+  - morphometry
+  - 3d-object-analysis
+# TODO: add `doi:` once Zenodo concept DOI is minted from the first
+# tagged GitHub Release after this BSD-3 cutover.
+# TODO: add `version:` and `date-released:` to match the first BSD-3
+# tagged release.
