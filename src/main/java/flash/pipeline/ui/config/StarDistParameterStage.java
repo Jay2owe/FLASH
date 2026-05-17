@@ -4,6 +4,8 @@ import flash.pipeline.bin.BinConfig;
 import flash.pipeline.click.ClickStore;
 import flash.pipeline.click.suggest.StarDistFilterSuggester;
 import flash.pipeline.click.suggest.SuggestionContext;
+import flash.pipeline.help.AnalysisHelpCatalog;
+import flash.pipeline.help.AnalysisHelpDialog;
 import flash.pipeline.help.SetupHelpCatalog;
 import flash.pipeline.help.SetupHelpTopic;
 import flash.pipeline.segmentation.SegmentationMethod;
@@ -16,6 +18,7 @@ import flash.pipeline.segmentation.catalog.ModelCatalogIO;
 import flash.pipeline.segmentation.catalog.ModelEntry;
 import flash.pipeline.stardist.StarDist3DRunner;
 import flash.pipeline.ui.FlashTheme;
+import flash.pipeline.ui.HelpButton;
 import flash.pipeline.ui.ModelEntryListCellRenderer;
 import flash.pipeline.ui.SegmentationModelManagerDialog;
 import flash.pipeline.ui.preview.ObjectSizeFilterPreview;
@@ -536,6 +539,12 @@ public final class StarDistParameterStage implements ConfigQcStage {
         gbc.fill = GridBagConstraints.NONE;
         gbc.weightx = 0.0;
         row.add(manageModelsButton, gbc);
+
+        final JButton trainingHelpButton = HelpButton.question("How to train and import custom segmentation models.");
+        trainingHelpButton.addActionListener(e -> AnalysisHelpDialog.show(
+                trainingHelpButton, AnalysisHelpCatalog.TRAIN_CUSTOM_SEGMENTATION_MODELS));
+        gbc.gridx++;
+        row.add(trainingHelpButton, gbc);
         return row;
     }
 

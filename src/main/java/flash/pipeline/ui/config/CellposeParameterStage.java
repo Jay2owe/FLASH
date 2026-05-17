@@ -7,6 +7,8 @@ import flash.pipeline.cellpose.CellposeRuntime;
 import flash.pipeline.click.ClickStore;
 import flash.pipeline.click.suggest.CellposeFilterSuggester;
 import flash.pipeline.click.suggest.SuggestionContext;
+import flash.pipeline.help.AnalysisHelpCatalog;
+import flash.pipeline.help.AnalysisHelpDialog;
 import flash.pipeline.help.SetupHelpCatalog;
 import flash.pipeline.help.SetupHelpTopic;
 import flash.pipeline.objects.ObjectsCounter3DWrapper;
@@ -17,6 +19,7 @@ import flash.pipeline.segmentation.catalog.ModelCatalog;
 import flash.pipeline.segmentation.catalog.ModelCatalogIO;
 import flash.pipeline.segmentation.catalog.ModelEntry;
 import flash.pipeline.ui.FlashTheme;
+import flash.pipeline.ui.HelpButton;
 import flash.pipeline.ui.ModelEntryListCellRenderer;
 import flash.pipeline.ui.SegmentationModelManagerDialog;
 import flash.pipeline.ui.ToggleSwitch;
@@ -707,6 +710,12 @@ public final class CellposeParameterStage implements ConfigQcStage {
         gbc.weightx = 0.0;
         gbc.fill = GridBagConstraints.NONE;
         row.add(manageModelsButton, gbc);
+
+        final JButton trainingHelpButton = HelpButton.question("How to train and import custom segmentation models.");
+        trainingHelpButton.addActionListener(e -> AnalysisHelpDialog.show(
+                trainingHelpButton, AnalysisHelpCatalog.TRAIN_CUSTOM_SEGMENTATION_MODELS));
+        gbc.gridx++;
+        row.add(trainingHelpButton, gbc);
         gbc.gridx++;
         gbc.weightx = 0.0;
         gbc.fill = GridBagConstraints.NONE;

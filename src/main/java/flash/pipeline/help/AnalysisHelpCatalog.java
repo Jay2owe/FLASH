@@ -91,35 +91,40 @@ public final class AnalysisHelpCatalog {
                 FLASH_Pipeline.IDX_CREATE_BIN,
                 "train-custom-segmentation-models",
                 "Train custom segmentation models",
-                "Use captured positive and negative clicks to either tune segmentation parameters or create a project-registered custom model.",
+                "Use captured positive and negative clicks to tune segmentation settings, export training data, or create a project-registered custom model.",
                 list(
-                        "Use this when stock Classical, Enhanced Classical, StarDist, or Cellpose settings are close but still miss a repeatable object class.",
+                        "Use this when stock Classical, Enhanced Classical, StarDist, or Cellpose settings repeatedly miss the same object class or include the same artefact.",
                         "Use click-to-suggest first when the current engine only needs better thresholds, size limits, or post-detection filters.",
-                        "Use Train Custom Engine when repeated click corrections should become a reusable project model entry."),
+                        "Use Train Custom Engine when repeated click corrections should become a reusable project model entry.",
+                        "For full written steps, see docs/training_segmentation_models.md in the FLASH source tree."),
                 list(
                         "Representative images opened in Set Up Configuration quality control.",
-                        "At least enough positive and negative clicks for the selected training route; the wizard enforces its minimum before training.",
-                        "For StarDist or Cellpose, an external training tool that can consume the packaged dataset and return a model file."),
+                        "Positive and negative clicks for RF post-filters, or instance label images for external StarDist and Cellpose training.",
+                        "For StarDist or Cellpose, the dataset exported by the Train Custom Engine wizard and an external training tool that returns a model file."),
                 list(
                         "Click good objects and bad objects in the preview, then use the click-suggest toggle when you want parameter suggestions.",
                         "Choose Train Custom Engine from the segmentation method picker when clicks should create a reusable model.",
                         "Pick a base engine: Classical or Enhanced Classical trains an in-process Smile Random Forest, while StarDist and Cellpose package datasets for external training.",
-                        "Cellpose 4, Cellpose-SAM, and cpsam models are not supported by the pinned Cellpose 3 runtime."),
+                        "Cellpose 4, Cellpose-SAM, and cpsam models are not supported by the pinned Cellpose 3.1.1.2 runtime.",
+                        "FLASH runs StarDist per slice as 2D detections with Z-linking; full 3D StarDist is not built in."),
                 list(
                         "Review captured clicks for the current channel and exclude weak training images if needed.",
-                        "Run the wizard training step; Classical and Enhanced Classical train in FLASH, while StarDist opens ZeroCostDL4Mic guidance and Cellpose writes a GUI/CLI-ready dataset.",
-                        "Import or choose the trained external StarDist or Cellpose model file, then save the new catalog entry.",
+                        "Run the wizard training step; Classical and Enhanced Classical train in FLASH, while StarDist and Cellpose export datasets for Python training.",
+                        "For StarDist, train externally and export a Fiji-compatible TensorFlow SavedModel zip with model.export_TF().",
+                        "For Cellpose, train with Cellpose 3 and import the trained file or registered model name.",
+                        "Open the Custom Model Manager from the model row, then use Add StarDist... or Add Cellpose... to save the new catalog entry.",
                         "Apply the recommended segmentation token to the channel or keep the previous method."),
                 list(
-                        "A project model catalog entry under FLASH/.settings/Presets/Segmentation Models/.",
+                        "A project model catalog entry under FLASH/Configuration/Segmentation Models/.",
                         "For Smile RF, a serialized Random Forest model and metadata with click counts and base engine.",
                         "For StarDist and Cellpose, a packaged training dataset plus the imported model reference after external training.",
                         "A stable segmentation token such as trained_rf:<modelKey>:base=<base> or model=<modelKey> on a deep-learning token."),
                 list(
-                        "Training on too few examples makes the model look precise on the preview but fail across the batch.",
+                        "Training on too few examples makes the model look precise on the preview but fail across the batch; start RF with roughly 20 to 30 positive and 20 to 30 negative clicks across several images.",
                         "Deep StarDist and Cellpose networks are not trained inside FLASH; FLASH packages data and registers the resulting model.",
                         "A model entry is project scoped. Copy the project catalog with the project if another machine needs to replay it.",
-                        "Do not use Cellpose 4 / Cellpose-SAM outputs with this runtime until FLASH explicitly upgrades that backend."),
+                        "Do not use Cellpose 4 / Cellpose-SAM outputs with this runtime until FLASH explicitly upgrades that backend.",
+                        "Do not expect StarDist to use full volumetric context; FLASH links 2D per-slice detections through Z."),
                 Collections.<AnalysisHelpTopic.HelpImage>emptyList());
     }
 
@@ -216,7 +221,7 @@ public final class AnalysisHelpCatalog {
                         "Filter by engine or source, select an entry, and review its key, source, file/resource path, defaults, and metadata.",
                         "Add or edit user entries, then return to the parameter stage and refresh the model list."),
                 list(
-                        "Catalog JSON and copied files under FLASH/.settings/Presets/Segmentation Models/.",
+                        "Catalog JSON and copied files under FLASH/Configuration/Segmentation Models/.",
                         "Project-relative file paths for portable replay and sharing.",
                         "Stable model keys used by StarDist, Cellpose, and trained_rf segmentation method tokens."),
                 list(

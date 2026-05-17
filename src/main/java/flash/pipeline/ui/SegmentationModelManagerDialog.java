@@ -130,6 +130,7 @@ public final class SegmentationModelManagerDialog extends PipelineDialog {
         actions.setOpaque(false);
         JButton addStarDistButton = new JButton("Add StarDist...");
         JButton addCellposeButton = new JButton("Add Cellpose...");
+        JButton trainingHelpButton = new JButton("Train a custom model...");
         JButton bulkImportButton = new JButton("Bulk import...");
         JButton exportButton = new JButton("Export catalog...");
         JButton importButton = new JButton("Import catalog...");
@@ -140,6 +141,7 @@ public final class SegmentationModelManagerDialog extends PipelineDialog {
         renameKeyButton = new JButton("Rename key...");
         actions.add(addStarDistButton);
         actions.add(addCellposeButton);
+        actions.add(trainingHelpButton);
         actions.add(bulkImportButton);
         actions.add(exportButton);
         actions.add(importButton);
@@ -182,6 +184,9 @@ public final class SegmentationModelManagerDialog extends PipelineDialog {
         });
         addStarDistButton.addActionListener(e -> addStarDist());
         addCellposeButton.addActionListener(e -> addCellpose());
+        trainingHelpButton.setToolTipText("Open training guidance for StarDist, Cellpose, and trained RF models.");
+        trainingHelpButton.addActionListener(e -> AnalysisHelpDialog.show(
+                getWindow(), AnalysisHelpCatalog.TRAIN_CUSTOM_SEGMENTATION_MODELS));
         bulkImportButton.addActionListener(e -> bulkImport());
         exportButton.addActionListener(e -> exportCatalog());
         importButton.addActionListener(e -> importCatalog());
