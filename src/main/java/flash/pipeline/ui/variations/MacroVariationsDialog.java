@@ -365,12 +365,12 @@ public final class MacroVariationsDialog extends PipelineDialog {
         }
         long deadline = System.currentTimeMillis() + timeoutMs;
         while (System.currentTimeMillis() < deadline
-                && completedCount < cells.size()) {
+                && completedCount < currentVariationTotal()) {
             EventQueue.invokeAndWait(new Runnable() {
                 @Override public void run() {
                 }
             });
-            if (completedCount >= cells.size()) {
+            if (completedCount >= currentVariationTotal()) {
                 return;
             }
             Thread.sleep(10L);
@@ -537,6 +537,9 @@ public final class MacroVariationsDialog extends PipelineDialog {
                 null,
                 context.presetMacroLoader());
 
+        VariationCellPanel baseline = VariationCellPanel.baseline(croppedSource);
+        baseline.setZ(1);
+        cells.add(baseline);
         for (int i = 0; i < combos.size(); i++) {
             ParameterCombo combo = combos.get(i);
             VariationCellPanel cell = new VariationCellPanel(combo, croppedSource,
@@ -663,7 +666,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
             setStatusTextNow(downstreamResolution.unavailableReason());
             return;
         }
-        if (completedCount < cells.size() || cells.isEmpty()) {
+        if (completedCount < resultCellTotal() || resultCellTotal() == 0) {
             setStatusTextNow("Downstream will run after the preview grid completes.");
             return;
         }
@@ -1341,8 +1344,8 @@ public final class MacroVariationsDialog extends PipelineDialog {
         VariationCellPanel cell = cellsByCombo.get(comboId);
         Integer comboIndex = cellIndexesByCombo.get(comboId);
         int targetIndex = comboIndex == null ? index : comboIndex.intValue();
-        if (cell == null && index >= 0 && index < cells.size()) {
-            cell = cells.get(index);
+        if (cell == null) {
+            cell = cellForResultIndex(index);
             targetIndex = index;
         }
         if (cell == null) {
@@ -1361,7 +1364,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
         failedCount = countFailures();
         updateGridWindowProgress();
         setStatusTextNow(progressStatus());
-        if (completedCount >= cells.size() && !cells.isEmpty()) {
+        if (completedCount >= resultCellTotal() && resultCellTotal() > 0) {
             if (downstreamVerdictSelected) {
                 startDownstreamVerdict();
             }
@@ -1411,7 +1414,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
     }
 
     private boolean allCellsSuccessful() {
-        if (resultsByCell.size() != cells.size() || resultsByCell.isEmpty()) {
+        if (resultsByCell.isEmpty()) {
             return false;
         }
         for (int i = 0; i < resultsByCell.size(); i++) {
@@ -1448,7 +1451,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
             return;
         }
         gridWindow.setSliceMax(gridWindow.controllerForTest().maxSlice());
-        gridWindow.setCompletedCount(completedCount, cells.size(), failedCount);
+        gridWindow.setCompletedCount(completedCount, currentVariationTotal(), failedCount);
     }
 
     private void startDownstreamVerdict() {
@@ -1805,8 +1808,34 @@ public final class MacroVariationsDialog extends PipelineDialog {
         return executor != null && !executor.isDone();
     }
 
+    private int currentVariationTotal() {
+        if (!resultsByCell.isEmpty()) {
+            return resultsByCell.size();
+        }
+        if (!cells.isEmpty()) {
+            return Math.max(0, cells.size() - baselineCellOffset());
+        }
+        return estimatedCellCount();
+    }
+
+    private int resultCellTotal() {
+        return resultsByCell.size();
+    }
+
+    private VariationCellPanel cellForResultIndex(int resultIndex) {
+        int cellIndex = resultIndex + baselineCellOffset();
+        if (cellIndex < 0 || cellIndex >= cells.size()) {
+            return null;
+        }
+        return cells.get(cellIndex);
+    }
+
+    private int baselineCellOffset() {
+        return !cells.isEmpty() && cells.get(0).isBaselineForTest() ? 1 : 0;
+    }
+
     private String progressStatus() {
-        int total = cells.isEmpty() ? estimatedCellCount() : cells.size();
+        int total = currentVariationTotal();
         String base = completedCount + "/" + Math.max(0, total);
         if (failedCount > 0) {
             return base + " (" + failedCount + " failed)";
@@ -1815,7 +1844,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
     }
 
     private String completionStatus() {
-        int total = cells.isEmpty() ? estimatedCellCount() : cells.size();
+        int total = currentVariationTotal();
         if (failedCount > 0) {
             return completedCount + "/" + Math.max(0, total)
                     + " complete (" + failedCount + " failed)";

@@ -57,7 +57,9 @@ public class MacroVariationsDialogRunTest {
             SwingUtilities.invokeAndWait(new Runnable() {
                 @Override public void run() {
                     MacroVariationsDialog d = ref.get();
-                    assertEquals(6, d.gridWindowForTest().cellsForTest().size());
+                    assertEquals(7, d.gridWindowForTest().cellsForTest().size());
+                    assertEquals("Original", d.gridWindowForTest()
+                            .cellsForTest().get(0).footerTextForTest());
                     assertEquals(6, d.completedCountForTest());
                     assertEquals(0, d.failedCountForTest());
                     List<VariationResult> results = d.resultsForTest();
@@ -119,9 +121,13 @@ public class MacroVariationsDialogRunTest {
                 @Override public void run() {
                     MacroVariationsDialog d = ref.get();
                     assertTrue(d.runButtonForTest().isEnabled());
-                    assertEquals(6, d.cellsForTest().size());
+                    assertEquals(7, d.cellsForTest().size());
                     for (VariationCellPanel cell : d.cellsForTest()) {
-                        assertEquals("cancelled", cell.footerTextForTest());
+                        if (cell.isBaselineForTest()) {
+                            assertEquals("Original", cell.footerTextForTest());
+                        } else {
+                            assertEquals("cancelled", cell.footerTextForTest());
+                        }
                     }
                 }
             });

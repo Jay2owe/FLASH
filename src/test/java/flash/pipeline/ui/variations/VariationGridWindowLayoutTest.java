@@ -1,5 +1,8 @@
 package flash.pipeline.ui.variations;
 
+import ij.ImagePlus;
+import ij.ImageStack;
+import ij.process.ByteProcessor;
 import org.junit.Assume;
 import org.junit.Test;
 
@@ -40,6 +43,29 @@ public class VariationGridWindowLayoutTest {
         assertWindowGrid(16, 4, 4);
     }
 
+    @Test
+    public void gridWindowCountsBaselineCell() throws Exception {
+        Assume.assumeFalse(GraphicsEnvironment.isHeadless());
+        SwingUtilities.invokeAndWait(new Runnable() {
+            @Override public void run() {
+                List<VariationCellPanel> cells = cells(3);
+                cells.add(0, VariationCellPanel.baseline(image()));
+                VariationGridWindow window = new VariationGridWindow(
+                        null, "FLASH variations", cells);
+                try {
+                    GridLayout layout =
+                            (GridLayout) window.gridPanelForTest().getLayout();
+                    assertEquals(4, window.cellsForTest().size());
+                    assertEquals(4, window.gridPanelForTest().getComponentCount());
+                    assertEquals(2, layout.getRows());
+                    assertEquals(2, layout.getColumns());
+                } finally {
+                    window.dispose();
+                }
+            }
+        });
+    }
+
     private static void assertGridDimensions(int cells, int expectedRows,
                                              int expectedCols) {
         int[] dimensions = VariationGridWindow.gridDimensions(cells);
@@ -73,5 +99,14 @@ public class VariationGridWindowLayoutTest {
                     ParameterCombo.builder().build(), null, null, null));
         }
         return cells;
+    }
+
+    private static ImagePlus image() {
+        ImageStack stack = new ImageStack(4, 4);
+        ByteProcessor processor = new ByteProcessor(4, 4);
+        processor.setValue(7);
+        processor.fill();
+        stack.addSlice("z1", processor);
+        return new ImagePlus("source", stack);
     }
 }

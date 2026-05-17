@@ -56,9 +56,10 @@ public class MacroVariationsDialogAcceptCallbackTest {
             dialog.waitForDoneForTest(5000L);
             SwingUtilities.invokeAndWait(new Runnable() {
                 @Override public void run() {
-                    assertEquals(1, dialog.cellsForTest().size());
+                    assertEquals(2, dialog.cellsForTest().size());
+                    assertTrue(dialog.cellsForTest().get(0).isBaselineForTest());
                     assertFalse(dialog.useComboButtonForTest().isEnabled());
-                    dialog.cellsForTest().get(0).clickForTest(false);
+                    dialog.cellsForTest().get(1).clickForTest(false);
                 }
             });
 

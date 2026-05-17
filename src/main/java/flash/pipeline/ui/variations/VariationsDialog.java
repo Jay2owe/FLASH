@@ -213,12 +213,12 @@ public final class VariationsDialog extends PipelineDialog {
         }
         long deadline = System.currentTimeMillis() + timeoutMs;
         while (System.currentTimeMillis() < deadline
-                && completedCount < cells.size()) {
+                && completedCount < currentVariationTotal()) {
             EventQueue.invokeAndWait(new Runnable() {
                 @Override public void run() {
                 }
             });
-            if (completedCount >= cells.size()) {
+            if (completedCount >= currentVariationTotal()) {
                 return;
             }
             Thread.sleep(10L);
@@ -450,6 +450,9 @@ public final class VariationsDialog extends PipelineDialog {
                         handleCompare(combo, cell);
                     }
                 };
+        VariationCellPanel baseline = VariationCellPanel.baseline(croppedSource);
+        baseline.setZ(1);
+        cells.add(baseline);
         for (int i = 0; i < combos.size(); i++) {
             ParameterCombo combo = combos.get(i);
             VariationCellPanel cell = new VariationCellPanel(combo, croppedSource,
@@ -482,7 +485,7 @@ public final class VariationsDialog extends PipelineDialog {
         openGridWindowForRun();
         setStatusTextNow(progressStatus(combos.size(), false));
         setSuggestionText("Most stable: pending");
-        if (completedCount >= cells.size() && !cells.isEmpty()) {
+        if (completedCount >= resultCellTotal() && resultCellTotal() > 0) {
             updateTileMetrics();
             applyKneeHint();
             applyStabilityHint();
@@ -542,7 +545,7 @@ public final class VariationsDialog extends PipelineDialog {
             return;
         }
         gridWindow.setSliceMax(gridWindow.controllerForTest().maxSlice());
-        gridWindow.setCompletedCount(completedCount, cells.size(), failedCount);
+        gridWindow.setCompletedCount(completedCount, currentVariationTotal(), failedCount);
     }
 
     private VariationState compatibleResumeState(ParameterSweep sweep) {
@@ -606,8 +609,8 @@ public final class VariationsDialog extends PipelineDialog {
         VariationCellPanel cell = cellsByCombo.get(result.combo().toCanonicalJson());
         Integer comboIndex = cellIndexesByCombo.get(result.combo().toCanonicalJson());
         int targetIndex = comboIndex == null ? index : comboIndex.intValue();
-        if (cell == null && index >= 0 && index < cells.size()) {
-            cell = cells.get(index);
+        if (cell == null) {
+            cell = cellForResultIndex(index);
             targetIndex = index;
         }
         if (cell == null) {
@@ -626,8 +629,8 @@ public final class VariationsDialog extends PipelineDialog {
         failedCount = countFailures();
         updateTileMetrics();
         updateGridWindowProgress();
-        setStatusTextNow(progressStatus(cells.size(), false));
-        if (completedCount >= cells.size()) {
+        setStatusTextNow(progressStatus(currentVariationTotal(), false));
+        if (completedCount >= resultCellTotal() && resultCellTotal() > 0) {
             applyKneeHint();
             applyStabilityHint();
             updateGridWindowProgress();
@@ -635,7 +638,7 @@ public final class VariationsDialog extends PipelineDialog {
     }
 
     private boolean allCellsSuccessful() {
-        if (resultsByCell.size() != cells.size() || resultsByCell.isEmpty()) {
+        if (resultsByCell.isEmpty()) {
             return false;
         }
         for (int i = 0; i < resultsByCell.size(); i++) {
@@ -657,34 +660,38 @@ public final class VariationsDialog extends PipelineDialog {
         }
         List<Integer> indexes = new ArrayList<Integer>();
         for (int i = 0; i < cells.size(); i++) {
-            if (i >= resultsByCell.size()) {
-                cells.get(i).clearDeltaN();
-                continue;
-            }
+            cells.get(i).clearDeltaN();
+        }
+        for (int i = 0; i < resultsByCell.size(); i++) {
             VariationResult result = resultsByCell.get(i);
-            Object value = cells.get(i).combo().get(swept);
+            Object value = result == null ? null : result.combo().get(swept);
             if (result == null || result.hasError() || !(value instanceof Number)) {
-                cells.get(i).clearDeltaN();
                 continue;
             }
             indexes.add(Integer.valueOf(i));
         }
         Collections.sort(indexes, new Comparator<Integer>() {
             @Override public int compare(Integer a, Integer b) {
-                double av = ((Number) cells.get(a.intValue()).combo().get(swept)).doubleValue();
-                double bv = ((Number) cells.get(b.intValue()).combo().get(swept)).doubleValue();
+                double av = ((Number) resultsByCell.get(a.intValue()).combo()
+                        .get(swept)).doubleValue();
+                double bv = ((Number) resultsByCell.get(b.intValue()).combo()
+                        .get(swept)).doubleValue();
                 return Double.compare(av, bv);
             }
         });
         int previous = -1;
         for (int i = 0; i < indexes.size(); i++) {
             int index = indexes.get(i).intValue();
+            VariationCellPanel cell = cellForResultIndex(index);
+            if (cell == null) {
+                continue;
+            }
             if (previous < 0) {
-                cells.get(index).clearDeltaN();
+                cell.clearDeltaN();
             } else {
                 int delta = resultsByCell.get(index).nObjects()
                         - resultsByCell.get(previous).nObjects();
-                cells.get(index).setDeltaN(delta);
+                cell.setDeltaN(delta);
             }
             previous = index;
         }
@@ -768,20 +775,20 @@ public final class VariationsDialog extends PipelineDialog {
             return;
         }
         int cellIndex = indexes.get(pointIndex).intValue();
-        if (cellIndex < 0 || cellIndex >= cells.size()) {
+        VariationCellPanel cell = cellForResultIndex(cellIndex);
+        if (cell == null) {
             return;
         }
-        VariationCellPanel cell = cells.get(cellIndex);
         cell.setBorderHint(VariationCellPanel.BorderHint.KNEE);
         stableCountStatus = "Most stable count at "
                 + ParameterLabels.shortKey(swept) + " = "
-                + formatValue(cell.combo().get(swept));
+                + formatValue(resultsByCell.get(cellIndex).combo().get(swept));
         setSuggestionText(indicatorSummary());
     }
 
     private List<Integer> visibleCompletedCountCurveIndexes(ParameterId driver) {
         List<Integer> indexes = new ArrayList<Integer>();
-        for (int i = 0; i < cells.size(); i++) {
+        for (int i = 0; i < resultsByCell.size(); i++) {
             if (!isCompletedCountCurveCell(i, driver)) {
                 continue;
             }
@@ -807,8 +814,7 @@ public final class VariationsDialog extends PipelineDialog {
             cells.get(i).setStabilityWinner(false);
         }
         if (currentSweep == null
-                || cells.size() < 3
-                || resultsByCell.size() != cells.size()) {
+                || resultsByCell.size() < 3) {
             stableMasksStatus = "";
             setSuggestionText(indicatorSummary());
             return;
@@ -816,8 +822,8 @@ public final class VariationsDialog extends PipelineDialog {
         // Macro sweeps stay eligible for mask agreement: the topology only
         // needs neighbouring completed tiles, while the 3-tile guard suppresses
         // two-value macro-only sweeps.
-        List<ParameterCombo> combos = new ArrayList<ParameterCombo>(cells.size());
-        List<ImagePlus> labels = new ArrayList<ImagePlus>(cells.size());
+        List<ParameterCombo> combos = new ArrayList<ParameterCombo>(resultsByCell.size());
+        List<ImagePlus> labels = new ArrayList<ImagePlus>(resultsByCell.size());
         for (int i = 0; i < resultsByCell.size(); i++) {
             VariationResult result = resultsByCell.get(i);
             if (result == null || result.hasError() || result.label() == null) {
@@ -828,7 +834,10 @@ public final class VariationsDialog extends PipelineDialog {
         }
         for (int i = 0; i < combos.size(); i++) {
             double mean = IouStability.meanNeighbourIou(combos, labels, i);
-            cells.get(i).setIouToNeighbours(mean);
+            VariationCellPanel cell = cellForResultIndex(i);
+            if (cell != null) {
+                cell.setIouToNeighbours(mean);
+            }
             VariationResult result = resultsByCell.get(i);
             if (result != null && !Double.isNaN(mean)) {
                 resultsByCell.set(i, result.withMeanNeighbourIou(mean));
@@ -844,14 +853,14 @@ public final class VariationsDialog extends PipelineDialog {
             return;
         }
         int index = stableIndex.getAsInt();
-        if (index < 0 || index >= cells.size()) {
+        VariationCellPanel cell = cellForResultIndex(index);
+        if (cell == null) {
             return;
         }
         double mean = IouStability.meanNeighbourIou(combos, labels, index);
-        VariationCellPanel cell = cells.get(index);
         cell.setStabilityWinner(true, mean);
         stableMasksStatus = "Most stable object masks at "
-                + comboSummaryForStatus(cell.combo())
+                + comboSummaryForStatus(resultsByCell.get(index).combo())
                 + " (IoU " + String.format(Locale.ROOT, "%.2f", Double.valueOf(mean)) + ")";
         setSuggestionText(indicatorSummary());
     }
@@ -992,7 +1001,7 @@ public final class VariationsDialog extends PipelineDialog {
     }
 
     private void updateProgressSliver() {
-        int total = cells.isEmpty() ? estimatedCellCount() : cells.size();
+        int total = currentVariationTotal();
         progressSliver.setCounts(completedCount, total, failedCount);
         progressSliver.setLineText(progressLine(total));
         progressSliver.setStrategyHint(strategyLabel.getText());
@@ -1123,6 +1132,32 @@ public final class VariationsDialog extends PipelineDialog {
         return failures;
     }
 
+    private int currentVariationTotal() {
+        if (!resultsByCell.isEmpty()) {
+            return resultsByCell.size();
+        }
+        if (!cells.isEmpty()) {
+            return Math.max(0, cells.size() - baselineCellOffset());
+        }
+        return estimatedCellCount();
+    }
+
+    private int resultCellTotal() {
+        return resultsByCell.size();
+    }
+
+    private VariationCellPanel cellForResultIndex(int resultIndex) {
+        int cellIndex = resultIndex + baselineCellOffset();
+        if (cellIndex < 0 || cellIndex >= cells.size()) {
+            return null;
+        }
+        return cells.get(cellIndex);
+    }
+
+    private int baselineCellOffset() {
+        return !cells.isEmpty() && cells.get(0).isBaselineForTest() ? 1 : 0;
+    }
+
     private String progressStatus(int total, boolean includeElapsed) {
         String base = completedCount + "/" + Math.max(0, total)
                 + separator() + "running";
@@ -1133,7 +1168,7 @@ public final class VariationsDialog extends PipelineDialog {
     }
 
     private String completionStatus() {
-        String base = completedCount + "/" + Math.max(0, cells.size())
+        String base = completedCount + "/" + Math.max(0, currentVariationTotal())
                 + separator() + indicatorSummary()
                 + separator() + elapsedText();
         return statusWithFailures(base);
@@ -1143,7 +1178,7 @@ public final class VariationsDialog extends PipelineDialog {
         if (failedCount <= 0) {
             return base;
         }
-        return completedCount + "/" + Math.max(0, cells.size())
+        return completedCount + "/" + Math.max(0, currentVariationTotal())
                 + separator() + failedCount + " failed (hover for details)"
                 + separator() + elapsedText();
     }

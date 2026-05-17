@@ -48,11 +48,12 @@ public class MacroVariationsDialogGridWindowTest {
                 dialog.runButtonForTest().doClick();
                 VariationGridWindow window = dialog.gridWindowForTest();
                 assertNotNull(window);
-                assertEquals(4, window.cellsForTest().size());
+                assertEquals(5, window.cellsForTest().size());
+                assertEquals("Original", window.cellsForTest().get(0).footerTextForTest());
                 GridLayout layout =
                         (GridLayout) window.gridPanelForTest().getLayout();
                 assertEquals(2, layout.getRows());
-                assertEquals(2, layout.getColumns());
+                assertEquals(3, layout.getColumns());
                 firstWindow.set(window);
                 ref.set(dialog);
             }
@@ -110,8 +111,13 @@ public class MacroVariationsDialogGridWindowTest {
                 @Override public void run() {
                     dialog.gridWindowForTest().otsuOverlayCheckBoxForTest().doClick();
                     for (VariationCellPanel cell : dialog.cellsForTest()) {
-                        assertEquals(VariationCellPanel.OverlayMode.OTSU_MASK,
-                                cell.overlayModeForTest());
+                        if (cell.isBaselineForTest()) {
+                            assertEquals(VariationCellPanel.OverlayMode.NONE,
+                                    cell.overlayModeForTest());
+                        } else {
+                            assertEquals(VariationCellPanel.OverlayMode.OTSU_MASK,
+                                    cell.overlayModeForTest());
+                        }
                     }
                 }
             });

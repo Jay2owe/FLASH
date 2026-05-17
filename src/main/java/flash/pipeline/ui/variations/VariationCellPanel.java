@@ -145,6 +145,7 @@ public final class VariationCellPanel extends JPanel {
     private boolean selectedForCompare;
     private boolean acceptEnabled;
     private boolean errorState;
+    private boolean isBaseline;
     private boolean showHalo;
     private boolean peeking;
     private boolean suppressNextClick;
@@ -170,7 +171,7 @@ public final class VariationCellPanel extends JPanel {
         this.croppedSource = croppedSource;
         this.onAccept = onAccept;
         this.onCompare = onCompare;
-        this.placeholderIndex = Math.max(0, placeholderIndex);
+        this.placeholderIndex = placeholderIndex;
         this.haloTimer = new Timer(33, e -> advanceHalo());
         this.haloTimer.setInitialDelay(0);
         this.peekDelayTimer = new Timer(PEEK_DELAY_MS, e -> beginPeek());
@@ -189,8 +190,56 @@ public final class VariationCellPanel extends JPanel {
         refreshTooltip();
     }
 
+    public static VariationCellPanel baseline(ImagePlus croppedSource) {
+        VariationCellPanel cell = new VariationCellPanel(
+                ParameterCombo.builder().build(),
+                croppedSource,
+                null,
+                null,
+                -1);
+        cell.markAsBaseline(croppedSource);
+        return cell;
+    }
+
     public ParameterCombo combo() {
         return combo;
+    }
+
+    void markAsBaseline(ImagePlus croppedSource) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    markAsBaseline(croppedSource);
+                }
+            });
+            return;
+        }
+        isBaseline = true;
+        acceptEnabled = false;
+        errorState = false;
+        errorText = "";
+        filteredImage = null;
+        invalidateOverlayCache();
+        setCachedLabel(null, false);
+        cachedStats = null;
+        objectCount = -1;
+        durationMs = -1L;
+        deltaN = UNKNOWN_DELTA;
+        iouToNeighbours = Double.NaN;
+        filterSnr = Double.NaN;
+        filterBgSigma = Double.NaN;
+        filterParameterText = "";
+        filterChipText = "";
+        filterChipVisible = false;
+        filterSnrText = "";
+        filterBgSigmaText = "";
+        clearRibbonLabelOverride();
+        clearDownstreamVerdictState();
+        showSegmentationFooter();
+        setDisplayedPreviewImage(croppedSource);
+        setStateText("Original", STABILITY_BORDER);
+        refreshTooltip();
+        refreshBorder();
     }
 
     public void setFooterParameterKeys(final List<ParameterKey> keys) {
@@ -733,6 +782,14 @@ public final class VariationCellPanel extends JPanel {
         return suppressNextClick;
     }
 
+    boolean isBaselineForTest() {
+        return isBaseline;
+    }
+
+    boolean isAcceptEnabledForTest() {
+        return acceptEnabled;
+    }
+
     boolean isHaloTimerRunningForTest() {
         return haloTimer.isRunning();
     }
@@ -812,7 +869,7 @@ public final class VariationCellPanel extends JPanel {
     }
 
     boolean isPickPillVisibleForTest() {
-        return acceptEnabled;
+        return acceptEnabled && !isBaseline;
     }
 
     @Override protected void paintComponent(Graphics g) {
@@ -825,9 +882,20 @@ public final class VariationCellPanel extends JPanel {
         g2.fill(card);
         float outlineWidth = selectedForCompare
                 ? COMPARE_OUTLINE_WIDTH
-                : DEFAULT_OUTLINE_WIDTH;
-        g2.setStroke(new BasicStroke(outlineWidth));
-        g2.setColor(selectedForCompare ? COMPARE_BORDER : DEFAULT_BORDER);
+                : isBaseline ? 3f : DEFAULT_OUTLINE_WIDTH;
+        if (isBaseline) {
+            g2.setStroke(new BasicStroke(outlineWidth,
+                    BasicStroke.CAP_ROUND,
+                    BasicStroke.JOIN_ROUND,
+                    0f,
+                    new float[] { 7f, 4f },
+                    0f));
+        } else {
+            g2.setStroke(new BasicStroke(outlineWidth));
+        }
+        g2.setColor(isBaseline
+                ? STABILITY_BORDER
+                : selectedForCompare ? COMPARE_BORDER : DEFAULT_BORDER);
         g2.draw(cardShape(outlineWidth));
         g2.dispose();
     }
@@ -1087,6 +1155,12 @@ public final class VariationCellPanel extends JPanel {
     private void refreshTooltip() {
         StringBuilder sb = new StringBuilder();
         sb.append("<html>");
+        if (isBaseline) {
+            sb.append("Original source crop");
+            sb.append("</html>");
+            setTooltips(sb.toString());
+            return;
+        }
         sb.append(html(combo.toCanonicalJson()));
         if (errorState) {
             sb.append("<br><b>Failed:</b> ")
@@ -1231,6 +1305,10 @@ public final class VariationCellPanel extends JPanel {
     }
 
     private void paintRibbons(Graphics g) {
+        if (isBaseline) {
+            paintRibbon(g, "ORIGINAL", STABILITY_BORDER, Color.WHITE, true);
+            return;
+        }
         if (kneeWinner) {
             String text = ribbonLabelOverride == null
                     ? "STABLE COUNT"
@@ -1755,7 +1833,7 @@ public final class VariationCellPanel extends JPanel {
         int width = croppedSource == null ? 96 : Math.max(1, croppedSource.getWidth());
         int height = croppedSource == null ? 96 : Math.max(1, croppedSource.getHeight());
         int slices = croppedSource == null ? 1 : Math.max(1, croppedSource.getStackSize());
-        int labelValue = (placeholderIndex % 250) + 1;
+        int labelValue = Math.floorMod(placeholderIndex, 250) + 1;
         ImageStack stack = new ImageStack(width, height);
         for (int z = 0; z < slices; z++) {
             ByteProcessor bp = new ByteProcessor(width, height);

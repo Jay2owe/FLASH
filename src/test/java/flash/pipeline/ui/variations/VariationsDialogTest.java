@@ -47,20 +47,24 @@ public class VariationsDialogTest {
 
         holder[0].waitForDoneForTest(5000L);
 
-        assertEquals(6, holder[0].cellCountForTest());
+        assertEquals(7, holder[0].cellCountForTest());
         assertEquals(6, holder[0].completedCountForTest());
-        assertEquals(6, holder[0].gridWindowForTest().cellsForTest().size());
+        assertEquals(7, holder[0].gridWindowForTest().cellsForTest().size());
 
         SwingUtilities.invokeAndWait(new Runnable() {
             @Override public void run() {
                 holder[0].setGlobalZForTest(3);
                 java.util.List<VariationCellPanel> cells =
                         holder[0].gridWindowForTest().cellsForTest();
+                assertTrue(cells.get(0).isBaselineForTest());
+                assertEquals("Original", cells.get(0).footerTextForTest());
                 for (int i = 0; i < cells.size(); i++) {
                     assertEquals(3, cells.get(i).currentZForTest());
+                }
+                for (int i = 1; i < cells.size(); i++) {
                     assertTrue(cells.get(i).cachedLabelForTest() != null);
                 }
-                cells.get(0).clickForTest(false);
+                cells.get(1).clickForTest(false);
             }
         });
         assertTrue(accepted.get() != null);

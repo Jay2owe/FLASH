@@ -99,31 +99,36 @@ public class MacroVariationsDialogOverlayToggleTest {
 
     private static void assertCellsHaveMode(List<VariationCellPanel> cells,
                                             VariationCellPanel.OverlayMode mode) {
-        assertEquals(2, cells.size());
+        assertEquals(3, cells.size());
         for (int i = 0; i < cells.size(); i++) {
-            assertEquals(mode, cells.get(i).overlayModeForTest());
+            if (cells.get(i).isBaselineForTest()) {
+                assertEquals(VariationCellPanel.OverlayMode.NONE,
+                        cells.get(i).overlayModeForTest());
+            } else {
+                assertEquals(mode, cells.get(i).overlayModeForTest());
+            }
         }
     }
 
     private static void assertOverlayImages(MacroVariationsDialog dialog) {
         List<VariationCellPanel> cells = dialog.cellsForTest();
         List<VariationResult> results = dialog.resultsForTest();
-        assertEquals(results.size(), cells.size());
-        for (int i = 0; i < cells.size(); i++) {
+        assertEquals(results.size() + 1, cells.size());
+        for (int i = 0; i < results.size(); i++) {
             assertNotSame(results.get(i).previewImage(),
-                    cells.get(i).currentPreviewImageForTest());
+                    cells.get(i + 1).currentPreviewImageForTest());
             assertEquals("Threshold red overlay",
-                    cells.get(i).currentPreviewImageForTest().getTitle());
+                    cells.get(i + 1).currentPreviewImageForTest().getTitle());
         }
     }
 
     private static void assertPlainImages(MacroVariationsDialog dialog) {
         List<VariationCellPanel> cells = dialog.cellsForTest();
         List<VariationResult> results = dialog.resultsForTest();
-        assertEquals(results.size(), cells.size());
-        for (int i = 0; i < cells.size(); i++) {
+        assertEquals(results.size() + 1, cells.size());
+        for (int i = 0; i < results.size(); i++) {
             assertEquals(results.get(i).previewImage(),
-                    cells.get(i).currentPreviewImageForTest());
+                    cells.get(i + 1).currentPreviewImageForTest());
         }
     }
 

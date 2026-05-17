@@ -63,7 +63,7 @@ public class MacroVariationsDialogIntegrationTest {
                 @Override public void run() {
                     assertTrue(dialog.cellsForTest().size() > 0);
                     assertFalse(dialog.exportPipelineFigureButtonForTest().isEnabled());
-                    dialog.cellsForTest().get(0).clickForTest(false);
+                    dialog.cellsForTest().get(1).clickForTest(false);
                     assertTrue(dialog.exportPipelineFigureButtonForTest().isEnabled());
                     assertTrue(dialog.useComboButtonForTest().isEnabled());
                     dialog.setPipelineFigureExportFileForTest(requested);
