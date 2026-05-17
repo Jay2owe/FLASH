@@ -124,7 +124,7 @@ Method note: `python -m graphify query "custom segmentation engine model catalog
 - Status: RESOLVED
 - Severity: MINOR
 - Evidence: The pre-merge validation stage required README coverage for pinned Cellpose 3/no Cellpose 4, Fiji-compatible StarDist zips, per-slice StarDist + Z-linking, and a link to `docs/training_segmentation_models.md` in `docs/custom-segmentation-engines/09_validation-docs.md:35`; current README mentions selectable built-ins/custom model import and external training in `README.md:90` and `README.md:92`, but does not include the Cellpose 4 exclusion, per-slice 2D StarDist caveat, model catalog layout, or the missing training guide link.
-- Resolution: RESOLVED in commit `07a821c`. README now includes a compact runtime and catalog note covering Cellpose 3.1.1.2 pinning, no Cellpose 4 / Cellpose-SAM / cpsam, Fiji-compatible StarDist `.zip` imports, per-slice 2D StarDist with Z-linking, the `<projectRoot>/FLASH/Configuration/Segmentation Models/` catalog layout, and the training guide link.
+- Resolution: RESOLVED in commit `052c340`. README now includes a compact runtime and catalog note covering Cellpose 3.1.1.2 pinning, no Cellpose 4 / Cellpose-SAM / cpsam, Fiji-compatible StarDist `.zip` imports, per-slice 2D StarDist with Z-linking, the `<projectRoot>/FLASH/Configuration/Segmentation Models/` catalog layout, and the training guide link.
 - Gap: None.
 
 ## Stage 10 - Few-Shot Interactive Segmentation
