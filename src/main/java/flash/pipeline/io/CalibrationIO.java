@@ -97,19 +97,19 @@ public final class CalibrationIO {
                              double pixelDepth, double stackDepth, String unit) {
         File file = new File(objectsDir, FILENAME);
         try {
-            PrintWriter pw = new PrintWriter(file, "UTF-8");
-            try {
-                pw.println("# Image calibration written by FLASH (Fluorescence Automated Spatial Histology)");
-                pw.println("pixelWidth=" + pixelWidth);
-                pw.println("pixelHeight=" + pixelHeight);
-                pw.println("pixelDepth=" + pixelDepth);
-                if (!Double.isNaN(stackDepth) && stackDepth > 0) {
-                    pw.println("stackDepth=" + stackDepth);
+            CsvSupport.writeAtomically(file, new CsvSupport.WriterAction() {
+                @Override
+                public void write(PrintWriter pw) {
+                    pw.println("# Image calibration written by FLASH (Fluorescence Automated Spatial Histology)");
+                    pw.println("pixelWidth=" + pixelWidth);
+                    pw.println("pixelHeight=" + pixelHeight);
+                    pw.println("pixelDepth=" + pixelDepth);
+                    if (!Double.isNaN(stackDepth) && stackDepth > 0) {
+                        pw.println("stackDepth=" + stackDepth);
+                    }
+                    pw.println("unit=" + (unit != null ? unit : "pixel"));
                 }
-                pw.println("unit=" + (unit != null ? unit : "pixel"));
-            } finally {
-                pw.close();
-            }
+            });
             IJ.log("  Calibration saved: " + pixelWidth + " x " + pixelHeight
                     + " x " + pixelDepth + " " + unit
                     + ((!Double.isNaN(stackDepth) && stackDepth > 0)

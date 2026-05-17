@@ -8,6 +8,7 @@ import java.io.PrintWriter;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -26,6 +27,43 @@ public final class CsvSupport {
 
     public static PrintWriter newWriter(File file) throws IOException {
         return new PrintWriter(Files.newBufferedWriter(file.toPath(), CHARSET));
+    }
+
+    public static void writeAtomically(File file, WriterAction action) throws IOException {
+        if (file == null) throw new IOException("CSV output file is null");
+        File parent = file.getAbsoluteFile().getParentFile();
+        if (parent != null && !parent.isDirectory()) {
+            Files.createDirectories(parent.toPath());
+        }
+        File temp = File.createTempFile("." + file.getName() + ".", ".tmp", parent);
+        boolean complete = false;
+        try {
+            PrintWriter writer = newWriter(temp);
+            try {
+                action.write(writer);
+                if (writer.checkError()) {
+                    throw new IOException("Failed while writing temporary CSV: " + temp.getAbsolutePath());
+                }
+            } finally {
+                writer.close();
+            }
+            try {
+                Files.move(temp.toPath(), file.toPath(),
+                        StandardCopyOption.ATOMIC_MOVE,
+                        StandardCopyOption.REPLACE_EXISTING);
+            } catch (IOException atomicMoveFailed) {
+                Files.move(temp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING);
+            }
+            complete = true;
+        } finally {
+            if (!complete) {
+                Files.deleteIfExists(temp.toPath());
+            }
+        }
+    }
+
+    public interface WriterAction {
+        void write(PrintWriter writer) throws IOException;
     }
 
     public static boolean isBlankRecord(String record) {

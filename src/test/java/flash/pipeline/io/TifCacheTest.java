@@ -5,8 +5,11 @@ import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
 import java.io.File;
+import java.util.Arrays;
+import java.util.Collections;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class TifCacheTest {
@@ -31,5 +34,18 @@ public class TifCacheTest {
 
         assertTrue(TifCache.cacheExists(dir.getAbsolutePath()));
         assertEquals(1, TifCache.cacheSize(dir.getAbsolutePath()));
+    }
+
+    @Test
+    public void hasAllSeriesRequiresMatchingSeriesPrefixes() throws Exception {
+        File dir = temp.newFolder("sparse-cache");
+        File cache = TifCache.getCacheDir(dir.getAbsolutePath());
+        assertTrue(cache.mkdirs());
+        assertTrue(new File(cache, "0000_first.tif").createNewFile());
+        assertTrue(new File(cache, "0002_third.tif").createNewFile());
+
+        assertTrue(TifCache.hasAllSeries(dir.getAbsolutePath(), Arrays.asList(0, 2)));
+        assertFalse(TifCache.hasAllSeries(dir.getAbsolutePath(), Arrays.asList(0, 1)));
+        assertFalse(TifCache.hasAllSeries(dir.getAbsolutePath(), Collections.<Integer>emptyList()));
     }
 }

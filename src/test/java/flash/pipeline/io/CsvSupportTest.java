@@ -7,10 +7,12 @@ import org.junit.rules.TemporaryFolder;
 import java.io.File;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.List;
 
 import static org.junit.Assert.assertArrayEquals;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 public class CsvSupportTest {
@@ -62,5 +64,23 @@ public class CsvSupportTest {
         } catch (IOException e) {
             assertTrue(e.getMessage().contains("Unexpected character"));
         }
+    }
+
+    @Test
+    public void writeAtomicallyReplacesFinalFileAndRemovesTemp() throws Exception {
+        File csv = temp.newFile("atomic.csv");
+        Files.write(csv.toPath(), Arrays.asList("old"), CsvSupport.CHARSET);
+
+        CsvSupport.writeAtomically(csv, new CsvSupport.WriterAction() {
+            @Override
+            public void write(PrintWriter writer) {
+                writer.println("new");
+            }
+        });
+
+        assertEquals(Arrays.asList("new"), Files.readAllLines(csv.toPath(), CsvSupport.CHARSET));
+        File[] leftovers = csv.getParentFile().listFiles((dir, name) ->
+                name.startsWith("." + csv.getName() + ".") && name.endsWith(".tmp"));
+        assertTrue(leftovers == null || leftovers.length == 0);
     }
 }

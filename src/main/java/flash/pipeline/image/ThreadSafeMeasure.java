@@ -145,7 +145,7 @@ public final class ThreadSafeMeasure {
         Calibration cal = imp.getCalibration();
         ImageStatistics stats = ImageStatistics.getStatistics(ip, measurements, cal);
         double intDen = stats.area > 0 ? stats.mean * stats.area : 0.0;
-        return new IntegratedAreaResult(intDen, stats.areaFraction);
+        return new IntegratedAreaResult(finiteOrNaN(intDen), finiteOrNaN(stats.areaFraction));
     }
 
     private static double measureIntegratedDensity(ImagePlus imp, int slice, Roi roi) {
@@ -154,7 +154,12 @@ public final class ThreadSafeMeasure {
         int measurements = ij.measure.Measurements.INTEGRATED_DENSITY;
         Calibration cal = imp.getCalibration();
         ImageStatistics stats = ImageStatistics.getStatistics(ip, measurements, cal);
-        return stats.area > 0 ? stats.mean * stats.area : 0.0;
+        double intDen = stats.area > 0 ? stats.mean * stats.area : 0.0;
+        return finiteOrNaN(intDen);
+    }
+
+    private static double finiteOrNaN(double value) {
+        return Double.isNaN(value) || Double.isInfinite(value) ? Double.NaN : value;
     }
 
     private static final class IntegratedAreaResult {

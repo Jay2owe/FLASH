@@ -72,15 +72,15 @@ public final class OrientationAliasIO {
             IoUtils.mustMkdirs(exportDir);
         }
 
-        PrintWriter pw = CsvSupport.newWriter(file);
-        try {
-            pw.println(CsvSupport.joinRow(Arrays.asList("Hemisphere", "Alias")));
-            if (aliases == null) return;
-            writeAliases(pw, OrientationManifestRow.Hemisphere.LH, aliases.get(OrientationManifestRow.Hemisphere.LH));
-            writeAliases(pw, OrientationManifestRow.Hemisphere.RH, aliases.get(OrientationManifestRow.Hemisphere.RH));
-        } finally {
-            pw.close();
-        }
+        CsvSupport.writeAtomically(file, new CsvSupport.WriterAction() {
+            @Override
+            public void write(PrintWriter pw) {
+                pw.println(CsvSupport.joinRow(Arrays.asList("Hemisphere", "Alias")));
+                if (aliases == null) return;
+                writeAliases(pw, OrientationManifestRow.Hemisphere.LH, aliases.get(OrientationManifestRow.Hemisphere.LH));
+                writeAliases(pw, OrientationManifestRow.Hemisphere.RH, aliases.get(OrientationManifestRow.Hemisphere.RH));
+            }
+        });
     }
 
     private static void writeAliases(PrintWriter pw,

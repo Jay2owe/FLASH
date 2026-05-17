@@ -305,15 +305,15 @@ public final class ConditionManifestIO {
     }
 
     static void write(File manifest, Map<String, String> assignments) throws IOException {
-        PrintWriter pw = CsvSupport.newWriter(manifest);
-        try {
-            pw.println(CsvSupport.joinRow(java.util.Arrays.asList("AnimalName", "Condition")));
-            for (Map.Entry<String, String> entry : assignments.entrySet()) {
-                pw.println(CsvSupport.joinRow(java.util.Arrays.asList(entry.getKey(), entry.getValue())));
+        CsvSupport.writeAtomically(manifest, new CsvSupport.WriterAction() {
+            @Override
+            public void write(PrintWriter pw) {
+                pw.println(CsvSupport.joinRow(java.util.Arrays.asList("AnimalName", "Condition")));
+                for (Map.Entry<String, String> entry : assignments.entrySet()) {
+                    pw.println(CsvSupport.joinRow(java.util.Arrays.asList(entry.getKey(), entry.getValue())));
+                }
             }
-        } finally {
-            pw.close();
-        }
+        });
     }
 
     /**

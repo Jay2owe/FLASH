@@ -5,6 +5,10 @@ import ij.IJ;
 import ij.ImagePlus;
 import ij.io.FileSaver;
 
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Future;
@@ -46,7 +50,9 @@ public class AsyncImageSaver {
             @Override
             public void run() {
                 try {
-                    IJ.saveAsTiff(copy, path);
+                    saveTiffAtomically(copy, path);
+                } catch (IOException e) {
+                    throw new RuntimeException("Failed to save TIFF atomically: " + path, e);
                 } finally {
                     copy.changes = false;
                     copy.close();
@@ -69,7 +75,9 @@ public class AsyncImageSaver {
             @Override
             public void run() {
                 try {
-                    new FileSaver(copy).saveAsPng(path);
+                    savePngAtomically(copy, path);
+                } catch (IOException e) {
+                    throw new RuntimeException("Failed to save PNG atomically: " + path, e);
                 } finally {
                     copy.changes = false;
                     copy.close();
@@ -112,6 +120,64 @@ public class AsyncImageSaver {
     private static void logFirstSave() {
         if (firstSaveLogged.compareAndSet(false, true)) {
             IJ.log("  Background saver started — images will be saved asynchronously.");
+        }
+    }
+
+    private static void saveTiffAtomically(ImagePlus image, String path) throws IOException {
+        File target = new File(path);
+        File temp = createTempSibling(target, ".tif");
+        boolean complete = false;
+        try {
+            FileSaver saver = new FileSaver(image);
+            boolean saved = image.getStackSize() > 1
+                    ? saver.saveAsTiffStack(temp.getAbsolutePath())
+                    : saver.saveAsTiff(temp.getAbsolutePath());
+            if (!saved) {
+                throw new IOException("ImageJ failed to save temporary TIFF: " + temp.getAbsolutePath());
+            }
+            moveIntoPlace(temp, target);
+            complete = true;
+        } finally {
+            if (!complete) {
+                Files.deleteIfExists(temp.toPath());
+            }
+        }
+    }
+
+    private static void savePngAtomically(ImagePlus image, String path) throws IOException {
+        File target = new File(path);
+        File temp = createTempSibling(target, ".png");
+        boolean complete = false;
+        try {
+            boolean saved = new FileSaver(image).saveAsPng(temp.getAbsolutePath());
+            if (!saved) {
+                throw new IOException("ImageJ failed to save temporary PNG: " + temp.getAbsolutePath());
+            }
+            moveIntoPlace(temp, target);
+            complete = true;
+        } finally {
+            if (!complete) {
+                Files.deleteIfExists(temp.toPath());
+            }
+        }
+    }
+
+    private static File createTempSibling(File target, String suffix) throws IOException {
+        File absolute = target.getAbsoluteFile();
+        File parent = absolute.getParentFile();
+        if (parent != null && !parent.isDirectory()) {
+            Files.createDirectories(parent.toPath());
+        }
+        return File.createTempFile("." + absolute.getName() + ".", suffix, parent);
+    }
+
+    private static void moveIntoPlace(File temp, File target) throws IOException {
+        try {
+            Files.move(temp.toPath(), target.toPath(),
+                    StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException atomicMoveFailed) {
+            Files.move(temp.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING);
         }
     }
 

@@ -1,9 +1,15 @@
 package flash.pipeline.io;
 
+import ij.ImagePlus;
+import ij.ImageStack;
+import ij.process.ByteProcessor;
 import org.junit.After;
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 
+import java.io.File;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -15,6 +21,9 @@ import static org.junit.Assert.*;
  * actually scales during drain and resets cleanly between batches.
  */
 public class AsyncImageSaverTest {
+
+    @Rule
+    public TemporaryFolder temp = new TemporaryFolder();
 
     @Before
     public void setUp() {
@@ -159,6 +168,23 @@ public class AsyncImageSaverTest {
     }
 
     // ── helper ──────────────────────────────────────────────────────
+
+    @Test
+    public void pngSavePublishesOnlyFinalFile() throws Exception {
+        ImageStack stack = new ImageStack(2, 1);
+        stack.addSlice(new ByteProcessor(2, 1, new byte[] {1, 2}, null));
+        ImagePlus image = new ImagePlus("atomic-png", stack);
+        File out = temp.newFile("saved.png");
+        assertTrue(out.delete());
+
+        AsyncImageSaver.saveAsPngAsync(image, out.getAbsolutePath());
+        AsyncImageSaver.waitForAllWithProgress(1);
+
+        assertTrue(out.isFile());
+        File[] leftovers = out.getParentFile().listFiles((dir, name) ->
+                name.startsWith("." + out.getName() + ".") && name.endsWith(".png"));
+        assertTrue(leftovers == null || leftovers.length == 0);
+    }
 
     private static void updateMax(AtomicInteger max, int value) {
         int prev;

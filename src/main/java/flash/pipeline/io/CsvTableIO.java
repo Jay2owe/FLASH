@@ -128,17 +128,17 @@ public final class CsvTableIO {
      */
     public static void writeChannelCsv(File outFile, ChannelData cd) {
         try {
-            PrintWriter pw = CsvSupport.newWriter(outFile);
-            try {
-                pw.println(joinCsv(cd.header));
-                for (List<String> row : cd.rows) {
-                    pw.println(joinCsv(row));
+            CsvSupport.writeAtomically(outFile, new CsvSupport.WriterAction() {
+                @Override
+                public void write(PrintWriter pw) {
+                    pw.println(joinCsv(cd.header));
+                    for (List<String> row : cd.rows) {
+                        pw.println(joinCsv(row));
+                    }
                 }
-            } finally {
-                pw.close();
-            }
+            });
         } catch (IOException e) {
-            IJ.log("  Error writing " + outFile.getName() + ": " + e.getMessage());
+            IJ.log("  Error writing " + outFile.getAbsolutePath() + ": " + e.getMessage());
         }
     }
 
@@ -160,22 +160,22 @@ public final class CsvTableIO {
      */
     public static void writeResultsTableCsv(File outFile, ResultsTable table, List<String> orderedColumns) {
         try {
-            PrintWriter pw = CsvSupport.newWriter(outFile);
-            try {
-                pw.println(joinCsv(orderedColumns));
-                if (table == null) return;
-                for (int row = 0; row < table.size(); row++) {
-                    List<String> values = new ArrayList<String>(orderedColumns.size());
-                    for (String col : orderedColumns) {
-                        values.add(resultsTableValue(table, col, row));
+            CsvSupport.writeAtomically(outFile, new CsvSupport.WriterAction() {
+                @Override
+                public void write(PrintWriter pw) {
+                    pw.println(joinCsv(orderedColumns));
+                    if (table == null) return;
+                    for (int row = 0; row < table.size(); row++) {
+                        List<String> values = new ArrayList<String>(orderedColumns.size());
+                        for (String col : orderedColumns) {
+                            values.add(resultsTableValue(table, col, row));
+                        }
+                        pw.println(joinCsv(values));
                     }
-                    pw.println(joinCsv(values));
                 }
-            } finally {
-                pw.close();
-            }
+            });
         } catch (IOException e) {
-            IJ.log("  Error writing " + outFile.getName() + ": " + e.getMessage());
+            IJ.log("  Error writing " + outFile.getAbsolutePath() + ": " + e.getMessage());
         }
     }
 

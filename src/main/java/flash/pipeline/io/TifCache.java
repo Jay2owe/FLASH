@@ -117,16 +117,8 @@ public class TifCache {
     public static ImagePlus loadSingle(String directory, int index) {
         File cacheDir = firstExistingCacheDir(directory);
         File[] tifs = listTifs(cacheDir);
-        if (tifs == null || index < 0 || index >= tifs.length) return null;
-
-        Arrays.sort(tifs, new Comparator<File>() {
-            @Override
-            public int compare(File a, File b) {
-                return a.getName().compareTo(b.getName());
-            }
-        });
-
-        File tif = tifs[index];
+        File tif = findTifForSeries(tifs, index);
+        if (tif == null) return null;
         ImagePlus imp = IJ.openImage(tif.getAbsolutePath());
         if (imp != null) {
             String name = tif.getName();
@@ -139,6 +131,24 @@ public class TifCache {
             imp.setTitle(name);
         }
         return imp;
+    }
+
+    /**
+     * Returns true only when every requested source series has a matching
+     * zero-padded cached TIFF. A raw file count is not enough because
+     * skip-existing runs may request sparse series indices.
+     */
+    public static boolean hasAllSeries(String directory, List<Integer> indices) {
+        if (indices == null || indices.isEmpty()) return false;
+        File cacheDir = firstExistingCacheDir(directory);
+        File[] tifs = listTifs(cacheDir);
+        if (tifs == null || tifs.length == 0) return false;
+        for (Integer index : indices) {
+            if (index == null || findTifForSeries(tifs, index.intValue()) == null) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
@@ -169,6 +179,17 @@ public class TifCache {
             }
         }
         return tifs.toArray(new File[tifs.size()]);
+    }
+
+    private static File findTifForSeries(File[] tifs, int index) {
+        if (tifs == null || index < 0) return null;
+        String prefix = String.format(Locale.ROOT, "%04d_", index);
+        for (File tif : tifs) {
+            if (tif.getName().startsWith(prefix)) {
+                return tif;
+            }
+        }
+        return null;
     }
 
     private static String sanitizeFilename(String title) {

@@ -101,8 +101,7 @@ public class BoundedImageLoader {
 
         // Always load from cache if it exists and has all required images,
         // even if the user has cache-saving turned off.
-        final boolean cacheHit = directory != null && TifCache.cacheExists(directory)
-                && TifCache.cacheSize(directory) >= indicesToLoad.size();
+        final boolean cacheHit = directory != null && TifCache.hasAllSeries(directory, indicesToLoad);
         final boolean cacheMiss = useTifCache && directory != null && !cacheHit;
 
         if (cacheHit) {

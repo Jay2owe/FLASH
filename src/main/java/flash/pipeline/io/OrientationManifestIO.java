@@ -100,17 +100,17 @@ public final class OrientationManifestIO {
             IoUtils.mustMkdirs(exportDir);
         }
 
-        PrintWriter pw = CsvSupport.newWriter(manifest);
-        try {
-            pw.println(CsvSupport.joinRow(HEADER));
-            if (rows == null) return;
-            for (OrientationManifestRow row : rows) {
-                if (row == null || row.imageKey.isEmpty()) continue;
-                pw.println(CsvSupport.joinRow(toFields(row)));
+        CsvSupport.writeAtomically(manifest, new CsvSupport.WriterAction() {
+            @Override
+            public void write(PrintWriter pw) {
+                pw.println(CsvSupport.joinRow(HEADER));
+                if (rows == null) return;
+                for (OrientationManifestRow row : rows) {
+                    if (row == null || row.imageKey.isEmpty()) continue;
+                    pw.println(CsvSupport.joinRow(toFields(row)));
+                }
             }
-        } finally {
-            pw.close();
-        }
+        });
     }
 
     public static LinkedHashMap<String, OrientationManifestRow> indexByImageKey(
