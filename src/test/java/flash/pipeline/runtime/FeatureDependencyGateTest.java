@@ -198,6 +198,31 @@ public class FeatureDependencyGateTest {
         assertEquals(0, opener.calls);
     }
 
+    @Test
+    public void missingDeconvolutionEngineDependencyUsesAutofixDialogActions() {
+        EnumMap<DependencyId, DependencyStatus> statuses =
+                DependencyRuntimeTestSupport.withStatuses(
+                        DependencyId.DECONVOLUTIONLAB2_RUNTIME,
+                        DependencyStatus.missing("DeconvolutionLab2 jar missing"));
+        FeatureDependencyGate.configure(DependencyRuntimeTestSupport.serviceWith(statuses), opener);
+        ui.headless = false;
+        ui.nextAction = "change_setup";
+
+        FeatureDependencyGate.GateDecision decision = FeatureDependencyGate.check(
+                DependencyId.DECONVOLUTIONLAB2_RUNTIME,
+                "3D Deconvolution",
+                "DeconvolutionLab2 3D deconvolution engine");
+
+        assertEquals(FeatureDependencyGate.GateDecision.CHANGE_SETUP, decision);
+        assertEquals(1, ui.prompts.size());
+        assertTrue(ui.prompts.get(0).plainMessage.contains("Missing dependency: DeconvolutionLab2 runtime"));
+        assertTrue(ui.prompts.get(0).plainMessage.contains("Required for: DeconvolutionLab2 3D deconvolution engine"));
+        assertTrue(ui.prompts.get(0).buttonLabels.contains("Install DeconvolutionLab2"));
+        assertTrue(ui.prompts.get(0).buttonLabels.contains("Open Dependencies"));
+        assertTrue(ui.prompts.get(0).buttonLabels.contains("Go Back / Change Setup"));
+        assertEquals(0, opener.calls);
+    }
+
     private static String join(List<String> values) {
         StringBuilder sb = new StringBuilder();
         for (String value : values) {

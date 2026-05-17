@@ -3,9 +3,12 @@ package flash.pipeline.ui.wizard;
 import flash.pipeline.click.ClickStore;
 import flash.pipeline.click.training.ObjectClassifierTrainer;
 import flash.pipeline.click.training.cellpose.CellposeDatasetPackager;
+import flash.pipeline.click.training.cellpose.CellposeLocalTrainingService;
 import flash.pipeline.click.training.stardist.StarDistDatasetPackager;
+import flash.pipeline.click.training.stardist.StarDistLocalTrainingService;
 import flash.pipeline.segmentation.catalog.ModelCatalog;
 import flash.pipeline.segmentation.catalog.ModelEntry;
+import flash.pipeline.ui.config.SegmentationMethodLauncherModel;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -79,6 +82,26 @@ public class TrainCustomEngineWorkflowTest {
     }
 
     @Test
+    public void clickPreviewRouteAppliesSelectedBaseUntilRealCancel() throws Exception {
+        RecordingMethodStore store = new RecordingMethodStore("stardist:0.5:0.4:model=old");
+        TrainCustomEngineWorkflow workflow = workflow(
+                store,
+                clickStore(2, 1),
+                services(okRf(), null, null, new RecordingCatalogService(), "rf_model"));
+        workflow.setBaseToken(TrainCustomEngineWorkflow.Base.CELLPOSE,
+                "cellpose:30.0:0.4:0.0:gpu=false:model=cellpose_cyto3");
+        workflow.selectBase(TrainCustomEngineWorkflow.Base.CELLPOSE_RF);
+
+        workflow.routeToClickPreview();
+
+        assertEquals("cellpose:30.0:0.4:0.0:gpu=false:model=cellpose_cyto3", store.token);
+
+        workflow.cancel();
+
+        assertEquals("stardist:0.5:0.4:model=old", store.token);
+    }
+
+    @Test
     public void successfulSmileRfFlowWritesCatalogEntryAndAppliesTrainedRfToken() throws Exception {
         RecordingMethodStore store = new RecordingMethodStore("classical");
         RecordingCatalogService catalog = new RecordingCatalogService();
@@ -122,6 +145,33 @@ public class TrainCustomEngineWorkflowTest {
     }
 
     @Test
+    public void localStarDistTrainingZipCanBeSavedWithoutManualChooser() throws Exception {
+        RecordingMethodStore store = new RecordingMethodStore("classical");
+        RecordingCatalogService catalog = new RecordingCatalogService();
+        Path dataset = temp.newFolder("sd-local-dataset").toPath();
+        Path zip = temp.newFile("Local_TF_SavedModel.zip").toPath();
+        Files.write(zip, "zip".getBytes(StandardCharsets.UTF_8));
+        RecordingStarDistPackager packager = new RecordingStarDistPackager(dataset);
+        RecordingStarDistTrainer trainer = new RecordingStarDistTrainer(zip);
+        TrainCustomEngineWorkflow workflow = workflow(store, clickStore(25, 25),
+                services(null, packager, trainer, null, catalog, "stardist_local"));
+
+        workflow.selectBase(TrainCustomEngineWorkflow.Base.STARDIST);
+        TrainCustomEngineWorkflow.TrainStepResult result =
+                workflow.runTrainingStep(TrainCustomEngineWorkflow.NO_PROGRESS);
+        workflow.saveModel("Local StarDist", "description");
+        workflow.applyRecommended();
+
+        assertTrue(packager.called);
+        assertTrue(trainer.called);
+        assertEquals(zip.toAbsolutePath().normalize(), workflow.externalModelFile());
+        assertEquals(zip.toAbsolutePath().normalize(), result.starDistTraining.outputZip);
+        assertEquals("stardist:0.5:0.4:linking=5.0:gapClosing=5.0:"
+                        + "area=0.0-Infinity:quality=0.0:intensity=0.0:model=stardist_local",
+                store.token);
+    }
+
+    @Test
     public void successfulCellposeFlowPackagesDatasetAndAppliesCanonicalToken() throws Exception {
         RecordingMethodStore store = new RecordingMethodStore("classical");
         RecordingCatalogService catalog = new RecordingCatalogService();
@@ -143,6 +193,74 @@ public class TrainCustomEngineWorkflowTest {
         assertTrue(packager.called);
         assertEquals("cellpose:30.0:0.4:0.0:gpu=true:chan2=0:model=cellpose_custom",
                 store.token);
+    }
+
+    @Test
+    public void localCellposeTrainingModelCanBeSavedWithoutManualChooser() throws Exception {
+        RecordingMethodStore store = new RecordingMethodStore("classical");
+        RecordingCatalogService catalog = new RecordingCatalogService();
+        Path dataset = temp.newFolder("cp-local-dataset").toPath();
+        Path model = dataset.resolve("models").resolve("cellpose_model_001");
+        Files.createDirectories(model.getParent());
+        Files.write(model, "model".getBytes(StandardCharsets.UTF_8));
+        RecordingCellposePackager packager = new RecordingCellposePackager(dataset);
+        RecordingCellposeTrainer trainer = new RecordingCellposeTrainer(model);
+        TrainCustomEngineWorkflow workflow = workflow(store, clickStore(25, 25),
+                services(null, null, null, packager, trainer, catalog, "cellpose_local"));
+
+        workflow.selectBase(TrainCustomEngineWorkflow.Base.CELLPOSE);
+        TrainCustomEngineWorkflow.TrainStepResult result =
+                workflow.runTrainingStep(TrainCustomEngineWorkflow.NO_PROGRESS);
+        workflow.saveModel("Local Cellpose", "description");
+        workflow.applyRecommended();
+
+        assertTrue(packager.called);
+        assertTrue(trainer.called);
+        assertEquals(model.toAbsolutePath().normalize(), workflow.externalModelFile());
+        assertEquals(model.toAbsolutePath().normalize(), result.cellposeTraining.modelFile);
+        assertEquals("cellpose:30.0:0.4:0.0:gpu=true:chan2=-1:model=cellpose_local",
+                store.token);
+    }
+
+    @Test
+    public void cellpose3DPackageWarningSurfacesInWorkflow() throws Exception {
+        TrainCustomEngineWorkflow workflow = workflow(
+                new RecordingMethodStore("classical"),
+                clickStore(25, 25),
+                services(null, null,
+                        new RecordingCellposePackager(temp.newFolder("cp-3d-dataset").toPath(), true),
+                        new RecordingCatalogService(),
+                        "cellpose_3d"));
+        workflow.selectBase(TrainCustomEngineWorkflow.Base.CELLPOSE);
+
+        TrainCustomEngineWorkflow.TrainStepResult result =
+                workflow.runTrainingStep(TrainCustomEngineWorkflow.NO_PROGRESS);
+
+        assertTrue(result.message.contains("2D-oriented"));
+        assertTrue(workflow.warningMessage().contains("per-Z"));
+    }
+
+    @Test
+    public void cellposeLocalFactoryRequiresHiddenUiFlagAndLocalCapability() {
+        String previousUi = System.getProperty(
+                SegmentationMethodLauncherModel.TRAIN_CUSTOM_ENGINE_UI_ENABLED_PROPERTY);
+        String previousLocal = System.getProperty(
+                CellposeLocalTrainingService.LOCAL_ENABLED_PROPERTY);
+        try {
+            System.clearProperty(SegmentationMethodLauncherModel.TRAIN_CUSTOM_ENGINE_UI_ENABLED_PROPERTY);
+            System.setProperty(CellposeLocalTrainingService.LOCAL_ENABLED_PROPERTY, "true");
+            assertNull(TrainCustomEngineWorkflow.ImageTrainingServices.cellposeLocalIfEnabled());
+
+            System.setProperty(SegmentationMethodLauncherModel.TRAIN_CUSTOM_ENGINE_UI_ENABLED_PROPERTY, "true");
+            System.clearProperty(CellposeLocalTrainingService.LOCAL_ENABLED_PROPERTY);
+            assertNull(TrainCustomEngineWorkflow.ImageTrainingServices.cellposeLocalIfEnabled());
+
+            System.setProperty(CellposeLocalTrainingService.LOCAL_ENABLED_PROPERTY, "true");
+            assertNotNull(TrainCustomEngineWorkflow.ImageTrainingServices.cellposeLocalIfEnabled());
+        } finally {
+            restoreProperty(SegmentationMethodLauncherModel.TRAIN_CUSTOM_ENGINE_UI_ENABLED_PROPERTY, previousUi);
+            restoreProperty(CellposeLocalTrainingService.LOCAL_ENABLED_PROPERTY, previousLocal);
+        }
     }
 
     @Test
@@ -192,6 +310,49 @@ public class TrainCustomEngineWorkflowTest {
                     }
                 },
                 Clock.fixed(Instant.parse("2026-05-15T00:00:00Z"), ZoneOffset.UTC));
+    }
+
+    private static TrainCustomEngineWorkflow.Services services(
+            TrainCustomEngineWorkflow.RfTrainingService rf,
+            TrainCustomEngineWorkflow.StarDistPackagingService sd,
+            TrainCustomEngineWorkflow.StarDistTrainingService sdTraining,
+            TrainCustomEngineWorkflow.CellposePackagingService cp,
+            RecordingCatalogService catalog,
+            final String key) {
+        return services(rf, sd, sdTraining, cp, null, catalog, key);
+    }
+
+    private static TrainCustomEngineWorkflow.Services services(
+            TrainCustomEngineWorkflow.RfTrainingService rf,
+            TrainCustomEngineWorkflow.StarDistPackagingService sd,
+            TrainCustomEngineWorkflow.StarDistTrainingService sdTraining,
+            TrainCustomEngineWorkflow.CellposePackagingService cp,
+            TrainCustomEngineWorkflow.CellposeTrainingService cpTraining,
+            RecordingCatalogService catalog,
+            final String key) {
+        return new TrainCustomEngineWorkflow.Services(
+                rf,
+                sd,
+                sdTraining,
+                cp,
+                cpTraining,
+                catalog,
+                new TrainCustomEngineWorkflow.ModelKeyGenerator() {
+                    @Override public String newModelKey(ModelCatalog catalog,
+                                                        ModelEntry.Engine engine,
+                                                        String displayName) {
+                        return key;
+                    }
+                },
+                Clock.fixed(Instant.parse("2026-05-15T00:00:00Z"), ZoneOffset.UTC));
+    }
+
+    private static void restoreProperty(String key, String value) {
+        if (value == null) {
+            System.clearProperty(key);
+        } else {
+            System.setProperty(key, value);
+        }
     }
 
     private static TrainCustomEngineWorkflow.RfTrainingService okRf() {
@@ -314,13 +475,46 @@ public class TrainCustomEngineWorkflowTest {
         }
     }
 
+    private static final class RecordingStarDistTrainer
+            implements TrainCustomEngineWorkflow.StarDistTrainingService {
+        final Path zip;
+        boolean called;
+
+        RecordingStarDistTrainer(Path zip) {
+            this.zip = zip;
+        }
+
+        @Override public boolean isEnabled() {
+            return true;
+        }
+
+        @Override public StarDistLocalTrainingService.TrainingResult train(
+                StarDistDatasetPackager.PackagingResult packageResult,
+                String modelName,
+                TrainCustomEngineWorkflow.ProgressListener progress) {
+            called = true;
+            return new StarDistLocalTrainingService.TrainingResult(
+                    zip.toAbsolutePath().normalize(),
+                    packageResult.outputDir.resolve("stardist_training.log"),
+                    packageResult.outputDir.resolve("train_stardist_flash.py"),
+                    packageResult.outputDir.resolve("train_stardist_command.txt"),
+                    0);
+        }
+    }
+
     private static final class RecordingCellposePackager
             implements TrainCustomEngineWorkflow.CellposePackagingService {
         final Path dir;
+        final boolean sourceHad3D;
         boolean called;
 
         RecordingCellposePackager(Path dir) {
+            this(dir, false);
+        }
+
+        RecordingCellposePackager(Path dir, boolean sourceHad3D) {
             this.dir = dir;
+            this.sourceHad3D = sourceHad3D;
         }
 
         @Override public CellposeDatasetPackager.PackagingResult packageDataset(
@@ -330,7 +524,37 @@ public class TrainCustomEngineWorkflowTest {
                 TrainCustomEngineWorkflow.ProgressListener progress) {
             called = true;
             return new CellposeDatasetPackager.PackagingResult(
-                    dir, dir.resolve("train_command.txt"), 8, 96, 25, 25);
+                    dir, dir.resolve("train_command.txt"), 8, 96, 25, 25,
+                    CellposeDatasetPackager.EXPORT_MODE_PER_Z_SLICES,
+                    sourceHad3D,
+                    sourceHad3D ? CellposeDatasetPackager.CELLPOSE_3D_TRAINING_WARNING : "");
+        }
+    }
+
+    private static final class RecordingCellposeTrainer
+            implements TrainCustomEngineWorkflow.CellposeTrainingService {
+        final Path model;
+        boolean called;
+
+        RecordingCellposeTrainer(Path model) {
+            this.model = model;
+        }
+
+        @Override public boolean isEnabled() {
+            return true;
+        }
+
+        @Override public CellposeLocalTrainingService.TrainingResult train(
+                CellposeDatasetPackager.PackagingResult packageResult,
+                String modelName,
+                TrainCustomEngineWorkflow.ProgressListener progress) {
+            called = true;
+            return new CellposeLocalTrainingService.TrainingResult(
+                    model.toAbsolutePath().normalize(),
+                    packageResult.outputDir.resolve("cellpose_training.log"),
+                    packageResult.outputDir.resolve("train_command.txt"),
+                    packageResult.outputDir.resolve("models"),
+                    0);
         }
     }
 }

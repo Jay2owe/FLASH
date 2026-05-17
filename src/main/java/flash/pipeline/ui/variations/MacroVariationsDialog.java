@@ -619,7 +619,10 @@ public final class MacroVariationsDialog extends PipelineDialog {
                 }
             }
         });
+        gridWindow.setAutoRequestFocus(true);
         gridWindow.setVisible(true);
+        gridWindow.toFront();
+        gridWindow.requestFocus();
     }
 
     private String gridWindowTitle() {
@@ -771,7 +774,6 @@ public final class MacroVariationsDialog extends PipelineDialog {
                     ChainRibbon.StepState.SWEPT);
             editor.setSelectedChainStepIndexes(swept);
             refreshCellEstimate();
-            start();
             return;
         }
         // SWEEP_PARAMETER or SWEEP_STEP (focus modes)
@@ -784,7 +786,6 @@ public final class MacroVariationsDialog extends PipelineDialog {
             stepSwapEditor.setFocusedStepIndex(stepIndex);
         }
         refreshCellEstimate();
-        start();
     }
 
     private ParameterSweep currentSweepForMode() {
@@ -872,13 +873,11 @@ public final class MacroVariationsDialog extends PipelineDialog {
         }
         int focused = chainRibbon.focusedStepIndex();
         if (focusModel.focusable.contains(Integer.valueOf(focused))) {
-            // Already focused on a valid step, so push it into the active editor and run.
             if (mode == Mode.SWEEP_PARAMETER) {
                 sweepRangeEditor.setFocusedStepIndex(focused);
             } else if (mode == Mode.SWEEP_STEP) {
                 stepSwapEditor.setFocusedStepIndex(focused);
             }
-            start();
             return true;
         }
         chainRibbon.focusStep(focusModel.focusable.iterator().next().intValue());

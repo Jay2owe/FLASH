@@ -1,6 +1,7 @@
 package flash.pipeline.click.suggest;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -53,12 +54,17 @@ public final class ClassicalParameterSuggester
         if (badLabels.size() < 3) {
             return ClassicalSuggestion.none();
         }
+        final Set<Integer> protectedLabels =
+                protectedLabels(stats.keySet(), badLabels, positiveLabels);
+        if (positiveLabels.isEmpty() && protectedLabels.isEmpty()) {
+            return ClassicalSuggestion.none();
+        }
 
         List<Candidate> candidates = new ArrayList<Candidate>();
-        Candidate threshold = thresholdCandidate(ctx, stats, badLabels, positiveLabels);
+        Candidate threshold = thresholdCandidate(ctx, stats, badLabels, protectedLabels);
         if (threshold != null) candidates.add(threshold);
-        Candidate minSize = minSizeCandidate(ctx, stats, badLabels, positiveLabels);
-        Candidate maxSize = maxSizeCandidate(ctx, stats, badLabels, positiveLabels);
+        Candidate minSize = minSizeCandidate(ctx, stats, badLabels, protectedLabels);
+        Candidate maxSize = maxSizeCandidate(ctx, stats, badLabels, protectedLabels);
         Candidate size = betterSizeCandidate(minSize, maxSize);
         if (size != null) candidates.add(size);
 
@@ -162,6 +168,22 @@ public final class ClassicalParameterSuggester
         candidate.collateralRemoved = SuggestionSupport.countCollateral(
                 allLabels, badLabels, positiveLabels, rule);
         return candidate.badRemoved <= 0 ? null : candidate;
+    }
+
+    private static Set<Integer> protectedLabels(Set<Integer> allLabels,
+                                                Set<Integer> badLabels,
+                                                Set<Integer> positiveLabels) {
+        if (positiveLabels != null && !positiveLabels.isEmpty()) {
+            return positiveLabels;
+        }
+        Set<Integer> out = new LinkedHashSet<Integer>();
+        if (allLabels == null) return out;
+        for (Integer label : allLabels) {
+            if (label == null) continue;
+            if (badLabels != null && badLabels.contains(label)) continue;
+            out.add(label);
+        }
+        return out;
     }
 
     private static Candidate betterSizeCandidate(Candidate minSize, Candidate maxSize) {

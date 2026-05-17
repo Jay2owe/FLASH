@@ -89,7 +89,7 @@ Display min/max and threshold controls update the preview live. Filter parameter
 
 FLASH supports built-in and project-specific segmentation models. StarDist and Cellpose parameter stages can select model catalog entries, and the Custom Model Manager can register Fiji-compatible StarDist `.zip` exports, Cellpose model files, or Cellpose registered model names.
 
-Click-driven setup can mark good and bad preview objects, suggest safer filter parameters, and launch the Train Custom Engine wizard. Classical and Enhanced Classical training uses an in-process Smile Random Forest object classifier; StarDist and Cellpose workflows package click-derived datasets for external training and then register the trained model in the project catalog.
+The normal setup UI no longer collects preview clicks or offers click-based parameter suggestions. Custom StarDist and Cellpose models are imported through the Custom Model Manager; the Train Custom Engine path remains hidden while its click-collection flow is redesigned.
 
 #### Runtime And Catalog Notes
 
@@ -114,7 +114,7 @@ Typical input formats include:
 
 FLASH opens even if optional runtime dependencies are missing. Features that need optional dependencies show a clear message and repair guidance when used.
 
-The **Dependencies** button in the main dialog opens the runtime check and repair panel. Depending on the selected workflow, optional dependencies can include Bio-Formats, 3D Objects Counter, mcib3d, StarDist/TrackMate, TensorFlow native libraries, Apache POI, Cellpose, and JTS.
+The **Dependencies** button in the main dialog opens the runtime check and repair panel. Depending on the selected workflow, optional dependencies can include Bio-Formats, 3D Objects Counter, mcib3d, StarDist/TrackMate, TensorFlow native libraries, Apache POI, Cellpose, 3D deconvolution engines, PSF Generator, and JTS.
 
 ## Headless and Macro Use
 

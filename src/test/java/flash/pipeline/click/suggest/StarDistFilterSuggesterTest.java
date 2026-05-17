@@ -13,6 +13,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
@@ -45,6 +46,22 @@ public class StarDistFilterSuggesterTest {
                 negatives(c(1, 0), c(2, 1), c(3, 2)), positives(c(4, 3)));
 
         assertNotNull(suggestion.minArea);
+        assertEquals(8.0d, suggestion.minArea.doubleValue(), 0.0d);
+    }
+
+    @Test
+    public void rejectsImplausibleAreaInsteadOfSuggestingHugeTextboxValue() {
+        ImagePlus labels = labels();
+        labels.setProperty(StarDist3DRunner.OBJECT_STATS_PROPERTY,
+                stats(new double[]{0.5, 0.5, 0.5, 0.5},
+                        new double[]{Double.MAX_VALUE, Double.MAX_VALUE,
+                                Double.MAX_VALUE, Double.MAX_VALUE},
+                        new double[]{10, 10, 10, 10}));
+
+        StarDistFilterSuggester.StarDistSuggestion suggestion = suggest(labels,
+                negatives(c(1, 0), c(2, 1), c(3, 2)), positives(c(4, 3)));
+
+        assertFalse(suggestion.hasSuggestion());
     }
 
     @Test

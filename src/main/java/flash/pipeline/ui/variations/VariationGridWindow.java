@@ -3,20 +3,23 @@ package flash.pipeline.ui.variations;
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
-import javax.swing.JFrame;
+import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JProgressBar;
 import javax.swing.JSlider;
 import javax.swing.SwingConstants;
+import javax.swing.JToolBar;
+import javax.swing.WindowConstants;
 import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
-import javax.swing.JToolBar;
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Dialog;
 import java.awt.Dimension;
 import java.awt.GraphicsEnvironment;
 import java.awt.GridLayout;
+import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.Window;
 import java.awt.event.ActionListener;
@@ -25,7 +28,7 @@ import java.awt.event.MouseWheelListener;
 import java.util.ArrayList;
 import java.util.List;
 
-public final class VariationGridWindow extends JFrame {
+public final class VariationGridWindow extends JDialog {
 
     private final SyncedSliceController controller = new SyncedSliceController();
     private final List<VariationCellPanel> cells =
@@ -52,7 +55,8 @@ public final class VariationGridWindow extends JFrame {
     public VariationGridWindow(Window owner,
                                String title,
                                List<VariationCellPanel> sourceCells) {
-        super(title == null || title.trim().length() == 0
+        super(owner, Dialog.ModalityType.MODELESS);
+        setTitle(title == null || title.trim().length() == 0
                 ? "FLASH variations"
                 : title.trim());
         this.baseTitle = getTitle();
@@ -84,7 +88,7 @@ public final class VariationGridWindow extends JFrame {
         add(toolBar, BorderLayout.NORTH);
         add(gridPanel, BorderLayout.CENTER);
         add(southPanel(), BorderLayout.SOUTH);
-        setDefaultCloseOperation(DISPOSE_ON_CLOSE);
+        setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
 
         total = cells.size();
         setCompletedCount(0, total, 0);
@@ -315,24 +319,34 @@ public final class VariationGridWindow extends JFrame {
     }
 
     private void applyInitialSizeAndLocation(Window owner) {
-        Dimension size = initialWindowSize();
         setMinimumSize(new Dimension(640, 480));
-        setSize(size);
-        if (owner != null) {
-            setLocationRelativeTo(owner);
-            setLocation(getX() + 32, getY() + 32);
-        } else {
-            setLocationRelativeTo(null);
-        }
-    }
-
-    private static Dimension initialWindowSize() {
         Rectangle desktop = GraphicsEnvironment
                 .getLocalGraphicsEnvironment()
                 .getMaximumWindowBounds();
-        int width = clamp((int) Math.round(desktop.width * 0.85d), 640, 1600);
-        int height = clamp((int) Math.round(desktop.height * 0.85d), 480, 1200);
-        return new Dimension(width, height);
+        Rectangle ownerBounds = owner == null ? null : owner.getBounds();
+        Dimension size;
+        Point location;
+        if (ownerBounds != null && ownerBounds.width > 0
+                && ownerBounds.x + ownerBounds.width + 660 <= desktop.x + desktop.width) {
+            // Place beside the dialog, occupying the remaining horizontal space.
+            int leftEdge = ownerBounds.x + ownerBounds.width + 8;
+            int rightEdge = desktop.x + desktop.width - 8;
+            int width = clamp(rightEdge - leftEdge, 640, 1600);
+            int height = clamp((int) Math.round(desktop.height * 0.9d), 480, 1200);
+            int top = clamp(ownerBounds.y, desktop.y, desktop.y + desktop.height - height);
+            size = new Dimension(width, height);
+            location = new Point(leftEdge, top);
+        } else {
+            // No room beside the dialog. Fall back to a large centred window.
+            int width = clamp((int) Math.round(desktop.width * 0.85d), 640, 1600);
+            int height = clamp((int) Math.round(desktop.height * 0.85d), 480, 1200);
+            size = new Dimension(width, height);
+            location = new Point(
+                    desktop.x + (desktop.width - width) / 2,
+                    desktop.y + (desktop.height - height) / 2);
+        }
+        setSize(size);
+        setLocation(location);
     }
 
     static int[] gridDimensions(int count) {

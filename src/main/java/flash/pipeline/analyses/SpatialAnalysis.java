@@ -1237,6 +1237,13 @@ public class SpatialAnalysis implements Analysis {
 
     SpatialAnalysisWizard.DerivedConfig showOptionsDialogForChainedRun(String directory,
                                                                        List<String> channelNames) {
+        return showOptionsDialogForChainedRun(directory, channelNames, false, false);
+    }
+
+    SpatialAnalysisWizard.DerivedConfig showOptionsDialogForChainedRun(String directory,
+                                                                       List<String> channelNames,
+                                                                       boolean lockVolumetricColoc,
+                                                                       boolean lockCpcColoc) {
         List<String> safeChannelNames = channelNames == null
                 ? new ArrayList<String>()
                 : new ArrayList<String>(channelNames);
@@ -1253,7 +1260,8 @@ public class SpatialAnalysis implements Analysis {
                 new SpatialArtifactScanner().scan(directory, safeChannelNames, artifactSections);
         spatialArtifactStatus = artifactStatus;
         return showSpatialOptionsDialog(directory, safeChannelNames, existingObjectData,
-                lineSetNames(linesDir), artifactStatus, configuredOptions);
+                lineSetNames(linesDir), artifactStatus, configuredOptions,
+                lockVolumetricColoc, lockCpcColoc);
     }
 
     private SpatialAnalysisWizard.DerivedConfig showSpatialOptionsDialog(
@@ -1263,6 +1271,19 @@ public class SpatialAnalysis implements Analysis {
             List<String> availableLineSets,
             SpatialArtifactStatus artifactStatus,
             SpatialAnalysisWizard.DerivedConfig initialOptions) {
+        return showSpatialOptionsDialog(directory, channelNames, existingObjectData,
+                availableLineSets, artifactStatus, initialOptions, false, false);
+    }
+
+    private SpatialAnalysisWizard.DerivedConfig showSpatialOptionsDialog(
+            String directory,
+            final List<String> channelNames,
+            SpatialObjectDataAvailability existingObjectData,
+            List<String> availableLineSets,
+            SpatialArtifactStatus artifactStatus,
+            SpatialAnalysisWizard.DerivedConfig initialOptions,
+            boolean lockVolumetricColoc,
+            boolean lockCpcColoc) {
         if (channelNames == null || channelNames.isEmpty()) {
             return null;
         }
@@ -1276,6 +1297,12 @@ public class SpatialAnalysis implements Analysis {
         boolean doSpatialStats = initialOptions != null && initialOptions.doSpatialStats;
         boolean doCpc = initialOptions == null ? true : initialOptions.doCpc;
         boolean doVolumetric = initialOptions != null && initialOptions.doVolColoc;
+        if (lockVolumetricColoc) {
+            doVolumetric = true;
+        }
+        if (lockCpcColoc) {
+            doCpc = true;
+        }
         boolean doVoronoi = initialOptions != null && initialOptions.doVoronoi;
         boolean doHeatmaps = initialOptions != null && initialOptions.doHeatmaps;
         boolean doPhenotyping = initialOptions != null && initialOptions.doPhenotyping;
@@ -1301,6 +1328,8 @@ public class SpatialAnalysis implements Analysis {
             PipelineDialog opts = new PipelineDialog("Spatial Analysis Options", PipelineDialog.Phase.ANALYSE);
             opts.addAnalysisHelpHeader("Spatial Analysis", FLASH_Pipeline.IDX_SPATIAL);
             final SpatialDialogBindings spatialBindings = new SpatialDialogBindings();
+            spatialBindings.lockVolColocFromObjectAnalysis = lockVolumetricColoc;
+            spatialBindings.lockCpcFromObjectAnalysis = lockCpcColoc;
             spatialBindings.forceRerunToggle = opts.addToggle(
                     "Force re-run all sub-analyses (ignore existing outputs)", false);
             opts.addHelpText("Recomputes selected spatial outputs even when matching files or columns already exist.");
@@ -1346,11 +1375,14 @@ public class SpatialAnalysis implements Analysis {
             spatialBindings.doVolColocToggle = volToggle;
             opts.addHelpText("Counts nearest-neighbor objects exceeding the colocalization "
                     + "threshold. Uses saved Colocalisation with percentages from 3D Object Analysis.");
+            if (lockVolumetricColoc) {
+                opts.addHelpText("Already selected in 3D Object Analysis. The previous setting is locked here.");
+            }
             final List<JTextField> thresholdFields = new ArrayList<JTextField>();
             for (String chName : channelNames) {
                 JTextField tf = opts.addNumericField(chName + " Coloc Threshold (%)",
                         getThreshold(chName), 0);
-                tf.setEnabled(doVolumetric);
+                tf.setEnabled(doVolumetric && !lockVolumetricColoc);
                 thresholdFields.add(tf);
             }
             spatialBindings.thresholdFields = thresholdFields;
@@ -1365,7 +1397,11 @@ public class SpatialAnalysis implements Analysis {
                     defaultForArtifactStatus(artifactStatus, SubAnalysis.CPC, doCpc));
             opts.addHelpText("Centroid-in-object colocalization from saved label images. "
                     + "Skips computation if CPC columns already exist from 3D Object Analysis.");
+            if (lockCpcColoc) {
+                opts.addHelpText("Already selected in 3D Object Analysis. The previous setting is locked here.");
+            }
             opts.addHelpText(existingObjectData.colocalizationHelperText());
+            applyLockedColocalizationControls(spatialBindings);
 
             opts.beginAdvancedSection("spatial");
             opts.addSetupHelpHeader("Voronoi Tessellation", SpatialHelpCatalog.VORONOI);
@@ -1402,6 +1438,12 @@ public class SpatialAnalysis implements Analysis {
             doSpatialStats = opts.getNextBoolean();
             doVolumetric = opts.getNextBoolean();
             doCpc = opts.getNextBoolean();
+            if (lockVolumetricColoc) {
+                doVolumetric = true;
+            }
+            if (lockCpcColoc) {
+                doCpc = true;
+            }
             doVoronoi = opts.getNextBoolean();
             doMorphology = opts.getNextBoolean();
             do3DShapeFeatures = opts.getNextBoolean();
@@ -5453,8 +5495,12 @@ public class SpatialAnalysis implements Analysis {
             setToggle(bindings.doDistancesToggle, config.doDistances);
             setToggle(bindings.lineDistanceToggle, config.doLineDistance);
             setToggle(bindings.doSpatialStatsToggle, config.doSpatialStats);
-            setToggle(bindings.doVolColocToggle, config.doVolColoc);
-            setToggle(bindings.doCpcToggle, config.doCpc);
+            if (!bindings.lockVolColocFromObjectAnalysis) {
+                setToggle(bindings.doVolColocToggle, config.doVolColoc);
+            }
+            if (!bindings.lockCpcFromObjectAnalysis) {
+                setToggle(bindings.doCpcToggle, config.doCpc);
+            }
             setToggle(bindings.doVoronoiToggle, config.doVoronoi);
             setToggle(bindings.doHeatmapsToggle, config.doHeatmaps);
             setToggle(bindings.doPhenotypingToggle, config.doPhenotyping);
@@ -5482,7 +5528,7 @@ public class SpatialAnalysis implements Analysis {
             if (bindings.clusterKField != null) {
                 bindings.clusterKField.setText(numericText(config.clusterK, 0));
             }
-            if (bindings.thresholdFields != null) {
+            if (bindings.thresholdFields != null && !bindings.lockVolColocFromObjectAnalysis) {
                 for (int i = 0; i < bindings.thresholdFields.size(); i++) {
                     JTextField field = bindings.thresholdFields.get(i);
                     if (field != null) {
@@ -5499,6 +5545,7 @@ public class SpatialAnalysis implements Analysis {
         } finally {
             bindings.programmaticChange = false;
         }
+        applyLockedColocalizationControls(bindings);
         updateVolumetricThresholdEnablement(bindings);
         updateMorphometricDependencyControls(bindings);
     }
@@ -5513,11 +5560,27 @@ public class SpatialAnalysis implements Analysis {
         if (bindings == null || bindings.thresholdFields == null) {
             return;
         }
-        boolean on = bindings.doVolColocToggle != null && bindings.doVolColocToggle.isSelected();
+        boolean on = !bindings.lockVolColocFromObjectAnalysis
+                && bindings.doVolColocToggle != null
+                && bindings.doVolColocToggle.isSelected();
         for (JTextField field : bindings.thresholdFields) {
             if (field != null) {
                 field.setEnabled(on);
             }
+        }
+    }
+
+    private static void applyLockedColocalizationControls(SpatialDialogBindings bindings) {
+        if (bindings == null) {
+            return;
+        }
+        if (bindings.lockVolColocFromObjectAnalysis && bindings.doVolColocToggle != null) {
+            bindings.doVolColocToggle.setSelected(true);
+            bindings.doVolColocToggle.setEnabled(false);
+        }
+        if (bindings.lockCpcFromObjectAnalysis && bindings.doCpcToggle != null) {
+            bindings.doCpcToggle.setSelected(true);
+            bindings.doCpcToggle.setEnabled(false);
         }
     }
 
@@ -6006,6 +6069,8 @@ public class SpatialAnalysis implements Analysis {
 
     private static final class SpatialDialogBindings {
         boolean programmaticChange;
+        boolean lockVolColocFromObjectAnalysis;
+        boolean lockCpcFromObjectAnalysis;
         JComboBox<String> presetCombo;
         ToggleSwitch forceRerunToggle;
         ToggleSwitch doDistancesToggle;

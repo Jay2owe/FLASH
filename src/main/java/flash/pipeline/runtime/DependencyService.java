@@ -302,6 +302,10 @@ public final class DependencyService {
         fixers.put(DependencyId.TENSORFLOW_NATIVE_RUNTIME, new TensorFlowNativeRuntimeFixer());
         fixers.put(DependencyId.APACHE_POI_RUNTIME, new ExcelRuntimeFixer());
         fixers.put(DependencyId.JTS_CORE, new JtsCoreFixer());
+        fixers.put(DependencyId.EPFL_PSF_GENERATOR_RUNTIME, new FijiPluginRuntimeFixer(19));
+        fixers.put(DependencyId.DECONV_CLIJ2_RUNTIME, new FijiPluginRuntimeFixer(20));
+        fixers.put(DependencyId.DECONVOLUTIONLAB2_RUNTIME, new FijiPluginRuntimeFixer(21));
+        fixers.put(DependencyId.ITERATIVE_DECONVOLVE_3D_RUNTIME, new FijiPluginRuntimeFixer(22));
         fixers.put(DependencyId.COLOC2_RUNTIME, new FijiPluginRuntimeFixer(14));
         fixers.put(DependencyId.IMGLIB2_ALGORITHM_RUNTIME, new FijiPluginRuntimeFixer(15));
         fixers.put(DependencyId.IMGLIB2_FFT_RUNTIME, new FijiPluginRuntimeFixer(16));

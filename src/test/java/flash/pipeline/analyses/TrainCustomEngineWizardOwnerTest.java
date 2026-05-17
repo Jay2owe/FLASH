@@ -5,6 +5,8 @@ import flash.pipeline.ui.config.ConfigQcContext;
 import flash.pipeline.ui.config.ConfigQcDialog;
 import flash.pipeline.ui.config.ConfigQcStage;
 import flash.pipeline.ui.config.SegmentationMethodStage;
+import flash.pipeline.ui.config.StarDistParameterStage;
+import flash.pipeline.ui.wizard.TrainCustomEngineWizard;
 import flash.pipeline.ui.wizard.TrainCustomEngineWorkflow;
 import ij.ImagePlus;
 import org.junit.Rule;
@@ -21,6 +23,7 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Collections;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
@@ -68,6 +71,42 @@ public class TrainCustomEngineWizardOwnerTest {
         }
     }
 
+    @Test
+    public void routeToClickPreviewSetsBaseTokenAndReturnsPreviewStage() throws Exception {
+        File projectRoot = temp.newFolder("project-route");
+        File binFolder = new File(projectRoot, ".bin");
+        assertTrue(binFolder.mkdirs());
+        CreateBinFileAnalysis.BinUserConfig cfg = oneChannelConfig();
+        ConfigQcContext context = ConfigQcContext.fromImages(
+                projectRoot,
+                binFolder,
+                cfg,
+                Collections.<ImagePlus>emptyList(),
+                Collections.singletonList("IBA1"),
+                0);
+        RoutingAnalysis analysis = new RoutingAnalysis();
+        SegmentationMethodStage.TrainCustomEngineLauncher launcher =
+                invokeCreateTrainCustomEngineLauncher(analysis, cfg, binFolder, 0);
+        TokenStore store = new TokenStore();
+        store.token = "cellpose:30.0:0.4:0.0:model=old";
+
+        SegmentationMethodStage.LaunchResult result =
+                launcher.launchWithResult(context, store);
+
+        assertTrue(result.routesToStage());
+        assertEquals(StarDistParameterStage.class.getName(), result.stageKey());
+        assertEquals("stardist:0.5:0.4", store.token);
+    }
+
+    private static final class RoutingAnalysis extends CreateBinFileAnalysis {
+        @Override protected TrainCustomEngineWizard.Result showTrainCustomEngineWizardResult(
+                Window owner,
+                TrainCustomEngineWorkflow workflow) {
+            workflow.selectBase(TrainCustomEngineWorkflow.Base.STARDIST_RF);
+            return TrainCustomEngineWizard.Result.ROUTE_TO_CLICK_PREVIEW;
+        }
+    }
+
     private static CreateBinFileAnalysis.BinUserConfig oneChannelConfig() {
         return new CreateBinFileAnalysis.BinUserConfig(
                 new ArrayList<String>(Collections.singletonList("IBA1")),
@@ -98,11 +137,12 @@ public class TrainCustomEngineWizardOwnerTest {
         Window capturedOwner;
         TrainCustomEngineWorkflow capturedWorkflow;
 
-        @Override protected boolean showTrainCustomEngineWizard(Window owner,
-                                                                TrainCustomEngineWorkflow workflow) {
+        @Override protected TrainCustomEngineWizard.Result showTrainCustomEngineWizardResult(
+                Window owner,
+                TrainCustomEngineWorkflow workflow) {
             capturedOwner = owner;
             capturedWorkflow = workflow;
-            return true;
+            return TrainCustomEngineWizard.Result.APPLIED;
         }
     }
 

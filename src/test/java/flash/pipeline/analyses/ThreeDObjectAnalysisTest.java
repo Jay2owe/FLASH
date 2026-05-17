@@ -190,15 +190,21 @@ public class ThreeDObjectAnalysisTest {
         final AtomicInteger launches = new AtomicInteger(0);
         final AtomicReference<List<String>> launchedChannels = new AtomicReference<List<String>>();
         final AtomicReference<Map<String, Double>> thresholds = new AtomicReference<Map<String, Double>>();
+        final AtomicReference<Boolean> lockVolumetric = new AtomicReference<Boolean>();
+        final AtomicReference<Boolean> lockCpc = new AtomicReference<Boolean>();
         setMarkerThresholds(analysis, singletonThresholds());
         analysis.setSpatialOptionsDialogLauncherForTest(new ThreeDObjectAnalysis.SpatialOptionsDialogLauncher() {
             @Override
             public SpatialAnalysisWizard.DerivedConfig launch(String directory,
                                                               List<String> channelNames,
-                                                              Map<String, Double> markerThresholds) {
+                                                              Map<String, Double> markerThresholds,
+                                                              boolean lockVolumetricColoc,
+                                                              boolean lockCpcColoc) {
                 launches.incrementAndGet();
                 launchedChannels.set(channelNames);
                 thresholds.set(markerThresholds);
+                lockVolumetric.set(Boolean.valueOf(lockVolumetricColoc));
+                lockCpc.set(Boolean.valueOf(lockCpcColoc));
                 return expected;
             }
         });
@@ -211,7 +217,38 @@ public class ThreeDObjectAnalysisTest {
         assertEquals(1, launches.get());
         assertEquals(dapiIba1AbetaConfig().channelNames, launchedChannels.get());
         assertEquals(singletonThresholds(), thresholds.get());
+        assertEquals(Boolean.TRUE, lockVolumetric.get());
+        assertEquals(Boolean.TRUE, lockCpc.get());
         assertSame(expected, fieldValue(analysis, "wizardSpatialConfig"));
+    }
+
+    @Test
+    public void interactiveSpatialHandoffPassesOnlySelectedObjectColocalizationLocks() throws Exception {
+        ThreeDObjectAnalysis analysis = new ThreeDObjectAnalysis();
+        setField(analysis, "doVolumetric", Boolean.FALSE);
+        setField(analysis, "doCpc", Boolean.TRUE);
+        final AtomicReference<Boolean> lockVolumetric = new AtomicReference<Boolean>();
+        final AtomicReference<Boolean> lockCpc = new AtomicReference<Boolean>();
+        analysis.setSpatialOptionsDialogLauncherForTest(new ThreeDObjectAnalysis.SpatialOptionsDialogLauncher() {
+            @Override
+            public SpatialAnalysisWizard.DerivedConfig launch(String directory,
+                                                              List<String> channelNames,
+                                                              Map<String, Double> markerThresholds,
+                                                              boolean lockVolumetricColoc,
+                                                              boolean lockCpcColoc) {
+                lockVolumetric.set(Boolean.valueOf(lockVolumetricColoc));
+                lockCpc.set(Boolean.valueOf(lockCpcColoc));
+                return new SpatialAnalysisWizard.DerivedConfig();
+            }
+        });
+
+        assertTrue(analysis.prepareSpatialHandoffBeforeAnalysis(
+                temp.newFolder("spatial-locks").getAbsolutePath(),
+                dapiIba1AbetaConfig().channelNames,
+                true));
+
+        assertEquals(Boolean.FALSE, lockVolumetric.get());
+        assertEquals(Boolean.TRUE, lockCpc.get());
     }
 
     @Test
@@ -222,7 +259,9 @@ public class ThreeDObjectAnalysisTest {
             @Override
             public SpatialAnalysisWizard.DerivedConfig launch(String directory,
                                                               List<String> channelNames,
-                                                              Map<String, Double> markerThresholds) {
+                                                              Map<String, Double> markerThresholds,
+                                                              boolean lockVolumetricColoc,
+                                                              boolean lockCpcColoc) {
                 launches.incrementAndGet();
                 return null;
             }
@@ -417,7 +456,9 @@ public class ThreeDObjectAnalysisTest {
             @Override
             public SpatialAnalysisWizard.DerivedConfig launch(String directory,
                                                               List<String> channelNames,
-                                                              Map<String, Double> markerThresholds) {
+                                                              Map<String, Double> markerThresholds,
+                                                              boolean lockVolumetricColoc,
+                                                              boolean lockCpcColoc) {
                 launches.incrementAndGet();
                 return new SpatialAnalysisWizard.DerivedConfig();
             }

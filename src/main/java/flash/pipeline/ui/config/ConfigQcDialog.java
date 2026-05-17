@@ -368,8 +368,6 @@ public final class ConfigQcDialog {
         previewPair.setChannelLutName(context.getChannelLutName());
         previewPair.setDisplayControlsAvailable(stage.showPreviewDisplayControls());
         previewPair.resetStageToolstripState();
-        previewPair.setClickCapture(context.getBinFolder(), context.getClickStore(),
-                context.getCurrentImageDisplayName(), context.getChannelNumber());
         previewPair.resetZ();
         previewPair.setOriginal(context.getCurrentImagePlus());
         previewPair.setAdjusted(null);
@@ -567,8 +565,14 @@ public final class ConfigQcDialog {
     private void lockInAndAdvance() {
         ConfigQcStage stage = currentStage();
         if (stage == null) return;
+        int startingStageIndex = stageIndex;
         if (!stage.lockIn(context)) {
-            setStatus("Current settings were not locked in.");
+            if (stageIndex == startingStageIndex && currentStage() == stage) {
+                setStatus("Current settings were not locked in.");
+            }
+            return;
+        }
+        if (stageIndex != startingStageIndex || currentStage() != stage) {
             return;
         }
         advanceImageOrStage(ConfigQcResult.DONE);

@@ -59,6 +59,49 @@ public final class SegmentationMethodStage implements ConfigQcStage {
 
     public interface TrainCustomEngineLauncher {
         boolean launch(ConfigQcContext context, MethodStore methodStore);
+
+        default LaunchResult launchWithResult(ConfigQcContext context,
+                                              MethodStore methodStore) {
+            return launch(context, methodStore)
+                    ? LaunchResult.applied()
+                    : LaunchResult.cancelled();
+        }
+    }
+
+    public static final class LaunchResult {
+        private final boolean applied;
+        private final boolean routeToStage;
+        private final String stageKey;
+
+        private LaunchResult(boolean applied, boolean routeToStage, String stageKey) {
+            this.applied = applied;
+            this.routeToStage = routeToStage;
+            this.stageKey = stageKey == null ? "" : stageKey;
+        }
+
+        public static LaunchResult applied() {
+            return new LaunchResult(true, false, "");
+        }
+
+        public static LaunchResult cancelled() {
+            return new LaunchResult(false, false, "");
+        }
+
+        public static LaunchResult routeToStage(String stageKey) {
+            return new LaunchResult(false, true, stageKey);
+        }
+
+        public boolean isApplied() {
+            return applied;
+        }
+
+        public boolean routesToStage() {
+            return routeToStage;
+        }
+
+        public String stageKey() {
+            return stageKey;
+        }
     }
 
     private static final Color HELP_COLOR = FlashTheme.TEXT_HELP;
@@ -126,6 +169,7 @@ public final class SegmentationMethodStage implements ConfigQcStage {
         choicePanel = new MethodChoicePanel(selectedChoice,
                 trainedRfOptionFor(selectedChoice, context),
                 false,
+                SegmentationMethodLauncherModel.isTrainCustomEngineUiEnabled(),
                 new Runnable() {
             @Override public void run() {
                 launchTrainingWizard(context);
@@ -210,6 +254,19 @@ public final class SegmentationMethodStage implements ConfigQcStage {
                 actions.jumpToStage(SegmentationMethodStage.class.getName());
             }
         });
+        if (SegmentationMethodLauncherModel.isTrainCustomEngineUiEnabled()) {
+            // Hidden developer path kept while the training launcher is redesigned.
+            JButton train = new JButton(SegmentationMethodLauncherModel.TRAIN_CUSTOM_ENGINE_DISPLAY);
+            gbc.gridx = 2;
+            gbc.insets = new Insets(0, 0, 0, 0);
+            panel.add(train, gbc);
+            train.addActionListener(e -> {
+                if (actions != null) {
+                    actions.jumpToStage(SegmentationMethodStage.class.getName());
+                    actions.setStatus("Train Custom Engine is hidden until its click-collection flow is redesigned.");
+                }
+            });
+        }
         return panel;
     }
 
@@ -253,9 +310,26 @@ public final class SegmentationMethodStage implements ConfigQcStage {
     }
 
     private boolean launchTrainingWizard(ConfigQcContext context) {
+        if (!SegmentationMethodLauncherModel.isTrainCustomEngineUiEnabled()) {
+            setStatus("Train Custom Engine is disabled.");
+            return false;
+        }
         String previousToken = methodStore.getMethodToken();
-        boolean applied = trainLauncher.launch(context, methodStore);
-        if (!applied) {
+        LaunchResult result = trainLauncher.launchWithResult(context, methodStore);
+        if (result == null) {
+            result = LaunchResult.cancelled();
+        }
+        if (result.routesToStage()) {
+            if (choicePanel != null) {
+                choicePanel.select(selectedChoiceFor(methodStore));
+            }
+            if (actions != null) {
+                actions.jumpToStage(result.stageKey());
+                actions.setStatus("Train Custom Engine needs the redesigned click-collection flow before it can continue.");
+            }
+            return false;
+        }
+        if (!result.isApplied()) {
             methodStore.setMethodToken(previousToken);
             if (choicePanel != null) {
                 choicePanel.select(selectedChoiceFor(methodStore));
@@ -428,7 +502,8 @@ public final class SegmentationMethodStage implements ConfigQcStage {
         private final ButtonGroup group;
 
         MethodChoicePanel(String selectedChoice, TrainedRfOption trainedRfOption,
-                          boolean includeSessionNote, Runnable launchAction) {
+                          boolean includeSessionNote, boolean includeTrainLauncher,
+                          Runnable launchAction) {
             setOpaque(false);
             setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
             group = new ButtonGroup();
@@ -464,16 +539,18 @@ public final class SegmentationMethodStage implements ConfigQcStage {
                 add(Box.createVerticalStrut(6));
                 addTrainedRfCard(trainedRfOption);
             }
-            add(Box.createVerticalStrut(8));
-            javax.swing.JSeparator separator = new javax.swing.JSeparator();
-            separator.setAlignmentX(Component.LEFT_ALIGNMENT);
-            add(separator);
-            add(Box.createVerticalStrut(6));
-            addCard(group, SegmentationMethodLauncherModel.TRAIN_CUSTOM_ENGINE,
-                    SegmentationMethodLauncherModel.TRAIN_CUSTOM_ENGINE_DISPLAY,
-                    "Open a guided training wizard. This is a launcher only; the saved method will be a trained Random Forest, StarDist model, or Cellpose model.",
-                    true,
-                    launchAction);
+            if (includeTrainLauncher) {
+                add(Box.createVerticalStrut(8));
+                javax.swing.JSeparator separator = new javax.swing.JSeparator();
+                separator.setAlignmentX(Component.LEFT_ALIGNMENT);
+                add(separator);
+                add(Box.createVerticalStrut(6));
+                addCard(group, SegmentationMethodLauncherModel.TRAIN_CUSTOM_ENGINE,
+                        SegmentationMethodLauncherModel.TRAIN_CUSTOM_ENGINE_DISPLAY,
+                        "Open a guided training wizard. This is a launcher only; the saved method will be a trained Random Forest, StarDist model, or Cellpose model.",
+                        true,
+                        launchAction);
+            }
 
             select(firstKnownChoice(selectedChoice));
             if (includeSessionNote) {

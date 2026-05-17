@@ -45,6 +45,11 @@ import java.util.UUID;
 public final class CellposeDatasetPackager {
     private static final int METADATA_VERSION = 1;
     private static final String FALLBACK_BASE_MODEL = "cyto3";
+    public static final String EXPORT_MODE_PER_Z_SLICES = "per_z_slices";
+    public static final String CELLPOSE_3D_TRAINING_WARNING =
+            "Cellpose 3 training in FLASH is 2D-oriented. This dataset was exported as "
+                    + "per-Z 2D image and mask pairs from 3D input; keep that limitation "
+                    + "in mind when training and validating the model.";
 
     public static final class PackagingResult {
         public final Path outputDir;
@@ -53,6 +58,9 @@ public final class CellposeDatasetPackager {
         public final int slicesWritten;
         public final int positiveLabelsRetained;
         public final int negativeLabelsRemoved;
+        public final String exportMode;
+        public final boolean sourceHad3D;
+        public final String trainingWarning;
 
         public PackagingResult(Path outputDir,
                                Path trainCommandFile,
@@ -60,12 +68,31 @@ public final class CellposeDatasetPackager {
                                int slicesWritten,
                                int positiveLabelsRetained,
                                int negativeLabelsRemoved) {
+            this(outputDir, trainCommandFile, imagesWritten, slicesWritten,
+                    positiveLabelsRetained, negativeLabelsRemoved,
+                    EXPORT_MODE_PER_Z_SLICES, false, "");
+        }
+
+        public PackagingResult(Path outputDir,
+                               Path trainCommandFile,
+                               int imagesWritten,
+                               int slicesWritten,
+                               int positiveLabelsRetained,
+                               int negativeLabelsRemoved,
+                               String exportMode,
+                               boolean sourceHad3D,
+                               String trainingWarning) {
             this.outputDir = outputDir;
             this.trainCommandFile = trainCommandFile;
             this.imagesWritten = imagesWritten;
             this.slicesWritten = slicesWritten;
             this.positiveLabelsRetained = positiveLabelsRetained;
             this.negativeLabelsRemoved = negativeLabelsRemoved;
+            this.exportMode = exportMode == null || exportMode.trim().isEmpty()
+                    ? EXPORT_MODE_PER_Z_SLICES
+                    : exportMode.trim();
+            this.sourceHad3D = sourceHad3D;
+            this.trainingWarning = trainingWarning == null ? "" : trainingWarning.trim();
         }
     }
 
@@ -119,7 +146,10 @@ public final class CellposeDatasetPackager {
                     counters.imagesWritten,
                     counters.slicesWritten,
                     counters.positiveLabelsRetained,
-                    counters.negativeLabelsRemoved);
+                    counters.negativeLabelsRemoved,
+                    EXPORT_MODE_PER_Z_SLICES,
+                    counters.source3DImages > 0,
+                    counters.source3DImages > 0 ? CELLPOSE_3D_TRAINING_WARNING : "");
         } finally {
             if (tempDir != null) {
                 deleteRecursively(tempDir);
@@ -169,6 +199,9 @@ public final class CellposeDatasetPackager {
 
             int slices = sliceCount(raw);
             counters.imagesWritten++;
+            if (slices > 1) {
+                counters.source3DImages++;
+            }
             for (int z = 1; z <= slices; z++) {
                 String stem = fileStem(clicks.imageName, channelOneBased, z);
                 saveSlice(raw, channelOneBased, z, outputDir.resolve(stem + ".tif"), false);
@@ -341,6 +374,12 @@ public final class CellposeDatasetPackager {
         root.put("createdAt", Long.valueOf(System.currentTimeMillis()));
         root.put("imageCount", Integer.valueOf(counters.imagesWritten));
         root.put("sliceCount", Integer.valueOf(counters.slicesWritten));
+        root.put("exportMode", EXPORT_MODE_PER_Z_SLICES);
+        root.put("sourceHad3D", Boolean.valueOf(counters.source3DImages > 0));
+        root.put("source3DImageCount", Integer.valueOf(counters.source3DImages));
+        if (counters.source3DImages > 0) {
+            root.put("trainingWarning", CELLPOSE_3D_TRAINING_WARNING);
+        }
         Map<String, Object> objectCount = JsonIO.object();
         objectCount.put("positive", Integer.valueOf(counters.positiveLabelsRetained));
         objectCount.put("negative", Integer.valueOf(counters.negativeLabelsRemoved));
@@ -533,6 +572,7 @@ public final class CellposeDatasetPackager {
         int slicesWritten;
         int positiveLabelsRetained;
         int negativeLabelsRemoved;
+        int source3DImages;
         final Set<String> positiveLabelKeysSeen = new LinkedHashSet<String>();
         final Set<String> negativeLabelKeysSeen = new LinkedHashSet<String>();
     }

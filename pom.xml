@@ -163,6 +163,14 @@
 			<scope>provided</scope>
 		</dependency>
 
+		<!-- 3D Objects Counter+: public API reused by FLASH Enhanced Classical segmentation. -->
+		<dependency>
+			<groupId>io.github.jay2owe</groupId>
+			<artifactId>3D_Objects_Counter_Plus</artifactId>
+			<version>0.1.0</version>
+			<scope>provided</scope>
+		</dependency>
+
 		<!-- mcib3d: 3D ImageJ Suite core (provided by Fiji at runtime) -->
 		<dependency>
 			<groupId>org.framagit.mcib3d</groupId>

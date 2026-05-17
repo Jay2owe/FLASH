@@ -2,7 +2,9 @@ package flash.pipeline.click.suggest;
 
 import flash.pipeline.objects.LabelIndex;
 import flash.pipeline.stardist.StarDist3DRunner;
+import ij.ImageStack;
 import ij.measure.ResultsTable;
+import ij.process.ImageProcessor;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -14,6 +16,10 @@ public final class StarDistFilterSuggester
         implements ParameterSuggester<StarDistFilterSuggester.StarDistSuggestion> {
 
     private static final double LOW_QUALITY_HINT_MARGIN = 0.1d;
+    private static final double MAX_REASONABLE_QUALITY = 1.0e6d;
+    private static final double MAX_REASONABLE_UNBOUNDED_METRIC = 1.0e12d;
+    private static final double AREA_IMAGE_TOLERANCE_FACTOR = 4.0d;
+    private static final double INTENSITY_IMAGE_TOLERANCE_FRACTION = 0.01d;
 
     public static final class StarDistSuggestion {
         public final Double minQuality;
@@ -112,11 +118,13 @@ public final class StarDistFilterSuggester
         double maxBad = Double.NEGATIVE_INFINITY;
         for (Integer label : badLabels) {
             StatRow row = rows.get(label);
-            if (row == null || !SuggestionSupport.finite(metric.value(row))) return null;
-            maxBad = Math.max(maxBad, metric.value(row));
+            double metricValue = row == null ? Double.NaN : metric.value(row);
+            if (!validMetricValue(ctx, metric, metricValue)) return null;
+            maxBad = Math.max(maxBad, metricValue);
         }
         if (!SuggestionSupport.finite(maxBad)) return null;
-        double value = maxBad + SuggestionSupport.EPSILON;
+        double value = minimumThreshold(metric, maxBad);
+        if (!validMetricValue(ctx, metric, value)) return null;
         double current = SuggestionSupport.current(ctx.currentParams, currentKey,
                 Double.NEGATIVE_INFINITY);
         if (value <= current + SuggestionSupport.EPSILON) return null;
@@ -142,11 +150,13 @@ public final class StarDistFilterSuggester
         double minBad = Double.POSITIVE_INFINITY;
         for (Integer label : badLabels) {
             StatRow row = rows.get(label);
-            if (row == null || !SuggestionSupport.finite(metric.value(row))) return null;
-            minBad = Math.min(minBad, metric.value(row));
+            double metricValue = row == null ? Double.NaN : metric.value(row);
+            if (!validMetricValue(ctx, metric, metricValue)) return null;
+            minBad = Math.min(minBad, metricValue);
         }
         if (!SuggestionSupport.finite(minBad)) return null;
-        double value = Math.max(0.0d, minBad - SuggestionSupport.EPSILON);
+        double value = maximumThreshold(metric, minBad);
+        if (!validMetricValue(ctx, metric, value)) return null;
         double current = SuggestionSupport.current(ctx.currentParams, currentKey,
                 Double.POSITIVE_INFINITY);
         if (value >= current - SuggestionSupport.EPSILON) return null;
@@ -174,6 +184,88 @@ public final class StarDistFilterSuggester
         candidate.collateralRemoved = SuggestionSupport.countCollateral(
                 allLabels, badLabels, positiveLabels, rule);
         return candidate.badRemoved <= 0 ? null : candidate;
+    }
+
+    private static double minimumThreshold(Metric metric, double maxBad) {
+        if (metric == Metric.QUALITY) {
+            return maxBad + SuggestionSupport.EPSILON;
+        }
+        return Math.floor(maxBad) + 1.0d;
+    }
+
+    private static double maximumThreshold(Metric metric, double minBad) {
+        if (metric == Metric.QUALITY) {
+            return Math.max(0.0d, minBad - SuggestionSupport.EPSILON);
+        }
+        return Math.max(0.0d, Math.ceil(minBad) - 1.0d);
+    }
+
+    private static boolean validMetricValue(SuggestionContext ctx,
+                                            Metric metric,
+                                            double value) {
+        if (!SuggestionSupport.finite(value)) return false;
+        if (Math.abs(value) > MAX_REASONABLE_UNBOUNDED_METRIC) return false;
+        if (metric == Metric.QUALITY) {
+            return Math.abs(value) <= MAX_REASONABLE_QUALITY;
+        }
+        if (metric == Metric.AREA) {
+            double maxArea = maxPlausibleArea(ctx);
+            return !SuggestionSupport.finite(maxArea)
+                    || value <= maxArea * AREA_IMAGE_TOLERANCE_FACTOR;
+        }
+        if (metric == Metric.INTENSITY) {
+            double imageMax = imageMaximum(ctx == null ? null : ctx.channelImage);
+            if (!SuggestionSupport.finite(imageMax)) return true;
+            double tolerance = Math.max(1.0d,
+                    Math.abs(imageMax) * INTENSITY_IMAGE_TOLERANCE_FRACTION);
+            return value <= imageMax + tolerance;
+        }
+        return true;
+    }
+
+    private static double maxPlausibleArea(SuggestionContext ctx) {
+        if (ctx == null || ctx.labelImage == null) return Double.NaN;
+        int width = Math.max(1, ctx.labelImage.getWidth());
+        int height = Math.max(1, ctx.labelImage.getHeight());
+        ij.measure.Calibration calibration = ctx.labelImage.getCalibration();
+        double pixelWidth = calibration == null ? 1.0d : calibration.pixelWidth;
+        double pixelHeight = calibration == null ? 1.0d : calibration.pixelHeight;
+        if (!SuggestionSupport.finite(pixelWidth) || pixelWidth <= 0.0d) {
+            pixelWidth = 1.0d;
+        }
+        if (!SuggestionSupport.finite(pixelHeight) || pixelHeight <= 0.0d) {
+            pixelHeight = 1.0d;
+        }
+        return (double) width * (double) height * pixelWidth * pixelHeight;
+    }
+
+    private static double imageMaximum(ij.ImagePlus image) {
+        if (image == null) return Double.NaN;
+        ImageStack stack;
+        try {
+            stack = image.getStack();
+        } catch (RuntimeException e) {
+            return Double.NaN;
+        }
+        if (stack == null || stack.getSize() == 0) return Double.NaN;
+        double max = Double.NEGATIVE_INFINITY;
+        for (int slice = 1; slice <= stack.getSize(); slice++) {
+            ImageProcessor processor;
+            try {
+                processor = stack.getProcessor(slice);
+            } catch (RuntimeException e) {
+                continue;
+            }
+            if (processor == null) continue;
+            int count = processor.getPixelCount();
+            for (int i = 0; i < count; i++) {
+                float value = processor.getf(i);
+                if (Float.isFinite(value) && value > max) {
+                    max = value;
+                }
+            }
+        }
+        return max == Double.NEGATIVE_INFINITY ? Double.NaN : max;
     }
 
     private static String lowQualityHint(SuggestionContext ctx,
@@ -330,9 +422,18 @@ public final class StarDistFilterSuggester
     private static String formatNumber(double value) {
         if (!Double.isFinite(value)) return String.valueOf(value);
         double rounded = Math.rint(value);
-        if (Math.abs(value - rounded) < 1.0e-9) {
+        if (Math.abs(value - rounded) < 1.0e-9
+                && Math.abs(rounded) <= Long.MAX_VALUE) {
             return String.valueOf((long) rounded);
         }
-        return String.valueOf(value);
+        double abs = Math.abs(value);
+        if (abs >= 1.0e9d || (abs > 0.0d && abs < 1.0e-4d)) {
+            return String.format(java.util.Locale.ROOT, "%.6g", Double.valueOf(value));
+        }
+        String text = String.format(java.util.Locale.ROOT, "%.6f", Double.valueOf(value));
+        while (text.endsWith("0")) {
+            text = text.substring(0, text.length() - 1);
+        }
+        return text.endsWith(".") ? text.substring(0, text.length() - 1) : text;
     }
 }

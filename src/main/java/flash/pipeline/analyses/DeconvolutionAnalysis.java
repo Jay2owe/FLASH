@@ -4,7 +4,6 @@ import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinConfigIO;
 import flash.pipeline.cli.CLIArgumentParser;
 import flash.pipeline.cli.CLIConfig;
-import flash.pipeline.deconv.DeconvolutionAvailability;
 import flash.pipeline.deconv.DeconvolutionIO;
 import flash.pipeline.deconv.RefractiveIndexEstimator;
 import flash.pipeline.deconv.qc.DeconvPreviewDialog;
@@ -65,14 +64,12 @@ import javax.swing.event.DocumentListener;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Cursor;
-import java.awt.Desktop;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.GraphicsEnvironment;
 import java.io.File;
 import java.io.IOException;
-import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
@@ -202,14 +199,10 @@ public class DeconvolutionAnalysis implements Analysis {
                 return;
             }
 
-            if (!isSelectedEngineAvailable(settings.engineKey)) {
-                promptInstall("Selected deconvolution engine is not available.",
-                        installInstructionUrl(settings.engineKey));
+            if (!isSelectedEngineReady(settings.engineKey)) {
                 return;
             }
             if (!isPsfGeneratorAvailable()) {
-                promptInstall("The EPFL PSF Generator plugin is required for deconvolution PSF synthesis.",
-                        installInstructionUrl("PsfGenerator"));
                 return;
             }
 
@@ -550,7 +543,7 @@ public class DeconvolutionAnalysis implements Analysis {
         engineChoice.addActionListener(e -> {
             EngineChoice choice = (EngineChoice) engineChoice.getSelectedItem();
             if (!bindings.programmaticChange && choice != null && !choice.available) {
-                browseInstallUrl(choice.installUrl);
+                showMissingEngineDependency(choice);
             }
             refreshAlgorithms.run();
             if (!bindings.programmaticChange) {
@@ -1517,11 +1510,8 @@ public class DeconvolutionAnalysis implements Analysis {
     }
 
     protected boolean isPsfGeneratorAvailable() {
-        return DeconvolutionAvailability.isPsfGeneratorAvailable();
-    }
-
-    protected String installInstructionUrl(String key) {
-        return DeconvolutionAvailability.installInstructionUrl(key);
+        return FeatureDependencyGate.gate(DependencyId.EPFL_PSF_GENERATOR_RUNTIME,
+                TITLE, "EPFL PSF synthesis");
     }
 
     protected DeconvolutionEngine resolveEngine(String key) {
@@ -1609,19 +1599,6 @@ public class DeconvolutionAnalysis implements Analysis {
             for (ImagePlus channelImage : channelImages) {
                 closeQuietly(channelImage);
             }
-        }
-    }
-
-    protected void browseInstallUrl(String url) {
-        if (url == null || url.trim().isEmpty()) return;
-        try {
-            if (!Desktop.isDesktopSupported()) {
-                IJ.log("Desktop browsing is not supported here. Install URL: " + url);
-                return;
-            }
-            Desktop.getDesktop().browse(URI.create(url));
-        } catch (Exception e) {
-            IJ.log("Could not open install URL: " + url + " (" + e.getMessage() + ")");
         }
     }
 
@@ -1777,6 +1754,28 @@ public class DeconvolutionAnalysis implements Analysis {
         return validateRequiredFields(representative.seriesInfo, settings);
     }
 
+    private boolean isSelectedEngineReady(String engineKey) {
+        if (isSelectedEngineAvailable(engineKey)) {
+            return true;
+        }
+        DependencyId dependencyId = dependencyIdForEngine(engineKey);
+        if (dependencyId != null) {
+            FeatureDependencyGate.GateDecision decision = FeatureDependencyGate.check(
+                    dependencyId,
+                    TITLE,
+                    dependencyRequirementForEngineKey(engineKey));
+            if (!decision.isAllowed()) {
+                return false;
+            }
+        }
+        if (isSelectedEngineAvailable(engineKey)) {
+            return true;
+        }
+        showOrLogError("Selected deconvolution engine is still not available in this Fiji runtime. "
+                + "Restart Fiji after installing its dependencies. CLIJ2 also needs a usable OpenCL GPU.");
+        return false;
+    }
+
     private boolean isSelectedEngineAvailable(String engineKey) {
         for (DeconvolutionEngine engine : availableEngines()) {
             if (engine.key().equals(engineKey)) return true;
@@ -1784,20 +1783,49 @@ public class DeconvolutionAnalysis implements Analysis {
         return false;
     }
 
-    private void promptInstall(String message, String url) {
-        if (headless || suppressDialogs) {
-            IJ.log(TITLE + ": " + message + (url == null ? "" : " Install: " + url));
+    private void showMissingEngineDependency(EngineChoice choice) {
+        if (choice == null || choice.available) {
             return;
         }
-        int choice = JOptionPane.showConfirmDialog(
-                null,
-                message + (url == null ? "" : "\n\nOpen install page now?"),
-                TITLE,
-                url == null ? JOptionPane.DEFAULT_OPTION : JOptionPane.YES_NO_OPTION,
-                JOptionPane.WARNING_MESSAGE);
-        if (choice == JOptionPane.YES_OPTION && url != null) {
-            browseInstallUrl(url);
+        DependencyId dependencyId = dependencyIdForEngine(choice.engine.key());
+        if (dependencyId == null) {
+            showOrLogError(choice.engine.displayName() + " is not available in this Fiji runtime.");
+            return;
         }
+        FeatureDependencyGate.check(dependencyId, TITLE, dependencyRequirementForEngine(choice.engine));
+    }
+
+    private static DependencyId dependencyIdForEngine(String engineKey) {
+        if ("CLIJ2".equals(engineKey)) {
+            return DependencyId.DECONV_CLIJ2_RUNTIME;
+        }
+        if ("DL2".equals(engineKey)) {
+            return DependencyId.DECONVOLUTIONLAB2_RUNTIME;
+        }
+        if ("IterativeDeconvolve3D".equals(engineKey)) {
+            return DependencyId.ITERATIVE_DECONVOLVE_3D_RUNTIME;
+        }
+        return null;
+    }
+
+    private static String dependencyRequirementForEngine(DeconvolutionEngine engine) {
+        if (engine == null) {
+            return "selected deconvolution engine";
+        }
+        return dependencyRequirementForEngineKey(engine.key());
+    }
+
+    private static String dependencyRequirementForEngineKey(String engineKey) {
+        if ("CLIJ2".equals(engineKey)) {
+            return "CLIJ2 3D deconvolution engine";
+        }
+        if ("DL2".equals(engineKey)) {
+            return "DeconvolutionLab2 3D deconvolution engine";
+        }
+        if ("IterativeDeconvolve3D".equals(engineKey)) {
+            return "Iterative Deconvolve 3D engine";
+        }
+        return "selected deconvolution engine";
     }
 
     private void showValidationErrors(List<String> errors) {
@@ -1915,8 +1943,7 @@ public class DeconvolutionAnalysis implements Analysis {
         for (DeconvolutionEngine engine : allEngines()) {
             boolean isAvailable = available.contains(engine.key());
             String label = engine.displayName() + (isAvailable ? "" : " - Install...");
-            choices.add(new EngineChoice(engine, isAvailable, label,
-                    DeconvolutionAvailability.installInstructionUrl(engine.key())));
+            choices.add(new EngineChoice(engine, isAvailable, label));
         }
         return choices;
     }
@@ -2319,13 +2346,11 @@ public class DeconvolutionAnalysis implements Analysis {
         final DeconvolutionEngine engine;
         final boolean available;
         final String label;
-        final String installUrl;
 
-        EngineChoice(DeconvolutionEngine engine, boolean available, String label, String installUrl) {
+        EngineChoice(DeconvolutionEngine engine, boolean available, String label) {
             this.engine = engine;
             this.available = available;
             this.label = label;
-            this.installUrl = installUrl;
         }
 
         @Override

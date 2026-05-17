@@ -16,8 +16,6 @@ public final class AnalysisHelpCatalog {
             trainCustomSegmentationModelsTopic();
     public static final AnalysisHelpTopic ENHANCED_CLASSICAL_SEGMENTATION =
             enhancedClassicalSegmentationTopic();
-    public static final AnalysisHelpTopic CLICK_TO_SUGGEST_FILTERS =
-            clickToSuggestFiltersTopic();
     public static final AnalysisHelpTopic CUSTOM_MODEL_MANAGER =
             customModelManagerTopic();
 
@@ -71,7 +69,6 @@ public final class AnalysisHelpCatalog {
         Map<String, AnalysisHelpTopic> topics = new LinkedHashMap<String, AnalysisHelpTopic>();
         putAuxiliary(topics, TRAIN_CUSTOM_SEGMENTATION_MODELS);
         putAuxiliary(topics, ENHANCED_CLASSICAL_SEGMENTATION);
-        putAuxiliary(topics, CLICK_TO_SUGGEST_FILTERS);
         putAuxiliary(topics, CUSTOM_MODEL_MANAGER);
         return Collections.unmodifiableMap(topics);
     }
@@ -91,24 +88,21 @@ public final class AnalysisHelpCatalog {
                 FLASH_Pipeline.IDX_CREATE_BIN,
                 "train-custom-segmentation-models",
                 "Train custom segmentation models",
-                "Use captured positive and negative clicks to tune segmentation settings, export training data, or create a project-registered custom model.",
+                "Use project-registered custom StarDist, Cellpose, or trained RF models when stock segmentation settings cannot represent the objects reliably.",
                 list(
                         "Use this when stock Classical, Enhanced Classical, StarDist, or Cellpose settings repeatedly miss the same object class or include the same artefact.",
-                        "Use click-to-suggest first when the current engine only needs better thresholds, size limits, or post-detection filters.",
-                        "Use Train Custom Engine when repeated click corrections should become a reusable project model entry.",
+                        "The Train Custom Engine launcher is hidden by default while its click-collection flow is redesigned.",
                         "For full written steps, see docs/training_segmentation_models.md in the FLASH source tree."),
                 list(
                         "Representative images opened in Set Up Configuration quality control.",
-                        "Positive and negative clicks for RF post-filters, or instance label images for external StarDist and Cellpose training.",
-                        "For StarDist or Cellpose, the dataset exported by the Train Custom Engine wizard and an external training tool that returns a model file."),
+                        "Instance label images or external training data for StarDist and Cellpose models.",
+                        "For StarDist or Cellpose, a model trained outside FLASH that can be imported through the Custom Model Manager."),
                 list(
-                        "Click good objects and bad objects in the preview, then use the click-suggest toggle when you want parameter suggestions.",
-                        "Choose Train Custom Engine from the segmentation method picker when clicks should create a reusable model.",
-                        "Pick a base engine: Classical or Enhanced Classical trains an in-process Smile Random Forest, while StarDist and Cellpose package datasets for external training.",
+                        "Import finished StarDist and Cellpose models through the Custom Model Manager while the training launcher is hidden.",
+                        "Developers can re-enable the hidden launcher with the flash.trainCustomEngine.ui.enabled system property while testing the redesigned flow.",
                         "Cellpose 4, Cellpose-SAM, and cpsam models are not supported by the pinned Cellpose 3.1.1.2 runtime.",
                         "FLASH runs StarDist per slice as 2D detections with Z-linking; full 3D StarDist is not built in."),
                 list(
-                        "Review captured clicks for the current channel and exclude weak training images if needed.",
                         "Run the wizard training step; Classical and Enhanced Classical train in FLASH, while StarDist and Cellpose export datasets for Python training.",
                         "For StarDist, train externally and export a Fiji-compatible TensorFlow SavedModel zip with model.export_TF().",
                         "For Cellpose, train with Cellpose 3 and import the trained file or registered model name.",
@@ -160,41 +154,6 @@ public final class AnalysisHelpCatalog {
                         "Very strict filters can remove true objects that are dim, clipped, or partly outside the image.",
                         "Predicates depend on the candidate labels produced by thresholding, so a bad threshold still gives bad morphology.",
                         "Use the old three-command macro chain only when image preprocessing is the real problem; use Enhanced Classical when object-level filtering is the problem."),
-                Collections.<AnalysisHelpTopic.HelpImage>emptyList());
-    }
-
-    private static AnalysisHelpTopic clickToSuggestFiltersTopic() {
-        return new AnalysisHelpTopic(
-                FLASH_Pipeline.IDX_CREATE_BIN,
-                "click-to-suggest-filters",
-                "Click-to-suggest filters",
-                "Click-to-suggest uses bad-object clicks and current preview measurements to propose safer parameter changes without applying them automatically.",
-                list(
-                        "Use this after a preview has produced obvious false positives that can be clicked consistently.",
-                        "Use it before training a custom model when the current backend may only need better numeric settings.",
-                        "Skip it when no current preview labels exist or the problem is missing objects rather than bad objects."),
-                list(
-                        "At least three negative clicks on bad objects for the current channel.",
-                        "Optional positive clicks that help estimate collateral damage to likely true objects.",
-                        "A current preview label image and backend-specific object measurements."),
-                list(
-                        "Classical suggestions use intensity and object-size features to propose threshold, minimum size, and maximum size.",
-                        "StarDist suggestions use post-detection quality, area, and intensity measurements to propose quality, area, and intensity filters.",
-                        "Cellpose suggestions use object size and Cellpose probability information when available to propose cell probability and diameter changes."),
-                list(
-                        "Turn on Click bad objects to suggest filters.",
-                        "Click at least three bad objects in the preview, then press Suggest.",
-                        "Review the highlighted fields and the status message showing how many clicked bad objects would be removed.",
-                        "Press Apply to accept the suggestion or Revert to restore the previous values; FLASH never auto-applies suggestions."),
-                list(
-                        "Updated parameter fields only after Apply is pressed.",
-                        "A stale preview marker, so the preview is rerun with accepted settings before lock-in.",
-                        "No permanent click or parameter change when Revert is pressed."),
-                list(
-                        "Suggestions are local to the current channel and preview state; rerun preview after applying.",
-                        "Three negative clicks is the minimum, not a guarantee that the suggestion generalizes across the dataset.",
-                        "Positive clicks are useful because they reveal when a proposed filter would remove likely true objects.",
-                        "A suggestion can still be wrong if the clicked labels are poor examples or the preview segmentation is already badly broken."),
                 Collections.<AnalysisHelpTopic.HelpImage>emptyList());
     }
 

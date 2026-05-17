@@ -1,9 +1,6 @@
 package flash.pipeline.ui.config;
 
 import flash.pipeline.bin.BinConfig;
-import flash.pipeline.click.ClickStore;
-import flash.pipeline.click.suggest.StarDistFilterSuggester;
-import flash.pipeline.click.suggest.SuggestionContext;
 import flash.pipeline.help.AnalysisHelpCatalog;
 import flash.pipeline.help.AnalysisHelpDialog;
 import flash.pipeline.help.SetupHelpCatalog;
@@ -189,7 +186,6 @@ public final class StarDistParameterStage implements ConfigQcStage {
     private JButton previewButton;
     private JButton resetButton;
     private JButton variationsButton;
-    private ClickSuggestPanel suggestPanel;
     private ObjectFilterSummary objectFilterSummary;
 
     public StarDistParameterStage(ParameterStore parameterStore, PreviewAdapter previewAdapter) {
@@ -249,9 +245,6 @@ public final class StarDistParameterStage implements ConfigQcStage {
                 new JTextField[]{linkingField, gapClosingField, frameGapField}));
         panel.add(Box.createVerticalStrut(4));
         panel.add(buildFilterActionRow());
-        panel.add(Box.createVerticalStrut(4));
-        suggestPanel = buildClickSuggestPanel();
-        panel.add(suggestPanel);
         loadFields(savedParameters);
         markPreviewStale(EMPTY_TEXT);
         return panel;
@@ -331,10 +324,6 @@ public final class StarDistParameterStage implements ConfigQcStage {
     @Override
     public void onLeave(ConfigQcContext context) {
         closePreviewWorker();
-        if (suggestPanel != null) {
-            suggestPanel.dispose();
-            suggestPanel = null;
-        }
         if (preview != null) {
             preview.setSourceModeChangeListener(null);
             preview.setDisplaySettingsChangeListener(null);
@@ -652,114 +641,6 @@ public final class StarDistParameterStage implements ConfigQcStage {
         gbc.weightx = 0.0;
         gbc.fill = GridBagConstraints.NONE;
         return gbc;
-    }
-
-    private ClickSuggestPanel buildClickSuggestPanel() {
-        return new ClickSuggestPanel(
-                new ClickSuggestPanel.CountsProvider() {
-                    @Override public ClickSuggestPanel.Counts counts() {
-                        return currentClickCounts();
-                    }
-                },
-                new ClickSuggestPanel.SuggestionProvider() {
-                    @Override public ClickSuggestPanel.Suggestion suggest() {
-                        return suggestStarDistFilters();
-                    }
-                },
-                null);
-    }
-
-    private ClickSuggestPanel.Counts currentClickCounts() {
-        List<ClickStore.Click> clicks = currentClicks();
-        int negative = 0;
-        int positive = 0;
-        for (int i = 0; i < clicks.size(); i++) {
-            ClickStore.Click click = clicks.get(i);
-            if (click == null) continue;
-            if (click.verdict == ClickStore.Verdict.POSITIVE) positive++;
-            else negative++;
-        }
-        return new ClickSuggestPanel.Counts(negative, positive);
-    }
-
-    private List<ClickStore.Click> currentClicks() {
-        if (activeContext == null || activeContext.getClickStore() == null) {
-            return Collections.emptyList();
-        }
-        return activeContext.getClickStore().forImageAndChannel(
-                activeContext.getCurrentImageDisplayName(),
-                activeContext.getChannelNumber());
-    }
-
-    private ClickSuggestPanel.Suggestion suggestStarDistFilters() {
-        if (labelPreview == null) {
-            setStatus("Run StarDist preview before asking for click-based suggestions.");
-            return null;
-        }
-        List<ClickStore.Click> negatives = new ArrayList<ClickStore.Click>();
-        List<ClickStore.Click> positives = new ArrayList<ClickStore.Click>();
-        splitClicks(currentClicks(), negatives, positives);
-        Parameters parameters = collectParameters();
-        Map<String, Double> params = new HashMap<String, Double>();
-        params.put("minArea", Double.valueOf(parameters.areaMin));
-        params.put("maxArea", Double.valueOf(parameters.areaMax));
-        params.put("minQuality", Double.valueOf(parameters.qualityMin));
-        params.put("minIntensity", Double.valueOf(parameters.intensityMin));
-        StarDistFilterSuggester.StarDistSuggestion suggestion =
-                new StarDistFilterSuggester().suggest(new SuggestionContext(
-                        filteredSource, labelPreview, null, negatives, positives, params));
-        if (suggestion == null || (!suggestion.hasSuggestion() && !suggestion.hasHint())) {
-            return null;
-        }
-        List<ClickSuggestPanel.FieldSuggestion> fields =
-                new ArrayList<ClickSuggestPanel.FieldSuggestion>();
-        if (suggestion.minQuality != null) {
-            fields.add(new ClickSuggestPanel.FieldSuggestion(
-                    ClickSuggestPanel.ValueBinding.text("quality min", qualityMinField),
-                    formatNumber(suggestion.minQuality.doubleValue())));
-        }
-        if (suggestion.minArea != null) {
-            fields.add(new ClickSuggestPanel.FieldSuggestion(
-                    ClickSuggestPanel.ValueBinding.text("area min", areaMinField),
-                    formatNumber(suggestion.minArea.doubleValue())));
-        }
-        if (suggestion.maxArea != null) {
-            fields.add(new ClickSuggestPanel.FieldSuggestion(
-                    ClickSuggestPanel.ValueBinding.text("area max", areaMaxField),
-                    formatNumber(suggestion.maxArea.doubleValue())));
-        }
-        if (suggestion.minIntensity != null) {
-            fields.add(new ClickSuggestPanel.FieldSuggestion(
-                    ClickSuggestPanel.ValueBinding.text("intensity min", intensityMinField),
-                    formatNumber(suggestion.minIntensity.doubleValue())));
-        }
-        boolean actionable = !fields.isEmpty();
-        return new ClickSuggestPanel.Suggestion(fields,
-                actionable
-                        ? suggestionMessage(fields, suggestion.badRemoved,
-                                suggestion.collateralRemoved)
-                        : "No clear StarDist post-filter suggestion.",
-                suggestion.hint,
-                actionable ? new Runnable() {
-                    @Override public void run() {
-                        applyStarDistSuggestion();
-                    }
-                } : null,
-                actionable ? new Runnable() {
-                    @Override public void run() {
-                        if (!refreshObjectFilterPreview()) markPreviewStale(STALE_TEXT);
-                    }
-                } : null);
-    }
-
-    private void applyStarDistSuggestion() {
-        Parameters parameters = collectParameters();
-        savedParameters = parameters;
-        parameterStore.save(formatMethod(parameters));
-        captureCurrentPreviewForComparison();
-        if (!refreshObjectFilterPreview()) {
-            markPreviewStale(STALE_TEXT);
-        }
     }
 
     private JComponent buildGroupRow(String headingText, String[] labels, JTextField[] fields) {
@@ -1690,41 +1571,22 @@ public final class StarDistParameterStage implements ConfigQcStage {
         if (field != null) field.setText(value);
     }
 
-    private static void splitClicks(List<ClickStore.Click> clicks,
-                                    List<ClickStore.Click> negatives,
-                                    List<ClickStore.Click> positives) {
-        if (clicks == null) return;
-        for (int i = 0; i < clicks.size(); i++) {
-            ClickStore.Click click = clicks.get(i);
-            if (click == null) continue;
-            if (click.verdict == ClickStore.Verdict.POSITIVE) positives.add(click);
-            else negatives.add(click);
-        }
-    }
-
-    private static String suggestionMessage(List<ClickSuggestPanel.FieldSuggestion> fields,
-                                            int badRemoved,
-                                            int collateralRemoved) {
-        StringBuilder sb = new StringBuilder("Suggested ");
-        for (int i = 0; i < fields.size(); i++) {
-            ClickSuggestPanel.FieldSuggestion field = fields.get(i);
-            if (i > 0) sb.append(", ");
-            sb.append(field.binding.label).append("=").append(field.value);
-        }
-        sb.append(". Removes ").append(badRemoved)
-                .append(" bad clicks; affects ")
-                .append(collateralRemoved)
-                .append(" unclicked objects.");
-        return sb.toString();
-    }
-
     private static String formatNumber(double value) {
         if (!Double.isFinite(value)) return "0";
         double rounded = Math.rint(value);
-        if (Math.abs(value - rounded) < 1.0e-9) {
+        if (Math.abs(value - rounded) < 1.0e-9
+                && Math.abs(rounded) <= Long.MAX_VALUE) {
             return String.valueOf((long) rounded);
         }
-        return String.valueOf(value);
+        double abs = Math.abs(value);
+        if (abs >= 1.0e9d || (abs > 0.0d && abs < 1.0e-4d)) {
+            return String.format(java.util.Locale.ROOT, "%.6g", Double.valueOf(value));
+        }
+        String text = String.format(java.util.Locale.ROOT, "%.6f", Double.valueOf(value));
+        while (text.endsWith("0")) {
+            text = text.substring(0, text.length() - 1);
+        }
+        return text.endsWith(".") ? text.substring(0, text.length() - 1) : text;
     }
 
     private static void setNumberField(JTextField field, ParameterCombo combo, ParameterId id) {

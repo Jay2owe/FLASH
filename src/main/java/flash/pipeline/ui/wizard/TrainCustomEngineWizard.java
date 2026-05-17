@@ -48,8 +48,12 @@ public final class TrainCustomEngineWizard {
     }
 
     public static boolean show(Window owner, TrainCustomEngineWorkflow workflow) {
+        return showResult(owner, workflow) == Result.APPLIED;
+    }
+
+    public static Result showResult(Window owner, TrainCustomEngineWorkflow workflow) {
         if (workflow == null) {
-            return false;
+            return Result.CANCELLED;
         }
         int step = STEP_BASE;
         while (step >= STEP_BASE && step <= STEP_APPLY) {
@@ -69,7 +73,11 @@ public final class TrainCustomEngineWizard {
 
                 if (result == StepResult.CANCEL) {
                     workflow.cancel();
-                    return false;
+                    return Result.CANCELLED;
+                }
+                if (result == StepResult.ROUTE_TO_CLICK_PREVIEW) {
+                    workflow.routeToClickPreview();
+                    return Result.ROUTE_TO_CLICK_PREVIEW;
                 }
                 if (result == StepResult.BACK) {
                     step = Math.max(STEP_BASE, step - 1);
@@ -80,11 +88,13 @@ public final class TrainCustomEngineWizard {
                 showError(owner, e.getMessage());
                 if (step <= STEP_BASE) {
                     workflow.cancel();
-                    return false;
+                    return Result.CANCELLED;
                 }
             }
         }
-        return workflow.step() == TrainCustomEngineWorkflow.Step.DONE;
+        return workflow.step() == TrainCustomEngineWorkflow.Step.DONE
+                ? Result.APPLIED
+                : Result.CANCELLED;
     }
 
     private static StepResult showBaseStep(Window owner, TrainCustomEngineWorkflow workflow) {
@@ -123,10 +133,10 @@ public final class TrainCustomEngineWizard {
     private static StepResult showClickStep(Window owner, final TrainCustomEngineWorkflow workflow) {
         final PipelineDialog dialog = new PipelineDialog(owner, "Train Custom Engine - Review Clicks");
         dialog.enableBackButton();
-        dialog.setPrimaryButtonText("Next");
         dialog.addHeader("Review clicks");
         dialog.addMessage("Click summary for this channel.");
         final JLabel gate = dialog.addMessage(workflow.clickGateMessage());
+        dialog.addMessage("If more examples are needed, this hidden development workflow must wait for the redesigned click-collection flow.");
 
         JPanel imagePanel = new JPanel();
         imagePanel.setOpaque(false);
@@ -142,7 +152,7 @@ public final class TrainCustomEngineWizard {
             box.addActionListener(e -> {
                 workflow.setImageExcluded(summary.imageName, !box.isSelected());
                 gate.setText(workflow.clickGateMessage());
-                dialog.setPrimaryButtonEnabled(workflow.canProceedFromClicks());
+                updateClickStepPrimary(dialog, workflow);
             });
             boxes.put(summary.imageName, box);
             imagePanel.add(box);
@@ -153,7 +163,7 @@ public final class TrainCustomEngineWizard {
             imagePanel.add(empty);
         }
         dialog.addComponent(imagePanel);
-        dialog.setPrimaryButtonEnabled(workflow.canProceedFromClicks());
+        updateClickStepPrimary(dialog, workflow);
 
         boolean ok = dialog.showDialog();
         for (Map.Entry<String, JCheckBox> entry : boxes.entrySet()) {
@@ -162,7 +172,16 @@ public final class TrainCustomEngineWizard {
         if (!ok) {
             return dialog.wasBackPressed() ? StepResult.BACK : StepResult.CANCEL;
         }
-        return workflow.canProceedFromClicks() ? StepResult.NEXT : StepResult.BACK;
+        return workflow.canProceedFromClicks()
+                ? StepResult.NEXT
+                : StepResult.ROUTE_TO_CLICK_PREVIEW;
+    }
+
+    private static void updateClickStepPrimary(PipelineDialog dialog,
+                                               TrainCustomEngineWorkflow workflow) {
+        boolean ready = workflow != null && workflow.canProceedFromClicks();
+        dialog.setPrimaryButtonText(ready ? "Next" : "Collect clicks");
+        dialog.setPrimaryButtonEnabled(true);
     }
 
     private static StepResult showTrainStep(Window owner, TrainCustomEngineWorkflow workflow) {
@@ -319,6 +338,11 @@ public final class TrainCustomEngineWizard {
                             openFolder.setEnabled(true);
                             helper.setEnabled(true);
                             choose.setEnabled(true);
+                            dialog.setPrimaryButtonEnabled(workflow.externalModelFile() != null);
+                            if (workflow.warningMessage() != null
+                                    && !workflow.warningMessage().isEmpty()) {
+                                dialog.setTransientStatus(workflow.warningMessage());
+                            }
                         } catch (Exception e) {
                             status.setText("Dataset packaging failed: " + cleanError(e));
                         }
@@ -393,6 +417,11 @@ public final class TrainCustomEngineWizard {
 
     private static String packageSummary(TrainCustomEngineWorkflow workflow) {
         if (workflow.selectedBase() == TrainCustomEngineWorkflow.Base.STARDIST) {
+            if (workflow.starDistTraining() != null
+                    && workflow.starDistTraining().outputZip != null) {
+                return "Local StarDist training complete. Model zip: "
+                        + workflow.starDistTraining().outputZip;
+            }
             StarDistDatasetPackager.PackagingResult result = workflow.starDistPackage();
             if (result == null) return "StarDist dataset packaged.";
             return "Dataset packaged: " + result.imagesWritten + " images, "
@@ -400,6 +429,11 @@ public final class TrainCustomEngineWizard {
                     + result.outputDir;
         }
         CellposeDatasetPackager.PackagingResult result = workflow.cellposePackage();
+        if (workflow.cellposeTraining() != null
+                && workflow.cellposeTraining().modelFile != null) {
+            return "Local Cellpose training complete. Model file: "
+                    + workflow.cellposeTraining().modelFile;
+        }
         if (result == null) return "Cellpose dataset packaged.";
         return "Dataset packaged: " + result.imagesWritten + " images, "
                 + result.slicesWritten + " slices. Folder: " + result.outputDir;
@@ -460,7 +494,14 @@ public final class TrainCustomEngineWizard {
     private enum StepResult {
         NEXT,
         BACK,
-        CANCEL
+        CANCEL,
+        ROUTE_TO_CLICK_PREVIEW
+    }
+
+    public enum Result {
+        APPLIED,
+        CANCELLED,
+        ROUTE_TO_CLICK_PREVIEW
     }
 
     private static final class ProgressUpdate {

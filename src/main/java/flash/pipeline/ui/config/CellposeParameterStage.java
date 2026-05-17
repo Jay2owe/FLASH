@@ -1,12 +1,8 @@
 package flash.pipeline.ui.config;
 
 import flash.pipeline.bin.BinConfig;
-import flash.pipeline.cellpose.Cellpose3DRunner;
 import flash.pipeline.cellpose.CellposeModel;
 import flash.pipeline.cellpose.CellposeRuntime;
-import flash.pipeline.click.ClickStore;
-import flash.pipeline.click.suggest.CellposeFilterSuggester;
-import flash.pipeline.click.suggest.SuggestionContext;
 import flash.pipeline.help.AnalysisHelpCatalog;
 import flash.pipeline.help.AnalysisHelpDialog;
 import flash.pipeline.help.SetupHelpCatalog;
@@ -220,7 +216,6 @@ public final class CellposeParameterStage implements ConfigQcStage {
     private JButton variationsButton;
     private JButton manageModelsButton;
     private JPanel missingNoticeContainer;
-    private ClickSuggestPanel suggestPanel;
     private JLabel missingModelNoticeLabel;
     private JLabel defaultsNoticeLabel;
     private JButton defaultsApplyButton;
@@ -329,9 +324,6 @@ public final class CellposeParameterStage implements ConfigQcStage {
         sizeCutoffPanel = new ObjectSizeCutoffPanel();
         panel.add(sizeCutoffPanel);
         panel.add(Box.createVerticalStrut(4));
-        suggestPanel = buildClickSuggestPanel();
-        panel.add(suggestPanel);
-        panel.add(Box.createVerticalStrut(4));
         panel.add(buildHintRow());
         panel.add(Box.createVerticalStrut(4));
         panel.add(buildActionRow());
@@ -435,10 +427,6 @@ public final class CellposeParameterStage implements ConfigQcStage {
         runtimeProbeRequestId++;
         closePreviewWorker();
         closeInstallWorker();
-        if (suggestPanel != null) {
-            suggestPanel.dispose();
-            suggestPanel = null;
-        }
         if (preview != null) {
             preview.setSourceModeChangeListener(null);
             preview.setDisplaySettingsChangeListener(null);
@@ -830,115 +818,6 @@ public final class CellposeParameterStage implements ConfigQcStage {
         gbc.fill = GridBagConstraints.HORIZONTAL;
         row.add(Box.createHorizontalGlue(), gbc);
         return row;
-    }
-
-    private ClickSuggestPanel buildClickSuggestPanel() {
-        return new ClickSuggestPanel(
-                new ClickSuggestPanel.CountsProvider() {
-                    @Override public ClickSuggestPanel.Counts counts() {
-                        return currentClickCounts();
-                    }
-                },
-                new ClickSuggestPanel.SuggestionProvider() {
-                    @Override public ClickSuggestPanel.Suggestion suggest() {
-                        return suggestCellposeFilters();
-                    }
-                },
-                new ClickSuggestPanel.ToggleListener() {
-                    @Override public void selectedChanged(boolean selected) {
-                        markPreviewStale(selected
-                                ? "Click suggestions enabled. Next Cellpose preview will keep cell probability data."
-                                : STALE_TEXT);
-                    }
-                });
-    }
-
-    private ClickSuggestPanel.Counts currentClickCounts() {
-        List<ClickStore.Click> clicks = currentClicks();
-        int negative = 0;
-        int positive = 0;
-        for (int i = 0; i < clicks.size(); i++) {
-            ClickStore.Click click = clicks.get(i);
-            if (click == null) continue;
-            if (click.verdict == ClickStore.Verdict.POSITIVE) positive++;
-            else negative++;
-        }
-        return new ClickSuggestPanel.Counts(negative, positive);
-    }
-
-    private List<ClickStore.Click> currentClicks() {
-        if (activeContext == null || activeContext.getClickStore() == null) {
-            return Collections.emptyList();
-        }
-        return activeContext.getClickStore().forImageAndChannel(
-                activeContext.getCurrentImageDisplayName(),
-                activeContext.getChannelNumber());
-    }
-
-    private ClickSuggestPanel.Suggestion suggestCellposeFilters() {
-        if (labelPreview == null) {
-            setStatus("Run Cellpose preview before asking for click-based suggestions.");
-            return null;
-        }
-        List<ClickStore.Click> negatives = new ArrayList<ClickStore.Click>();
-        List<ClickStore.Click> positives = new ArrayList<ClickStore.Click>();
-        splitClicks(currentClicks(), negatives, positives);
-        Parameters parameters = collectParameters();
-        Map<String, Double> params = new LinkedHashMap<String, Double>();
-        params.put("cellprob_threshold", Double.valueOf(parameters.cellprobThreshold));
-        params.put("diameter", Double.valueOf(parameters.diameter));
-        CellposeFilterSuggester.CellposeSuggestion suggestion =
-                new CellposeFilterSuggester().suggest(new SuggestionContext(
-                        filteredSource, labelPreview, cellprobImageForSuggestion(),
-                        negatives, positives, params));
-        if (suggestion == null || !suggestion.hasSuggestion()) {
-            return null;
-        }
-        List<ClickSuggestPanel.FieldSuggestion> fields =
-                new ArrayList<ClickSuggestPanel.FieldSuggestion>();
-        if (suggestion.cellprobThreshold != null) {
-            fields.add(new ClickSuggestPanel.FieldSuggestion(
-                    ClickSuggestPanel.ValueBinding.text("cellprob threshold", cellprobField),
-                    formatNumber(suggestion.cellprobThreshold.doubleValue())));
-        }
-        if (suggestion.diameter != null) {
-            fields.add(new ClickSuggestPanel.FieldSuggestion(
-                    ClickSuggestPanel.ValueBinding.text("diameter", diameterField),
-                    formatNumber(suggestion.diameter.doubleValue())));
-        }
-        return new ClickSuggestPanel.Suggestion(fields,
-                suggestionMessage(fields, suggestion.badRemoved, suggestion.collateralRemoved),
-                new Runnable() {
-                    @Override public void run() {
-                        applyCellposeSuggestion();
-                    }
-                },
-                new Runnable() {
-                    @Override public void run() {
-                        markPreviewStale(STALE_TEXT);
-                    }
-                });
-    }
-
-    private ImagePlus cellprobImageForSuggestion() {
-        if (labelPreview == null) return null;
-        try {
-            Object property = labelPreview.getProperty(Cellpose3DRunner.CELLPROB_IMAGE_PROPERTY);
-            return property instanceof ImagePlus ? (ImagePlus) property : null;
-        } catch (RuntimeException e) {
-            return null;
-        }
-    }
-
-    private void applyCellposeSuggestion() {
-        try {
-            Parameters parameters = collectParameters();
-            parameterStore.save(formatMethod(parameters));
-            savedParameters = parameters;
-            runPreviewOnWorker();
-        } catch (RuntimeException e) {
-            setError("Could not apply suggested Cellpose parameters.");
-        }
     }
 
     private JComponent buildHintRow() {
@@ -1715,7 +1594,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
                 parse(flowField, fallback.flowThreshold),
                 parse(cellprobField, fallback.cellprobThreshold),
                 gpuSwitch == null ? fallback.useGpu : gpuSwitch.isSelected(),
-                suggestPanel != null && suggestPanel.isSelected());
+                false);
     }
 
     private static Parameters copyParameters(Parameters parameters) {
@@ -1887,41 +1766,22 @@ public final class CellposeParameterStage implements ConfigQcStage {
         }
     }
 
-    private static void splitClicks(List<ClickStore.Click> clicks,
-                                    List<ClickStore.Click> negatives,
-                                    List<ClickStore.Click> positives) {
-        if (clicks == null) return;
-        for (int i = 0; i < clicks.size(); i++) {
-            ClickStore.Click click = clicks.get(i);
-            if (click == null) continue;
-            if (click.verdict == ClickStore.Verdict.POSITIVE) positives.add(click);
-            else negatives.add(click);
-        }
-    }
-
-    private static String suggestionMessage(List<ClickSuggestPanel.FieldSuggestion> fields,
-                                            int badRemoved,
-                                            int collateralRemoved) {
-        StringBuilder sb = new StringBuilder("Suggested ");
-        for (int i = 0; i < fields.size(); i++) {
-            ClickSuggestPanel.FieldSuggestion field = fields.get(i);
-            if (i > 0) sb.append(", ");
-            sb.append(field.binding.label).append("=").append(field.value);
-        }
-        sb.append(". Removes ").append(badRemoved)
-                .append(" bad clicks; affects ")
-                .append(collateralRemoved)
-                .append(" unclicked objects.");
-        return sb.toString();
-    }
-
     private static String formatNumber(double value) {
         if (!Double.isFinite(value)) return "0";
         double rounded = Math.rint(value);
-        if (Math.abs(value - rounded) < 1.0e-9) {
+        if (Math.abs(value - rounded) < 1.0e-9
+                && Math.abs(rounded) <= Long.MAX_VALUE) {
             return String.valueOf((long) rounded);
         }
-        return String.valueOf(value);
+        double abs = Math.abs(value);
+        if (abs >= 1.0e9d || (abs > 0.0d && abs < 1.0e-4d)) {
+            return String.format(java.util.Locale.ROOT, "%.6g", Double.valueOf(value));
+        }
+        String text = String.format(java.util.Locale.ROOT, "%.6f", Double.valueOf(value));
+        while (text.endsWith("0")) {
+            text = text.substring(0, text.length() - 1);
+        }
+        return text.endsWith(".") ? text.substring(0, text.length() - 1) : text;
     }
 
     private void closePreviewWorker() {

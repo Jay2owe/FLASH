@@ -8,7 +8,9 @@ import flash.pipeline.click.training.ObjectClassifierPersistence;
 import flash.pipeline.click.training.ObjectClassifierTrainer;
 import flash.pipeline.click.training.ObjectFeatureExtractor;
 import flash.pipeline.click.training.cellpose.CellposeDatasetPackager;
+import flash.pipeline.click.training.cellpose.CellposeLocalTrainingService;
 import flash.pipeline.click.training.stardist.StarDistDatasetPackager;
+import flash.pipeline.click.training.stardist.StarDistLocalTrainingService;
 import flash.pipeline.segmentation.SegmentationMethod;
 import flash.pipeline.segmentation.SegmentationTokenParser;
 import flash.pipeline.segmentation.StarDistLinkingParams;
@@ -16,6 +18,7 @@ import flash.pipeline.segmentation.StarDistPostFilters;
 import flash.pipeline.segmentation.catalog.ModelCatalog;
 import flash.pipeline.segmentation.catalog.ModelCatalogIO;
 import flash.pipeline.segmentation.catalog.ModelEntry;
+import flash.pipeline.ui.config.SegmentationMethodLauncherModel;
 import ij.ImagePlus;
 
 import java.io.IOException;
@@ -103,11 +106,29 @@ public final class TrainCustomEngineWorkflow {
                                                                ProgressListener progress) throws Exception;
     }
 
+    public interface StarDistTrainingService {
+        boolean isEnabled();
+
+        StarDistLocalTrainingService.TrainingResult train(
+                StarDistDatasetPackager.PackagingResult packageResult,
+                String modelName,
+                ProgressListener progress) throws Exception;
+    }
+
     public interface CellposePackagingService {
         CellposeDatasetPackager.PackagingResult packageDataset(ClickSelection selection,
                                                                String sessionName,
                                                                String baseModel,
                                                                ProgressListener progress) throws Exception;
+    }
+
+    public interface CellposeTrainingService {
+        boolean isEnabled();
+
+        CellposeLocalTrainingService.TrainingResult train(
+                CellposeDatasetPackager.PackagingResult packageResult,
+                String modelName,
+                ProgressListener progress) throws Exception;
     }
 
     public interface ModelCatalogService {
@@ -149,7 +170,9 @@ public final class TrainCustomEngineWorkflow {
     public static final class Services {
         public final RfTrainingService rfTrainingService;
         public final StarDistPackagingService starDistPackagingService;
+        public final StarDistTrainingService starDistTrainingService;
         public final CellposePackagingService cellposePackagingService;
+        public final CellposeTrainingService cellposeTrainingService;
         public final ModelCatalogService catalogService;
         public final ModelKeyGenerator modelKeyGenerator;
         public final Clock clock;
@@ -160,9 +183,34 @@ public final class TrainCustomEngineWorkflow {
                         ModelCatalogService catalogService,
                         ModelKeyGenerator modelKeyGenerator,
                         Clock clock) {
+            this(rfTrainingService, starDistPackagingService, null,
+                    cellposePackagingService, null, catalogService, modelKeyGenerator, clock);
+        }
+
+        public Services(RfTrainingService rfTrainingService,
+                        StarDistPackagingService starDistPackagingService,
+                        StarDistTrainingService starDistTrainingService,
+                        CellposePackagingService cellposePackagingService,
+                        ModelCatalogService catalogService,
+                        ModelKeyGenerator modelKeyGenerator,
+                        Clock clock) {
+            this(rfTrainingService, starDistPackagingService, starDistTrainingService,
+                    cellposePackagingService, null, catalogService, modelKeyGenerator, clock);
+        }
+
+        public Services(RfTrainingService rfTrainingService,
+                        StarDistPackagingService starDistPackagingService,
+                        StarDistTrainingService starDistTrainingService,
+                        CellposePackagingService cellposePackagingService,
+                        CellposeTrainingService cellposeTrainingService,
+                        ModelCatalogService catalogService,
+                        ModelKeyGenerator modelKeyGenerator,
+                        Clock clock) {
             this.rfTrainingService = rfTrainingService;
             this.starDistPackagingService = starDistPackagingService;
+            this.starDistTrainingService = starDistTrainingService;
             this.cellposePackagingService = cellposePackagingService;
+            this.cellposeTrainingService = cellposeTrainingService;
             this.catalogService = catalogService == null
                     ? new DefaultModelCatalogService()
                     : catalogService;
@@ -210,9 +258,33 @@ public final class TrainCustomEngineWorkflow {
             };
         }
 
+        public static StarDistTrainingService starDistLocalIfEnabled() {
+            final StarDistLocalTrainingService service = new StarDistLocalTrainingService();
+            if (!service.isEnabled()) {
+                return null;
+            }
+            return new StarDistTrainingService() {
+                @Override public boolean isEnabled() {
+                    return service.isEnabled();
+                }
+
+                @Override public StarDistLocalTrainingService.TrainingResult train(
+                        StarDistDatasetPackager.PackagingResult packageResult,
+                        String modelName,
+                        final ProgressListener progress) throws Exception {
+                    return service.train(packageResult, modelName,
+                            new StarDistLocalTrainingService.ProgressSink() {
+                                @Override public void update(double fraction, String message) {
+                                    safeProgress(progress).update(fraction, message);
+                                }
+                            });
+                }
+            };
+        }
+
         public static CellposePackagingService cellpose(final Path projectRoot,
-                                                        final int channelOneBased,
-                                                        final ClickStore clickStore,
+                                                       final int channelOneBased,
+                                                       final ClickStore clickStore,
                                                         final ImagePlusProvider rawProvider,
                                                         final ImagePlusProvider labelProvider) {
             return new CellposePackagingService() {
@@ -234,6 +306,33 @@ public final class TrainCustomEngineWorkflow {
                                     baseModel);
                     safe.update(1.0, "Cellpose dataset packaged.");
                     return result;
+                }
+            };
+        }
+
+        public static CellposeTrainingService cellposeLocalIfEnabled() {
+            if (!SegmentationMethodLauncherModel.isTrainCustomEngineUiEnabled()) {
+                return null;
+            }
+            final CellposeLocalTrainingService service = new CellposeLocalTrainingService();
+            if (!service.isEnabled()) {
+                return null;
+            }
+            return new CellposeTrainingService() {
+                @Override public boolean isEnabled() {
+                    return service.isEnabled();
+                }
+
+                @Override public CellposeLocalTrainingService.TrainingResult train(
+                        CellposeDatasetPackager.PackagingResult packageResult,
+                        String modelName,
+                        final ProgressListener progress) throws Exception {
+                    return service.train(packageResult, modelName,
+                            new CellposeLocalTrainingService.ProgressSink() {
+                                @Override public void update(double fraction, String message) {
+                                    safeProgress(progress).update(fraction, message);
+                                }
+                            });
                 }
             };
         }
@@ -330,18 +429,24 @@ public final class TrainCustomEngineWorkflow {
         public final Base base;
         public final ObjectClassifierTrainer.TrainingResult rfResult;
         public final StarDistDatasetPackager.PackagingResult starDistPackage;
+        public final StarDistLocalTrainingService.TrainingResult starDistTraining;
         public final CellposeDatasetPackager.PackagingResult cellposePackage;
+        public final CellposeLocalTrainingService.TrainingResult cellposeTraining;
         public final String message;
 
         TrainStepResult(Base base,
                         ObjectClassifierTrainer.TrainingResult rfResult,
                         StarDistDatasetPackager.PackagingResult starDistPackage,
+                        StarDistLocalTrainingService.TrainingResult starDistTraining,
                         CellposeDatasetPackager.PackagingResult cellposePackage,
+                        CellposeLocalTrainingService.TrainingResult cellposeTraining,
                         String message) {
             this.base = base;
             this.rfResult = rfResult;
             this.starDistPackage = starDistPackage;
+            this.starDistTraining = starDistTraining;
             this.cellposePackage = cellposePackage;
+            this.cellposeTraining = cellposeTraining;
             this.message = message == null ? "" : message;
         }
     }
@@ -360,7 +465,9 @@ public final class TrainCustomEngineWorkflow {
     private Base selectedBase = Base.CLASSICAL;
     private ObjectClassifierTrainer.TrainingResult rfResult;
     private StarDistDatasetPackager.PackagingResult starDistPackage;
+    private StarDistLocalTrainingService.TrainingResult starDistTraining;
     private CellposeDatasetPackager.PackagingResult cellposePackage;
+    private CellposeLocalTrainingService.TrainingResult cellposeTraining;
     private Path externalModelFile;
     private ModelEntry savedEntry;
     private String recommendedMethodToken;
@@ -432,8 +539,16 @@ public final class TrainCustomEngineWorkflow {
         return starDistPackage;
     }
 
+    public StarDistLocalTrainingService.TrainingResult starDistTraining() {
+        return starDistTraining;
+    }
+
     public CellposeDatasetPackager.PackagingResult cellposePackage() {
         return cellposePackage;
+    }
+
+    public CellposeLocalTrainingService.TrainingResult cellposeTraining() {
+        return cellposeTraining;
     }
 
     public Path externalModelFile() {
@@ -462,11 +577,18 @@ public final class TrainCustomEngineWorkflow {
         selectedBase = base == null ? Base.CLASSICAL : base;
         rfResult = null;
         starDistPackage = null;
+        starDistTraining = null;
         cellposePackage = null;
+        cellposeTraining = null;
         externalModelFile = null;
         savedEntry = null;
         recommendedMethodToken = null;
         warningMessage = "";
+        step = Step.REVIEW_CLICKS;
+    }
+
+    public void routeToClickPreview() {
+        methodStore.setMethodToken(baseToken(selectedBase));
         step = Step.REVIEW_CLICKS;
     }
 
@@ -547,6 +669,13 @@ public final class TrainCustomEngineWorkflow {
         ClickSelection selection = clickSelection();
         step = Step.TRAIN;
         warningMessage = "";
+        if (selectedBase == Base.STARDIST) {
+            starDistTraining = null;
+            externalModelFile = null;
+        } else if (selectedBase == Base.CELLPOSE) {
+            cellposeTraining = null;
+            externalModelFile = null;
+        }
         if (selectedBase.trainsRf()) {
             if (services.rfTrainingService == null) {
                 throw new IllegalStateException("Random Forest training is not available in this context.");
@@ -561,7 +690,7 @@ public final class TrainCustomEngineWorkflow {
                         + "). Consider adding more clicks before saving.";
             }
             step = Step.RESULT_REVIEW;
-            return new TrainStepResult(selectedBase, rfResult, null, null,
+            return new TrainStepResult(selectedBase, rfResult, null, null, null, null,
                     warningMessage.isEmpty() ? "Training complete." : warningMessage);
         }
         String sessionName = datasetSessionName();
@@ -571,16 +700,61 @@ public final class TrainCustomEngineWorkflow {
             }
             starDistPackage = services.starDistPackagingService.packageDataset(
                     selection, sessionName, safe);
-            return new TrainStepResult(selectedBase, null, starDistPackage, null,
-                    "StarDist dataset packaged.");
+            step = Step.RESULT_REVIEW;
+            if (services.starDistTrainingService != null
+                    && services.starDistTrainingService.isEnabled()) {
+                try {
+                    safe.update(0.05, "Starting local StarDist training...");
+                    starDistTraining = services.starDistTrainingService.train(
+                            starDistPackage, defaultModelName(), safe);
+                    externalModelFile = starDistTraining.outputZip;
+                    safe.update(1.0, "Local StarDist training complete.");
+                    return new TrainStepResult(selectedBase, null, starDistPackage,
+                            starDistTraining, null, null,
+                            "Local StarDist training complete.");
+                } catch (Exception e) {
+                    warningMessage = "Local StarDist training failed; dataset package remains available "
+                            + "for ZeroCostDL4Mic fallback. " + clean(e.getMessage(), "");
+                }
+            }
+            return new TrainStepResult(selectedBase, null, starDistPackage, null, null, null,
+                    warningMessage.isEmpty()
+                            ? "StarDist dataset packaged."
+                            : warningMessage);
         }
         if (services.cellposePackagingService == null) {
             throw new IllegalStateException("Cellpose dataset packaging is not available in this context.");
         }
         cellposePackage = services.cellposePackagingService.packageDataset(
                 selection, sessionName, cellposeBaseModel(), safe);
-        return new TrainStepResult(selectedBase, null, null, cellposePackage,
-                "Cellpose dataset packaged.");
+        step = Step.RESULT_REVIEW;
+        if (cellposePackage != null && cellposePackage.trainingWarning != null
+                && !cellposePackage.trainingWarning.isEmpty()) {
+            warningMessage = cellposePackage.trainingWarning;
+        }
+        if (services.cellposeTrainingService != null
+                && services.cellposeTrainingService.isEnabled()) {
+            try {
+                safe.update(0.05, "Starting local Cellpose training...");
+                cellposeTraining = services.cellposeTrainingService.train(
+                        cellposePackage, defaultModelName(), safe);
+                externalModelFile = cellposeTraining.modelFile;
+                safe.update(1.0, "Local Cellpose training complete.");
+                return new TrainStepResult(selectedBase, null, null, null,
+                        cellposePackage, cellposeTraining,
+                        warningMessage.isEmpty()
+                                ? "Local Cellpose training complete."
+                                : "Local Cellpose training complete. " + warningMessage);
+            } catch (Exception e) {
+                warningMessage = appendWarning(warningMessage,
+                        "Local Cellpose training failed; dataset package remains available "
+                                + "for the manual command fallback. " + clean(e.getMessage(), ""));
+            }
+        }
+        return new TrainStepResult(selectedBase, null, null, null, cellposePackage, null,
+                warningMessage.isEmpty()
+                        ? "Cellpose dataset packaged."
+                        : warningMessage);
     }
 
     public boolean acceptExternalModelFile(Path modelFile) throws IOException {
@@ -740,6 +914,14 @@ public final class TrainCustomEngineWorkflow {
     private static String clean(String value, String fallback) {
         String text = value == null ? "" : value.trim();
         return text.isEmpty() ? fallback : text;
+    }
+
+    private static String appendWarning(String current, String addition) {
+        String left = current == null ? "" : current.trim();
+        String right = addition == null ? "" : addition.trim();
+        if (left.isEmpty()) return right;
+        if (right.isEmpty()) return left;
+        return left + " " + right;
     }
 
     private static String valueOrDefault(String value, String fallback) {

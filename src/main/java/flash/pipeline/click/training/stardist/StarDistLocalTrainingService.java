@@ -1,0 +1,654 @@
+package flash.pipeline.click.training.stardist;
+
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Locale;
+
+/**
+ * Hidden local StarDist 2D training runner for datasets exported by FLASH.
+ */
+public final class StarDistLocalTrainingService {
+    public static final String LOCAL_ENABLED_PROPERTY =
+            "flash.stardist.training.local.enabled";
+    public static final String PYTHON_PROPERTY =
+            "flash.stardist.training.python";
+    public static final String CONDA_ENV_PROPERTY =
+            "flash.stardist.training.conda.env";
+    public static final String CONDA_EXECUTABLE_PROPERTY =
+            "flash.stardist.training.conda.executable";
+    public static final String EPOCHS_PROPERTY =
+            "flash.stardist.training.epochs";
+    public static final String BATCH_SIZE_PROPERTY =
+            "flash.stardist.training.batchSize";
+    public static final String STEPS_PER_EPOCH_PROPERTY =
+            "flash.stardist.training.stepsPerEpoch";
+    public static final String LEARNING_RATE_PROPERTY =
+            "flash.stardist.training.learningRate";
+    public static final String USE_GPU_PROPERTY =
+            "flash.stardist.training.useGpu";
+
+    private static final String SCRIPT_FILENAME = "train_stardist_flash.py";
+    private static final String COMMAND_FILENAME = "train_stardist_command.txt";
+    private static final String LOG_FILENAME = "stardist_training.log";
+    private static final String OUTPUT_ZIP_FILENAME = "TF_SavedModel.zip";
+    private static final String MODELS_DIR = "stardist_model";
+
+    private final Config config;
+    private final ProcessRunner runner;
+
+    public StarDistLocalTrainingService() {
+        this(Config.fromSystemProperties(), new DefaultProcessRunner());
+    }
+
+    public StarDistLocalTrainingService(Config config, ProcessRunner runner) {
+        this.config = config == null ? Config.fromSystemProperties() : config;
+        this.runner = runner == null ? new DefaultProcessRunner() : runner;
+    }
+
+    public boolean isEnabled() {
+        return config.enabled;
+    }
+
+    public TrainingResult train(StarDistDatasetPackager.PackagingResult packageResult,
+                                String modelName,
+                                ProgressSink progress) throws IOException, InterruptedException {
+        if (packageResult == null || packageResult.outputDir == null) {
+            throw new IOException("StarDist training dataset is not available.");
+        }
+        return train(packageResult.outputDir, modelName, progress);
+    }
+
+    public TrainingResult train(Path datasetDir,
+                                String modelName,
+                                ProgressSink progress) throws IOException, InterruptedException {
+        if (!config.enabled) {
+            throw new IOException("Local StarDist training is disabled. Set -D"
+                    + LOCAL_ENABLED_PROPERTY + "=true to enable the hidden backend.");
+        }
+        TrainingArtifacts artifacts = prepareTrainingArtifacts(datasetDir, modelName, config);
+        final Path[] reportedZip = new Path[] {null};
+        final IOException[] logFailure = new IOException[] {null};
+        final Object logLock = new Object();
+        ProgressSink safeProgress = progress == null ? NO_PROGRESS : progress;
+        safeProgress.update(0.0, "Starting local StarDist training...");
+
+        BufferedWriter writer = Files.newBufferedWriter(
+                artifacts.logFile,
+                StandardCharsets.UTF_8);
+        try {
+            writeLog(writer, logLock, logFailure, "FLASH",
+                    "Command: " + displayCommand(artifacts.command));
+            ProcessSpec spec = new ProcessSpec(artifacts.command, artifacts.datasetDir);
+            ProcessResult result = runner.run(spec,
+                    new LoggingLineConsumer(writer, logLock, logFailure, "STDOUT",
+                            artifacts.datasetDir, reportedZip, safeProgress),
+                    new LoggingLineConsumer(writer, logLock, logFailure, "STDERR",
+                            artifacts.datasetDir, reportedZip, safeProgress));
+            if (logFailure[0] != null) {
+                throw logFailure[0];
+            }
+            int exitCode = result == null ? -1 : result.exitCode;
+            if (exitCode != 0) {
+                throw new IOException("Local StarDist training failed with exit code "
+                        + exitCode + ". Log: " + artifacts.logFile);
+            }
+        } finally {
+            writer.close();
+        }
+
+        Path zip = reportedZip[0] == null ? artifacts.outputZip : reportedZip[0];
+        if (!Files.isRegularFile(zip)) {
+            throw new IOException("Local StarDist training finished but no model zip was found: "
+                    + zip + ". Log: " + artifacts.logFile);
+        }
+        safeProgress.update(1.0, "Local StarDist training complete.");
+        return new TrainingResult(zip, artifacts.logFile, artifacts.scriptFile,
+                artifacts.commandFile, 0);
+    }
+
+    public static TrainingArtifacts prepareTrainingArtifacts(Path datasetDir,
+                                                            String modelName,
+                                                            Config config) throws IOException {
+        Config safeConfig = config == null ? Config.fromSystemProperties() : config;
+        Path dir = datasetDir == null ? null : datasetDir.toAbsolutePath().normalize();
+        if (dir == null) {
+            throw new IOException("StarDist dataset directory must not be null.");
+        }
+        if (!Files.isDirectory(dir.resolve("raw")) || !Files.isDirectory(dir.resolve("labels"))) {
+            throw new IOException("StarDist dataset must contain raw/ and labels/ folders: " + dir);
+        }
+        Files.createDirectories(dir);
+        Path scriptFile = dir.resolve(SCRIPT_FILENAME);
+        Path commandFile = dir.resolve(COMMAND_FILENAME);
+        Path logFile = dir.resolve(LOG_FILENAME);
+        Path outputZip = dir.resolve(OUTPUT_ZIP_FILENAME);
+        Path modelsDir = dir.resolve(MODELS_DIR);
+        String cleanName = safeModelName(modelName);
+
+        String script = buildTrainingScript();
+        Files.write(scriptFile, script.getBytes(StandardCharsets.UTF_8));
+        List<String> command = buildCommand(scriptFile, dir, outputZip,
+                modelsDir, cleanName, safeConfig);
+        Files.write(commandFile,
+                Collections.singletonList(displayCommand(command)),
+                StandardCharsets.UTF_8);
+        return new TrainingArtifacts(dir, scriptFile, commandFile, logFile,
+                outputZip, command, script);
+    }
+
+    public static List<String> buildCommand(Path scriptFile,
+                                            Path datasetDir,
+                                            Path outputZip,
+                                            Path modelsDir,
+                                            String modelName,
+                                            Config config) {
+        Config safeConfig = config == null ? Config.fromSystemProperties() : config;
+        List<String> command = new ArrayList<String>();
+        String condaEnv = clean(safeConfig.condaEnvironment);
+        if (!condaEnv.isEmpty()) {
+            command.add(cleanOrDefault(safeConfig.condaExecutable, "conda"));
+            command.add("run");
+            command.add("-n");
+            command.add(condaEnv);
+        }
+        command.add(cleanOrDefault(safeConfig.pythonExecutable, "python"));
+        command.add(scriptFile.toAbsolutePath().normalize().toString());
+        command.add("--dataset");
+        command.add(datasetDir.toAbsolutePath().normalize().toString());
+        command.add("--output-zip");
+        command.add(outputZip.toAbsolutePath().normalize().toString());
+        command.add("--models-dir");
+        command.add(modelsDir.toAbsolutePath().normalize().toString());
+        command.add("--model-name");
+        command.add(safeModelName(modelName));
+        command.add("--epochs");
+        command.add(String.valueOf(Math.max(1, safeConfig.epochs)));
+        command.add("--batch-size");
+        command.add(String.valueOf(Math.max(1, safeConfig.batchSize)));
+        command.add("--steps-per-epoch");
+        command.add(String.valueOf(Math.max(1, safeConfig.stepsPerEpoch)));
+        command.add("--learning-rate");
+        command.add(String.valueOf(safeConfig.learningRate));
+        command.add("--n-rays");
+        command.add(String.valueOf(Math.max(8, safeConfig.nRays)));
+        command.add("--grid");
+        command.add(String.valueOf(Math.max(1, safeConfig.grid)));
+        command.add("--validation-fraction");
+        command.add(String.valueOf(safeConfig.validationFraction));
+        command.add("--seed");
+        command.add(String.valueOf(safeConfig.seed));
+        if (safeConfig.useGpu) {
+            command.add("--use-gpu");
+        }
+        return command;
+    }
+
+    public static String buildTrainingScript() {
+        return ""
+                + "import argparse\n"
+                + "import shutil\n"
+                + "from pathlib import Path\n"
+                + "\n"
+                + "import numpy as np\n"
+                + "from tifffile import imread\n"
+                + "from csbdeep.utils import normalize\n"
+                + "from stardist.models import Config2D, StarDist2D\n"
+                + "\n"
+                + "\n"
+                + "def parse_args():\n"
+                + "    parser = argparse.ArgumentParser(description='FLASH StarDist 2D training')\n"
+                + "    parser.add_argument('--dataset', required=True)\n"
+                + "    parser.add_argument('--output-zip', required=True)\n"
+                + "    parser.add_argument('--models-dir', required=True)\n"
+                + "    parser.add_argument('--model-name', required=True)\n"
+                + "    parser.add_argument('--epochs', type=int, default=100)\n"
+                + "    parser.add_argument('--batch-size', type=int, default=1)\n"
+                + "    parser.add_argument('--steps-per-epoch', type=int, default=100)\n"
+                + "    parser.add_argument('--learning-rate', type=float, default=0.0003)\n"
+                + "    parser.add_argument('--n-rays', type=int, default=32)\n"
+                + "    parser.add_argument('--grid', type=int, default=2)\n"
+                + "    parser.add_argument('--validation-fraction', type=float, default=0.2)\n"
+                + "    parser.add_argument('--seed', type=int, default=42)\n"
+                + "    parser.add_argument('--use-gpu', action='store_true')\n"
+                + "    return parser.parse_args()\n"
+                + "\n"
+                + "\n"
+                + "def squeeze_2d(array):\n"
+                + "    squeezed = np.squeeze(array)\n"
+                + "    if squeezed.ndim != 2:\n"
+                + "        raise RuntimeError('Expected 2D image plane after squeezing, got shape {}'.format(squeezed.shape))\n"
+                + "    return squeezed\n"
+                + "\n"
+                + "\n"
+                + "def load_pairs(dataset):\n"
+                + "    raw_dir = dataset / 'raw'\n"
+                + "    label_dir = dataset / 'labels'\n"
+                + "    names = sorted([p.name for p in raw_dir.glob('*.tif') if (label_dir / p.name).is_file()])\n"
+                + "    names += sorted([p.name for p in raw_dir.glob('*.tiff') if (label_dir / p.name).is_file()])\n"
+                + "    if not names:\n"
+                + "        raise RuntimeError('No matching raw/label TIFF pairs found in {}'.format(dataset))\n"
+                + "    X = []\n"
+                + "    Y = []\n"
+                + "    for name in names:\n"
+                + "        raw = squeeze_2d(imread(str(raw_dir / name)))\n"
+                + "        labels = squeeze_2d(imread(str(label_dir / name))).astype(np.uint16, copy=False)\n"
+                + "        X.append(normalize(raw, 1, 99.8, axis=(0, 1)))\n"
+                + "        Y.append(labels)\n"
+                + "    return X, Y\n"
+                + "\n"
+                + "\n"
+                + "def split_train_validation(X, Y, fraction, seed):\n"
+                + "    n = len(X)\n"
+                + "    indices = np.arange(n)\n"
+                + "    rng = np.random.RandomState(seed)\n"
+                + "    rng.shuffle(indices)\n"
+                + "    if n <= 1:\n"
+                + "        return X, Y, X, Y\n"
+                + "    n_val = max(1, int(round(n * max(0.0, min(0.9, fraction)))))\n"
+                + "    val = set(indices[:n_val])\n"
+                + "    X_train = [x for i, x in enumerate(X) if i not in val]\n"
+                + "    Y_train = [y for i, y in enumerate(Y) if i not in val]\n"
+                + "    X_val = [x for i, x in enumerate(X) if i in val]\n"
+                + "    Y_val = [y for i, y in enumerate(Y) if i in val]\n"
+                + "    if not X_train:\n"
+                + "        X_train, Y_train = X, Y\n"
+                + "    if not X_val:\n"
+                + "        X_val, Y_val = X_train, Y_train\n"
+                + "    return X_train, Y_train, X_val, Y_val\n"
+                + "\n"
+                + "\n"
+                + "def newest_zip(root):\n"
+                + "    candidates = list(root.rglob('*.zip'))\n"
+                + "    if not candidates:\n"
+                + "        return None\n"
+                + "    candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)\n"
+                + "    return candidates[0]\n"
+                + "\n"
+                + "\n"
+                + "def main():\n"
+                + "    args = parse_args()\n"
+                + "    dataset = Path(args.dataset)\n"
+                + "    output_zip = Path(args.output_zip)\n"
+                + "    models_dir = Path(args.models_dir)\n"
+                + "    models_dir.mkdir(parents=True, exist_ok=True)\n"
+                + "    X, Y = load_pairs(dataset)\n"
+                + "    X_train, Y_train, X_val, Y_val = split_train_validation(X, Y, args.validation_fraction, args.seed)\n"
+                + "    conf = Config2D(n_rays=args.n_rays, grid=(args.grid, args.grid), use_gpu=args.use_gpu,\n"
+                + "                    train_epochs=args.epochs, train_batch_size=args.batch_size,\n"
+                + "                    train_learning_rate=args.learning_rate,\n"
+                + "                    train_steps_per_epoch=args.steps_per_epoch)\n"
+                + "    model = StarDist2D(conf, name=args.model_name, basedir=str(models_dir))\n"
+                + "    print('FLASH_EPOCH 0/{}'.format(args.epochs), flush=True)\n"
+                + "    model.train(X_train, Y_train, validation_data=(X_val, Y_val),\n"
+                + "                epochs=args.epochs, steps_per_epoch=args.steps_per_epoch)\n"
+                + "    print('FLASH_EPOCH {}/{}'.format(args.epochs, args.epochs), flush=True)\n"
+                + "    model.optimize_thresholds(X_val, Y_val)\n"
+                + "    exported = model.export_TF()\n"
+                + "    source = Path(str(exported)) if exported is not None else newest_zip(models_dir)\n"
+                + "    if source is None or not source.is_file():\n"
+                + "        source = newest_zip(models_dir)\n"
+                + "    if source is None or not source.is_file():\n"
+                + "        raise RuntimeError('model.export_TF() did not produce a zip file')\n"
+                + "    output_zip.parent.mkdir(parents=True, exist_ok=True)\n"
+                + "    if source.resolve() != output_zip.resolve():\n"
+                + "        shutil.copy2(str(source), str(output_zip))\n"
+                + "    print('FLASH_EXPORT_ZIP=' + str(output_zip), flush=True)\n"
+                + "\n"
+                + "\n"
+                + "if __name__ == '__main__':\n"
+                + "    main()\n";
+    }
+
+    private static void writeLog(BufferedWriter writer,
+                                 Object lock,
+                                 IOException[] failure,
+                                 String stream,
+                                 String line) {
+        synchronized (lock) {
+            try {
+                writer.write("[" + stream + "] " + (line == null ? "" : line));
+                writer.newLine();
+                writer.flush();
+            } catch (IOException e) {
+                failure[0] = e;
+            }
+        }
+    }
+
+    private static Path parseExportZip(Path datasetDir, String line) {
+        String marker = "FLASH_EXPORT_ZIP=";
+        String text = line == null ? "" : line.trim();
+        int index = text.indexOf(marker);
+        if (index < 0) {
+            return null;
+        }
+        String value = text.substring(index + marker.length()).trim();
+        if (value.isEmpty()) {
+            return null;
+        }
+        Path path = Paths.get(value);
+        if (!path.isAbsolute()) {
+            path = datasetDir.resolve(path);
+        }
+        return path.toAbsolutePath().normalize();
+    }
+
+    private static String safeModelName(String value) {
+        String input = clean(value).toLowerCase(Locale.ROOT);
+        StringBuilder out = new StringBuilder();
+        boolean separator = false;
+        for (int i = 0; i < input.length(); i++) {
+            char c = input.charAt(i);
+            if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+                out.append(c);
+                separator = false;
+            } else if (c == '_' || c == '-') {
+                if (out.length() > 0) {
+                    out.append(c);
+                    separator = false;
+                }
+            } else if (!separator && out.length() > 0) {
+                out.append('_');
+                separator = true;
+            }
+        }
+        while (out.length() > 0
+                && (out.charAt(out.length() - 1) == '_'
+                || out.charAt(out.length() - 1) == '-')) {
+            out.deleteCharAt(out.length() - 1);
+        }
+        return out.length() == 0 ? "flash_stardist_model" : out.toString();
+    }
+
+    private static String displayCommand(List<String> command) {
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < command.size(); i++) {
+            if (i > 0) out.append(' ');
+            out.append(quoteForDisplay(command.get(i)));
+        }
+        return out.toString();
+    }
+
+    private static String quoteForDisplay(String value) {
+        String text = value == null ? "" : value;
+        if (text.indexOf(' ') < 0 && text.indexOf('\t') < 0 && text.indexOf('"') < 0) {
+            return text;
+        }
+        return "\"" + text.replace("\"", "\\\"") + "\"";
+    }
+
+    private static String cleanOrDefault(String value, String fallback) {
+        String text = clean(value);
+        return text.isEmpty() ? fallback : text;
+    }
+
+    private static String clean(String value) {
+        return value == null ? "" : value.trim();
+    }
+
+    private static int intProperty(String name, int fallback, int min) {
+        String value = System.getProperty(name, "").trim();
+        if (value.isEmpty()) return fallback;
+        try {
+            return Math.max(min, Integer.parseInt(value));
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
+    private static double doubleProperty(String name, double fallback, double min) {
+        String value = System.getProperty(name, "").trim();
+        if (value.isEmpty()) return fallback;
+        try {
+            return Math.max(min, Double.parseDouble(value));
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
+    public interface ProgressSink {
+        void update(double fraction, String message);
+    }
+
+    public interface LineConsumer {
+        void accept(String line);
+    }
+
+    public interface ProcessRunner {
+        ProcessResult run(ProcessSpec spec,
+                          LineConsumer stdout,
+                          LineConsumer stderr) throws IOException, InterruptedException;
+    }
+
+    public static final ProgressSink NO_PROGRESS = new ProgressSink() {
+        @Override public void update(double fraction, String message) {
+        }
+    };
+
+    public static final class Config {
+        public final boolean enabled;
+        public final String pythonExecutable;
+        public final String condaEnvironment;
+        public final String condaExecutable;
+        public final int epochs;
+        public final int batchSize;
+        public final int stepsPerEpoch;
+        public final double learningRate;
+        public final int nRays;
+        public final int grid;
+        public final double validationFraction;
+        public final int seed;
+        public final boolean useGpu;
+
+        public Config(boolean enabled,
+                      String pythonExecutable,
+                      String condaEnvironment,
+                      String condaExecutable,
+                      int epochs,
+                      int batchSize,
+                      int stepsPerEpoch,
+                      double learningRate,
+                      int nRays,
+                      int grid,
+                      double validationFraction,
+                      int seed,
+                      boolean useGpu) {
+            this.enabled = enabled;
+            this.pythonExecutable = cleanOrDefault(pythonExecutable, "python");
+            this.condaEnvironment = clean(condaEnvironment);
+            this.condaExecutable = cleanOrDefault(condaExecutable, "conda");
+            this.epochs = Math.max(1, epochs);
+            this.batchSize = Math.max(1, batchSize);
+            this.stepsPerEpoch = Math.max(1, stepsPerEpoch);
+            this.learningRate = Math.max(0.0, learningRate);
+            this.nRays = Math.max(8, nRays);
+            this.grid = Math.max(1, grid);
+            this.validationFraction = Math.max(0.0, Math.min(0.9, validationFraction));
+            this.seed = seed;
+            this.useGpu = useGpu;
+        }
+
+        public static Config fromSystemProperties() {
+            return new Config(
+                    Boolean.getBoolean(LOCAL_ENABLED_PROPERTY),
+                    System.getProperty(PYTHON_PROPERTY, "python"),
+                    System.getProperty(CONDA_ENV_PROPERTY, ""),
+                    System.getProperty(CONDA_EXECUTABLE_PROPERTY, "conda"),
+                    intProperty(EPOCHS_PROPERTY, 100, 1),
+                    intProperty(BATCH_SIZE_PROPERTY, 1, 1),
+                    intProperty(STEPS_PER_EPOCH_PROPERTY, 100, 1),
+                    doubleProperty(LEARNING_RATE_PROPERTY, 0.0003, 0.0),
+                    32,
+                    2,
+                    0.2,
+                    42,
+                    Boolean.getBoolean(USE_GPU_PROPERTY));
+        }
+    }
+
+    public static final class TrainingArtifacts {
+        public final Path datasetDir;
+        public final Path scriptFile;
+        public final Path commandFile;
+        public final Path logFile;
+        public final Path outputZip;
+        public final List<String> command;
+        public final String scriptText;
+
+        TrainingArtifacts(Path datasetDir,
+                          Path scriptFile,
+                          Path commandFile,
+                          Path logFile,
+                          Path outputZip,
+                          List<String> command,
+                          String scriptText) {
+            this.datasetDir = datasetDir;
+            this.scriptFile = scriptFile;
+            this.commandFile = commandFile;
+            this.logFile = logFile;
+            this.outputZip = outputZip;
+            this.command = Collections.unmodifiableList(new ArrayList<String>(command));
+            this.scriptText = scriptText == null ? "" : scriptText;
+        }
+    }
+
+    public static final class TrainingResult {
+        public final Path outputZip;
+        public final Path logFile;
+        public final Path scriptFile;
+        public final Path commandFile;
+        public final int exitCode;
+
+        public TrainingResult(Path outputZip,
+                              Path logFile,
+                              Path scriptFile,
+                              Path commandFile,
+                              int exitCode) {
+            this.outputZip = outputZip;
+            this.logFile = logFile;
+            this.scriptFile = scriptFile;
+            this.commandFile = commandFile;
+            this.exitCode = exitCode;
+        }
+    }
+
+    public static final class ProcessSpec {
+        public final List<String> command;
+        public final Path workingDirectory;
+
+        ProcessSpec(List<String> command, Path workingDirectory) {
+            this.command = Collections.unmodifiableList(new ArrayList<String>(
+                    command == null ? Collections.<String>emptyList() : command));
+            this.workingDirectory = workingDirectory;
+        }
+    }
+
+    public static final class ProcessResult {
+        public final int exitCode;
+
+        public ProcessResult(int exitCode) {
+            this.exitCode = exitCode;
+        }
+    }
+
+    private static final class LoggingLineConsumer implements LineConsumer {
+        private final BufferedWriter writer;
+        private final Object logLock;
+        private final IOException[] logFailure;
+        private final String stream;
+        private final Path datasetDir;
+        private final Path[] reportedZip;
+        private final ProgressSink progress;
+
+        LoggingLineConsumer(BufferedWriter writer,
+                            Object logLock,
+                            IOException[] logFailure,
+                            String stream,
+                            Path datasetDir,
+                            Path[] reportedZip,
+                            ProgressSink progress) {
+            this.writer = writer;
+            this.logLock = logLock;
+            this.logFailure = logFailure;
+            this.stream = stream;
+            this.datasetDir = datasetDir;
+            this.reportedZip = reportedZip;
+            this.progress = progress;
+        }
+
+        @Override public void accept(String line) {
+            writeLog(writer, logLock, logFailure, stream, line);
+            Path zip = parseExportZip(datasetDir, line);
+            if (zip != null) {
+                reportedZip[0] = zip;
+            }
+            StarDistTrainingProgressParser.Progress parsed =
+                    StarDistTrainingProgressParser.parse(line);
+            if (parsed != null) {
+                progress.update(0.05 + (0.90 * parsed.fraction), parsed.message);
+            }
+        }
+    }
+
+    private static final class DefaultProcessRunner implements ProcessRunner {
+        @Override public ProcessResult run(ProcessSpec spec,
+                                           LineConsumer stdout,
+                                           LineConsumer stderr) throws IOException, InterruptedException {
+            ProcessBuilder builder = new ProcessBuilder(spec.command);
+            if (spec.workingDirectory != null) {
+                builder.directory(spec.workingDirectory.toFile());
+            }
+            final Process process = builder.start();
+            Thread outThread = streamThread(process, true, stdout);
+            Thread errThread = streamThread(process, false, stderr);
+            outThread.start();
+            errThread.start();
+            int exit;
+            try {
+                exit = process.waitFor();
+            } catch (InterruptedException e) {
+                process.destroy();
+                throw e;
+            } finally {
+                outThread.join();
+                errThread.join();
+            }
+            return new ProcessResult(exit);
+        }
+
+        private static Thread streamThread(final Process process,
+                                           final boolean stdout,
+                                           final LineConsumer consumer) {
+            return new Thread(new Runnable() {
+                @Override public void run() {
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(
+                            stdout ? process.getInputStream() : process.getErrorStream(),
+                            StandardCharsets.UTF_8));
+                    try {
+                        String line;
+                        while ((line = reader.readLine()) != null) {
+                            if (consumer != null) {
+                                consumer.accept(line);
+                            }
+                        }
+                    } catch (IOException ignored) {
+                    } finally {
+                        try {
+                            reader.close();
+                        } catch (IOException ignored) {
+                        }
+                    }
+                }
+            }, stdout ? "flash-stardist-train-stdout" : "flash-stardist-train-stderr");
+        }
+    }
+}

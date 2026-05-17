@@ -134,6 +134,10 @@ public class DependencyServiceTest {
         assertEquals(DependencyId.IMGLIB2_FFT_RUNTIME, ordered.get(8));
         assertEquals(DependencyId.JTRANSFORMS_RUNTIME, ordered.get(9));
         assertEquals(DependencyId.ORIENTATIONJ_RUNTIME, ordered.get(10));
+        assertEquals(DependencyId.EPFL_PSF_GENERATOR_RUNTIME, ordered.get(11));
+        assertEquals(DependencyId.DECONV_CLIJ2_RUNTIME, ordered.get(12));
+        assertEquals(DependencyId.DECONVOLUTIONLAB2_RUNTIME, ordered.get(13));
+        assertEquals(DependencyId.ITERATIVE_DECONVOLVE_3D_RUNTIME, ordered.get(14));
         assertEquals(DependencyId.CELLPOSE_RUNTIME, ordered.get(ordered.size() - 1));
     }
 
@@ -174,6 +178,27 @@ public class DependencyServiceTest {
         assertEquals("Install ImgLib2 FFT (~20 KB)", labels.get(DependencyId.IMGLIB2_FFT_RUNTIME));
         assertEquals("Install JTransforms (~487 KB)", labels.get(DependencyId.JTRANSFORMS_RUNTIME));
         assertEquals("Install OrientationJ (~438 KB)", labels.get(DependencyId.ORIENTATIONJ_RUNTIME));
+    }
+
+    @Test
+    public void missingDeconvolutionRowsOfferInstallButtons() {
+        DependencyService service = DependencyRuntimeTestSupport.serviceWith(
+                DependencyRuntimeTestSupport.withStatuses(
+                        DependencyId.EPFL_PSF_GENERATOR_RUNTIME,
+                        DependencyStatus.missing("PSF Generator missing"),
+                        DependencyId.DECONV_CLIJ2_RUNTIME,
+                        DependencyStatus.missing("CLIJ2 missing"),
+                        DependencyId.DECONVOLUTIONLAB2_RUNTIME,
+                        DependencyStatus.missing("DL2 missing"),
+                        DependencyId.ITERATIVE_DECONVOLVE_3D_RUNTIME,
+                        DependencyStatus.missing("Iterative missing")));
+
+        Map<DependencyId, String> labels = firstActionLabels(service.getDialogRows());
+
+        assertEquals("Install PSF Generator (~366 KB)", labels.get(DependencyId.EPFL_PSF_GENERATOR_RUNTIME));
+        assertEquals("Install CLIJ2 Deconvolution (~8.1 MB)", labels.get(DependencyId.DECONV_CLIJ2_RUNTIME));
+        assertEquals("Install DeconvolutionLab2 (~2.6 MB)", labels.get(DependencyId.DECONVOLUTIONLAB2_RUNTIME));
+        assertEquals("Install Iterative Deconvolve 3D (~16 KB)", labels.get(DependencyId.ITERATIVE_DECONVOLVE_3D_RUNTIME));
     }
 
     @Test

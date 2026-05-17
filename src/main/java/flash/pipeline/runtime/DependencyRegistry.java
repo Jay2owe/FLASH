@@ -52,12 +52,17 @@ public final class DependencyRegistry {
     public static final long IMAGEJ_RUNTIME_BYTES = 2589983L;
     public static final long BIO_FORMATS_RUNTIME_BYTES = 250459L;
     public static final long OBJECTS_COUNTER_3D_BYTES = 22913L;
+    public static final long OBJECTS_COUNTER_3D_PLUS_BYTES = 194990L;
     public static final long MCIB3D_CORE_BYTES = 1572864L;
     public static final long STARDIST_RUNTIME_BYTES = 22775071L;
     public static final long TENSORFLOW_NATIVE_RUNTIME_BYTES = 143819615L;
     public static final long APACHE_POI_RUNTIME_BYTES = 13820232L;
     public static final long CELLPOSE_CPU_RUNTIME_BYTES = 524288000L;
     public static final long CELLPOSE_GPU_RUNTIME_BYTES = 2684354560L;
+    public static final long EPFL_PSF_GENERATOR_RUNTIME_BYTES = 374403L;
+    public static final long DECONV_CLIJ2_RUNTIME_BYTES = 8469845L;
+    public static final long DECONVOLUTIONLAB2_RUNTIME_BYTES = 2718343L;
+    public static final long ITERATIVE_DECONVOLVE_3D_RUNTIME_BYTES = 16573L;
     public static final long JTS_CORE_BYTES = 1103721L;
     public static final long COLOC2_RUNTIME_BYTES = 153303L;
     public static final long IMGLIB2_ALGORITHM_RUNTIME_BYTES = 1145386L;
@@ -250,6 +255,142 @@ public final class DependencyRegistry {
                             "jars",
                             "https://repo1.maven.org/maven2/org/locationtech/jts/jts-core/1.19.0/jts-core-1.19.0.jar",
                             "3ff3baa0074445384f9e0068df81fbd0a168395a",
+                            false)
+            ));
+
+    private static final List<DependencySpec.JarRequirement> EPFL_PSF_GENERATOR_JARS =
+            Collections.unmodifiableList(Arrays.asList(
+                    new DependencySpec.JarRequirement(
+                            "EPFL PSF Generator",
+                            "PSF_Generator.jar",
+                            "PSF_Generator-",
+                            "plugins",
+                            "https://bigwww.epfl.ch/algorithms/psfgenerator/PSF_Generator.jar",
+                            "14123eaac9ded5c007414e493bb0045f927b970d",
+                            false)
+            ));
+
+    private static final List<DependencySpec.JarRequirement> DECONV_CLIJ2_JARS =
+            Collections.unmodifiableList(Arrays.asList(
+                    new DependencySpec.JarRequirement(
+                            "clij2-fft",
+                            "clij2-fft_-2.2.0.22.jar",
+                            "clij2-fft_-",
+                            "plugins",
+                            "https://sites.imagej.net/clijx-deconvolution/plugins/clij2-fft_-2.2.0.22.jar-20251218161549",
+                            "c3e072f6aad0fc6dacef2a883385f24c395b0303",
+                            false),
+                    new DependencySpec.JarRequirement(
+                            "CLIJ2",
+                            "clij2_-2.5.3.5.jar",
+                            "clij2_-",
+                            "plugins",
+                            "https://sites.imagej.net/clij2/plugins/clij2_-2.5.3.5.jar-20240704214737",
+                            "64a3742743d322e466cf6fed2917a82d9d5c1165",
+                            true),
+                    new DependencySpec.JarRequirement(
+                            "CLIJ",
+                            "clij_-1.9.0.1.jar",
+                            "clij_-",
+                            "plugins",
+                            "https://sites.imagej.net/clij/plugins/clij_-1.9.0.1.jar-20210613085830",
+                            "724139b2c163cd8a5e32fdf616347af0b3eecb03",
+                            true),
+                    new DependencySpec.JarRequirement(
+                            "ClearCL",
+                            "clij-clearcl-2.5.0.1.jar",
+                            "clij-clearcl-",
+                            "jars",
+                            "https://sites.imagej.net/clij/jars/clij-clearcl-2.5.0.1.jar-20210613085830",
+                            "4de6955a28c3a1c469b743cbf3f438c0db8e2fa3",
+                            true),
+                    new DependencySpec.JarRequirement(
+                            "CLIJ core",
+                            "clij-core-1.8.1.1.jar",
+                            "clij-core-",
+                            "jars",
+                            "https://sites.imagej.net/clij/jars/clij-core-1.8.1.1.jar-20210725142738",
+                            "56445e5f061eac19d79d933d470a5dc1d5f20068",
+                            true),
+                    new DependencySpec.JarRequirement(
+                            "CLIJ core memory",
+                            "clij-coremem-2.3.0.4.jar",
+                            "clij-coremem-",
+                            "jars",
+                            "https://sites.imagej.net/clij/jars/clij-coremem-2.3.0.4.jar-20210506170808",
+                            "4a657bc5a6e365c4dcfbaea5d6eafbc5e96a110f",
+                            true),
+                    new DependencySpec.JarRequirement(
+                            "JOCL",
+                            "jocl-2.0.5.jar",
+                            "jocl-",
+                            "jars",
+                            "https://sites.imagej.net/clij/jars/jocl-2.0.5.jar-20250801124700",
+                            "1718f599e8edc29a6d2a465ca43a963347a71669",
+                            true),
+                    new DependencySpec.JarRequirement(
+                            "BridJ",
+                            "bridj-0.7.0.jar",
+                            "bridj-",
+                            "jars",
+                            "https://sites.imagej.net/clij/jars/bridj-0.7.0.jar-20181201213334",
+                            "461c40ed578c92106579e370838ed4e224d0289e",
+                            true),
+                    new DependencySpec.JarRequirement(
+                            "JavaCL",
+                            "javacl-1.0.0-RC4.jar",
+                            "javacl-",
+                            "jars",
+                            "https://sites.imagej.net/clij/jars/javacl-1.0.0-RC4.jar-20181201213040",
+                            "3dd897f9fc9e85e21dad24b33b48f70f1a65a94a",
+                            true),
+                    new DependencySpec.JarRequirement(
+                            "OpenCL4Java",
+                            "opencl4java-1.0.0-RC4.jar",
+                            "opencl4java-",
+                            "jars",
+                            "https://sites.imagej.net/clij/jars/opencl4java-1.0.0-RC4.jar-20181201213239",
+                            "c7150b7cbe1237c61d81c93fa02926a65a5fa46e",
+                            true),
+                    new DependencySpec.JarRequirement(
+                            "NativeLibs4Java utilities",
+                            "nativelibs4java-utils-1.6.jar",
+                            "nativelibs4java-utils-",
+                            "jars",
+                            "https://sites.imagej.net/clij/jars/nativelibs4java-utils-1.6.jar-20181201213239",
+                            "2afd9ecca247bc7df95530bbc09674c311bc0f6f",
+                            true),
+                    new DependencySpec.JarRequirement(
+                            "JavaCPP",
+                            "javacpp-1.5.10.jar",
+                            "javacpp-",
+                            "jars",
+                            "https://sites.imagej.net/Fiji/jars/javacpp-1.5.10.jar-20250122172943",
+                            "afb6ae145e7563c66b677cb4896dd0197d49fce6",
+                            true)
+            ));
+
+    private static final List<DependencySpec.JarRequirement> DECONVOLUTIONLAB2_JARS =
+            Collections.unmodifiableList(Arrays.asList(
+                    new DependencySpec.JarRequirement(
+                            "DeconvolutionLab2",
+                            "DeconvolutionLab_2.jar",
+                            "DeconvolutionLab_",
+                            "plugins",
+                            "http://bigwww.epfl.ch/deconvolution/deconvolutionlab2/DeconvolutionLab_2.jar",
+                            "c6bb56b77c0706b96aee4eba82c4459e694c108d",
+                            false)
+            ));
+
+    private static final List<DependencySpec.JarRequirement> ITERATIVE_DECONVOLVE_3D_FILES =
+            Collections.unmodifiableList(Arrays.asList(
+                    new DependencySpec.JarRequirement(
+                            "Iterative Deconvolve 3D",
+                            "Iterative_Deconvolve_3D.class",
+                            "Iterative_Deconvolve_3D-",
+                            "plugins",
+                            "https://www.optinav.info/download/Iterative_Deconvolve_3D.class",
+                            "9579f73f0c897b3cef48dec1dedb49c263a2edb1",
                             false)
             ));
 
@@ -579,6 +720,24 @@ public final class DependencyRegistry {
                 .jarRequirements(OBJECTS_COUNTER_3D_JARS)
                 .build());
 
+        specs.put(DependencyId.OBJECTS_COUNTER_3D_PLUS, DependencySpec.builder(
+                        DependencyId.OBJECTS_COUNTER_3D_PLUS,
+                        "3D Objects Counter+")
+                .description("Final 3D Objects Counter+ plugin API reused by FLASH for Enhanced Classical segmentation and morphology filtering.")
+                .affectedFeatures("Enhanced Classical segmentation", "enhanced classical morphology filtering", "trained RF Enhanced Classical base", "Set Up Configuration Enhanced Classical preview")
+                .criticality(DependencySpec.Criticality.OPTIONAL_FEATURE)
+                .detectionStrategyLabel("Class probe")
+                .probe(classProbe(
+                        "sc.fiji.oc3dplus.api.OC3DPlus",
+                        "sc.fiji.oc3dplus.engine.ObjectsCounter3DWrapper"))
+                .fixerStrategy(DependencySpec.FixerStrategy.NONE)
+                .approxDownloadSizeBytes(OBJECTS_COUNTER_3D_PLUS_BYTES)
+                .restartRequired(true)
+                .fixableInApp(false)
+                .nonFixableReason("Install 3D Objects Counter+ into Fiji, then restart Fiji.")
+                .visibleInDependenciesDialog(true)
+                .build());
+
         specs.put(DependencyId.MCIB3D_CORE, DependencySpec.builder(
                         DependencyId.MCIB3D_CORE,
                         "mcib3d-core")
@@ -682,6 +841,92 @@ public final class DependencyRegistry {
                                 "cellpose_gpu",
                                 "Install Cellpose GPU%s",
                                 CELLPOSE_GPU_RUNTIME_BYTES)))
+                .build());
+
+        specs.put(DependencyId.EPFL_PSF_GENERATOR_RUNTIME, DependencySpec.builder(
+                        DependencyId.EPFL_PSF_GENERATOR_RUNTIME,
+                        "EPFL PSF Generator")
+                .description("EPFL PSF Generator plugin used to synthesize the point spread functions required by 3D deconvolution.")
+                .affectedFeatures("3D Deconvolution PSF synthesis", "deconvolution preview", "deconvolution batch processing")
+                .criticality(DependencySpec.Criticality.OPTIONAL_FEATURE)
+                .detectionStrategyLabel("Composite class probe + jar presence / version probe")
+                .probe(composite(
+                        classProbe("PSF_Generator"),
+                        jarProbe(EPFL_PSF_GENERATOR_JARS, Collections.<String>emptyList())))
+                .fixerStrategy(DependencySpec.FixerStrategy.DIRECT_JAR_DOWNLOAD)
+                .approxDownloadSizeBytes(EPFL_PSF_GENERATOR_RUNTIME_BYTES)
+                .restartRequired(true)
+                .fixableInApp(true)
+                .fixButtonLabelTemplate("Install PSF Generator%s")
+                .presentButtonLabel("Verify PSF Generator")
+                .visibleInDependenciesDialog(true)
+                .dialogSectionLabel("3D Deconvolution")
+                .jarRequirements(EPFL_PSF_GENERATOR_JARS)
+                .build());
+
+        specs.put(DependencyId.DECONV_CLIJ2_RUNTIME, DependencySpec.builder(
+                        DependencyId.DECONV_CLIJ2_RUNTIME,
+                        "CLIJ2 / clij2-fft runtime")
+                .description("GPU deconvolution Java stack for the CLIJ2 engine. A usable OpenCL GPU is still required at run time.")
+                .affectedFeatures("CLIJ2 3D deconvolution engine", "GPU Richardson-Lucy deconvolution", "GPU RL-TV deconvolution")
+                .criticality(DependencySpec.Criticality.OPTIONAL_FEATURE)
+                .detectionStrategyLabel("Composite class probe + jar presence / version probe")
+                .probe(composite(
+                        classProbe(
+                                "net.haesleinhuepf.clij2.CLIJ2",
+                                "net.haesleinhuepf.clijx.plugins.DeconvolveRichardsonLucyFFT"),
+                        jarProbe(DECONV_CLIJ2_JARS, Collections.<String>emptyList())))
+                .fixerStrategy(DependencySpec.FixerStrategy.DIRECT_JAR_DOWNLOAD)
+                .approxDownloadSizeBytes(DECONV_CLIJ2_RUNTIME_BYTES)
+                .restartRequired(true)
+                .fixableInApp(true)
+                .fixButtonLabelTemplate("Install CLIJ2 Deconvolution%s")
+                .presentButtonLabel("Verify CLIJ2 Deconvolution")
+                .visibleInDependenciesDialog(true)
+                .dialogSectionLabel("3D Deconvolution")
+                .jarRequirements(DECONV_CLIJ2_JARS)
+                .build());
+
+        specs.put(DependencyId.DECONVOLUTIONLAB2_RUNTIME, DependencySpec.builder(
+                        DependencyId.DECONVOLUTIONLAB2_RUNTIME,
+                        "DeconvolutionLab2 runtime")
+                .description("CPU deconvolution plugin used by the DeconvolutionLab2 engine.")
+                .affectedFeatures("DeconvolutionLab2 3D deconvolution engine", "CPU Richardson-Lucy deconvolution", "CPU regularized deconvolution")
+                .criticality(DependencySpec.Criticality.OPTIONAL_FEATURE)
+                .detectionStrategyLabel("Composite class probe + jar presence / version probe")
+                .probe(composite(
+                        classProbe("deconvolutionlab.Lab"),
+                        jarProbe(DECONVOLUTIONLAB2_JARS, Collections.<String>emptyList())))
+                .fixerStrategy(DependencySpec.FixerStrategy.DIRECT_JAR_DOWNLOAD)
+                .approxDownloadSizeBytes(DECONVOLUTIONLAB2_RUNTIME_BYTES)
+                .restartRequired(true)
+                .fixableInApp(true)
+                .fixButtonLabelTemplate("Install DeconvolutionLab2%s")
+                .presentButtonLabel("Verify DeconvolutionLab2")
+                .visibleInDependenciesDialog(true)
+                .dialogSectionLabel("3D Deconvolution")
+                .jarRequirements(DECONVOLUTIONLAB2_JARS)
+                .build());
+
+        specs.put(DependencyId.ITERATIVE_DECONVOLVE_3D_RUNTIME, DependencySpec.builder(
+                        DependencyId.ITERATIVE_DECONVOLVE_3D_RUNTIME,
+                        "Iterative Deconvolve 3D runtime")
+                .description("Lightweight ImageJ 1.x Richardson-Lucy plugin used by the Iterative Deconvolve 3D engine.")
+                .affectedFeatures("Iterative Deconvolve 3D engine", "CPU Richardson-Lucy deconvolution fallback")
+                .criticality(DependencySpec.Criticality.OPTIONAL_FEATURE)
+                .detectionStrategyLabel("Composite class probe + plugin file presence probe")
+                .probe(composite(
+                        classProbe("Iterative_Deconvolve_3D"),
+                        jarProbe(ITERATIVE_DECONVOLVE_3D_FILES, Collections.<String>emptyList())))
+                .fixerStrategy(DependencySpec.FixerStrategy.DIRECT_JAR_DOWNLOAD)
+                .approxDownloadSizeBytes(ITERATIVE_DECONVOLVE_3D_RUNTIME_BYTES)
+                .restartRequired(true)
+                .fixableInApp(true)
+                .fixButtonLabelTemplate("Install Iterative Deconvolve 3D%s")
+                .presentButtonLabel("Verify Iterative Deconvolve 3D")
+                .visibleInDependenciesDialog(true)
+                .dialogSectionLabel("3D Deconvolution")
+                .jarRequirements(ITERATIVE_DECONVOLVE_3D_FILES)
                 .build());
 
         specs.put(DependencyId.COLOC2_RUNTIME, DependencySpec.builder(

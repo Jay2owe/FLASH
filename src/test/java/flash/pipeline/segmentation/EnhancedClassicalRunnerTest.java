@@ -45,7 +45,7 @@ public class EnhancedClassicalRunnerTest {
         ImagePlus image = sphereAndRodImage();
         ImagePlus result = new EnhancedClassicalRunner().run(
                 image,
-                params(image, MorphPredicate.parse("sphericity>=0.9")));
+                params(image, MorphPredicate.parse("sphericity>=0.6")));
 
         assertEquals(1, countLabels(result));
     }

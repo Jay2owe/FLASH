@@ -106,6 +106,9 @@ public class CellposeDatasetPackagerTest {
         assertEquals(command, JsonIO.stringValue(metadata.get("trainCommand")));
         assertEquals(1, JsonIO.intValue(metadata.get("imageCount"), -1));
         assertEquals(1, JsonIO.intValue(metadata.get("sliceCount"), -1));
+        assertEquals(CellposeDatasetPackager.EXPORT_MODE_PER_Z_SLICES,
+                JsonIO.stringValue(metadata.get("exportMode")));
+        assertFalse(JsonIO.booleanValue(metadata.get("sourceHad3D"), true));
         assertEquals(relativePath(result.outputDir, clicksJson),
                 JsonIO.stringValue(metadata.get("sourceClicksJsonPath")));
 
@@ -167,6 +170,16 @@ public class CellposeDatasetPackagerTest {
         assertTrue(Files.isRegularFile(result.outputDir.resolve("Image1_C2_z001_masks.tif")));
         assertTrue(Files.isRegularFile(result.outputDir.resolve("Image1_C2_z003.tif")));
         assertTrue(Files.isRegularFile(result.outputDir.resolve("Image1_C2_z003_masks.tif")));
+        assertTrue(result.sourceHad3D);
+        assertTrue(result.trainingWarning.contains("2D-oriented"));
+
+        Map<String, Object> metadata = JsonIO.parseObject(
+                text(result.outputDir.resolve("metadata.json")));
+        assertEquals(CellposeDatasetPackager.EXPORT_MODE_PER_Z_SLICES,
+                JsonIO.stringValue(metadata.get("exportMode")));
+        assertTrue(JsonIO.booleanValue(metadata.get("sourceHad3D"), false));
+        assertEquals(1, JsonIO.intValue(metadata.get("source3DImageCount"), -1));
+        assertTrue(JsonIO.stringValue(metadata.get("trainingWarning")).contains("per-Z"));
     }
 
     @Test

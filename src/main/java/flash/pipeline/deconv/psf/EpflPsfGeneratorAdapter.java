@@ -83,7 +83,7 @@ public final class EpflPsfGeneratorAdapter {
     /**
      * Pure option-string builder for the EPFL PSF Generator macro API.
      *
-     * <p>No live {@code psfgenerator.PSFGenerator} install was available on this machine on
+     * <p>No live {@code PSF_Generator} install was available on this machine on
      * 2026-04-23. The only local Fiji hit was the older {@code Diffraction_PSF_3D} plugin, which
      * is not the EPFL generator detected by {@link DeconvolutionAvailability#isPsfGeneratorAvailable()}.
      * These option keys are therefore best-effort guesses based on the phase spec:

@@ -72,22 +72,49 @@ public class DeconvolutionAvailabilityTest {
         }
     }
 
+    @Test
+    public void detectsRootPluginClassNamesUsedByInstalledFijiPlugins() throws Exception {
+        ClassLoader original = Thread.currentThread().getContextClassLoader();
+        URLClassLoader populatedLoader = compileClasses("", "PSF_Generator", "Iterative_Deconvolve_3D");
+        try {
+            Thread.currentThread().setContextClassLoader(populatedLoader);
+            DeconvolutionAvailability.clearCache();
+
+            assertTrue(DeconvolutionAvailability.isPsfGeneratorAvailable());
+            assertTrue(DeconvolutionAvailability.isIterativeDeconvolve3DAvailable());
+        } finally {
+            Thread.currentThread().setContextClassLoader(original);
+            DeconvolutionAvailability.clearCache();
+            populatedLoader.close();
+        }
+    }
+
     private URLClassLoader compileClass(String packageName, String simpleName) throws Exception {
+        return compileClasses(packageName, simpleName);
+    }
+
+    private URLClassLoader compileClasses(String packageName, String... simpleNames) throws Exception {
         JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
         assertNotNull("Tests require a JDK compiler", compiler);
 
-        File root = temp.newFolder(simpleName.toLowerCase());
-        File sourceDir = new File(root, packageName.replace('.', File.separatorChar));
+        File root = temp.newFolder(simpleNames[0].toLowerCase());
+        File sourceDir = packageName == null || packageName.trim().isEmpty()
+                ? root
+                : new File(root, packageName.replace('.', File.separatorChar));
         assertTrue(sourceDir.mkdirs() || sourceDir.isDirectory());
 
-        File sourceFile = new File(sourceDir, simpleName + ".java");
-        String source = "package " + packageName + ";\n"
-                + "public class " + simpleName + " {}\n";
-        Files.write(sourceFile.toPath(), source.getBytes(StandardCharsets.UTF_8));
+        java.util.List<String> args = new java.util.ArrayList<String>();
+        args.add("-d");
+        args.add(root.getAbsolutePath());
+        for (String simpleName : simpleNames) {
+            File sourceFile = new File(sourceDir, simpleName + ".java");
+            String source = (packageName == null || packageName.trim().isEmpty() ? "" : "package " + packageName + ";\n")
+                    + "public class " + simpleName + " {}\n";
+            Files.write(sourceFile.toPath(), source.getBytes(StandardCharsets.UTF_8));
+            args.add(sourceFile.getAbsolutePath());
+        }
 
-        int exitCode = compiler.run(null, null, null,
-                "-d", root.getAbsolutePath(),
-                sourceFile.getAbsolutePath());
+        int exitCode = compiler.run(null, null, null, args.toArray(new String[args.size()]));
         assertEquals(0, exitCode);
 
         return new URLClassLoader(new URL[]{root.toURI().toURL()}, null);

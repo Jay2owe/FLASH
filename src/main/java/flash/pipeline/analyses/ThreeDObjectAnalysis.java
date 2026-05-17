@@ -46,7 +46,6 @@ import flash.pipeline.naming.ImageNameParser;
 import flash.pipeline.naming.NameParts;
 import flash.pipeline.naming.ResolvedImageMetadata;
 import flash.pipeline.objects.ObjectsCounter3DWrapper;
-import flash.pipeline.objects.ObjectsCounterOptions;
 import flash.pipeline.recipes.RecipeReplayModelResolver;
 import flash.pipeline.results.ObjectAnalysisDetailsWriter;
 import flash.pipeline.results.ObjectCsvColumnOrder;
@@ -137,7 +136,9 @@ public class ThreeDObjectAnalysis implements Analysis {
     interface SpatialOptionsDialogLauncher {
         SpatialAnalysisWizard.DerivedConfig launch(String directory,
                                                    List<String> channelNames,
-                                                   Map<String, Double> markerThresholds);
+                                                   Map<String, Double> markerThresholds,
+                                                   boolean lockVolumetricColoc,
+                                                   boolean lockCpcColoc);
     }
 
     private static final SpatialOptionsDialogLauncher DEFAULT_SPATIAL_OPTIONS_DIALOG_LAUNCHER =
@@ -145,13 +146,16 @@ public class ThreeDObjectAnalysis implements Analysis {
                 @Override
                 public SpatialAnalysisWizard.DerivedConfig launch(String directory,
                                                                   List<String> channelNames,
-                                                                  Map<String, Double> markerThresholds) {
+                                                                  Map<String, Double> markerThresholds,
+                                                                  boolean lockVolumetricColoc,
+                                                                  boolean lockCpcColoc) {
                     SpatialAnalysis spatialOptions = new SpatialAnalysis();
                     spatialOptions.setSuppressDialogs(false);
                     spatialOptions.setMarkerThresholds(markerThresholds == null
                             ? new LinkedHashMap<String, Double>()
                             : new LinkedHashMap<String, Double>(markerThresholds));
-                    return spatialOptions.showOptionsDialogForChainedRun(directory, channelNames);
+                    return spatialOptions.showOptionsDialogForChainedRun(
+                            directory, channelNames, lockVolumetricColoc, lockCpcColoc);
                 }
             };
 
@@ -389,6 +393,13 @@ public class ThreeDObjectAnalysis implements Analysis {
                 "3D Object Analysis", featureDisplayName);
     }
 
+    private static boolean gateObjectsCounterPlusFeature(String featureDisplayName) {
+        return FeatureDependencyGate.gate(DependencyId.OBJECTS_COUNTER_3D_PLUS,
+                "3D Object Analysis", featureDisplayName)
+                && FeatureDependencyGate.gate(DependencyId.MCIB3D_CORE,
+                "3D Object Analysis", featureDisplayName);
+    }
+
     private static boolean isMcib3dAvailable() {
         Boolean cached = mcib3dAvailable;
         if (cached != null) {
@@ -425,7 +436,12 @@ public class ThreeDObjectAnalysis implements Analysis {
     private static boolean usesEnhancedClassicalSegmentation(BinConfig cfg) {
         if (cfg == null) return false;
         for (int i = 0; i < cfg.numChannels(); i++) {
-            if (cfg.isEnhancedClassical(i)) return true;
+            SegmentationMethod method = cfg.segmentationMethod(i);
+            if (method.isEnhancedClassical()) return true;
+            if (method.isTrainedRf()
+                    && SegmentationMethod.trainedRfBase(method).isEnhancedClassical()) {
+                return true;
+            }
         }
         return false;
     }
@@ -433,7 +449,12 @@ public class ThreeDObjectAnalysis implements Analysis {
     private static boolean usesClassicalSegmentation(BinConfig cfg) {
         if (cfg == null) return false;
         for (int i = 0; i < cfg.numChannels(); i++) {
-            if (!cfg.usesLabelImageSegmentation(i)) return true;
+            SegmentationMethod method = cfg.segmentationMethod(i);
+            if (method.isClassical()) return true;
+            if (method.isTrainedRf()
+                    && SegmentationMethod.trainedRfBase(method).isClassical()) {
+                return true;
+            }
         }
         return false;
     }
@@ -634,6 +655,10 @@ public class ThreeDObjectAnalysis implements Analysis {
         if (usesClassicalSegmentation(cfg)
                 && !FeatureDependencyGate.gate(DependencyId.OBJECTS_COUNTER_3D,
                 "3D Object Analysis", "classical 3D object counting")) {
+            return;
+        }
+        if (usesEnhancedClassicalSegmentation(cfg)
+                && !gateObjectsCounterPlusFeature("Enhanced Classical / 3D Objects Counter+ segmentation")) {
             return;
         }
         if (usesStarDistSegmentation(cfg) && !gateStarDistFeature("StarDist 3D segmentation")) {
@@ -1435,7 +1460,8 @@ public class ThreeDObjectAnalysis implements Analysis {
             return true;
         }
         SpatialAnalysisWizard.DerivedConfig spatialConfig =
-                spatialOptionsDialogLauncher.launch(directory, channelNames, markerThresholds);
+                spatialOptionsDialogLauncher.launch(
+                        directory, channelNames, markerThresholds, doVolumetric, doCpc);
         if (spatialConfig == null) {
             IJ.log("[FLASH] 3D Object Analysis cancelled because Spatial Analysis options were cancelled.");
             if (!suppressDialogs && cliConfig == null && !GraphicsEnvironment.isHeadless()) {
@@ -2798,7 +2824,7 @@ public class ThreeDObjectAnalysis implements Analysis {
                     boolean excludeOnEdges = false;
                     long counterStart = System.currentTimeMillis();
 
-                    if (fr.enhancedClassical && fr.morphPredicates != null && !fr.morphPredicates.isEmpty()) {
+                    if (fr.enhancedClassical) {
                         ImagePlus enhancedLabels = new EnhancedClassicalRunner().run(
                                 fr.filtered,
                                 new EnhancedClassicalParameters(
@@ -3189,7 +3215,7 @@ public class ThreeDObjectAnalysis implements Analysis {
                 } else {
                     // Classical: threshold + native counting
                     long counterStart = System.currentTimeMillis();
-                    if (fr.enhancedClassical && fr.morphPredicates != null && !fr.morphPredicates.isEmpty()) {
+                    if (fr.enhancedClassical) {
                         ImagePlus enhancedLabels = new EnhancedClassicalRunner().run(
                                 fr.filtered,
                                 new EnhancedClassicalParameters(

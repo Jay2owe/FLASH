@@ -134,6 +134,73 @@ public class ClassicalParameterSuggesterTest {
         assertEquals(1, suggestion.collateralRemoved);
     }
 
+    @Test
+    public void badOnlyClicksDoNotRemoveUnclickedObjectsWithThreshold() {
+        Fixture f = fixture(new int[][]{
+                {1, 2, 3, 4},
+                {1, 2, 3, 4}
+        }, new float[][]{
+                {10, 15, 20, 18},
+                {10, 15, 20, 18}
+        });
+
+        ClassicalParameterSuggester.ClassicalSuggestion suggestion = suggest(f,
+                negatives(c(1, 0, 0), c(2, 1, 0), c(3, 2, 0)),
+                Collections.<ClickStore.Click>emptyList());
+
+        assertFalse(suggestion.hasSuggestion());
+    }
+
+    @Test
+    public void badOnlyClicksCanSuggestThresholdWhenUnclickedObjectsArePreserved() {
+        Fixture f = fixture(new int[][]{
+                {1, 2, 3, 4},
+                {1, 2, 3, 4}
+        }, new float[][]{
+                {10, 15, 20, 100},
+                {10, 15, 20, 100}
+        });
+
+        ClassicalParameterSuggester.ClassicalSuggestion suggestion = suggest(f,
+                negatives(c(1, 0, 0), c(2, 1, 0), c(3, 2, 0)),
+                Collections.<ClickStore.Click>emptyList());
+
+        assertNotNull(suggestion.thresholdLow);
+        assertEquals(21.0, suggestion.thresholdLow.doubleValue(), 0.001);
+        assertEquals(3, suggestion.badRemoved);
+        assertEquals(0, suggestion.collateralRemoved);
+    }
+
+    @Test
+    public void badOnlyClicksCanSuggestMinSizeWhenUnclickedObjectsArePreserved() {
+        Fixture f = fixture(new int[][]{
+                {1, 2, 3, 4, 4, 4},
+                {0, 0, 0, 4, 4, 4}
+        }, fill(2, 6, 100f));
+
+        ClassicalParameterSuggester.ClassicalSuggestion suggestion = suggest(f,
+                negatives(c(1, 0, 0), c(2, 1, 0), c(3, 2, 0)),
+                Collections.<ClickStore.Click>emptyList());
+
+        assertNotNull(suggestion.minSize);
+        assertEquals(2, suggestion.minSize.intValue());
+        assertEquals(3, suggestion.badRemoved);
+        assertEquals(0, suggestion.collateralRemoved);
+    }
+
+    @Test
+    public void badOnlyClicksDoNotRemoveUnclickedObjectsWithMinSize() {
+        Fixture f = fixture(new int[][]{
+                {1, 2, 3, 4}
+        }, fill(1, 4, 100f));
+
+        ClassicalParameterSuggester.ClassicalSuggestion suggestion = suggest(f,
+                negatives(c(1, 0, 0), c(2, 1, 0), c(3, 2, 0)),
+                Collections.<ClickStore.Click>emptyList());
+
+        assertFalse(suggestion.hasSuggestion());
+    }
+
     private static ClassicalParameterSuggester.ClassicalSuggestion suggest(
             Fixture fixture, java.util.List<ClickStore.Click> negative,
             java.util.List<ClickStore.Click> positive) {

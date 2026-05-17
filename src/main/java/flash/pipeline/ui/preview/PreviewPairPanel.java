@@ -1192,7 +1192,7 @@ public final class PreviewPairPanel extends JPanel {
         ImagePreviewPanel.PixelClickListener listener = new ImagePreviewPanel.PixelClickListener() {
             @Override public void pixelClicked(ImagePreviewPanel src, double imageX, double imageY,
                                                int z, int button, int modifiers) {
-                dispatchInlineObjectClick(imageX, imageY, z, button, modifiers);
+                dispatchInlineObjectClick(src, imageX, imageY, z, button, modifiers);
             }
         };
         originalPreview.setPixelClickListener(listener);
@@ -1204,9 +1204,11 @@ public final class PreviewPairPanel extends JPanel {
         adjustedPreview.setPixelClickListener(null);
     }
 
-    private void dispatchInlineObjectClick(double x, double y, int z,
+    private void dispatchInlineObjectClick(ImagePreviewPanel source,
+                                           double x, double y, int z,
                                            int button, int modifiers) {
-        ObjectClickDispatcher.dispatch(largePreviewThirdImage, x, y, z, button, modifiers,
+        if (!clickCaptureAvailable()) return;
+        ObjectClickDispatcher.dispatch(inlineObjectLabelImage(source), x, y, z, button, modifiers,
                 new ObjectClickDispatcher.Handler() {
                     @Override public void objectClicked(int label, int clickZ,
                                                         double clickX, double clickY,
@@ -1214,6 +1216,33 @@ public final class PreviewPairPanel extends JPanel {
                         handleLargeObjectClick(label, clickZ, clickX, clickY, positive, clear);
                     }
                 });
+    }
+
+    private ImagePlus inlineObjectLabelImage(ImagePreviewPanel source) {
+        if (largePreviewThirdImage != null) return largePreviewThirdImage;
+        if (source == adjustedPreview && isLikelyObjectLabelImage(adjustedImage)) {
+            return adjustedImage;
+        }
+        if (isLikelyObjectLabelImage(adjustedImage)) {
+            return adjustedImage;
+        }
+        return null;
+    }
+
+    private static boolean isLikelyObjectLabelImage(ImagePlus image) {
+        if (image == null) return false;
+        String title;
+        try {
+            title = image.getTitle();
+        } catch (RuntimeException e) {
+            return false;
+        }
+        String lower = title == null ? "" : title.trim().toLowerCase(java.util.Locale.ROOT);
+        return lower.contains("object label")
+                || lower.contains("label preview")
+                || lower.contains("label map")
+                || lower.contains("stardist label")
+                || lower.contains("cellpose label");
     }
 
     private void wireComparisonDialog() {

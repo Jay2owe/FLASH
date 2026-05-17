@@ -279,6 +279,13 @@ public class CreateBinFileAnalysis implements Analysis {
                 "Set Up Configuration", featureDisplayName);
     }
 
+    private static boolean gateObjectsCounterPlusFeature(String featureDisplayName) {
+        return FeatureDependencyGate.gate(DependencyId.OBJECTS_COUNTER_3D_PLUS,
+                "Set Up Configuration", featureDisplayName)
+                && FeatureDependencyGate.gate(DependencyId.MCIB3D_CORE,
+                "Set Up Configuration", featureDisplayName);
+    }
+
     @Override
     public void setHeadless(boolean headless) {
         this.headless = headless;
@@ -5161,24 +5168,20 @@ public class CreateBinFileAnalysis implements Analysis {
                         positionImageLeft(dup);
                         IJ.selectWindow(dup.getTitle());
 
-                        // Run 3D Objects Counter to generate objects map
-                        try {
-                            String ocParams = "threshold=" + threshValue
-                                    + " slice=6"
-                                    + " min.=" + minSize
-                                    + " max.=" + maxSize
-                                    + " objects";
-                            IJ.run("3D Objects Counter", ocParams);
-                        } catch (Exception e) {
-                            IJ.log("Warning: 3D Objects Counter failed: " + e.getMessage());
-                        }
-
-                        // Find the objects map and apply high-vis visualization
-                        ImagePlus objectsMap = findObjectsMap();
+                        ObjectsCounter3DWrapper.Result preview = runObjectsCounterPreview(
+                                dup,
+                                threshValue,
+                                minSize,
+                                maxSize,
+                                "Particle size preview input | " + chLabel,
+                                "Object label preview | " + chLabel);
+                        ImagePlus objectsMap = preview == null ? null : preview.getObjectsMap();
                         if (objectsMap != null) {
                             // Objects maps are label images: pixel values are object IDs,
                             // so they should use a categorical label LUT, not the channel LUT.
                             applyLabelMapLut(objectsMap);
+                            objectsMap.show();
+                            positionImageLeft(objectsMap);
                         }
 
                         String sizeLabel = minSize + "-" + (maxSize >= 99999999 ? "Infinity" : String.valueOf(maxSize));
@@ -5652,6 +5655,9 @@ public class CreateBinFileAnalysis implements Analysis {
                     }
 
                     @Override public ImagePlus createFilteredSource(ConfigQcContext context) {
+                        if (!gateObjectsCounterPlusFeature("Enhanced Classical / 3D Objects Counter+ preview")) {
+                            return null;
+                        }
                         return createFilteredSetupSource(context, cfg, binFolder, channelIndex,
                                 "Enhanced Classical filtered input");
                     }
@@ -6189,8 +6195,14 @@ public class CreateBinFileAnalysis implements Analysis {
         return new SegmentationMethodStage.TrainCustomEngineLauncher() {
             @Override public boolean launch(final ConfigQcContext context,
                                             final SegmentationMethodStage.MethodStore methodStore) {
+                return launchWithResult(context, methodStore).isApplied();
+            }
+
+            @Override public SegmentationMethodStage.LaunchResult launchWithResult(
+                    final ConfigQcContext context,
+                    final SegmentationMethodStage.MethodStore methodStore) {
                 if (context == null || methodStore == null) {
-                    return false;
+                    return SegmentationMethodStage.LaunchResult.cancelled();
                 }
 
                 final TrainCustomEngineWorkflow[] workflowRef =
@@ -6233,9 +6245,11 @@ public class CreateBinFileAnalysis implements Analysis {
                                 TrainCustomEngineWorkflow.ImageTrainingServices.starDist(
                                         projectRoot, channelIndex + 1,
                                         context.getClickStore(), rawProvider, labelProvider),
+                                TrainCustomEngineWorkflow.ImageTrainingServices.starDistLocalIfEnabled(),
                                 TrainCustomEngineWorkflow.ImageTrainingServices.cellpose(
                                         projectRoot, channelIndex + 1,
                                         context.getClickStore(), rawProvider, labelProvider),
+                                TrainCustomEngineWorkflow.ImageTrainingServices.cellposeLocalIfEnabled(),
                                 null,
                                 null,
                                 null);
@@ -6255,16 +6269,47 @@ public class CreateBinFileAnalysis implements Analysis {
                         cellposeBaseTokenForTraining(cfg, channelIndex));
                 workflowRef[0] = workflow;
 
-                return showTrainCustomEngineWizard(
+                TrainCustomEngineWizard.Result result = showTrainCustomEngineWizardResult(
                         context == null ? null : context.getWindowOwner(),
                         workflow);
+                if (result == TrainCustomEngineWizard.Result.ROUTE_TO_CLICK_PREVIEW) {
+                    workflow.routeToClickPreview();
+                    return SegmentationMethodStage.LaunchResult.routeToStage(
+                            trainingClickPreviewStageKey(workflow.selectedBase()));
+                }
+                return result == TrainCustomEngineWizard.Result.APPLIED
+                        ? SegmentationMethodStage.LaunchResult.applied()
+                        : SegmentationMethodStage.LaunchResult.cancelled();
             }
         };
     }
 
+    private static String trainingClickPreviewStageKey(TrainCustomEngineWorkflow.Base base) {
+        TrainCustomEngineWorkflow.Base routed = base == null
+                ? TrainCustomEngineWorkflow.Base.CLASSICAL
+                : base.tokenBase();
+        if (routed == TrainCustomEngineWorkflow.Base.ENHANCED_CLASSICAL) {
+            return EnhancedClassicalSegmentationStage.class.getName();
+        }
+        if (routed == TrainCustomEngineWorkflow.Base.STARDIST) {
+            return StarDistParameterStage.class.getName();
+        }
+        if (routed == TrainCustomEngineWorkflow.Base.CELLPOSE) {
+            return CellposeParameterStage.class.getName();
+        }
+        return ClassicalSegmentationStage.class.getName();
+    }
+
+    protected TrainCustomEngineWizard.Result showTrainCustomEngineWizardResult(
+            Window owner,
+            TrainCustomEngineWorkflow workflow) {
+        return TrainCustomEngineWizard.showResult(owner, workflow);
+    }
+
     protected boolean showTrainCustomEngineWizard(Window owner,
                                                   TrainCustomEngineWorkflow workflow) {
-        return TrainCustomEngineWizard.show(owner, workflow);
+        return showTrainCustomEngineWizardResult(owner, workflow)
+                == TrainCustomEngineWizard.Result.APPLIED;
     }
 
     private ImagePlus createTrainingRawImage(ConfigQcContext context,
@@ -6348,6 +6393,9 @@ public class CreateBinFileAnalysis implements Analysis {
                                                             File binFolder,
                                                             int channelIndex,
                                                             String imageName) {
+        if (!gateObjectsCounterPlusFeature("Enhanced Classical training labels")) {
+            return null;
+        }
         ImagePlus filtered = createFilteredSetupSource(context, cfg, binFolder,
                 channelIndex, "Training enhanced classical filtered input");
         ImagePlus raw = createTrainingRawImage(context, cfg, channelIndex, imageName);

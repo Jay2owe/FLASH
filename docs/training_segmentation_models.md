@@ -2,7 +2,11 @@
 
 Use a stock model first when it finds the right object type with only small threshold, size, or filter changes. Train a custom model when the stock model repeatedly misses the same biology, includes the same artefacts, or cannot separate crowded objects after normal parameter tuning.
 
-Custom training is worth the extra work when the object shape, staining pattern, species, tissue, imaging scale, or background looks different from the examples used by the stock model. For small numeric problems, try click-to-suggest filters before training.
+Custom training is worth the extra work when the object shape, staining pattern, species, tissue, imaging scale, or background looks different from the examples used by the stock model. For small numeric problems, tune the visible threshold, size, and post-detection filter controls before training.
+
+The Set Up Configuration "Train Custom Engine" launcher is currently hidden by default because the training workflow needs a valid object-label preview before it can collect useful clicks. Until that workflow is redesigned, import finished StarDist or Cellpose models through the Custom Model Manager. Developers can re-enable the hidden launcher with `-Dflash.trainCustomEngine.ui.enabled=true` only while testing the training flow.
+
+A hidden local StarDist training backend is available for validation only. It remains disabled by default; developers must set both `-Dflash.trainCustomEngine.ui.enabled=true` and `-Dflash.stardist.training.local.enabled=true`, and can point it at Python with `-Dflash.stardist.training.python=<python>` or a conda environment with `-Dflash.stardist.training.conda.env=<env>`. If local training is disabled or unavailable, the wizard still packages the dataset for ZeroCostDL4Mic or another external StarDist workflow.
 
 ## Where Custom Models Are Imported
 
@@ -19,13 +23,11 @@ FLASH stores project model entries in `FLASH/Configuration/Segmentation Models/c
 
 StarDist is best for compact, roughly round or star-convex objects such as nuclei.
 
-1. In Set Up Configuration quality control, click good and bad objects on representative images.
-2. Open the Train Custom Engine wizard and choose the StarDist training route.
-3. Export the dataset package from the wizard.
-4. Train in Python with `stardist.models.StarDist2D`, ZeroCostDL4Mic, or another Fiji-compatible StarDist training workflow.
-5. Export the trained model with `model.export_TF()` to create a TensorFlow SavedModel `.zip`.
-6. Import that `.zip` through Custom Model Manager -> `Add StarDist...`.
-7. Preview the imported model on several representative images before batch analysis.
+1. Prepare raw images and matching instance-label masks outside FLASH, or re-enable the hidden training launcher only for development testing of dataset packaging.
+2. Train in Python with `stardist.models.StarDist2D`, ZeroCostDL4Mic, the hidden local FLASH backend during developer validation, or another Fiji-compatible StarDist training workflow.
+3. Export the trained model with `model.export_TF()` to create a TensorFlow SavedModel `.zip`.
+4. Import that `.zip` through Custom Model Manager -> `Add StarDist...`.
+5. Preview the imported model on several representative images before batch analysis.
 
 Use a tested StarDist export environment if possible. Newer TensorFlow/Keras combinations can make Fiji-compatible export harder; Python 3.9, TensorFlow 2.10, and StarDist 0.8.x are a safer reference environment.
 
@@ -35,31 +37,28 @@ FLASH runs StarDist per slice as 2D detections, then links detections through Z.
 
 Cellpose is best for cells or cell-like objects with flexible shapes.
 
-1. In Set Up Configuration quality control, click good and bad objects on representative images.
-2. Open the Train Custom Engine wizard and choose the Cellpose training route.
-3. Export the dataset package from the wizard.
-4. Train with the Cellpose 3 GUI or command line. The exported data should follow Cellpose naming conventions such as `<image>.tif` with `<image>_masks.tif` or `<image>_seg.npy`.
-5. For command-line training, start from a command like:
+1. Prepare training images and masks outside FLASH, or re-enable the hidden training launcher only for development testing of dataset packaging.
+2. Train with the Cellpose 3 GUI or command line. The exported data should follow Cellpose naming conventions such as `<image>.tif` with `<image>_masks.tif` or `<image>_seg.npy`.
+3. For command-line training, start from a command like:
 
 ```text
 python -m cellpose --train --dir <train_folder> --test_dir <validation_folder> --pretrained_model cyto3 --chan 0 --chan2 0
 ```
 
-6. Cellpose writes trained models under `<train_folder>/models/`.
-7. Import the trained model file through Custom Model Manager -> `Add Cellpose...`, or register it with `python -m cellpose --add_model <path>` and add the registered name through `Add Cellpose...` -> `Registered name`.
-8. Preview the imported model on several representative images before batch analysis.
+4. Cellpose writes trained models under `<train_folder>/models/`.
+5. Import the trained model file through Custom Model Manager -> `Add Cellpose...`, or register it with `python -m cellpose --add_model <path>` and add the registered name through `Add Cellpose...` -> `Registered name`.
+6. Preview the imported model on several representative images before batch analysis.
 
 FLASH pins Cellpose `3.1.1.2`. Cellpose 4, Cellpose-SAM, and `cpsam` models are not supported.
 
 ## Trained RF Workflow
 
-Trained RF (random forest) models are trained inside FLASH. Use this when the current classical, enhanced classical, StarDist, or Cellpose result is close, but repeated false positives can be learned from clicked examples.
+Trained RF (random forest) models are trained inside FLASH. This route is temporarily unavailable from the normal UI while the training launcher is hidden. Use it only in development builds with `-Dflash.trainCustomEngine.ui.enabled=true` until the redesigned click-collection flow is implemented.
 
 1. Run the normal preview for the channel.
-2. Click bad objects and, when useful, click good objects as positive examples.
-3. Open the Train Custom Engine wizard.
-4. Choose a Classical RF, Enhanced Classical RF, StarDist RF post-filter, or Cellpose RF post-filter route.
-5. Train inside the wizard and save the resulting project model.
+2. Open the Train Custom Engine wizard in a development build.
+3. Choose a Classical RF, Enhanced Classical RF, StarDist RF post-filter, or Cellpose RF post-filter route.
+4. Train inside the wizard and save the resulting project model.
 
 No Python training step is needed for trained RF models.
 

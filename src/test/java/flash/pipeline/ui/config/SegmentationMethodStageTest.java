@@ -80,6 +80,49 @@ public class SegmentationMethodStageTest {
     }
 
     @Test
+    public void trainCustomEnginePreviewReopenButtonIsHiddenByDefault() {
+        String previous = System.getProperty(
+                SegmentationMethodLauncherModel.TRAIN_CUSTOM_ENGINE_UI_ENABLED_PROPERTY);
+        try {
+            System.clearProperty(
+                    SegmentationMethodLauncherModel.TRAIN_CUSTOM_ENGINE_UI_ENABLED_PROPERTY);
+
+            JComponent panel = SegmentationMethodStage.buildChangeMethodPanel(
+                    new RecordingStore(), new RecordingActions());
+
+            assertEquals(null, findButton(panel,
+                    SegmentationMethodLauncherModel.TRAIN_CUSTOM_ENGINE_DISPLAY));
+        } finally {
+            restoreTrainCustomEngineFlag(previous);
+        }
+    }
+
+    @Test
+    public void trainCustomEnginePreviewReopenButtonRoutesToMethodPickerWhenEnabled() {
+        String previous = System.getProperty(
+                SegmentationMethodLauncherModel.TRAIN_CUSTOM_ENGINE_UI_ENABLED_PROPERTY);
+        try {
+            System.setProperty(
+                    SegmentationMethodLauncherModel.TRAIN_CUSTOM_ENGINE_UI_ENABLED_PROPERTY,
+                    "true");
+            RecordingActions actions = new RecordingActions();
+            JComponent panel = SegmentationMethodStage.buildChangeMethodPanel(
+                    new RecordingStore(), actions);
+
+            JButton train = findButton(panel,
+                    SegmentationMethodLauncherModel.TRAIN_CUSTOM_ENGINE_DISPLAY);
+            assertNotNull(train);
+            train.doClick();
+
+            assertEquals(SegmentationMethodStage.class.getName(), actions.jumpTarget);
+            assertEquals("Train Custom Engine is hidden until its click-collection flow is redesigned.",
+                    actions.status);
+        } finally {
+            restoreTrainCustomEngineFlag(previous);
+        }
+    }
+
+    @Test
     public void trainedRfTokenLoadsAsCatalogNamedChoiceAndRoundTripsUnchanged() throws Exception {
         File projectRoot = temp.newFolder("project");
         writeSmileRfCatalog(projectRoot, "test_model_key", "Test Microglia RF");
@@ -235,6 +278,17 @@ public class SegmentationMethodStageTest {
             }
         }
         return null;
+    }
+
+    private static void restoreTrainCustomEngineFlag(String previous) {
+        if (previous == null) {
+            System.clearProperty(
+                    SegmentationMethodLauncherModel.TRAIN_CUSTOM_ENGINE_UI_ENABLED_PROPERTY);
+        } else {
+            System.setProperty(
+                    SegmentationMethodLauncherModel.TRAIN_CUSTOM_ENGINE_UI_ENABLED_PROPERTY,
+                    previous);
+        }
     }
 
     private static ImagePlus stack(String title) {

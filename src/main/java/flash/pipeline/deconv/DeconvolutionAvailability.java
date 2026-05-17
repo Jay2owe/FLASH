@@ -19,7 +19,9 @@ public final class DeconvolutionAvailability {
             }
         }
 
-        boolean available = classExists("net.haesleinhuepf.clij2.CLIJ2") && hasUsableGpu();
+        boolean available = classExists("net.haesleinhuepf.clij2.CLIJ2")
+                && classExists("net.haesleinhuepf.clijx.plugins.DeconvolveRichardsonLucyFFT")
+                && hasUsableGpu();
         synchronized (CACHE) {
             CACHE.put("CLIJ2", Boolean.valueOf(available));
         }
@@ -31,19 +33,24 @@ public final class DeconvolutionAvailability {
     }
 
     public static boolean isIterativeDeconvolve3DAvailable() {
-        return cachedClassAvailability("IterativeDeconvolve3D", "OptiNavLib.Iterative_Deconvolve_3D");
+        return cachedAnyClassAvailability(
+                "IterativeDeconvolve3D",
+                "Iterative_Deconvolve_3D",
+                "OptiNavLib.Iterative_Deconvolve_3D");
     }
 
     public static boolean isPsfGeneratorAvailable() {
-        return cachedClassAvailability("PsfGenerator", "psfgenerator.PSFGenerator");
+        return cachedAnyClassAvailability(
+                "PsfGenerator",
+                "PSF_Generator",
+                "plugins.sage.psfgenerator.PSFGenerator",
+                "psfgenerator.PSFGenerator");
     }
 
     public static String installInstructionUrl(String engineKey) {
-        if ("DL2".equals(engineKey)) return "https://sites.imagej.net/DeconvolutionLab2/";
-        if ("IterativeDeconvolve3D".equals(engineKey)) {
-            return "http://www.optinav.info/Iterative-Deconvolve-3D.htm";
-        }
-        if ("PsfGenerator".equals(engineKey)) return "http://bigwww.epfl.ch/algorithms/psfgenerator/";
+        if ("DL2".equals(engineKey)) return "https://bigwww.epfl.ch/deconvolution/deconvolutionlab2/";
+        if ("IterativeDeconvolve3D".equals(engineKey)) return "https://www.optinav.info/Iterative-Deconvolve-3D.htm";
+        if ("PsfGenerator".equals(engineKey)) return "https://bigwww.epfl.ch/algorithms/psfgenerator/";
         if ("CLIJ2".equals(engineKey)) return "https://clij.github.io/clij2-docs/installationInFiji";
         return null;
     }
@@ -62,6 +69,28 @@ public final class DeconvolutionAvailability {
         }
 
         boolean available = classExists(className);
+        synchronized (CACHE) {
+            CACHE.put(cacheKey, Boolean.valueOf(available));
+        }
+        return available;
+    }
+
+    private static boolean cachedAnyClassAvailability(String cacheKey, String... classNames) {
+        synchronized (CACHE) {
+            if (CACHE.containsKey(cacheKey)) {
+                return CACHE.get(cacheKey).booleanValue();
+            }
+        }
+
+        boolean available = false;
+        if (classNames != null) {
+            for (String className : classNames) {
+                if (classExists(className)) {
+                    available = true;
+                    break;
+                }
+            }
+        }
         synchronized (CACHE) {
             CACHE.put(cacheKey, Boolean.valueOf(available));
         }

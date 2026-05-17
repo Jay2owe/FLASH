@@ -8,6 +8,8 @@ import java.util.List;
  * Separates persisted segmentation-method choices from UI-only launchers.
  */
 public final class SegmentationMethodLauncherModel {
+    public static final String TRAIN_CUSTOM_ENGINE_UI_ENABLED_PROPERTY =
+            "flash.trainCustomEngine.ui.enabled";
     public static final String TRAIN_CUSTOM_ENGINE = "Train Custom Engine...";
     public static final String TRAIN_CUSTOM_ENGINE_DISPLAY = "+ " + TRAIN_CUSTOM_ENGINE;
 
@@ -19,8 +21,14 @@ public final class SegmentationMethodLauncherModel {
         out.add(Entry.method(SegmentationMethodStage.ENHANCED_CLASSICAL));
         out.add(Entry.method(SegmentationMethodStage.STARDIST));
         out.add(Entry.method(SegmentationMethodStage.CELLPOSE));
-        out.add(Entry.launcher(TRAIN_CUSTOM_ENGINE, TRAIN_CUSTOM_ENGINE_DISPLAY));
+        if (isTrainCustomEngineUiEnabled()) {
+            out.add(Entry.launcher(TRAIN_CUSTOM_ENGINE, TRAIN_CUSTOM_ENGINE_DISPLAY));
+        }
         this.entries = Collections.unmodifiableList(out);
+    }
+
+    public static boolean isTrainCustomEngineUiEnabled() {
+        return Boolean.getBoolean(TRAIN_CUSTOM_ENGINE_UI_ENABLED_PROPERTY);
     }
 
     public List<Entry> entries() {

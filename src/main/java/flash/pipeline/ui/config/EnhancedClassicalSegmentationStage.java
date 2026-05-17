@@ -1,7 +1,5 @@
 package flash.pipeline.ui.config;
 
-import flash.pipeline.click.suggest.EnhancedClassicalMorphSuggester;
-import flash.pipeline.click.suggest.SuggestionContext;
 import flash.pipeline.help.AnalysisHelpCatalog;
 import flash.pipeline.help.AnalysisHelpDialog;
 import flash.pipeline.help.SetupHelpCatalog;
@@ -71,7 +69,6 @@ public final class EnhancedClassicalSegmentationStage implements ConfigQcStage {
     private final List<PredicateRow> rows = new ArrayList<PredicateRow>();
 
     private JPanel rowsPanel;
-    private CollapsibleSection filterSection;
     private JLabel predicateSummary;
     private ConfigQcActions actions;
     private ImagePlus rawPreviewSource;
@@ -145,15 +142,7 @@ public final class EnhancedClassicalSegmentationStage implements ConfigQcStage {
                         if (image == rawPreviewSource) rawPreviewSource = null;
                         EnhancedClassicalSegmentationStage.this.previewAdapter.close(image);
                     }
-                },
-                new ClassicalSegmentationStage.SuggestionDecorator() {
-                    @Override public ClickSuggestPanel.Suggestion decorate(
-                            SuggestionContext context,
-                            ClickSuggestPanel.Suggestion parameterSuggestion) {
-                        return decorateEnhancedSuggestion(context, parameterSuggestion);
-                    }
-                },
-                1);
+                });
     }
 
     @Override public String title() {
@@ -218,34 +207,52 @@ public final class EnhancedClassicalSegmentationStage implements ConfigQcStage {
     }
 
     private JComponent buildMorphSection() {
-        filterSection = new CollapsibleSection("Filter by morphology", false);
-        filterSection.setAlignmentX(Component.LEFT_ALIGNMENT);
-        JButton help = HelpButton.question("About Enhanced Classical segmentation.");
-        help.addActionListener(e -> AnalysisHelpDialog.show(
-                filterSection, AnalysisHelpCatalog.ENHANCED_CLASSICAL_SEGMENTATION));
-        filterSection.getHeaderControls().add(help);
+        final JPanel panel = new JPanel();
+        panel.setOpaque(false);
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        panel.setBorder(BorderFactory.createTitledBorder("Morphology filters"));
+
         rowsPanel = new JPanel();
         rowsPanel.setOpaque(false);
         rowsPanel.setLayout(new BoxLayout(rowsPanel, BoxLayout.Y_AXIS));
 
+        JPanel actionRow = new JPanel(new GridBagLayout());
+        actionRow.setOpaque(false);
+        actionRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+        actionRow.setBorder(FlashTheme.pad(2, 0, 2, 0));
+
         JButton add = new JButton("+ Add filter");
         add.addActionListener(e -> {
             rows.add(new PredicateRow("sphericity", ">=", 0.6, true));
-            if (filterSection != null) filterSection.setExpanded(true);
             refreshRows();
             markPreviewStale();
         });
+
+        JButton help = HelpButton.question("About Enhanced Classical segmentation.");
+        help.addActionListener(e -> AnalysisHelpDialog.show(
+                panel, AnalysisHelpCatalog.ENHANCED_CLASSICAL_SEGMENTATION));
 
         predicateSummary = new JLabel("No morphology filters enabled.");
         predicateSummary.setForeground(FlashTheme.TEXT_HELP);
         predicateSummary.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-        filterSection.getBody().add(rowsPanel);
-        filterSection.getBody().add(Box.createVerticalStrut(4));
-        filterSection.getBody().add(add);
-        filterSection.getBody().add(Box.createVerticalStrut(4));
-        filterSection.getBody().add(predicateSummary);
-        return filterSection;
+        GridBagConstraints gbc = rowConstraints();
+        actionRow.add(predicateSummary, gbc);
+        gbc.gridx++;
+        gbc.weightx = 1.0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        actionRow.add(Box.createHorizontalGlue(), gbc);
+        gbc.gridx++;
+        gbc.weightx = 0.0;
+        gbc.fill = GridBagConstraints.NONE;
+        actionRow.add(add, gbc);
+        gbc.gridx++;
+        actionRow.add(help, gbc);
+
+        panel.add(rowsPanel);
+        panel.add(actionRow);
+        return panel;
     }
 
     private void loadPredicatesFromStoredToken() {
@@ -262,35 +269,42 @@ public final class EnhancedClassicalSegmentationStage implements ConfigQcStage {
                     predicate.value,
                     true));
         }
-        if (!rows.isEmpty() && filterSection != null) {
-            filterSection.setExpanded(true);
-        }
     }
 
     private void refreshRows() {
         if (rowsPanel == null) return;
+        ensureVisibleMorphRow();
         rowsPanel.removeAll();
-        if (rows.isEmpty()) {
-            JLabel empty = new JLabel("No morphology filters enabled.");
-            empty.setForeground(FlashTheme.TEXT_HELP);
-            empty.setAlignmentX(Component.LEFT_ALIGNMENT);
-            rowsPanel.add(empty);
-        } else {
-            for (int i = 0; i < rows.size(); i++) {
-                rowsPanel.add(buildRow(rows.get(i)));
-                rowsPanel.add(Box.createVerticalStrut(3));
-            }
+        for (int i = 0; i < rows.size(); i++) {
+            rowsPanel.add(buildRow(rows.get(i)));
+            rowsPanel.add(Box.createVerticalStrut(3));
         }
         updatePredicateSummary(null);
         rowsPanel.revalidate();
         rowsPanel.repaint();
     }
 
+    private void ensureVisibleMorphRow() {
+        if (!rows.isEmpty()) return;
+        rows.add(new PredicateRow("sphericity", ">=", 0.6, false));
+    }
+
+    private static GridBagConstraints rowConstraints() {
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.gridy = 0;
+        gbc.gridx = 0;
+        gbc.insets = new Insets(0, 0, 0, 6);
+        gbc.anchor = GridBagConstraints.WEST;
+        gbc.fill = GridBagConstraints.NONE;
+        gbc.weightx = 0.0;
+        return gbc;
+    }
+
     private JComponent buildRow(final PredicateRow row) {
         JPanel panel = new JPanel(new GridBagLayout());
         panel.setOpaque(false);
         panel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        panel.setBorder(BorderFactory.createEmptyBorder(1, 0, 1, 0));
+        panel.setBorder(FlashTheme.pad(2, 0, 2, 0));
 
         final JComboBox<String> feature = new JComboBox<String>(FEATURE_OPTIONS);
         feature.setSelectedItem(row.feature);
@@ -321,6 +335,21 @@ public final class EnhancedClassicalSegmentationStage implements ConfigQcStage {
                 markPreviewStale();
             }
         });
+        JLabel enabledLabel = new JLabel("Use");
+        enabledLabel.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+        enabledLabel.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override public void mouseClicked(java.awt.event.MouseEvent e) {
+                if (enabled.isEnabled()) {
+                    enabled.setSelected(!enabled.isSelected());
+                }
+            }
+        });
+        JPanel enabledPanel = new JPanel();
+        enabledPanel.setOpaque(false);
+        enabledPanel.setLayout(new BoxLayout(enabledPanel, BoxLayout.X_AXIS));
+        enabledPanel.add(enabled);
+        enabledPanel.add(Box.createHorizontalStrut(FlashTheme.SPACE_S));
+        enabledPanel.add(enabledLabel);
 
         JButton remove = new JButton("X");
         remove.setToolTipText("Remove filter");
@@ -330,21 +359,34 @@ public final class EnhancedClassicalSegmentationStage implements ConfigQcStage {
             markPreviewStale();
         });
 
-        GridBagConstraints gbc = new GridBagConstraints();
-        gbc.gridy = 0;
-        gbc.insets = new Insets(0, 0, 0, 5);
-        gbc.anchor = GridBagConstraints.WEST;
-        gbc.fill = GridBagConstraints.NONE;
-        gbc.gridx = 0;
+        GridBagConstraints gbc = rowConstraints();
+        JLabel heading = new JLabel("Morphology:");
+        heading.setFont(FlashTheme.bodyMedium());
+        panel.add(heading, gbc);
+        gbc.gridx++;
+        panel.add(new JLabel("Feature"), gbc);
+        gbc.gridx++;
+        gbc.weightx = 0.35;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
         panel.add(feature, gbc);
+        gbc.gridx++;
+        gbc.weightx = 0.0;
+        gbc.fill = GridBagConstraints.NONE;
+        panel.add(new JLabel("Rule"), gbc);
         gbc.gridx++;
         panel.add(operator, gbc);
         gbc.gridx++;
+        panel.add(new JLabel("Value"), gbc);
+        gbc.gridx++;
         panel.add(value, gbc);
         gbc.gridx++;
-        panel.add(enabled, gbc);
+        panel.add(enabledPanel, gbc);
         gbc.gridx++;
         panel.add(remove, gbc);
+        gbc.gridx++;
+        gbc.weightx = 1.0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        panel.add(Box.createHorizontalGlue(), gbc);
         return panel;
     }
 
@@ -356,71 +398,6 @@ public final class EnhancedClassicalSegmentationStage implements ConfigQcStage {
             predicates.add(new MorphPredicate(row.feature, operator(row.operator), row.value));
         }
         return predicates;
-    }
-
-    private ClickSuggestPanel.Suggestion decorateEnhancedSuggestion(
-            SuggestionContext context,
-            ClickSuggestPanel.Suggestion parameterSuggestion) {
-        SuggestionContext morphContext = rawPreviewSource == null || context == null
-                ? context
-                : new SuggestionContext(
-                        rawPreviewSource,
-                        context.labelImage,
-                        context.auxImage,
-                        context.negativeClicks,
-                        context.positiveClicks,
-                        context.currentParams);
-        final EnhancedClassicalMorphSuggester.MorphSuggestion morphSuggestion =
-                new EnhancedClassicalMorphSuggester().suggestMorph(morphContext);
-        if (morphSuggestion == null) {
-            return parameterSuggestion;
-        }
-
-        List<ClickSuggestPanel.ActionSuggestion> actions =
-                new ArrayList<ClickSuggestPanel.ActionSuggestion>();
-        if (parameterSuggestion != null) {
-            actions.addAll(parameterSuggestion.actions);
-        }
-        actions.add(new ClickSuggestPanel.ActionSuggestion(
-                "Add to morph filters",
-                new Runnable() {
-                    @Override public void run() {
-                        addSuggestedMorphFilter(morphSuggestion);
-                    }
-                }));
-
-        if (parameterSuggestion == null) {
-            return new ClickSuggestPanel.Suggestion(
-                    new ArrayList<ClickSuggestPanel.FieldSuggestion>(),
-                    morphSuggestion.message(),
-                    "",
-                    null,
-                    null,
-                    actions);
-        }
-        String message = parameterSuggestion.message == null
-                || parameterSuggestion.message.trim().isEmpty()
-                ? morphSuggestion.message()
-                : parameterSuggestion.message + " " + morphSuggestion.message();
-        return new ClickSuggestPanel.Suggestion(
-                parameterSuggestion.fields,
-                message,
-                parameterSuggestion.hint,
-                parameterSuggestion.applyAction,
-                parameterSuggestion.revertAction,
-                actions);
-    }
-
-    private void addSuggestedMorphFilter(EnhancedClassicalMorphSuggester.MorphSuggestion suggestion) {
-        if (suggestion == null) return;
-        MorphPredicate predicate = suggestion.toPredicate();
-        rows.add(new PredicateRow(predicate.featureName, predicate.op.symbol(),
-                predicate.value, true));
-        if (filterSection != null) filterSection.setExpanded(true);
-        refreshRows();
-        markPreviewStale();
-        setStatus("Added morph filter: " + predicate.format()
-                + ". Run object preview again.");
     }
 
     private String buildMethodToken(String thresholdToken, String sizeToken) {

@@ -1,8 +1,5 @@
 package flash.pipeline.ui.config;
 
-import flash.pipeline.click.ClickStore;
-import flash.pipeline.click.suggest.ClassicalParameterSuggester;
-import flash.pipeline.click.suggest.SuggestionContext;
 import flash.pipeline.help.SetupHelpCatalog;
 import flash.pipeline.help.SetupHelpTopic;
 import flash.pipeline.objects.ObjectsCounter3DWrapper;
@@ -37,12 +34,8 @@ import java.awt.Font;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
-import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.IdentityHashMap;
-import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 public final class ClassicalSegmentationStage implements ConfigQcStage {
@@ -68,19 +61,12 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
         void close(ImagePlus image);
     }
 
-    interface SuggestionDecorator {
-        ClickSuggestPanel.Suggestion decorate(SuggestionContext context,
-                                              ClickSuggestPanel.Suggestion parameterSuggestion);
-    }
-
     private static final String EMPTY_TEXT = "Threshold preview is ready. Press Run Object Preview.";
     private static final String STALE_TEXT = "Object preview is out of date. Press Run Object Preview.";
 
     private final ThresholdStore thresholdStore;
     private final SizeStore sizeStore;
     private final PreviewAdapter previewAdapter;
-    private final SuggestionDecorator suggestionDecorator;
-    private final int clickSuggestMinimumNegatives;
 
     private ConfigQcActions actions;
     private PreviewPairPanel preview;
@@ -115,20 +101,11 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
     private JButton variationsButton;
     private JLabel feedbackLabel;
     private ObjectSizeCutoffPanel sizeCutoffPanel;
-    private ClickSuggestPanel suggestPanel;
     private ObjectSizeFilterPreview.Summary sizeSummary;
 
     public ClassicalSegmentationStage(ThresholdStore thresholdStore,
                                       SizeStore sizeStore,
                                       PreviewAdapter previewAdapter) {
-        this(thresholdStore, sizeStore, previewAdapter, null, 3);
-    }
-
-    ClassicalSegmentationStage(ThresholdStore thresholdStore,
-                               SizeStore sizeStore,
-                               PreviewAdapter previewAdapter,
-                               SuggestionDecorator suggestionDecorator,
-                               int clickSuggestMinimumNegatives) {
         if (thresholdStore == null) {
             throw new IllegalArgumentException("thresholdStore must not be null");
         }
@@ -141,8 +118,6 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
         this.thresholdStore = thresholdStore;
         this.sizeStore = sizeStore;
         this.previewAdapter = previewAdapter;
-        this.suggestionDecorator = suggestionDecorator;
-        this.clickSuggestMinimumNegatives = Math.max(1, clickSuggestMinimumNegatives);
     }
 
     @Override
@@ -198,9 +173,6 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
         panel.add(thresholdControl);
         panel.add(Box.createVerticalStrut(4));
         panel.add(buildObjectRow());
-        panel.add(Box.createVerticalStrut(4));
-        suggestPanel = buildClickSuggestPanel();
-        panel.add(suggestPanel);
         panel.add(Box.createVerticalStrut(4));
         sizeCutoffPanel = new ObjectSizeCutoffPanel();
         panel.add(sizeCutoffPanel);
@@ -316,10 +288,6 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
     @Override
     public void onLeave(ConfigQcContext context) {
         closePreviewWorker();
-        if (suggestPanel != null) {
-            suggestPanel.dispose();
-            suggestPanel = null;
-        }
         if (preview != null) {
             preview.setSourceModeChangeListener(null);
             preview.setDisplaySettingsChangeListener(null);
@@ -444,136 +412,6 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
         gbc.gridx++;
         row.add(variationsButton, gbc);
         return row;
-    }
-
-    private ClickSuggestPanel buildClickSuggestPanel() {
-        return new ClickSuggestPanel(
-                new ClickSuggestPanel.CountsProvider() {
-                    @Override public ClickSuggestPanel.Counts counts() {
-                        return currentClickCounts();
-                    }
-                },
-                new ClickSuggestPanel.SuggestionProvider() {
-                    @Override public ClickSuggestPanel.Suggestion suggest() {
-                        return suggestClassicalParameters();
-                    }
-                },
-                null,
-                clickSuggestMinimumNegatives);
-    }
-
-    private ClickSuggestPanel.Counts currentClickCounts() {
-        List<ClickStore.Click> clicks = currentClicks();
-        int negative = 0;
-        int positive = 0;
-        for (int i = 0; i < clicks.size(); i++) {
-            ClickStore.Click click = clicks.get(i);
-            if (click == null) continue;
-            if (click.verdict == ClickStore.Verdict.POSITIVE) positive++;
-            else negative++;
-        }
-        return new ClickSuggestPanel.Counts(negative, positive);
-    }
-
-    private List<ClickStore.Click> currentClicks() {
-        if (activeContext == null || activeContext.getClickStore() == null) {
-            return Collections.emptyList();
-        }
-        return activeContext.getClickStore().forImageAndChannel(
-                activeContext.getCurrentImageDisplayName(),
-                activeContext.getChannelNumber());
-    }
-
-    private ClickSuggestPanel.Suggestion suggestClassicalParameters() {
-        if (labelPreview == null || filteredSource == null) {
-            setStatus("Run object preview before asking for click-based suggestions.");
-            return null;
-        }
-        List<ClickStore.Click> negatives = new ArrayList<ClickStore.Click>();
-        List<ClickStore.Click> positives = new ArrayList<ClickStore.Click>();
-        splitClicks(currentClicks(), negatives, positives);
-        Map<String, Double> params = new HashMap<String, Double>();
-        params.put("thresholdLow", Double.valueOf(thresholdControl.getLowerThreshold()));
-        try {
-            ParticleSizeStage.SizeToken token = collectSizeToken();
-            params.put("minSize", Double.valueOf(minSizeVoxels(token)));
-            params.put("maxSize", Double.valueOf(maxSizeVoxels(token)));
-        } catch (RuntimeException ignored) {
-            // Invalid size fields will be surfaced by the normal preview path.
-        }
-        SuggestionContext suggestionContext = new SuggestionContext(
-                filteredSource, labelPreview, null, negatives, positives, params);
-        ClassicalParameterSuggester.ClassicalSuggestion suggestion =
-                new ClassicalParameterSuggester().suggest(suggestionContext);
-        if (suggestion == null || !suggestion.hasSuggestion()) {
-            return decorateSuggestion(suggestionContext, null);
-        }
-        List<ClickSuggestPanel.FieldSuggestion> fields =
-                new ArrayList<ClickSuggestPanel.FieldSuggestion>();
-        if (suggestion.thresholdLow != null) {
-            fields.add(new ClickSuggestPanel.FieldSuggestion(thresholdBinding(),
-                    ChannelThresholdStage.formatThreshold(suggestion.thresholdLow.doubleValue())));
-        }
-        if (suggestion.minSize != null) {
-            fields.add(new ClickSuggestPanel.FieldSuggestion(
-                    ClickSuggestPanel.ValueBinding.text("min size", minField),
-                    String.valueOf(suggestion.minSize.intValue())));
-        }
-        if (suggestion.maxSize != null) {
-            fields.add(new ClickSuggestPanel.FieldSuggestion(
-                    ClickSuggestPanel.ValueBinding.text("max size", maxField),
-                    String.valueOf(suggestion.maxSize.intValue())));
-        }
-        return decorateSuggestion(suggestionContext, new ClickSuggestPanel.Suggestion(fields,
-                suggestionMessage(fields, suggestion.badRemoved, suggestion.collateralRemoved),
-                new Runnable() {
-                    @Override public void run() {
-                        applyClassicalSuggestion();
-                    }
-                },
-                new Runnable() {
-                    @Override public void run() {
-                        markObjectPreviewStale(STALE_TEXT);
-                    }
-                }));
-    }
-
-    private ClickSuggestPanel.Suggestion decorateSuggestion(SuggestionContext context,
-                                                           ClickSuggestPanel.Suggestion parameterSuggestion) {
-        return suggestionDecorator == null
-                ? parameterSuggestion
-                : suggestionDecorator.decorate(context, parameterSuggestion);
-    }
-
-    private ClickSuggestPanel.ValueBinding thresholdBinding() {
-        return new ClickSuggestPanel.ValueBinding("threshold", thresholdControl) {
-            @Override String get() {
-                return currentThresholdToken();
-            }
-
-            @Override void set(String value) {
-                if (thresholdControl == null) return;
-                try {
-                    double lower = Double.parseDouble(value);
-                    thresholdControl.setThreshold(lower, imageMaximum(filteredSource));
-                    updateThresholdPreview(true);
-                } catch (NumberFormatException e) {
-                    setError("Could not apply suggested threshold.");
-                }
-            }
-        };
-    }
-
-    private void applyClassicalSuggestion() {
-        try {
-            ParticleSizeStage.SizeToken size = collectSizeToken();
-            thresholdStore.set(currentThresholdToken());
-            sizeStore.set(size.toToken());
-            savedSize = size;
-            runPreviewOnWorker();
-        } catch (RuntimeException e) {
-            setError("Enter valid min and max voxel sizes.");
-        }
     }
 
     private void installFieldListener(JTextField field) {
@@ -1166,37 +1004,6 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
 
     private static void setTextForTest(JTextField field, String value) {
         if (field != null) field.setText(value);
-    }
-
-    private static void splitClicks(List<ClickStore.Click> clicks,
-                                    List<ClickStore.Click> negatives,
-                                    List<ClickStore.Click> positives) {
-        if (clicks == null) return;
-        for (int i = 0; i < clicks.size(); i++) {
-            ClickStore.Click click = clicks.get(i);
-            if (click == null) continue;
-            if (click.verdict == ClickStore.Verdict.POSITIVE) {
-                positives.add(click);
-            } else {
-                negatives.add(click);
-            }
-        }
-    }
-
-    private static String suggestionMessage(List<ClickSuggestPanel.FieldSuggestion> fields,
-                                            int badRemoved,
-                                            int collateralRemoved) {
-        StringBuilder sb = new StringBuilder("Suggested ");
-        for (int i = 0; i < fields.size(); i++) {
-            ClickSuggestPanel.FieldSuggestion field = fields.get(i);
-            if (i > 0) sb.append(", ");
-            sb.append(field.binding.label).append("=").append(field.value);
-        }
-        sb.append(". Removes ").append(badRemoved)
-                .append(" bad clicks; affects ")
-                .append(collateralRemoved)
-                .append(" unclicked objects.");
-        return sb.toString();
     }
 
     private static double imageMaximum(ImagePlus image) {
