@@ -115,4 +115,18 @@ public class MetricStatisticsEngineTest {
         assertTrue(Double.isNaN(row.pValue));
         assertTrue(row.notes.contains("GroupA n=1"));
     }
+
+    @Test
+    public void emptyGroup_returnsSkippedRowInsteadOfDividingByZero() {
+        List<String> conditions = Arrays.asList("A", "B");
+        LinkedHashMap<String, List<Double>> groups = new LinkedHashMap<String, List<Double>>();
+        groups.put("A", new ArrayList<Double>());
+        groups.put("B", Arrays.asList(1.0, 2.0, 3.0));
+
+        List<StatisticRow> rows = MetricStatisticsEngine.analyseMetric("EmptyMetric", conditions, groups);
+
+        assertEquals(1, rows.size());
+        assertEquals("Skipped", rows.get(0).test);
+        assertTrue(rows.get(0).notes.contains("A n=0"));
+    }
 }

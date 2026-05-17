@@ -718,7 +718,7 @@ public class ExcelSummaryExportAnalysis implements Analysis {
             if (wb.getNumberOfSheets() == 0) {
                 Sheet empty = wb.createSheet(ExcelNameMap.safeSheetName("Summary", usedSheetNames));
                 Row row = empty.createRow(0);
-                row.createCell(0).setCellValue(
+                setTextCellValue(row.createCell(0),
                         "No sheets were selected by preset '" + preset.getName() + "'.");
             }
 
@@ -906,11 +906,11 @@ public class ExcelSummaryExportAnalysis implements Analysis {
 
             Row row = sheet.createRow(rowIdx++);
             Cell condCell = row.createCell(0);
-            condCell.setCellValue(cond);
+            setTextCellValue(condCell, cond);
             condCell.setCellStyle(styles.centerStyle);
 
             Cell animalsCell = row.createCell(1);
-            animalsCell.setCellValue(join(animalsInCond, ", "));
+            setTextCellValue(animalsCell, join(animalsInCond, ", "));
             animalsCell.setCellStyle(styles.cellStyle);
         }
 
@@ -982,17 +982,17 @@ public class ExcelSummaryExportAnalysis implements Analysis {
 
             Cell markerCell = row.createCell(0);
             if (!marker.equals(lastMarker)) {
-                markerCell.setCellValue(marker);
+                setTextCellValue(markerCell, marker);
                 lastMarker = marker;
             }
             markerCell.setCellStyle(styles.mergeStyle);
 
             Cell analysisCell = row.createCell(1);
-            analysisCell.setCellValue(analysis);
+            setTextCellValue(analysisCell, analysis);
             analysisCell.setCellStyle(styles.centerStyle);
 
             Cell dataCell = row.createCell(2);
-            dataCell.setCellValue(join(labels, ", "));
+            setTextCellValue(dataCell, join(labels, ", "));
             dataCell.setCellStyle(styles.wrapStyle);
 
             Map<String, String> details = detailsPerMarker.get(entry.getKey());
@@ -1007,11 +1007,11 @@ public class ExcelSummaryExportAnalysis implements Analysis {
             }
 
             Cell filterCell = row.createCell(3);
-            filterCell.setCellValue(filterMacro);
+            setTextCellValue(filterCell, filterMacro);
             filterCell.setCellStyle(styles.smallStyle);
 
             Cell analysisMacroCell = row.createCell(4);
-            analysisMacroCell.setCellValue(analysisMacro);
+            setTextCellValue(analysisMacroCell, analysisMacro);
             analysisMacroCell.setCellStyle(styles.smallStyle);
         }
 
@@ -1051,7 +1051,7 @@ public class ExcelSummaryExportAnalysis implements Analysis {
         Row headerRow = sheet.createRow(0);
         for (int c = 0; c < conditionOrder.size(); c++) {
             Cell cell = headerRow.createCell(c);
-            cell.setCellValue(conditionOrder.get(c));
+            setTextCellValue(cell, conditionOrder.get(c));
             cell.setCellStyle(styles.headerStyle);
             sheet.setColumnWidth(c, Math.max(conditionOrder.get(c).length() + 4, 12) * 256);
         }
@@ -1089,7 +1089,7 @@ public class ExcelSummaryExportAnalysis implements Analysis {
             int descRowIdx = nextRow + 1;
             Row descRow = sheet.createRow(descRowIdx);
             Cell descCell = descRow.createCell(0);
-            descCell.setCellValue(desc);
+            setTextCellValue(descCell, desc);
             descCell.setCellStyle(styles.descStyle);
             if (conditionOrder.size() > 1) {
                 sheet.addMergedRegion(new CellRangeAddress(
@@ -1132,7 +1132,7 @@ public class ExcelSummaryExportAnalysis implements Analysis {
                 }
             }
             Cell labelCell = row.createCell(Math.max(1, conditionValues.size()));
-            labelCell.setCellValue(labels[r]);
+            setTextCellValue(labelCell, labels[r]);
             labelCell.setCellStyle(styles.summaryLabelStyle);
         }
         return startRow + labels.length;
@@ -1182,12 +1182,12 @@ public class ExcelSummaryExportAnalysis implements Analysis {
         Row headerRow = sheet.createRow(0);
         for (int c = 0; c < csvHeaders.length; c++) {
             Cell cell = headerRow.createCell(c);
-            cell.setCellValue(csvHeaders[c].trim());
+            setTextCellValue(cell, csvHeaders[c].trim());
             cell.setCellStyle(styles.headerStyle);
         }
         if (stars) {
             Cell cell = headerRow.createCell(starsColumn);
-            cell.setCellValue("Stars");
+            setTextCellValue(cell, "Stars");
             cell.setCellStyle(styles.headerStyle);
         }
 
@@ -1231,7 +1231,7 @@ public class ExcelSummaryExportAnalysis implements Analysis {
                     }
                 }
                 if (!written) {
-                    cell.setCellValue(val);
+                    setTextCellValue(cell, val);
                 }
 
                 CellStyle baseCentered = (c == significantIdx || c == pValueIdx)
@@ -1253,7 +1253,7 @@ public class ExcelSummaryExportAnalysis implements Analysis {
             if (stars) {
                 Cell starCell = row.createCell(starsColumn);
                 String starText = starsFor(pValue);
-                starCell.setCellValue(starText);
+                setTextCellValue(starCell, starText);
                 starCell.setCellStyle(styles.centerStyle);
             }
         }
@@ -1292,7 +1292,7 @@ public class ExcelSummaryExportAnalysis implements Analysis {
         if (detailsPerMarker.isEmpty()) {
             Row empty = sheet.createRow(rowIdx);
             Cell cell = empty.createCell(0);
-            cell.setCellValue("No Analysis Details files were found.");
+            setTextCellValue(cell, "No Analysis Details files were found.");
             cell.setCellStyle(styles.descStyle);
         } else {
             for (Map.Entry<String, Map<String, String>> entry : detailsPerMarker.entrySet()) {
@@ -1307,23 +1307,23 @@ public class ExcelSummaryExportAnalysis implements Analysis {
                     if (key.startsWith("_")) continue;
                     Row row = sheet.createRow(rowIdx++);
                     Cell markerCell = row.createCell(0);
-                    markerCell.setCellValue(marker);
+                    setTextCellValue(markerCell, marker);
                     markerCell.setCellStyle(styles.mergeStyle);
 
                     Cell analysisCell = row.createCell(1);
-                    analysisCell.setCellValue(analysisType);
+                    setTextCellValue(analysisCell, analysisType);
                     analysisCell.setCellStyle(styles.centerStyle);
 
                     Cell sourceCell = row.createCell(2);
-                    sourceCell.setCellValue(sourceFile);
+                    setTextCellValue(sourceCell, sourceFile);
                     sourceCell.setCellStyle(styles.cellStyle);
 
                     Cell sectionCell = row.createCell(3);
-                    sectionCell.setCellValue(key);
+                    setTextCellValue(sectionCell, key);
                     sectionCell.setCellStyle(styles.cellStyle);
 
                     Cell contentCell = row.createCell(4);
-                    contentCell.setCellValue(nullSafe(details.get(key)));
+                    setTextCellValue(contentCell, nullSafe(details.get(key)));
                     contentCell.setCellStyle(styles.smallStyle);
                 }
             }
@@ -1436,5 +1436,19 @@ public class ExcelSummaryExportAnalysis implements Analysis {
 
     private static String nullSafe(String s) {
         return s == null ? "" : s;
+    }
+
+    private static void setTextCellValue(Cell cell, String value) {
+        cell.setCellValue(excelSafeText(value));
+    }
+
+    static String excelSafeText(String value) {
+        if (value == null || value.isEmpty()) return value == null ? "" : value;
+        char first = value.charAt(0);
+        if (first == '=' || first == '+' || first == '-' || first == '@'
+                || first == '\t' || first == '\r' || first == '\n') {
+            return "'" + value;
+        }
+        return value;
     }
 }

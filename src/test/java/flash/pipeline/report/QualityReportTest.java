@@ -1,6 +1,8 @@
 package flash.pipeline.report;
 
 import flash.pipeline.analyses.wizard.IntensitySpatialConfig;
+import ij.ImagePlus;
+import ij.process.ByteProcessor;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -154,5 +156,25 @@ public class QualityReportTest {
         assertEquals("true", params.get("Spatial Native 3D"));
         assertEquals("true", params.get("Spatial Overlays"));
         assertEquals("OrientationJ missing", params.get("Spatial Dependency Warnings"));
+    }
+
+    @Test
+    public void addChannelQC_recordsOriginalWhenMaskMissing() {
+        QualityReport report = new QualityReport();
+        report.setEnabled(true);
+
+        ByteProcessor processor = new ByteProcessor(4, 4);
+        processor.set(1, 1, 255);
+        ImagePlus original = new ImagePlus("original", processor);
+
+        report.addChannelQC("Image1", "DAPI", original, null, "Blue");
+
+        assertEquals(1, report.getImageQcData().size());
+        QualityReport.ChannelQC qc = report.getImageQcData().get("Image1").get(0);
+        assertEquals("DAPI", qc.channelName);
+        assertNotNull(qc.originalB64);
+        assertFalse(qc.originalB64.isEmpty());
+        assertNull(qc.maskB64);
+        assertNull(qc.overlayB64);
     }
 }

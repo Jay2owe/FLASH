@@ -20,6 +20,10 @@ import java.io.File;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -904,11 +908,21 @@ public final class QcMinMaxPerConditionSelector {
             props.setProperty(KEY_ORIENTATION_MODIFIED, String.valueOf(orientationFile.lastModified()));
         }
 
-        PrintWriter pw = new PrintWriter(cacheFile, StandardCharsets.UTF_8.name());
+        File temp = tempFileFor(cacheFile);
+        boolean moved = false;
         try {
-            props.store(pw, "QC min/max per condition cache");
+            PrintWriter pw = new PrintWriter(temp, StandardCharsets.UTF_8.name());
+            try {
+                props.store(pw, "QC min/max per condition cache");
+            } finally {
+                pw.close();
+            }
+            moveAtomically(temp.toPath(), cacheFile.toPath());
+            moved = true;
         } finally {
-            pw.close();
+            if (!moved) {
+                Files.deleteIfExists(temp.toPath());
+            }
         }
     }
 
@@ -922,39 +936,71 @@ public final class QcMinMaxPerConditionSelector {
 
     private static void writeScoresCsv(File scoresFile, List<ScoreRecord> records,
                                        List<QcSelectionChannel> qcChannels) throws IOException {
-        PrintWriter pw = CsvSupport.newWriter(scoresFile);
+        File temp = tempFileFor(scoresFile);
+        boolean moved = false;
         try {
-            List<String> header = new ArrayList<String>();
-            header.add("Condition");
-            header.add("SeriesIndex");
-            header.add("SeriesNumber");
-            header.add("SeriesName");
-            header.add("AnimalName");
-            header.add("CompositeRank");
-            header.add("SelectedRole");
-            for (QcSelectionChannel channel : qcChannels) {
-                header.add("Channel" + channel.channelNumber + "Score");
-            }
-            pw.println(CsvSupport.joinRow(header));
-
-            for (ScoreRecord record : records) {
-                List<String> row = new ArrayList<String>();
-                row.add(record.candidate.conditionName);
-                row.add(String.valueOf(record.candidate.seriesIndex));
-                row.add(String.valueOf(record.candidate.seriesNumber));
-                row.add(record.candidate.seriesName);
-                row.add(record.candidate.animalName);
-                row.add(formatDouble(record.compositeRank));
-                row.add(record.selectedRole == null ? "" : record.selectedRole);
+            PrintWriter pw = CsvSupport.newWriter(temp);
+            try {
+                List<String> header = new ArrayList<String>();
+                header.add("Condition");
+                header.add("SeriesIndex");
+                header.add("SeriesNumber");
+                header.add("SeriesName");
+                header.add("AnimalName");
+                header.add("CompositeRank");
+                header.add("SelectedRole");
                 for (QcSelectionChannel channel : qcChannels) {
-                    Double score = record.channelScores.get(channel.channelNumber);
-                    row.add(score == null ? "" : formatDouble(score));
+                    header.add("Channel" + channel.channelNumber + "Score");
                 }
-                pw.println(CsvSupport.joinRow(row));
+                pw.println(CsvSupport.joinRow(header));
+
+                for (ScoreRecord record : records) {
+                    List<String> row = new ArrayList<String>();
+                    row.add(record.candidate.conditionName);
+                    row.add(String.valueOf(record.candidate.seriesIndex));
+                    row.add(String.valueOf(record.candidate.seriesNumber));
+                    row.add(record.candidate.seriesName);
+                    row.add(record.candidate.animalName);
+                    row.add(formatDouble(record.compositeRank));
+                    row.add(record.selectedRole == null ? "" : record.selectedRole);
+                    for (QcSelectionChannel channel : qcChannels) {
+                        Double score = record.channelScores.get(channel.channelNumber);
+                        row.add(score == null ? "" : formatDouble(score));
+                    }
+                    pw.println(CsvSupport.joinRow(row));
+                }
+            } finally {
+                pw.close();
             }
+            moveAtomically(temp.toPath(), scoresFile.toPath());
+            moved = true;
         } finally {
-            pw.close();
+            if (!moved) {
+                Files.deleteIfExists(temp.toPath());
+            }
         }
+    }
+
+    private static File tempFileFor(File target) throws IOException {
+        File parent = target.getParentFile();
+        if (parent != null) flash.pipeline.io.IoUtils.mustMkdirs(parent);
+        return File.createTempFile(tempPrefix(target), ".tmp",
+                parent == null ? new File(".") : parent);
+    }
+
+    private static void moveAtomically(Path source, Path target) throws IOException {
+        try {
+            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.ATOMIC_MOVE);
+        } catch (AtomicMoveNotSupportedException e) {
+            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+
+    private static String tempPrefix(File target) {
+        String name = target == null ? "qc" : target.getName();
+        String clean = name.replaceAll("[^A-Za-z0-9._-]", "_");
+        return clean.length() < 3 ? "tmp" + clean : clean;
     }
 
     private static String cell(String[] row, int index) {

@@ -235,66 +235,68 @@ public class QualityReport {
     public synchronized void addChannelQC(String imageName, String channelName,
                                            ImagePlus original, ImagePlus mask, String lutColor) {
         if (!enabled) return;
-        if (original == null || mask == null) return;
+        if (original == null) {
+            addChannelQcRecord(imageName, new ChannelQC(channelName, lutColor, null, null, null));
+            return;
+        }
 
         try {
             // Take the middle Z-slice; use the smaller stack if dimensions differ
             int origSlices = original.getNSlices();
-            int maskSlices = mask.getNSlices();
+            int maskSlices = mask == null ? origSlices : mask.getNSlices();
             int midSlice = Math.max(1, Math.min(origSlices, maskSlices) / 2);
 
             // Get original slice as BufferedImage with LUT color
             ImageProcessor origIp = original.getStack().getProcessor(Math.min(midSlice, origSlices)).duplicate();
             BufferedImage origColored = applyLutColor(origIp, lutColor);
 
-            // Get mask slice as BufferedImage (binary -> white)
-            ImageProcessor maskIp = mask.getStack().getProcessor(Math.min(midSlice, maskSlices)).duplicate();
-            BufferedImage maskBi = maskIp.getBufferedImage();
+            BufferedImage maskBi = null;
+            BufferedImage overlay = null;
+            if (mask != null) {
+                // Get mask slice as BufferedImage (binary -> white)
+                ImageProcessor maskIp = mask.getStack().getProcessor(Math.min(midSlice, maskSlices)).duplicate();
+                maskBi = maskIp.getBufferedImage();
 
-            // Create overlay: original + semi-transparent white mask
-            BufferedImage overlay = new BufferedImage(origColored.getWidth(), origColored.getHeight(), BufferedImage.TYPE_INT_ARGB);
-            Graphics2D g2d = overlay.createGraphics();
-            g2d.drawImage(origColored, 0, 0, null);
-            // Create white mask version
-            BufferedImage whiteMask = new BufferedImage(maskBi.getWidth(), maskBi.getHeight(), BufferedImage.TYPE_INT_ARGB);
-            Graphics2D mg = whiteMask.createGraphics();
-            for (int y = 0; y < maskBi.getHeight(); y++) {
-                for (int x = 0; x < maskBi.getWidth(); x++) {
-                    int val = maskBi.getRGB(x, y) & 0xFF;
-                    if (val > 0) {
-                        whiteMask.setRGB(x, y, 0xFFFFFFFF); // opaque white
-                    } else {
-                        whiteMask.setRGB(x, y, 0x00000000); // transparent
+                // Create overlay: original + semi-transparent white mask
+                overlay = new BufferedImage(origColored.getWidth(), origColored.getHeight(), BufferedImage.TYPE_INT_ARGB);
+                Graphics2D g2d = overlay.createGraphics();
+                g2d.drawImage(origColored, 0, 0, null);
+                // Create white mask version
+                BufferedImage whiteMask = new BufferedImage(maskBi.getWidth(), maskBi.getHeight(), BufferedImage.TYPE_INT_ARGB);
+                Graphics2D mg = whiteMask.createGraphics();
+                for (int y = 0; y < maskBi.getHeight(); y++) {
+                    for (int x = 0; x < maskBi.getWidth(); x++) {
+                        int val = maskBi.getRGB(x, y) & 0xFF;
+                        if (val > 0) {
+                            whiteMask.setRGB(x, y, 0xFFFFFFFF); // opaque white
+                        } else {
+                            whiteMask.setRGB(x, y, 0x00000000); // transparent
+                        }
                     }
                 }
-            }
-            mg.dispose();
-            g2d.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.4f));
-            g2d.drawImage(whiteMask, 0, 0, null);
-            g2d.dispose();
+                mg.dispose();
+                g2d.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.4f));
+                g2d.drawImage(whiteMask, 0, 0, null);
+                g2d.dispose();
 
-            // Save overlay TIF to disk
-            File overlayDir = new File(reportDir(), "overlays");
-            IoUtils.mustMkdirs(overlayDir);
-            String safeName = imageName.replaceAll("[^a-zA-Z0-9_\\-]", "_");
-            File overlayFile = new File(overlayDir, safeName + "_" + ChannelFilenameCodec.toSafe(channelName) + "_overlay.tif");
-            ImagePlus overlayImp = new ImagePlus("overlay", new ij.process.ColorProcessor(overlay));
-            IJ.saveAsTiff(overlayImp, overlayFile.getAbsolutePath());
-            overlayImp.flush();
+                // Save overlay TIF to disk
+                File overlayDir = new File(reportDir(), "overlays");
+                IoUtils.mustMkdirs(overlayDir);
+                String safeName = (imageName == null ? "image" : imageName)
+                        .replaceAll("[^a-zA-Z0-9_\\-]", "_");
+                File overlayFile = new File(overlayDir, safeName + "_" + ChannelFilenameCodec.toSafe(channelName) + "_overlay.tif");
+                ImagePlus overlayImp = new ImagePlus("overlay", new ij.process.ColorProcessor(overlay));
+                IJ.saveAsTiff(overlayImp, overlayFile.getAbsolutePath());
+                overlayImp.flush();
+            }
 
             // Encode as base64 JPEGs for HTML
             String origB64 = toBase64Jpeg(origColored, 0.7f);
-            String maskB64 = toBase64Jpeg(maskBi, 0.7f);
-            String overlayB64 = toBase64Jpeg(overlay, 0.7f);
+            String maskB64 = maskBi == null ? null : toBase64Jpeg(maskBi, 0.7f);
+            String overlayB64 = overlay == null ? null : toBase64Jpeg(overlay, 0.7f);
 
             ChannelQC qc = new ChannelQC(channelName, lutColor, origB64, maskB64, overlayB64);
-
-            List<ChannelQC> channels = imageQcData.get(imageName);
-            if (channels == null) {
-                channels = new ArrayList<ChannelQC>();
-                imageQcData.put(imageName, channels);
-            }
-            channels.add(qc);
+            addChannelQcRecord(imageName, qc);
 
         } catch (Exception e) {
             IJ.log("  QC Report: failed to capture " + channelName + " for " + imageName + ": " + e.getMessage());
@@ -304,16 +306,20 @@ public class QualityReport {
                 ImageProcessor fbIp = original.getStack().getProcessor(fallbackSlice).duplicate();
                 String origB64Only = toBase64Jpeg(applyLutColor(fbIp, lutColor), 0.7f);
                 ChannelQC fallbackQc = new ChannelQC(channelName, lutColor, origB64Only, null, null);
-                List<ChannelQC> channels = imageQcData.get(imageName);
-                if (channels == null) {
-                    channels = new ArrayList<ChannelQC>();
-                    imageQcData.put(imageName, channels);
-                }
-                channels.add(fallbackQc);
+                addChannelQcRecord(imageName, fallbackQc);
             } catch (Exception ignored) {
                 // nothing more we can do
             }
         }
+    }
+
+    private void addChannelQcRecord(String imageName, ChannelQC qc) {
+        List<ChannelQC> channels = imageQcData.get(imageName);
+        if (channels == null) {
+            channels = new ArrayList<ChannelQC>();
+            imageQcData.put(imageName, channels);
+        }
+        channels.add(qc);
     }
 
     /** Call after all 3D Object Analysis images are processed to write the report. */
@@ -484,11 +490,17 @@ public class QualityReport {
                 rgb = img;
             }
 
-            ImageOutputStream ios = ImageIO.createImageOutputStream(baos);
-            writer.setOutput(ios);
-            writer.write(null, new IIOImage(rgb, null, null), param);
-            writer.dispose();
-            ios.close();
+            ImageOutputStream ios = null;
+            try {
+                ios = ImageIO.createImageOutputStream(baos);
+                writer.setOutput(ios);
+                writer.write(null, new IIOImage(rgb, null, null), param);
+            } finally {
+                writer.dispose();
+                if (ios != null) {
+                    ios.close();
+                }
+            }
             return java.util.Base64.getEncoder().encodeToString(baos.toByteArray());
         } catch (IOException e) {
             return "";

@@ -141,6 +141,15 @@ public class ExcelSummaryExportAnalysisTest {
         }
     }
 
+    @Test
+    public void excelSafeText_escapesFormulaLeadingText() {
+        assertEquals("'=cmd", ExcelSummaryExportAnalysis.excelSafeText("=cmd"));
+        assertEquals("'+cmd", ExcelSummaryExportAnalysis.excelSafeText("+cmd"));
+        assertEquals("'-cmd", ExcelSummaryExportAnalysis.excelSafeText("-cmd"));
+        assertEquals("'@cmd", ExcelSummaryExportAnalysis.excelSafeText("@cmd"));
+        assertEquals("safe", ExcelSummaryExportAnalysis.excelSafeText("safe"));
+    }
+
     private static void writeCsv(File file, java.util.List<String> header,
                                  java.util.List<java.util.List<String>> rows) throws Exception {
         PrintWriter pw = CsvSupport.newWriter(file);

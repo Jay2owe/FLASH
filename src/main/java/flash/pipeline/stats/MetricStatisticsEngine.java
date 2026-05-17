@@ -53,6 +53,14 @@ public final class MetricStatisticsEngine {
             StatisticsConfig cfg) {
 
         if (cfg == null) cfg = new StatisticsConfig();
+        if (cfg.pairedMode == StatisticsConfig.PairedMode.OFF) {
+            String insufficientReason = insufficientGroupReason(conditionOrder, groups);
+            if (insufficientReason != null) {
+                List<StatisticRow> skipped = new ArrayList<StatisticRow>();
+                skipped.add(skippedRow(metric, insufficientReason));
+                return skipped;
+            }
+        }
 
         // -- Decide parametric vs non-parametric path --
         boolean useParametric;
@@ -479,8 +487,19 @@ public final class MetricStatisticsEngine {
     // ================================================================
 
     static double[] kruskalWallis(List<List<Double>> groups) {
+        if (groups == null || groups.size() < 2) {
+            return new double[]{0.0, 1.0};
+        }
         int N = 0;
-        for (List<Double> g : groups) N += g.size();
+        for (List<Double> g : groups) {
+            if (g == null || g.isEmpty()) {
+                return new double[]{0.0, 1.0};
+            }
+            N += g.size();
+        }
+        if (N == 0) {
+            return new double[]{0.0, 1.0};
+        }
 
         double[] allValues = new double[N];
         int[] groupTag = new int[N];
@@ -513,6 +532,9 @@ public final class MetricStatisticsEngine {
     }
 
     static double[] mannWhitneyU(List<Double> a, List<Double> b) {
+        if (a == null || b == null || a.isEmpty() || b.isEmpty()) {
+            return new double[]{0.0, 1.0};
+        }
         int n1 = a.size();
         int n2 = b.size();
         int N = n1 + n2;
@@ -639,5 +661,27 @@ public final class MetricStatisticsEngine {
 
     static double stdDev(List<Double> data, double mean) {
         return Math.sqrt(variance(data, mean));
+    }
+
+    private static String insufficientGroupReason(List<String> conditionOrder,
+                                                  LinkedHashMap<String, List<Double>> groups) {
+        if (conditionOrder == null || groups == null || conditionOrder.size() < 2) {
+            return "fewer than two groups";
+        }
+        for (String cond : conditionOrder) {
+            List<Double> vals = groups.get(cond);
+            int n = 0;
+            if (vals != null) {
+                for (Double value : vals) {
+                    if (value != null && Double.isFinite(value.doubleValue())) {
+                        n++;
+                    }
+                }
+            }
+            if (n < 3) {
+                return cond + " n=" + n;
+            }
+        }
+        return null;
     }
 }
