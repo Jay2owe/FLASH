@@ -80,6 +80,30 @@ public class FilterBuilderPanelTest {
     }
 
     @Test
+    public void listenersCanAddListenersDuringNotification() {
+        DagIR seed = IjmToDagLoader.load(SEED_MACRO);
+        final AtomicInteger fired = new AtomicInteger(0);
+        final FilterBuilderPanel panel = new FilterBuilderPanel(seed, null, noopRunner(), null);
+        panel.addChangeListener(new Runnable() {
+            @Override public void run() {
+                fired.incrementAndGet();
+                panel.addChangeListener(new Runnable() {
+                    @Override public void run() {
+                        fired.incrementAndGet();
+                    }
+                });
+            }
+        });
+
+        panel.loadPreset(IjmToDagLoader.load(OTHER_MACRO), "Other");
+        assertEquals("Listener added during notification must not run in the same pass",
+                1, fired.get());
+
+        panel.loadPreset(seed, "Original");
+        assertEquals(3, fired.get());
+    }
+
+    @Test
     public void multiplePanelsShareStaticCatalogStateSafely() {
         DagIR seed = IjmToDagLoader.load(SEED_MACRO);
         FilterBuilderPanel first = new FilterBuilderPanel(seed, null, noopRunner(), null);

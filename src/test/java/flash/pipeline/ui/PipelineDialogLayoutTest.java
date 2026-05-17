@@ -110,6 +110,53 @@ public class PipelineDialogLayoutTest {
     }
 
     @Test
+    public void interleavedControlsRetainIndependentPerTypeRetrievalOrder() throws Exception {
+        PipelineDialog dialog = new PipelineDialog("Counter Order");
+        dialog.addToggle("First boolean", true);
+        dialog.addNumericField("First number", 2.5, 1);
+        dialog.addChoice("First choice", new String[]{"A", "B"}, "B");
+        dialog.addToggle("Second boolean", false);
+        dialog.addNumericField("Second number", 4, 0);
+        dialog.addStringField("First string", "text", 12);
+
+        assertTrue(dialog.getNextBoolean());
+        assertFalse(dialog.getNextBoolean());
+        assertEquals(2.5, dialog.getNextNumber(), 0.0001);
+        assertEquals(4.0, dialog.getNextNumber(), 0.0001);
+        assertEquals("B", dialog.getNextChoice());
+        assertEquals("text", dialog.getNextString());
+        backingDialog(dialog).dispose();
+    }
+
+    @Test
+    public void emptyAndSingleItemChoicesDoNotBreakChoiceRetrieval() throws Exception {
+        PipelineDialog dialog = new PipelineDialog("Choice Edge Cases");
+        dialog.addChoice("Empty", new String[0], null);
+        dialog.addChoice("Single", new String[]{"Only"}, null);
+        dialog.addChoice("Null list with default", null, "Fallback");
+
+        assertEquals("", dialog.getNextChoice());
+        assertEquals("Only", dialog.getNextChoice());
+        assertEquals("Fallback", dialog.getNextChoice());
+        backingDialog(dialog).dispose();
+    }
+
+    @Test
+    public void retrievalDriftReportsFieldTypeAndIndex() throws Exception {
+        PipelineDialog dialog = new PipelineDialog("Counter Drift");
+        try {
+            dialog.getNextNumber();
+            throw new AssertionError("Expected a typed retrieval failure");
+        } catch (IllegalStateException expected) {
+            assertTrue(expected.getMessage().contains("number field"));
+            assertTrue(expected.getMessage().contains("retrieval index 0"));
+            assertTrue(expected.getMessage().contains("getNextNumber()"));
+        } finally {
+            backingDialog(dialog).dispose();
+        }
+    }
+
+    @Test
     public void footerUtilityButtonsShareRowWithActionButtons() throws Exception {
         PipelineDialog dialog = new PipelineDialog("Footer");
         dialog.addFooterButton("Check my data");

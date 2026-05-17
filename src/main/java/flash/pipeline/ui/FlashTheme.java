@@ -67,7 +67,7 @@ public final class FlashTheme {
     public static final int ICON_SECTION_SIZE = 18;
     public static final int ICON_PHASE_SIZE = 13;
     public static final int ICON_SMALL_SIZE = 12;
-    public static final Dimension HELP_BUTTON_SIZE = new Dimension(22, 22);
+    private static final int HELP_BUTTON_SIDE = 22;
 
     public static EmptyBorder pad(int v) {
         return new EmptyBorder(v, v, v, v);
@@ -79,6 +79,10 @@ public final class FlashTheme {
 
     public static EmptyBorder pad(int top, int left, int bottom, int right) {
         return new EmptyBorder(top, left, bottom, right);
+    }
+
+    public static Dimension helpButtonSize() {
+        return new Dimension(HELP_BUTTON_SIDE, HELP_BUTTON_SIDE);
     }
 
     private static Font base() {

@@ -10,8 +10,6 @@ import java.awt.Font;
  */
 public final class HelpButton {
 
-    private static final Dimension SIZE = FlashTheme.HELP_BUTTON_SIZE;
-
     private HelpButton() {
     }
 
@@ -27,9 +25,10 @@ public final class HelpButton {
         button.setFocusPainted(false);
         button.setBorder(BorderFactory.createLineBorder(FlashTheme.INFO_BORDER));
         button.setMargin(new java.awt.Insets(0, 0, 0, 0));
-        button.setMinimumSize(SIZE);
-        button.setPreferredSize(SIZE);
-        button.setMaximumSize(SIZE);
+        Dimension size = FlashTheme.helpButtonSize();
+        button.setMinimumSize(size);
+        button.setPreferredSize(new Dimension(size));
+        button.setMaximumSize(new Dimension(size));
         return button;
     }
 }

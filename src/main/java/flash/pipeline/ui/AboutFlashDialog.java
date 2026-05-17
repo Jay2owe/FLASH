@@ -4,6 +4,7 @@ import com.github.weisj.jsvg.SVGDocument;
 import com.github.weisj.jsvg.attributes.ViewBox;
 import com.github.weisj.jsvg.parser.SVGLoader;
 
+import ij.IJ;
 import ij.plugin.PlugIn;
 
 import javax.swing.BorderFactory;
@@ -27,6 +28,7 @@ import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.GradientPaint;
+import java.awt.GraphicsEnvironment;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
@@ -68,6 +70,10 @@ public final class AboutFlashDialog implements PlugIn {
     }
 
     public static void show(java.awt.Window owner) {
+        if (GraphicsEnvironment.isHeadless()) {
+            IJ.log("About FLASH dialog skipped because the JVM is headless.");
+            return;
+        }
         JDialog dialog = owner == null
                 ? new JDialog((java.awt.Frame) null, "About FLASH", true)
                 : new JDialog(owner, "About FLASH", Dialog.ModalityType.APPLICATION_MODAL);

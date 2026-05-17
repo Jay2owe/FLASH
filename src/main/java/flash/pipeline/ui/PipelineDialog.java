@@ -598,9 +598,13 @@ public class PipelineDialog {
         lbl.setForeground(LABEL_COLOR);
         row.add(lbl);
         row.add(Box.createHorizontalGlue());
-        JComboBox<String> combo = new JComboBox<String>(items);
+        String[] safeItems = items == null ? new String[0] : items;
+        if (safeItems.length == 0 && defaultItem != null) {
+            safeItems = new String[]{defaultItem};
+        }
+        JComboBox<String> combo = new JComboBox<String>(safeItems);
         if (defaultItem != null) combo.setSelectedItem(defaultItem);
-        combo.setMaximumSize(new Dimension(280, 24));
+        combo.setMaximumSize(new Dimension(MAX_COMBO_WIDTH, 24));
         constrainComboBox(combo);
         row.add(combo);
 
@@ -1082,19 +1086,28 @@ public class PipelineDialog {
     // Sequential retrieval methods (matching GenericDialog pattern)
 
     public boolean getNextBoolean() {
-        return toggles.get(toggleIndex++).isSelected();
+        ToggleSwitch toggle = next(toggles, toggleIndex, "boolean");
+        toggleIndex++;
+        return toggle.isSelected();
     }
 
     public String getNextString() {
-        return textFields.get(textFieldIndex++).getText();
+        JTextField field = next(textFields, textFieldIndex, "string");
+        textFieldIndex++;
+        return field.getText();
     }
 
     public String getNextChoice() {
-        return (String) combos.get(comboIndex++).getSelectedItem();
+        JComboBox<String> combo = next(combos, comboIndex, "choice");
+        comboIndex++;
+        Object selected = combo.getSelectedItem();
+        return selected == null ? "" : selected.toString();
     }
 
     public double getNextNumber() {
-        String text = numericFields.get(numericFieldIndex++).getText().trim();
+        JTextField field = next(numericFields, numericFieldIndex, "number");
+        numericFieldIndex++;
+        String text = field.getText().trim();
         try {
             return Double.parseDouble(text);
         } catch (NumberFormatException e) {
@@ -1220,6 +1233,24 @@ public class PipelineDialog {
         button.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(border),
                 FlashTheme.pad(3, 10, 3, 10)));
+    }
+
+    private static <T> T next(List<T> values, int index, String type) {
+        if (index < 0 || index >= values.size()) {
+            throw new IllegalStateException("No " + type + " field is available at retrieval index "
+                    + index + "; dialog contains " + values.size() + " " + type
+                    + " field(s). Add-order within each field type must match getNext"
+                    + retrievalSuffix(type) + "() order.");
+        }
+        return values.get(index);
+    }
+
+    private static String retrievalSuffix(String type) {
+        if ("boolean".equals(type)) return "Boolean";
+        if ("choice".equals(type)) return "Choice";
+        if ("number".equals(type)) return "Number";
+        if ("string".equals(type)) return "String";
+        return "";
     }
 
     private static class BodyPanel extends JPanel implements Scrollable {

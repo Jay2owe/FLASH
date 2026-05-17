@@ -2,6 +2,7 @@ package flash.pipeline.ui.demo;
 
 import flash.pipeline.ui.FlashTheme;
 
+import ij.IJ;
 import ij.plugin.PlugIn;
 
 import javax.swing.Box;
@@ -35,6 +36,7 @@ import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
+import java.awt.GraphicsEnvironment;
 import java.awt.GridLayout;
 import java.awt.Insets;
 import java.awt.RenderingHints;
@@ -68,6 +70,10 @@ public final class FlashStyleLab implements PlugIn {
     }
 
     private static void showAsFrame() {
+        if (GraphicsEnvironment.isHeadless()) {
+            IJ.log("FLASH Style Lab skipped because the JVM is headless.");
+            return;
+        }
         JFrame frame = new JFrame("FLASH Style Lab");
         frame.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
         frame.setContentPane(buildContent());

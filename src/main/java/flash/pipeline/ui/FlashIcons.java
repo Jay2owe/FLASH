@@ -16,13 +16,13 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
-import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public final class FlashIcons {
 
     private static final SVGLoader LOADER = new SVGLoader();
-    private static final Map<String, Icon> CACHE = new HashMap<String, Icon>();
+    private static final Map<String, Icon> CACHE = new ConcurrentHashMap<String, Icon>();
 
     private FlashIcons() {}
 
@@ -132,8 +132,9 @@ public final class FlashIcons {
         Icon cached = CACHE.get(key);
         if (cached != null) return cached;
         Icon icon = renderToIcon(name, size, color);
-        if (icon != null) CACHE.put(key, icon);
-        return icon;
+        if (icon == null) return null;
+        Icon previous = CACHE.putIfAbsent(key, icon);
+        return previous == null ? icon : previous;
     }
 
     private static Icon renderToIcon(String name, int size, Color color) {

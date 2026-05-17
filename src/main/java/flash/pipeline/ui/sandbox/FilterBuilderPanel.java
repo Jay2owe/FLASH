@@ -767,8 +767,9 @@ public final class FilterBuilderPanel extends JPanel {
     }
 
     private void notifyListeners() {
-        for (int i = 0; i < changeListeners.size(); i++) {
-            changeListeners.get(i).run();
+        List<Runnable> snapshot = new ArrayList<Runnable>(changeListeners);
+        for (int i = 0; i < snapshot.size(); i++) {
+            snapshot.get(i).run();
         }
     }
 
