@@ -326,7 +326,7 @@ public final class ChainRibbon extends JPanel {
             setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
             setToolTipText(step.fullLabel);
             addMouseListener(new MouseAdapter() {
-                @Override public void mouseClicked(MouseEvent e) {
+                @Override public void mousePressed(MouseEvent e) {
                     if (SwingUtilities.isLeftMouseButton(e)) {
                         handleClick(MouseEvent.BUTTON1);
                     }
