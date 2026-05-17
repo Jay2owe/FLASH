@@ -246,6 +246,36 @@ public class MasterAggregationAnalysisTest {
     }
 
     @Test
+    public void execute_prefixesFormulaLikeAnimalNamesInMasterCsv() throws Exception {
+        File root = temp.newFolder("master-agg-formula-animal");
+        File attrs = new File(root, "Data Analysis/Attributes");
+        File objects = new File(root, "Data Analysis/Objects");
+        assertTrue(attrs.mkdirs());
+        assertTrue(objects.mkdirs());
+
+        String animal = "=HYPERLINK(\"http://example.com\")";
+        writeCsvRows(new File(attrs, "SCN ROI Properties.csv"),
+                Arrays.asList("Animal Name", "Region", "ROI Set", "SCN", "Area (pixel)", "Area (um^2)",
+                        "Volume (micron^3)", "Volume (mm^3)", "Width", "Height"),
+                Arrays.asList(
+                        Arrays.asList(animal, "LHSCN", "SCN", "1", "10", "10", "500000000", "0.5", "1", "1")));
+        writeCsvRows(new File(objects, "CK1D.csv"),
+                Arrays.asList("Region", "Hemisphere", "ROI", "Animal Name", "Volume (micron^3)",
+                        "Surface (micron^2)", "IntDen", "Mean", "XM", "YM", "ZM"),
+                Arrays.asList(
+                        Arrays.asList("SCN", "LH", "SCN1", animal, "10", "5", "100", "10", "1", "1", "1")));
+
+        MasterAggregationAnalysis analysis = new MasterAggregationAnalysis();
+        analysis.setSuppressDialogs(true);
+        analysis.execute(root.getAbsolutePath());
+
+        List<String> lines = Files.readAllLines(
+                aggregationFile(root, "3D Objects.csv").toPath(),
+                StandardCharsets.UTF_8);
+        assertEquals("'" + animal, csvRow(lines.get(0), lines.get(1)).get("AnimalName"));
+    }
+
+    @Test
     public void execute_readsNewObjectIntensityAndLineDistanceOutputsBeforeLegacy() throws Exception {
         File root = temp.newFolder("master-agg-new-layout");
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(root.getAbsolutePath());

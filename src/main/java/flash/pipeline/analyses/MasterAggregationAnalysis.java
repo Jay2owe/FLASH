@@ -45,6 +45,9 @@ import java.awt.event.ActionListener;
 import java.io.File;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -2273,14 +2276,21 @@ public class MasterAggregationAnalysis implements Analysis {
     private void writeMasterCsv(File outFile, List<String> columns,
                                 Set<String> allAnimals,
                                 LinkedHashMap<String, LinkedHashMap<String, Double>> table) {
+        File tmpFile = null;
+        boolean moved = false;
         try {
-            PrintWriter pw = CsvSupport.newWriter(outFile);
+            File parent = outFile.getParentFile();
+            if (parent != null) {
+                IoUtils.mustMkdirs(parent);
+            }
+            tmpFile = File.createTempFile(outFile.getName() + ".", ".tmp", parent);
+            PrintWriter pw = CsvSupport.newWriter(tmpFile);
             try {
-                pw.println(CsvSupport.joinRow(columns));
+                pw.println(CsvSupport.joinRow(csvSafeValues(columns)));
 
                 for (String animal : allAnimals) {
                     List<String> vals = new ArrayList<String>();
-                    vals.add(animal);
+                    vals.add(csvSafeCell(animal));
 
                     LinkedHashMap<String, Double> row = table.get(animal);
                     for (int c = 1; c < columns.size(); c++) {
@@ -2293,13 +2303,46 @@ public class MasterAggregationAnalysis implements Analysis {
             } finally {
                 pw.close();
             }
+            try {
+                Files.move(tmpFile.toPath(), outFile.toPath(),
+                        StandardCopyOption.REPLACE_EXISTING,
+                        StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException e) {
+                Files.move(tmpFile.toPath(), outFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+            }
+            moved = true;
             IJ.log("Saved: " + outFile.getAbsolutePath());
         } catch (IOException e) {
             IJ.log("Error writing " + outFile.getName() + ": " + e.getMessage());
+        } finally {
+            if (!moved && tmpFile != null) {
+                try {
+                    Files.deleteIfExists(tmpFile.toPath());
+                } catch (IOException ignored) {
+                }
+            }
         }
     }
 
     // ----------------------------------------------------------------- Helpers
+
+    private static List<String> csvSafeValues(List<String> values) {
+        List<String> safe = new ArrayList<String>();
+        if (values == null) return safe;
+        for (String value : values) {
+            safe.add(csvSafeCell(value));
+        }
+        return safe;
+    }
+
+    private static String csvSafeCell(String value) {
+        if (value == null || value.isEmpty()) return value == null ? "" : value;
+        char first = value.charAt(0);
+        if (first == '=' || first == '+' || first == '-' || first == '@') {
+            return "'" + value;
+        }
+        return value;
+    }
 
     private static String safeGet(String[] arr, Integer idx) {
         if (idx == null || idx < 0 || idx >= arr.length) return "";
