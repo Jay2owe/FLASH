@@ -525,6 +525,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
                     new Consumer<ParameterCombo>() {
                         @Override public void accept(ParameterCombo accepted) {
                             selectCombo(accepted, strategy);
+                            acceptAndClose(accepted, strategy);
                         }
                     },
                     null,

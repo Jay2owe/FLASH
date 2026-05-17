@@ -13,6 +13,7 @@ import java.awt.GraphicsEnvironment;
 import java.io.File;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
@@ -24,19 +25,21 @@ import static org.junit.Assert.assertTrue;
 public class MacroVariationsDialogAcceptCallbackTest {
 
     @Test
-    public void useComboAcceptsRenderedSelectedFilterMacro() throws Exception {
+    public void cellClickAcceptsRenderedSelectedFilterMacro() throws Exception {
         Assume.assumeFalse("PipelineDialog creates a JDialog in this codebase.",
                 GraphicsEnvironment.isHeadless());
         final AtomicReference<MacroVariationsDialog> ref =
                 new AtomicReference<MacroVariationsDialog>();
         final AtomicReference<String> accepted =
                 new AtomicReference<String>();
+        final AtomicInteger acceptedCount = new AtomicInteger();
 
         SwingUtilities.invokeAndWait(new Runnable() {
             @Override public void run() {
                 MacroVariationsDialog dialog = new MacroVariationsDialog(null,
                         context(), new Consumer<String>() {
                     @Override public void accept(String macro) {
+                        acceptedCount.incrementAndGet();
                         accepted.set(macro);
                     }
                 });
@@ -56,12 +59,11 @@ public class MacroVariationsDialogAcceptCallbackTest {
                     assertEquals(1, dialog.cellsForTest().size());
                     assertFalse(dialog.useComboButtonForTest().isEnabled());
                     dialog.cellsForTest().get(0).clickForTest(false);
-                    assertTrue(dialog.useComboButtonForTest().isEnabled());
-                    dialog.useComboButtonForTest().doClick();
                 }
             });
 
             assertNotNull(accepted.get());
+            assertEquals(1, acceptedCount.get());
             assertTrue(accepted.get().contains("sigma=2.0"));
         } finally {
             SwingUtilities.invokeAndWait(new Runnable() {
@@ -72,6 +74,38 @@ public class MacroVariationsDialogAcceptCallbackTest {
                 }
             });
         }
+    }
+
+    @Test
+    public void completedFilterCellClickInvokesAcceptCallbackOnce() throws Exception {
+        final ParameterCombo combo = ParameterCombo.builder()
+                .put(ParameterId.THRESHOLD, Integer.valueOf(128))
+                .build();
+        final ImagePlus source = image();
+        final ImagePlus filtered = image();
+        final AtomicReference<ParameterCombo> accepted =
+                new AtomicReference<ParameterCombo>();
+        final AtomicInteger acceptedCount = new AtomicInteger();
+        final VariationCellPanel cell = new VariationCellPanel(combo, source,
+                new Consumer<ParameterCombo>() {
+                    @Override public void accept(ParameterCombo value) {
+                        acceptedCount.incrementAndGet();
+                        accepted.set(value);
+                    }
+                },
+                null);
+        final VariationResult result = VariationResult.filterSuccess(combo,
+                filtered, 12L, new int[256], 6.8d, 14.3d);
+
+        SwingUtilities.invokeAndWait(new Runnable() {
+            @Override public void run() {
+                cell.setFilterResult(result);
+                cell.clickForTest(false);
+            }
+        });
+
+        assertEquals(1, acceptedCount.get());
+        assertEquals(combo, accepted.get());
     }
 
     private static void configureOneComboSweep(ParameterSweepEditor editor) {
