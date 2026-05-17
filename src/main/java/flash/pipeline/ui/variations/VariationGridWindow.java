@@ -37,6 +37,7 @@ public final class VariationGridWindow extends JFrame {
     private final JCheckBox downstreamVerdictCheckBox =
             new JCheckBox("Show downstream verdict");
     private final JButton stopDownstreamButton = new JButton("Stop downstream");
+    private final JButton pickSelectedButton = new JButton("Pick selected");
     private final JPanel gridPanel;
     private final JSlider zSlider = new JSlider(1, 1, 1);
     private final JLabel zSliceLabel = new JLabel(" ");
@@ -124,12 +125,20 @@ public final class VariationGridWindow extends JFrame {
         stopDownstreamButton.addActionListener(listener);
     }
 
+    public void attachPickSelectedActionListener(ActionListener listener) {
+        pickSelectedButton.addActionListener(listener);
+    }
+
     public void setDownstreamControlsEnabled(boolean checkBoxEnabled,
                                              boolean stopEnabled,
                                              String checkBoxTooltip) {
         downstreamVerdictCheckBox.setEnabled(checkBoxEnabled);
         stopDownstreamButton.setEnabled(stopEnabled);
         downstreamVerdictCheckBox.setToolTipText(checkBoxTooltip);
+    }
+
+    public void setPickSelectedEnabled(boolean enabled) {
+        pickSelectedButton.setEnabled(enabled);
     }
 
     public void setOtsuOverlaySelected(boolean selected) {
@@ -154,6 +163,10 @@ public final class VariationGridWindow extends JFrame {
 
     public JButton stopDownstreamButtonForTest() {
         return stopDownstreamButton;
+    }
+
+    public JButton pickSelectedButtonForTest() {
+        return pickSelectedButton;
     }
 
     public JSlider zSliderForTest() {
@@ -189,10 +202,15 @@ public final class VariationGridWindow extends JFrame {
         otsuOverlayCheckBox.setOpaque(false);
         downstreamVerdictCheckBox.setOpaque(false);
         stopDownstreamButton.setEnabled(false);
+        pickSelectedButton.setEnabled(false);
+        pickSelectedButton.setToolTipText(
+                "Use the currently selected variation as the result.");
         toolBar.add(otsuOverlayCheckBox);
         toolBar.addSeparator();
         toolBar.add(downstreamVerdictCheckBox);
         toolBar.add(stopDownstreamButton);
+        toolBar.addSeparator();
+        toolBar.add(pickSelectedButton);
     }
 
     private void configureSlider() {

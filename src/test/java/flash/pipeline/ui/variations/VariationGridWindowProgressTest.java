@@ -5,10 +5,13 @@ import org.junit.Test;
 
 import javax.swing.SwingUtilities;
 import java.awt.GraphicsEnvironment;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
 import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 public class VariationGridWindowProgressTest {
 
@@ -24,6 +27,33 @@ public class VariationGridWindowProgressTest {
                     assertEquals(2, window.progressBarForTest().getValue());
                     assertEquals("Slice 1 / 1  |  Variants: 4  |  2/4 complete",
                             window.statusLabelForTest().getText());
+                } finally {
+                    window.dispose();
+                }
+            }
+        });
+    }
+
+    @Test
+    public void pickSelectedButtonCanBeEnabledAndClicked() throws Exception {
+        Assume.assumeFalse(GraphicsEnvironment.isHeadless());
+        SwingUtilities.invokeAndWait(new Runnable() {
+            @Override public void run() {
+                VariationGridWindow window = new VariationGridWindow(
+                        null, "FLASH variations", cells(1));
+                try {
+                    final boolean[] fired = new boolean[] { false };
+                    window.setPickSelectedEnabled(true);
+                    assertTrue(window.pickSelectedButtonForTest().isEnabled());
+                    window.attachPickSelectedActionListener(new ActionListener() {
+                        @Override public void actionPerformed(ActionEvent e) {
+                            fired[0] = true;
+                        }
+                    });
+
+                    window.pickSelectedButtonForTest().doClick();
+
+                    assertTrue(fired[0]);
                 } finally {
                     window.dispose();
                 }

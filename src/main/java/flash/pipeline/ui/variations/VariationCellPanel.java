@@ -72,6 +72,10 @@ public final class VariationCellPanel extends JPanel {
     private static final int OVERLAY_PILL_HEIGHT = 18;
     private static final int OVERLAY_PILL_RADIUS = 6;
     private static final int OVERLAY_PILL_X_PAD = 7;
+    private static final int PICK_PILL_WIDTH = 50;
+    private static final int PICK_PILL_HEIGHT = 22;
+    private static final int PICK_PILL_RADIUS = 8;
+    private static final int PICK_PILL_INSET = 10;
     private static final Color OVERLAY_STRIP = new Color(0, 0, 0, 140);
     private static final Color OVERLAY_TEXT = Color.WHITE;
     private static final String ERROR_BADGE = "\u26a0";
@@ -807,6 +811,10 @@ public final class VariationCellPanel extends JPanel {
         }
     }
 
+    boolean isPickPillVisibleForTest() {
+        return hover && acceptEnabled;
+    }
+
     @Override protected void paintComponent(Graphics g) {
         super.paintComponent(g);
         Graphics2D g2 = (Graphics2D) g.create();
@@ -832,6 +840,7 @@ public final class VariationCellPanel extends JPanel {
             paintCompareBadge(g);
             paintRibbons(g);
             paintMetricOverlays(g);
+            paintPickPill(g);
         }
     }
 
@@ -905,6 +914,7 @@ public final class VariationCellPanel extends JPanel {
 
             @Override public void mouseEntered(MouseEvent e) {
                 hover = true;
+                refreshTooltip();
                 refreshBorder();
             }
 
@@ -912,6 +922,7 @@ public final class VariationCellPanel extends JPanel {
                 hover = false;
                 cancelPeek(true);
                 pressPoint = null;
+                refreshTooltip();
                 refreshBorder();
             }
 
@@ -1081,6 +1092,7 @@ public final class VariationCellPanel extends JPanel {
         if (errorState) {
             sb.append("<br><b>Failed:</b> ")
                     .append(html(errorText).replace("\n", "<br>"));
+            appendPickInstruction(sb);
             sb.append("</html>");
             setTooltips(sb.toString());
             return;
@@ -1098,6 +1110,7 @@ public final class VariationCellPanel extends JPanel {
             if (durationMs >= 0L) {
                 sb.append("<br>durationMs: ").append(durationMs).append(" ms");
             }
+            appendPickInstruction(sb);
             sb.append("</html>");
             setTooltips(sb.toString());
             return;
@@ -1125,8 +1138,15 @@ public final class VariationCellPanel extends JPanel {
         if (cachedStats != null) {
             sb.append("<br>").append(cachedStats.size()).append(" stats rows");
         }
+        appendPickInstruction(sb);
         sb.append("</html>");
         setTooltips(sb.toString());
+    }
+
+    private void appendPickInstruction(StringBuilder sb) {
+        if (hover && acceptEnabled) {
+            sb.append("<br>Click to pick this combo");
+        }
     }
 
     private void setTooltips(String text) {
@@ -1286,6 +1306,43 @@ public final class VariationCellPanel extends JPanel {
             } else {
                 paintSegmentationOverlay(g2, width, height);
             }
+        } finally {
+            g2.dispose();
+        }
+    }
+
+    private void paintPickPill(Graphics g) {
+        if (!isPickPillVisibleForTest()) {
+            return;
+        }
+        int width = getWidth();
+        int height = getHeight();
+        if (width <= 0 || height <= 0) {
+            return;
+        }
+        Graphics2D g2 = (Graphics2D) g.create();
+        try {
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                    RenderingHints.VALUE_ANTIALIAS_ON);
+            g2.setClip(cardShape());
+            int x = Math.max(PICK_PILL_INSET,
+                    width - PICK_PILL_WIDTH - PICK_PILL_INSET);
+            int y = Math.min(Math.max(PICK_PILL_INSET, 0),
+                    Math.max(0, height - PICK_PILL_HEIGHT - PICK_PILL_INSET));
+            g2.setColor(STABILITY_BORDER);
+            g2.fillRoundRect(x, y, PICK_PILL_WIDTH, PICK_PILL_HEIGHT,
+                    PICK_PILL_RADIUS, PICK_PILL_RADIUS);
+            g2.setColor(new Color(0, 0, 0, 90));
+            g2.drawRoundRect(x, y, PICK_PILL_WIDTH - 1, PICK_PILL_HEIGHT - 1,
+                    PICK_PILL_RADIUS, PICK_PILL_RADIUS);
+            g2.setFont(FlashTheme.bodyMedium().deriveFont(Font.BOLD, 11f));
+            FontMetrics fm = g2.getFontMetrics();
+            String text = "Pick";
+            int textX = x + (PICK_PILL_WIDTH - fm.stringWidth(text)) / 2;
+            int baseline = y + (PICK_PILL_HEIGHT - fm.getHeight()) / 2
+                    + fm.getAscent();
+            g2.setColor(Color.WHITE);
+            g2.drawString(text, textX, baseline);
         } finally {
             g2.dispose();
         }

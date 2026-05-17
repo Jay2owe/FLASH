@@ -501,6 +501,9 @@ public final class MacroVariationsDialog extends PipelineDialog {
             runButton.setEnabled(false);
         }
         useComboButton.setEnabled(false);
+        if (gridWindow != null) {
+            gridWindow.setPickSelectedEnabled(false);
+        }
         exportPipelineFigureButton.setEnabled(false);
 
         final ImagePlus croppedSource = currentSweep.cropSpec().apply(source);
@@ -585,6 +588,13 @@ public final class MacroVariationsDialog extends PipelineDialog {
             @Override public void actionPerformed(ActionEvent e) {
                 cancelDownstreamWorker();
                 setStatusTextNow("Downstream cancelled");
+            }
+        });
+        gridWindow.attachPickSelectedActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                if (selectedCombo != null && selectedStrategy != null) {
+                    acceptAndClose(selectedCombo, selectedStrategy);
+                }
             }
         });
         gridWindow.setVisible(true);
@@ -1638,6 +1648,9 @@ public final class MacroVariationsDialog extends PipelineDialog {
         }
         if (useComboButton != null) {
             useComboButton.setEnabled(true);
+        }
+        if (gridWindow != null) {
+            gridWindow.setPickSelectedEnabled(true);
         }
         if (exportPipelineFigureButton != null) {
             exportPipelineFigureButton.setEnabled(true);
