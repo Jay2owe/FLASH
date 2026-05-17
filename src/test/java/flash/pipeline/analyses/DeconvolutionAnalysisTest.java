@@ -23,6 +23,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -48,6 +49,8 @@ public class DeconvolutionAnalysisTest {
         Files.write(source.toPath(), "lif".getBytes(StandardCharsets.UTF_8));
 
         final ImagePlus blurred = gaussianPointSource("blurred", 64, 64, 16, 2.6, 1.6, 100.0);
+        ((FloatProcessor) blurred.getStack().getProcessor(1)).setf(0, -5.0f);
+        ((FloatProcessor) blurred.getStack().getProcessor(1)).setf(1, Float.NaN);
         final ImagePlus psf = gaussianPointSource("psf", 15, 15, 9, 1.2, 1.0, 1.0);
         final MetadataDiagnostics.SeriesInfo info = syntheticSeriesInfo();
         final DeconvolutionEngine engine = mockEngine();
@@ -80,6 +83,10 @@ public class DeconvolutionAnalysisTest {
         assertTrue(containsFileNamed(DeconvolutionIO.cacheDir(root), "synthetic_C0.tif"));
         File summaryReport = new File(DeconvolutionIO.deconvOutDir(root), "deconv_summary.txt");
         assertTrue(summaryReport.isFile());
+        assertEquals(1, analysis.requestedSpecs.size());
+        assertEquals(63, analysis.requestedSpecs.get(0).getSizeX());
+        assertEquals(63, analysis.requestedSpecs.get(0).getSizeY());
+        assertEquals(15, analysis.requestedSpecs.get(0).getSizeZ());
 
         ImagePlus written = new Opener().openImage(output.getAbsolutePath());
         ImagePlus merged = new Opener().openImage(mergedOutput.getAbsolutePath());
@@ -177,6 +184,7 @@ public class DeconvolutionAnalysisTest {
 
             @Override
             public ImagePlus deconvolve(ImagePlus stack, ImagePlus psf, DeconvParams params) throws DeconvolutionException {
+                assertNonNegativeFinite(stack);
                 ImagePlus output = stack.duplicate();
                 int centerX = output.getWidth() / 2;
                 int centerY = output.getHeight() / 2;
@@ -230,6 +238,18 @@ public class DeconvolutionAnalysisTest {
         return max;
     }
 
+    private static void assertNonNegativeFinite(ImagePlus image) {
+        for (int z = 1; z <= image.getStackSize(); z++) {
+            FloatProcessor processor = (FloatProcessor) image.getStack().getProcessor(z);
+            float[] pixels = (float[]) processor.getPixels();
+            for (float pixel : pixels) {
+                assertTrue("deconvolution input must be finite",
+                        !Float.isNaN(pixel) && !Float.isInfinite(pixel));
+                assertTrue("deconvolution input must be non-negative", pixel >= 0.0f);
+            }
+        }
+    }
+
     private static void close(ImagePlus image) {
         if (image == null) return;
         image.changes = false;
@@ -258,6 +278,7 @@ public class DeconvolutionAnalysisTest {
         private final ImagePlus psf;
         private final MetadataDiagnostics.SeriesInfo info;
         private final DeconvolutionEngine engine;
+        private final List<PsfSpec> requestedSpecs = new ArrayList<PsfSpec>();
 
         private TestDeconvolutionAnalysis(File sourceFile,
                                           ImagePlus blurred,
@@ -308,6 +329,7 @@ public class DeconvolutionAnalysisTest {
 
         @Override
         protected ImagePlus getOrCreatePsf(PsfSpec spec, PsfModel model) {
+            requestedSpecs.add(spec);
             return psf.duplicate();
         }
 

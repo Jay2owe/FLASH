@@ -71,6 +71,7 @@ import java.awt.GraphicsEnvironment;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.SimpleFileVisitor;
@@ -107,6 +108,8 @@ public class DeconvolutionAnalysis implements Analysis {
     private static final int PINHOLE_FIELD_WIDTH = 104;
     private static final int HELPER_COLUMN_WIDTH = 240;
     private static final int HELP_DIALOG_TEXT_WIDTH = 660;
+    private static final int MAX_PSF_SIZE_XY = 257;
+    private static final int MAX_PSF_SIZE_Z = 127;
 
     private boolean headless = false;
     private boolean suppressDialogs = false;
@@ -1006,21 +1009,8 @@ public class DeconvolutionAnalysis implements Analysis {
             }
 
             ResolvedSeriesSettings resolved = resolveSeriesSettings(job.seriesInfo, settings, channelNames.length);
-            PsfSpec spec = new PsfSpec(
-                    resolved.numericalAperture,
-                    resolved.immersionRi,
-                    resolved.sampleRi,
-                    resolved.emissionWavelengthsNm[channelIndex],
-                    resolved.xyPixelSizeUm * 1000.0,
-                    resolved.zStepUm * 1000.0,
-                    rawCrop.getWidth(),
-                    rawCrop.getHeight(),
-                    rawCrop.getStackSize(),
-                    settings.scopeModality,
-                    settings.scopeModality == ScopeModality.CONFOCAL
-                            ? Double.valueOf(resolved.pinholeAiryUnits)
-                            : null
-            );
+            sanitizeInputForDeconvolution(rawCrop);
+            PsfSpec spec = createPsfSpec(resolved, channelIndex, rawCrop, settings.scopeModality);
             psf = getOrCreatePsf(spec, settings.psfModel);
             if (psf == null) {
                 return DeconvPreviewDialog.Decision.RUN_FULL_BATCH;
@@ -1335,21 +1325,13 @@ public class DeconvolutionAnalysis implements Analysis {
                         continue;
                     }
 
-                    PsfSpec spec = new PsfSpec(
-                            resolved.numericalAperture,
-                            resolved.immersionRi,
-                            resolved.sampleRi,
-                            resolved.emissionWavelengthsNm[channelIndex],
-                            resolved.xyPixelSizeUm * 1000.0,
-                            resolved.zStepUm * 1000.0,
-                            channelStack.getWidth(),
-                            channelStack.getHeight(),
-                            channelStack.getStackSize(),
-                            settings.scopeModality,
-                            settings.scopeModality == ScopeModality.CONFOCAL
-                                    ? Double.valueOf(resolved.pinholeAiryUnits)
-                                    : null
-                    );
+                    if (sanitizeInputForDeconvolution(channelStack)) {
+                        String message = "input contained negative or non-finite pixels; sanitized before deconvolution";
+                        warnings.add(channelNames[channelIndex] + " " + message);
+                        summaryWarnings.add("inputSanitized");
+                    }
+
+                    PsfSpec spec = createPsfSpec(resolved, channelIndex, channelStack, settings.scopeModality);
 
                     psf = getOrCreatePsf(spec, settings.psfModel);
                     channelPeakUsedBytes = Math.max(channelPeakUsedBytes, usedHeapBytes());
@@ -1536,12 +1518,22 @@ public class DeconvolutionAnalysis implements Analysis {
 
     protected void saveTiff(ImagePlus image, File target) throws IOException {
         ensureDirectory(target.getParentFile());
-        FileSaver saver = new FileSaver(image);
-        boolean ok = image.getStackSize() > 1
-                ? saver.saveAsTiffStack(target.getAbsolutePath())
-                : saver.saveAsTiff(target.getAbsolutePath());
-        if (!ok) {
-            throw new IOException("Could not save TIFF " + target.getAbsolutePath());
+        File temp = File.createTempFile(target.getName() + "-", ".tmp", target.getParentFile());
+        boolean moved = false;
+        try {
+            FileSaver saver = new FileSaver(image);
+            boolean ok = image.getStackSize() > 1
+                    ? saver.saveAsTiffStack(temp.getAbsolutePath())
+                    : saver.saveAsTiff(temp.getAbsolutePath());
+            if (!ok) {
+                throw new IOException("Could not save TIFF " + target.getAbsolutePath());
+            }
+            moveReplacing(temp, target);
+            moved = true;
+        } finally {
+            if (!moved) {
+                Files.deleteIfExists(temp.toPath());
+            }
         }
     }
 
@@ -1931,7 +1923,80 @@ public class DeconvolutionAnalysis implements Analysis {
         params.put("sizeX", String.valueOf(info.sizeX));
         params.put("sizeY", String.valueOf(info.sizeY));
         params.put("sizeZ", String.valueOf(info.sizeZ));
+        params.put("psfSizeX", String.valueOf(psfKernelSizeForImageDimension(info.sizeX, MAX_PSF_SIZE_XY)));
+        params.put("psfSizeY", String.valueOf(psfKernelSizeForImageDimension(info.sizeY, MAX_PSF_SIZE_XY)));
+        params.put("psfSizeZ", String.valueOf(psfKernelSizeForImageDimension(info.sizeZ, MAX_PSF_SIZE_Z)));
         return params;
+    }
+
+    private static PsfSpec createPsfSpec(ResolvedSeriesSettings resolved,
+                                         int channelIndex,
+                                         ImagePlus image,
+                                         ScopeModality scopeModality) {
+        if (resolved == null) throw new IllegalArgumentException("resolved settings are required.");
+        if (image == null) throw new IllegalArgumentException("image is required.");
+        ScopeModality modality = scopeModality == null ? ScopeModality.WIDEFIELD : scopeModality;
+        return new PsfSpec(
+                resolved.numericalAperture,
+                resolved.immersionRi,
+                resolved.sampleRi,
+                resolved.emissionWavelengthsNm[channelIndex],
+                resolved.xyPixelSizeUm * 1000.0,
+                resolved.zStepUm * 1000.0,
+                psfKernelSizeForImageDimension(image.getWidth(), MAX_PSF_SIZE_XY),
+                psfKernelSizeForImageDimension(image.getHeight(), MAX_PSF_SIZE_XY),
+                psfKernelSizeForImageDimension(image.getStackSize(), MAX_PSF_SIZE_Z),
+                modality,
+                modality == ScopeModality.CONFOCAL
+                        ? Double.valueOf(resolved.pinholeAiryUnits)
+                        : null
+        );
+    }
+
+    private static int psfKernelSizeForImageDimension(int imageDimension, int maxOddSize) {
+        int capped = Math.min(Math.max(1, imageDimension), Math.max(1, maxOddSize));
+        if (capped > 1 && (capped % 2) == 0) {
+            capped--;
+        }
+        return Math.max(1, capped);
+    }
+
+    private static boolean sanitizeInputForDeconvolution(ImagePlus image) {
+        if (image == null || image.getStack() == null) return false;
+        ImageStack stack = image.getStack();
+        float minFinite = Float.POSITIVE_INFINITY;
+        boolean changed = false;
+        for (int z = 1; z <= stack.getSize(); z++) {
+            ImageProcessor processor = stack.getProcessor(z);
+            for (int i = 0; i < processor.getPixelCount(); i++) {
+                float value = processor.getf(i);
+                if (Float.isNaN(value) || Float.isInfinite(value)) {
+                    changed = true;
+                    continue;
+                }
+                if (value < minFinite) {
+                    minFinite = value;
+                }
+            }
+        }
+        float offset = minFinite < 0.0f ? -minFinite : 0.0f;
+        if (offset > 0.0f) {
+            changed = true;
+        }
+        if (!changed) return false;
+
+        for (int z = 1; z <= stack.getSize(); z++) {
+            ImageProcessor processor = stack.getProcessor(z);
+            for (int i = 0; i < processor.getPixelCount(); i++) {
+                float value = processor.getf(i);
+                if (Float.isNaN(value) || Float.isInfinite(value)) {
+                    processor.setf(i, 0.0f);
+                } else if (offset > 0.0f) {
+                    processor.setf(i, value + offset);
+                }
+            }
+        }
+        return true;
     }
 
     private List<EngineChoice> engineChoices() {
@@ -2238,9 +2303,29 @@ public class DeconvolutionAnalysis implements Analysis {
     private static void copyFile(File source, File target) throws IOException {
         if (source == null || target == null) return;
         ensureDirectory(target.getParentFile());
-        Files.copy(source.toPath(), target.toPath(),
-                StandardCopyOption.REPLACE_EXISTING,
-                StandardCopyOption.COPY_ATTRIBUTES);
+        File temp = File.createTempFile(target.getName() + "-", ".tmp", target.getParentFile());
+        boolean moved = false;
+        try {
+            Files.copy(source.toPath(), temp.toPath(),
+                    StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.COPY_ATTRIBUTES);
+            moveReplacing(temp, target);
+            moved = true;
+        } finally {
+            if (!moved) {
+                Files.deleteIfExists(temp.toPath());
+            }
+        }
+    }
+
+    private static void moveReplacing(File source, File target) throws IOException {
+        try {
+            Files.move(source.toPath(), target.toPath(),
+                    StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.ATOMIC_MOVE);
+        } catch (AtomicMoveNotSupportedException e) {
+            Files.move(source.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING);
+        }
     }
 
     private static void deleteRecursively(java.nio.file.Path root) throws IOException {
