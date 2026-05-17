@@ -2,17 +2,16 @@
 
 Date: 2026-05-16
 Total stages: 10 (plus PLAN.md)
-Findings: 0 BLOCKER, 0 MAJOR, 2 MINOR, 7 IMPLEMENTED, 3 SUPERSEDED, 5 RESOLVED
+Findings: 0 BLOCKER, 0 MAJOR, 1 MINOR, 7 IMPLEMENTED, 3 SUPERSEDED, 6 RESOLVED
 
 Method note: `python -m graphify query "custom segmentation engine model catalog parser StarDist Cellpose implementation locations" --graph graphify-out/graph.json` was attempted, but local `python.exe` failed with "A specified logon session does not exist. It may already have been terminated." This audit continued with targeted source reads and `rg`.
 
 ## Executive summary
 
-- Top remaining user-impacting gaps: CLI usage still needs the legacy StarDist token form documented, and the public README still needs the compact runtime/catalog constraints pointer.
-- Resolved gaps: per-channel Object Analysis details now report the selected StarDist/Cellpose/trained-RF model display name plus key; Custom Model Manager delete now keeps copied files by default; the manager now has status, validate-all, and duplicate-as-custom affordances for stock entries; and training guidance now has a source-tree guide plus direct help links from the manager and QC model rows.
-- Remaining Stage 08 gap: CLI usage still needs the legacy StarDist token form documented.
+- Top remaining user-impacting gap: the public README still needs the compact runtime/catalog constraints pointer.
+- Resolved gaps: per-channel Object Analysis details now report the selected StarDist/Cellpose/trained-RF model display name plus key; Custom Model Manager delete now keeps copied files by default; the manager now has status, validate-all, and duplicate-as-custom affordances for stock entries; training guidance now has a source-tree guide plus direct help links from the manager and QC model rows; and CLI usage now documents the legacy StarDist form plus legacy token rewrites.
 - Stages with 100% functional parity after merged-plan substitutions: 01, 02, 03, 04, 05.
-- Stages with significant divergence: 08, 09. Stage 10 is deliberately deferred/superseded.
+- Stages with significant divergence: 09. Stage 10 is deliberately deferred/superseded.
 
 ## Stage 01 - Segmentation Config Model
 
@@ -86,7 +85,7 @@ Method note: `python -m graphify query "custom segmentation engine model catalog
 - Status: RESOLVED
 - Severity: MINOR
 - Evidence: The pre-merge spec required a setup-help topic, model-manager training button, QC-stage training link, and `docs/training_segmentation_models.md` in `docs/custom-segmentation-engines/07_training-guidance.md:32`, `docs/custom-segmentation-engines/07_training-guidance.md:38`, `docs/custom-segmentation-engines/07_training-guidance.md:39`, and `docs/custom-segmentation-engines/07_training-guidance.md:45`; implementation has an auxiliary analysis help topic in `src/main/java/flash/pipeline/help/AnalysisHelpCatalog.java:15` and `src/main/java/flash/pipeline/help/AnalysisHelpCatalog.java:89`; the model manager help button opens only `CUSTOM_MODEL_MANAGER` in `src/main/java/flash/pipeline/ui/SegmentationModelManagerDialog.java:196`; StarDist and Cellpose QC stages still return their ordinary setup topics in `src/main/java/flash/pipeline/ui/config/StarDistParameterStage.java:206` and `src/main/java/flash/pipeline/ui/config/CellposeParameterStage.java:276`. `docs/training_segmentation_models.md` does not exist.
-- Resolution: RESOLVED in commit `c4bf878`. `docs/training_segmentation_models.md` now covers StarDist, Cellpose 3, trained RF, data sizing, pitfalls, import paths, Cellpose 4 exclusion, and per-slice StarDist behavior. `AnalysisHelpCatalog.TRAIN_CUSTOM_SEGMENTATION_MODELS` was refreshed with the same constraints, `SegmentationModelManagerDialog` now has a `Train a custom model...` help entry, and StarDist/Cellpose QC model rows expose compact training-help buttons.
+- Resolution: RESOLVED in commit `fc31eab`. `docs/training_segmentation_models.md` now covers StarDist, Cellpose 3, trained RF, data sizing, pitfalls, import paths, Cellpose 4 exclusion, and per-slice StarDist behavior. `AnalysisHelpCatalog.TRAIN_CUSTOM_SEGMENTATION_MODELS` was refreshed with the same constraints, `SegmentationModelManagerDialog` now has a `Train a custom model...` help entry, and StarDist/Cellpose QC model rows expose compact training-help buttons.
 - Gap: None.
 
 ## Stage 08 - CLI, Audit, Recipe Surfaces
@@ -113,11 +112,11 @@ Method note: `python -m graphify query "custom segmentation engine model catalog
 - Resolution: Fixed in commit `e4b46498b1a6cbe43f4a25905cd992773aa3a518`; `RunSettingsSnapshot.toJsonObject()` now emits a root-level `segmentation_models` array with one derived metadata row per segmentation-method channel and degrades unresolved model keys to `source_type=unknown`.
 
 ### Feature: CLI usage documents legacy and model-key forms
-- Status: PARTIAL
+- Status: RESOLVED
 - Severity: MINOR
 - Evidence: The pre-merge spec required CLI usage to list the legacy StarDist form, new StarDist model-key form, and Cellpose form in `docs/custom-segmentation-engines/08_cli-audit-recipe-surfaces.md:76`; current usage includes examples for enhanced classical, StarDist with `model=`, Cellpose with `model=`, and trained RF in `src/main/java/flash/pipeline/cli/CLIArgumentParser.java:239`, but it does not list `stardist:<prob>:<nms>` as a valid legacy form.
-- Gap: CLI parsing accepts legacy tokens because they are carried as bin fields, but the usage text omits one promised backward-compatible form.
-- Suggested fix: Add a one-line legacy StarDist example and clarify that old Cellpose positional tokens are accepted but rewritten to canonical `model=` form.
+- Resolution: RESOLVED in commit `1ca7495`. `CLIArgumentParser.usage()` now lists `stardist:<prob>:<nms>` as the accepted legacy StarDist form, keeps the canonical StarDist and Cellpose `model=` examples, and clarifies that legacy Cellpose positional tokens are accepted and rewritten to canonical `model=` form internally.
+- Gap: None.
 
 ## Stage 09 - Validation And Docs
 

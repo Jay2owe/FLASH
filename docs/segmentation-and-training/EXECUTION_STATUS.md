@@ -58,4 +58,5 @@ FIX parity-engines-minor - 12_qc_dialog_model_selectors.md: manager status/fork/
 FIX audit-pass3-minor - runner error UX: real error message surfaced at 2026-05-17T00:36:31.1153028+01:00 (commit d706e5ddf49f283317a4e264122c232a8c9964ec)
 FIX parity-engines-major - 08_run_snapshot.md: per-channel details model metadata at 2026-05-17T00:51:22.9198400+01:00 (commit af0ecc6ab3b1a53740add453d2fb32b6c4bef15e)
 FIX parity-engines-minor - 08_run_snapshot.md: segmentation_models array at 2026-05-17T00:56:19.7439793+01:00 (commit e4b46498b1a6cbe43f4a25905cd992773aa3a518)
-FIX parity-engines-minor - 07 training guidance: docs+help links at 2026-05-17T01:05:38+01:00 (commit c4bf878)
+FIX parity-engines-minor - 07 training guidance: docs+help links at 2026-05-17T01:05:38+01:00 (commit fc31eab)
+FIX parity-engines-minor - 08 CLI usage: legacy form documented at 2026-05-17T01:09:22+01:00 (commit 1ca7495)
