@@ -9,12 +9,13 @@ import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
-import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStreamWriter;
 import java.lang.management.ManagementFactory;
 import java.net.URL;
 import java.net.URLConnection;
+import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.text.DecimalFormat;
 import java.text.DecimalFormatSymbols;
@@ -501,7 +502,19 @@ public final class DependencyRegistry {
             return snapshot;
         }
         for (DependencySpec spec : specs) {
-            snapshot.put(spec.getId(), spec.probe(context));
+            if (spec == null || spec.getId() == null) {
+                continue;
+            }
+            DependencyStatus status;
+            try {
+                status = spec.probe(context);
+            } catch (RuntimeException e) {
+                status = DependencyStatus.error("Probe failed for " + spec.getDisplayName()
+                        + ": " + e.getClass().getSimpleName() + ": " + safeMessage(e));
+            }
+            snapshot.put(spec.getId(), status == null
+                    ? DependencyStatus.error("Probe returned no status for " + spec.getDisplayName() + ".")
+                    : status);
         }
         return snapshot;
     }
@@ -660,7 +673,7 @@ public final class DependencyRegistry {
                 .approxDownloadSizeBytes(PLUGIN_JAR_INTEGRITY_BYTES)
                 .restartRequired(true)
                 .fixableInApp(false)
-                .nonFixableReason("Manual repair only. Close Fiji, remove stale IHF plugin jars, copy one fresh plugin jar, and restart.")
+                .nonFixableReason("Manual repair only. Close Fiji, remove stale FLASH plugin jars, copy one fresh plugin jar, and restart.")
                 .visibleInDependenciesDialog(false)
                 .build());
 
@@ -1465,8 +1478,8 @@ public final class DependencyRegistry {
     }
 
     private static void writeDeferredDisableScript(File script) throws IOException {
-        BufferedWriter writer = new BufferedWriter(new FileWriter(script));
-        try {
+        try (BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(
+                new FileOutputStream(script), StandardCharsets.UTF_8))) {
             writer.write("param([string]$ParentPid,[string]$SourcePath,[string]$DestPath,[string]$LogPath)\n");
             writer.write("$ErrorActionPreference = 'Stop'\n");
             writer.write("function Write-RepairLog([string]$Message) {\n");
@@ -1495,8 +1508,6 @@ public final class DependencyRegistry {
             writer.write("  Write-RepairLog \"FAILED to disable ${SourcePath}: $($_.Exception.Message)\"\n");
             writer.write("  exit 1\n");
             writer.write("}\n");
-        } finally {
-            writer.close();
         }
     }
 
@@ -1517,30 +1528,30 @@ public final class DependencyRegistry {
 
     private static void downloadFile(String urlStr, File dest, String expectedSha1) throws Exception {
         File temp = new File(dest.getParentFile(), dest.getName() + ".download");
-        InputStream in = null;
-        FileOutputStream out = null;
-        try {
-            URL url = new URL(urlStr);
-            URLConnection connection = url.openConnection();
-            connection.setConnectTimeout(15000);
-            connection.setReadTimeout(30000);
-            in = connection.getInputStream();
-            out = new FileOutputStream(temp);
-
+        URL url = new URL(urlStr);
+        URLConnection connection = url.openConnection();
+        connection.setConnectTimeout(15000);
+        connection.setReadTimeout(30000);
+        try (InputStream in = connection.getInputStream();
+             FileOutputStream out = new FileOutputStream(temp)) {
             byte[] buffer = new byte[8192];
             int read;
             while ((read = in.read(buffer)) != -1) {
                 out.write(buffer, 0, read);
             }
-            out.close();
-            out = null;
-
-            if (temp.length() < 1000L) {
+        } catch (Exception e) {
+            if (temp.exists()) {
                 temp.delete();
+            }
+            throw e;
+        }
+
+        try {
+            if (temp.length() < 1000L) {
                 throw new Exception("Download too small - likely an error page");
             }
-            verifySha1(temp, expectedSha1);
 
+            verifySha1(temp, expectedSha1);
             if (dest.exists()) {
                 dest.delete();
             }
@@ -1548,12 +1559,6 @@ public final class DependencyRegistry {
                 throw new Exception("Could not move download to " + dest.getName());
             }
         } finally {
-            if (in != null) {
-                try { in.close(); } catch (Exception ignored) {}
-            }
-            if (out != null) {
-                try { out.close(); } catch (Exception ignored) {}
-            }
             if (temp.exists()) {
                 temp.delete();
             }
@@ -1573,9 +1578,7 @@ public final class DependencyRegistry {
 
     private static String sha1(File file) throws Exception {
         MessageDigest digest = MessageDigest.getInstance("SHA-1");
-        InputStream in = null;
-        try {
-            in = new FileInputStream(file);
+        try (InputStream in = new FileInputStream(file)) {
             byte[] buffer = new byte[8192];
             int read;
             while ((read = in.read(buffer)) != -1) {
@@ -1591,10 +1594,6 @@ public final class DependencyRegistry {
                 sb.append(hex);
             }
             return sb.toString();
-        } finally {
-            if (in != null) {
-                try { in.close(); } catch (Exception ignored) {}
-            }
         }
     }
 

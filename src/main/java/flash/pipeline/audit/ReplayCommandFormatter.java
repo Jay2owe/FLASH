@@ -61,10 +61,10 @@ public final class ReplayCommandFormatter {
             case 5: return "run_spatial";
             case 6: return "run_distance";
             case 7: return "run_intensity";
-            case 9: return "run_aggregate";
-            case 10: return "run_statistics";
-            case 11: return "run_excel";
-            case 12: return "run_spectral_decontamination";
+            case 8: return "run_aggregate";
+            case 9: return "run_statistics";
+            case 10: return "run_excel";
+            case 11: return "run_spectral_decontamination";
             default: return "";
         }
     }

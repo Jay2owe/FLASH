@@ -125,7 +125,7 @@ abstract class AbstractJarDependencyFixer implements DependencyFixer {
                 problems.add("Expected a folder but found a file: " + dir.getAbsolutePath());
                 continue;
             }
-            File probe = new File(dir, ".ihf-runtime-write-test-" + System.currentTimeMillis());
+            File probe = new File(dir, ".flash-runtime-write-test-" + System.currentTimeMillis());
             try {
                 if (!probe.createNewFile()) {
                     problems.add("Could not create a temporary file in " + dir.getAbsolutePath());

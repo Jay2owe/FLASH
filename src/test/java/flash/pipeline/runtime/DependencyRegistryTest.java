@@ -12,6 +12,7 @@ import java.net.URLClassLoader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.Collections;
+import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.List;
@@ -51,6 +52,29 @@ public class DependencyRegistryTest {
         assertEquals("(~1.5 MB)", DependencyRegistry.formatApproxSize(1536 * 1024));
         assertEquals("(~1 GB)", DependencyRegistry.formatApproxSize(1024L * 1024L * 1024L));
         assertEquals("(~2.5 GB)", DependencyRegistry.formatApproxSize(2684354560L));
+    }
+
+    @Test
+    public void snapshotStatusesSkipsNullSpecsAndWrapsProbeFailures() {
+        DependencySpec throwingSpec = DependencySpec.builder(
+                        DependencyId.IMAGEJ_RUNTIME,
+                        "Throwing dependency")
+                .probe(new DependencySpec.Probe() {
+                    @Override
+                    public DependencyStatus probe(DependencyRegistry.ProbeContext context) {
+                        throw new IllegalStateException("boom");
+                    }
+                })
+                .build();
+
+        EnumMap<DependencyId, DependencyStatus> snapshot = DependencyRegistry.snapshotStatuses(
+                java.util.Arrays.asList(null, throwingSpec));
+
+        assertEquals(1, snapshot.size());
+        DependencyStatus status = snapshot.get(DependencyId.IMAGEJ_RUNTIME);
+        assertTrue(status.isError());
+        assertTrue(status.getDetailMessage().contains("Throwing dependency"));
+        assertTrue(status.getDetailMessage().contains("boom"));
     }
 
     @Test

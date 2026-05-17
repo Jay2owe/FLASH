@@ -20,7 +20,7 @@ import java.util.Locale;
 
 /**
  * Parses ImageJ macro option strings for CLI/headless/PyImageJ execution
- * of the IHF Analysis Pipeline.
+ * of the FLASH pipeline.
  */
 public final class CLIArgumentParser {
 
@@ -64,6 +64,9 @@ public final class CLIArgumentParser {
         }
 
         CLIConfig cfg = new CLIConfig();
+
+        rejectMalformedBracketedValue(macroOptions, "dir");
+        rejectMalformedBracketedValue(macroOptions, "config_dir");
 
         cfg.directory = getValue(macroOptions, "dir");
         if (cfg.directory == null) {
@@ -176,8 +179,8 @@ public final class CLIArgumentParser {
      * Returns a multi-line usage string showing all supported parameters.
      */
     public static String usage() {
-        return "IHF Pipeline CLI Usage:\n"
-                + "  IJ.run(\"IHF Pipeline\", \"dir=[/path/to/data] run_deconv run_3d run_intensity threads=4\")\n"
+        return "FLASH CLI Usage:\n"
+                + "  IJ.run(\"FLASH - The Pipeline for Fluorescence Automated Spatial Histology\", \"dir=[/path/to/data] run_deconv run_3d run_intensity threads=4\")\n"
                 + "\n"
                 + "Required:\n"
                 + "  dir=[path]            Data directory (or config_dir=)\n"
@@ -296,10 +299,10 @@ public final class CLIArgumentParser {
                 + "  intensityV2.useDeconv=true|false\n"
                 + "\n"
                 + "PyImageJ Example:\n"
-                + "  ij.py.run_plugin(\"IHF Pipeline\", args={'dir': '/data', 'run_deconv': True, 'threads': 4})\n"
+                + "  ij.py.run_plugin(\"FLASH - The Pipeline for Fluorescence Automated Spatial Histology\", args={'dir': '/data', 'run_deconv': True, 'threads': 4})\n"
                 + "\n"
                 + "Bash Example:\n"
-                + "  ImageJ --headless --run \"IHF Pipeline\" \"dir=[/data] run_deconv deconv.engine=CLIJ2\"\n";
+                + "  ImageJ --headless --run \"FLASH - The Pipeline for Fluorescence Automated Spatial Histology\" \"dir=[/data] run_deconv deconv.engine=CLIJ2\"\n";
     }
 
     private static void parseDeconvolutionOptions(String options, CLIConfig cfg, DeconvPresetIO presetIO) {
@@ -1193,12 +1196,88 @@ public final class CLIArgumentParser {
             if (lastClose > 0) return unescapeBracketedValue(options.substring(start + 1, lastClose));
             return unescapeBracketedValue(options.substring(start + 1));
         }
+        if (c == '"' || c == '\'') {
+            return parseQuotedValue(options, start, c);
+        }
         int end = start;
         while (end < options.length()
                 && !Character.isWhitespace(options.charAt(end))) {
             end++;
         }
         return options.substring(start, end);
+    }
+
+    private static String parseQuotedValue(String options, int start, char quote) {
+        StringBuilder out = new StringBuilder();
+        for (int i = start + 1; i < options.length(); i++) {
+            char ch = options.charAt(i);
+            if (ch == '\\' && i + 1 < options.length()) {
+                char next = options.charAt(i + 1);
+                if (next == quote || next == '\\') {
+                    out.append(next);
+                    i++;
+                    continue;
+                }
+            }
+            if (ch == quote) {
+                return out.toString();
+            }
+            out.append(ch);
+        }
+        return out.toString();
+    }
+
+    private static void rejectMalformedBracketedValue(String options, String key) {
+        int valueStart = valueStart(options, key);
+        if (valueStart < 0 || valueStart >= options.length()
+                || options.charAt(valueStart) != '[') {
+            return;
+        }
+        if (!hasClosingBracket(options, valueStart)) {
+            throw new CliFatalException("Malformed " + key
+                    + " value: missing closing ']' in " + key + "=[...]");
+        }
+    }
+
+    private static int valueStart(String options, String key) {
+        if (options == null || options.isEmpty() || key == null || key.isEmpty()) {
+            return -1;
+        }
+        String lower = options.toLowerCase(Locale.ROOT);
+        String keyEq = key.toLowerCase(Locale.ROOT) + "=";
+        int from = 0;
+        while (true) {
+            int i = lower.indexOf(keyEq, from);
+            if (i < 0) return -1;
+            if (i == 0 || Character.isWhitespace(options.charAt(i - 1))) {
+                return i + keyEq.length();
+            }
+            from = i + 1;
+        }
+    }
+
+    private static boolean hasClosingBracket(String options, int start) {
+        int depth = 1;
+        for (int i = start + 1; i < options.length(); i++) {
+            char ch = options.charAt(i);
+            if (ch == '\\' && i + 1 < options.length()) {
+                i++;
+                continue;
+            }
+            if (ch == '[') {
+                depth++;
+            } else if (ch == ']') {
+                depth--;
+                if (depth == 0) {
+                    if (i + 1 == options.length()
+                            || Character.isWhitespace(options.charAt(i + 1))) {
+                        return true;
+                    }
+                    depth++;
+                }
+            }
+        }
+        return false;
     }
 
     private static String unescapeBracketedValue(String value) {
@@ -1238,11 +1317,24 @@ public final class CLIArgumentParser {
         List<String> tokens = new ArrayList<String>();
         StringBuilder current = new StringBuilder();
         int bracketDepth = 0;
+        char quote = 0;
         for (int i = 0; i < options.length(); i++) {
             char ch = options.charAt(i);
             if (ch == '\\' && i + 1 < options.length()) {
                 current.append(ch).append(options.charAt(i + 1));
                 i++;
+                continue;
+            }
+            if (quote != 0) {
+                current.append(ch);
+                if (ch == quote) {
+                    quote = 0;
+                }
+                continue;
+            }
+            if ((ch == '"' || ch == '\'') && bracketDepth == 0) {
+                quote = ch;
+                current.append(ch);
                 continue;
             }
             if (ch == '[') {

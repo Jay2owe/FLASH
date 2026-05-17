@@ -32,7 +32,7 @@ public final class ExcelRuntimeChecker {
     public static boolean checkAndOffer() {
         File fijiDir = getFijiDir();
         if (fijiDir == null) {
-            IJ.showMessage("IHF Pipeline - Excel Runtime Check",
+            IJ.showMessage("FLASH - Excel Runtime Check",
                     "Could not determine the Fiji.app directory.\n\n"
                             + "Open Fiji from its installed location, or run:\n"
                             + "scripts\\repair-fiji-runtime.ps1");
@@ -41,7 +41,7 @@ public final class ExcelRuntimeChecker {
 
         List<String> issues = check(fijiDir);
         if (issues.isEmpty()) {
-            IJ.showMessage("IHF Pipeline - Excel Runtime Check",
+            IJ.showMessage("FLASH - Excel Runtime Check",
                     "Excel runtime is fully verified.");
             return true;
         }
@@ -71,7 +71,7 @@ public final class ExcelRuntimeChecker {
                 @Override
                 public void run() {
                     JDialog dialog = new JDialog(IJ.getInstance(),
-                            "IHF Pipeline - Excel Runtime Check", true);
+                            "FLASH - Excel Runtime Check", true);
                     dialog.setLayout(new BorderLayout(10, 10));
 
                     JLabel header = new JLabel(
@@ -126,7 +126,7 @@ public final class ExcelRuntimeChecker {
                                     }
                                 });
                             }
-                        }, "IHF-Excel-Runtime-Repair").start();
+                        }, "FLASH-Excel-Runtime-Repair").start();
                     });
 
                     buttons.add(skipBtn);
@@ -161,13 +161,13 @@ public final class ExcelRuntimeChecker {
                 : "";
 
         if (hadFailure) {
-            IJ.showMessage("IHF Pipeline - Excel Repair Incomplete",
+            IJ.showMessage("FLASH - Excel Repair Incomplete",
                     "Some repairs failed:\n\n" + sb
                             + restoreGuidance
                             + "\nExit Fiji and run this script manually if the locked jar remains:\n"
                             + "scripts/repair-fiji-runtime.ps1");
         } else {
-            IJ.showMessage("IHF Pipeline - Excel Repair Complete",
+            IJ.showMessage("FLASH - Excel Repair Complete",
                     "Excel runtime repaired:\n\n" + sb
                             + restoreGuidance
                             + "\nPlease restart Fiji for changes to take effect.\n"

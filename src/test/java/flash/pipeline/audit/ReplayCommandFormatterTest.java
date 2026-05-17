@@ -77,6 +77,23 @@ public class ReplayCommandFormatterTest {
         assertFalse(options.contains("z_slice_mode="));
     }
 
+    @Test
+    public void formatsCurrentPostAnalysisRunFlagsAtCorrectIndices() {
+        assertReplayFlagSelectsIndex(8, "run_aggregate");
+        assertReplayFlagSelectsIndex(9, "run_statistics");
+        assertReplayFlagSelectsIndex(10, "run_excel");
+        assertReplayFlagSelectsIndex(11, "run_spectral_decontamination");
+    }
+
+    private static void assertReplayFlagSelectsIndex(int analysisIndex, String expectedFlag) {
+        String options = extractOptions(ReplayCommandFormatter.format("C:/data", analysisIndex, new BinConfig()));
+        CLIConfig parsed = CLIArgumentParser.parse(options);
+
+        assertTrue(options, options.contains(expectedFlag));
+        assertTrue(expectedFlag + " should select analysis index " + analysisIndex,
+                parsed.getSelectedAnalyses()[analysisIndex]);
+    }
+
     private static String extractOptions(String command) {
         int start = command.indexOf("\", \"");
         assertTrue("Expected IJ.run command with options string", start >= 0);

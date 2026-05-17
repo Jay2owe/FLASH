@@ -20,7 +20,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Parsed CLI state for one IHF Pipeline invocation.
+ * Parsed CLI state for one FLASH invocation.
  */
 public class CLIConfig {
 

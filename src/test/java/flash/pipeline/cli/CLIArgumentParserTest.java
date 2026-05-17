@@ -68,10 +68,31 @@ public class CLIArgumentParserTest {
     }
 
     @Test
+    public void parse_quotedPathWithSpaces() {
+        CLIConfig cfg = CLIArgumentParser.parse("dir=\"C:/path with spaces/data\" run_3d");
+        assertNotNull(cfg);
+        assertEquals("C:/path with spaces/data", cfg.getDirectory());
+        assertTrue(cfg.getSelectedAnalyses()[4]);
+    }
+
+    @Test
     public void parse_analysisFlagInsideBracketedPathIsNotSelected() {
         CLIConfig cfg = CLIArgumentParser.parse("dir=[C:/path with run_3d/data]");
         assertNotNull(cfg);
         assertFalse(cfg.getSelectedAnalyses()[4]);
+    }
+
+    @Test
+    public void parse_analysisFlagInsideQuotedPathIsNotSelected() {
+        CLIConfig cfg = CLIArgumentParser.parse("dir=\"C:/path with run_3d/data\"");
+        assertNotNull(cfg);
+        assertFalse(cfg.getSelectedAnalyses()[4]);
+    }
+
+    @Test
+    public void parse_malformedBracketedDirReturnsNullInsteadOfSwallowingFlags() {
+        CLIConfig cfg = CLIArgumentParser.parse("dir=[C:/path with spaces run_3d");
+        assertNull(cfg);
     }
 
     @Test
