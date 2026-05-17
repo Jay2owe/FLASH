@@ -76,7 +76,7 @@ public class VariationCellPanelFilterModeTest {
     }
 
     @Test
-    public void pickPillAppearsForAcceptEnabledHoveredCell() throws Exception {
+    public void pickPillAppearsForAcceptEnabledCellBeforeHover() throws Exception {
         final ParameterCombo combo = ParameterCombo.builder().build();
         final ImagePlus source = image("source", 3);
         final ImagePlus filtered = image("filtered", 9);
@@ -88,7 +88,7 @@ public class VariationCellPanelFilterModeTest {
         SwingUtilities.invokeAndWait(new Runnable() {
             @Override public void run() {
                 cell.setResult(result);
-                assertFalse(cell.isPickPillVisibleForTest());
+                assertTrue(cell.isPickPillVisibleForTest());
                 mouseEnter(cell);
             }
         });

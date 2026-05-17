@@ -812,7 +812,7 @@ public final class VariationCellPanel extends JPanel {
     }
 
     boolean isPickPillVisibleForTest() {
-        return hover && acceptEnabled;
+        return acceptEnabled;
     }
 
     @Override protected void paintComponent(Graphics g) {
@@ -1329,7 +1329,7 @@ public final class VariationCellPanel extends JPanel {
                     width - PICK_PILL_WIDTH - PICK_PILL_INSET);
             int y = Math.min(Math.max(PICK_PILL_INSET, 0),
                     Math.max(0, height - PICK_PILL_HEIGHT - PICK_PILL_INSET));
-            g2.setColor(STABILITY_BORDER);
+            g2.setColor(hover ? STABILITY_BORDER.brighter() : STABILITY_BORDER);
             g2.fillRoundRect(x, y, PICK_PILL_WIDTH, PICK_PILL_HEIGHT,
                     PICK_PILL_RADIUS, PICK_PILL_RADIUS);
             g2.setColor(new Color(0, 0, 0, 90));
