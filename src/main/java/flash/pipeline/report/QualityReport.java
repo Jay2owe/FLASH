@@ -37,6 +37,9 @@ import java.util.Map;
  */
 public class QualityReport {
 
+    static final String MAX_CHANNEL_QC_PROPERTY = "flash.qc.maxChannelImages";
+    private static final int DEFAULT_MAX_CHANNEL_QC_RECORDS = 120;
+
     private boolean enabled = false;
     private String directory;
     private final long startTime = System.currentTimeMillis();
@@ -55,6 +58,9 @@ public class QualityReport {
 
     // 3D Object Analysis visual QC data
     private final Map<String, List<ChannelQC>> imageQcData = new LinkedHashMap<String, List<ChannelQC>>();
+    private int channelQcRecordCount = 0;
+    private int skippedChannelQcRecords = 0;
+    private boolean channelQcLimitLogged = false;
     private final List<SpectralPreviewQC> spectralPreviewData = new ArrayList<SpectralPreviewQC>();
 
     public void setEnabled(boolean enabled) {
@@ -235,6 +241,7 @@ public class QualityReport {
     public synchronized void addChannelQC(String imageName, String channelName,
                                            ImagePlus original, ImagePlus mask, String lutColor) {
         if (!enabled) return;
+        if (!reserveChannelQcRecord(imageName, channelName)) return;
         if (original == null) {
             addChannelQcRecord(imageName, new ChannelQC(channelName, lutColor, null, null, null));
             return;
@@ -313,6 +320,28 @@ public class QualityReport {
         }
     }
 
+    private boolean reserveChannelQcRecord(String imageName, String channelName) {
+        int max = maxChannelQcRecords();
+        if (channelQcRecordCount >= max) {
+            skippedChannelQcRecords++;
+            if (!channelQcLimitLogged) {
+                IJ.log("  QC Report: skipped additional segmentation thumbnails after "
+                        + max + " image/channel entries. Set "
+                        + MAX_CHANNEL_QC_PROPERTY + " to change the cap.");
+                channelQcLimitLogged = true;
+            }
+            return false;
+        }
+        channelQcRecordCount++;
+        return true;
+    }
+
+    private static int maxChannelQcRecords() {
+        int configured = Integer.getInteger(MAX_CHANNEL_QC_PROPERTY,
+                DEFAULT_MAX_CHANNEL_QC_RECORDS).intValue();
+        return Math.max(0, configured);
+    }
+
     private void addChannelQcRecord(String imageName, ChannelQC qc) {
         List<ChannelQC> channels = imageQcData.get(imageName);
         if (channels == null) {
@@ -354,6 +383,7 @@ public class QualityReport {
     public String getOverwriteBehavior() { return overwriteBehavior; }
     public List<AnalysisSection> getSections() { return sections; }
     public Map<String, List<ChannelQC>> getImageQcData() { return imageQcData; }
+    public int getSkippedChannelQcRecords() { return skippedChannelQcRecords; }
     public List<SpectralPreviewQC> getSpectralPreviewData() { return spectralPreviewData; }
 
     // ── Helper classes ──

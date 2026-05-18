@@ -73,6 +73,11 @@ public class HtmlReportWriter {
             // 3D Object Analysis image gallery
             if (is3D && has3DQcData) {
                 html.append("<h3>Segmentation QC Gallery</h3>\n");
+                if (report.getSkippedChannelQcRecords() > 0) {
+                    html.append("<p class=\"qc-note\">")
+                            .append(report.getSkippedChannelQcRecords())
+                            .append(" additional image/channel QC entries were omitted to keep report memory bounded.</p>\n");
+                }
                 for (Map.Entry<String, List<QualityReport.ChannelQC>> entry : report.getImageQcData().entrySet()) {
                     html.append("<div class=\"image-block\">\n");
                     html.append("<h4>").append(esc(entry.getKey())).append("</h4>\n");
@@ -256,6 +261,7 @@ public class HtmlReportWriter {
             ".spectral-meta { font-size: 0.8em; color: #64748b; }\n" +
             ".ch-label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.9em; }\n" +
             ".ch-label em { font-weight: 400; color: #888; }\n" +
+            ".qc-note { margin: 0 16px 12px; color: #64748b; font-size: 0.85em; }\n" +
             ".thumbs { display: flex; gap: 8px; flex-wrap: wrap; }\n" +
             ".thumb { text-align: center; }\n" +
             ".thumb-label { font-size: 0.75em; color: #888; margin-bottom: 2px; }\n" +

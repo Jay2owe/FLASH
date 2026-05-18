@@ -177,4 +177,34 @@ public class QualityReportTest {
         assertNull(qc.maskB64);
         assertNull(qc.overlayB64);
     }
+
+    @Test
+    public void addChannelQC_capsStoredImages() {
+        String previous = System.getProperty(QualityReport.MAX_CHANNEL_QC_PROPERTY);
+        System.setProperty(QualityReport.MAX_CHANNEL_QC_PROPERTY, "2");
+        try {
+            QualityReport report = new QualityReport();
+            report.setEnabled(true);
+
+            report.addChannelQC("Image1", "DAPI", tinyImage(), null, "Blue");
+            report.addChannelQC("Image2", "GFAP", tinyImage(), null, "Green");
+            report.addChannelQC("Image3", "IBA1", tinyImage(), null, "Red");
+
+            assertEquals(2, report.getImageQcData().size());
+            assertFalse(report.getImageQcData().containsKey("Image3"));
+            assertEquals(1, report.getSkippedChannelQcRecords());
+        } finally {
+            if (previous == null) {
+                System.clearProperty(QualityReport.MAX_CHANNEL_QC_PROPERTY);
+            } else {
+                System.setProperty(QualityReport.MAX_CHANNEL_QC_PROPERTY, previous);
+            }
+        }
+    }
+
+    private static ImagePlus tinyImage() {
+        ByteProcessor processor = new ByteProcessor(4, 4);
+        processor.set(1, 1, 255);
+        return new ImagePlus("original", processor);
+    }
 }
