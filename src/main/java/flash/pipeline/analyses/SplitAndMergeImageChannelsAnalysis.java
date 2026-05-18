@@ -825,10 +825,14 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                                 IJ.freeMemory();
                             }
                         } catch (Exception e) {
-                            failures.add(e);
                             String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
-                            IJ.log("[" + (idx + 1) + "/" + scheduled + "] ERROR: " + msg);
-                            e.printStackTrace();
+                            RuntimeException contextual = new RuntimeException(
+                                    "Split/Merge failed for image " + (idx + 1) + "/" + scheduled
+                                            + " title='" + imgTitle + "' label='" + partLabel + "': " + msg,
+                                    e);
+                            failures.add(contextual);
+                            IJ.log("[" + (idx + 1) + "/" + scheduled + "] ERROR: "
+                                    + contextual.getMessage());
                             int done = completed.incrementAndGet();
                             IJ.showProgress(done, scheduled);
                             IJ.showStatus("Processing " + done + "/" + scheduled + " (failed)");
