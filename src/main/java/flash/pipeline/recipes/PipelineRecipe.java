@@ -28,7 +28,7 @@ import static flash.pipeline.FLASH_Pipeline.IDX_STATISTICS;
  */
 public final class PipelineRecipe {
 
-    public static final String CURRENT_FLASH_VERSION = "0.x";
+    public static final String CURRENT_FLASH_VERSION = "4.0.0";
 
     public static final Map<String, Integer> KEY_TO_IDX;
     public static final Map<Integer, String> IDX_TO_KEY;

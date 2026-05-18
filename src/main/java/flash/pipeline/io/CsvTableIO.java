@@ -13,7 +13,7 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * CSV I/O utilities for the IHF Pipeline.
+ * CSV I/O utilities for FLASH.
  *
  * <p>Provides loading and writing of per-channel object CSV files, along
  * with helper methods for CSV parsing and formatting.

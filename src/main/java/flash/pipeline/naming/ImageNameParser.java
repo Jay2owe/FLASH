@@ -84,7 +84,12 @@ public final class ImageNameParser {
      * Returns a {@link NameParts} with {@code strictMatch = true} when the parse
      * yields at least an animal token; the caller checks {@link NameParts#hasKnownHemisphere()}
      * to decide whether the convention was satisfied.
+     *
+     * @deprecated Prefer {@link #parse(String)} in production paths so
+     * arbitrary filenames fall back to a safe sample identifier instead of
+     * producing empty animal/hemisphere fields.
      */
+    @Deprecated
     public static NameParts parseStrict(String imageTitleOrFilename) {
         if (imageTitleOrFilename == null) {
             return new NameParts("", "", "", "", false, null);

@@ -56,7 +56,7 @@ public final class LooseTiffRelocator {
         String action = dialog.getActionCommand();
         if ("move".equals(action)) {
             int moved = moveAll(directory, looseTiffs);
-            IJ.log("IHF Pipeline: moved " + moved + "/" + looseTiffs.size()
+            IJ.log("FLASH: moved " + moved + "/" + looseTiffs.size()
                     + " loose TIFF files into input/.");
             return Choice.MOVED;
         }
@@ -72,7 +72,7 @@ public final class LooseTiffRelocator {
 
         File inputDir = new File(directory, "input");
         if (!inputDir.isDirectory() && !inputDir.mkdirs()) {
-            IJ.log("IHF Pipeline: failed to create input/ directory: "
+            IJ.log("FLASH: failed to create input/ directory: "
                     + inputDir.getAbsolutePath());
             return 0;
         }
@@ -82,12 +82,12 @@ public final class LooseTiffRelocator {
             if (src == null) continue;
             File dst = new File(inputDir, src.getName());
             if (dst.exists()) {
-                IJ.log("IHF Pipeline: skipping loose TIFF because input/ target exists: "
+                IJ.log("FLASH: skipping loose TIFF because input/ target exists: "
                         + dst.getAbsolutePath());
                 continue;
             }
             if (!src.isFile()) {
-                IJ.log("IHF Pipeline: skipping missing loose TIFF: "
+                IJ.log("FLASH: skipping missing loose TIFF: "
                         + src.getAbsolutePath());
                 continue;
             }
@@ -115,11 +115,11 @@ public final class LooseTiffRelocator {
             try {
                 Files.copy(src.toPath(), dst.toPath(), StandardCopyOption.REPLACE_EXISTING);
                 Files.delete(src.toPath());
-                IJ.log("IHF Pipeline: copied then deleted loose TIFF after move failed: "
+                IJ.log("FLASH: copied then deleted loose TIFF after move failed: "
                         + src.getName());
                 return true;
             } catch (IOException copyError) {
-                IJ.log("IHF Pipeline: failed to move loose TIFF " + src.getAbsolutePath()
+                IJ.log("FLASH: failed to move loose TIFF " + src.getAbsolutePath()
                         + " to " + dst.getAbsolutePath() + ": "
                         + copyError.getMessage());
                 return false;
@@ -131,15 +131,15 @@ public final class LooseTiffRelocator {
         File marker = FlashProjectLayout.forDirectory(directory).statusWriteFile(NO_PROMPT_MARKER);
         File parent = marker.getParentFile();
         if (parent != null && !parent.isDirectory() && !parent.mkdirs() && !parent.isDirectory()) {
-            IJ.log("IHF Pipeline: failed to create status marker folder: "
+            IJ.log("FLASH: failed to create status marker folder: "
                     + parent.getAbsolutePath());
             return;
         }
         try (PrintWriter writer = new PrintWriter(new OutputStreamWriter(
                 new FileOutputStream(marker), StandardCharsets.UTF_8))) {
-            writer.println("# IHF Pipeline: do not prompt to move loose TIFFs in this directory.");
+            writer.println("# FLASH: do not prompt to move loose TIFFs in this directory.");
         } catch (IOException e) {
-            IJ.log("IHF Pipeline: failed to write loose-TIFF prompt marker: "
+            IJ.log("FLASH: failed to write loose-TIFF prompt marker: "
                     + marker.getAbsolutePath());
         }
     }

@@ -33,8 +33,9 @@ public class BinConfigIO {
     static final char UTF8_BOM = '﻿';
 
     /**
-     * Reads the macro-created file:
-     *   Directory/Configuration folder/Channel_Data.txt
+     * Reads the active Set Up Configuration file:
+     *   Directory/FLASH/Set Up Configuration/.settings/Channel_Data.txt
+     * falling back to legacy configuration locations for older projects.
      *
      * Expected lines:
      * 1) name_info              (space-separated)
@@ -205,7 +206,7 @@ public class BinConfigIO {
     }
 
     /**
-     * Writes the standard Configuration folder/Channel_Data.txt format from a BinConfig.
+     * Writes the standard Set Up Configuration Channel_Data.txt format from a BinConfig.
      * Empty lists are preserved as blank lines so partial configurations can
      * keep later-stage parameters genuinely missing for the soft reader.
      */

@@ -17,7 +17,7 @@ After training, import models through the Custom Model Manager:
 3. Open `Manage models...`.
 4. Use `Add StarDist...` for a Fiji-compatible StarDist `.zip`, or `Add Cellpose...` for a Cellpose model file or registered Cellpose model name.
 
-FLASH stores project model entries in `FLASH/Configuration/Segmentation Models/catalog.json` and copied files under `FLASH/Configuration/Segmentation Models/files/<modelKey>/...`.
+FLASH stores project model entries in `Configuration/Segmentation Models/catalog.json` and copied files under `Configuration/Segmentation Models/files/<modelKey>/...` in the selected project folder.
 
 ## StarDist Workflow
 

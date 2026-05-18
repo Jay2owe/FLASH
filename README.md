@@ -39,11 +39,14 @@ FLASH writes analysis outputs into a `FLASH/` folder inside the selected project
 ```text
 Project/
 |-- input images
+|-- Configuration/
+|   `-- Segmentation Models/
 `-- FLASH/
-    |-- 00 - Configuration/
+    |-- Set Up Configuration/
+    |   `-- .settings/
     |-- 01 - Regions of Interest/
     |-- 02 - 3D Deconvolution/
-    |-- 03 - Split and Merge/
+    |-- Make Presentation-Ready Images/
     |-- 04 - Fluorescence Intensity/
     |-- 05 - 3D Object Analysis/
     |-- 06 - Spatial Analysis/
@@ -55,7 +58,9 @@ Project/
     |-- .settings/
     |   `-- Presets/
     |-- Reports/
+    |   `-- Quality Report/
     |-- Cache/
+    |   `-- TIF/
     `-- Status/
 ```
 
@@ -72,7 +77,7 @@ The main dialog groups modules into setup, image preparation, display, image ana
 - **3D Object Analysis**: Segment, count, and measure 3D objects, with colocalisation and process-length workflows.
 - **Spatial Analysis**: Recompute nearest-neighbour, spatial statistics, heatmap, phenotyping, and morphometry outputs from object tables.
 
-  **Per-object texture and complexity.** Spatial Analysis can score each segmented object on its internal texture (2D per-slice GLCM Haralick features), morphological complexity (box-counting fractal dimension and lacunarity on an XY mask projection), or assign it to an auto-discovered texture class (2D per-slice Gabor and wavelet k-means). Columns appear under the `MorphTexture_*` prefix in per-channel output. Native-3D texture metrics are deferred. See `docs/how_tos/per-object-texture-*.md`.
+  **Per-object texture and complexity.** Spatial Analysis can score each segmented object on its internal texture (2D per-slice GLCM Haralick features), morphological complexity (box-counting fractal dimension and lacunarity on an XY mask projection), or assign it to an auto-discovered texture class (2D per-slice Gabor and wavelet k-means). Columns appear under the `MorphTexture_*` prefix in per-channel output. Native-3D texture metrics are deferred.
 - **Combine results per condition / animal**: Aggregate per-image analysis CSVs into project-level master tables.
 - **Statistical Analysis**: Run configured group comparisons from aggregated result tables.
 - **Excel Summary Export**: Export formatted `.xlsx` workbooks from aggregated and statistical outputs.
@@ -95,9 +100,7 @@ The normal setup UI no longer collects preview clicks or offers click-based para
 
 FLASH pins Cellpose `3.1.1.2`; Cellpose 4, Cellpose-SAM, and `cpsam` models are not supported. StarDist custom models must be Fiji-compatible TensorFlow SavedModel `.zip` exports. FLASH runs StarDist per slice as 2D detections with Z-linking; full 3D StarDist is not built in.
 
-The project model catalog lives under `<projectRoot>/FLASH/Configuration/Segmentation Models/`, with entries in `catalog.json` and copied model files under `files/<modelKey>/...`. For training and import steps, see [docs/training_segmentation_models.md](docs/training_segmentation_models.md).
-
-Publication-oriented method notes live in [docs/methods/](docs/methods/), including [custom models and click training](docs/methods/Methodology%20-%20Custom%20Models%20and%20Click%20Training.md).
+The project model catalog lives under `<projectRoot>/Configuration/Segmentation Models/`, with entries in `catalog.json` and copied model files under `files/<modelKey>/...`. For training and import steps, see [docs/training_segmentation_models.md](docs/training_segmentation_models.md).
 
 ## Supported Inputs
 
@@ -131,8 +134,9 @@ run("FLASH - The Pipeline for Fluorescence Automated Spatial Histology",
 
 The project uses Maven and targets Java 8 bytecode for Fiji compatibility.
 
-```powershell
-.\mvnw.cmd clean package "-Denforcer.skip=true"
+```bash
+export JAVA_HOME="/c/Program Files/Java/jdk-25.0.2"
+bash mvnw clean package -Denforcer.skip=true -DskipTests=true
 ```
 
 The deployable artifact is:
@@ -151,7 +155,7 @@ Run the default Maven suite before committing or building a release:
 .\mvnw.cmd test "-Denforcer.skip=true"
 ```
 
-In the 2026-05-13 codebase review, this command passed with 1539 tests, 0 failures, 0 errors, and 6 skipped. A green default suite does not prove every Fiji runtime path, because these runtime-sensitive test classes can be skipped on local machines without the required Fiji plugins, native/GPU dependencies, non-headless runtime, or LIF fixture:
+The full Maven test suite is expected to be green before release, but a green default suite does not prove every Fiji runtime path, because these runtime-sensitive test classes can be skipped on local machines without the required Fiji plugins, native/GPU dependencies, non-headless runtime, or LIF fixture:
 
 - `flash.pipeline.deconv.engine.Clij2FftEngineTest`
 - `flash.pipeline.deconv.engine.DeconvolutionLab2EngineTest`

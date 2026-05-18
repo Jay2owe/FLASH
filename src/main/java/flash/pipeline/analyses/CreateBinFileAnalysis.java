@@ -149,7 +149,7 @@ import java.util.Set;
 /**
  * Migration of the macro createBinFile().
  *
- * Creates Directory/.bin and writes:
+ * Creates Directory/FLASH/Set Up Configuration/.settings and writes:
  * - Channel_Data.txt (names, colors, object thresholds, sizes, minmax, intensity thresholds)
  * - C1_Filters.ijm ... Cn_Filters.ijm (from preset templates)
  * - defaultFilter.ijm

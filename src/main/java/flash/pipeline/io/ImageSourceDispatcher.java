@@ -436,15 +436,15 @@ public final class ImageSourceDispatcher {
     private static void writeCalibrationWarningSuppressMarker(File marker) {
         File parent = marker.getParentFile();
         if (parent != null && !parent.isDirectory() && !parent.mkdirs() && !parent.isDirectory()) {
-            IJ.log("IHF Pipeline: failed to create calibration warning marker folder: "
+            IJ.log("FLASH: failed to create calibration warning marker folder: "
                     + parent.getAbsolutePath());
             return;
         }
         try (PrintWriter writer = new PrintWriter(new OutputStreamWriter(
                 new FileOutputStream(marker), StandardCharsets.UTF_8))) {
-            writer.println("# IHF Pipeline: suppress calibration warning for this project.");
+            writer.println("# FLASH: suppress calibration warning for this project.");
         } catch (IOException e) {
-            IJ.log("IHF Pipeline: failed to write calibration warning marker: "
+            IJ.log("FLASH: failed to write calibration warning marker: "
                     + marker.getAbsolutePath());
         }
     }
