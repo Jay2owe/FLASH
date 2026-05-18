@@ -109,29 +109,107 @@ public final class FilterMacroParser {
 
         /** Extracts a numeric parameter value from the args string. {@link Double#NaN} when absent. */
         public double getParam(String key) {
-            // Anchor on word boundary so "radius" doesn't match "z=2 stack radius=3" wrongly,
-            // and "x" doesn't match the "x" inside "max=...".
-            Pattern p = Pattern.compile(
-                    "(?:^|[^A-Za-z0-9_])" + Pattern.quote(key)
-                            + "\\s*=\\s*(-?[0-9]*\\.?[0-9]+(?:[eE][-+]?[0-9]+)?)");
-            Matcher m = p.matcher(args);
-            if (m.find()) return Double.parseDouble(m.group(1));
+            int start = findAssignmentValueStart(key);
+            if (start < 0) return Double.NaN;
+            int end = scanNumberEnd(args, start);
+            if (end > start) return Double.parseDouble(args.substring(start, end));
             return Double.NaN;
         }
 
         /** Extracts a non-numeric parameter value (e.g. {@code method=Bernsen}). */
         public String getStringParam(String key) {
-            Pattern p = Pattern.compile(
-                    "(?:^|[^A-Za-z0-9_])" + Pattern.quote(key) + "\\s*=\\s*([^\\s]+)");
-            Matcher m = p.matcher(args);
-            if (m.find()) return m.group(1);
-            return null;
+            int start = findAssignmentValueStart(key);
+            if (start < 0) return null;
+            int end = start;
+            while (end < args.length() && !Character.isWhitespace(args.charAt(end))) {
+                end++;
+            }
+            return end > start ? args.substring(start, end) : null;
         }
 
         /** True when the arg list mentions the bare boolean flag {@code key}. */
         public boolean hasFlag(String key) {
-            Pattern p = Pattern.compile("(?:^|\\s)" + Pattern.quote(key) + "(?=$|\\s)");
-            return p.matcher(args).find();
+            if (key == null || key.isEmpty()) return false;
+            int from = 0;
+            while (from < args.length()) {
+                int idx = args.indexOf(key, from);
+                if (idx < 0) return false;
+                int after = idx + key.length();
+                boolean beforeOk = idx == 0 || Character.isWhitespace(args.charAt(idx - 1));
+                boolean afterOk = after == args.length() || Character.isWhitespace(args.charAt(after));
+                if (beforeOk && afterOk) return true;
+                from = idx + 1;
+            }
+            return false;
+        }
+
+        private int findAssignmentValueStart(String key) {
+            if (key == null || key.isEmpty()) return -1;
+            int from = 0;
+            while (from < args.length()) {
+                int idx = args.indexOf(key, from);
+                if (idx < 0) return -1;
+                if (idx == 0 || !isIdentifierChar(args.charAt(idx - 1))) {
+                    int pos = idx + key.length();
+                    while (pos < args.length() && Character.isWhitespace(args.charAt(pos))) {
+                        pos++;
+                    }
+                    if (pos < args.length() && args.charAt(pos) == '=') {
+                        pos++;
+                        while (pos < args.length() && Character.isWhitespace(args.charAt(pos))) {
+                            pos++;
+                        }
+                        return pos;
+                    }
+                }
+                from = idx + 1;
+            }
+            return -1;
+        }
+
+        private static boolean isIdentifierChar(char ch) {
+            return (ch >= 'A' && ch <= 'Z')
+                    || (ch >= 'a' && ch <= 'z')
+                    || (ch >= '0' && ch <= '9')
+                    || ch == '_';
+        }
+
+        private static int scanNumberEnd(String text, int start) {
+            int i = start;
+            int len = text.length();
+            if (i < len && (text.charAt(i) == '-' || text.charAt(i) == '+')) {
+                i++;
+            }
+
+            boolean hasDigit = false;
+            while (i < len && Character.isDigit(text.charAt(i))) {
+                hasDigit = true;
+                i++;
+            }
+            if (i < len && text.charAt(i) == '.') {
+                i++;
+                while (i < len && Character.isDigit(text.charAt(i))) {
+                    hasDigit = true;
+                    i++;
+                }
+            }
+            if (!hasDigit) return start;
+
+            int expStart = i;
+            if (i < len && (text.charAt(i) == 'e' || text.charAt(i) == 'E')) {
+                i++;
+                if (i < len && (text.charAt(i) == '-' || text.charAt(i) == '+')) {
+                    i++;
+                }
+                int expDigits = i;
+                while (i < len && Character.isDigit(text.charAt(i))) {
+                    i++;
+                }
+                if (i == expDigits) {
+                    return expStart;
+                }
+            }
+            return i;
         }
     }
 
