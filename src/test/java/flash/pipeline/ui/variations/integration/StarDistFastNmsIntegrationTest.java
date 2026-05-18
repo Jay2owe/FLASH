@@ -35,7 +35,7 @@ import static org.junit.Assert.assertTrue;
  */
 public class StarDistFastNmsIntegrationTest {
 
-    @Ignore("Manual GPU integration test: run only after StarDist fast-NMS parity is enabled.")
+    @Ignore("TODO(gpu-fixture): manual GPU integration test; re-enable after StarDist fast-NMS parity is enabled and CI has a GPU fixture.")
     @Test
     public void fastNmsSweepUsesFastPathAndBeatsRepeatedInference() throws Exception {
         Assume.assumeTrue("StarDist fast-NMS parity is disabled.",

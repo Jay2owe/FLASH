@@ -14,7 +14,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-@Ignore("Manual Fiji launcher for the parameter variations dialog.")
+@Ignore("TODO(manual-ui): manual Fiji launcher; re-enable only if converted to an automated headless UI test.")
 public final class VariationsDialogDemoMain {
 
     @Test

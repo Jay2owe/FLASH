@@ -1,6 +1,7 @@
 package flash.pipeline.ui.variations;
 
 import flash.pipeline.image.FilterMacroEditorModel;
+import flash.pipeline.testutil.TestWait;
 import flash.pipeline.ui.config.ConfigQcContext;
 import flash.pipeline.ui.config.FilterParameterStage;
 
@@ -207,20 +208,22 @@ public class MacroVariationsDialogRunTest {
 
     private static boolean waitForRunButtonEnabled(MacroVariationsDialog dialog,
                                                    long timeoutMs) throws Exception {
-        long deadline = System.currentTimeMillis() + timeoutMs;
-        while (System.currentTimeMillis() < deadline) {
-            final boolean[] enabled = new boolean[1];
-            SwingUtilities.invokeAndWait(new Runnable() {
-                @Override public void run() {
-                    enabled[0] = dialog.runButtonForTest().isEnabled();
+        try {
+            TestWait.until("run button was not enabled", new TestWait.Condition() {
+                @Override public boolean isMet() throws Exception {
+                    final boolean[] enabled = new boolean[1];
+                    SwingUtilities.invokeAndWait(new Runnable() {
+                        @Override public void run() {
+                            enabled[0] = dialog.runButtonForTest().isEnabled();
+                        }
+                    });
+                    return enabled[0];
                 }
-            });
-            if (enabled[0]) {
-                return true;
-            }
-            Thread.sleep(10L);
+            }, timeoutMs);
+            return true;
+        } catch (AssertionError expectedOnTimeout) {
+            return false;
         }
-        return false;
     }
 
     private static final class SyntheticPreviewAdapter

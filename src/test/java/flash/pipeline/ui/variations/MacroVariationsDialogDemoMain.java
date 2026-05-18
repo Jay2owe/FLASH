@@ -16,7 +16,7 @@ import java.io.File;
 import java.util.Collections;
 import java.util.function.Consumer;
 
-@Ignore("Manual launcher for the macro variations dialog.")
+@Ignore("TODO(manual-ui): manual launcher for visual checks; re-enable only if converted to an automated headless UI test.")
 public final class MacroVariationsDialogDemoMain {
 
     @Test

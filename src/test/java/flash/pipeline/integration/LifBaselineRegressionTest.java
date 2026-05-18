@@ -25,7 +25,7 @@ import static org.junit.Assert.assertNotNull;
  */
 public class LifBaselineRegressionTest {
 
-    @Ignore("No LIF fixture exists under src/test/resources; TODO: add a small .lif fixture to enable this regression.")
+    @Ignore("TODO(lif-fixture): no LIF fixture exists under src/test/resources; re-enable after adding a small .lif regression fixture.")
     @Test
     public void dispatcherMatchesLifIoForExistingLifFixture() throws Exception {
         File lif = findFirstLifFixture(new File("src/test/resources"));

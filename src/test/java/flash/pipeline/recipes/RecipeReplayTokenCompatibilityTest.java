@@ -40,7 +40,7 @@ public class RecipeReplayTokenCompatibilityTest {
     }
 
     @Test
-    public void recipeJsonSerializationIsStableAcrossRuns() {
+    public void recipeJsonSerializationIsStableAcrossRuns() throws Exception {
         PipelineRecipe recipe = new PipelineRecipe(
                 "Token compatibility",
                 "Confirms recipe JSON ordering remains deterministic.",
@@ -48,7 +48,14 @@ public class RecipeReplayTokenCompatibilityTest {
                 Collections.singletonList("ThreeDObject"),
                 Collections.singletonMap("ThreeDObject", "count_coloc_standard"));
 
-        assertEquals(recipe.toJson(), recipe.toJson());
+        String firstJson = recipe.toJson();
+        PipelineRecipe loaded = PipelineRecipe.fromJson(firstJson);
+
+        assertEquals(recipe.getName(), loaded.getName());
+        assertEquals(recipe.getDescription(), loaded.getDescription());
+        assertEquals(recipe.getAnalyses(), loaded.getAnalyses());
+        assertEquals(recipe.getModulePresets(), loaded.getModulePresets());
+        assertEquals(firstJson, loaded.toJson());
     }
 
     private static void assertStable(String token) {

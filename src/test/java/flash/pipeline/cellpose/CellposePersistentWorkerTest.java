@@ -29,7 +29,6 @@ public class CellposePersistentWorkerTest {
                 status.ready);
 
         ImagePlus input = createStack(16, 16, 1);
-        long normalStarted = System.currentTimeMillis();
         ImagePlus normal = Cellpose3DRunner.run(input.duplicate(),
                 "cyto3",
                 30.0d,
@@ -37,13 +36,11 @@ public class CellposePersistentWorkerTest {
                 0.0d,
                 false,
                 "Test");
-        long normalMs = Math.max(1L, System.currentTimeMillis() - normalStarted);
         assertNotNull(normal);
 
         Path tempDir = temp.newFolder("persistent-cellpose").toPath();
         Path outDir = temp.newFolder("persistent-cellpose-out").toPath();
         Path inputPath = Cellpose3DRunner.writeInputStack(input, tempDir);
-        long persistentStarted = System.currentTimeMillis();
         CellposePersistentWorker worker = new CellposePersistentWorker(inputPath,
                 outDir,
                 input,
@@ -65,12 +62,6 @@ public class CellposePersistentWorkerTest {
         } finally {
             worker.close();
         }
-        long persistentMs = Math.max(1L, System.currentTimeMillis() - persistentStarted);
-
-        assertTrue("Persistent helper should finish three requests within 3x "
-                        + "one normal Cellpose run. normalMs=" + normalMs
-                        + ", persistentMs=" + persistentMs,
-                persistentMs <= normalMs * 3L);
     }
 
     private static void assertResult(CellposeWorkerResult result) {

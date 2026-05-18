@@ -64,6 +64,7 @@ public class VariationExecutorTest {
         final AtomicInteger published = new AtomicInteger();
         final AtomicInteger delivered = new AtomicInteger();
         final CountDownLatch firstDelivered = new CountDownLatch(1);
+        final CountDownLatch cancellationRequested = new CountDownLatch(1);
         final AtomicReference<VariationExecutor> workerRef =
                 new AtomicReference<VariationExecutor>();
 
@@ -79,9 +80,8 @@ public class VariationExecutorTest {
                     published.incrementAndGet();
                     publisher.accept(fakeResult(i));
                     if (i == 0) {
-                        while (!cancelCheck.getAsBoolean()) {
-                            Thread.sleep(5L);
-                        }
+                        assertTrue("cancel callback did not run",
+                                cancellationRequested.await(5L, TimeUnit.SECONDS));
                     }
                 }
             }
@@ -94,6 +94,7 @@ public class VariationExecutorTest {
                     if (delivered.incrementAndGet() == 1) {
                         firstDelivered.countDown();
                         workerRef.get().cancel(false);
+                        cancellationRequested.countDown();
                     }
                 },
                 null);

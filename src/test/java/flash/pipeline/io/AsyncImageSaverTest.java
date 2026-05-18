@@ -48,7 +48,6 @@ public class AsyncImageSaverTest {
                 public void run() {
                     int r = running.incrementAndGet();
                     updateMax(maxConcurrent, r);
-                    try { Thread.sleep(30); } catch (InterruptedException ignored) { }
                     running.decrementAndGet();
                 }
             });

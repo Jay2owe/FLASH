@@ -27,7 +27,7 @@ import static org.junit.Assert.assertTrue;
  */
 public class CellposePersistentIntegrationTest {
 
-    @Ignore("Manual Cellpose integration test: remove @Ignore and run the command in the class Javadoc.")
+    @Ignore("TODO(cellpose-fixture): manual Cellpose integration test; re-enable when Cellpose runtime fixtures exist in CI.")
     @Test
     public void persistentHelperKeepsLaterCellOverheadBelowFiftyPercent() throws Exception {
         CellposeRuntime.Status status = CellposeRuntime.probeConfigured();

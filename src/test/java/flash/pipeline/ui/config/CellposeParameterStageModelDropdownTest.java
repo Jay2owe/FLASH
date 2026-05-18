@@ -4,6 +4,7 @@ import flash.pipeline.cellpose.CellposeRuntime;
 import flash.pipeline.segmentation.catalog.ModelCatalog;
 import flash.pipeline.segmentation.catalog.ModelCatalogIO;
 import flash.pipeline.segmentation.catalog.ModelEntry;
+import flash.pipeline.testutil.TestWait;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import ij.ImagePlus;
 import ij.process.ByteProcessor;
@@ -221,7 +222,7 @@ public class CellposeParameterStageModelDropdownTest {
     }
 
     private static final class RecordingPreviewAdapter implements CellposeParameterStage.PreviewAdapter {
-        int previewRuns;
+        volatile int previewRuns;
         CellposeParameterStage.Parameters lastParameters;
 
         @Override public ImagePlus createRawSource(ConfigQcContext context) {
@@ -302,10 +303,11 @@ public class CellposeParameterStageModelDropdownTest {
 
     private static void waitForPreviewRuns(RecordingPreviewAdapter adapter,
                                            int expectedRuns) throws Exception {
-        long deadline = System.currentTimeMillis() + 3000L;
-        while (System.currentTimeMillis() < deadline && adapter.previewRuns < expectedRuns) {
-            Thread.sleep(10L);
-        }
+        TestWait.until("preview did not run " + expectedRuns + " time(s)", new TestWait.Condition() {
+            @Override public boolean isMet() {
+                return adapter.previewRuns >= expectedRuns;
+            }
+        }, 3000L);
         javax.swing.SwingUtilities.invokeAndWait(new Runnable() {
             @Override public void run() {
             }

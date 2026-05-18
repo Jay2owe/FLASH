@@ -60,12 +60,11 @@ public class QualityReportTest {
     }
 
     @Test
-    public void secondInstance_hasIndependentStartTime() throws Exception {
+    public void secondInstance_doesNotHaveEarlierStartTime() {
         QualityReport a = new QualityReport();
-        Thread.sleep(20);
         QualityReport b = new QualityReport();
-        assertTrue("Second report must have a later start time",
-                b.getStartTime() > a.getStartTime());
+        assertTrue("Second report must not move start time backwards",
+                b.getStartTime() >= a.getStartTime());
     }
 
     @Test

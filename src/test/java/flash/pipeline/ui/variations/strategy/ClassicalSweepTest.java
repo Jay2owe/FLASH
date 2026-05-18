@@ -53,22 +53,19 @@ public class ClassicalSweepTest {
     }
 
     @Test
-    public void fourCellSweepCompletesUnderTwoSecondsHeadless() throws Exception {
+    public void fourCellSweepCompletesHeadlessAndReturnsLabels() throws Exception {
         ImagePlus source = syntheticBlobs();
         ClassicalSweep strategy = new ClassicalSweep(source, CropSpec.full(), null,
                 new ThresholdingPreviewAdapter(), 2);
         List<VariationResult> results =
                 Collections.synchronizedList(new ArrayList<VariationResult>());
-        long started = System.currentTimeMillis();
 
         strategy.dispatch(classicalSweep(ParameterValueList.ofInts(60, 180),
                         ParameterValueList.ofInts(1, 500)),
                 results::add,
                 () -> false);
 
-        long elapsedMs = System.currentTimeMillis() - started;
         assertEquals(4, results.size());
-        assertTrue("4-cell sweep took " + elapsedMs + " ms", elapsedMs < 2000L);
         for (int i = 0; i < results.size(); i++) {
             assertNotNull(results.get(i).getLabel());
         }

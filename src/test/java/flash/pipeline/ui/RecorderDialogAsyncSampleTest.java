@@ -1,5 +1,6 @@
 package flash.pipeline.ui;
 
+import flash.pipeline.testutil.TestWait;
 import ij.ImagePlus;
 import ij.WindowManager;
 import ij.plugin.frame.Recorder;
@@ -28,7 +29,6 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
 
 public class RecorderDialogAsyncSampleTest {
 
@@ -73,7 +73,7 @@ public class RecorderDialogAsyncSampleTest {
         assertTrue(isButtonEnabled(dialog, "Cancel"));
 
         releaseSupplier.countDown();
-        waitForCondition("controls were not enabled after sample load", new Condition() {
+        TestWait.until("controls were not enabled after sample load", new TestWait.Condition() {
             @Override public boolean isMet() throws Exception {
                 return isButtonEnabled(dialog, "Start over")
                         && isButtonEnabled(dialog, "Preview")
@@ -113,7 +113,7 @@ public class RecorderDialogAsyncSampleTest {
         run.awaitCleanExit();
 
         releaseSupplier.countDown();
-        waitForCondition("late sample was not closed", new Condition() {
+        TestWait.until("late sample was not closed", new TestWait.Condition() {
             @Override public boolean isMet() {
                 CloseTrackingImagePlus sample = sampleRef.get();
                 return sample != null && sample.closed && sample.flushed;
@@ -139,7 +139,7 @@ public class RecorderDialogAsyncSampleTest {
         DialogRun run = startDialog("Hook", supplier);
         final JDialog dialog = waitForDialog("Record Filter - Hook", 1000);
         assertTrue("display hook did not run", hookRan.await(2, TimeUnit.SECONDS));
-        waitForCondition("recorder did not enable after hook", new Condition() {
+        TestWait.until("recorder did not enable after hook", new TestWait.Condition() {
             @Override public boolean isMet() throws Exception {
                 return isButtonEnabled(dialog, "Use this filter");
             }
@@ -150,7 +150,7 @@ public class RecorderDialogAsyncSampleTest {
                 Recorder.recordString("run(\"Median...\", \"radius=2\");\n");
             }
         });
-        waitForCondition("captured diff did not update", new Condition() {
+        TestWait.until("captured diff did not update", new TestWait.Condition() {
             @Override public boolean isMet() throws Exception {
                 return textArea(dialog).getText().contains("Median");
             }
@@ -209,7 +209,7 @@ public class RecorderDialogAsyncSampleTest {
 
     private static JDialog waitForDialog(final String title, long timeoutMillis) throws Exception {
         final AtomicReference<JDialog> found = new AtomicReference<JDialog>();
-        waitForCondition("dialog not visible: " + title, new Condition() {
+        TestWait.until("dialog not visible: " + title, new TestWait.Condition() {
             @Override public boolean isMet() throws Exception {
                 found.set(findDialog(title));
                 return found.get() != null && found.get().isVisible();
@@ -339,26 +339,6 @@ public class RecorderDialogAsyncSampleTest {
         return null;
     }
 
-    private static void waitForCondition(String message, Condition condition,
-                                         long timeoutMillis) throws Exception {
-        long deadline = System.currentTimeMillis() + timeoutMillis;
-        Throwable lastFailure = null;
-        while (System.currentTimeMillis() <= deadline) {
-            try {
-                if (condition.isMet()) return;
-            } catch (Throwable t) {
-                lastFailure = t;
-            }
-            Thread.sleep(20);
-        }
-        if (lastFailure != null) {
-            AssertionError error = new AssertionError(message);
-            error.initCause(lastFailure);
-            throw error;
-        }
-        fail(message);
-    }
-
     private static void resetRecorderText() throws Exception {
         RecorderDialog.resolveRecorder();
         SwingUtilities.invokeAndWait(new Runnable() {
@@ -408,10 +388,6 @@ public class RecorderDialogAsyncSampleTest {
                 if (recorder != null) recorder.close();
             }
         });
-    }
-
-    private interface Condition {
-        boolean isMet() throws Exception;
     }
 
     private static final class DialogRun {

@@ -1,6 +1,7 @@
 package flash.pipeline.ui.config;
 
 import flash.pipeline.stardist.StarDist3DRunner;
+import flash.pipeline.testutil.TestWait;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import flash.pipeline.ui.variations.ParameterCombo;
 import flash.pipeline.ui.variations.ParameterId;
@@ -427,7 +428,7 @@ public class StarDistParameterStageTest {
     private static final class RecordingPreviewAdapter implements StarDistParameterStage.PreviewAdapter {
         int rawSourceCreations;
         int filteredSourceCreations;
-        int previewRuns;
+        volatile int previewRuns;
         boolean returnNullPreview;
         StarDistParameterStage.Parameters lastPreviewParameters;
 
@@ -553,10 +554,11 @@ public class StarDistParameterStageTest {
 
     private static void waitForPreviewRuns(RecordingPreviewAdapter adapter,
                                            int expectedRuns) throws Exception {
-        long deadline = System.currentTimeMillis() + 3000L;
-        while (System.currentTimeMillis() < deadline && adapter.previewRuns < expectedRuns) {
-            Thread.sleep(10L);
-        }
+        TestWait.until("preview did not run " + expectedRuns + " time(s)", new TestWait.Condition() {
+            @Override public boolean isMet() {
+                return adapter.previewRuns >= expectedRuns;
+            }
+        }, 3000L);
         SwingUtilities.invokeAndWait(new Runnable() {
             @Override public void run() {
             }

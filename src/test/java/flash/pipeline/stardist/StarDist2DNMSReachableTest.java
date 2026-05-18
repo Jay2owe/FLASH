@@ -36,7 +36,7 @@ public class StarDist2DNMSReachableTest {
                 de.csbdresden.stardist.Candidates.class);
     }
 
-    @Ignore("GPU/CSBDeep integration test: run manually in Fiji before enabling StarDistFastNms.")
+    @Ignore("TODO(gpu-fixture): GPU/CSBDeep integration test; re-enable when Fiji GPU runtime exists in CI before enabling StarDistFastNms.")
     @Test
     public void stardist2dProbDistOutputsFeedNmsCommand() throws Exception {
         ImageJ ij = new ImageJ();

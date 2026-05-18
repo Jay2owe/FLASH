@@ -2,6 +2,7 @@ package flash.pipeline.ui.config;
 
 import flash.pipeline.help.SetupHelpCatalog;
 import flash.pipeline.objects.ObjectsCounter3DWrapper;
+import flash.pipeline.testutil.TestWait;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import flash.pipeline.ui.variations.ParameterCombo;
 import flash.pipeline.ui.variations.ParameterId;
@@ -464,7 +465,7 @@ public class ClassicalSegmentationStageTest {
             implements ClassicalSegmentationStage.PreviewAdapter {
         int rawSourceCreations;
         int filteredSourceCreations;
-        int previewRuns;
+        volatile int previewRuns;
         int lastThreshold;
         int lastMinSize;
         int lastMaxSize;
@@ -590,10 +591,11 @@ public class ClassicalSegmentationStageTest {
 
     private static void waitForPreviewRuns(RecordingPreviewAdapter adapter,
                                            int expectedRuns) throws Exception {
-        long deadline = System.currentTimeMillis() + 3000L;
-        while (System.currentTimeMillis() < deadline && adapter.previewRuns < expectedRuns) {
-            Thread.sleep(10L);
-        }
+        TestWait.until("preview did not run " + expectedRuns + " time(s)", new TestWait.Condition() {
+            @Override public boolean isMet() {
+                return adapter.previewRuns >= expectedRuns;
+            }
+        }, 3000L);
         SwingUtilities.invokeAndWait(new Runnable() {
             @Override public void run() {
             }

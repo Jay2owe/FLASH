@@ -101,7 +101,6 @@ public class QcMinMaxPerConditionSelectorTest {
         assertEquals(Boolean.TRUE,
                 valid.invoke(null, dir.getAbsolutePath(), lif, qcChannels, null, cache, scores));
 
-        Thread.sleep(5L);
         OrientationManifestIO.saveRows(dir.getAbsolutePath(), Arrays.asList(
                 orientationRow("A", "MouseA"),
                 orientationRow("B", "MouseB")));

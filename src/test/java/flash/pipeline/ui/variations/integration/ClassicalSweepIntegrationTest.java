@@ -26,7 +26,7 @@ import static org.junit.Assert.assertTrue;
  */
 public class ClassicalSweepIntegrationTest {
 
-    @Ignore("Manual integration test: remove @Ignore and run the command in the class Javadoc.")
+    @Ignore("TODO(integration-fixture): manual integration test; re-enable when the class Javadoc command is available in CI fixtures.")
     @Test
     public void nineCellRealImageSweepCompletesUnderFiveSeconds() throws Exception {
         ImagePlus source = VariationIntegrationTestSupport.loadSyntheticBlobStack();
