@@ -10,6 +10,8 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.io.ObjectOutputStream;
+import java.nio.file.Files;
 
 import static org.junit.Assert.*;
 
@@ -143,6 +145,24 @@ public class ObjectClassifierTrainerTest {
                 0.5);
         assertTrue(scores.get(0).kept);
         assertFalse(scores.get(1).kept);
+    }
+
+    @Test
+    public void loadModelRejectsUnexpectedSerializedClasses() throws Exception {
+        Path path = temp.newFile("not-model.smile").toPath();
+        ObjectOutputStream out = new ObjectOutputStream(Files.newOutputStream(path));
+        try {
+            out.writeObject(new java.io.File("payload"));
+        } finally {
+            out.close();
+        }
+
+        try {
+            ObjectClassifierPersistence.loadModel(path);
+            fail("Expected non-model serialized payload to be rejected.");
+        } catch (java.io.InvalidClassException expected) {
+            assertTrue(expected.getMessage().contains("java.io.File"));
+        }
     }
 
     private static List<ObjectFeatureExtractor.FeatureRow> rows(int count, boolean positive) {

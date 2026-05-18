@@ -5,6 +5,7 @@ import smile.classification.RandomForest;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InvalidClassException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.OutputStream;
@@ -63,7 +64,7 @@ public final class ObjectClassifierPersistence {
             throw new IOException("Smile Random Forest model file does not exist: " + path);
         }
         try (InputStream in = Files.newInputStream(path);
-             ObjectInputStream objects = new ObjectInputStream(in)) {
+             ObjectInputStream objects = new RestrictedModelObjectInputStream(in)) {
             Object value = objects.readObject();
             if (!(value instanceof RandomForest)) {
                 throw new IOException("Serialized model is not a Smile RandomForest: " + path);
@@ -158,6 +159,40 @@ public final class ObjectClassifierPersistence {
     private static void requireSafeModelKey(String modelKey) {
         if (modelKey == null || !modelKey.matches("[A-Za-z0-9._-]+")) {
             throw new IllegalArgumentException("Invalid model key: " + modelKey);
+        }
+    }
+
+    private static final class RestrictedModelObjectInputStream extends ObjectInputStream {
+        RestrictedModelObjectInputStream(InputStream in) throws IOException {
+            super(in);
+        }
+
+        @Override
+        protected Class<?> resolveClass(java.io.ObjectStreamClass desc)
+                throws IOException, ClassNotFoundException {
+            String name = desc == null ? "" : desc.getName();
+            if (!isAllowedSerializedClass(name)) {
+                throw new InvalidClassException("Blocked serialized class", name);
+            }
+            return super.resolveClass(desc);
+        }
+
+        private static boolean isAllowedSerializedClass(String name) {
+            if (name == null || name.isEmpty()) return false;
+            if (name.charAt(0) == '[') return true;
+            if (name.startsWith("smile.")) return true;
+            if (name.startsWith("scala.")) return true;
+            if (name.equals("java.lang.String")
+                    || name.equals("java.lang.Integer")
+                    || name.equals("java.lang.Long")
+                    || name.equals("java.lang.Double")
+                    || name.equals("java.lang.Float")
+                    || name.equals("java.lang.Boolean")
+                    || name.equals("java.lang.Enum")
+                    || name.equals("java.lang.Number")) {
+                return true;
+            }
+            return name.startsWith("java.util.");
         }
     }
 }
