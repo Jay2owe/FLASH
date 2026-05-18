@@ -9,7 +9,6 @@ import ij.IJ;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
-import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JFileChooser;
 import javax.swing.JLabel;
@@ -534,9 +533,8 @@ public final class SegmentationModelManagerDialog extends PipelineDialog {
         dialog.addHeader("Delete Model");
         dialog.addMessage("Delete " + entry.name + " from this project catalog?");
         dialog.addHelpText("Removes the catalog entry. Copied model files on disk are kept by default.");
-        final JCheckBox removeFiles = new JCheckBox("Also delete copied model files on disk", false);
-        removeFiles.setOpaque(false);
-        dialog.addComponent(removeFiles);
+        final ToggleSwitch removeFiles =
+                dialog.addToggle("Also delete copied model files on disk", false);
         dialog.setPrimaryButtonText("Delete");
         if (!dialog.showDialog()) {
             return;
