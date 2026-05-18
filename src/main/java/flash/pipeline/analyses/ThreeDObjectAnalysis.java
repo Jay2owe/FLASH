@@ -1879,6 +1879,8 @@ public class ThreeDObjectAnalysis implements Analysis {
 
         final int total = loader.totalToLoad();
         final AtomicInteger completed = new AtomicInteger(0);
+        final List<Throwable> failures =
+                Collections.synchronizedList(new ArrayList<Throwable>());
         int effectiveThreads = Math.min(nThreads, total);
 
         ExecutorService pool = Executors.newFixedThreadPool(effectiveThreads);
@@ -1901,7 +1903,11 @@ public class ThreeDObjectAnalysis implements Analysis {
 
                         ImagePlus imp = indexed.image;
                         int idx = indexed.index;
+                        int scnIndex = idx + 1;
+                        String imgTitle = imp == null ? "<null image>" : imp.getTitle();
+                        String partLabel = imgTitle;
                         imp = applyConfiguredZSliceSubset(cfg, idx, imp, "3D Object Analysis");
+                        imgTitle = imp == null ? imgTitle : imp.getTitle();
 
                         // Write calibration from the first image (thread-safe)
                         if (calibrationWritten.compareAndSet(false, true)) {
@@ -1920,9 +1926,6 @@ public class ThreeDObjectAnalysis implements Analysis {
                         }
 
                         try {
-                            String imgTitle = imp.getTitle();
-                            int scnIndex = idx + 1;
-
                             ResolvedImageMetadata metadata = ImageOrientationResolver.resolve(
                                     directory, imgTitle, idx + 1);
                             NameParts parts = metadata.toNameParts();
@@ -1931,7 +1934,7 @@ public class ThreeDObjectAnalysis implements Analysis {
                             // Worker start log with short name and channels
                             String workerTag = effectiveThreads > 1
                                     ? "Worker " + workerNum : "Worker";
-                            String partLabel = parts.displayLabel();
+                            partLabel = parts.displayLabel();
                             StringBuilder chList = new StringBuilder();
                             for (int ci = 0; ci < cfg.channelNames.size(); ci++) {
                                 if (ci > 0) chList.append(" ");
@@ -2024,8 +2027,16 @@ public class ThreeDObjectAnalysis implements Analysis {
                                 }
                             }
                         } catch (Exception e) {
-                            IJ.log("[" + (idx + 1) + "/" + total + "] ERROR: " + e.getMessage());
-                            e.printStackTrace();
+                            String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+                            RuntimeException contextual = new RuntimeException(
+                                    "3D Object Analysis failed for image " + scnIndex + "/" + total
+                                            + " title='" + imgTitle + "' label='" + partLabel + "': " + msg,
+                                    e);
+                            failures.add(contextual);
+                            IJ.log("[" + scnIndex + "/" + total + "] ERROR: " + contextual.getMessage());
+                            int done = completed.incrementAndGet();
+                            IJ.showProgress(done, total);
+                            IJ.showStatus("Processing " + done + "/" + total + " (failed)");
                         } finally {
                             // Close image after processing
                             imp.changes = false;
@@ -2062,10 +2073,33 @@ public class ThreeDObjectAnalysis implements Analysis {
             try {
                 f.get();
             } catch (Exception e) {
-                IJ.log("Parallel processing error: " + e.getMessage());
+                if (e instanceof InterruptedException) {
+                    Thread.currentThread().interrupt();
+                }
+                Throwable cause = e.getCause() == null ? e : e.getCause();
+                failures.add(cause);
+                String msg = cause.getMessage() != null
+                        ? cause.getMessage() : cause.getClass().getSimpleName();
+                IJ.log("Parallel processing error: " + msg);
             }
         }
         pool.shutdown();
+        if (!failures.isEmpty()) {
+            throw buildParallelFailure("3D Object Analysis failed for "
+                    + failures.size() + " image(s)", failures);
+        }
+    }
+
+    private static RuntimeException buildParallelFailure(String message, List<Throwable> failures) {
+        RuntimeException combined = new RuntimeException(message);
+        synchronized (failures) {
+            for (Throwable failure : failures) {
+                if (failure != null) {
+                    combined.addSuppressed(failure);
+                }
+            }
+        }
+        return combined;
     }
 
     /** Merge all rows from source into dest ResultsTable. */
@@ -2995,9 +3029,10 @@ public class ThreeDObjectAnalysis implements Analysis {
                 // Objects image saving is deferred until after colocalization.
 
             } catch (Throwable t) {
-                IJ.log("ERROR in channel " + channelName + ": " + t);
-                t.printStackTrace();
-                IJ.handleException(t);
+                IJ.log("ERROR in channel " + channelName
+                        + " for image '" + imp.getTitle() + "'"
+                        + ", animal='" + animalName + "', region='" + regionLabel
+                        + "', ROI='" + roiLabel + "': " + t);
                 throw t;
             }
         }
@@ -3268,8 +3303,9 @@ public class ThreeDObjectAnalysis implements Analysis {
                 channelHasObjects[c] = countResults[c].isFoundObjects()
                         && countResults[c].getObjectsMap() != null;
             } catch (Throwable t) {
-                IJ.log("    ERROR counting " + channelName + " on full image: " + t);
-                t.printStackTrace();
+                IJ.log("    ERROR counting " + channelName
+                        + " on full image for animal='" + animalName
+                        + "', hemisphere='" + hemisphere + "': " + t);
             }
         }
 
