@@ -4584,6 +4584,7 @@ public class CreateBinFileAnalysis implements Analysis {
                     final ImagePlus previewSource = chDup;
                     final String previewFilterContent = sdFilterContent;
                     final ImagePlus previewAnchor = filteredPreview;
+                    final String previewChannelName = cfg.names.get(ch);
                     previewBtn.addActionListener(new java.awt.event.ActionListener() {
                         @Override public void actionPerformed(java.awt.event.ActionEvent e) {
                             if (!previewBtn.isEnabled()) return;
@@ -4641,14 +4642,16 @@ public class CreateBinFileAnalysis implements Analysis {
                                             }
                                         });
                                     } catch (final Exception ex) {
-                                        IJ.log("WARNING: StarDist 3D preview failed: " + ex.getMessage());
-                                        java.io.StringWriter sw = new java.io.StringWriter();
-                                        ex.printStackTrace(new java.io.PrintWriter(sw));
-                                        IJ.log(sw.toString());
+                                        IJ.log("WARNING: StarDist 3D preview failed for channel='"
+                                                + previewChannelName + "', source='"
+                                                + previewSource.getTitle() + "', probThresh="
+                                                + previewProb + ", nmsThresh=" + previewNms
+                                                + ": " + exceptionSummary(ex));
                                         SwingUtilities.invokeLater(new Runnable() {
                                             @Override public void run() {
                                                 IJ.showMessage("StarDist 3D Preview",
-                                                        "Preview failed.\nCheck the log for details.");
+                                                        "Preview failed for channel " + previewChannelName
+                                                                + ".\nCheck the log for details.");
                                             }
                                         });
                                     } finally {
@@ -5001,14 +5004,19 @@ public class CreateBinFileAnalysis implements Analysis {
                                             }
                                         });
                                     } catch (final Exception ex) {
-                                        IJ.log("WARNING: Cellpose preview failed: " + ex.getMessage());
-                                        java.io.StringWriter sw = new java.io.StringWriter();
-                                        ex.printStackTrace(new java.io.PrintWriter(sw));
-                                        IJ.log(sw.toString());
+                                        IJ.log("WARNING: Cellpose preview failed for channel='"
+                                                + previewChannelName + "', source='"
+                                                + previewSource.getTitle() + "', model='"
+                                                + previewModel + "', diameter=" + previewDiameter
+                                                + ", flowThreshold=" + previewFlow
+                                                + ", cellprobThreshold=" + previewCellprob
+                                                + ", gpu=" + previewUseGpu + ": "
+                                                + exceptionSummary(ex));
                                         SwingUtilities.invokeLater(new Runnable() {
                                             @Override public void run() {
                                                 IJ.showMessage("Cellpose Preview",
-                                                        "Preview failed.\nCheck the log for details.");
+                                                        "Preview failed for channel " + previewChannelName
+                                                                + ".\nCheck the log for details.");
                                             }
                                         });
                                     } finally {
@@ -7095,6 +7103,15 @@ public class CreateBinFileAnalysis implements Analysis {
 
     private static String safe(String value) {
         return value == null ? "" : value;
+    }
+
+    private static String exceptionSummary(Throwable throwable) {
+        if (throwable == null) {
+            return "unknown error";
+        }
+        String message = throwable.getMessage();
+        return throwable.getClass().getSimpleName()
+                + (message == null || message.trim().isEmpty() ? "" : ": " + message.trim());
     }
 
     private String legacyInteractiveFilterParameterQC(List<QcImageSelection> images, BinUserConfig cfg,

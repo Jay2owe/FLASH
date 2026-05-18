@@ -211,7 +211,6 @@ public class StarDist3DRunner {
             String message = StarDistDetector.getAvailabilityMessage();
             IJ.log("WARNING: " + message);
             IllegalStateException cause = new IllegalStateException(message);
-            logStackTrace(cause);
             throw failure("StarDist failed: " + message, cause);
         }
 
@@ -472,19 +471,21 @@ public class StarDist3DRunner {
             return labelImp;
 
         } catch (Exception e) {
-            IJ.log("WARNING: StarDist failed: " + e.getClass().getSimpleName()
-                    + " - " + e.getMessage());
-            java.io.StringWriter sw = new java.io.StringWriter();
-            e.printStackTrace(new java.io.PrintWriter(sw));
-            IJ.log(sw.toString());
+            IJ.log("WARNING: StarDist failed for channel='" + channelName
+                    + "', input='" + (input == null ? "<null>" : input.getTitle())
+                    + "', modelKey='" + modelKey + "', probThresh=" + probThresh
+                    + ", nmsThresh=" + nmsThresh
+                    + ", linkingMaxDistance=" + linkingMaxDistance
+                    + ", gapClosingMaxDistance=" + gapClosingMaxDistance
+                    + ", maxFrameGap=" + maxFrameGap + ": " + exceptionSummary(e));
             throw failure("StarDist failed: " + exceptionSummary(e), e);
         } catch (LinkageError e) {
             IJ.log("WARNING: StarDist failed due to an incompatible runtime: "
                     + e.getClass().getSimpleName() + " - " + e.getMessage());
             IJ.log("WARNING: " + StarDistDetector.getAvailabilityMessage());
-            java.io.StringWriter sw = new java.io.StringWriter();
-            e.printStackTrace(new java.io.PrintWriter(sw));
-            IJ.log(sw.toString());
+            IJ.log("WARNING: StarDist runtime context: channel='" + channelName
+                    + "', input='" + (input == null ? "<null>" : input.getTitle())
+                    + "', modelKey='" + modelKey + "'.");
             throw failure("StarDist failed due to an incompatible runtime: " + exceptionSummary(e), e);
         }
     }
@@ -835,12 +836,6 @@ public class StarDist3DRunner {
 
     private static SegmentationRunFailureException failure(String message, Throwable cause) {
         return new SegmentationRunFailureException(message, cause);
-    }
-
-    private static void logStackTrace(Throwable throwable) {
-        java.io.StringWriter sw = new java.io.StringWriter();
-        throwable.printStackTrace(new java.io.PrintWriter(sw));
-        IJ.log(sw.toString());
     }
 
     private static String exceptionSummary(Throwable throwable) {

@@ -82,7 +82,6 @@ public final class Cellpose3DRunner {
             String message = "Cellpose input image is null.";
             IJ.log("WARNING: " + message);
             IllegalArgumentException cause = new IllegalArgumentException(message);
-            logStackTrace(cause);
             throw failure("Cellpose failed: " + message, cause);
         }
 
@@ -94,7 +93,6 @@ public final class Cellpose3DRunner {
                     ? "Cellpose runtime is not ready."
                     : runtime.message.trim();
             IllegalStateException cause = new IllegalStateException(message);
-            logStackTrace(cause);
             throw failure("Cellpose failed: " + message, cause);
         }
 
@@ -138,10 +136,12 @@ public final class Cellpose3DRunner {
             }
             return labelImage;
         } catch (Exception e) {
-            IJ.log("WARNING: Cellpose failed: " + e.getClass().getSimpleName() + " - " + e.getMessage());
-            java.io.StringWriter sw = new java.io.StringWriter();
-            e.printStackTrace(new java.io.PrintWriter(sw));
-            IJ.log(sw.toString());
+            IJ.log("WARNING: Cellpose failed for channel='" + channelName
+                    + "', input='" + (input == null ? "<null>" : input.getTitle())
+                    + "', model='" + model + "', diameter=" + diameter
+                    + ", flowThreshold=" + flowThreshold
+                    + ", cellprobThreshold=" + cellprobThreshold
+                    + ", gpu=" + useGpu + ": " + exceptionSummary(e));
             throw failure("Cellpose failed: " + exceptionSummary(e), e);
         } finally {
             if (runtimeInput != null && runtimeInput != input) {
@@ -584,22 +584,16 @@ public final class Cellpose3DRunner {
                     + " [native " + (input != null && input.getNSlices() > 1 ? "3D" : "2D") + "]");
             return labelImage;
         } catch (Exception e) {
-            IJ.log("WARNING: Failed reading Cellpose mask image: " + e.getMessage());
-            java.io.StringWriter sw = new java.io.StringWriter();
-            e.printStackTrace(new java.io.PrintWriter(sw));
-            IJ.log(sw.toString());
+            IJ.log("WARNING: Failed reading Cellpose mask image at " + maskPath
+                    + " for channel='" + channelName + "', input='"
+                    + (input == null ? "<null>" : input.getTitle()) + "': "
+                    + exceptionSummary(e));
             return null;
         }
     }
 
     private static SegmentationRunFailureException failure(String message, Throwable cause) {
         return new SegmentationRunFailureException(message, cause);
-    }
-
-    private static void logStackTrace(Throwable throwable) {
-        java.io.StringWriter sw = new java.io.StringWriter();
-        throwable.printStackTrace(new java.io.PrintWriter(sw));
-        IJ.log(sw.toString());
     }
 
     private static String exceptionSummary(Throwable throwable) {

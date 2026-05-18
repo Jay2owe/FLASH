@@ -4044,12 +4044,11 @@ public class ThreeDObjectAnalysis implements Analysis {
 
         } catch (Throwable t) {
             String errMsg = t.getClass().getName() + ": " + t.getMessage();
-            IJ.log("    - [Ch " + (c + 1) + "] ERROR during filter phase: " + errMsg);
-            java.io.StringWriter sw = new java.io.StringWriter();
-            t.printStackTrace(new java.io.PrintWriter(sw));
-            for (String line : sw.toString().split("\\r?\\n")) {
-                IJ.log("      " + line);
-            }
+            IJ.log("    - [Ch " + (c + 1) + "] ERROR during filter phase for channel '"
+                    + channelName + "', image='" + imp.getTitle()
+                    + "', segmentation='" + (segmentationMethod == null
+                    ? "<unset>" : SegmentationTokenParser.format(segmentationMethod))
+                    + "': " + errMsg);
             if (segmentationMethod != null && segmentationMethod.isTrainedRf()) {
                 String modelKey = SegmentationMethod.trainedRfModelKey(segmentationMethod);
                 throw new FatalSegmentationException(
