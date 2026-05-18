@@ -4,6 +4,7 @@ import flash.pipeline.bin.BinField;
 import flash.pipeline.analyses.wizard.IntensitySpatialConfig;
 import org.junit.Test;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -100,6 +101,16 @@ public class CLIArgumentParserTest {
         CLIConfig cfg = CLIArgumentParser.parse("config_dir=[/tmp/cfg]");
         assertNotNull(cfg);
         assertEquals("/tmp/cfg", cfg.getDirectory());
+    }
+
+    @Test
+    public void parse_canonicalizesExistingDirectory() throws Exception {
+        File dir = new File(".").getCanonicalFile();
+
+        CLIConfig cfg = CLIArgumentParser.parse("dir=[" + dir.getPath() + "]");
+
+        assertNotNull(cfg);
+        assertEquals(dir.getCanonicalPath(), cfg.getDirectory());
     }
 
     @Test

@@ -76,7 +76,9 @@ public final class CLIArgumentParser {
             IJ.log("[CLI] Error: 'dir' parameter is required. Use dir=[/path/to/data]");
             return null;
         }
+        cfg.directory = canonicalizeExistingDirectoryArgument(cfg.directory);
         File dirFile = new File(cfg.directory);
+        dirFile = new File(cfg.directory);
         if (!dirFile.exists()) {
             IJ.log("[CLI] Warning: Directory does not exist: " + cfg.directory);
         } else if (!dirFile.isDirectory()) {
@@ -1134,6 +1136,18 @@ public final class CLIArgumentParser {
         }
         IJ.log("[CLI] Warning: Unknown deconv.scopeModality '" + raw + "'.");
         return null;
+    }
+
+    private static String canonicalizeExistingDirectoryArgument(String directory) {
+        File dirFile = new File(directory);
+        if (dirFile == null || !dirFile.exists()) {
+            return directory;
+        }
+        try {
+            return dirFile.getCanonicalFile().getPath();
+        } catch (IOException e) {
+            return dirFile.getAbsoluteFile().toPath().normalize().toString();
+        }
     }
 
     /**
