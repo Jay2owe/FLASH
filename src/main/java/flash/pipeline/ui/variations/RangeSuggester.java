@@ -4,6 +4,7 @@ import flash.pipeline.bin.BinConfig;
 import flash.pipeline.ui.config.CellposeParameterStage;
 import flash.pipeline.ui.config.StarDistParameterStage;
 
+import ij.IJ;
 import ij.ImagePlus;
 import ij.ImageStack;
 import ij.process.AutoThresholder;
@@ -488,7 +489,8 @@ public final class RangeSuggester {
                 out.put(id, values);
             }
         } catch (RuntimeException e) {
-            System.err.println("Could not suggest " + id + ": " + e.getMessage());
+            IJ.log("WARNING: Could not suggest variation range for " + id + ": "
+                    + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage()));
         }
     }
 

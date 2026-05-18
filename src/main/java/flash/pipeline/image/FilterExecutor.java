@@ -817,7 +817,13 @@ public final class FilterExecutor {
             try {
                 f.get();
             } catch (Exception e) {
-                throw new RuntimeException(e);
+                if (e instanceof InterruptedException) {
+                    Thread.currentThread().interrupt();
+                }
+                Throwable cause = e.getCause() == null ? e : e.getCause();
+                throw new RuntimeException("Filter operation " + op.type
+                        + " failed while processing image '" + imp.getTitle()
+                        + "' across " + nSlices + " slice(s)", cause);
             }
         }
         slicePool.shutdown();

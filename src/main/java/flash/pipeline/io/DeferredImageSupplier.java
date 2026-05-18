@@ -411,7 +411,8 @@ public class DeferredImageSupplier {
             } catch (ExecutionException e) {
                 Throwable cause = e.getCause();
                 if (cause instanceof Exception) throw (Exception) cause;
-                throw new RuntimeException(cause);
+                throw new RuntimeException("Prefetched image series " + seriesIndex
+                        + " failed with a non-Exception cause", cause);
             }
         }
         return openSeriesMaterialized(seriesIndex);

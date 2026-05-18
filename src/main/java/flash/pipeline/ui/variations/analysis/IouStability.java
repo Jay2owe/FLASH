@@ -3,6 +3,7 @@ package flash.pipeline.ui.variations.analysis;
 import flash.pipeline.ui.variations.ParameterCombo;
 import flash.pipeline.ui.variations.ParameterKey;
 
+import ij.IJ;
 import ij.ImagePlus;
 
 import java.util.ArrayList;
@@ -25,7 +26,8 @@ public final class IouStability {
                                              List<ImagePlus> labels) {
         ScoreSummary summary = score(combos, labels, -1);
         if (summary.aborted) {
-            System.err.println("Skipping IoU stability hint: computation exceeded 5 seconds.");
+            IJ.log("WARNING: Skipping IoU stability hint for " + combos.size()
+                    + " combo(s): computation exceeded 5 seconds.");
         }
         if (summary.bestIndex < 0 || summary.bestMean <= 0.0d) {
             return OptionalInt.empty();

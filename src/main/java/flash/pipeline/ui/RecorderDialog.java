@@ -229,12 +229,12 @@ public final class RecorderDialog {
                 });
             } catch (InterruptedException ie) {
                 Thread.currentThread().interrupt();
-                throw new RuntimeException(ie);
+                throw new RuntimeException("Interrupted while opening recorder dialog on the UI thread", ie);
             } catch (InvocationTargetException ite) {
                 Throwable cause = ite.getCause();
                 if (cause instanceof RuntimeException) throw (RuntimeException) cause;
                 if (cause instanceof Error) throw (Error) cause;
-                throw new RuntimeException(cause);
+                throw new RuntimeException("Recorder dialog failed while opening on the UI thread", cause);
             }
         }
 
@@ -287,7 +287,7 @@ public final class RecorderDialog {
                         return sample;
                     } catch (Throwable t) {
                         closeImageQuietly(sample);
-                        throw new RuntimeException(t);
+                        throw new RuntimeException("Recorder dialog failed while loading the sample image", t);
                     }
                 }
 
