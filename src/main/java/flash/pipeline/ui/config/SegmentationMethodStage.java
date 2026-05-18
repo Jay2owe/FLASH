@@ -9,6 +9,7 @@ import flash.pipeline.segmentation.catalog.ModelCatalogIO;
 import flash.pipeline.segmentation.catalog.ModelEntry;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import ij.ImagePlus;
+// Intentional on the setup-preview UI path only; use thread-safe image helpers in worker code.
 import ij.plugin.Duplicator;
 
 import flash.pipeline.ui.FlashTheme;

@@ -823,7 +823,7 @@ public class StarDist3DRunner {
         if (safeMessage.contains("NullPointerException")) {
             IJ.log("WARNING: StarDist returned a NullPointerException inside TrackMate/StarDist. "
                     + "This is commonly caused by a broken Fiji StarDist runtime, including duplicate "
-                    + "or Dropbox-conflicted StarDist jars. Use Dependencies > Auto-Fix StarDist, "
+                    + "or cloud-sync-conflicted StarDist jars. Use Dependencies > Auto-Fix StarDist, "
                     + "close Fiji, and restart Fiji before retrying.");
         }
     }

@@ -15,14 +15,14 @@ public class RuntimeCheckerTest {
     public void checkReportsConflictingStarDistJarBesideExpectedJar() throws Exception {
         File fijiDir = completeStarDistRuntime("stardist-runtime-conflict");
         File plugins = new File(fijiDir, "plugins");
-        touch(plugins, "StarDist_-0.3.0 (Dropbox conflicted copy).jar");
+        touch(plugins, "StarDist_-0.3.0 (cloud conflicted copy).jar");
         File jars = new File(fijiDir, "jars");
         touch(jars, "protobuf-java-4.28.2.jar");
 
         List<String> issues = RuntimeChecker.check(fijiDir);
 
         assertTrue(containsIssue(issues, "StarDist: conflicting extra jar(s) beside StarDist_-0.3.0.jar"));
-        assertTrue(containsIssue(issues, "StarDist_-0.3.0 (Dropbox conflicted copy).jar"));
+        assertTrue(containsIssue(issues, "StarDist_-0.3.0 (cloud conflicted copy).jar"));
         assertTrue(containsIssue(issues, "protobuf-java: conflicting extra jar(s) beside protobuf-java-3.5.1.jar"));
         assertTrue(containsIssue(issues, "protobuf-java-4.28.2.jar"));
     }
@@ -31,12 +31,12 @@ public class RuntimeCheckerTest {
     public void repairDisablesConflictingStarDistJarEvenWhenExpectedJarExists() throws Exception {
         File fijiDir = completeStarDistRuntime("stardist-runtime-repair-conflict");
         File plugins = new File(fijiDir, "plugins");
-        File duplicate = touch(plugins, "StarDist_-0.3.0 (Dropbox conflicted copy).jar");
+        File duplicate = touch(plugins, "StarDist_-0.3.0 (cloud conflicted copy).jar");
 
         List<String> actions = RuntimeChecker.repair(fijiDir);
 
         assertFalse(duplicate.exists());
-        assertTrue(containsIssue(actions, "Disabled: StarDist_-0.3.0 (Dropbox conflicted copy).jar"));
+        assertTrue(containsIssue(actions, "Disabled: StarDist_-0.3.0 (cloud conflicted copy).jar"));
         assertTrue(RuntimeChecker.check(fijiDir).isEmpty());
     }
 

@@ -9,6 +9,7 @@ import flash.pipeline.ui.FlashTheme;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import ij.IJ;
 import ij.ImagePlus;
+// Intentional on the Swing sandbox preview path only; do not use Duplicator from worker threads.
 import ij.plugin.Duplicator;
 
 import javax.swing.BorderFactory;

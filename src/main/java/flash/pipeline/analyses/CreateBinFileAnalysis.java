@@ -92,6 +92,7 @@ import ij.WindowManager;
 import ij.gui.GenericDialog;
 import ij.gui.NonBlockingGenericDialog;
 import ij.gui.WaitForUserDialog;
+// Intentional on interactive QC paths only; worker code must use ImageOps because Duplicator is not thread-safe.
 import ij.plugin.Duplicator;
 import ij.plugin.ZProjector;
 import ij.process.ImageProcessor;

@@ -11,7 +11,7 @@ public final class IoUtils {
     /**
      * Create {@code f} as a directory (and any missing parents). Throws a clear
      * {@link IOException} if the path already exists as a file, or if creation
-     * fails for any reason (permissions, OneDrive/Dropbox conflict, long path,
+     * fails for any reason (permissions, cloud-sync conflict, long path,
      * reserved device name, etc.). Silently succeeds if the directory already
      * exists.
      */

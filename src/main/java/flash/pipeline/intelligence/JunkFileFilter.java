@@ -10,8 +10,8 @@ import java.util.regex.Pattern;
  * L-09 Cloud-Placeholder & Junk Sweep.
  *
  * Recognises filenames that should never enter a file scan: OS junk,
- * Office lockfiles, macOS resource forks, Dropbox conflicted copies.
- * Also recognises cloud-only placeholder files (OneDrive / Dropbox "online-only")
+ * Office lockfiles, macOS resource forks, and cloud-sync conflicted copies.
+ * Also recognises cloud-only placeholder files from sync providers
  * by DOS file attributes on Windows.
  *
  * Silent guard: the plugin never reports these, they just disappear from the list.
@@ -78,7 +78,7 @@ public final class JunkFileFilter {
     }
 
     /**
-     * Best-effort detection of OneDrive / Dropbox "online only" placeholders on Windows.
+     * Best-effort detection of cloud-sync "online only" placeholders on Windows.
      * These files report System+Archive DOS attributes; opening them triggers a
      * blocking cloud fetch that can hang a scan.
      *
