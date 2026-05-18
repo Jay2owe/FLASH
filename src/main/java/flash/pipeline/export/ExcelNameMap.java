@@ -19,6 +19,12 @@ public final class ExcelNameMap {
     private static final double COLOC_THRESHOLD = 30.0;
     private static final Pattern TEXTURE_CLASS_FRACTION_RE = Pattern.compile(
             "^(.+)_MorphTexture_(Class3DLabel|ClassLabel)_Fraction_(\\d+)$");
+    private static final Pattern ROI_INTENSITY_RE = Pattern.compile("^(.+)_ROI_(Intensity_.+)Mean$");
+    private static final Pattern ROI_PAIR_RE = Pattern.compile("^(.+)_ROI_(.+_.+_.+)Mean$");
+    private static final Pattern EXCEL_FORBIDDEN_SHEET_CHARS = Pattern.compile("[\\[\\]:*?/\\\\]");
+    private static final Pattern LOWER_TO_UPPER = Pattern.compile("([a-z])([A-Z])");
+    private static final Pattern LETTER_TO_DIGIT = Pattern.compile("([A-Za-z])([0-9])");
+    private static final Pattern DIGIT_TO_LETTER = Pattern.compile("([0-9])([A-Za-z])");
 
     private static final String OBJ_COUNTER =
             "Using 3D Object Counter, confocal image stacks were segmented "
@@ -405,7 +411,7 @@ public final class ExcelNameMap {
                 } catch (IllegalArgumentException ignored) {}
             }
         }
-        Matcher intensity = Pattern.compile("^(.+)_ROI_(Intensity_.+)Mean$").matcher(matchName);
+        Matcher intensity = ROI_INTENSITY_RE.matcher(matchName);
         if (intensity.matches()) {
             return intensity.group(1);
         }
@@ -413,7 +419,7 @@ public final class ExcelNameMap {
         if (textureClassFraction.matches()) {
             return textureClassFraction.group(1);
         }
-        Matcher pair = Pattern.compile("^(.+)_ROI_(.+_.+_.+)Mean$").matcher(matchName);
+        Matcher pair = ROI_PAIR_RE.matcher(matchName);
         if (pair.matches()) {
             return pair.group(1);
         }
@@ -439,7 +445,7 @@ public final class ExcelNameMap {
     }
 
     private static String[] convertDynamicIntensity(String colName) {
-        Matcher sameChannel = Pattern.compile("^(.+)_ROI_(Intensity_.+)Mean$").matcher(colName);
+        Matcher sameChannel = ROI_INTENSITY_RE.matcher(colName);
         if (sameChannel.matches()) {
             String marker = sameChannel.group(1);
             String metric = humanizeIntensityMetric(sameChannel.group(2));
@@ -450,7 +456,7 @@ public final class ExcelNameMap {
             };
         }
 
-        Matcher pair = Pattern.compile("^(.+)_ROI_(.+_.+_.+)Mean$").matcher(colName);
+        Matcher pair = ROI_PAIR_RE.matcher(colName);
         if (pair.matches()) {
             String marker = pair.group(1);
             String metric = pair.group(2);
@@ -483,11 +489,11 @@ public final class ExcelNameMap {
     }
 
     private static String splitCamelAndUnderscore(String text) {
-        String spaced = text.replace('_', ' ')
-                .replaceAll("([a-z])([A-Z])", "$1 $2")
-                .replaceAll("([A-Za-z])([0-9])", "$1 $2")
-                .replaceAll("([0-9])([A-Za-z])", "$1 $2")
-                .trim();
+        String spaced = text.replace('_', ' ');
+        spaced = LOWER_TO_UPPER.matcher(spaced).replaceAll("$1 $2");
+        spaced = LETTER_TO_DIGIT.matcher(spaced).replaceAll("$1 $2");
+        spaced = DIGIT_TO_LETTER.matcher(spaced).replaceAll("$1 $2");
+        spaced = spaced.trim();
         return spaced.isEmpty() ? "Intensity Metric" : spaced;
     }
 
@@ -503,7 +509,7 @@ public final class ExcelNameMap {
      * truncate to 31 chars, and ensure uniqueness.
      */
     public static String safeSheetName(String name, java.util.Set<String> used) {
-        String base = name.replaceAll("[\\[\\]:*?/\\\\]", "-").trim();
+        String base = EXCEL_FORBIDDEN_SHEET_CHARS.matcher(name).replaceAll("-").trim();
         if (base.length() > EXCEL_MAX_SHEET) {
             base = base.substring(0, EXCEL_MAX_SHEET);
         }
