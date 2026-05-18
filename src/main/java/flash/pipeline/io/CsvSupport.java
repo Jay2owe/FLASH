@@ -126,7 +126,7 @@ public final class CsvSupport {
     }
 
     public static String escapeField(String value) {
-        String text = value == null ? "" : value;
+        String text = spreadsheetSafeFieldValue(value);
         boolean needsQuotes = text.indexOf(',') >= 0
                 || text.indexOf('"') >= 0
                 || text.indexOf('\n') >= 0
@@ -143,6 +143,17 @@ public final class CsvSupport {
             sb.append(escapeField(values.get(i)));
         }
         return sb.toString();
+    }
+
+    public static String spreadsheetSafeFieldValue(String value) {
+        String text = value == null ? "" : value;
+        if (text.isEmpty()) return text;
+        char first = text.charAt(0);
+        if (first == '=' || first == '+' || first == '-' || first == '@'
+                || first == '\t' || first == '\r' || first == '\n') {
+            return "'" + text;
+        }
+        return text;
     }
 
     private static boolean startsOrEndsWithWhitespace(String text) {

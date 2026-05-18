@@ -57,6 +57,26 @@ public class CsvSupportTest {
     }
 
     @Test
+    public void joinRow_escapesSpreadsheetFormulaPrefixes() throws Exception {
+        String joined = CsvSupport.joinRow(Arrays.asList(
+                "=cmd",
+                "+cmd",
+                "-cmd",
+                "@cmd",
+                "\tcmd",
+                "safe"));
+
+        assertArrayEquals(new String[]{
+                "'=cmd",
+                "'+cmd",
+                "'-cmd",
+                "'@cmd",
+                "'\tcmd",
+                "safe"
+        }, CsvSupport.parseRecord(joined));
+    }
+
+    @Test
     public void parseRecord_rejectsMalformedQuoteSequences() {
         try {
             CsvSupport.parseRecord("\"bad\"quote");
