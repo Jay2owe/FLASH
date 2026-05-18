@@ -27,6 +27,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -58,6 +59,7 @@ public class StarDist3DRunner {
     public static final String STATS_QUALITY_MEAN = "StarDist Quality Mean";
     public static final String STATS_INTENSITY_MEAN = "StarDist Intensity Mean";
     public static final String DEFAULT_STARDIST_MODEL_KEY = SegmentationMethod.DEFAULT_STARDIST_MODEL_KEY;
+    private static final int MAX_BITSET_LABEL = 10_000_000;
     private static final String DEFAULT_STARDIST_MODEL_RESOURCE = "models/2D/dsb2018_heavy_augment.zip";
 
     interface WarningSink {
@@ -649,17 +651,25 @@ public class StarDist3DRunner {
      */
     public static int countLabels(ImagePlus labelImage) {
         if (labelImage == null || labelImage.getStack() == null) return 0;
-        Set<Integer> labels = new HashSet<Integer>();
+        BitSet labels = new BitSet();
+        Set<Integer> highLabels = null;
         int nSlices = labelImage.getStackSize();
         for (int s = 1; s <= nSlices; s++) {
             ImageProcessor ip = labelImage.getStack().getProcessor(s);
             if (ip == null) continue;
             for (int i = 0; i < ip.getPixelCount(); i++) {
                 int label = labelFromPixel(ip.getf(i));
-                if (label > 0) labels.add(Integer.valueOf(label));
+                if (label > 0) {
+                    if (label <= MAX_BITSET_LABEL) {
+                        labels.set(label);
+                    } else {
+                        if (highLabels == null) highLabels = new HashSet<Integer>();
+                        highLabels.add(Integer.valueOf(label));
+                    }
+                }
             }
         }
-        return labels.size();
+        return labels.cardinality() + (highLabels == null ? 0 : highLabels.size());
     }
 
     private static ResultsTable buildObjectStats(Model model) {
@@ -699,7 +709,9 @@ public class StarDist3DRunner {
                                          double qualityMin,
                                          double intensityMin) {
         if (labelImage == null || objectStats == null || objectStats.size() == 0) return 0;
-        Set<Integer> labelsToRemove = new HashSet<Integer>();
+        BitSet labelsToRemove = new BitSet();
+        Set<Integer> highLabelsToRemove = null;
+        int removedLabels = 0;
         for (int row = 0; row < objectStats.size(); row++) {
             int label = labelForRow(objectStats, row);
             if (label <= 0) continue;
@@ -717,22 +729,41 @@ public class StarDist3DRunner {
             if (!remove && intensityMin > 0 && Double.isFinite(intensity)) {
                 remove = intensity < intensityMin;
             }
-            if (remove) labelsToRemove.add(Integer.valueOf(label));
+            if (remove) {
+                if (label <= MAX_BITSET_LABEL) {
+                    if (!labelsToRemove.get(label)) {
+                        labelsToRemove.set(label);
+                        removedLabels++;
+                    }
+                } else {
+                    if (highLabelsToRemove == null) highLabelsToRemove = new HashSet<Integer>();
+                    if (highLabelsToRemove.add(Integer.valueOf(label))) {
+                        removedLabels++;
+                    }
+                }
+            }
         }
-        if (labelsToRemove.isEmpty() || labelImage.getStack() == null) return 0;
+        if (removedLabels == 0 || labelImage.getStack() == null) return 0;
         ImageStack stack = labelImage.getStack();
         for (int slice = 1; slice <= stack.getSize(); slice++) {
             ImageProcessor processor = stack.getProcessor(slice);
             if (processor == null) continue;
             for (int i = 0; i < processor.getPixelCount(); i++) {
                 int label = labelFromPixel(processor.getf(i));
-                if (label > 0 && labelsToRemove.contains(Integer.valueOf(label))) {
+                if (label > 0 && shouldRemoveLabel(label, labelsToRemove, highLabelsToRemove)) {
                     processor.setf(i, 0f);
                 }
             }
         }
         labelImage.updateAndDraw();
-        return labelsToRemove.size();
+        return removedLabels;
+    }
+
+    private static boolean shouldRemoveLabel(int label, BitSet labelsToRemove, Set<Integer> highLabelsToRemove) {
+        if (label <= MAX_BITSET_LABEL) {
+            return labelsToRemove.get(label);
+        }
+        return highLabelsToRemove != null && highLabelsToRemove.contains(Integer.valueOf(label));
     }
 
     private static int labelForRow(ResultsTable table, int row) {
