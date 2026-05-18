@@ -1,5 +1,7 @@
 package flash.pipeline.click.training.stardist;
 
+import flash.pipeline.segmentation.StarDistModelZipValidator;
+
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.IOException;
@@ -12,15 +14,12 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Deque;
-import java.util.Enumeration;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipFile;
 
 /**
  * Hidden local StarDist 2D training runner for datasets exported by FLASH.
@@ -194,116 +193,13 @@ public final class StarDistLocalTrainingService {
         if (!name.toLowerCase(Locale.ROOT).endsWith(".zip")) {
             throw new IOException("StarDist model output must be a .zip file: " + file);
         }
-        StarDistZipScan scan;
-        try (ZipFile zip = new ZipFile(file.toFile())) {
-            scan = scanStarDistZip(zip);
-        } catch (IOException e) {
-            throw new IOException("StarDist model zip could not be read: "
-                    + file + ": " + e.getMessage(), e);
-        }
-        if (!scan.hasFileEntry) {
-            throw new IOException("StarDist model zip is empty: " + file);
-        }
-        if (scan.marker == null) {
-            throw new IOException("Not a StarDist / CSBDeep SavedModel: missing saved_model.pb "
+        try {
+            StarDistModelZipValidator.validate(file,
+                    "Not a StarDist / CSBDeep SavedModel: missing saved_model.pb "
                     + "(or config.json + thresholds.json): " + file);
+        } catch (IOException e) {
+            throw new IOException(e.getMessage() + ": " + file, e);
         }
-    }
-
-    private static StarDistZipScan scanStarDistZip(ZipFile zip) {
-        boolean hasFileEntry = false;
-        boolean hasTopLevelSavedModel = false;
-        boolean hasSingleDirectorySavedModel = false;
-        boolean hasModelTfSavedModel = false;
-        Set<String> configParents = new HashSet<String>();
-        Set<String> thresholdsParents = new HashSet<String>();
-
-        Enumeration<? extends ZipEntry> entries = zip.entries();
-        while (entries.hasMoreElements()) {
-            ZipEntry entry = entries.nextElement();
-            if (entry.isDirectory()) {
-                continue;
-            }
-            String entryName = normalizedZipEntryName(entry.getName());
-            if (entryName.isEmpty()) {
-                continue;
-            }
-            hasFileEntry = true;
-            if ("saved_model.pb".equals(entryName)) {
-                hasTopLevelSavedModel = true;
-            }
-            if (isSingleDirectorySavedModel(entryName)) {
-                hasSingleDirectorySavedModel = true;
-            }
-            if (isModelTfSavedModel(entryName)) {
-                hasModelTfSavedModel = true;
-            }
-            String fileName = zipFileName(entryName);
-            String parent = zipParent(entryName);
-            if ("config.json".equals(fileName)) {
-                configParents.add(parent);
-            } else if ("thresholds.json".equals(fileName)) {
-                thresholdsParents.add(parent);
-            }
-        }
-
-        String marker = null;
-        if (hasTopLevelSavedModel) {
-            marker = "top-level saved_model.pb";
-        } else if (hasModelTfSavedModel) {
-            marker = "model.tf SavedModel layout";
-        } else if (hasSingleDirectorySavedModel) {
-            marker = "single-directory saved_model.pb";
-        } else if (hasMatchingCsbDeepMetadata(configParents, thresholdsParents)) {
-            marker = "CSBDeep config.json + thresholds.json";
-        }
-        return new StarDistZipScan(hasFileEntry, marker);
-    }
-
-    private static String normalizedZipEntryName(String rawName) {
-        String name = rawName == null ? "" : rawName.replace('\\', '/').trim();
-        while (name.startsWith("/")) {
-            name = name.substring(1);
-        }
-        while (name.startsWith("./")) {
-            name = name.substring(2);
-        }
-        while (name.indexOf("//") >= 0) {
-            name = name.replace("//", "/");
-        }
-        return name;
-    }
-
-    private static boolean isSingleDirectorySavedModel(String name) {
-        int firstSlash = name.indexOf('/');
-        return firstSlash > 0
-                && firstSlash == name.lastIndexOf('/')
-                && name.endsWith("/saved_model.pb");
-    }
-
-    private static boolean isModelTfSavedModel(String name) {
-        return "model.tf/saved_model.pb".equals(name)
-                || name.endsWith("/model.tf/saved_model.pb");
-    }
-
-    private static boolean hasMatchingCsbDeepMetadata(Set<String> configParents,
-                                                      Set<String> thresholdsParents) {
-        for (String parent : configParents) {
-            if (thresholdsParents.contains(parent)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static String zipParent(String name) {
-        int slash = name.lastIndexOf('/');
-        return slash < 0 ? "" : name.substring(0, slash);
-    }
-
-    private static String zipFileName(String name) {
-        int slash = name.lastIndexOf('/');
-        return slash < 0 ? name : name.substring(slash + 1);
     }
 
     public static TrainingArtifacts prepareTrainingArtifacts(Path datasetDir,
@@ -859,16 +755,6 @@ public final class StarDistLocalTrainingService {
             if (parsed != null) {
                 progress.update(0.05 + (0.90 * parsed.fraction), parsed.message);
             }
-        }
-    }
-
-    private static final class StarDistZipScan {
-        final boolean hasFileEntry;
-        final String marker;
-
-        StarDistZipScan(boolean hasFileEntry, String marker) {
-            this.hasFileEntry = hasFileEntry;
-            this.marker = marker;
         }
     }
 

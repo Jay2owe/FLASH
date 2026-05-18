@@ -99,6 +99,21 @@ public class SegmentationModelImportValidationTest {
     }
 
     @Test
+    public void rejectsZipWithTraversalEntry() throws Exception {
+        Path root = temp.newFolder("stardist-traversal").toPath();
+        Path source = zip(root.resolve("imports").resolve("traversal.zip"),
+                "../saved_model.pb");
+        SegmentationModelManagerController controller = new SegmentationModelManagerController(root);
+
+        try {
+            controller.addStarDistModel(source, "Traversal", null, null);
+            fail("Expected unsafe zip entry to fail.");
+        } catch (Exception expected) {
+            assertTrue(expected.getMessage().contains("unsafe entry path"));
+        }
+    }
+
+    @Test
     public void starDistNonZipRejected() throws Exception {
         Path root = temp.newFolder("stardist-nonzip").toPath();
         Path source = root.resolve("imports").resolve("model.txt");
