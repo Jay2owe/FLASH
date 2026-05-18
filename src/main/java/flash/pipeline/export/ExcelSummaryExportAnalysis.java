@@ -22,6 +22,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -643,6 +645,12 @@ public class ExcelSummaryExportAnalysis implements Analysis {
         });
 
         if (txtFiles == null) return;
+        Arrays.sort(txtFiles, new Comparator<File>() {
+            @Override
+            public int compare(File a, File b) {
+                return String.CASE_INSENSITIVE_ORDER.compare(a.getName(), b.getName());
+            }
+        });
 
         for (File txt : txtFiles) {
             String safeName = txt.getName();

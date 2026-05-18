@@ -207,7 +207,7 @@ public final class VariationCache {
             byte[] bytes = digest.digest(value.getBytes(StandardCharsets.UTF_8));
             StringBuilder out = new StringBuilder(bytes.length * 2);
             for (int i = 0; i < bytes.length; i++) {
-                out.append(String.format("%02x", Integer.valueOf(bytes[i] & 0xff)));
+                out.append(String.format(java.util.Locale.ROOT, "%02x", Integer.valueOf(bytes[i] & 0xff)));
             }
             return out.toString();
         } catch (NoSuchAlgorithmException e) {

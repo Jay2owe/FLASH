@@ -182,7 +182,7 @@ public class DapiDiagnosticTest {
             byte[] digest = MessageDigest.getInstance("SHA-1").digest(data);
             StringBuilder sb = new StringBuilder(digest.length * 2);
             for (int i = 0; i < digest.length; i++) {
-                sb.append(String.format("%02x", Integer.valueOf(digest[i] & 0xff)));
+                sb.append(String.format(java.util.Locale.ROOT, "%02x", Integer.valueOf(digest[i] & 0xff)));
             }
             return sb.toString();
         } catch (Exception e) {

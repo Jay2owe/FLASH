@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 public final class ConfigQcContext {
@@ -373,7 +374,7 @@ public final class ConfigQcContext {
             byte[] bytes = digest.digest(value.getBytes(StandardCharsets.UTF_8));
             StringBuilder sb = new StringBuilder(bytes.length * 2);
             for (int i = 0; i < bytes.length; i++) {
-                sb.append(String.format("%02x", Integer.valueOf(bytes[i] & 0xff)));
+                sb.append(String.format(Locale.ROOT, "%02x", Integer.valueOf(bytes[i] & 0xff)));
             }
             return sb.toString();
         } catch (NoSuchAlgorithmException e) {

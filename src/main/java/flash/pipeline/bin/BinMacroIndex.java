@@ -109,7 +109,13 @@ public final class BinMacroIndex {
                 return name != null && name.toLowerCase(Locale.ROOT).endsWith(".ijm");
             }
         });
-        return files == null ? new File[0] : files;
+        if (files == null) return new File[0];
+        java.util.Arrays.sort(files, new java.util.Comparator<File>() {
+            @Override public int compare(File left, File right) {
+                return String.CASE_INSENSITIVE_ORDER.compare(left.getName(), right.getName());
+            }
+        });
+        return files;
     }
 
     private static void addUniqueOption(List<String> options, String value) {

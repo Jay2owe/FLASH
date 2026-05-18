@@ -204,6 +204,12 @@ public class DeconvPresetIO {
 
             File[] files = dir.listFiles((parent, fileName) -> fileName != null && fileName.toLowerCase(Locale.ROOT).endsWith(".json"));
             if (files == null) continue;
+            Arrays.sort(files, new Comparator<File>() {
+                @Override
+                public int compare(File left, File right) {
+                    return left.getName().compareToIgnoreCase(right.getName());
+                }
+            });
 
             for (File file : files) {
                 String base = stripExtension(file.getName());

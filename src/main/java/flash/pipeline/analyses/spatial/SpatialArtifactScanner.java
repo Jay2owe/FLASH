@@ -391,6 +391,9 @@ public final class SpatialArtifactScanner {
             return new File[0];
         }
         File[] files = dir.listFiles();
+        if (files != null) {
+            java.util.Arrays.sort(files);
+        }
         return files == null ? new File[0] : files;
     }
 

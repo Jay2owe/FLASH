@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -106,7 +107,7 @@ public final class MiniJson {
                     break;
                 default:
                     if (ch < 0x20) {
-                        out.append(String.format("\\u%04x", (int) ch));
+                        out.append(String.format(Locale.ROOT, "\\u%04x", (int) ch));
                     } else {
                         out.append(ch);
                     }

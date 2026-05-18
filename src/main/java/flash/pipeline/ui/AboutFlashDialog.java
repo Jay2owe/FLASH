@@ -38,6 +38,7 @@ import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 
 /**
  * About FLASH dialog. Header brand mark (placeholder bolt icon) + workflow diagram
@@ -256,7 +257,7 @@ public final class AboutFlashDialog implements PlugIn {
                 while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
                 svgText = out.toString("UTF-8");
             }
-            String hex = String.format("#%02x%02x%02x", color.getRed(), color.getGreen(), color.getBlue());
+            String hex = String.format(Locale.ROOT, "#%02x%02x%02x", color.getRed(), color.getGreen(), color.getBlue());
             svgText = svgText
                     .replace("stroke=\"currentColor\"", "stroke=\"" + hex + "\"")
                     .replace("fill=\"currentColor\"", "fill=\"" + hex + "\"");

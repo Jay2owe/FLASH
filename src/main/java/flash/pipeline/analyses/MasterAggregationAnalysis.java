@@ -596,6 +596,12 @@ public class MasterAggregationAnalysis implements Analysis {
             IJ.log("No ROI Properties CSV found in Attributes — volume normalization will be skipped.");
             return result;
         }
+        Arrays.sort(csvFiles, new Comparator<File>() {
+            @Override
+            public int compare(File a, File b) {
+                return String.CASE_INSENSITIVE_ORDER.compare(a.getName(), b.getName());
+            }
+        });
 
         // Use the first matching file
         File roiFile = selectedRoiFile != null ? selectedRoiFile : csvFiles[0];
@@ -957,6 +963,12 @@ public class MasterAggregationAnalysis implements Analysis {
                 }
             });
             if (csvFiles != null && csvFiles.length > 0) {
+                Arrays.sort(csvFiles, new Comparator<File>() {
+                    @Override
+                    public int compare(File a, File b) {
+                        return String.CASE_INSENSITIVE_ORDER.compare(a.getName(), b.getName());
+                    }
+                });
                 result = countUniqueSCNs(selectedRoiFile != null ? selectedRoiFile : csvFiles[0]);
                 if (!result.isEmpty()) return result;
             }

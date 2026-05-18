@@ -16,6 +16,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -99,7 +100,7 @@ public final class FlashIcons {
             java.net.URL url = FlashIcons.class.getResource("/flash/icons/bolt.svg");
             if (url == null) return null;
             String svgText = readAll(url);
-            String hex = String.format("#%02x%02x%02x",
+            String hex = String.format(Locale.ROOT, "#%02x%02x%02x",
                     FlashTheme.WARNING_BORDER.getRed(),
                     FlashTheme.WARNING_BORDER.getGreen(),
                     FlashTheme.WARNING_BORDER.getBlue());
@@ -143,7 +144,7 @@ public final class FlashIcons {
         if (url == null) return null;
         try {
             String svgText = readAll(url);
-            String hex = String.format("#%02x%02x%02x", color.getRed(), color.getGreen(), color.getBlue());
+            String hex = String.format(Locale.ROOT, "#%02x%02x%02x", color.getRed(), color.getGreen(), color.getBlue());
             svgText = svgText
                     .replace("stroke=\"currentColor\"", "stroke=\"" + hex + "\"")
                     .replace("fill=\"currentColor\"", "fill=\"" + hex + "\"");

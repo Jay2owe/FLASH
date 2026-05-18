@@ -201,6 +201,12 @@ public abstract class PresetIO<T extends Preset<?>> {
             if (files == null) {
                 continue;
             }
+            Arrays.sort(files, new Comparator<File>() {
+                @Override
+                public int compare(File left, File right) {
+                    return left.getName().compareToIgnoreCase(right.getName());
+                }
+            });
             for (File file : files) {
                 if (!isPresetFileInsideDirectory(file, dir)) {
                     continue;

@@ -24,6 +24,8 @@ import java.io.File;
 import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -382,7 +384,34 @@ public class QualityReport {
     public boolean isVerboseLogging() { return verboseLogging; }
     public String getOverwriteBehavior() { return overwriteBehavior; }
     public List<AnalysisSection> getSections() { return sections; }
-    public Map<String, List<ChannelQC>> getImageQcData() { return imageQcData; }
+    public Map<String, List<ChannelQC>> getImageQcData() {
+        List<Map.Entry<String, List<ChannelQC>>> entries =
+                new ArrayList<Map.Entry<String, List<ChannelQC>>>(imageQcData.entrySet());
+        Collections.sort(entries, new Comparator<Map.Entry<String, List<ChannelQC>>>() {
+            @Override
+            public int compare(Map.Entry<String, List<ChannelQC>> a,
+                               Map.Entry<String, List<ChannelQC>> b) {
+                return String.CASE_INSENSITIVE_ORDER.compare(safeOrderKey(a.getKey()), safeOrderKey(b.getKey()));
+            }
+        });
+        LinkedHashMap<String, List<ChannelQC>> ordered =
+                new LinkedHashMap<String, List<ChannelQC>>();
+        for (Map.Entry<String, List<ChannelQC>> entry : entries) {
+            List<ChannelQC> channels = new ArrayList<ChannelQC>(entry.getValue());
+            Collections.sort(channels, new Comparator<ChannelQC>() {
+                @Override
+                public int compare(ChannelQC a, ChannelQC b) {
+                    return String.CASE_INSENSITIVE_ORDER.compare(safeOrderKey(a.channelName), safeOrderKey(b.channelName));
+                }
+            });
+            ordered.put(entry.getKey(), channels);
+        }
+        return ordered;
+    }
+
+    private static String safeOrderKey(String value) {
+        return value == null ? "" : value;
+    }
     public int getSkippedChannelQcRecords() { return skippedChannelQcRecords; }
     public List<SpectralPreviewQC> getSpectralPreviewData() { return spectralPreviewData; }
 
