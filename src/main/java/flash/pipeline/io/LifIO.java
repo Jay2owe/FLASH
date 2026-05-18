@@ -6,6 +6,7 @@ import ij.ImagePlus;
 import flash.pipeline.intelligence.JunkFileFilter;
 
 import java.io.File;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -42,7 +43,8 @@ public class LifIO {
         File[] candidates = JunkFileFilter.listCleanFiles(dir);
         List<File> sorted = new ArrayList<File>();
         for (File candidate : candidates) {
-            if (candidate.getName().toLowerCase(Locale.ROOT).endsWith(".lif")) {
+            if (candidate.getName().toLowerCase(Locale.ROOT).endsWith(".lif")
+                    && !Files.isSymbolicLink(candidate.toPath())) {
                 sorted.add(candidate);
             }
         }

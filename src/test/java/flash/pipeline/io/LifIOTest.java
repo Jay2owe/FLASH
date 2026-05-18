@@ -5,6 +5,8 @@ import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
 import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
@@ -81,6 +83,22 @@ public class LifIOTest {
 
         List<File> result = LifIO.listLifFiles(dir.getAbsolutePath());
         assertEquals(3, result.size());
+    }
+
+    @Test
+    public void listLifFiles_ignoresSymlinkedLifFiles() throws Exception {
+        File dir = temp.newFolder("symlink-lif");
+        File outside = temp.newFile("outside.lif");
+        Path link = new File(dir, "linked.lif").toPath();
+        try {
+            Files.createSymbolicLink(link, outside.toPath());
+        } catch (UnsupportedOperationException | SecurityException | java.io.IOException e) {
+            return;
+        }
+
+        List<File> result = LifIO.listLifFiles(dir.getAbsolutePath());
+
+        assertTrue(result.isEmpty());
     }
 
     @Test
