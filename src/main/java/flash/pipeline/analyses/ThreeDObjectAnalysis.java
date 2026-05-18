@@ -4045,7 +4045,7 @@ public class ThreeDObjectAnalysis implements Analysis {
         } catch (Throwable t) {
             String errMsg = t.getClass().getName() + ": " + t.getMessage();
             IJ.log("    - [Ch " + (c + 1) + "] ERROR during filter phase for channel '"
-                    + channelName + "', image='" + imp.getTitle()
+                    + channelName + "', image='" + ch.getTitle()
                     + "', segmentation='" + (segmentationMethod == null
                     ? "<unset>" : SegmentationTokenParser.format(segmentationMethod))
                     + "': " + errMsg);

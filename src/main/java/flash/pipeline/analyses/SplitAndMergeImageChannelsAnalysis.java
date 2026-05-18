@@ -828,7 +828,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                             String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
                             RuntimeException contextual = new RuntimeException(
                                     "Split/Merge failed for image " + (idx + 1) + "/" + scheduled
-                                            + " title='" + imgTitle + "' label='" + partLabel + "': " + msg,
+                                            + " title='" + imp.getTitle() + "': " + msg,
                                     e);
                             failures.add(contextual);
                             IJ.log("[" + (idx + 1) + "/" + scheduled + "] ERROR: "
