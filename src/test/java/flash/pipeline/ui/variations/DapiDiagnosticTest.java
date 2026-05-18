@@ -186,7 +186,7 @@ public class DapiDiagnosticTest {
             }
             return sb.toString();
         } catch (Exception e) {
-            throw new RuntimeException(e);
+            throw new RuntimeException("Failed to compute SHA-1 for synthetic DAPI diagnostic pixels", e);
         }
     }
 

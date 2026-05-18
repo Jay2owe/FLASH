@@ -234,7 +234,8 @@ public class FilterExecutorSandboxTest {
             Throwable cause = e.getCause();
             if (cause instanceof RuntimeException) throw (RuntimeException) cause;
             if (cause instanceof Error) throw (Error) cause;
-            throw new RuntimeException(cause);
+            throw new RuntimeException("FilterExecutor sandbox invocation failed for image '"
+                    + (imp == null ? "<null>" : imp.getTitle()) + "'", cause);
         }
     }
 

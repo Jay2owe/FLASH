@@ -371,7 +371,7 @@ public class RecorderDialogAsyncSampleTest {
                     Recorder.record = false;
                     Recorder.recordInMacros = false;
                 } catch (Exception e) {
-                    throw new RuntimeException(e);
+                    throw new RuntimeException("Failed to reset ImageJ recorder text for async sample test", e);
                 }
             }
         });

@@ -93,7 +93,7 @@ public class PsfCacheTest {
                     }
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
-                    throw new RuntimeException(e);
+                    throw new RuntimeException("Interrupted while waiting to release PSF cache synthesizer", e);
                 }
                 return imageWithValue("shared", 3.0);
             }
