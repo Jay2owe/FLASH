@@ -844,7 +844,7 @@ public final class StarDistParameterStage implements ConfigQcStage {
     }
 
     private static void highlightDefaultField(JTextField field) {
-        if (field != null) field.setBackground(new Color(255, 246, 170));
+        if (field != null) field.setBackground(FlashTheme.FIELD_ATTENTION_BG);
     }
 
     private static void resetDefaultField(JTextField field) {

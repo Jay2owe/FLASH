@@ -2,6 +2,7 @@ package flash.pipeline.ui.wizard;
 
 import ij.IJ;
 import flash.pipeline.io.ConditionManifestIO;
+import flash.pipeline.ui.FlashTheme;
 
 import javax.swing.BorderFactory;
 import javax.swing.JComponent;
@@ -13,7 +14,6 @@ import javax.swing.JTable;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
 import java.awt.BorderLayout;
-import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.util.LinkedHashMap;
@@ -33,7 +33,7 @@ import java.util.Set;
  */
 public final class ConditionManifestPanel {
 
-    private static final Color UNASSIGNED_BG = new Color(255, 230, 230);
+    private static final java.awt.Color UNASSIGNED_BG = FlashTheme.TABLE_REQUIRED_BG;
 
     private final DefaultTableModel model;
     private final JTable table;
@@ -161,7 +161,7 @@ public final class ConditionManifestPanel {
             Object condValue = table.getModel().getValueAt(row, 1);
             boolean unassigned = condValue == null || condValue.toString().trim().isEmpty();
             if (!isSelected) {
-                c.setBackground(unassigned ? UNASSIGNED_BG : Color.WHITE);
+                c.setBackground(unassigned ? UNASSIGNED_BG : table.getBackground());
             }
             return c;
         }

@@ -40,6 +40,9 @@ public final class FlashTheme {
     public static final Color WARNING_FG = new Color(90, 60, 0);
     public static final Color WARNING_BORDER = new Color(220, 200, 130);
 
+    public static final Color FIELD_ATTENTION_BG = new Color(255, 246, 170);
+    public static final Color TABLE_REQUIRED_BG = DANGER_BG;
+
     public static final Color SUCCESS_FG = new Color(40, 110, 70);
     public static final Color LINK_FG = new Color(50, 110, 200);
 

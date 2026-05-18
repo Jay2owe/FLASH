@@ -5,6 +5,7 @@ import flash.pipeline.image.NamedFilterLoader;
 import flash.pipeline.image.dag.DagIR;
 import flash.pipeline.image.dag.DagToIjmEmitter;
 import flash.pipeline.image.dag.IjmToDagLoader;
+import flash.pipeline.ui.FlashTheme;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import ij.IJ;
 import ij.ImagePlus;
@@ -19,7 +20,6 @@ import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
 import javax.swing.SwingUtilities;
 import java.awt.BorderLayout;
-import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
@@ -156,7 +156,7 @@ public final class FilterBuilderPanel extends JPanel {
         });
 
         legacyBanner.setOpaque(true);
-        legacyBanner.setBackground(new Color(255, 244, 204));
+        legacyBanner.setBackground(FlashTheme.WARNING_BG);
         legacyBanner.setBorder(BorderFactory.createEmptyBorder(6, 10, 6, 10));
         legacyBanner.setVisible(false);
 
@@ -429,9 +429,9 @@ public final class FilterBuilderPanel extends JPanel {
 
         JLabel intro = new JLabel("Pick a step from 'Available steps' on the right, then click '+ Add step' on the branch you want it on.");
         intro.setOpaque(true);
-        intro.setBackground(new Color(232, 244, 252));
+        intro.setBackground(FlashTheme.INFO_BG);
         intro.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(180, 200, 220)),
+                BorderFactory.createMatteBorder(0, 0, 1, 0, FlashTheme.INFO_BORDER),
                 BorderFactory.createEmptyBorder(6, 10, 6, 10)));
 
         JPanel left = new JPanel(new BorderLayout(0, 4));
