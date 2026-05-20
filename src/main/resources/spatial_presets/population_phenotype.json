@@ -1,0 +1,21 @@
+{
+  "name": "Population phenotype scoring",
+  "description": "Population-scale morphometric scoring with clustering enabled.",
+  "libraryVersion": "1",
+  "doDistances": false,
+  "doSpatialStats": false,
+  "doVolColoc": false,
+  "doCpc": false,
+  "doVoronoi": false,
+  "doHeatmaps": true,
+  "doPhenotyping": true,
+  "do2DMorphology": false,
+  "do3DMorphology": true,
+  "doCompositeIndices": true,
+  "doPopMorphometrics": true,
+  "doSpatialMorphometrics": false,
+  "kdeBandwidth": 0,
+  "heatmapLut": "Fire",
+  "clusterK": 0,
+  "colocThresholdPercent": 30
+}

@@ -1,0 +1,13 @@
+{
+  "name": "Count + Coloc Loose",
+  "description": "Count objects and use loose colocalization for partial overlap.",
+  "libraryVersion": "1",
+  "doVolumetric": true,
+  "doCpc": true,
+  "extractProcessLength": false,
+  "runSpatial": false,
+  "classicalCentroidFiltering": true,
+  "colocThresholdPercent": 10,
+  "processMarkerHints": [],
+  "nuclearMarkerHints": ["nuclei", "dapi", "hoechst"]
+}

@@ -1,0 +1,9 @@
+{
+  "name": "Multi-group Tukey HSD",
+  "description": "Three or more parametric groups with Tukey's honestly significant difference post-hoc. Less conservative than Bonferroni for normally distributed data.",
+  "libraryVersion": "1",
+  "pairedMode": "OFF",
+  "distributionMode": "ASSUME_NORMAL",
+  "postHocMethod": "TUKEY",
+  "metricFilter": null
+}

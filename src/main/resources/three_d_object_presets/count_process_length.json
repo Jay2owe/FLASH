@@ -1,0 +1,13 @@
+{
+  "name": "Count + Process Length",
+  "description": "Count objects and extract process length from process-like channels.",
+  "libraryVersion": "1",
+  "doVolumetric": false,
+  "doCpc": false,
+  "extractProcessLength": true,
+  "runSpatial": false,
+  "classicalCentroidFiltering": true,
+  "colocThresholdPercent": 30,
+  "processMarkerHints": ["microglia", "iba1", "p2ry12", "tmem119"],
+  "nuclearMarkerHints": ["nuclei", "dapi", "hoechst"]
+}

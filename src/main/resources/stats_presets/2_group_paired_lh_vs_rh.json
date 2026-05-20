@@ -1,0 +1,9 @@
+{
+  "name": "2-group paired LH vs RH",
+  "description": "Paired hemisphere comparison. Requires per-hemisphere aggregation. Uses paired t / Wilcoxon signed-rank.",
+  "libraryVersion": "1",
+  "pairedMode": "HEMISPHERE",
+  "distributionMode": "AUTO",
+  "postHocMethod": "BONFERRONI",
+  "metricFilter": null
+}

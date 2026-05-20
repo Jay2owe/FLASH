@@ -1,0 +1,7 @@
+{
+  "name": "Per-animal standard (raw + per-mm3)",
+  "description": "One row per animal; emit both raw totals and per-mm^3 companions.",
+  "libraryVersion": "1",
+  "granularity": "animal",
+  "output": "both"
+}

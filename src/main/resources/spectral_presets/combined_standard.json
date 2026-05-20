@@ -1,0 +1,19 @@
+{
+  "name": "Combined correction (standard)",
+  "description": "Linear unmixing for combined bleed-through and autofluorescence.",
+  "libraryVersion": "1",
+  "contaminationType": "both",
+  "calibration": "manual",
+  "strength": "standard",
+  "goal": "create_cleaned_image",
+  "targetChannelIndex": 0,
+  "bleedThroughChannelIndexes": [],
+  "autofluorescenceChannelIndexes": [],
+  "excludedChannelIndexes": [],
+  "controlConditionNames": [],
+  "experimentalConditionNames": [],
+  "correctionPresetId": "basic",
+  "expertMode": false,
+  "correctionFeatureIds": ["saturation_exclusion", "linear_unmixing", "threshold_corrected_target", "size_filter"],
+  "featureSettings": {"size_filter": {"min_size_voxels": "50", "max_size_voxels": "0"}}
+}

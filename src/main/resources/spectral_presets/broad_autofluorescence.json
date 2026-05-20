@@ -1,0 +1,19 @@
+{
+  "name": "Broad autofluorescence (global)",
+  "description": "Global autofluorescence ratio correction for broad tissue background.",
+  "libraryVersion": "1",
+  "contaminationType": "broad_af",
+  "calibration": "manual",
+  "strength": "standard",
+  "goal": "create_cleaned_mask",
+  "targetChannelIndex": 0,
+  "bleedThroughChannelIndexes": [],
+  "autofluorescenceChannelIndexes": [],
+  "excludedChannelIndexes": [],
+  "controlConditionNames": [],
+  "experimentalConditionNames": [],
+  "correctionPresetId": "autofluorescence",
+  "expertMode": false,
+  "correctionFeatureIds": ["saturation_exclusion", "global_ratio_correction", "threshold_corrected_target", "size_filter"],
+  "featureSettings": {"size_filter": {"min_size_voxels": "50", "max_size_voxels": "0"}}
+}

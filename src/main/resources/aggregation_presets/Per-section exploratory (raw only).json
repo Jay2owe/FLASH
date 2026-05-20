@@ -1,0 +1,7 @@
+{
+  "name": "Per-section exploratory (raw only)",
+  "description": "One row per (animal, section). Raw totals only; per-mm^3 is omitted for a pure exploratory view.",
+  "libraryVersion": "1",
+  "granularity": "section",
+  "output": "raw"
+}

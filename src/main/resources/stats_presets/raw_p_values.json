@@ -1,0 +1,9 @@
+{
+  "name": "Raw p-values (no correction)",
+  "description": "Skip multiple-comparisons correction and report raw pairwise p-values. Use only for exploratory analysis.",
+  "libraryVersion": "1",
+  "pairedMode": "OFF",
+  "distributionMode": "AUTO",
+  "postHocMethod": "NONE",
+  "metricFilter": null
+}

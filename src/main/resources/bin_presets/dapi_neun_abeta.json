@@ -1,0 +1,47 @@
+{
+  "name": "DAPI + NeuN + Abeta (amyloid cohort)",
+  "description": "Nuclear counterstain, neuronal nuclei, and amyloid plaque marker.",
+  "libraryVersion": "1",
+  "zSliceMode": "FULL",
+  "channels": [
+    {
+      "name": "DAPI",
+      "color": "Blue",
+      "objectThreshold": "5",
+      "particleSize": "20-5000",
+      "displayRange": "250-65535",
+      "intensityThreshold": "20",
+      "segmentationMethod": "classical",
+      "filterPreset": "Clustered Small",
+      "markerId": "nuclei_dapi",
+      "shape": "round",
+      "crowdingSensitive": true
+    },
+    {
+      "name": "NeuN",
+      "color": "Red",
+      "objectThreshold": "5",
+      "particleSize": "20-5000",
+      "displayRange": "100-65535",
+      "intensityThreshold": "10",
+      "segmentationMethod": "classical",
+      "filterPreset": "Clustered Small",
+      "markerId": "neurons_neun",
+      "shape": "round",
+      "crowdingSensitive": true
+    },
+    {
+      "name": "Abeta",
+      "color": "Red",
+      "objectThreshold": "10",
+      "particleSize": "500-250000",
+      "displayRange": "250-65535",
+      "intensityThreshold": "20",
+      "segmentationMethod": "classical",
+      "filterPreset": "Diffuse Object",
+      "markerId": "amyloid_abeta_pan",
+      "shape": "diffuse",
+      "crowdingSensitive": false
+    }
+  ]
+}

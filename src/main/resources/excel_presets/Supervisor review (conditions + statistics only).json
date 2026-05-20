@@ -1,0 +1,14 @@
+{
+  "name": "Supervisor review (conditions + statistics only)",
+  "description": "Trim per-metric sheets; keep significance-highlighted stats for a quick PI read-through.",
+  "libraryVersion": "1",
+  "includeExperimentalConditionsSheet": true,
+  "includeDataSummarySheet": false,
+  "includePerMetricSheets": false,
+  "includeStatisticsSheet": true,
+  "metricSheetDetail": "raw_values",
+  "includeMethodsAppendix": false,
+  "significanceHighlight": "yellow",
+  "headerStyle": "standard",
+  "significanceStars": true
+}

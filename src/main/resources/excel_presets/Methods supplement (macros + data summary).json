@@ -1,0 +1,14 @@
+{
+  "name": "Methods supplement (macros + data summary)",
+  "description": "Methods appendix on; data summary prominent. Suitable for the methods section of a manuscript.",
+  "libraryVersion": "1",
+  "includeExperimentalConditionsSheet": true,
+  "includeDataSummarySheet": true,
+  "includePerMetricSheets": false,
+  "includeStatisticsSheet": false,
+  "metricSheetDetail": "raw_values",
+  "includeMethodsAppendix": true,
+  "significanceHighlight": "off",
+  "headerStyle": "standard",
+  "significanceStars": false
+}

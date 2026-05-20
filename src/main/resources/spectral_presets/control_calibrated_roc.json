@@ -1,0 +1,19 @@
+{
+  "name": "Control-calibrated mask (ROC)",
+  "description": "Mask threshold calibrated against negative control images.",
+  "libraryVersion": "1",
+  "contaminationType": "broad_af",
+  "calibration": "roc",
+  "strength": "standard",
+  "goal": "create_cleaned_mask",
+  "targetChannelIndex": 0,
+  "bleedThroughChannelIndexes": [],
+  "autofluorescenceChannelIndexes": [],
+  "excludedChannelIndexes": [],
+  "controlConditionNames": [],
+  "experimentalConditionNames": [],
+  "correctionPresetId": "roc_threshold_search",
+  "expertMode": false,
+  "correctionFeatureIds": ["saturation_exclusion", "global_ratio_correction", "roc_threshold_search", "size_filter"],
+  "featureSettings": {"size_filter": {"min_size_voxels": "50", "max_size_voxels": "0"}}
+}

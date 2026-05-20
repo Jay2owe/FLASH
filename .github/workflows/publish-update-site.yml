@@ -1,0 +1,145 @@
+name: Publish ImageJ Update Site
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to build. Leave blank to use the current ref."
+        required: false
+        type: string
+      dry_run:
+        description: "Simulate the ImageJ update-site upload without publishing."
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: imagej-update-site
+  cancel-in-progress: false
+
+env:
+  UPDATE_SITE: FLASH
+  UPDATE_SITE_URL: https://sites.imagej.net/FLASH/
+
+jobs:
+  upload:
+    name: Build and Upload FLASH
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Build plugin JAR
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./mvnw
+          ./mvnw -B clean package -Denforcer.skip=true
+
+      - name: Select deployable JAR
+        id: jar
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t jars < <(find target -maxdepth 1 -type f \
+            -name 'FLASH-*.jar' \
+            ! -name '*-sources.jar' \
+            ! -name '*-tests.jar' \
+            ! -name 'original-*' \
+            | sort)
+
+          if [ "${#jars[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one deployable FLASH JAR in target/."
+            find target -maxdepth 1 -type f -name '*.jar' -print | sort
+            exit 1
+          fi
+
+          jar="${jars[0]}"
+          echo "path=$jar" >> "$GITHUB_OUTPUT"
+          echo "name=$(basename "$jar")" >> "$GITHUB_OUTPUT"
+
+      - name: Download Fiji
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/fiji"
+          curl -fsSL -o "$RUNNER_TEMP/fiji-linux64.zip" \
+            https://downloads.imagej.net/fiji/latest/fiji-linux64.zip
+          unzip -q "$RUNNER_TEMP/fiji-linux64.zip" -d "$RUNNER_TEMP/fiji"
+
+          ij_path="$RUNNER_TEMP/fiji/Fiji.app"
+          ij_launcher="$ij_path/ImageJ-linux64"
+          chmod +x "$ij_launcher"
+
+          echo "IJ_PATH=$ij_path" >> "$GITHUB_ENV"
+          echo "IJ_LAUNCHER=$ij_launcher" >> "$GITHUB_ENV"
+
+      - name: Prepare update-site state
+        shell: bash
+        env:
+          IMAGEJ_UPLOAD_USER: ${{ secrets.IMAGEJ_UPLOAD_USER }}
+          IMAGEJ_UPLOAD_PASS: ${{ secrets.IMAGEJ_UPLOAD_PASS }}
+          JAR_PATH: ${{ steps.jar.outputs.path }}
+          JAR_NAME: ${{ steps.jar.outputs.name }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${IMAGEJ_UPLOAD_USER:-}" ]; then
+            echo "::error::Missing GitHub secret IMAGEJ_UPLOAD_USER."
+            exit 1
+          fi
+          if [ -z "${IMAGEJ_UPLOAD_PASS:-}" ]; then
+            echo "::error::Missing GitHub secret IMAGEJ_UPLOAD_PASS."
+            exit 1
+          fi
+
+          "$IJ_LAUNCHER" --update edit-update-site \
+            "$UPDATE_SITE" "$UPDATE_SITE_URL" \
+            "webdav:${IMAGEJ_UPLOAD_USER}:${IMAGEJ_UPLOAD_PASS}" .
+
+          # Pull the current FLASH update-site state first. Then replace only
+          # the FLASH plugin JAR so complete-site upload does not drop other files.
+          "$IJ_LAUNCHER" --update update
+
+          mkdir -p "$IJ_PATH/plugins"
+          find "$IJ_PATH/plugins" -maxdepth 1 -type f \
+            \( -name 'FLASH-*.jar' -o -name 'IHF-Analysis-Pipeline-*.jar' \) \
+            -print -delete
+          cp "$GITHUB_WORKSPACE/$JAR_PATH" "$IJ_PATH/plugins/$JAR_NAME"
+
+          find "$IJ_PATH/plugins" -maxdepth 1 -type f -name 'FLASH-*.jar' -print
+
+      - name: Simulate update-site upload
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$IJ_PATH"
+          "$IJ_LAUNCHER" --update upload-complete-site \
+            --simulate \
+            --force-shadow \
+            "$UPDATE_SITE"
+
+      - name: Upload update site
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.dry_run == false }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$IJ_PATH"
+          "$IJ_LAUNCHER" --update upload-complete-site \
+            --force-shadow \
+            "$UPDATE_SITE"

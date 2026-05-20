@@ -1,0 +1,19 @@
+{
+  "name": "Patchy autofluorescence (local)",
+  "description": "Local autofluorescence correction with correlation veto.",
+  "libraryVersion": "1",
+  "contaminationType": "patchy_af",
+  "calibration": "manual",
+  "strength": "standard",
+  "goal": "create_cleaned_mask",
+  "targetChannelIndex": 0,
+  "bleedThroughChannelIndexes": [],
+  "autofluorescenceChannelIndexes": [],
+  "excludedChannelIndexes": [],
+  "controlConditionNames": [],
+  "experimentalConditionNames": [],
+  "correctionPresetId": "autofluorescence",
+  "expertMode": false,
+  "correctionFeatureIds": ["saturation_exclusion", "local_k_correction", "local_correlation_veto", "threshold_corrected_target", "veto_masks", "size_filter"],
+  "featureSettings": {"size_filter": {"min_size_voxels": "50", "max_size_voxels": "0"}}
+}

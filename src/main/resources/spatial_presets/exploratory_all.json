@@ -1,0 +1,21 @@
+{
+  "name": "Exploratory (all features)",
+  "description": "Enable broad spatial and morphometric outputs while leaving Ripley's K/L/G off.",
+  "libraryVersion": "1",
+  "doDistances": true,
+  "doSpatialStats": false,
+  "doVolColoc": true,
+  "doCpc": true,
+  "doVoronoi": true,
+  "doHeatmaps": true,
+  "doPhenotyping": true,
+  "do2DMorphology": true,
+  "do3DMorphology": true,
+  "doCompositeIndices": true,
+  "doPopMorphometrics": true,
+  "doSpatialMorphometrics": true,
+  "kdeBandwidth": 0,
+  "heatmapLut": "Fire",
+  "clusterK": 0,
+  "colocThresholdPercent": 30
+}
