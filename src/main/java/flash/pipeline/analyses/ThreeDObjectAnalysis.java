@@ -161,7 +161,6 @@ public class ThreeDObjectAnalysis implements Analysis {
 
     private boolean headless = false;
     private boolean suppressDialogs = false;
-    private boolean aggressiveMemory = false;
     private boolean verboseLogging = false;
     private boolean skipExisting = false;
     private int parallelThreads = 1;
@@ -320,11 +319,6 @@ public class ThreeDObjectAnalysis implements Analysis {
     @Override
     public void setSuppressDialogs(boolean suppress) {
         this.suppressDialogs = suppress;
-    }
-
-    @Override
-    public void setAggressiveMemory(boolean aggressive) {
-        this.aggressiveMemory = aggressive;
     }
 
     @Override
@@ -1480,7 +1474,6 @@ public class ThreeDObjectAnalysis implements Analysis {
         spatialAnalysis.setSuppressDialogs(suppressDialogs || cliConfig != null);
         spatialAnalysis.setMarkerThresholds(markerThresholds);
         spatialAnalysis.setParallelThreads(parallelThreads);
-        spatialAnalysis.setAggressiveMemory(aggressiveMemory);
         spatialAnalysis.setVerboseLogging(verboseLogging);
         spatialAnalysis.setCliConfig(cliConfig);
         if (wizardSpatialConfig != null) {
@@ -1855,11 +1848,6 @@ public class ThreeDObjectAnalysis implements Analysis {
                     IJ.log("  [DEBUG] Image processing time: " + formatDuration(imageElapsed));
                 }
 
-                if (aggressiveMemory) {
-                    if (verboseLogging) IJ.log("  [DEBUG] Aggressive memory clearing...");
-                    System.gc();
-                    IJ.freeMemory();
-                }
             }
         }
         prefetcher.shutdown();
@@ -2058,10 +2046,6 @@ public class ThreeDObjectAnalysis implements Analysis {
                             }
                             threadLocalRegistry.remove();
 
-                            if (aggressiveMemory) {
-                                System.gc();
-                                IJ.freeMemory();
-                            }
                         }
                     }
                 }

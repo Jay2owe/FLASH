@@ -44,7 +44,6 @@ public class HtmlReportWriter {
         html.append("<table>\n<thead><tr><th>Setting</th><th>Value</th></tr></thead>\n<tbody>\n");
         addRow(html, "Headless Mode", String.valueOf(report.isHeadless()));
         addRow(html, "Parallel Processing", report.isParallel() ? "Yes (" + report.getThreadCount() + " threads)" : "No");
-        addRow(html, "Aggressive Memory", String.valueOf(report.isAggressiveMemory()));
         addRow(html, "Verbose Logging", String.valueOf(report.isVerboseLogging()));
         addRow(html, "Overwrite Behavior", report.getOverwriteBehavior() != null ? report.getOverwriteBehavior() : "Auto-Overwrite");
         html.append("</tbody>\n</table>\n</details>\n\n");

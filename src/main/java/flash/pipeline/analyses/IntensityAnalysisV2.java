@@ -91,7 +91,6 @@ public class IntensityAnalysisV2 implements Analysis {
 
     private boolean headless = false;
     private boolean suppressDialogs = false;
-    private boolean aggressiveMemory = false;
     private boolean verboseLogging = false;
     private boolean skipExisting = false;
     private int parallelThreads = 1;
@@ -133,11 +132,6 @@ public class IntensityAnalysisV2 implements Analysis {
     @Override
     public void setSuppressDialogs(boolean suppress) {
         this.suppressDialogs = suppress;
-    }
-
-    @Override
-    public void setAggressiveMemory(boolean aggressive) {
-        this.aggressiveMemory = aggressive;
     }
 
     @Override
@@ -925,11 +919,6 @@ public class IntensityAnalysisV2 implements Analysis {
                     IJ.log("  [DEBUG] Image processing time: " + formatDuration(imageElapsed));
                 }
 
-                if (aggressiveMemory) {
-                    if (verboseLogging) IJ.log("  [DEBUG] Aggressive memory clearing...");
-                    System.gc();
-                    IJ.freeMemory();
-                }
             }
         }
         prefetcher.shutdown();
@@ -1082,10 +1071,6 @@ public class IntensityAnalysisV2 implements Analysis {
                                         + " done, ~" + formatDuration(rem) + " remaining)");
                             }
 
-                            if (aggressiveMemory) {
-                                System.gc();
-                                IJ.freeMemory();
-                            }
                         } catch (Throwable t) {
                             rethrowIfFatal(t);
                             handleParallelImageThrowable(idx, total, t);

@@ -93,7 +93,6 @@ public class FLASH_Pipeline implements PlugIn {
     private String directory = null;
     private boolean cliInvocation = false;
     private boolean headlessMode = true;
-    private boolean aggressiveMemory = false;
     private boolean verboseLogging = false;
     private boolean autoAggregate = true;
     private boolean parallelProcessing = true;
@@ -240,7 +239,7 @@ public class FLASH_Pipeline implements PlugIn {
             // Fresh QC report for this run — prevents state leaking across runs
             QualityReport qualityReport = createQualityReportForRun(
                     directory, generateQcReport, headlessMode, parallelProcessing,
-                    parallelThreadCount, aggressiveMemory, verboseLogging, overwriteBehavior);
+                    parallelThreadCount, verboseLogging, overwriteBehavior);
 
             // Count selected analyses to suppress intermediate dialogs
             int selectedCount = 0;
@@ -334,7 +333,6 @@ public class FLASH_Pipeline implements PlugIn {
         headlessMode = cfg.isHeadless();
         parallelProcessing = cfg.isParallel();
         parallelThreadCount = cfg.getThreads();
-        aggressiveMemory = cfg.isAggressiveMemory();
         verboseLogging = cfg.isVerbose();
         overwriteBehavior = cfg.getOverwriteBehavior();
         autoAggregate = cfg.isAutoAggregate();
@@ -384,7 +382,7 @@ public class FLASH_Pipeline implements PlugIn {
         // Fresh QC report for this CLI invocation
         QualityReport qualityReport = createQualityReportForRun(
                 directory, generateQcReport, headlessMode, parallelProcessing,
-                parallelThreadCount, aggressiveMemory, verboseLogging, overwriteBehavior);
+                parallelThreadCount, verboseLogging, overwriteBehavior);
 
         GpuConcurrency.logEffectivePermits();
 
@@ -1152,10 +1150,6 @@ public class FLASH_Pipeline implements PlugIn {
         opts.addToggle("Cache Images as TIFs", useTifCache);
         opts.addHelpText("Save raw images as individual TIF files on first load. "
                 + "Subsequent analyses load from TIFs instead of re-parsing the .lif file (much faster).");
-        opts.addToggle("Aggressive Memory Clearing", aggressiveMemory);
-        opts.addHelpText("Explicitly frees memory after each image. Useful for large datasets "
-                + "that cause out-of-memory errors.");
-
         opts.addHeader("Logging");
         opts.addToggle("Verbose Logging / Debug Mode", verboseLogging);
         opts.addHelpText("Prints detailed step-by-step information during processing, "
@@ -1189,7 +1183,6 @@ public class FLASH_Pipeline implements PlugIn {
             gpuPermits = Math.max(0, (int) opts.getNextNumber());
             GpuConcurrency.setUserOverride(gpuPermits);
             useTifCache = opts.getNextBoolean();
-            aggressiveMemory = opts.getNextBoolean();
             verboseLogging = opts.getNextBoolean();
             overwriteBehavior = opts.getNextChoice();
             autoAggregate = opts.getNextBoolean();
@@ -1613,8 +1606,8 @@ public class FLASH_Pipeline implements PlugIn {
      */
     static QualityReport createQualityReportForRun(String dir, boolean enabled,
                                                     boolean headless, boolean parallel,
-                                                    int threadCount, boolean aggressiveMemory,
-                                                    boolean verboseLogging, String overwriteBehavior) {
+                                                    int threadCount, boolean verboseLogging,
+                                                    String overwriteBehavior) {
         if (enabled) {
             cleanStaleReportArtifacts(dir);
         }
@@ -1622,7 +1615,7 @@ public class FLASH_Pipeline implements PlugIn {
         report.setEnabled(enabled);
         report.setDirectory(dir);
         report.setGlobalSettings(headless, parallel, threadCount,
-                aggressiveMemory, verboseLogging, overwriteBehavior);
+                verboseLogging, overwriteBehavior);
         return report;
     }
 
@@ -1676,7 +1669,6 @@ public class FLASH_Pipeline implements PlugIn {
         }
         FeatureDependencyGate.setUiMode(isDependencyGateUnattended());
         analysis.setHeadless(analysisHeadless);
-        analysis.setAggressiveMemory(aggressiveMemory);
         analysis.setVerboseLogging(verboseLogging);
         analysis.setSkipExisting("Skip Existing".equals(overwriteBehavior));
         analysis.setParallelThreads(parallelProcessing ? parallelThreadCount : 1);

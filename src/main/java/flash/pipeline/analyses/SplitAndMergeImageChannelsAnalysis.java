@@ -86,7 +86,6 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
 
     private boolean headless = false;
     private boolean suppressDialogs = false;
-    private boolean aggressiveMemory = false;
     private boolean verboseLogging = false;
     private boolean skipExisting = false;
     private boolean compactLog = false;
@@ -128,11 +127,6 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
         } else {
             IJ.showMessage(title, body);
         }
-    }
-
-    @Override
-    public void setAggressiveMemory(boolean aggressive) {
-        this.aggressiveMemory = aggressive;
     }
 
     @Override
@@ -693,11 +687,6 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                 IJ.log("  [DEBUG] Image processing time: " + formatDuration(imageElapsed));
             }
 
-            if (aggressiveMemory) {
-                if (verboseLogging) IJ.log("  [DEBUG] Aggressive memory clearing...");
-                System.gc();
-                IJ.freeMemory();
-            }
         }
         prefetcher.shutdown();
     }
@@ -820,10 +809,6 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                             IJ.log("[" + done + "/" + scheduled + "] " + partLabel
                                     + " Completed in " + formatDurationCompact(imageElapsed) + etaStr);
 
-                            if (aggressiveMemory) {
-                                System.gc();
-                                IJ.freeMemory();
-                            }
                         } catch (Exception e) {
                             String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
                             RuntimeException contextual = new RuntimeException(

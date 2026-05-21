@@ -65,7 +65,6 @@ public class LineDistanceAnalysis implements Analysis {
 
     private boolean headless = false;
     private boolean verboseLogging = false;
-    private boolean aggressiveMemory = false;
     private boolean skipExisting = false;
     private boolean suppressDialogs = false;
     private CLIConfig cliConfig = null;
@@ -93,11 +92,6 @@ public class LineDistanceAnalysis implements Analysis {
     @Override
     public void setVerboseLogging(boolean verbose) {
         this.verboseLogging = verbose;
-    }
-
-    @Override
-    public void setAggressiveMemory(boolean aggressive) {
-        this.aggressiveMemory = aggressive;
     }
 
     @Override

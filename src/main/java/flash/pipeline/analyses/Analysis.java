@@ -29,9 +29,6 @@ public interface Analysis {
     /** When true, batch modules should avoid displaying image windows. */
     default void setHeadless(boolean headless) {}
 
-    /** When true, aggressively free memory after each image. */
-    default void setAggressiveMemory(boolean aggressive) {}
-
     /** When true, print detailed step-by-step debug logging. */
     default void setVerboseLogging(boolean verbose) {}
 

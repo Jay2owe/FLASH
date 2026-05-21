@@ -205,7 +205,6 @@ public class SpatialAnalysis implements Analysis {
     private SpatialExecutionContext activeExecution = null;
     private boolean headless = false;
     private boolean suppressDialogs = false;
-    private boolean aggressiveMemory = false;
     private boolean verboseLogging = false;
     private int parallelThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
     private CLIConfig cliConfig = null;
@@ -590,11 +589,6 @@ public class SpatialAnalysis implements Analysis {
     @Override
     public void setSuppressDialogs(boolean suppress) {
         this.suppressDialogs = suppress;
-    }
-
-    @Override
-    public void setAggressiveMemory(boolean aggressive) {
-        this.aggressiveMemory = aggressive;
     }
 
     @Override
@@ -2583,13 +2577,6 @@ public class SpatialAnalysis implements Analysis {
                     }
                 }
 
-                if (aggressiveMemory) {
-                    if (verboseLogging) {
-                        IJ.log("    [DEBUG] Aggressive memory clearing after CPC pair...");
-                    }
-                    System.gc();
-                    IJ.freeMemory();
-                }
             }
         }
 

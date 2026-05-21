@@ -51,7 +51,6 @@ public class QualityReport {
     private boolean headless;
     private boolean parallel;
     private int threadCount;
-    private boolean aggressiveMemory;
     private boolean verboseLogging;
     private String overwriteBehavior;
 
@@ -79,12 +78,10 @@ public class QualityReport {
     }
 
     public synchronized void setGlobalSettings(boolean headless, boolean parallel, int threadCount,
-                                                boolean aggressiveMemory, boolean verboseLogging,
-                                                String overwriteBehavior) {
+                                                boolean verboseLogging, String overwriteBehavior) {
         this.headless = headless;
         this.parallel = parallel;
         this.threadCount = threadCount;
-        this.aggressiveMemory = aggressiveMemory;
         this.verboseLogging = verboseLogging;
         this.overwriteBehavior = overwriteBehavior;
     }
@@ -380,7 +377,6 @@ public class QualityReport {
     public boolean isHeadless() { return headless; }
     public boolean isParallel() { return parallel; }
     public int getThreadCount() { return threadCount; }
-    public boolean isAggressiveMemory() { return aggressiveMemory; }
     public boolean isVerboseLogging() { return verboseLogging; }
     public String getOverwriteBehavior() { return overwriteBehavior; }
     public List<AnalysisSection> getSections() { return sections; }
