@@ -55,8 +55,7 @@ public class FLASH_PipelineQualityReportLifecycleTest {
 
     @Test
     public void createQualityReportForRun_cleansStaleOverlays() throws IOException {
-        // Create stale report artifacts
-        File reportDir = new File(tmp.getRoot(), "FLASH/Reports/Quality Report");
+        File reportDir = new File(tmp.getRoot(), "FLASH/Results/QC");
         File overlayDir = new File(reportDir, "overlays");
         assertTrue(overlayDir.mkdirs());
 
@@ -68,7 +67,6 @@ public class FLASH_PipelineQualityReportLifecycleTest {
         writeStubFile(staleHtml);
         assertTrue(staleHtml.exists());
 
-        // Create a fresh report — should clean the stale artifacts
         FLASH_Pipeline.createQualityReportForRun(
                 tmp.getRoot().getAbsolutePath(), true,
                 false, false, 1, false, false, "Auto-Overwrite");
@@ -78,35 +76,14 @@ public class FLASH_PipelineQualityReportLifecycleTest {
     }
 
     @Test
-    public void createQualityReportForRun_cleansLegacyReportArtifacts() throws IOException {
-        File reportDir = new File(tmp.getRoot(), "Quality_Report");
-        File overlayDir = new File(reportDir, "overlays");
-        assertTrue(overlayDir.mkdirs());
-
-        File staleOverlay = new File(overlayDir, "old_overlay.tif");
-        File staleHtml = new File(reportDir, "QC_Report.html");
-        writeStubFile(staleOverlay);
-        writeStubFile(staleHtml);
-
-        FLASH_Pipeline.createQualityReportForRun(
-                tmp.getRoot().getAbsolutePath(), true,
-                false, false, 1, false, false, "Auto-Overwrite");
-
-        assertFalse("Legacy stale overlay must be removed", staleOverlay.exists());
-        assertFalse("Legacy stale HTML must be removed", staleHtml.exists());
-    }
-
-    @Test
     public void createQualityReportForRun_skipsCleanupWhenDisabled() throws IOException {
-        // Create report artifacts
-        File reportDir = new File(tmp.getRoot(), "FLASH/Reports/Quality Report");
+        File reportDir = new File(tmp.getRoot(), "FLASH/Results/QC");
         File overlayDir = new File(reportDir, "overlays");
         assertTrue(overlayDir.mkdirs());
 
         File existingOverlay = new File(overlayDir, "keep_me.tif");
         writeStubFile(existingOverlay);
 
-        // Create with QC disabled — should NOT clean
         FLASH_Pipeline.createQualityReportForRun(
                 tmp.getRoot().getAbsolutePath(), false,
                 false, false, 1, false, false, "Auto-Overwrite");

@@ -128,6 +128,46 @@ public class AnalysisStatusScanner {
         writeSidecar(new File(directory), analysisId, imageCount);
     }
 
+    /**
+     * Appends a row to {@code Results/Run Records/run_history.csv}. Creates the file
+     * with a header row on first call. Best-effort: IO errors are surfaced as IOExceptions.
+     */
+    public static void appendRunHistory(File directory,
+                                        int analysisIndex,
+                                        String analysisName,
+                                        String timestamp) throws IOException {
+        if (directory == null) return;
+        FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory.getAbsolutePath());
+        File runHistory = layout.runHistoryWriteFile();
+        File parent = runHistory.getParentFile();
+        if (parent != null && !parent.isDirectory() && !parent.mkdirs() && !parent.isDirectory()) {
+            throw new IOException("Could not create run-records folder: " + parent.getAbsolutePath());
+        }
+        boolean newFile = !runHistory.isFile();
+        StringBuilder sb = new StringBuilder();
+        if (newFile) {
+            sb.append("timestamp,analysisIndex,analysisName\n");
+        }
+        sb.append(csvCell(timestamp == null ? isoNow() : timestamp));
+        sb.append(',');
+        sb.append(analysisIndex);
+        sb.append(',');
+        sb.append(csvCell(analysisName == null ? "" : analysisName));
+        sb.append('\n');
+        Files.write(runHistory.toPath(), sb.toString().getBytes(StandardCharsets.UTF_8),
+                newFile ? java.nio.file.StandardOpenOption.CREATE
+                        : java.nio.file.StandardOpenOption.APPEND,
+                java.nio.file.StandardOpenOption.WRITE);
+    }
+
+    private static String csvCell(String value) {
+        if (value == null) return "";
+        boolean needsQuote = value.indexOf(',') >= 0 || value.indexOf('"') >= 0
+                || value.indexOf('\n') >= 0 || value.indexOf('\r') >= 0;
+        if (!needsQuote) return value;
+        return '"' + value.replace("\"", "\"\"") + '"';
+    }
+
     public static int estimateImageCount(String directory) {
         if (directory == null || directory.trim().isEmpty()) return 0;
         File root = new File(directory);

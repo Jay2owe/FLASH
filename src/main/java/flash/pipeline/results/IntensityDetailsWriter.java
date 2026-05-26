@@ -16,11 +16,13 @@ import java.nio.file.StandardCopyOption;
 
 /**
  * Writes macro-style per-channel Analysis Details for Intensity Analysis.
- * Output target is supplied by {@link FlashProjectLayout#intensityAnalysisDetailsWriteDir()}.
+ * Output target is supplied by {@link FlashProjectLayout#analysisDetailsWriteDir()}.
  * Mirrors the tag structure used by ObjectAnalysisDetailsWriter:
  * {@code <Filter Macro>}, {@code <Analysis Macro>}, {@code <Threshold>}, {@code <In ROI>}.
  */
 public final class IntensityDetailsWriter {
+
+    public static final String FILENAME_PREFIX = "intensity_";
 
     private IntensityDetailsWriter() {}
 
@@ -29,7 +31,11 @@ public final class IntensityDetailsWriter {
             throw new IllegalArgumentException("Project directory must not be null.");
         }
         return FlashProjectLayout.forDirectory(projectDirectory.getAbsolutePath())
-                .intensityAnalysisDetailsWriteDir();
+                .analysisDetailsWriteDir();
+    }
+
+    public static String detailsFileName(String channelName) {
+        return FILENAME_PREFIX + ChannelFilenameCodec.toSafe(channelName) + ".txt";
     }
 
     /**
@@ -85,7 +91,7 @@ public final class IntensityDetailsWriter {
     ) throws Exception {
         flash.pipeline.io.IoUtils.mustMkdirs(analysisDetailsDir);
 
-        File out = new File(analysisDetailsDir, ChannelFilenameCodec.toSafe(channelName) + ".txt");
+        File out = new File(analysisDetailsDir, detailsFileName(channelName));
         File tmp = File.createTempFile(out.getName(), ".tmp", analysisDetailsDir);
 
         String filterMacro = "";

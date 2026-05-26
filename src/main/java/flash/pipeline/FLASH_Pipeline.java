@@ -1632,16 +1632,8 @@ public class FLASH_Pipeline implements PlugIn {
      */
     private static void cleanStaleReportArtifacts(String dir) {
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(dir);
-        for (File reportDir : layout.qualityReportReadDirs()) {
-            cleanStaleReportArtifactsIn(reportDir);
-        }
-    }
 
-    private static void cleanStaleReportArtifactsIn(File reportDir) {
-        if (reportDir == null || !reportDir.exists()) return;
-
-        // Remove overlay directory contents
-        File overlayDir = new File(reportDir, "overlays");
+        File overlayDir = layout.qcOverlaysWriteDir();
         if (overlayDir.isDirectory()) {
             File[] overlays = overlayDir.listFiles();
             if (overlays != null) {
@@ -1653,8 +1645,7 @@ public class FLASH_Pipeline implements PlugIn {
             }
         }
 
-        // Remove old HTML report so it's never stale between write calls
-        File oldHtml = new File(reportDir, "QC_Report.html");
+        File oldHtml = layout.qcReportWriteFile();
         if (oldHtml.exists() && !oldHtml.delete()) {
             IJ.log("QC Report: could not remove stale QC_Report.html");
         }

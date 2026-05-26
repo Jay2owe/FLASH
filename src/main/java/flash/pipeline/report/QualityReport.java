@@ -289,7 +289,7 @@ public class QualityReport {
                 g2d.dispose();
 
                 // Save overlay TIF to disk
-                File overlayDir = new File(reportDir(), "overlays");
+                File overlayDir = FlashProjectLayout.forDirectory(directory).qcOverlaysWriteDir();
                 IoUtils.mustMkdirs(overlayDir);
                 String safeName = (imageName == null ? "image" : imageName)
                         .replaceAll("[^a-zA-Z0-9_\\-]", "_");
@@ -364,10 +364,9 @@ public class QualityReport {
     private void writeReport() {
         if (directory == null) return;
         try {
-            File reportDir = reportDir();
-            IoUtils.mustMkdirs(reportDir);
-            File reportFile = new File(reportDir, "QC_Report.html");
-            HtmlReportWriter.write(reportFile, this);
+            FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
+            IoUtils.mustMkdirs(layout.qcRoot());
+            HtmlReportWriter.write(layout.qcReportWriteFile(), this);
         } catch (Exception e) {
             IJ.log("QC Report: failed to write HTML: " + e.getMessage());
         }
@@ -574,7 +573,4 @@ public class QualityReport {
         return secs + "s";
     }
 
-    private File reportDir() {
-        return FlashProjectLayout.forDirectory(directory).qualityReportWriteDir();
-    }
 }

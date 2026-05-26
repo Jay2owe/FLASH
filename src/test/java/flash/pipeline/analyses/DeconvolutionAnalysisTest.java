@@ -3,6 +3,7 @@ package flash.pipeline.analyses;
 import flash.pipeline.cli.CLIArgumentParser;
 import flash.pipeline.cli.CLIConfig;
 import flash.pipeline.deconv.DeconvolutionIO;
+import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.deconv.engine.Algorithm;
 import flash.pipeline.deconv.engine.DeconvParams;
 import flash.pipeline.deconv.engine.DeconvolutionEngine;
@@ -81,7 +82,8 @@ public class DeconvolutionAnalysisTest {
         File mergedOutput = DeconvolutionIO.mergedDeconvFile(root, "synthetic");
         assertTrue(mergedOutput.isFile());
         assertTrue(containsFileNamed(DeconvolutionIO.cacheDir(root), "synthetic_C0.tif"));
-        File summaryReport = new File(DeconvolutionIO.deconvOutDir(root), "deconv_summary.txt");
+        File summaryReport = new File(FlashProjectLayout.forDirectory(root.getAbsolutePath()).qcRoot(),
+                "deconv_summary.txt");
         assertTrue(summaryReport.isFile());
         assertEquals(1, analysis.requestedSpecs.size());
         assertEquals(63, analysis.requestedSpecs.get(0).getSizeX());

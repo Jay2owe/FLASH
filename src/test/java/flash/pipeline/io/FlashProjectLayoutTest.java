@@ -27,10 +27,6 @@ public class FlashProjectLayoutTest {
         assertPath(new File(project, "FLASH/Set Up Configuration/.settings"), layout.configurationWriteDir());
         assertPath(new File(project, "FLASH/Set Up Configuration/.settings/Channel_Data.txt"),
                 layout.channelDataWriteFile());
-        assertPath(new File(project, "FLASH/Results/Run Records/analysis_details"),
-                layout.intensityAnalysisDetailsWriteDir());
-        assertPath(new File(project, "FLASH/Results/Analysis Images/Objects/Analysis Details"),
-                layout.objectAnalysisDetailsWriteDir());
         assertPath(new File(project, "FLASH/Results Export"),
                 layout.aggregationWriteDir());
         assertPath(new File(project, "FLASH/Results Export"),
@@ -44,13 +40,10 @@ public class FlashProjectLayoutTest {
         assertPath(new File(project, "FLASH/Results Export/Summary.xlsx"),
                 layout.excelWriteFile(FlashProjectLayout.SUMMARY_WORKBOOK_FILENAME));
         assertPath(new File(project, "FLASH/.settings/Presets"), layout.presetsRoot());
-        assertPath(new File(project, "FLASH/Reports"), layout.reportsRoot());
-        assertPath(new File(project, "FLASH/Reports/Quality Report"), layout.qualityReportWriteDir());
         assertPath(new File(project, "FLASH/Cache"), layout.cacheRoot());
         assertPath(new File(project, "FLASH/Cache/TIF"), layout.tifCacheWriteDir());
         assertPath(new File(project, "FLASH/Status"), layout.statusRoot());
         assertPath(new File(project, "FLASH/Status/.settings/Analysis"), layout.analysisStatusWriteDir());
-        assertPath(new File(project, "FLASH/Status/.settings/Audit"), layout.auditRoot());
         assertPath(new File(project, "FLASH/Status/.settings/cli_status.txt"),
                 layout.statusWriteFile("cli_status.txt"));
     }
@@ -169,10 +162,6 @@ public class FlashProjectLayoutTest {
                 new File(project, "FLASH/Results Export"),
                 new File(project, "FLASH/11 - Excel Summary Export"),
                 new File(project, "ImageJ Exports"));
-        assertPaths(layout.objectAnalysisDetailsReadDirs(),
-                new File(project, "FLASH/Results/Analysis Images/Objects/Analysis Details"));
-        assertPaths(layout.intensityAnalysisDetailsReadDirs(),
-                new File(project, "FLASH/Results/Run Records/analysis_details"));
         assertPaths(layout.aggregationReadDirs(),
                 new File(project, "FLASH/Results Export"),
                 new File(project, "FLASH/09 - Result Aggregation"),
@@ -205,12 +194,6 @@ public class FlashProjectLayoutTest {
                 new File(project, "FLASH/.settings/Presets/Custom Filter Presets"),
                 new File(project, "FLASH/Presets/Custom Filter Presets"),
                 new File(project, ".bin/Custom Filter Presets"));
-        assertPaths(layout.reportsReadDirs(),
-                new File(project, "FLASH/Reports"),
-                new File(project, "Quality_Report"));
-        assertPaths(layout.qualityReportReadDirs(),
-                new File(project, "FLASH/Reports/Quality Report"),
-                new File(project, "Quality_Report"));
         assertPaths(layout.tifCacheReadDirs(),
                 new File(project, "FLASH/Cache/TIF"),
                 new File(project, ".tif_cache"));

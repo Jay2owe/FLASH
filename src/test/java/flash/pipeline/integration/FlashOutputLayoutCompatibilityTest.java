@@ -47,18 +47,6 @@ public class FlashOutputLayoutCompatibilityTest {
     }
 
     @Test
-    public void layoutReadPathsPreferFlashThenLegacyRoots() throws Exception {
-        File project = temp.newFolder("project");
-        FlashProjectLayout layout = FlashProjectLayout.forDirectory(
-                project.getAbsolutePath());
-
-        assertEquals(new File(project, "FLASH/Reports/Quality Report"),
-                layout.qualityReportReadDirs().get(0));
-        assertEquals(new File(project, "Quality_Report"),
-                layout.qualityReportReadDirs().get(1));
-    }
-
-    @Test
     public void spectralWriterUsesResultsLayout() throws Exception {
         File project = temp.newFolder("project");
 

@@ -60,7 +60,7 @@ public class RunSettingsSnapshotTest {
     }
 
     @Test
-    public void writerCreatesSnapshotAndReplayFilesInFlashOutputAndAuditFolders() throws Exception {
+    public void writerPlacesSnapshotAndReplayFilesUnderRunRecords() throws Exception {
         File dir = temp.newFolder("write");
         BinConfigIO.writeFromConfig(dir.getAbsolutePath(), representativeConfig());
 
@@ -73,25 +73,30 @@ public class RunSettingsSnapshotTest {
                 null);
 
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(dir.getAbsolutePath());
-        File objectOutput = layout.analysisImagesObjectsRoot();
-        File auditOutput = new File(layout.auditRoot(), "04 - 3D Object Analysis");
-        File objectSettings = FlashProjectLayout.settingsDir(objectOutput);
-        File auditSettings = FlashProjectLayout.settingsDir(auditOutput);
-        assertTrue(new File(objectSettings, RunSettingsSnapshot.SETTINGS_FILENAME).isFile());
-        assertTrue(new File(objectSettings, RunSettingsSnapshot.REPLAY_FILENAME).isFile());
-        assertTrue(new File(auditSettings, RunSettingsSnapshot.SETTINGS_FILENAME).isFile());
-        assertTrue(new File(auditSettings, RunSettingsSnapshot.REPLAY_FILENAME).isFile());
+        String prefix = "04 - 3D Object Analysis";
+        File snapshotFile = new File(layout.settingsSnapshotsWriteDir(),
+                prefix + RunSettingsSnapshot.SETTINGS_EXTENSION);
+        File replayFile = new File(layout.replayCommandsWriteDir(),
+                prefix + RunSettingsSnapshot.REPLAY_EXTENSION);
+        assertTrue(snapshotFile.isFile());
+        assertTrue(replayFile.isFile());
         assertFalse(new File(dir, "Data Analysis").exists());
 
-        String replay = new String(Files.readAllBytes(
-                new File(objectSettings, RunSettingsSnapshot.REPLAY_FILENAME).toPath()),
+        String replay = new String(Files.readAllBytes(replayFile.toPath()),
                 StandardCharsets.UTF_8);
         assertTrue(replay.contains("run_3d"));
         assertTrue(replay.contains("dir=["));
+
+        File runHistory = layout.runHistoryWriteFile();
+        assertTrue(runHistory.isFile());
+        String runHistoryText = new String(Files.readAllBytes(runHistory.toPath()),
+                StandardCharsets.UTF_8);
+        assertTrue(runHistoryText.contains("timestamp,analysisIndex,analysisName"));
+        assertTrue(runHistoryText.contains("3D Object Analysis"));
     }
 
     @Test
-    public void writerUsesCurrentAnalysisIndexFoldersForAggregationStatsExcelAndSpectral() throws Exception {
+    public void writerEmitsOneSnapshotPerAnalysisInRunRecords() throws Exception {
         File dir = temp.newFolder("indexFolders");
         BinConfigIO.writeFromConfig(dir.getAbsolutePath(), representativeConfig());
 
@@ -105,10 +110,10 @@ public class RunSettingsSnapshotTest {
                 EnumSet.of(BinField.CHANNEL_NAMES), null, null);
 
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(dir.getAbsolutePath());
-        assertSnapshotExists(layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.AGGREGATION));
-        assertSnapshotExists(layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.STATISTICS));
-        assertSnapshotExists(layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.EXCEL));
-        assertSnapshotExists(layout.tablesSpectralWriteDir());
+        assertSnapshotPair(layout, 8, "Aggregation");
+        assertSnapshotPair(layout, 9, "Statistics");
+        assertSnapshotPair(layout, 10, "Excel");
+        assertSnapshotPair(layout, 11, "Spectral");
     }
 
     @Test
@@ -183,11 +188,12 @@ public class RunSettingsSnapshotTest {
         assertEquals(expectedSelection.range, actualSelection.range);
     }
 
-    private static void assertSnapshotExists(File outputDir) {
-        assertTrue(new File(FlashProjectLayout.settingsDir(outputDir),
-                RunSettingsSnapshot.SETTINGS_FILENAME).isFile());
-        assertTrue(new File(FlashProjectLayout.settingsDir(outputDir),
-                RunSettingsSnapshot.REPLAY_FILENAME).isFile());
+    private static void assertSnapshotPair(FlashProjectLayout layout, int analysisIndex, String analysisName) {
+        String prefix = RunSettingsSnapshot.safeRecordName(analysisIndex, analysisName);
+        assertTrue(new File(layout.settingsSnapshotsWriteDir(),
+                prefix + RunSettingsSnapshot.SETTINGS_EXTENSION).isFile());
+        assertTrue(new File(layout.replayCommandsWriteDir(),
+                prefix + RunSettingsSnapshot.REPLAY_EXTENSION).isFile());
     }
 
     private final class RunSettingsSnapshotTestHarness {

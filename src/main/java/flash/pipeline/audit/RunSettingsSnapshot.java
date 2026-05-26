@@ -4,6 +4,7 @@ import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinConfigIO;
 import flash.pipeline.bin.BinField;
 import flash.pipeline.cli.CLIConfig;
+import flash.pipeline.intelligence.AnalysisStatusScanner;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.segmentation.SegmentationMethod;
 import flash.pipeline.segmentation.SegmentationTokenParser;
@@ -32,8 +33,8 @@ import java.util.Set;
 
 /** Writes the per-run FLASH settings snapshot and replay macro line. */
 public final class RunSettingsSnapshot {
-    public static final String SETTINGS_FILENAME = "flash_run_settings.json";
-    public static final String REPLAY_FILENAME = "flash_replay_command.txt";
+    public static final String SETTINGS_EXTENSION = ".json";
+    public static final String REPLAY_EXTENSION = ".txt";
 
     public final String flashVersion;
     public final String timestamp;
@@ -92,9 +93,21 @@ public final class RunSettingsSnapshot {
                                         CLIConfig cliConfig) throws IOException {
         RunSettingsSnapshot snapshot = create(directory, analysisName, analysisIndex,
                 requiredFields, observedSources, cliConfig);
-        for (File outputDir : outputFolders(directory, analysisName, analysisIndex)) {
-            writeToFolder(snapshot, outputDir);
-        }
+        FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
+        String baseName = safeRecordName(analysisIndex, analysisName);
+
+        File snapshotsDir = layout.settingsSnapshotsWriteDir();
+        ensureDirectory(snapshotsDir);
+        BinConfigIO.writeAtomic(new File(snapshotsDir, baseName + SETTINGS_EXTENSION).toPath(),
+                Arrays.asList(trimTrailingNewline(snapshot.toJson())));
+
+        File replayDir = layout.replayCommandsWriteDir();
+        ensureDirectory(replayDir);
+        BinConfigIO.writeAtomic(new File(replayDir, baseName + REPLAY_EXTENSION).toPath(),
+                Arrays.asList(snapshot.replayCommand));
+
+        AnalysisStatusScanner.appendRunHistory(new File(directory),
+                analysisIndex, analysisName, snapshot.timestamp);
     }
 
     public String toJson() {
@@ -130,44 +143,10 @@ public final class RunSettingsSnapshot {
         return root;
     }
 
-    private static void writeToFolder(RunSettingsSnapshot snapshot, File outputDir) throws IOException {
-        if (outputDir == null) return;
-        File settingsDir = FlashProjectLayout.settingsDir(outputDir);
-        if (!settingsDir.isDirectory() && !settingsDir.mkdirs() && !settingsDir.isDirectory()) {
-            throw new IOException("Could not create audit settings folder: " + settingsDir.getAbsolutePath());
-        }
-        BinConfigIO.writeAtomic(new File(settingsDir, SETTINGS_FILENAME).toPath(),
-                Arrays.asList(trimTrailingNewline(snapshot.toJson())));
-        BinConfigIO.writeAtomic(new File(settingsDir, REPLAY_FILENAME).toPath(),
-                Arrays.asList(snapshot.replayCommand));
-    }
-
-    private static List<File> outputFolders(String directory, String analysisName, int analysisIndex) {
-        FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
-        List<File> folders = new ArrayList<File>();
-        File analysisDir = analysisOutputFolder(layout, analysisIndex);
-        if (analysisDir != null) {
-            folders.add(analysisDir);
-        }
-        folders.add(new File(layout.auditRoot(), safeFolderName(analysisIndex, analysisName)));
-        return folders;
-    }
-
-    private static File analysisOutputFolder(FlashProjectLayout layout, int analysisIndex) {
-        switch (analysisIndex) {
-            case 0: return layout.visibleConfigurationDir();
-            case 1: return layout.analysisImagesRoiDir();
-            case 2: return layout.analysisImagesDeconvolutionDir();
-            case 3: return layout.presentationImagesRoot();
-            case 4: return layout.analysisImagesObjectsRoot();
-            case 5: return layout.tablesSpatialWriteDir();
-            case 6: return layout.tablesLineDistanceWriteDir();
-            case 7: return layout.tablesIntensityWriteDir();
-            case 8: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.AGGREGATION);
-            case 9: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.STATISTICS);
-            case 10: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.EXCEL);
-            case 11: return layout.tablesSpectralWriteDir();
-            default: return null;
+    private static void ensureDirectory(File dir) throws IOException {
+        if (dir == null) return;
+        if (!dir.isDirectory() && !dir.mkdirs() && !dir.isDirectory()) {
+            throw new IOException("Could not create run-records folder: " + dir.getAbsolutePath());
         }
     }
 
@@ -182,7 +161,7 @@ public final class RunSettingsSnapshot {
         return value.substring(0, end);
     }
 
-    private static String safeFolderName(int analysisIndex, String analysisName) {
+    public static String safeRecordName(int analysisIndex, String analysisName) {
         String name = analysisName == null ? "analysis" : analysisName.trim();
         if (name.isEmpty()) name = "analysis";
         name = name.replaceAll("[^a-zA-Z0-9._ -]", "_")

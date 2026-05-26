@@ -622,18 +622,12 @@ public class ExcelSummaryExportAnalysis implements Analysis {
         Map<String, Map<String, String>> result = new LinkedHashMap<String, Map<String, String>>();
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
 
-        for (File detailsDir : layout.objectAnalysisDetailsReadDirs()) {
-            loadDetailsFromDir(detailsDir, "Object", result);
-        }
-
-        for (File detailsDir : layout.intensityAnalysisDetailsReadDirs()) {
-            loadDetailsFromDir(detailsDir, "ROI", result);
-        }
+        loadDetailsFromDir(layout.analysisDetailsWriteDir(), result);
 
         return result;
     }
 
-    private void loadDetailsFromDir(File detailsDir, String analysisType,
+    private void loadDetailsFromDir(File detailsDir,
                                     Map<String, Map<String, String>> out) {
         if (!detailsDir.isDirectory()) return;
 
@@ -657,7 +651,22 @@ public class ExcelSummaryExportAnalysis implements Analysis {
             if (safeName.toLowerCase(Locale.ROOT).endsWith(".txt")) {
                 safeName = safeName.substring(0, safeName.length() - 4);
             }
-            String marker = ChannelFilenameCodec.toRaw(safeName);
+
+            String analysisType;
+            String channelPart;
+            if (safeName.startsWith(flash.pipeline.results.ObjectAnalysisDetailsWriter.FILENAME_PREFIX)) {
+                analysisType = "Object";
+                channelPart = safeName.substring(
+                        flash.pipeline.results.ObjectAnalysisDetailsWriter.FILENAME_PREFIX.length());
+                if (channelPart.equals("segmentation_models")) continue;
+            } else if (safeName.startsWith(flash.pipeline.results.IntensityDetailsWriter.FILENAME_PREFIX)) {
+                analysisType = "ROI";
+                channelPart = safeName.substring(
+                        flash.pipeline.results.IntensityDetailsWriter.FILENAME_PREFIX.length());
+            } else {
+                continue;
+            }
+            String marker = ChannelFilenameCodec.toRaw(channelPart);
 
             String key = marker + "|" + analysisType;
             if (out.containsKey(key)) {

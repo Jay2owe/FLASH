@@ -154,7 +154,7 @@ public class ObjectAnalysisDetailsModelMetadataTest {
     }
 
     private static String readDetails(File detailsDir, String channelName) throws Exception {
-        File out = new File(detailsDir, channelName + ".txt");
+        File out = new File(detailsDir, ObjectAnalysisDetailsWriter.detailsFileName(channelName));
         assertTrue(out.isFile());
         return new String(Files.readAllBytes(out.toPath()), StandardCharsets.UTF_8);
     }

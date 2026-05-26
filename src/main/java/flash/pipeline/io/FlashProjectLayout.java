@@ -46,18 +46,14 @@ public final class FlashProjectLayout {
     public static final String SETTINGS_DIR = ".settings";
     public static final String CONFIGURATION_DIR = "Set Up Configuration";
     public static final String PRESETS_DIR = "Presets";
-    public static final String REPORTS_DIR = "Reports";
     public static final String CACHE_DIR = "Cache";
     public static final String STATUS_DIR = "Status";
-    public static final String QUALITY_REPORT_DIR = "Quality Report";
     public static final String TIF_CACHE_DIR = "TIF";
     public static final String ANALYSIS_STATUS_DIR = "Analysis";
-    public static final String AUDIT_DIR = "Audit";
 
     public static final String LEGACY_BIN_DIR = ".bin";
     public static final String LEGACY_CONFIGURATION_DIR = "00 - Configuration";
     public static final String LEGACY_STATUS_DIR = ".flash-status";
-    public static final String LEGACY_QUALITY_REPORT_DIR = "Quality_Report";
     public static final String LEGACY_TIF_CACHE_DIR = ".tif_cache";
     public static final String LEGACY_CUSTOM_FILTER_PRESET_DIR = "Custom Filter Presets";
     public static final String CUSTOM_FILTER_PRESET_DIR = "Custom Filter Presets";
@@ -361,21 +357,6 @@ public final class FlashProjectLayout {
         return Collections.unmodifiableList(out);
     }
 
-    // TODO(Stage 08): collapse intensityAnalysisDetailsWriteDir into the single
-    // analysis_details directory now that intensity details live under Run Records.
-    public File intensityAnalysisDetailsWriteDir() {
-        return analysisDetailsWriteDir();
-    }
-
-    // TODO(Stage 08): move under Results/Run Records/analysis_details/.
-    public File objectAnalysisDetailsWriteDir() {
-        return new File(analysisImagesObjectsRoot(), "Analysis Details");
-    }
-
-    public List<File> objectAnalysisDetailsReadDirs() {
-        return immutableList(objectAnalysisDetailsWriteDir());
-    }
-
     public File aggregationWriteDir() {
         return analysisWriteDir(AnalysisFolder.AGGREGATION);
     }
@@ -438,10 +419,6 @@ public final class FlashProjectLayout {
         return readFilesForNames(excelReadDirs(), fileNames);
     }
 
-    public List<File> intensityAnalysisDetailsReadDirs() {
-        return Collections.singletonList(intensityAnalysisDetailsWriteDir());
-    }
-
     public File presetsRoot() {
         return new File(settingsRoot(), PRESETS_DIR);
     }
@@ -481,23 +458,6 @@ public final class FlashProjectLayout {
                 new File(legacyBinDir(), LEGACY_CUSTOM_FILTER_PRESET_DIR));
     }
 
-    public File reportsRoot() {
-        return new File(flashRoot(), REPORTS_DIR);
-    }
-
-    public List<File> reportsReadDirs() {
-        return immutableList(reportsRoot(), new File(projectRoot, LEGACY_QUALITY_REPORT_DIR));
-    }
-
-    public File qualityReportWriteDir() {
-        return new File(reportsRoot(), QUALITY_REPORT_DIR);
-    }
-
-    public List<File> qualityReportReadDirs() {
-        return immutableList(qualityReportWriteDir(),
-                new File(projectRoot, LEGACY_QUALITY_REPORT_DIR));
-    }
-
     public File cacheRoot() {
         return new File(flashRoot(), CACHE_DIR);
     }
@@ -531,10 +491,6 @@ public final class FlashProjectLayout {
         return immutableList(analysisStatusWriteDir(),
                 new File(statusRoot(), ANALYSIS_STATUS_DIR),
                 new File(projectRoot, LEGACY_STATUS_DIR));
-    }
-
-    public File auditRoot() {
-        return new File(statusSettingsRoot(), AUDIT_DIR);
     }
 
     public File statusWriteFile(String fileName) {

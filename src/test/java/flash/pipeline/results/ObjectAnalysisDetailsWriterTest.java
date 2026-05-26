@@ -49,7 +49,7 @@ public class ObjectAnalysisDetailsWriterTest {
                 Collections.singletonMap("GFAP", 35.0)
         );
 
-        File out = new File(analysisDetailsDir, "GFAP.txt");
+        File out = new File(analysisDetailsDir, "objects_GFAP.txt");
         String text = new String(Files.readAllBytes(out.toPath()), StandardCharsets.UTF_8);
 
         assertTrue(text.contains("<Filter Macro>"));
@@ -62,11 +62,11 @@ public class ObjectAnalysisDetailsWriterTest {
     }
 
     @Test
-    public void analysisDetailsWriteDir_isInsideResultsAnalysisImagesObjectsFolder() throws Exception {
+    public void analysisDetailsWriteDir_isInsideRunRecordsAnalysisDetailsFolder() throws Exception {
         File root = tempFolder.newFolder("object-details-layout");
 
         assertEquals(
-                new File(root, "FLASH/Results/Analysis Images/Objects/Analysis Details").getAbsolutePath(),
+                new File(root, "FLASH/Results/Run Records/analysis_details").getAbsolutePath(),
                 ObjectAnalysisDetailsWriter.analysisDetailsWriteDir(root).getAbsolutePath());
     }
 
@@ -96,7 +96,7 @@ public class ObjectAnalysisDetailsWriterTest {
                 null
         );
 
-        File out = new File(analysisDetailsDir, "DAPI.txt");
+        File out = new File(analysisDetailsDir, "objects_DAPI.txt");
         String text = new String(Files.readAllBytes(out.toPath()), StandardCharsets.UTF_8);
 
         assertTrue(text.contains("// === STANDARD CLEANUP ==="));
@@ -132,7 +132,7 @@ public class ObjectAnalysisDetailsWriterTest {
                 Collections.singletonMap("IBA1", 40.0)
         );
 
-        File out = new File(analysisDetailsDir, "IBA1.txt");
+        File out = new File(analysisDetailsDir, "objects_IBA1.txt");
         String text = new String(Files.readAllBytes(out.toPath()), StandardCharsets.UTF_8);
 
         assertTrue(text.contains("<Filter Macro>"));

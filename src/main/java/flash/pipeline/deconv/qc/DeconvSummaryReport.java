@@ -1,6 +1,6 @@
 package flash.pipeline.deconv.qc;
 
-import flash.pipeline.deconv.DeconvolutionIO;
+import flash.pipeline.io.FlashProjectLayout;
 
 import java.io.File;
 import java.io.IOException;
@@ -30,7 +30,8 @@ public final class DeconvSummaryReport {
     private boolean finished = false;
 
     public DeconvSummaryReport(File rootDir) throws IOException {
-        this(new File(DeconvolutionIO.deconvOutDir(rootDir), "deconv_summary.txt"), true);
+        this(new File(FlashProjectLayout.forDirectory(rootDir.getAbsolutePath()).qcRoot(),
+                "deconv_summary.txt"), true);
     }
 
     DeconvSummaryReport(File reportFile, boolean initialize) throws IOException {

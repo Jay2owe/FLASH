@@ -38,7 +38,7 @@ public class IntensityDetailsWriterTest {
                 "DAPI"
         );
 
-        File out = new File(analysisDetailsDir, "GFAP.txt");
+        File out = new File(analysisDetailsDir, "intensity_GFAP.txt");
         assertTrue(out.getAbsolutePath().contains(
                 "FLASH" + File.separator + "Results"
                         + File.separator + "Run Records"
@@ -87,7 +87,7 @@ public class IntensityDetailsWriterTest {
                 "No partial failures"
         );
 
-        File out = new File(analysisDetailsDir, "DAPI.txt");
+        File out = new File(analysisDetailsDir, "intensity_DAPI.txt");
         String text = new String(Files.readAllBytes(out.toPath()), StandardCharsets.UTF_8);
 
         assertTrue(text.contains("<Intensity Spatial Analysis>"));

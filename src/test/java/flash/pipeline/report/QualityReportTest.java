@@ -109,7 +109,7 @@ public class QualityReportTest {
     }
 
     @Test
-    public void writeReport_usesFlashQualityReportFolder() {
+    public void writeReport_writesUnderResultsQcFolder() {
         QualityReport report = new QualityReport();
         report.setEnabled(true);
         report.setDirectory(tmp.getRoot().getAbsolutePath());
@@ -117,8 +117,9 @@ public class QualityReportTest {
         report.addGenericAnalysis("Test Analysis", 1200);
 
         assertTrue(new File(tmp.getRoot(),
-                "FLASH/Reports/Quality Report/QC_Report.html").isFile());
-        assertFalse(new File(tmp.getRoot(), "Quality_Report/QC_Report.html").exists());
+                "FLASH/Results/QC/QC_Report.html").isFile());
+        assertFalse(new File(tmp.getRoot(),
+                "FLASH/Reports/Quality Report/QC_Report.html").exists());
     }
 
     @Test

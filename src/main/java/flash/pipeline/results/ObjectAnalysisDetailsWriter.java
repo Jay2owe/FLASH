@@ -27,7 +27,8 @@ import java.util.Optional;
 
 /** Writes macro-style per-channel Analysis Details for 3D Object Analysis. */
 public final class ObjectAnalysisDetailsWriter {
-    public static final String SEGMENTATION_MODELS_FILENAME = "segmentation_models.txt";
+    public static final String FILENAME_PREFIX = "objects_";
+    public static final String SEGMENTATION_MODELS_FILENAME = FILENAME_PREFIX + "segmentation_models.txt";
     private static final String MISSING_MODEL_ERROR = "Model not found in catalog at audit time";
 
     private ObjectAnalysisDetailsWriter() {}
@@ -37,7 +38,11 @@ public final class ObjectAnalysisDetailsWriter {
             throw new IllegalArgumentException("Project directory must not be null.");
         }
         return FlashProjectLayout.forDirectory(projectDirectory.getAbsolutePath())
-                .objectAnalysisDetailsWriteDir();
+                .analysisDetailsWriteDir();
+    }
+
+    public static String detailsFileName(String channelName) {
+        return FILENAME_PREFIX + ChannelFilenameCodec.toSafe(channelName) + ".txt";
     }
 
     public static File segmentationModelsReportFile(File analysisDetailsDir) {
@@ -165,7 +170,7 @@ public final class ObjectAnalysisDetailsWriter {
     ) throws Exception {
         flash.pipeline.io.IoUtils.mustMkdirs(analysisDetailsDir);
 
-        File out = new File(analysisDetailsDir, ChannelFilenameCodec.toSafe(channelName) + ".txt");
+        File out = new File(analysisDetailsDir, detailsFileName(channelName));
         String macroText = loadObjectFilterMacro(binDir, channelIndex1Based);
         String modelSummary = modelSummary(modelEntry,
                 "Versatile (fluorescent nuclei)",
@@ -281,7 +286,7 @@ public final class ObjectAnalysisDetailsWriter {
     ) throws Exception {
         flash.pipeline.io.IoUtils.mustMkdirs(analysisDetailsDir);
 
-        File out = new File(analysisDetailsDir, ChannelFilenameCodec.toSafe(channelName) + ".txt");
+        File out = new File(analysisDetailsDir, detailsFileName(channelName));
         String macroText = loadObjectFilterMacro(binDir, channelIndex1Based);
         String modelSummary = modelSummary(modelEntry,
                 modelToken,
@@ -401,7 +406,7 @@ public final class ObjectAnalysisDetailsWriter {
 
         flash.pipeline.io.IoUtils.mustMkdirs(analysisDetailsDir);
 
-        File out = new File(analysisDetailsDir, ChannelFilenameCodec.toSafe(channelName) + ".txt");
+        File out = new File(analysisDetailsDir, detailsFileName(channelName));
         String macroText = loadObjectFilterMacro(binDir, channelIndex1Based);
 
         String[] sizeParts = particleSizeToken == null ? new String[] {"100", "Infinity"} : particleSizeToken.split("-");
