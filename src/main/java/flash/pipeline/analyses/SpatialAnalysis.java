@@ -32,6 +32,7 @@ import flash.pipeline.io.DeferredImageSupplier;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.ImageSourceDispatcher;
 import flash.pipeline.io.IoUtils;
+import flash.pipeline.io.CsvSupport;
 import flash.pipeline.io.CsvTableIO.ChannelData;
 import flash.pipeline.morphometry.ObjectFractal;
 import flash.pipeline.morphometry.ObjectPatch;
@@ -1812,31 +1813,12 @@ public class SpatialAnalysis implements Analysis {
                 continue;
             }
 
-            double[] axArr = new double[idxA.size()];
-            double[] ayArr = new double[idxA.size()];
-            double[] azArr = new double[idxA.size()];
-            boolean allZeroZA = true;
-            for (int i = 0; i < idxA.size(); i++) {
-                int ri = idxA.get(i);
-                axArr[i] = resolveAxis(chA, ri, "XM", XM_UM, calibratedScale(cal, 'x'));
-                ayArr[i] = resolveAxis(chA, ri, "YM", YM_UM, calibratedScale(cal, 'y'));
-                azArr[i] = resolveAxis(chA, ri, "ZM", ZM_UM, calibratedScale(cal, 'z'));
-                if (azArr[i] != 0.0) allZeroZA = false;
-            }
+            CentroidSet centroidsA = buildFiniteCentroids(chA, idxA, cal);
+            CentroidSet centroidsB = buildFiniteCentroids(chB, idxB, cal);
+            idxA = centroidsA.rows;
+            idxB = centroidsB.rows;
 
-            double[] bxArr = new double[idxB.size()];
-            double[] byArr = new double[idxB.size()];
-            double[] bzArr = new double[idxB.size()];
-            boolean allZeroZB = true;
-            for (int i = 0; i < idxB.size(); i++) {
-                int ri = idxB.get(i);
-                bxArr[i] = resolveAxis(chB, ri, "XM", XM_UM, calibratedScale(cal, 'x'));
-                byArr[i] = resolveAxis(chB, ri, "YM", YM_UM, calibratedScale(cal, 'y'));
-                bzArr[i] = resolveAxis(chB, ri, "ZM", ZM_UM, calibratedScale(cal, 'z'));
-                if (bzArr[i] != 0.0) allZeroZB = false;
-            }
-
-            if (allZeroZA && allZeroZB) {
+            if (idxA.isEmpty() || idxB.isEmpty()) {
                 continue;
             }
 
@@ -1846,9 +1828,9 @@ public class SpatialAnalysis implements Analysis {
                 double minDist = Double.MAX_VALUE;
                 int minIdx = 0;
                 for (int j = 0; j < idxB.size(); j++) {
-                    double dx = axArr[i] - bxArr[j];
-                    double dy = ayArr[i] - byArr[j];
-                    double dz = azArr[i] - bzArr[j];
+                    double dx = centroidsA.x[i] - centroidsB.x[j];
+                    double dy = centroidsA.y[i] - centroidsB.y[j];
+                    double dz = centroidsA.z[i] - centroidsB.z[j];
                     double dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
                     if (dist < minDist) {
                         minDist = dist;
@@ -1865,9 +1847,9 @@ public class SpatialAnalysis implements Analysis {
                 double minDist = Double.MAX_VALUE;
                 int minIdx = 0;
                 for (int i = 0; i < idxA.size(); i++) {
-                    double dx = bxArr[j] - axArr[i];
-                    double dy = byArr[j] - ayArr[i];
-                    double dz = bzArr[j] - azArr[i];
+                    double dx = centroidsB.x[j] - centroidsA.x[i];
+                    double dy = centroidsB.y[j] - centroidsA.y[i];
+                    double dz = centroidsB.z[j] - centroidsA.z[i];
                     double dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
                     if (dist < minDist) {
                         minDist = dist;
@@ -1936,6 +1918,53 @@ public class SpatialAnalysis implements Analysis {
         }
 
         IJ.log("    Distances computed for " + nameA + " <-> " + nameB);
+    }
+
+    private CentroidSet buildFiniteCentroids(ChannelData cd,
+                                             List<Integer> rowIndices,
+                                             CalibrationIO.PixelCalibration cal) {
+        List<Integer> rows = new ArrayList<Integer>();
+        List<Double> xs = new ArrayList<Double>();
+        List<Double> ys = new ArrayList<Double>();
+        List<Double> zs = new ArrayList<Double>();
+        if (rowIndices != null) {
+            for (int i = 0; i < rowIndices.size(); i++) {
+                int row = rowIndices.get(i);
+                double x = resolveAxis(cd, row, "XM", XM_UM, calibratedScale(cal, 'x'));
+                double y = resolveAxis(cd, row, "YM", YM_UM, calibratedScale(cal, 'y'));
+                double z = resolveAxis(cd, row, "ZM", ZM_UM, calibratedScale(cal, 'z'));
+                if (!Double.isFinite(x) || !Double.isFinite(y) || !Double.isFinite(z)) {
+                    continue;
+                }
+                rows.add(Integer.valueOf(row));
+                xs.add(Double.valueOf(x));
+                ys.add(Double.valueOf(y));
+                zs.add(Double.valueOf(z));
+            }
+        }
+        return new CentroidSet(rows, toPrimitive(xs), toPrimitive(ys), toPrimitive(zs));
+    }
+
+    private static double[] toPrimitive(List<Double> values) {
+        double[] out = new double[values.size()];
+        for (int i = 0; i < values.size(); i++) {
+            out[i] = values.get(i).doubleValue();
+        }
+        return out;
+    }
+
+    private static final class CentroidSet {
+        private final List<Integer> rows;
+        private final double[] x;
+        private final double[] y;
+        private final double[] z;
+
+        private CentroidSet(List<Integer> rows, double[] x, double[] y, double[] z) {
+            this.rows = rows;
+            this.x = x;
+            this.y = y;
+            this.z = z;
+        }
     }
 
     private Map<String, List<Integer>> groupBySCN(ChannelData cd, boolean validObjectsOnly) {
@@ -2274,10 +2303,12 @@ public class SpatialAnalysis implements Analysis {
             if (xRaw == null || xRaw.trim().isEmpty() || yRaw == null || yRaw.trim().isEmpty()) {
                 continue;
             }
-            points.add(new double[]{
-                    CsvTableIO.parseDoubleSafe(xRaw),
-                    CsvTableIO.parseDoubleSafe(yRaw)
-            });
+            double x = CsvTableIO.parseDoubleSafe(xRaw);
+            double y = CsvTableIO.parseDoubleSafe(yRaw);
+            if (!Double.isFinite(x) || !Double.isFinite(y)) {
+                continue;
+            }
+            points.add(new double[]{x, y});
         }
         double[][] result = new double[points.size()][2];
         for (int i = 0; i < points.size(); i++) {
@@ -2377,15 +2408,15 @@ public class SpatialAnalysis implements Analysis {
 
     private void writeCsv(File outFile, List<String> header, List<List<String>> rows) {
         try {
-            PrintWriter pw = new PrintWriter(outFile, "UTF-8");
-            try {
+            CsvSupport.writeAtomically(outFile, new CsvSupport.WriterAction() {
+                @Override
+                public void write(PrintWriter pw) {
                 pw.println(CsvTableIO.joinCsv(header));
                 for (List<String> row : rows) {
                     pw.println(CsvTableIO.joinCsv(row));
                 }
-            } finally {
-                pw.close();
-            }
+                }
+            });
         } catch (IOException e) {
             IJ.log("Warning: could not write spatial statistics file " + outFile.getName() + ": " + e.getMessage());
         }

@@ -136,6 +136,52 @@ public class SpatialAnalysisTest {
     }
 
     @Test
+    public void execute_computesPixelDistancesForSingleSliceZeroZVolumes() throws Exception {
+        File root = temp.newFolder("spatial-single-slice-zero-z");
+        File objectsDir = objectsDir(root);
+
+        writeChannel(objectsDir, "A.csv",
+                "SCN,XM,YM,ZM",
+                "1,1,1,0");
+        writeChannel(objectsDir, "B.csv",
+                "SCN,XM,YM,ZM",
+                "1,4,5,0");
+
+        runSuppressed(root);
+
+        ChannelData a = CsvTableIO.loadChannelCsv(new File(objectsDir, "A.csv"), "A");
+        ChannelData b = CsvTableIO.loadChannelCsv(new File(objectsDir, "B.csv"), "B");
+        assertNotNull(a);
+        assertNotNull(b);
+        assertEquals(5.0, a.getDouble(0, "A_DistToClosest_B"), 1e-6);
+        assertEquals(5.0, b.getDouble(0, "B_DistToClosest_A"), 1e-6);
+    }
+
+    @Test
+    public void execute_skipsNonFiniteCentroidsDuringSpatialMatching() throws Exception {
+        File root = temp.newFolder("spatial-non-finite-centroids");
+        File objectsDir = objectsDir(root);
+
+        writeChannel(objectsDir, "A.csv",
+                "SCN,XM,YM,ZM",
+                "1,NaN,1,0\n" +
+                "1,1,1,0");
+        writeChannel(objectsDir, "B.csv",
+                "SCN,XM,YM,ZM",
+                "1,4,5,0");
+
+        runSuppressed(root);
+
+        ChannelData a = CsvTableIO.loadChannelCsv(new File(objectsDir, "A.csv"), "A");
+        ChannelData b = CsvTableIO.loadChannelCsv(new File(objectsDir, "B.csv"), "B");
+        assertNotNull(a);
+        assertNotNull(b);
+        assertEquals("Inf", a.get(0, "A_DistToClosest_B"));
+        assertEquals(5.0, a.getDouble(1, "A_DistToClosest_B"), 1e-6);
+        assertEquals(1.0, b.getDouble(0, "B_ClosestTo_A"), 1e-6);
+    }
+
+    @Test
     public void execute_writesDotDecimalDistancesUnderGermanLocale() throws Exception {
         Locale original = Locale.getDefault();
         Locale.setDefault(Locale.GERMANY);
