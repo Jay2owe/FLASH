@@ -87,6 +87,38 @@ public class BinSetupDispatcherTest {
     }
 
     @Test
+    public void legacyBinWithoutSegmentationLineUsesClassicalDefault() throws Exception {
+        File dir = temp.newFolder("legacySixLine");
+        writeChannelData(dir,
+                "DAPI GFP",
+                "Blue Green",
+                "default 100",
+                "100-Infinity 100-Infinity",
+                "None None",
+                "default default");
+
+        final AtomicInteger chooserCalls = new AtomicInteger(0);
+        BinSetupDispatcher.setChooserForTest(new BinSetupDispatcher.Chooser() {
+            @Override public BinSetupChooser.Choice show(String analysisDisplayName,
+                                                         Set<BinField> missing,
+                                                         boolean showRoiTip) {
+                chooserCalls.incrementAndGet();
+                return BinSetupChooser.Choice.CANCELLED;
+            }
+        });
+
+        BinSetupDispatcher.Outcome outcome = BinSetupDispatcher.ensure(
+                dir.getAbsolutePath(), "3D Object Analysis",
+                EnumSet.of(BinField.CHANNEL_NAMES, BinField.SEGMENTATION_METHODS),
+                false);
+
+        assertEquals(BinSetupDispatcher.Outcome.COMPLETED, outcome);
+        assertEquals(0, chooserCalls.get());
+        assertEquals(BinSetupDispatcher.SOURCE_LOADED,
+                BinSetupDispatcher.getLastFieldSources().get(BinField.SEGMENTATION_METHODS));
+    }
+
+    @Test
     public void headlessModeWritesMissingFieldsFromCliWithoutChooser() throws Exception {
         File dir = temp.newFolder("macro");
         final AtomicInteger chooserCalls = new AtomicInteger(0);

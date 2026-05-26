@@ -168,6 +168,9 @@ public class BinConfigIO {
             for (int i = 0; i < segmentationMethods.length; i++) {
                 cfg.addSegmentationMethodToken(segmentationMethods[i]);
             }
+            while (cfg.segmentationMethods.size() < cfg.numChannels()) {
+                cfg.addSegmentationMethodToken("classical");
+            }
             if (hasFilterPresetLine) {
                 for (int i = 0; i < storedFilterPresets.length; i++) {
                     cfg.channelFilterPresets.add(resolveFilterPresetForChannel(
