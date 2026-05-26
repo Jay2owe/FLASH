@@ -66,7 +66,7 @@ public class BinConfigIO {
         String[] colors = (lines.size() > 1) ? splitTokens(lines.get(1)) : new String[0];
         String[] thresholds = (lines.size() > 2) ? splitTokens(lines.get(2)) : new String[0];
         String[] sizes = (lines.size() > 3) ? splitTokens(lines.get(3)) : new String[0];
-        String[] minmax = (lines.size() > 4) ? splitTokens(lines.get(4)) : new String[names.length];
+        String[] minmax = (lines.size() > 4) ? splitTokens(lines.get(4)) : new String[0];
         String[] intensityThresholds = (lines.size() > 5) ? splitTokens(lines.get(5)) : new String[0];
         String[] segmentationMethods = (lines.size() > 6) ? splitTokens(lines.get(6)) : new String[0];
         String[] storedFilterPresets = (lines.size() > 7) ? splitTokens(lines.get(7)) : new String[0];

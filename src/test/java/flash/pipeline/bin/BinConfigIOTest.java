@@ -590,10 +590,8 @@ public class BinConfigIOTest {
         );
         BinConfig cfg = BinConfigIO.readFromDirectory(dir.getAbsolutePath());
         assertEquals(2, cfg.numChannels());
-        // When lines.size() <= 4, minmax array is new String[names.length] with null entries
-        // BinConfigIO stores null (not "None") because the null array element passes the bounds check
-        assertNull(cfg.channelMinMax.get(0));
-        assertNull(cfg.channelMinMax.get(1));
+        assertEquals("None", cfg.channelMinMax.get(0));
+        assertEquals("None", cfg.channelMinMax.get(1));
         assertEquals("default", cfg.channelIntensityThresholds.get(0));
         assertEquals("classical", cfg.segmentationMethods.get(0));
         assertEquals("classical", cfg.segmentationMethods.get(1));
