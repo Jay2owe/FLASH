@@ -80,6 +80,71 @@ public class FlashProjectLayoutTest {
     }
 
     @Test
+    public void resultsWritePaths_areUnderResultsRoot() throws Exception {
+        File project = temp.newFolder("project");
+        FlashProjectLayout layout = FlashProjectLayout.forDirectory(project.getAbsolutePath());
+
+        assertPath(new File(project, "FLASH/Results"), layout.resultsRoot());
+        assertPath(new File(project, "FLASH/Results/Tables"), layout.tablesRoot());
+        assertPath(new File(project, "FLASH/Results/Tables/Project Summary"),
+                layout.tablesProjectSummaryWriteDir());
+        assertPath(new File(project, "FLASH/Results/Tables/ROIs"), layout.tablesRoiWriteDir());
+        assertPath(new File(project, "FLASH/Results/Tables/Objects"), layout.tablesObjectsWriteDir());
+        assertPath(new File(project, "FLASH/Results/Tables/Intensity"), layout.tablesIntensityWriteDir());
+        assertPath(new File(project, "FLASH/Results/Tables/Spatial"), layout.tablesSpatialWriteDir());
+        assertPath(new File(project, "FLASH/Results/Tables/Morphometry"), layout.tablesMorphometryWriteDir());
+        assertPath(new File(project, "FLASH/Results/Tables/Line Distance"), layout.tablesLineDistanceWriteDir());
+        assertPath(new File(project, "FLASH/Results/Tables/Spectral Decontamination"),
+                layout.tablesSpectralWriteDir());
+        assertPath(new File(project, "FLASH/Results/Presentation Images"), layout.presentationImagesRoot());
+        assertPath(new File(project, "FLASH/Results/Presentation Images/Images"),
+                layout.presentationImagesDir());
+        assertPath(new File(project, "FLASH/Results/Presentation Images/Annotated Images"),
+                layout.presentationAnnotatedDir());
+        assertPath(new File(project, "FLASH/Results/Presentation Images/Tiles"),
+                layout.presentationTilesDir());
+        assertPath(new File(project, "FLASH/Results/Presentation Images/OME-TIFF"),
+                layout.presentationOmeTiffDir());
+        assertPath(new File(project, "FLASH/Results/Analysis Images"), layout.analysisImagesRoot());
+        assertPath(new File(project, "FLASH/Results/Analysis Images/ROIs"), layout.analysisImagesRoiDir());
+        assertPath(new File(project, "FLASH/Results/Analysis Images/Objects"),
+                layout.analysisImagesObjectsRoot());
+        assertPath(new File(project, "FLASH/Results/Analysis Images/Objects/Masks and Label Maps"),
+                layout.analysisImagesObjectsMasksDir());
+        assertPath(new File(project, "FLASH/Results/Analysis Images/Objects/Masked Images"),
+                layout.analysisImagesObjectsMaskedDir());
+        assertPath(new File(project, "FLASH/Results/Analysis Images/Objects/Filtered Inputs"),
+                layout.analysisImagesObjectsFilteredDir());
+        assertPath(new File(project, "FLASH/Results/Analysis Images/Intensity Overlays"),
+                layout.analysisImagesIntensityOverlaysDir());
+        assertPath(new File(project, "FLASH/Results/Analysis Images/Spatial Heatmaps"),
+                layout.analysisImagesSpatialHeatmapsDir());
+        assertPath(new File(project, "FLASH/Results/Analysis Images/Spectral Decontamination"),
+                layout.analysisImagesSpectralDir());
+        assertPath(new File(project, "FLASH/Results/Analysis Images/Deconvolution"),
+                layout.analysisImagesDeconvolutionDir());
+        assertPath(new File(project, "FLASH/Results/QC"), layout.qcRoot());
+        assertPath(new File(project, "FLASH/Results/QC/QC_Report.html"), layout.qcReportWriteFile());
+        assertPath(new File(project, "FLASH/Results/QC/overlays"), layout.qcOverlaysWriteDir());
+        assertPath(new File(project, "FLASH/Results/Run Records"), layout.runRecordsRoot());
+        assertPath(new File(project, "FLASH/Results/Run Records/run_history.csv"),
+                layout.runHistoryWriteFile());
+        assertPath(new File(project, "FLASH/Results/Run Records/settings_snapshots"),
+                layout.settingsSnapshotsWriteDir());
+        assertPath(new File(project, "FLASH/Results/Run Records/replay_commands"),
+                layout.replayCommandsWriteDir());
+        assertPath(new File(project, "FLASH/Results/Run Records/analysis_details"),
+                layout.analysisDetailsWriteDir());
+        assertPath(new File(project, "FLASH/Results/Summary.xlsx"), layout.summaryWorkbookWriteFile());
+        assertPath(new File(project, "FLASH/Results/START_HERE.html"), layout.startHereWriteFile());
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void forDirectory_rejectsBlankDirectory() {
+        FlashProjectLayout.forDirectory("");
+    }
+
+    @Test
     public void configurationReadPaths_preferNewThenLegacyAndDoNotCreateDirectories() throws Exception {
         File project = temp.newFolder("project");
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(project.getAbsolutePath());
