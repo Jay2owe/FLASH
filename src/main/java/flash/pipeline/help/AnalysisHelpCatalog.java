@@ -254,16 +254,15 @@ public final class AnalysisHelpCatalog {
                         "Save the ROI set for the image, then repeat or append until all required images have ROI files."),
                 list(
                         "Apply any saved image transform before the image is shown for drawing.",
-                        "FLASH stores the main ROI zip files in FLASH/Draw and Save ROIs/ROI Sets/.",
-                        "FLASH also stores ROI properties and a copy of the ROI zip in FLASH/Draw and Save ROIs/Attributes/ for later volume and aggregation steps.",
-                        "After each image, FLASH writes or updates FLASH/Draw and Save ROIs/Image Orientation.csv with the confirmed orientation transform.",
+                        "FLASH stores the main ROI zip files in FLASH/Results/Analysis Images/ROIs/.",
+                        "FLASH stores ROI properties in FLASH/Results/Tables/ROIs/ for later volume and aggregation steps.",
+                        "After each image, FLASH writes or updates FLASH/Results/Tables/ROIs/Image Orientation.csv with the confirmed orientation transform.",
                         "Later analyses load these ROI sets and saved transforms automatically."),
                 list(
-                        "FLASH/Draw and Save ROIs/ROI Sets/<name> ROIs.zip contains the drawn regions for an image or region set.",
-                        "FLASH/Draw and Save ROIs/Attributes/<name> ROI Properties.csv records ROI measurements used by aggregation and normalization.",
-                        "FLASH/Draw and Save ROIs/Attributes/<name> ROIs.zip keeps the ROI set with its region attributes.",
-                        "FLASH/Draw and Save ROIs/Image Outputs/<animal>/ stores cropped ROI preview PNGs.",
-                        "FLASH/Draw and Save ROIs/Image Orientation.csv records saved rotate and flip transforms confirmed during ROI drawing."),
+                        "FLASH/Results/Analysis Images/ROIs/<name> ROIs.zip contains the drawn regions for an image or region set.",
+                        "FLASH/Results/Tables/ROIs/<name> ROI Properties.csv records ROI measurements used by aggregation and normalization.",
+                        "FLASH/Results/Analysis Images/ROIs/<image>_Cropped.PNG stores cropped ROI previews.",
+                        "FLASH/Results/Tables/ROIs/Image Orientation.csv records saved rotate and flip transforms confirmed during ROI drawing."),
                 list(
                         "Inconsistent ROI names create separate groups during aggregation, even if they refer to the same anatomical region.",
                         "Changing orientation after drawing an unsaved ROI clears or invalidates that ROI so coordinates still match the displayed image.",
@@ -546,7 +545,7 @@ public final class AnalysisHelpCatalog {
                         "Use it again after changing condition assignments, ROI attributes, object outputs, spatial outputs, or aggregation granularity."),
                 list(
                         "Per-analysis CSV files from FLASH/Image Analysis/Image Intensities/, FLASH/Image Analysis/3D Objects/, FLASH/Image Analysis/Spatial Analysis/, and any legacy Data Analysis folders that still contain compatible outputs.",
-                        "ROI attribute CSV files from FLASH/Draw and Save ROIs/Attributes/ when per-mm3 normalization or ROI metadata should be included.",
+                        "ROI attribute CSV files from FLASH/Results/Tables/ROIs/ when per-mm3 normalization or ROI metadata should be included.",
                         "Condition assignments saved in FLASH/Results Export/Conditions.csv, with legacy fallback when opening older projects.",
                         "A selected aggregation granularity and output mode, such as per-animal, per-hemisphere, per-region, per-section, raw, normalized, or both."),
                 list(

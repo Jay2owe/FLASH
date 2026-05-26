@@ -10,6 +10,7 @@ import flash.pipeline.naming.OrientationManifestRow;
 import flash.pipeline.naming.ResolvedImageMetadata;
 import flash.pipeline.orientation.OrientationTransformState;
 import flash.pipeline.orientation.RoiOrientationManifestService;
+import flash.pipeline.roi.RoiIO;
 import flash.pipeline.zslice.ZSliceMode;
 import ij.ImagePlus;
 import ij.process.ByteProcessor;
@@ -52,6 +53,18 @@ public class DrawAndSaveROIsAnalysisTest {
                 analysis.requiredBinFields());
         assertFalse(analysis.benefitsFromRois());
         assertTrue(analysis.requiresHeadedMode());
+    }
+
+    @Test
+    public void roiOutputHelpersPointDrawRoisAtResultsFolders() throws Exception {
+        File dir = temp.newFolder("roi-output-layout");
+
+        assertEquals(new File(dir, "FLASH/Results/Analysis Images/ROIs"),
+                RoiIO.roiSetWriteDir(dir));
+        assertEquals(new File(dir, "FLASH/Results/Analysis Images/ROIs"),
+                RoiIO.imageOutputsWriteDir(dir));
+        assertEquals(new File(dir, "FLASH/Results/Tables/ROIs"),
+                RoiIO.attributesWriteDir(dir));
     }
 
     @Test

@@ -74,7 +74,7 @@ public class MasterAggregationConfigIntegrationTest {
     @Test
     public void execute_perHemisphereGranularityEmitsOneRowPerHemisphere() throws Exception {
         File root = temp.newFolder("agg-hemisphere");
-        File attrs = new File(root, "Data Analysis/Attributes");
+        File attrs = roiTables(root);
         File objects = new File(root, "Data Analysis/Objects");
         assertTrue(attrs.mkdirs());
         assertTrue(objects.mkdirs());
@@ -115,7 +115,7 @@ public class MasterAggregationConfigIntegrationTest {
     @Test
     public void execute_rawOnlyOutputModeDropsPerMm3Columns() throws Exception {
         File root = temp.newFolder("agg-raw-only");
-        File attrs = new File(root, "Data Analysis/Attributes");
+        File attrs = roiTables(root);
         File objects = new File(root, "Data Analysis/Objects");
         assertTrue(attrs.mkdirs());
         assertTrue(objects.mkdirs());
@@ -148,7 +148,7 @@ public class MasterAggregationConfigIntegrationTest {
     @Test
     public void execute_permm3OnlyOutputModeDropsRawSummables() throws Exception {
         File root = temp.newFolder("agg-permm3-only");
-        File attrs = new File(root, "Data Analysis/Attributes");
+        File attrs = roiTables(root);
         File objects = new File(root, "Data Analysis/Objects");
         assertTrue(attrs.mkdirs());
         assertTrue(objects.mkdirs());
@@ -204,5 +204,9 @@ public class MasterAggregationConfigIntegrationTest {
 
     private static File aggregationFile(File root, String fileName) {
         return new File(FlashProjectLayout.forDirectory(root.getAbsolutePath()).aggregationWriteDir(), fileName);
+    }
+
+    private static File roiTables(File root) {
+        return FlashProjectLayout.forDirectory(root.getAbsolutePath()).tablesRoiWriteDir();
     }
 }

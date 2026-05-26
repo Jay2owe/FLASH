@@ -73,10 +73,7 @@ public final class FlashProjectLayout {
     public static final String SUMMARY_WORKBOOK_FILENAME = "Summary.xlsx";
     public static final String LEGACY_SUMMARY_WORKBOOK_FILENAME = "Project_Summary.xlsx";
     public static final String ORIENTATION_MANIFEST_FILENAME = "Image Orientation.csv";
-    public static final String LEGACY_ORIENTATION_MANIFEST_FILENAME = "Project_Image_Orientation.csv";
-    public static final String LEGACY_ORIENTATION_MANIFEST_TYPO_FILENAME = "Project_Image_Oritentation.csv";
     public static final String ORIENTATION_ALIASES_FILENAME = "Image Orientation Aliases.csv";
-    public static final String LEGACY_ORIENTATION_ALIASES_FILENAME = "Project_Image_Orientation_Aliases.csv";
 
     private static final String DATA_ANALYSIS_DIR = "Data Analysis";
     private static final String IMAGE_ANALYSIS_DIR = "Image Analysis";
@@ -86,10 +83,6 @@ public final class FlashProjectLayout {
     private final File projectRoot;
 
     public enum AnalysisFolder {
-        ROIS("Draw and Save ROIs",
-                FLASH_DIR + File.separator + "01 - Regions of Interest",
-                "ROIs",
-                DATA_ANALYSIS_DIR + File.separator + "Attributes"),
         DECONVOLUTION("3D Deconvolution",
                 FLASH_DIR + File.separator + "02 - 3D Deconvolution",
                 IMAGE_ANALYSIS_DIR + File.separator + "Deconvolved"),
@@ -503,24 +496,6 @@ public final class FlashProjectLayout {
 
     public List<File> excelReadFiles(String... fileNames) {
         return readFilesForNames(excelReadDirs(), fileNames);
-    }
-
-    public File orientationWriteDir() {
-        return analysisWriteDir(AnalysisFolder.ROIS);
-    }
-
-    public File orientationManifestWriteFile(String fileName) {
-        return new File(orientationWriteDir(), fileName);
-    }
-
-    public List<File> orientationManifestReadFiles(String... fileNames) {
-        return readFilesForNames(orientationReadDirs(), fileNames);
-    }
-
-    public List<File> orientationReadDirs() {
-        return immutableList(orientationWriteDir(),
-                new File(flashRoot(), IMAGEJ_EXPORTS_DIR),
-                new File(projectRoot, IMAGEJ_EXPORTS_DIR));
     }
 
     public List<File> intensityDataReadDirs() {

@@ -278,25 +278,8 @@ public class AnalysisStatusScanner {
     }
 
     private static boolean hasRoiOutputs(FlashProjectLayout layout) {
-        if (!RoiIO.listRoiZipFiles(layout.projectRoot()).isEmpty()
-                || !RoiIO.listRoiPropertiesCsvFiles(layout.projectRoot()).isEmpty()) {
-            return true;
-        }
-        List<File> dirs = layout.analysisReadDirs(FlashProjectLayout.AnalysisFolder.ROIS);
-        for (int i = 0; i < dirs.size(); i++) {
-            if (hasZip(dirs.get(i))) return true;
-        }
-        return false;
-    }
-
-    private static boolean hasZip(File dir) {
-        if (dir == null || !dir.isDirectory()) return false;
-        File[] files = dir.listFiles(new FilenameFilter() {
-            @Override public boolean accept(File parent, String name) {
-                return name != null && name.toLowerCase(Locale.US).endsWith(".zip");
-            }
-        });
-        return files != null && files.length > 0;
+        return !RoiIO.listRoiZipFiles(layout.projectRoot()).isEmpty()
+                || !RoiIO.listRoiPropertiesCsvFiles(layout.projectRoot()).isEmpty();
     }
 
     private static String sha256(File file) {

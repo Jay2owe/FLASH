@@ -53,8 +53,8 @@ public class AnalysisStatusScannerTest {
     @Test
     public void scan_detectsSavedRoiOutputsInCurrentFlashLayout() throws Exception {
         File dir = temp.newFolder("current-rois-done");
-        File roiSets = new File(dir, "FLASH/Draw and Save ROIs/ROI Sets");
-        File attributes = new File(dir, "FLASH/Draw and Save ROIs/Attributes");
+        File roiSets = new File(dir, "FLASH/Results/Analysis Images/ROIs");
+        File attributes = new File(dir, "FLASH/Results/Tables/ROIs");
         assertTrue(roiSets.mkdirs());
         assertTrue(attributes.mkdirs());
         writeRoiZip(new File(roiSets, "SCN ROIs.zip"));
@@ -71,15 +71,15 @@ public class AnalysisStatusScannerTest {
     }
 
     @Test
-    public void scan_detectsLegacyRoiOutputs() throws Exception {
-        File dir = temp.newFolder("legacy-rois-done");
-        File legacyRois = new File(dir, "ROIs");
-        assertTrue(legacyRois.mkdirs());
-        writeRoiZip(new File(legacyRois, "Legacy ROIs.zip"));
+    public void scan_ignoresOldRoiFolders() throws Exception {
+        File dir = temp.newFolder("old-rois-ignored");
+        File oldRois = new File(dir, "ROIs");
+        assertTrue(oldRois.mkdirs());
+        writeRoiZip(new File(oldRois, "Old ROIs.zip"));
 
         Map<Integer, AnalysisStatus> statuses = new AnalysisStatusScanner().scan(dir);
 
-        assertEquals(AnalysisStatus.DONE,
+        assertEquals(AnalysisStatus.NOT_STARTED,
                 statuses.get(Integer.valueOf(FLASH_Pipeline.IDX_DRAW_ROIS)));
     }
 

@@ -24,64 +24,37 @@ import java.util.zip.ZipInputStream;
 
 /** Macro-equivalent ROI zip discovery and loading. */
 public final class RoiIO {
-    public static final String ROI_SETS_DIR = "ROI Sets";
-    public static final String ATTRIBUTES_DIR = "Attributes";
-    public static final String IMAGE_OUTPUTS_DIR = "Image Outputs";
-    public static final String PARTIAL_DIR = "Partial";
-    public static final String LEGACY_ROI_DIR = "ROIs";
-    public static final String LEGACY_FLASH_ROI_DIR = FlashProjectLayout.FLASH_DIR
-            + File.separator + "01 - Regions of Interest";
-    public static final String LEGACY_ATTRIBUTES_DIR = "Data Analysis" + File.separator + "Attributes";
-
     private RoiIO() {}
 
-    public static File roiRoot(File directory) {
-        return layout(directory).analysisWriteDir(FlashProjectLayout.AnalysisFolder.ROIS);
-    }
-
     public static File roiSetWriteDir(File directory) {
-        return new File(roiRoot(directory), ROI_SETS_DIR);
+        return layout(directory).analysisImagesRoiDir();
     }
 
     public static File attributesWriteDir(File directory) {
-        return new File(roiRoot(directory), ATTRIBUTES_DIR);
+        return layout(directory).tablesRoiWriteDir();
     }
 
     public static File imageOutputsWriteDir(File directory) {
-        return new File(roiRoot(directory), IMAGE_OUTPUTS_DIR);
+        return layout(directory).analysisImagesRoiDir();
     }
 
     public static File imageOutputsWriteDir(File directory, String animalName) {
-        String safeAnimal = animalName == null ? "" : animalName.trim();
-        return new File(imageOutputsWriteDir(directory), safeAnimal);
+        return imageOutputsWriteDir(directory);
     }
 
     public static File partialWriteDir(File directory) {
-        return new File(roiRoot(directory), PARTIAL_DIR);
+        return layout(directory).analysisImagesRoiDir();
     }
 
     public static List<File> roiSetReadDirs(File directory) {
-        File root = requireDirectory(directory);
-        ArrayList<File> dirs = new ArrayList<File>();
-        dirs.add(roiSetWriteDir(root));
-        dirs.add(attributesWriteDir(root));
-        dirs.add(new File(new File(root, LEGACY_FLASH_ROI_DIR), ROI_SETS_DIR));
-        dirs.add(new File(new File(root, LEGACY_FLASH_ROI_DIR), ATTRIBUTES_DIR));
-        dirs.add(new File(root, LEGACY_ROI_DIR));
-        dirs.add(new File(root, LEGACY_ATTRIBUTES_DIR));
-        return Collections.unmodifiableList(dirs);
+        return Collections.singletonList(roiSetWriteDir(requireDirectory(directory)));
     }
 
     public static List<File> attributesReadDirs(File directory) {
-        File root = requireDirectory(directory);
-        ArrayList<File> dirs = new ArrayList<File>();
-        dirs.add(attributesWriteDir(root));
-        dirs.add(new File(new File(root, LEGACY_FLASH_ROI_DIR), ATTRIBUTES_DIR));
-        dirs.add(new File(root, LEGACY_ATTRIBUTES_DIR));
-        return Collections.unmodifiableList(dirs);
+        return Collections.singletonList(attributesWriteDir(requireDirectory(directory)));
     }
 
-    /** FLASH ROI zip discovery. New layout wins; legacy folders remain readable. */
+    /** FLASH ROI zip discovery in the current Results layout. */
     public static List<File> listRoiZipFiles(File directory) {
         Map<String, File> byIdentity = new LinkedHashMap<String, File>();
         for (File dir : roiSetReadDirs(directory)) {

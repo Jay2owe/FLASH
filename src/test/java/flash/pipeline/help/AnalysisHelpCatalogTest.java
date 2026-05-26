@@ -259,9 +259,9 @@ public class AnalysisHelpCatalogTest {
         assertContains(AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_CREATE_BIN).outputs,
                 "FLASH/Set Up Configuration/.settings/Channel_Data.txt");
         assertContains(AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_DRAW_ROIS).outputs,
-                "FLASH/Draw and Save ROIs/ROI Sets/");
+                "FLASH/Results/Analysis Images/ROIs/");
         assertContains(AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_DRAW_ROIS).outputs,
-                "FLASH/Draw and Save ROIs/Image Orientation.csv");
+                "FLASH/Results/Tables/ROIs/Image Orientation.csv");
         assertContains(AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_DECONVOLUTION).outputs,
                 "FLASH/3D Deconvolution/");
         assertContains(AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_SPECTRAL_DECONTAMINATION).outputs,

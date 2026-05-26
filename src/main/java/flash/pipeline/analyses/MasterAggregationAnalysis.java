@@ -570,7 +570,7 @@ public class MasterAggregationAnalysis implements Analysis {
     // -------------------------------------------------- ROI Properties loading
 
     /**
-     * Loads ROI volume data from Attributes CSVs for per-mm³ normalization.
+     * Loads ROI volume data from ROI Properties tables for per-mm³ normalization.
      * Prefers "Volume (mm^3)" column directly; falls back to computing from
      * calibrated area × full stack depth when the volume column is absent.
      * Returns mean volume (mm³) per animal name.
@@ -580,7 +580,7 @@ public class MasterAggregationAnalysis implements Analysis {
         if (selectedRoiFile == null) return result;
         File attribDir = selectedRoiFile.getParentFile();
         if (!attribDir.isDirectory()) {
-            IJ.log("No Attributes directory found — volume normalization will be skipped.");
+            IJ.log("No ROI tables directory found — volume normalization will be skipped.");
             return result;
         }
 
@@ -593,7 +593,7 @@ public class MasterAggregationAnalysis implements Analysis {
         });
 
         if (csvFiles == null || csvFiles.length == 0) {
-            IJ.log("No ROI Properties CSV found in Attributes — volume normalization will be skipped.");
+            IJ.log("No ROI Properties CSV found in ROI tables — volume normalization will be skipped.");
             return result;
         }
         Arrays.sort(csvFiles, new Comparator<File>() {
@@ -806,7 +806,7 @@ public class MasterAggregationAnalysis implements Analysis {
             throw e;
         }
         if (roiZips.isEmpty()) {
-            IJ.log("  No ROI zip files found in ROI Sets or legacy ROI folders.");
+            IJ.log("  No ROI zip files found in the ROI analysis-image folder.");
             return null;
         }
 
@@ -952,8 +952,8 @@ public class MasterAggregationAnalysis implements Analysis {
     private Map<String, Integer> loadNumSections(String directory, File selectedRoiFile) {
         Map<String, Integer> result = new HashMap<String, Integer>();
 
-        // Try Attributes ROI Properties first (most accurate)
-        File attribDir = firstExistingRoiAttributesDir(directory);
+        // Try ROI Properties tables first (most accurate)
+        File attribDir = firstExistingRoiTablesDir(directory);
         if (attribDir.isDirectory()) {
             File[] csvFiles = attribDir.listFiles(new java.io.FilenameFilter() {
                 @Override
@@ -1412,9 +1412,9 @@ public class MasterAggregationAnalysis implements Analysis {
     }
 
     File chooseRoiPropertiesFile(String directory, Set<String> preferredAnimals) {
-        File attribDir = firstExistingRoiAttributesDir(directory);
+        File attribDir = firstExistingRoiTablesDir(directory);
         if (!attribDir.isDirectory()) {
-            IJ.log("No Attributes directory found â€” volume normalization will be skipped.");
+            IJ.log("No ROI tables directory found â€” volume normalization will be skipped.");
             return null;
         }
 
@@ -1427,7 +1427,7 @@ public class MasterAggregationAnalysis implements Analysis {
         });
 
         if (csvFiles == null || csvFiles.length == 0) {
-            IJ.log("No ROI Properties CSV found in Attributes â€” volume normalization will be skipped.");
+            IJ.log("No ROI Properties CSV found in ROI tables â€” volume normalization will be skipped.");
             return null;
         }
 
@@ -2565,7 +2565,7 @@ public class MasterAggregationAnalysis implements Analysis {
         return overlap;
     }
 
-    private static File firstExistingRoiAttributesDir(String directory) {
+    private static File firstExistingRoiTablesDir(String directory) {
         File root = new File(directory);
         for (File dir : RoiIO.attributesReadDirs(root)) {
             if (hasRoiPropertiesCsv(dir)) return dir;

@@ -16,9 +16,6 @@ import java.util.List;
 public final class OrientationManifestIO {
 
     public static final String FILE_NAME = FlashProjectLayout.ORIENTATION_MANIFEST_FILENAME;
-    public static final String LEGACY_FILE_NAME = FlashProjectLayout.LEGACY_ORIENTATION_MANIFEST_FILENAME;
-    public static final String LEGACY_TYPO_FILE_NAME =
-            FlashProjectLayout.LEGACY_ORIENTATION_MANIFEST_TYPO_FILENAME;
 
     private static final List<String> HEADER = Arrays.asList(
             "ImageKey",
@@ -40,16 +37,14 @@ public final class OrientationManifestIO {
     private OrientationManifestIO() {}
 
     public static File getFile(String directory) {
-        return FlashProjectLayout.forDirectory(directory).orientationManifestWriteFile(FILE_NAME);
+        FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
+        // TODO(results-folder-layout-plan stage 09): move this to tablesProjectSummaryWriteDir().
+        return new File(layout.tablesRoiWriteDir(), FILE_NAME);
     }
 
     public static File getExistingFile(String directory) {
-        List<File> candidates = FlashProjectLayout.forDirectory(directory)
-                .orientationManifestReadFiles(FILE_NAME, LEGACY_FILE_NAME, LEGACY_TYPO_FILE_NAME);
-        for (File candidate : candidates) {
-            if (candidate.isFile()) return candidate;
-        }
-        return null;
+        File candidate = getFile(directory);
+        return candidate.isFile() ? candidate : null;
     }
 
     public static List<OrientationManifestRow> readIfExists(String directory) {

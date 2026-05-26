@@ -17,21 +17,18 @@ import java.util.Map;
 public final class OrientationAliasIO {
 
     public static final String FILE_NAME = FlashProjectLayout.ORIENTATION_ALIASES_FILENAME;
-    public static final String LEGACY_FILE_NAME = FlashProjectLayout.LEGACY_ORIENTATION_ALIASES_FILENAME;
 
     private OrientationAliasIO() {}
 
     public static File getFile(String directory) {
-        return FlashProjectLayout.forDirectory(directory).orientationManifestWriteFile(FILE_NAME);
+        FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
+        // TODO(results-folder-layout-plan stage 09): move this to tablesProjectSummaryWriteDir().
+        return new File(layout.tablesRoiWriteDir(), FILE_NAME);
     }
 
     public static File getExistingFile(String directory) {
-        List<File> candidates = FlashProjectLayout.forDirectory(directory)
-                .orientationManifestReadFiles(FILE_NAME, LEGACY_FILE_NAME);
-        for (File candidate : candidates) {
-            if (candidate.isFile()) return candidate;
-        }
-        return null;
+        File candidate = getFile(directory);
+        return candidate.isFile() ? candidate : null;
     }
 
     public static LinkedHashMap<OrientationManifestRow.Hemisphere, List<String>> readIfExists(String directory) {

@@ -32,7 +32,7 @@ public class MasterAggregationAnalysisTest {
     @Test
     public void execute_countsSectionsFromScnBeforeRegionAndComputesPerMm3() throws Exception {
         File root = temp.newFolder("master-agg-sections");
-        File attrs = new File(root, "Data Analysis/Attributes");
+        File attrs = roiTables(root);
         File objects = new File(root, "Data Analysis/Objects");
         assertTrue(attrs.mkdirs());
         assertTrue(objects.mkdirs());
@@ -68,7 +68,7 @@ public class MasterAggregationAnalysisTest {
     @Test
     public void chooseRoiPropertiesFile_prefersMatchingAnimalsWhenMultipleFilesExist() throws Exception {
         File root = temp.newFolder("master-agg-roi-choice");
-        File attrs = new File(root, "Data Analysis/Attributes");
+        File attrs = roiTables(root);
         assertTrue(attrs.mkdirs());
 
         writeCsv(new File(attrs, "AAA ROI Properties.csv"),
@@ -90,7 +90,7 @@ public class MasterAggregationAnalysisTest {
     @Test
     public void execute_usesPersistedFullStackDepthWhenVolumeColumnMissing() throws Exception {
         File root = temp.newFolder("master-agg-stack-depth");
-        File attrs = new File(root, "Data Analysis/Attributes");
+        File attrs = roiTables(root);
         File objects = new File(root, "Data Analysis/Objects");
         assertTrue(attrs.mkdirs());
         assertTrue(objects.mkdirs());
@@ -125,7 +125,7 @@ public class MasterAggregationAnalysisTest {
     @Test
     public void execute_skipsFallbackWhenLegacyCalibrationHasNoStackDepth() throws Exception {
         File root = temp.newFolder("master-agg-legacy-cal");
-        File attrs = new File(root, "Data Analysis/Attributes");
+        File attrs = roiTables(root);
         File objects = new File(root, "Data Analysis/Objects");
         assertTrue(attrs.mkdirs());
         assertTrue(objects.mkdirs());
@@ -155,7 +155,7 @@ public class MasterAggregationAnalysisTest {
     @Test
     public void execute_convertsPixelAreaWhenPhysicalCalibrationIsAvailable() throws Exception {
         File root = temp.newFolder("master-agg-pixel-area");
-        File attrs = new File(root, "Data Analysis/Attributes");
+        File attrs = roiTables(root);
         File objects = new File(root, "Data Analysis/Objects");
         assertTrue(attrs.mkdirs());
         assertTrue(objects.mkdirs());
@@ -185,7 +185,7 @@ public class MasterAggregationAnalysisTest {
     @Test
     public void execute_skipsPixelAreaFallbackWithoutPhysicalCalibration() throws Exception {
         File root = temp.newFolder("master-agg-pixel-area-skip");
-        File attrs = new File(root, "Data Analysis/Attributes");
+        File attrs = roiTables(root);
         File objects = new File(root, "Data Analysis/Objects");
         assertTrue(attrs.mkdirs());
         assertTrue(objects.mkdirs());
@@ -213,7 +213,7 @@ public class MasterAggregationAnalysisTest {
     @Test
     public void execute_quotesAnimalNamesInMasterCsv() throws Exception {
         File root = temp.newFolder("master-agg-quoted-animal");
-        File attrs = new File(root, "Data Analysis/Attributes");
+        File attrs = roiTables(root);
         File objects = new File(root, "Data Analysis/Objects");
         assertTrue(attrs.mkdirs());
         assertTrue(objects.mkdirs());
@@ -248,7 +248,7 @@ public class MasterAggregationAnalysisTest {
     @Test
     public void execute_prefixesFormulaLikeAnimalNamesInMasterCsv() throws Exception {
         File root = temp.newFolder("master-agg-formula-animal");
-        File attrs = new File(root, "Data Analysis/Attributes");
+        File attrs = roiTables(root);
         File objects = new File(root, "Data Analysis/Objects");
         assertTrue(attrs.mkdirs());
         assertTrue(objects.mkdirs());
@@ -279,7 +279,7 @@ public class MasterAggregationAnalysisTest {
     public void execute_readsNewObjectIntensityAndLineDistanceOutputsBeforeLegacy() throws Exception {
         File root = temp.newFolder("master-agg-new-layout");
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(root.getAbsolutePath());
-        File attrs = new File(root, "FLASH/Draw and Save ROIs/Attributes");
+        File attrs = roiTables(root);
         File objects = layout.objectDataWriteDir();
         File intensities = layout.intensityDataWriteDir();
         File lineDistances = layout.lineDistanceWriteDir();
@@ -586,5 +586,9 @@ public class MasterAggregationAnalysisTest {
 
     private File aggregationFile(File root, String fileName) {
         return new File(FlashProjectLayout.forDirectory(root.getAbsolutePath()).aggregationWriteDir(), fileName);
+    }
+
+    private File roiTables(File root) {
+        return FlashProjectLayout.forDirectory(root.getAbsolutePath()).tablesRoiWriteDir();
     }
 }

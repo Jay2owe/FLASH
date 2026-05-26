@@ -17,8 +17,7 @@ public final class RoiPresenceCheck {
 
         if (!RoiIO.listRoiZipFiles(root).isEmpty()) return true;
 
-        if (hasRoiZip(RoiIO.partialWriteDir(root))) return true;
-        return hasRoiZip(new File(root, "RoiSets" + File.separator + "partial"));
+        return hasRoiZip(RoiIO.partialWriteDir(root));
     }
 
     private static boolean hasRoiZip(File dir) {

@@ -234,14 +234,9 @@ public class BinSetupDispatcherTest {
     public void roiTipShownOnlyWhenAnalysisBenefitsAndNoRoisExist() throws Exception {
         File noRois = temp.newFolder("noRois");
         File withRois = temp.newFolder("withRois");
-        File roiDir = new File(withRois, "ROIs");
+        File roiDir = new File(withRois, "FLASH/Results/Analysis Images/ROIs");
         assertTrue(roiDir.mkdirs());
         Files.write(new File(roiDir, "SCN ROIs.zip").toPath(), new byte[]{1, 2, 3});
-        File withNewLayoutRois = temp.newFolder("withNewLayoutRois");
-        File newRoiDir = new File(withNewLayoutRois,
-                "FLASH/Draw and Save ROIs/ROI Sets");
-        assertTrue(newRoiDir.mkdirs());
-        Files.write(new File(newRoiDir, "SCN ROIs.zip").toPath(), new byte[]{1, 2, 3});
 
         BinSetupDispatcher.setHeadlessProbeForTest(new BinSetupDispatcher.HeadlessProbe() {
             @Override public boolean isHeadlessOrMacro() {
@@ -264,10 +259,6 @@ public class BinSetupDispatcherTest {
         assertTrue(lastRoiTip.get());
 
         BinSetupDispatcher.ensure(withRois.getAbsolutePath(), "Intensity",
-                EnumSet.of(BinField.CHANNEL_NAMES), true);
-        assertFalse(lastRoiTip.get());
-
-        BinSetupDispatcher.ensure(withNewLayoutRois.getAbsolutePath(), "Intensity",
                 EnumSet.of(BinField.CHANNEL_NAMES), true);
         assertFalse(lastRoiTip.get());
 

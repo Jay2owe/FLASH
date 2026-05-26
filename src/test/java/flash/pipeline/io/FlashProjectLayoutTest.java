@@ -27,8 +27,6 @@ public class FlashProjectLayoutTest {
         assertPath(new File(project, "FLASH/Set Up Configuration/.settings"), layout.configurationWriteDir());
         assertPath(new File(project, "FLASH/Set Up Configuration/.settings/Channel_Data.txt"),
                 layout.channelDataWriteFile());
-        assertPath(new File(project, "FLASH/Draw and Save ROIs"),
-                layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.ROIS));
         assertPath(new File(project, "FLASH/Presentation-Ready Images"),
                 layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.SPLIT_MERGE));
         assertPath(new File(project, "FLASH/Image Analysis/3D Objects/Objects"),
@@ -65,8 +63,6 @@ public class FlashProjectLayoutTest {
                 layout.excelWriteFile(FlashProjectLayout.SUMMARY_WORKBOOK_FILENAME));
         assertPath(new File(project, "FLASH/Spectral Decontamination"),
                 layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.SPECTRAL));
-        assertPath(new File(project, "FLASH/Draw and Save ROIs/Image Orientation.csv"),
-                layout.orientationManifestWriteFile(FlashProjectLayout.ORIENTATION_MANIFEST_FILENAME));
         assertPath(new File(project, "FLASH/.settings/Presets"), layout.presetsRoot());
         assertPath(new File(project, "FLASH/Reports"), layout.reportsRoot());
         assertPath(new File(project, "FLASH/Reports/Quality Report"), layout.qualityReportWriteDir());
@@ -185,11 +181,6 @@ public class FlashProjectLayoutTest {
         File project = temp.newFolder("project");
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(project.getAbsolutePath());
 
-        assertPaths(layout.analysisReadDirs(FlashProjectLayout.AnalysisFolder.ROIS),
-                new File(project, "FLASH/Draw and Save ROIs"),
-                new File(project, "FLASH/01 - Regions of Interest"),
-                new File(project, "ROIs"),
-                new File(project, "Data Analysis/Attributes"));
         assertPaths(layout.analysisReadDirs(FlashProjectLayout.AnalysisFolder.DECONVOLUTION),
                 new File(project, "FLASH/3D Deconvolution"),
                 new File(project, "FLASH/02 - 3D Deconvolution"),

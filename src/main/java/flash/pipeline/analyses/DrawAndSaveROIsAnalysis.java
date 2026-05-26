@@ -53,8 +53,6 @@ import java.awt.Toolkit;
 import java.awt.Window;
 import java.io.File;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.StandardCopyOption;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -81,8 +79,8 @@ import javax.swing.UIManager;
  * - User chooses to create a new ROI set or append to existing
  * - Opens each series from the .lif file
  * - For each image: user draws ROIs and clicks OK to continue
- * - Saves the ROI set to FLASH/Draw and Save ROIs/ROI Sets/<name> ROIs.zip
- * - Copies the ROI zip into FLASH/Draw and Save ROIs/Attributes/
+ * - Saves the ROI set through the central ROI analysis-image layout.
+ * - Saves ROI property tables through the central ROI table layout.
  */
 public class DrawAndSaveROIsAnalysis implements Analysis {
 
@@ -478,7 +476,7 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
             roiProps.setValue("Height", row, b.height);
 
             // Save cropped image preview
-            File imgAnalysisDir = RoiIO.imageOutputsWriteDir(projectRoot, parts.animal);
+            File imgAnalysisDir = RoiIO.imageOutputsWriteDir(projectRoot);
             boolean imgAnalysisDirReady = true;
             try {
                 IoUtils.mustMkdirs(imgAnalysisDir);
@@ -514,7 +512,7 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
         try {
             IoUtils.mustMkdirs(attrDir);
         } catch (IOException e) {
-            IJ.log("[FLASH] Could not create Attributes directory: " + e.getMessage()
+            IJ.log("[FLASH] Could not create ROI tables directory: " + e.getMessage()
                     + " — ROI Properties CSV will not be saved.");
             return;
         }
@@ -552,19 +550,11 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
         // ── Save ROI zip ────────────────────────────────────────────────
         rm.runCommand("Save", roiZip.getAbsolutePath());
 
-        // Copy ROI zip into the ROI Attributes folder for downstream readers.
-        File roiZipCopy = new File(attrDir, roiZip.getName());
-        try {
-            Files.copy(roiZip.toPath(), roiZipCopy.toPath(), StandardCopyOption.REPLACE_EXISTING);
-        } catch (IOException e) {
-            IJ.log("Warning: could not copy ROI zip to Attributes: " + e.getMessage());
-        }
-
         rm.close();
 
         showOrLog("Draw and Save ROIs",
                 "Saved ROIs to:\n" + roiZip.getAbsolutePath() +
-                        "\n\nCopy saved to:\n" + roiZipCopy.getAbsolutePath());
+                        "\n\nROI properties saved to:\n" + roiPropsOut.getAbsolutePath());
 
         closeAllNoPrompt();
 
@@ -834,7 +824,7 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
                     "Run aborted (" + reason + ").\n\n"
                     + "Partial ROI set saved to:\n" + path + "\n\n"
                     + "To recover: re-run Draw ROIs, choose 'Append to existing',\n"
-                    + "and load that zip (or copy it into the ROI Sets folder first).");
+                    + "and load that zip (or copy it into the ROI output folder first).");
         } else {
             showOrLog("Draw and Save ROIs",
                     "Run aborted (" + reason + "). No ROIs were saved.");

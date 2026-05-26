@@ -156,7 +156,7 @@ public final class RunSettingsSnapshot {
     private static File analysisOutputFolder(FlashProjectLayout layout, int analysisIndex) {
         switch (analysisIndex) {
             case 0: return layout.visibleConfigurationDir();
-            case 1: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.ROIS);
+            case 1: return layout.analysisImagesRoiDir();
             case 2: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.DECONVOLUTION);
             case 3: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.SPLIT_MERGE);
             case 4: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.OBJECTS);

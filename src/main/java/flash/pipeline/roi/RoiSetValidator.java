@@ -67,7 +67,7 @@ public final class RoiSetValidator {
                 body.append("Your in-progress ROI set has been saved to:\n  ")
                     .append(partialZipPath).append("\n\n")
                     .append("To recover: in a new Draw ROIs run, choose 'Append to existing'\n")
-                    .append("and select that zip (or copy it into the ROI Sets folder first).\n\n");
+                    .append("and select that zip (or copy it into the ROI output folder first).\n\n");
             }
             body.append("Fix the ROI Manager ordering and try again.");
 

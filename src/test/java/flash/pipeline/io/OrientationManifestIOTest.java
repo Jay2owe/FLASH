@@ -21,25 +21,26 @@ public class OrientationManifestIOTest {
     public TemporaryFolder temp = new TemporaryFolder();
 
     @Test
-    public void getFile_usesFlashRoiOrientationManifestName() throws Exception {
+    public void getFile_usesTemporaryRoiTableManifestName() throws Exception {
         File dir = temp.newFolder("project");
 
         File manifest = OrientationManifestIO.getFile(dir.getAbsolutePath());
 
         assertEquals("Image Orientation.csv", manifest.getName());
-        assertEquals("Draw and Save ROIs", manifest.getParentFile().getName());
-        assertEquals("FLASH", manifest.getParentFile().getParentFile().getName());
+        assertEquals("ROIs", manifest.getParentFile().getName());
+        assertEquals("Tables", manifest.getParentFile().getParentFile().getName());
+        assertEquals("Results", manifest.getParentFile().getParentFile().getParentFile().getName());
     }
 
     @Test
-    public void readIfExists_readsLegacyImageJExportsManifest() throws Exception {
-        File dir = temp.newFolder("legacy");
-        File manifest = new File(new File(dir, "ImageJ Exports"), OrientationManifestIO.LEGACY_FILE_NAME);
+    public void readIfExists_readsCurrentRoiTableManifest() throws Exception {
+        File dir = temp.newFolder("current");
+        File manifest = OrientationManifestIO.getFile(dir.getAbsolutePath());
         assertTrue(manifest.getParentFile().mkdirs());
         PrintWriter pw = CsvSupport.newWriter(manifest);
         try {
             pw.println("ImageKey,SourceFile,SeriesIndex,OriginalName,DisplayName,AnimalName,Hemisphere,Region,RotateDegrees,FlipHorizontal,FlipVertical,ViewPolicy,DecisionSource,Confirmed,Notes");
-            pw.println("KEY,source.tif,1,Original,Display,Animal,LH,SCN,0,No,No,ManualOnly,Manual,Yes,legacy");
+            pw.println("KEY,source.tif,1,Original,Display,Animal,LH,SCN,0,No,No,ManualOnly,Manual,Yes,current");
         } finally {
             pw.close();
         }
@@ -47,7 +48,7 @@ public class OrientationManifestIOTest {
         List<OrientationManifestRow> rows = OrientationManifestIO.readIfExists(dir.getAbsolutePath());
 
         assertEquals(1, rows.size());
-        assertEquals("legacy", rows.get(0).notes);
+        assertEquals("current", rows.get(0).notes);
     }
 
     @Test
