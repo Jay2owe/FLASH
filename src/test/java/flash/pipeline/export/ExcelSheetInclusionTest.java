@@ -38,7 +38,7 @@ public class ExcelSheetInclusionTest {
         analysis.execute(dir.getAbsolutePath());
 
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(dir.getAbsolutePath());
-        List<String> sheets = readSheetNames(layout.excelWriteFile(FlashProjectLayout.SUMMARY_WORKBOOK_FILENAME));
+        List<String> sheets = readSheetNames(layout.summaryWorkbookWriteFile());
         assertTrue("Expected at least one per-metric sheet. Got: " + sheets, sheets.size() >= 1);
         for (String name : sheets) {
             assertSheetIsNotMeta(name);
@@ -56,7 +56,7 @@ public class ExcelSheetInclusionTest {
         analysis.execute(dir.getAbsolutePath());
 
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(dir.getAbsolutePath());
-        File workbookFile = layout.excelWriteFile(FlashProjectLayout.SUMMARY_WORKBOOK_FILENAME);
+        File workbookFile = layout.summaryWorkbookWriteFile();
         assertTrue(workbookFile.isFile());
 
         FileInputStream fis = new FileInputStream(workbookFile);
@@ -85,8 +85,8 @@ public class ExcelSheetInclusionTest {
     private File prepareFixture(String folderName) throws Exception {
         File dir = temp.newFolder(folderName);
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(dir.getAbsolutePath());
-        File aggregationDir = layout.aggregationWriteDir();
-        File statisticsDir = layout.statisticsWriteDir();
+        File aggregationDir = layout.tablesProjectSummaryWriteDir();
+        File statisticsDir = layout.tablesProjectSummaryWriteDir();
         assertTrue(aggregationDir.isDirectory() || aggregationDir.mkdirs());
         assertTrue(statisticsDir.isDirectory() || statisticsDir.mkdirs());
 

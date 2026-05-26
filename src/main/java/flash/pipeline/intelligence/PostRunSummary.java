@@ -38,12 +38,8 @@ public final class PostRunSummary {
         if (directory == null || directory.isEmpty()) return;
 
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
-        File objectsMaster = firstExistingFile(layout.aggregationReadFiles(
-                FlashProjectLayout.MASTER_OBJECTS_FILENAME,
-                FlashProjectLayout.LEGACY_MASTER_OBJECTS_FILENAME));
-        File intensitiesMaster = firstExistingFile(layout.aggregationReadFiles(
-                FlashProjectLayout.MASTER_INTENSITIES_FILENAME,
-                FlashProjectLayout.LEGACY_MASTER_INTENSITIES_FILENAME));
+        File objectsMaster = existingProjectSummaryFile(layout, FlashProjectLayout.MASTER_OBJECTS_FILENAME);
+        File intensitiesMaster = existingProjectSummaryFile(layout, FlashProjectLayout.MASTER_INTENSITIES_FILENAME);
         File exportDir = masterDirectory(objectsMaster, intensitiesMaster);
         if (exportDir == null) return;
 
@@ -96,13 +92,9 @@ public final class PostRunSummary {
         return null;
     }
 
-    private static File firstExistingFile(List<File> files) {
-        if (files == null) return null;
-        for (int i = 0; i < files.size(); i++) {
-            File file = files.get(i);
-            if (file != null && file.isFile()) return file;
-        }
-        return null;
+    private static File existingProjectSummaryFile(FlashProjectLayout layout, String fileName) {
+        File file = layout.projectSummaryWriteFile(fileName);
+        return file.isFile() ? file : null;
     }
 
     private static void renderPerAnimalVariance(List<String[]> rows, int animalCol,

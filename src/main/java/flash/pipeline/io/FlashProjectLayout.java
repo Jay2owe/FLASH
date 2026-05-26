@@ -7,8 +7,9 @@ import java.util.List;
 
 /**
  * Central path policy for files written under a FLASH project directory.
- * Write helpers always point at {@code FLASH/}; read helpers list the new path
- * first, followed by legacy locations for old projects.
+ * User-facing output helpers point at the single {@code FLASH/Results/}
+ * tree. Configuration, cache, and status helpers keep their own compatibility
+ * rules because they are outside the results-layout migration.
  */
 public final class FlashProjectLayout {
     public static final String FLASH_DIR = "FLASH";
@@ -59,46 +60,14 @@ public final class FlashProjectLayout {
     public static final String CUSTOM_FILTER_PRESET_DIR = "Custom Filter Presets";
     public static final String CHANNEL_DATA_FILENAME = "Channel_Data.txt";
     public static final String CONDITIONS_FILENAME = "Conditions.csv";
-    public static final String LEGACY_CONDITIONS_FILENAME = "Project_Conditions.csv";
     public static final String MASTER_OBJECTS_FILENAME = "3D Objects.csv";
-    public static final String LEGACY_MASTER_OBJECTS_FILENAME = "Project_Master_Objects.csv";
     public static final String MASTER_INTENSITIES_FILENAME = "Image Intensities.csv";
-    public static final String LEGACY_MASTER_INTENSITIES_FILENAME = "Project_Master_Intensities.csv";
     public static final String STATISTICS_FILENAME = "Statistics.csv";
-    public static final String LEGACY_STATISTICS_FILENAME = "Project_Statistics.csv";
     public static final String SUMMARY_WORKBOOK_FILENAME = "Summary.xlsx";
-    public static final String LEGACY_SUMMARY_WORKBOOK_FILENAME = "Project_Summary.xlsx";
     public static final String ORIENTATION_MANIFEST_FILENAME = "Image Orientation.csv";
     public static final String ORIENTATION_ALIASES_FILENAME = "Image Orientation Aliases.csv";
 
-    private static final String IMAGEJ_EXPORTS_DIR = "ImageJ Exports";
-    private static final String RESULTS_EXPORT_DIR = "Results Export";
-
     private final File projectRoot;
-
-    public enum AnalysisFolder {
-        AGGREGATION(RESULTS_EXPORT_DIR,
-                FLASH_DIR + File.separator + "09 - Result Aggregation",
-                IMAGEJ_EXPORTS_DIR),
-        STATISTICS(RESULTS_EXPORT_DIR,
-                FLASH_DIR + File.separator + "10 - Statistical Analysis",
-                IMAGEJ_EXPORTS_DIR),
-        EXCEL(RESULTS_EXPORT_DIR,
-                FLASH_DIR + File.separator + "11 - Excel Summary Export",
-                IMAGEJ_EXPORTS_DIR);
-
-        private final String directoryName;
-        private final String[] legacyRelativePaths;
-
-        AnalysisFolder(String directoryName, String... legacyRelativePaths) {
-            this.directoryName = directoryName;
-            this.legacyRelativePaths = legacyRelativePaths;
-        }
-
-        public String directoryName() {
-            return directoryName;
-        }
-    }
 
     private FlashProjectLayout(File projectRoot) {
         this.projectRoot = projectRoot;
@@ -129,6 +98,13 @@ public final class FlashProjectLayout {
 
     public File tablesProjectSummaryWriteDir() {
         return new File(tablesRoot(), PROJECT_SUMMARY_DIR);
+    }
+
+    public File projectSummaryWriteFile(String fileName) {
+        if (fileName == null || fileName.trim().isEmpty()) {
+            throw new IllegalArgumentException("Project summary filename must not be blank.");
+        }
+        return new File(tablesProjectSummaryWriteDir(), fileName);
     }
 
     public File tablesRoiWriteDir() {
@@ -336,89 +312,6 @@ public final class FlashProjectLayout {
         return existing == null ? channelDataWriteFile() : existing;
     }
 
-    public File analysisWriteDir(AnalysisFolder folder) {
-        requireFolder(folder);
-        return new File(flashRoot(), folder.directoryName());
-    }
-
-    public List<File> analysisLegacyDirs(AnalysisFolder folder) {
-        requireFolder(folder);
-        List<File> out = new ArrayList<File>();
-        for (int i = 0; i < folder.legacyRelativePaths.length; i++) {
-            out.add(new File(projectRoot, folder.legacyRelativePaths[i]));
-        }
-        return Collections.unmodifiableList(out);
-    }
-
-    public List<File> analysisReadDirs(AnalysisFolder folder) {
-        List<File> out = new ArrayList<File>();
-        out.add(analysisWriteDir(folder));
-        out.addAll(analysisLegacyDirs(folder));
-        return Collections.unmodifiableList(out);
-    }
-
-    public File aggregationWriteDir() {
-        return analysisWriteDir(AnalysisFolder.AGGREGATION);
-    }
-
-    public List<File> aggregationReadDirs() {
-        return analysisReadDirs(AnalysisFolder.AGGREGATION);
-    }
-
-    public File statisticsWriteDir() {
-        return analysisWriteDir(AnalysisFolder.STATISTICS);
-    }
-
-    public List<File> statisticsReadDirs() {
-        return analysisReadDirs(AnalysisFolder.STATISTICS);
-    }
-
-    public File conditionManifestWriteFile(String fileName) {
-        return new File(aggregationWriteDir(), fileName);
-    }
-
-    public File conditionManifestWriteFile() {
-        return conditionManifestWriteFile(CONDITIONS_FILENAME);
-    }
-
-    public List<File> conditionManifestReadFiles(String fileName) {
-        return readFilesForNames(aggregationReadDirs(), fileName);
-    }
-
-    public List<File> conditionManifestReadFiles() {
-        return readFilesForNames(aggregationReadDirs(),
-                CONDITIONS_FILENAME,
-                LEGACY_CONDITIONS_FILENAME);
-    }
-
-    public File statisticsWriteFile(String fileName) {
-        return new File(statisticsWriteDir(), fileName);
-    }
-
-    public List<File> aggregationReadFiles(String... fileNames) {
-        return readFilesForNames(aggregationReadDirs(), fileNames);
-    }
-
-    public List<File> statisticsReadFiles(String... fileNames) {
-        return readFilesForNames(statisticsReadDirs(), fileNames);
-    }
-
-    public File excelWriteDir() {
-        return analysisWriteDir(AnalysisFolder.EXCEL);
-    }
-
-    public List<File> excelReadDirs() {
-        return analysisReadDirs(AnalysisFolder.EXCEL);
-    }
-
-    public File excelWriteFile(String fileName) {
-        return new File(excelWriteDir(), fileName);
-    }
-
-    public List<File> excelReadFiles(String... fileNames) {
-        return readFilesForNames(excelReadDirs(), fileNames);
-    }
-
     public File presetsRoot() {
         return new File(settingsRoot(), PRESETS_DIR);
     }
@@ -503,12 +396,6 @@ public final class FlashProjectLayout {
                 new File(projectRoot, fileName));
     }
 
-    private static void requireFolder(AnalysisFolder folder) {
-        if (folder == null) {
-            throw new IllegalArgumentException("Analysis folder must not be null.");
-        }
-    }
-
     private static File firstExistingDirectory(List<File> dirs) {
         for (int i = 0; i < dirs.size(); i++) {
             File dir = dirs.get(i);
@@ -550,17 +437,4 @@ public final class FlashProjectLayout {
         return Collections.unmodifiableList(out);
     }
 
-    private static List<File> readFilesForNames(List<File> dirs, String... fileNames) {
-        List<File> out = new ArrayList<File>();
-        if (dirs == null || fileNames == null) return Collections.unmodifiableList(out);
-        for (File dir : dirs) {
-            if (dir == null) continue;
-            for (int i = 0; i < fileNames.length; i++) {
-                String fileName = fileNames[i];
-                if (fileName == null || fileName.trim().isEmpty()) continue;
-                out.add(new File(dir, fileName));
-            }
-        }
-        return Collections.unmodifiableList(out);
-    }
 }

@@ -1350,10 +1350,10 @@ public class SpatialAnalysis implements Analysis {
                             doLineDistance && hasLineRoiSets));
             if (!hasLineRoiSets) {
                 spatialBindings.lineDistanceToggle.setEnabled(false);
-                opts.addHelpText("No line ROI set found in Data Analysis/Lines. Draw a line set first, "
+                opts.addHelpText("No line ROI set found in FLASH/Results/Tables/Line Distance/Line Sets. Draw a line set first, "
                         + "then rerun Spatial Analysis.");
             } else {
-                opts.addHelpText("Uses all line ROI sets found in Data Analysis/Lines: "
+                opts.addHelpText("Uses all line ROI sets found in FLASH/Results/Tables/Line Distance/Line Sets: "
                         + lineSetSummary(availableLineSets) + ".");
             }
             opts.beginAdvancedSection("spatial");
@@ -5722,7 +5722,7 @@ public class SpatialAnalysis implements Analysis {
                         SubAnalysis.DENSITY_HEATMAPS),
                 heatmapsDefault);
         opts.addHelpText("Gaussian KDE density maps per channel. "
-                + "Saved as TIFF + PNG to FLASH/Image Analysis/Spatial Analysis/Image Outputs/<animal>/Heatmaps/.");
+                + "Saved as TIFF + PNG to FLASH/Results/Analysis Images/Spatial Heatmaps/.");
         spatialBindings.kdeBandwidthField = opts.addNumericField("KDE bandwidth (um, 0=auto)", heatmapBandwidth, 1);
         opts.addHelpText("Kernel bandwidth in microns. 0 uses Scott's rule automatically.");
         String[] lutOptions = {"Fire", "Grays", "Cyan", "Green", "Magenta", "Red"};

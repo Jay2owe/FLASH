@@ -23,7 +23,7 @@ public class PostRunSummaryTest {
     @Test
     public void writeIfPossible_persistsSnapshotAndReportsRerunDiff() throws Exception {
         File root = temp.newFolder("post-run-summary");
-        File exportDir = new File(root, "ImageJ Exports");
+        File exportDir = FlashProjectLayout.forDirectory(root.getAbsolutePath()).tablesProjectSummaryWriteDir();
         File binDir = new File(root, ".bin");
         assertTrue(exportDir.mkdirs());
         assertTrue(binDir.mkdirs());
@@ -58,10 +58,8 @@ public class PostRunSummaryTest {
     @Test
     public void writeIfPossible_persistsPerImageMetricsForOddImageOut() throws Exception {
         File root = temp.newFolder("post-run-image-metrics");
-        File exportDir = new File(root, "ImageJ Exports");
         File binDir = new File(root, ".bin");
         File objectsDir = FlashProjectLayout.forDirectory(root.getAbsolutePath()).tablesObjectsWriteDir();
-        assertTrue(exportDir.mkdirs());
         assertTrue(binDir.mkdirs());
         assertTrue(objectsDir.mkdirs());
 
@@ -93,12 +91,12 @@ public class PostRunSummaryTest {
     }
 
     @Test
-    public void writeIfPossible_readsIntensityUnfilteredMetricsWithLegacyFallback() throws Exception {
+    public void writeIfPossible_readsIntensityUnfilteredMetrics() throws Exception {
         File root = temp.newFolder("post-run-intensity-metrics");
         File binDir = new File(root, ".bin");
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(root.getAbsolutePath());
         File intensitiesDir = layout.tablesIntensityWriteDir();
-        File aggregationDir = layout.aggregationWriteDir();
+        File aggregationDir = layout.tablesProjectSummaryWriteDir();
         assertTrue(binDir.mkdirs());
         assertTrue(intensitiesDir.mkdirs());
         assertTrue(aggregationDir.mkdirs());
@@ -141,10 +139,10 @@ public class PostRunSummaryTest {
     }
 
     @Test
-    public void writeIfPossible_readsNewAggregationMastersFirst() throws Exception {
+    public void writeIfPossible_readsProjectSummaryMasters() throws Exception {
         File root = temp.newFolder("post-run-new-aggregation");
         File binDir = new File(root, ".bin");
-        File aggregationDir = FlashProjectLayout.forDirectory(root.getAbsolutePath()).aggregationWriteDir();
+        File aggregationDir = FlashProjectLayout.forDirectory(root.getAbsolutePath()).tablesProjectSummaryWriteDir();
         assertTrue(binDir.mkdirs());
         assertTrue(aggregationDir.mkdirs());
 
@@ -166,7 +164,7 @@ public class PostRunSummaryTest {
     public void writeIfPossible_handlesIntensityOnlyAggregation() throws Exception {
         File root = temp.newFolder("post-run-intensity-only");
         File binDir = new File(root, ".bin");
-        File aggregationDir = FlashProjectLayout.forDirectory(root.getAbsolutePath()).aggregationWriteDir();
+        File aggregationDir = FlashProjectLayout.forDirectory(root.getAbsolutePath()).tablesProjectSummaryWriteDir();
         assertTrue(binDir.mkdirs());
         assertTrue(aggregationDir.mkdirs());
 
@@ -194,7 +192,10 @@ public class PostRunSummaryTest {
     }
 
     private void writeObjectsMaster(File root, int count) throws Exception {
-        File objectsMaster = new File(new File(root, "ImageJ Exports"), "Project_Master_Objects.csv");
+        File objectsMaster = FlashProjectLayout.forDirectory(root.getAbsolutePath())
+                .projectSummaryWriteFile(FlashProjectLayout.MASTER_OBJECTS_FILENAME);
+        File parent = objectsMaster.getParentFile();
+        assertTrue(parent.isDirectory() || parent.mkdirs());
         String content = "Animal Name,Region,DAPI_Count\n"
                 + "Mouse1,SCN," + count + "\n";
         Files.write(objectsMaster.toPath(), content.getBytes(StandardCharsets.UTF_8));

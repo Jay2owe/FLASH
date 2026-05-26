@@ -181,7 +181,7 @@ public class ConditionManifestIOTest {
     @Test
     public void saveAssignments_createsAggregationDirIfNeeded() throws Exception {
         File dir = temp.newFolder("fresh");
-        // Do not create the FLASH aggregation folder; saveAssignments should create it.
+        // Do not create the results folder; saveAssignments should create it.
         LinkedHashMap<String, String> assignments = new LinkedHashMap<String, String>();
         assignments.put("Animal1", "CondA");
 
@@ -189,38 +189,9 @@ public class ConditionManifestIOTest {
 
         File manifest = ConditionManifestIO.getFile(dir.getAbsolutePath());
         assertTrue("Manifest file should be created", manifest.exists());
-        assertEquals("Results Export", manifest.getParentFile().getName());
-        assertEquals("FLASH", manifest.getParentFile().getParentFile().getName());
-    }
-
-    @Test
-    public void readAssignmentsIfExists_readsLegacyManifestWhenNewMissing() throws Exception {
-        File dir = temp.newFolder("legacy");
-        LinkedHashMap<String, String> legacyAssignments = new LinkedHashMap<String, String>();
-        legacyAssignments.put("Legacy1", "Control");
-        ConditionManifestIO.write(legacyManifest(dir), legacyAssignments);
-
-        assertEquals(legacyAssignments,
-                ConditionManifestIO.readAssignmentsIfExists(dir.getAbsolutePath()));
-        assertEquals(legacyManifest(dir).getAbsolutePath(),
-                ConditionManifestIO.getReadFile(dir.getAbsolutePath()).getAbsolutePath());
-    }
-
-    @Test
-    public void readAssignmentsIfExists_prefersNewManifestOverLegacy() throws Exception {
-        File dir = temp.newFolder("mixed");
-        LinkedHashMap<String, String> legacyAssignments = new LinkedHashMap<String, String>();
-        legacyAssignments.put("Mouse1", "Legacy");
-        ConditionManifestIO.write(legacyManifest(dir), legacyAssignments);
-
-        LinkedHashMap<String, String> newAssignments = new LinkedHashMap<String, String>();
-        newAssignments.put("Mouse1", "Current");
-        ConditionManifestIO.write(newManifest(dir), newAssignments);
-
-        assertEquals(newAssignments,
-                ConditionManifestIO.readAssignmentsIfExists(dir.getAbsolutePath()));
-        assertEquals(ConditionManifestIO.getFile(dir.getAbsolutePath()).getAbsolutePath(),
-                ConditionManifestIO.getReadFile(dir.getAbsolutePath()).getAbsolutePath());
+        assertEquals("Project Summary", manifest.getParentFile().getName());
+        assertEquals("Tables", manifest.getParentFile().getParentFile().getName());
+        assertEquals("Results", manifest.getParentFile().getParentFile().getParentFile().getName());
     }
 
     @Test
@@ -249,9 +220,4 @@ public class ConditionManifestIOTest {
         return manifest;
     }
 
-    private static File legacyManifest(File dir) {
-        File manifest = new File(new File(dir, "ImageJ Exports"), ConditionManifestIO.LEGACY_FILE_NAME);
-        assertTrue(manifest.getParentFile().isDirectory() || manifest.getParentFile().mkdirs());
-        return manifest;
-    }
 }

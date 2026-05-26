@@ -39,6 +39,7 @@ import flash.pipeline.intelligence.PreFlightChecks;
 import flash.pipeline.recipes.PipelineRecipe;
 import flash.pipeline.recipes.PipelineRecipeIO;
 import flash.pipeline.report.QualityReport;
+import flash.pipeline.results.StartHereWriter;
 import flash.pipeline.runtime.BioFormatsRuntime;
 import flash.pipeline.runtime.DependencyFixPlan;
 import flash.pipeline.runtime.DependencyFixResult;
@@ -295,6 +296,11 @@ public class FLASH_Pipeline implements PlugIn {
                     PostRunSummary.writeIfPossible(directory);
                 }
             });
+            runGuiStepSafely("START_HERE index", new Runnable() {
+                @Override public void run() {
+                    writeStartHereIfPossible(directory);
+                }
+            });
             if (!runHadFailure) {
                 runGuiStepSafely("Project recipe save", new Runnable() {
                     @Override public void run() {
@@ -443,10 +449,20 @@ public class FLASH_Pipeline implements PlugIn {
 
         // Post-run summary (R-01, R-08, R-09) — informational only
         PostRunSummary.writeIfPossible(directory);
+        writeStartHereIfPossible(directory);
 
         writeCliStatus(runDir, failedAnalyses.isEmpty(), failedAnalyses, null);
         releaseImageCache();
-        IJ.log("[CLI] Pipeline finished.");
+        IJ.log("[CLI] Pipeline finished. Open FLASH/Results/START_HERE.html to review outputs.");
+    }
+
+    private static void writeStartHereIfPossible(String directory) {
+        if (directory == null || directory.trim().isEmpty()) return;
+        try {
+            StartHereWriter.write(FlashProjectLayout.forDirectory(directory));
+        } catch (IOException e) {
+            IJ.log("[FLASH] Could not write START_HERE.html: " + e.getMessage());
+        }
     }
 
     static void writeCliStatus(File directory, boolean ok,
@@ -1170,7 +1186,7 @@ public class FLASH_Pipeline implements PlugIn {
         opts.addHeader("Export");
         opts.addToggle("Auto-Save Aggregated Summaries", autoAggregate);
         opts.addHelpText("When enabled, master summary CSVs are automatically generated "
-                + "in FLASH/Results Export after running 3D Object or Intensity analyses. "
+                + "in FLASH/Results/Tables/Project Summary after running 3D Object or Intensity analyses. "
                 + "Disable to skip automatic aggregation.");
 
         opts.addHeader("Reporting");

@@ -27,10 +27,8 @@ final class SummaryHistoryStore {
     static final String FILE_NAME = "summary_history.json";
     static final String LEGACY_FILE_NAME = ".ihf-summary.json";
     private static final String[][] SUMMARY_TABLES = new String[][] {
-            { FlashProjectLayout.MASTER_OBJECTS_FILENAME,
-                    FlashProjectLayout.LEGACY_MASTER_OBJECTS_FILENAME },
-            { FlashProjectLayout.MASTER_INTENSITIES_FILENAME,
-                    FlashProjectLayout.LEGACY_MASTER_INTENSITIES_FILENAME }
+            { FlashProjectLayout.MASTER_OBJECTS_FILENAME },
+            { FlashProjectLayout.MASTER_INTENSITIES_FILENAME }
     };
     private static final String IMAGE_METRICS_KEY = "metrics";
 
@@ -493,7 +491,7 @@ final class SummaryHistoryStore {
         LinkedHashMap<String, TableSnapshot> tables = new LinkedHashMap<String, TableSnapshot>();
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
         for (String[] fileNames : SUMMARY_TABLES) {
-            File csv = firstExistingFile(layout.aggregationReadFiles(fileNames));
+            File csv = layout.projectSummaryWriteFile(fileNames[0]);
             if (!csv.isFile()) continue;
             try {
                 TableSnapshot table = captureTable(csv);
@@ -527,21 +525,6 @@ final class SummaryHistoryStore {
             }
         }
         return out;
-    }
-
-    private static File firstExistingFile(List<File> dirs, String fileName) {
-        for (File dir : dirs) {
-            File file = new File(dir, fileName);
-            if (file.isFile()) return file;
-        }
-        return new File(dirs.get(0), fileName);
-    }
-
-    private static File firstExistingFile(List<File> files) {
-        for (File file : files) {
-            if (file != null && file.isFile()) return file;
-        }
-        return files.isEmpty() ? null : files.get(0);
     }
 
     private static TableSnapshot captureTable(File csvFile) throws IOException {

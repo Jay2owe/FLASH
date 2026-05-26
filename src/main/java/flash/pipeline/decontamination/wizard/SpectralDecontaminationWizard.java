@@ -17,6 +17,7 @@ import flash.pipeline.decontamination.features.SizeFilterFeature;
 import flash.pipeline.decontamination.features.ThresholdCorrectedTargetFeature;
 import flash.pipeline.decontamination.features.VetoMasksFeature;
 import flash.pipeline.io.ConditionManifestIO;
+import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.ui.PipelineDialog;
 import ij.IJ;
 
@@ -470,7 +471,8 @@ public class SpectralDecontaminationWizard {
     }
 
     private static boolean hasExistingObjectCsv(File projectRoot) {
-        File dir = projectRoot == null ? null : new File(projectRoot, "Data Analysis" + File.separator + "Objects");
+        File dir = projectRoot == null ? null
+                : FlashProjectLayout.forDirectory(projectRoot.getAbsolutePath()).tablesObjectsWriteDir();
         File[] files = dir == null ? null : dir.listFiles((parent, name) ->
                 name != null && name.toLowerCase(Locale.US).endsWith(".csv"));
         return files != null && files.length > 0;

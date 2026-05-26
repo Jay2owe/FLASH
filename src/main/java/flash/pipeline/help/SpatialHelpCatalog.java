@@ -19,7 +19,7 @@ public final class SpatialHelpCatalog {
             "Computes distance-based measurements for each object. Three sub-analyses run independently; each writes its own columns or summary files.",
             section("Sub-analyses",
                     "Nearest neighbor distances: for every object, the 3D distance and ID of the closest object in each other channel. Adds columns <channel>_DistToClosest_<partner> and <channel>_ClosestTo_<partner>.",
-                    "Line distance: perpendicular distance from each object centroid to drawn line ROI sets (cortical surface, white-matter border, vessel). Disabled when no line set exists in Data Analysis/Lines.",
+                    "Line distance: perpendicular distance from each object centroid to drawn line ROI sets (cortical surface, white-matter border, vessel). Disabled when no line set exists in FLASH/Results/Tables/Line Distance/Line Sets.",
                     "Ripley's K/L/G: per-channel point-pattern statistics across radii. K(r) counts the expected number of additional objects within radius r of a given object; L(r) is a variance-stabilised K; G(r) is the cumulative nearest-neighbour distance distribution."),
             section("When to use",
                     "Whenever the question is 'how close to what' - proximity between marker types, distance from a tissue feature, or aggregated-versus-dispersed patterns."),
@@ -111,7 +111,7 @@ public final class SpatialHelpCatalog {
     public static final SetupHelpTopic HEATMAPS = topic(
             "spatial-heatmaps",
             "Density Heatmaps",
-            "Builds per-channel object-density maps by smoothing centroids with a Gaussian kernel (KDE, kernel density estimation). Saved as TIFF and PNG to FLASH/Image Analysis/Spatial Analysis/Image Outputs/<animal>/Heatmaps/.",
+            "Builds per-channel object-density maps by smoothing centroids with a Gaussian kernel (KDE, kernel density estimation). Saved as TIFF and PNG to FLASH/Results/Analysis Images/Spatial Heatmaps/.",
             section("Sub-analyses",
                     "Generate density heatmaps: turn on the export.",
                     "KDE bandwidth (um, 0=auto): kernel width in microns. 0 uses Scott's rule, a data-driven automatic choice.",

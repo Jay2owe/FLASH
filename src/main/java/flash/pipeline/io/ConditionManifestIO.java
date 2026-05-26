@@ -20,12 +20,12 @@ import java.util.Set;
 public final class ConditionManifestIO {
 
     public static final String FILE_NAME = FlashProjectLayout.CONDITIONS_FILENAME;
-    public static final String LEGACY_FILE_NAME = FlashProjectLayout.LEGACY_CONDITIONS_FILENAME;
 
     private ConditionManifestIO() {}
 
     public static File getFile(String directory) {
-        return FlashProjectLayout.forDirectory(directory).conditionManifestWriteFile();
+        return FlashProjectLayout.forDirectory(directory)
+                .projectSummaryWriteFile(FlashProjectLayout.CONDITIONS_FILENAME);
     }
 
     public static File getReadFile(String directory) {
@@ -34,11 +34,8 @@ public final class ConditionManifestIO {
     }
 
     public static File getExistingFile(String directory) {
-        List<File> candidates = FlashProjectLayout.forDirectory(directory).conditionManifestReadFiles();
-        for (File candidate : candidates) {
-            if (candidate.isFile()) return candidate;
-        }
-        return null;
+        File candidate = getFile(directory);
+        return candidate.isFile() ? candidate : null;
     }
 
     /**
@@ -317,7 +314,8 @@ public final class ConditionManifestIO {
     }
 
     /**
-     * Persists condition assignments to {@code FLASH/Results Export/Conditions.csv}.
+     * Persists condition assignments to
+     * {@code FLASH/Results/Tables/Project Summary/Conditions.csv}.
      * Trims keys and values and drops blank rows so the file stays clean.
      */
     public static void saveAssignments(String directory, Map<String, String> assignments) throws IOException {

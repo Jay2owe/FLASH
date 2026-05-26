@@ -134,45 +134,6 @@ public class StatisticalAnalysisHeadlessTest {
                 statsFile.exists());
     }
 
-    @Test
-    public void headless_legacyMasterCsv_readsFromImageJExportsAndWritesNewStatistics() throws Exception {
-        File dir = temp.newFolder("legacy-project");
-        File exportDir = new File(dir, "ImageJ Exports");
-        assertTrue(exportDir.mkdirs());
-
-        writeMasterCsv(new File(exportDir, "Project_Master_Objects.csv"),
-                new String[]{"AnimalName", "Count"},
-                new String[][]{
-                        {"Syn1", "10"},
-                        {"Syn2", "12"},
-                        {"Syn3", "11"},
-                        {"hAPP1", "30"},
-                        {"hAPP2", "32"},
-                        {"hAPP3", "31"}
-                });
-
-        LinkedHashMap<String, String> conditions = new LinkedHashMap<String, String>();
-        conditions.put("Syn1", "Syn");
-        conditions.put("Syn2", "Syn");
-        conditions.put("Syn3", "Syn");
-        conditions.put("hAPP1", "hAPP");
-        conditions.put("hAPP2", "hAPP");
-        conditions.put("hAPP3", "hAPP");
-        ConditionManifestIO.saveAssignments(dir.getAbsolutePath(), conditions);
-
-        StatisticalAnalysis analysis = new StatisticalAnalysis();
-        analysis.setHeadless(true);
-        analysis.setSuppressDialogs(true);
-        analysis.execute(dir.getAbsolutePath());
-
-        assertTrue("Statistics should be written to the new statistics folder",
-                statisticsFile(dir).exists());
-        assertFalse("Legacy statistics output should not be written",
-                new File(exportDir, FlashProjectLayout.LEGACY_STATISTICS_FILENAME).exists());
-        assertFalse("New statistics output should not be written outside FLASH",
-                new File(exportDir, FlashProjectLayout.STATISTICS_FILENAME).exists());
-    }
-
     /**
      * resolveConditionAssignments in headless mode returns assignments
      * without opening any Swing dialog.
@@ -317,14 +278,14 @@ public class StatisticalAnalysisHeadlessTest {
     }
 
     private static File aggregationDir(File root) {
-        File dir = FlashProjectLayout.forDirectory(root.getAbsolutePath()).aggregationWriteDir();
+        File dir = FlashProjectLayout.forDirectory(root.getAbsolutePath()).tablesProjectSummaryWriteDir();
         assertTrue(dir.isDirectory() || dir.mkdirs());
         return dir;
     }
 
     private static File statisticsFile(File root) {
         return FlashProjectLayout.forDirectory(root.getAbsolutePath())
-                .statisticsWriteFile(FlashProjectLayout.STATISTICS_FILENAME);
+                .projectSummaryWriteFile(FlashProjectLayout.STATISTICS_FILENAME);
     }
 
     private static void writeMasterCsv(File file, String[] headers, String[][] rows)

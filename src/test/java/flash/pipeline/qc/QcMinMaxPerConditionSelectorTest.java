@@ -1,5 +1,6 @@
 package flash.pipeline.qc;
 
+import flash.pipeline.io.ConditionManifestIO;
 import flash.pipeline.io.LifIO;
 import flash.pipeline.io.OrientationManifestIO;
 import flash.pipeline.io.SeriesMeta;
@@ -10,8 +11,6 @@ import org.junit.rules.TemporaryFolder;
 
 import java.io.File;
 import java.lang.reflect.Method;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -29,13 +28,10 @@ public class QcMinMaxPerConditionSelectorTest {
     @Test
     public void buildCandidates_usesConditionManifestAssignments() throws Exception {
         File dir = temp.newFolder("project");
-        File exportDir = new File(dir, "ImageJ Exports");
-        assertTrue(exportDir.mkdirs());
-
-        Files.write(new File(exportDir, "Project_Conditions.csv").toPath(),
-                ("AnimalName,Condition\n"
-                        + "Syn1WeekTwo,SynWeekTwo\n"
-                        + "hAPP2WeekEight,hAPPWeekEight\n").getBytes(StandardCharsets.UTF_8));
+        LinkedHashMap<String, String> assignments = new LinkedHashMap<String, String>();
+        assignments.put("Syn1WeekTwo", "SynWeekTwo");
+        assignments.put("hAPP2WeekEight", "hAPPWeekEight");
+        ConditionManifestIO.saveAssignments(dir.getAbsolutePath(), assignments);
 
         List<SeriesMeta> metas = Arrays.asList(
                 new SeriesMeta(0, "project.lif - Syn1WeekTwo_LH_SCN", 12, 1.0, 1.0, 1.0, "pixel"),

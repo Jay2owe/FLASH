@@ -117,7 +117,7 @@ public class MasterAggregationAnalysisTest {
         assertEquals(4.0, Double.parseDouble(row.get("CK1D_Count_permm3")), 0.0);
 
         String details = new String(Files.readAllBytes(
-                aggregationFile(root, "Aggregation_Analysis_Details.txt").toPath()),
+                aggregationDetailsFile(root).toPath()),
                 StandardCharsets.UTF_8);
         assertTrue(details.contains("persisted fallback stack depth"));
     }
@@ -149,7 +149,7 @@ public class MasterAggregationAnalysisTest {
                 StandardCharsets.UTF_8);
 
         assertFalse(lines.get(0).contains("CK1D_Count_permm3"));
-        assertFalse(aggregationFile(root, "Aggregation_Analysis_Details.txt").exists());
+        assertFalse(aggregationDetailsFile(root).exists());
     }
 
     @Test
@@ -207,7 +207,7 @@ public class MasterAggregationAnalysisTest {
                 StandardCharsets.UTF_8);
 
         assertFalse(lines.get(0).contains("CK1D_Count_permm3"));
-        assertFalse(aggregationFile(root, "Aggregation_Analysis_Details.txt").exists());
+        assertFalse(aggregationDetailsFile(root).exists());
     }
 
     @Test
@@ -317,7 +317,6 @@ public class MasterAggregationAnalysisTest {
         assertTrue(objectHeader.contains("CK1D_Count"));
         assertTrue(objectHeader.contains("CK1D_DistTo_Line1Mean"));
         assertTrue(intensityHeader.contains("GFAP_ROI_IntDenMean"));
-        assertFalse(new File(root, "ImageJ Exports/3D Objects.csv").exists());
     }
 
     @Test
@@ -574,7 +573,12 @@ public class MasterAggregationAnalysisTest {
     }
 
     private File aggregationFile(File root, String fileName) {
-        return new File(FlashProjectLayout.forDirectory(root.getAbsolutePath()).aggregationWriteDir(), fileName);
+        return FlashProjectLayout.forDirectory(root.getAbsolutePath()).projectSummaryWriteFile(fileName);
+    }
+
+    private File aggregationDetailsFile(File root) {
+        return new File(FlashProjectLayout.forDirectory(root.getAbsolutePath()).analysisDetailsWriteDir(),
+                "Aggregation_Analysis_Details.txt");
     }
 
     private File roiTables(File root) {

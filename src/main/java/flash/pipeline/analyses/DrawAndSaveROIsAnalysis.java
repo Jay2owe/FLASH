@@ -183,7 +183,7 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
         pd.addHeader("Line Sets");
         ToggleSwitch drawLineToggle = pd.addToggle("Draw Line Set", false);
         pd.addHelpText("Also draw a named reference line on each image (e.g., ventricle boundary). "
-                + "Lines are saved to FLASH/Image Analysis/Line Distance Analysis/Line Sets/ for distance analysis.");
+                + "Lines are saved to FLASH/Results/Tables/Line Distance/Line Sets/ for distance analysis.");
         JTextField lineSetNameField = pd.addStringField("Line Set Name", "Ventricle", 15);
 
         pd.addHeader("Settings");

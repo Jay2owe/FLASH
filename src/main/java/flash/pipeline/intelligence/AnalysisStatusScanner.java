@@ -78,21 +78,16 @@ public class AnalysisStatusScanner {
                 "Fluorescence Intensity Analysis");
         put(out, FLASH_Pipeline.IDX_AGGREGATION,
                 sidecarStatus(directory, AGGREGATION_ID, currentBinHash,
-                        firstExistingFile(layout.aggregationReadFiles(
-                                FlashProjectLayout.MASTER_OBJECTS_FILENAME,
-                                FlashProjectLayout.LEGACY_MASTER_OBJECTS_FILENAME,
-                                FlashProjectLayout.MASTER_INTENSITIES_FILENAME,
-                                FlashProjectLayout.LEGACY_MASTER_INTENSITIES_FILENAME)) != null),
+                        hasFile(layout.projectSummaryWriteFile(FlashProjectLayout.MASTER_OBJECTS_FILENAME))
+                                || hasFile(layout.projectSummaryWriteFile(
+                                        FlashProjectLayout.MASTER_INTENSITIES_FILENAME))),
                 "Master Aggregation");
         put(out, FLASH_Pipeline.IDX_STATISTICS,
-                fallbackStatus(directory, firstExistingFile(layout.statisticsReadFiles(
-                        FlashProjectLayout.STATISTICS_FILENAME,
-                        FlashProjectLayout.LEGACY_STATISTICS_FILENAME)) != null),
+                fallbackStatus(directory,
+                        hasFile(layout.projectSummaryWriteFile(FlashProjectLayout.STATISTICS_FILENAME))),
                 "Statistical Analysis");
         put(out, FLASH_Pipeline.IDX_EXCEL_EXPORT,
-                fallbackStatus(directory, firstExistingFile(layout.excelReadFiles(
-                        FlashProjectLayout.SUMMARY_WORKBOOK_FILENAME,
-                        FlashProjectLayout.LEGACY_SUMMARY_WORKBOOK_FILENAME)) != null),
+                fallbackStatus(directory, hasFile(layout.summaryWorkbookWriteFile())),
                 "Excel Summary Export");
         put(out, FLASH_Pipeline.IDX_SPECTRAL_DECONTAMINATION,
                 fallbackStatus(directory, hasCsv(
@@ -105,6 +100,10 @@ public class AnalysisStatusScanner {
     public String tooltipFor(int analysisIndex) {
         String tooltip = tooltips.get(Integer.valueOf(analysisIndex));
         return tooltip == null ? "Not run on this folder" : tooltip;
+    }
+
+    private static boolean hasFile(File file) {
+        return file != null && file.isFile();
     }
 
     public static void writeSidecar(File directory, String analysisId, int imageCount) throws IOException {

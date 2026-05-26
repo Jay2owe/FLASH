@@ -38,8 +38,7 @@ public final class OrientationManifestIO {
 
     public static File getFile(String directory) {
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
-        // TODO(results-folder-layout-plan stage 09): move this to tablesProjectSummaryWriteDir().
-        return new File(layout.tablesRoiWriteDir(), FILE_NAME);
+        return layout.projectSummaryWriteFile(FILE_NAME);
     }
 
     public static File getExistingFile(String directory) {

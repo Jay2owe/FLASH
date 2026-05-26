@@ -16,7 +16,8 @@ import java.util.Set;
 /**
  * Extracts 2D morphological features from saved label images (object maps).
  *
- * <p>Works entirely from label images stored in {@code Image Analysis/<animal>/}
+ * <p>Works entirely from label images stored in
+ * {@code FLASH/Results/Analysis Images/Objects/Masks and Label Maps/}
  * — no raw fluorescence images needed for shape features. Each unique non-zero
  * label's XY footprint is accumulated independently across all z-slices (so that
  * two labels whose voxel columns overlap at different z don't conflate into one),

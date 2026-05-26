@@ -202,7 +202,6 @@ public class SpatialAnalysisTest {
 
         File statsFile = new File(root, "FLASH/Results/Tables/Spatial/Spatial_Statistics_A.csv");
         assertTrue(statsFile.exists());
-        assertFalse(new File(root, "Data Analysis/Spatial/Spatial_Statistics_A.csv").exists());
 
         List<String> lines = Files.readAllLines(statsFile.toPath(), StandardCharsets.UTF_8);
         assertEquals(11, lines.size());
@@ -249,7 +248,6 @@ public class SpatialAnalysisTest {
         ChannelData a = CsvTableIO.loadChannelCsv(new File(objectsDir, "A.csv"), "A");
         assertNotNull(a);
         assertEquals(5.0, a.getDouble(0, "A_DistToClosest_B"), 1e-6);
-        assertFalse(new File(root, "Data Analysis/Objects/A.csv").exists());
     }
 
     @Test
@@ -278,7 +276,6 @@ public class SpatialAnalysisTest {
                 "FLASH/Results/Analysis Images/Spatial Heatmaps/Mouse1/Heatmaps");
         assertTrue(new File(heatmapDir, "Density_A_LH_SCN.tif").isFile());
         assertTrue(new File(heatmapDir, "Density_A_LH_SCN.png").isFile());
-        assertFalse(new File(root, "Image Analysis/Mouse1/Heatmaps/Density_A_LH_SCN.tif").exists());
     }
 
     @Test

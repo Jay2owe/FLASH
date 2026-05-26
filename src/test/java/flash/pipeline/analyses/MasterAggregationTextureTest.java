@@ -287,7 +287,7 @@ public class MasterAggregationTextureTest {
     }
 
     private File aggregationFile(File root, String fileName) {
-        return new File(FlashProjectLayout.forDirectory(root.getAbsolutePath()).aggregationWriteDir(), fileName);
+        return FlashProjectLayout.forDirectory(root.getAbsolutePath()).projectSummaryWriteFile(fileName);
     }
 
     private CLIConfig classFractionsConfig(File root) {

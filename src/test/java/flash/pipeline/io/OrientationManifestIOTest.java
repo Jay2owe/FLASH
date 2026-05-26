@@ -21,19 +21,19 @@ public class OrientationManifestIOTest {
     public TemporaryFolder temp = new TemporaryFolder();
 
     @Test
-    public void getFile_usesTemporaryRoiTableManifestName() throws Exception {
+    public void getFile_usesProjectSummaryManifestName() throws Exception {
         File dir = temp.newFolder("project");
 
         File manifest = OrientationManifestIO.getFile(dir.getAbsolutePath());
 
         assertEquals("Image Orientation.csv", manifest.getName());
-        assertEquals("ROIs", manifest.getParentFile().getName());
+        assertEquals("Project Summary", manifest.getParentFile().getName());
         assertEquals("Tables", manifest.getParentFile().getParentFile().getName());
         assertEquals("Results", manifest.getParentFile().getParentFile().getParentFile().getName());
     }
 
     @Test
-    public void readIfExists_readsCurrentRoiTableManifest() throws Exception {
+    public void readIfExists_readsProjectSummaryManifest() throws Exception {
         File dir = temp.newFolder("current");
         File manifest = OrientationManifestIO.getFile(dir.getAbsolutePath());
         assertTrue(manifest.getParentFile().mkdirs());

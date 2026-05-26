@@ -88,7 +88,7 @@ public class ExcelSummaryExportTextureTest {
     private File prepareFixture(String folderName) throws Exception {
         File dir = temp.newFolder(folderName);
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(dir.getAbsolutePath());
-        File aggregationDir = layout.aggregationWriteDir();
+        File aggregationDir = layout.tablesProjectSummaryWriteDir();
         assertTrue(aggregationDir.isDirectory() || aggregationDir.mkdirs());
 
         List<String> header = new ArrayList<String>();
@@ -122,7 +122,7 @@ public class ExcelSummaryExportTextureTest {
 
     private Workbook openWorkbook(File dir) throws Exception {
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(dir.getAbsolutePath());
-        File workbookFile = layout.excelWriteFile(FlashProjectLayout.SUMMARY_WORKBOOK_FILENAME);
+        File workbookFile = layout.summaryWorkbookWriteFile();
         assertTrue(workbookFile.isFile());
         FileInputStream fis = new FileInputStream(workbookFile);
         try {

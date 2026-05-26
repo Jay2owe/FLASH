@@ -27,18 +27,12 @@ public class FlashProjectLayoutTest {
         assertPath(new File(project, "FLASH/Set Up Configuration/.settings"), layout.configurationWriteDir());
         assertPath(new File(project, "FLASH/Set Up Configuration/.settings/Channel_Data.txt"),
                 layout.channelDataWriteFile());
-        assertPath(new File(project, "FLASH/Results Export"),
-                layout.aggregationWriteDir());
-        assertPath(new File(project, "FLASH/Results Export"),
-                layout.statisticsWriteDir());
-        assertPath(new File(project, "FLASH/Results Export/Conditions.csv"),
-                layout.conditionManifestWriteFile());
-        assertPath(new File(project, "FLASH/Results Export/Statistics.csv"),
-                layout.statisticsWriteFile(FlashProjectLayout.STATISTICS_FILENAME));
-        assertPath(new File(project, "FLASH/Results Export"),
-                layout.excelWriteDir());
-        assertPath(new File(project, "FLASH/Results Export/Summary.xlsx"),
-                layout.excelWriteFile(FlashProjectLayout.SUMMARY_WORKBOOK_FILENAME));
+        assertPath(new File(project, "FLASH/Results/Tables/Project Summary/Conditions.csv"),
+                layout.projectSummaryWriteFile(FlashProjectLayout.CONDITIONS_FILENAME));
+        assertPath(new File(project, "FLASH/Results/Tables/Project Summary/Statistics.csv"),
+                layout.projectSummaryWriteFile(FlashProjectLayout.STATISTICS_FILENAME));
+        assertPath(new File(project, "FLASH/Results/Summary.xlsx"),
+                layout.summaryWorkbookWriteFile());
         assertPath(new File(project, "FLASH/.settings/Presets"), layout.presetsRoot());
         assertPath(new File(project, "FLASH/Cache"), layout.cacheRoot());
         assertPath(new File(project, "FLASH/Cache/TIF"), layout.tifCacheWriteDir());
@@ -150,33 +144,18 @@ public class FlashProjectLayoutTest {
     }
 
     @Test
-    public void analysisReadDirs_includeNewPathThenLegacyFallbacks() throws Exception {
+    public void resultsProjectSummary_hasSingleWritePath() throws Exception {
         File project = temp.newFolder("project");
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(project.getAbsolutePath());
 
-        assertPaths(layout.analysisReadDirs(FlashProjectLayout.AnalysisFolder.EXCEL),
-                new File(project, "FLASH/Results Export"),
-                new File(project, "FLASH/11 - Excel Summary Export"),
-                new File(project, "ImageJ Exports"));
-        assertPaths(layout.excelReadDirs(),
-                new File(project, "FLASH/Results Export"),
-                new File(project, "FLASH/11 - Excel Summary Export"),
-                new File(project, "ImageJ Exports"));
-        assertPaths(layout.aggregationReadDirs(),
-                new File(project, "FLASH/Results Export"),
-                new File(project, "FLASH/09 - Result Aggregation"),
-                new File(project, "ImageJ Exports"));
-        assertPaths(layout.statisticsReadDirs(),
-                new File(project, "FLASH/Results Export"),
-                new File(project, "FLASH/10 - Statistical Analysis"),
-                new File(project, "ImageJ Exports"));
-        assertPaths(layout.conditionManifestReadFiles(),
-                new File(project, "FLASH/Results Export/Conditions.csv"),
-                new File(project, "FLASH/Results Export/Project_Conditions.csv"),
-                new File(project, "FLASH/09 - Result Aggregation/Conditions.csv"),
-                new File(project, "FLASH/09 - Result Aggregation/Project_Conditions.csv"),
-                new File(project, "ImageJ Exports/Conditions.csv"),
-                new File(project, "ImageJ Exports/Project_Conditions.csv"));
+        assertPath(new File(project, "FLASH/Results/Tables/Project Summary/3D Objects.csv"),
+                layout.projectSummaryWriteFile(FlashProjectLayout.MASTER_OBJECTS_FILENAME));
+        assertPath(new File(project, "FLASH/Results/Tables/Project Summary/Image Intensities.csv"),
+                layout.projectSummaryWriteFile(FlashProjectLayout.MASTER_INTENSITIES_FILENAME));
+        assertPath(new File(project, "FLASH/Results/Tables/Project Summary/Image Orientation.csv"),
+                layout.projectSummaryWriteFile(FlashProjectLayout.ORIENTATION_MANIFEST_FILENAME));
+        assertPath(new File(project, "FLASH/Results/Tables/Project Summary/Image Orientation Aliases.csv"),
+                layout.projectSummaryWriteFile(FlashProjectLayout.ORIENTATION_ALIASES_FILENAME));
     }
 
     @Test

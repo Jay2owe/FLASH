@@ -44,21 +44,16 @@ Project/
 `-- FLASH/
     |-- Set Up Configuration/
     |   `-- .settings/
-    |-- 01 - Regions of Interest/
-    |-- 02 - 3D Deconvolution/
-    |-- Make Presentation-Ready Images/
-    |-- 04 - Fluorescence Intensity/
-    |-- 05 - 3D Object Analysis/
-    |-- 06 - Spatial Analysis/
-    |-- 07 - Line Distance/
-    |-- 08 - Spectral Decontamination/
-    |-- 09 - Result Aggregation/
-    |-- 10 - Statistical Analysis/
-    |-- 11 - Excel Summary Export/
+    |-- Results/
+    |   |-- START_HERE.html
+    |   |-- Summary.xlsx
+    |   |-- Tables/
+    |   |-- Presentation Images/
+    |   |-- Analysis Images/
+    |   |-- QC/
+    |   `-- Run Records/
     |-- .settings/
     |   `-- Presets/
-    |-- Reports/
-    |   `-- Quality Report/
     |-- Cache/
     |   `-- TIF/
     `-- Status/

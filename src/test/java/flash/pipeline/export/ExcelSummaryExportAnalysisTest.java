@@ -29,8 +29,8 @@ public class ExcelSummaryExportAnalysisTest {
     public void execute_readsQuotedStatisticsCsvIntoWorkbook() throws Exception {
         File dir = temp.newFolder("excel-summary");
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(dir.getAbsolutePath());
-        File aggregationDir = layout.aggregationWriteDir();
-        File statisticsDir = layout.statisticsWriteDir();
+        File aggregationDir = layout.tablesProjectSummaryWriteDir();
+        File statisticsDir = layout.tablesProjectSummaryWriteDir();
         assertTrue(aggregationDir.isDirectory() || aggregationDir.mkdirs());
         assertTrue(statisticsDir.isDirectory() || statisticsDir.mkdirs());
 
@@ -71,7 +71,7 @@ public class ExcelSummaryExportAnalysisTest {
         analysis.setSuppressDialogs(true);
         analysis.execute(dir.getAbsolutePath());
 
-        File workbookFile = layout.excelWriteFile(FlashProjectLayout.SUMMARY_WORKBOOK_FILENAME);
+        File workbookFile = layout.summaryWorkbookWriteFile();
         assertTrue(workbookFile.isFile());
 
         FileInputStream fis = new FileInputStream(workbookFile);
@@ -95,7 +95,7 @@ public class ExcelSummaryExportAnalysisTest {
     public void execute_readsLegacyAnalysisDetailsIntoNewWorkbook() throws Exception {
         File dir = temp.newFolder("excel-summary-legacy-details");
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(dir.getAbsolutePath());
-        File aggregationDir = layout.aggregationWriteDir();
+        File aggregationDir = layout.tablesProjectSummaryWriteDir();
         assertTrue(aggregationDir.isDirectory() || aggregationDir.mkdirs());
 
         writeCsv(new File(aggregationDir, FlashProjectLayout.MASTER_OBJECTS_FILENAME),
@@ -120,7 +120,7 @@ public class ExcelSummaryExportAnalysisTest {
         analysis.setSuppressDialogs(true);
         analysis.execute(dir.getAbsolutePath());
 
-        File workbookFile = layout.excelWriteFile(FlashProjectLayout.SUMMARY_WORKBOOK_FILENAME);
+        File workbookFile = layout.summaryWorkbookWriteFile();
         assertTrue(workbookFile.isFile());
 
         FileInputStream fis = new FileInputStream(workbookFile);

@@ -337,6 +337,9 @@ public final class RunSettingsSnapshot {
         if (method.isCellpose() && entry.engine != ModelEntry.Engine.CELLPOSE) {
             return Optional.empty();
         }
+        if (method.isTrainedRf() && entry.engine != ModelEntry.Engine.SMILE_RF) {
+            return Optional.empty();
+        }
         return Optional.of(entry);
     }
 
@@ -349,6 +352,9 @@ public final class RunSettingsSnapshot {
         }
         if (method.isCellpose()) {
             return safe(SegmentationMethod.cellposeModelKey(method));
+        }
+        if (method.isTrainedRf()) {
+            return safe(SegmentationMethod.trainedRfModelKey(method));
         }
         return "";
     }
@@ -365,6 +371,9 @@ public final class RunSettingsSnapshot {
         }
         if (method.isCellpose()) {
             return "cellpose";
+        }
+        if (method.isTrainedRf()) {
+            return "trained_rf";
         }
         return "classical";
     }

@@ -210,6 +210,43 @@ public final class CsvTableIO {
     }
 
     /**
+     * Writes a ResultsTable by appending new rows to an existing channel CSV,
+     * preserving manual columns already present in the file.
+     *
+     * @return true when an existing CSV was extended, false when the caller
+     * should fall back to a normal overwrite.
+     */
+    public static boolean appendResultsTableCsv(File outFile, File existingFile, String channelName,
+                                                ResultsTable table, List<String> orderedColumns) {
+        if (outFile == null || table == null || orderedColumns == null
+                || existingFile == null || !existingFile.isFile()) {
+            return false;
+        }
+        ChannelData existing = loadChannelCsv(existingFile, channelName);
+        if (existing == null) {
+            return false;
+        }
+        for (String column : orderedColumns) {
+            if (column != null && !column.trim().isEmpty()) {
+                existing.addColumn(column);
+            }
+        }
+        for (int row = 0; row < table.size(); row++) {
+            List<String> values = new ArrayList<String>(existing.header.size());
+            for (String column : existing.header) {
+                if (orderedColumns.contains(column)) {
+                    values.add(resultsTableValue(table, column, row));
+                } else {
+                    values.add("");
+                }
+            }
+            existing.rows.add(values);
+        }
+        writeChannelCsv(outFile, existing);
+        return true;
+    }
+
+    /**
      * Parses a string as a double, returning 0.0 for null, empty, or
      * unparseable values.
      */

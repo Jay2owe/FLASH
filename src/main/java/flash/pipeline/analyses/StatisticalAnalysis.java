@@ -47,7 +47,8 @@ import java.util.Set;
  *   <li>Runs a global test (ANOVA / Welch's t / Kruskal-Wallis / Mann-Whitney)</li>
  *   <li>Performs pairwise post-hoc comparisons with Bonferroni correction</li>
  * </ol>
- * Results are written to {@code FLASH/Results Export/Statistics.csv}.
+ * Results are written to
+ * {@code FLASH/Results/Tables/Project Summary/Statistics.csv}.
  * <p>
  * Parametric tests (Welch's t, ANOVA) are backed by Apache Commons Math.
  * Compatible with Java 8.
@@ -140,16 +141,12 @@ public class StatisticalAnalysis implements Analysis {
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
 
         // 1. Load master CSVs
-        File objectsCsv = findFirstExistingFile(layout.aggregationReadFiles(
-                FlashProjectLayout.MASTER_OBJECTS_FILENAME,
-                FlashProjectLayout.LEGACY_MASTER_OBJECTS_FILENAME));
-        File intensitiesCsv = findFirstExistingFile(layout.aggregationReadFiles(
-                FlashProjectLayout.MASTER_INTENSITIES_FILENAME,
-                FlashProjectLayout.LEGACY_MASTER_INTENSITIES_FILENAME));
+        File objectsCsv = existingProjectSummaryFile(layout, FlashProjectLayout.MASTER_OBJECTS_FILENAME);
+        File intensitiesCsv = existingProjectSummaryFile(layout, FlashProjectLayout.MASTER_INTENSITIES_FILENAME);
 
         if (objectsCsv == null && intensitiesCsv == null) {
             notifyUser("Statistical Analysis",
-                    "No master CSV files found in FLASH/Results Export or legacy result folders.\n"
+                    "No master CSV files found in FLASH/Results/Tables/Project Summary/.\n"
                             + "Run Master Data Aggregation first.");
             return;
         }
@@ -188,7 +185,7 @@ public class StatisticalAnalysis implements Analysis {
             String msg = "At least 2 conditions are required for statistical testing. Found: "
                     + conditionOrder.size() + ".";
             if (headless || suppressDialogs) {
-                msg += " Edit FLASH/Results Export/Conditions.csv to assign conditions.";
+                msg += " Edit FLASH/Results/Tables/Project Summary/Conditions.csv to assign conditions.";
             }
             notifyUser("Statistical Analysis", msg);
             return;
@@ -293,7 +290,7 @@ public class StatisticalAnalysis implements Analysis {
         }
 
         // 5. Write output CSV
-        File outFile = layout.statisticsWriteFile(FlashProjectLayout.STATISTICS_FILENAME);
+        File outFile = layout.projectSummaryWriteFile(FlashProjectLayout.STATISTICS_FILENAME);
         writeStatisticsCsv(outFile, results);
 
         IJ.log("Statistical analysis complete: " + tested + " metrics tested, "
@@ -535,10 +532,8 @@ public class StatisticalAnalysis implements Analysis {
 
     private static List<String> readAvailableMetricColumns(String directory) {
         List<String> out = new ArrayList<String>();
-        File csv = findFirstExistingFile(
-                FlashProjectLayout.forDirectory(directory).aggregationReadFiles(
-                        FlashProjectLayout.MASTER_OBJECTS_FILENAME,
-                        FlashProjectLayout.LEGACY_MASTER_OBJECTS_FILENAME));
+        File csv = existingProjectSummaryFile(FlashProjectLayout.forDirectory(directory),
+                FlashProjectLayout.MASTER_OBJECTS_FILENAME);
         if (csv == null) {
             return out;
         }
@@ -573,6 +568,11 @@ public class StatisticalAnalysis implements Analysis {
         if (!headless && !suppressDialogs) {
             IJ.showMessage(title, message);
         }
+    }
+
+    private static File existingProjectSummaryFile(FlashProjectLayout layout, String fileName) {
+        File file = layout.projectSummaryWriteFile(fileName);
+        return file.isFile() ? file : null;
     }
 
     // ================================================================
@@ -632,21 +632,6 @@ public class StatisticalAnalysis implements Analysis {
         } catch (IOException e) {
             IJ.log("Error writing " + outFile.getName() + ": " + e.getMessage());
         }
-    }
-
-    private static File findFirstExistingFile(List<File> dirs, String fileName) {
-        for (File dir : dirs) {
-            File candidate = new File(dir, fileName);
-            if (candidate.isFile()) return candidate;
-        }
-        return null;
-    }
-
-    private static File findFirstExistingFile(List<File> files) {
-        for (File candidate : files) {
-            if (candidate != null && candidate.isFile()) return candidate;
-        }
-        return null;
     }
 
     // ================================================================

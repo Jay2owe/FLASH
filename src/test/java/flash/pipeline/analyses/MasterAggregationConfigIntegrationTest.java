@@ -203,7 +203,7 @@ public class MasterAggregationConfigIntegrationTest {
     }
 
     private static File aggregationFile(File root, String fileName) {
-        return new File(FlashProjectLayout.forDirectory(root.getAbsolutePath()).aggregationWriteDir(), fileName);
+        return FlashProjectLayout.forDirectory(root.getAbsolutePath()).projectSummaryWriteFile(fileName);
     }
 
     private static File roiTables(File root) {

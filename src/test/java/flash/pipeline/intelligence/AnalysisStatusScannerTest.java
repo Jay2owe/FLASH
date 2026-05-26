@@ -84,7 +84,7 @@ public class AnalysisStatusScannerTest {
     }
 
     @Test
-    public void writeSidecar_usesFlashStatusAnalysisFolder() throws Exception {
+    public void writeSidecar_usesFlashStatusDirectory() throws Exception {
         File dir = temp.newFolder("sidecar-new");
 
         AnalysisStatusScanner.writeSidecar(dir, AnalysisStatusScanner.CREATE_BIN_ID, 3);
@@ -101,8 +101,9 @@ public class AnalysisStatusScannerTest {
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(dir.getAbsolutePath());
         assertEquals(true, layout.tablesObjectsWriteDir().mkdirs());
         assertEquals(true, new File(layout.tablesObjectsWriteDir(), "DAPI.csv").createNewFile());
-        assertEquals(true, layout.excelWriteDir().mkdirs());
-        assertEquals(true, new File(layout.excelWriteDir(), "Summary.xlsx").createNewFile());
+        File summaryParent = layout.summaryWorkbookWriteFile().getParentFile();
+        assertEquals(true, summaryParent.isDirectory() || summaryParent.mkdirs());
+        assertEquals(true, layout.summaryWorkbookWriteFile().createNewFile());
 
         Map<Integer, AnalysisStatus> statuses = new AnalysisStatusScanner().scan(dir);
 

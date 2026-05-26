@@ -35,7 +35,7 @@ public final class PreFlightChecks {
 
     /** Output sub-folder names that indicate a previous run produced outputs here. */
     private static final Set<String> OUTPUT_FOLDER_NAMES = new HashSet<String>(
-            Arrays.asList("FLASH", "Data Analysis", "Image Analysis", "ImageJ Exports"));
+            Arrays.asList("FLASH"));
 
     /** Extensions that should not be scanned for truncation (only raw microscopy). */
     private static final Set<String> RAW_IMAGE_EXTS = new HashSet<String>(
@@ -67,9 +67,9 @@ public final class PreFlightChecks {
         return new DirectoryFileScan(dir, files);
     }
 
-    // ─────────────────────────────────────────────
+    // ---------------------------------------------
     // L-10 Running-on-Output Detector
-    // ─────────────────────────────────────────────
+    // ---------------------------------------------
 
     public static final class OutputFolderResult {
         public final boolean likelyOutput;
@@ -97,8 +97,8 @@ public final class PreFlightChecks {
                 found.add(child.getName());
             }
         }
-        // Warn only if ≥2 of the canonical output folders are siblings.
-        boolean likely = found.size() >= 2;
+        // The current results tree is rooted under FLASH; older sibling-folder heuristics are obsolete.
+        boolean likely = found.contains("FLASH");
         return new OutputFolderResult(likely, found);
     }
 
@@ -124,9 +124,9 @@ public final class PreFlightChecks {
         return proceed;
     }
 
-    // ─────────────────────────────────────────────
+    // ---------------------------------------------
     // L-08 Truncated-File Detector
-    // ─────────────────────────────────────────────
+    // ---------------------------------------------
 
     public static List<File> findTruncatedImages(String directory) {
         return findTruncatedImages(scanCleanFiles(directory));
@@ -160,11 +160,11 @@ public final class PreFlightChecks {
         return out;
     }
 
-    // ─────────────────────────────────────────────
+    // ---------------------------------------------
     // P-10 Disk-Space Pre-Flight
-    // ─────────────────────────────────────────────
+    // ---------------------------------------------
 
-    /** Rough per-step multiplier: input bytes × 4 covers split TIFs + label stacks + CSVs. */
+    /** Rough per-step multiplier: input bytes x 4 covers split TIFs + label stacks + CSVs. */
     private static final double OUTPUT_SIZE_MULTIPLIER = 4.0;
 
     public static final class DiskSpaceResult {
@@ -203,9 +203,9 @@ public final class PreFlightChecks {
         return new DiskSpaceResult(inputBytes, free, estimatedOutput, warn, insufficient);
     }
 
-    // ─────────────────────────────────────────────
+    // ---------------------------------------------
     // P-11 Write-Permission Check
-    // ─────────────────────────────────────────────
+    // ---------------------------------------------
 
     /** Returns null if writable; otherwise a message describing the problem. */
     public static String checkWritePermission(String directory) {
@@ -224,9 +224,9 @@ public final class PreFlightChecks {
         return null;
     }
 
-    // ─────────────────────────────────────────────
+    // ---------------------------------------------
     // P-13 Windows Path-Length + Non-ASCII
-    // ─────────────────────────────────────────────
+    // ---------------------------------------------
 
     public static final class PathIssue {
         public final File file;
@@ -258,9 +258,9 @@ public final class PreFlightChecks {
         return out;
     }
 
-    // ─────────────────────────────────────────────
+    // ---------------------------------------------
     // Helpers
-    // ─────────────────────────────────────────────
+    // ---------------------------------------------
 
     private static String extension(String name) {
         if (name == null) return "";

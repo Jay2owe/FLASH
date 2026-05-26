@@ -20,6 +20,7 @@ import flash.pipeline.io.ImageSourceDispatcher;
 import flash.pipeline.io.IoUtils;
 import flash.pipeline.io.SeriesMeta;
 import flash.pipeline.naming.ChannelFilenameCodec;
+import flash.pipeline.results.StartHereWriter;
 import flash.pipeline.roi.RoiIO;
 import flash.pipeline.runtime.PluginInstallGuard;
 import flash.pipeline.ui.PipelineDialog;
@@ -63,7 +64,8 @@ import java.util.TreeMap;
 
 /**
  * Aggregates per-object and per-intensity CSV data across all channels into
- * master summary files saved to {@code FLASH/Results Export/}:
+ * master summary files saved to
+ * {@code FLASH/Results/Tables/Project Summary/}:
  * <ul>
  *   <li>{@code 3D Objects.csv} - object and spatial per-animal totals/means</li>
  *   <li>{@code Image Intensities.csv} - intensity per-animal means</li>
@@ -526,11 +528,11 @@ public class MasterAggregationAnalysis implements Analysis {
 
         // Create output directory
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
-        File exportDir = layout.aggregationWriteDir();
+        File exportDir = layout.tablesProjectSummaryWriteDir();
         try {
             IoUtils.mustMkdirs(exportDir);
         } catch (IOException e) {
-            IJ.log("[FLASH] Could not create Results Export directory: " + e.getMessage());
+            IJ.log("[FLASH] Could not create project summary directory: " + e.getMessage());
             return;
         }
 
@@ -541,7 +543,8 @@ public class MasterAggregationAnalysis implements Analysis {
         Map<String, Double> volumeMm3PerAnimal = loadRoiVolumeMm3Mean(directory, roiPropertiesFile);
         Map<String, Integer> numSectionsPerAnimal = loadNumSections(directory, roiPropertiesFile);
 
-        boolean didObjects = aggregateObjects(directory, exportDir, volumeMm3PerAnimal, numSectionsPerAnimal);
+        boolean didObjects = aggregateObjects(directory, exportDir, layout.analysisDetailsWriteDir(),
+                volumeMm3PerAnimal, numSectionsPerAnimal);
         boolean didIntensities = aggregateIntensities(directory, exportDir, numSectionsPerAnimal);
 
         if (didObjects || didIntensities) {
@@ -551,6 +554,11 @@ public class MasterAggregationAnalysis implements Analysis {
                         AnalysisStatusScanner.estimateImageCount(directory));
             } catch (IOException e) {
                 IJ.log("Warning: could not write aggregation status sidecar: " + e.getMessage());
+            }
+            try {
+                StartHereWriter.write(layout);
+            } catch (IOException e) {
+                IJ.log("Warning: could not write START_HERE.html: " + e.getMessage());
             }
             if (!suppressDialogs) {
                 IJ.showMessage("Master Aggregation Analysis",
@@ -1035,7 +1043,7 @@ public class MasterAggregationAnalysis implements Analysis {
 
     // ------------------------------------------------------------------ Objects
 
-    private boolean aggregateObjects(String directory, File exportDir,
+    private boolean aggregateObjects(String directory, File exportDir, File detailsDir,
                                      Map<String, Double> volumeMm3PerAnimal,
                                      Map<String, Integer> numSectionsPerAnimal) {
         List<File> csvFiles = aggregationObjectCsvFiles(directory);
@@ -1404,7 +1412,7 @@ public class MasterAggregationAnalysis implements Analysis {
 
         // Write aggregation analysis details
         if (canNormalize) {
-            writeAggregationDetails(exportDir, volumeMm3PerAnimal, numSectionsPerAnimal);
+            writeAggregationDetails(detailsDir, volumeMm3PerAnimal, numSectionsPerAnimal);
         }
 
         return true;
@@ -1687,11 +1695,12 @@ public class MasterAggregationAnalysis implements Analysis {
         }
     }
 
-    private void writeAggregationDetails(File exportDir,
+    private void writeAggregationDetails(File detailsDir,
                                           Map<String, Double> volumeMm3PerAnimal,
                                           Map<String, Integer> numSectionsPerAnimal) {
-        File detailsFile = new File(exportDir, "Aggregation_Analysis_Details.txt");
+        File detailsFile = new File(detailsDir, "Aggregation_Analysis_Details.txt");
         try {
+            IoUtils.mustMkdirs(detailsDir);
             PrintWriter pw = new PrintWriter(detailsFile);
             try {
                 pw.println("=== Master Data Aggregation — Analysis Details ===");
