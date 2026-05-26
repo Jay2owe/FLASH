@@ -8,6 +8,7 @@ import flash.pipeline.analyses.wizard.IntensitySpatialConfig;
 import flash.pipeline.intensity.spatial.IntensitySpatialOutputKey;
 import flash.pipeline.intensity.spatial.IntensitySpatialOutputMode;
 import flash.pipeline.io.CsvTableIO;
+import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.naming.NameParts;
 import ij.IJ;
 import ij.ImagePlus;
@@ -81,25 +82,22 @@ public class IntensityAnalysisV2Test {
         new IntensityAnalysisV2().execute(dir.getAbsolutePath());
 
         assertEquals(1, chooserCalls.get());
-        assertFalse(new File(dir, "Data Analysis/ROI Intensities").exists());
-        assertFalse(new File(dir, "FLASH/Image Analysis/Image Intensities").exists());
+        assertFalse(new File(dir, "FLASH/Results/Tables/Intensity").exists());
+        assertFalse(new File(dir, "FLASH/Results/Analysis Images/Intensity Overlays").exists());
     }
 
     @Test
-    public void intensityPathsUseFlashOutputAndLegacyReadFallback() throws Exception {
+    public void intensityPathsResolveUnderResultsLayout() throws Exception {
         File dir = temp.newFolder("intensityPaths");
+        FlashProjectLayout layout = FlashProjectLayout.forDirectory(dir.getAbsolutePath());
 
-        File writeRoot = IntensityAnalysisV2.intensityWriteRoot(dir.getAbsolutePath());
-        List<File> readRoots = IntensityAnalysisV2.intensityReadRoots(dir.getAbsolutePath());
+        File writeRoot = layout.tablesIntensityWriteDir();
+        File overlayRoot = layout.analysisImagesIntensityOverlaysDir();
 
-        assertEquals(new File(dir, "FLASH/Image Analysis/Image Intensities").getAbsolutePath(),
+        assertEquals(new File(dir, "FLASH/Results/Tables/Intensity").getAbsolutePath(),
                 writeRoot.getAbsolutePath());
-        assertEquals(new File(dir, "FLASH/Image Analysis/Image Intensities").getAbsolutePath(),
-                readRoots.get(0).getAbsolutePath());
-        assertEquals(new File(dir, "FLASH/04 - Fluorescence Intensity").getAbsolutePath(),
-                readRoots.get(1).getAbsolutePath());
-        assertEquals(new File(dir, "Data Analysis/ROI Intensities").getAbsolutePath(),
-                readRoots.get(2).getAbsolutePath());
+        assertEquals(new File(dir, "FLASH/Results/Analysis Images/Intensity Overlays").getAbsolutePath(),
+                overlayRoot.getAbsolutePath());
         assertEquals(new File(writeRoot, "GFAP in DAPI ROI.csv").getAbsolutePath(),
                 IntensityAnalysisV2.intensityOutputCsv(writeRoot, "GFAP", true, 1,
                         new String[]{"DAPI", "GFAP"}).getAbsolutePath());
@@ -382,7 +380,8 @@ public class IntensityAnalysisV2Test {
         File dir = temp.newFolder("headless-spatial-missing-dependency");
         File binDir = new File(dir, ".bin");
         assertTrue(binDir.mkdirs());
-        File outputRoot = IntensityAnalysisV2.intensityWriteRoot(dir.getAbsolutePath());
+        File outputRoot = FlashProjectLayout.forDirectory(dir.getAbsolutePath())
+                .tablesIntensityWriteDir();
         assertTrue(outputRoot.mkdirs());
         String[] channelNames = {"DAPI"};
         boolean[] binarization = {false};
@@ -445,7 +444,8 @@ public class IntensityAnalysisV2Test {
         File dir = temp.newFolder("parallel-channel-failure");
         File binDir = new File(dir, ".bin");
         assertTrue(binDir.mkdirs());
-        File outputRoot = IntensityAnalysisV2.intensityWriteRoot(dir.getAbsolutePath());
+        File outputRoot = FlashProjectLayout.forDirectory(dir.getAbsolutePath())
+                .tablesIntensityWriteDir();
         assertTrue(outputRoot.mkdirs());
 
         String[] channelNames = {"DAPI", "GFAP"};
@@ -503,7 +503,8 @@ public class IntensityAnalysisV2Test {
         File dir = temp.newFolder("negative-threshold-failure");
         File binDir = new File(dir, ".bin");
         assertTrue(binDir.mkdirs());
-        File outputRoot = IntensityAnalysisV2.intensityWriteRoot(dir.getAbsolutePath());
+        File outputRoot = FlashProjectLayout.forDirectory(dir.getAbsolutePath())
+                .tablesIntensityWriteDir();
         assertTrue(outputRoot.mkdirs());
 
         String[] channelNames = {"DAPI"};

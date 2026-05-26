@@ -1,7 +1,6 @@
 package flash.pipeline.intensity.spatial;
 
 import flash.pipeline.io.FlashProjectLayout;
-import flash.pipeline.io.FlashProjectLayout.AnalysisFolder;
 import flash.pipeline.io.IoUtils;
 import flash.pipeline.naming.ChannelFilenameCodec;
 import ij.IJ;
@@ -21,10 +20,10 @@ public final class IntensitySpatialOverlayWriter {
     }
 
     public File overlayRoot(File projectRoot, String animalName) {
-        File intensityRoot = FlashProjectLayout
+        File overlaysRoot = FlashProjectLayout
                 .forDirectory(projectRoot.getAbsolutePath())
-                .analysisWriteDir(AnalysisFolder.INTENSITY);
-        return new File(new File(intensityRoot, "Spatial Overlays"), safeComponent(animalName));
+                .analysisImagesIntensityOverlaysDir();
+        return new File(overlaysRoot, safeComponent(animalName));
     }
 
     public File overlayFile(File projectRoot,

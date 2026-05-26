@@ -86,9 +86,6 @@ public final class FlashProjectLayout {
         DECONVOLUTION("3D Deconvolution",
                 FLASH_DIR + File.separator + "02 - 3D Deconvolution",
                 IMAGE_ANALYSIS_DIR + File.separator + "Deconvolved"),
-        INTENSITY(IMAGE_ANALYSIS_DIR + File.separator + "Image Intensities",
-                FLASH_DIR + File.separator + "04 - Fluorescence Intensity",
-                DATA_ANALYSIS_DIR + File.separator + "ROI Intensities"),
         SPATIAL(IMAGE_ANALYSIS_DIR + File.separator + "Spatial Analysis",
                 FLASH_DIR + File.separator + "06 - Spatial Analysis",
                 DATA_ANALYSIS_DIR + File.separator + "Spatial",
@@ -381,12 +378,10 @@ public final class FlashProjectLayout {
         return Collections.unmodifiableList(out);
     }
 
-    public File intensityDataWriteDir() {
-        return analysisWriteDir(AnalysisFolder.INTENSITY);
-    }
-
+    // TODO(Stage 08): collapse intensityAnalysisDetailsWriteDir into the single
+    // analysis_details directory now that intensity details live under Run Records.
     public File intensityAnalysisDetailsWriteDir() {
-        return new File(intensityDataWriteDir(), "Analysis Details");
+        return analysisDetailsWriteDir();
     }
 
     // TODO(Stage 08): move under Results/Run Records/analysis_details/.
@@ -480,16 +475,8 @@ public final class FlashProjectLayout {
         return readFilesForNames(excelReadDirs(), fileNames);
     }
 
-    public List<File> intensityDataReadDirs() {
-        return analysisReadDirs(AnalysisFolder.INTENSITY);
-    }
-
     public List<File> intensityAnalysisDetailsReadDirs() {
-        return immutableList(intensityAnalysisDetailsWriteDir(),
-                new File(projectRoot, FLASH_DIR + File.separator + "04 - Fluorescence Intensity"
-                        + File.separator + "Analysis Details"),
-                new File(projectRoot, DATA_ANALYSIS_DIR + File.separator + "ROI Intensities"
-                        + File.separator + "Analysis Details"));
+        return Collections.singletonList(intensityAnalysisDetailsWriteDir());
     }
 
     public List<File> spatialDataReadDirs() {

@@ -24,7 +24,7 @@ public class IntensitySpatialOverlayWriterTest {
                 "LH ROI", "DAPI", "HOTSPOTSCAN");
 
         assertEquals(new File(project,
-                "FLASH/Image Analysis/Image Intensities/Spatial Overlays/Mouse_1/"
+                "FLASH/Results/Analysis Images/Intensity Overlays/Mouse_1/"
                         + "SCN1_LH_ROI_DAPI_HOTSPOTSCAN.png").getAbsolutePath(),
                 overlay.getAbsolutePath());
     }

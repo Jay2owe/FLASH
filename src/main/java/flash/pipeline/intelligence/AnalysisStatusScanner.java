@@ -71,7 +71,8 @@ public class AnalysisStatusScanner {
                         "Spatial_Distances.csv")),
                 "Line Distance Analysis");
         put(out, FLASH_Pipeline.IDX_INTENSITY,
-                fallbackStatus(directory, hasCsv(layout.intensityDataReadDirs())),
+                fallbackStatus(directory, hasCsv(
+                        java.util.Collections.singletonList(layout.tablesIntensityWriteDir()))),
                 "Fluorescence Intensity Analysis");
         put(out, FLASH_Pipeline.IDX_AGGREGATION,
                 sidecarStatus(directory, AGGREGATION_ID, currentBinHash,

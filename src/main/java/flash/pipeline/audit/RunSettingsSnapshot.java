@@ -162,7 +162,7 @@ public final class RunSettingsSnapshot {
             case 4: return layout.analysisImagesObjectsRoot();
             case 5: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.SPATIAL);
             case 6: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.LINE_DISTANCE);
-            case 7: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.INTENSITY);
+            case 7: return layout.tablesIntensityWriteDir();
             case 8: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.AGGREGATION);
             case 9: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.STATISTICS);
             case 10: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.EXCEL);

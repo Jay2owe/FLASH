@@ -97,7 +97,7 @@ public class PostRunSummaryTest {
         File root = temp.newFolder("post-run-intensity-metrics");
         File binDir = new File(root, ".bin");
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(root.getAbsolutePath());
-        File intensitiesDir = layout.intensityDataWriteDir();
+        File intensitiesDir = layout.tablesIntensityWriteDir();
         File aggregationDir = layout.aggregationWriteDir();
         assertTrue(binDir.mkdirs());
         assertTrue(intensitiesDir.mkdirs());

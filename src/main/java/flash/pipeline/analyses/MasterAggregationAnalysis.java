@@ -1787,8 +1787,7 @@ public class MasterAggregationAnalysis implements Analysis {
         List<File> csvFiles = intensityCsvFiles(directory);
         if (csvFiles.isEmpty()) {
             FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
-            IJ.log("No intensity CSV files found in: " + layout.intensityDataWriteDir().getAbsolutePath()
-                    + " or legacy ROI Intensities folder.");
+            IJ.log("No intensity CSV files found in: " + layout.tablesIntensityWriteDir().getAbsolutePath());
             return false;
         }
 
@@ -2413,7 +2412,8 @@ public class MasterAggregationAnalysis implements Analysis {
     private static List<File> intensityCsvFiles(String directory) {
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
         List<File> files = new ArrayList<File>();
-        appendFirstNamedCsvs(files, new HashSet<String>(), layout.intensityDataReadDirs(), intensityCsvFilter());
+        appendFirstNamedCsvs(files, new HashSet<String>(),
+                java.util.Collections.singletonList(layout.tablesIntensityWriteDir()), intensityCsvFilter());
         return files;
     }
 

@@ -32,7 +32,6 @@ import flash.pipeline.intensity.spatial.IntensitySpatialRunner;
 import flash.pipeline.io.CsvTableIO;
 import flash.pipeline.io.DeferredImageSupplier;
 import flash.pipeline.io.FlashProjectLayout;
-import flash.pipeline.io.FlashProjectLayout.AnalysisFolder;
 import flash.pipeline.io.ImageSourceDispatcher;
 import flash.pipeline.io.IoUtils;
 import flash.pipeline.io.SeriesMeta;
@@ -85,13 +84,12 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * Macro-faithful rewrite of intensityAnalysis(), focused on outputs.
  *
- * Output: FLASH/Image Analysis/Image Intensities/<channel>.csv and Analysis Details/<channel>.txt
+ * Output: FLASH/Results/Tables/Intensity/&lt;channel&gt;.csv and intensity-analysis details.
  */
 public class IntensityAnalysisV2 implements Analysis {
 
     private boolean headless = false;
     private boolean suppressDialogs = false;
-    private boolean aggressiveMemory = false;
     private boolean verboseLogging = false;
     private boolean skipExisting = false;
     private int parallelThreads = 1;
@@ -133,11 +131,6 @@ public class IntensityAnalysisV2 implements Analysis {
     @Override
     public void setSuppressDialogs(boolean suppress) {
         this.suppressDialogs = suppress;
-    }
-
-    @Override
-    public void setAggressiveMemory(boolean aggressive) {
-        this.aggressiveMemory = aggressive;
     }
 
     @Override
@@ -566,14 +559,23 @@ public class IntensityAnalysisV2 implements Analysis {
         }
 
         // Output directories
-        File saveRoot = intensityWriteRoot(directory);
+        FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
+        File saveRoot = layout.tablesIntensityWriteDir();
+        File overlayRoot = layout.analysisImagesIntensityOverlaysDir();
         try {
             IoUtils.mustMkdirs(saveRoot);
         } catch (IOException e) {
-            IJ.log("[FLASH] Could not create ROI Intensities output directory: " + e.getMessage());
+            IJ.log("[FLASH] Could not create intensity tables output directory: " + e.getMessage());
             return;
         }
-        IJ.log("Output directory: " + saveRoot.getAbsolutePath());
+        try {
+            IoUtils.mustMkdirs(overlayRoot);
+        } catch (IOException e) {
+            IJ.log("[FLASH] Could not create intensity overlays output directory: " + e.getMessage());
+            return;
+        }
+        IJ.log("Tables output directory: " + saveRoot.getAbsolutePath());
+        IJ.log("Overlay output directory: " + overlayRoot.getAbsolutePath());
 
         // Write per-channel Analysis Details (mirrors 3D Object Analysis output structure)
         File analysisDetailsDir = IntensityDetailsWriter.analysisDetailsWriteDir(new File(directory));
@@ -594,7 +596,7 @@ public class IntensityAnalysisV2 implements Analysis {
                         roiAnalysis ? roiChannelChoice : null,
                         intensitySpatialConfig,
                         cfg.getZSliceConfig().summary(),
-                        new File(saveRoot, "Spatial Overlays").getAbsolutePath(),
+                        overlayRoot.getAbsolutePath(),
                         "Optional intensity-spatial dependencies are checked per family at run time.",
                         "Failures are logged with image/channel/ROI/analysis context and written as NaN columns.");
                 IJ.log("  Analysis details written for: " + channelNames[c]);
@@ -925,11 +927,6 @@ public class IntensityAnalysisV2 implements Analysis {
                     IJ.log("  [DEBUG] Image processing time: " + formatDuration(imageElapsed));
                 }
 
-                if (aggressiveMemory) {
-                    if (verboseLogging) IJ.log("  [DEBUG] Aggressive memory clearing...");
-                    System.gc();
-                    IJ.freeMemory();
-                }
             }
         }
         prefetcher.shutdown();
@@ -1082,10 +1079,6 @@ public class IntensityAnalysisV2 implements Analysis {
                                         + " done, ~" + formatDuration(rem) + " remaining)");
                             }
 
-                            if (aggressiveMemory) {
-                                System.gc();
-                                IJ.freeMemory();
-                            }
                         } catch (Throwable t) {
                             rethrowIfFatal(t);
                             handleParallelImageThrowable(idx, total, t);
@@ -2856,14 +2849,6 @@ public class IntensityAnalysisV2 implements Analysis {
                 }
             }
         }
-    }
-
-    static File intensityWriteRoot(String directory) {
-        return FlashProjectLayout.forDirectory(directory).analysisWriteDir(AnalysisFolder.INTENSITY);
-    }
-
-    static List<File> intensityReadRoots(String directory) {
-        return FlashProjectLayout.forDirectory(directory).analysisReadDirs(AnalysisFolder.INTENSITY);
     }
 
     static File intensityOutputCsv(File saveRoot, String channelName,

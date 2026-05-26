@@ -27,9 +27,7 @@ public class FlashProjectLayoutTest {
         assertPath(new File(project, "FLASH/Set Up Configuration/.settings"), layout.configurationWriteDir());
         assertPath(new File(project, "FLASH/Set Up Configuration/.settings/Channel_Data.txt"),
                 layout.channelDataWriteFile());
-        assertPath(new File(project, "FLASH/Image Analysis/Image Intensities"),
-                layout.intensityDataWriteDir());
-        assertPath(new File(project, "FLASH/Image Analysis/Image Intensities/Analysis Details"),
+        assertPath(new File(project, "FLASH/Results/Run Records/analysis_details"),
                 layout.intensityAnalysisDetailsWriteDir());
         assertPath(new File(project, "FLASH/Results/Analysis Images/Objects/Analysis Details"),
                 layout.objectAnalysisDetailsWriteDir());
@@ -194,14 +192,8 @@ public class FlashProjectLayoutTest {
                 new File(project, "ImageJ Exports"));
         assertPaths(layout.objectAnalysisDetailsReadDirs(),
                 new File(project, "FLASH/Results/Analysis Images/Objects/Analysis Details"));
-        assertPaths(layout.intensityDataReadDirs(),
-                new File(project, "FLASH/Image Analysis/Image Intensities"),
-                new File(project, "FLASH/04 - Fluorescence Intensity"),
-                new File(project, "Data Analysis/ROI Intensities"));
         assertPaths(layout.intensityAnalysisDetailsReadDirs(),
-                new File(project, "FLASH/Image Analysis/Image Intensities/Analysis Details"),
-                new File(project, "FLASH/04 - Fluorescence Intensity/Analysis Details"),
-                new File(project, "Data Analysis/ROI Intensities/Analysis Details"));
+                new File(project, "FLASH/Results/Run Records/analysis_details"));
         assertPaths(layout.spatialDataReadDirs(),
                 new File(project, "FLASH/Image Analysis/Spatial Analysis/Spatial"),
                 new File(project, "FLASH/06 - Spatial Analysis/Spatial"),

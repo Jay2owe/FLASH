@@ -281,7 +281,7 @@ public class MasterAggregationAnalysisTest {
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(root.getAbsolutePath());
         File attrs = roiTables(root);
         File objects = layout.tablesObjectsWriteDir();
-        File intensities = layout.intensityDataWriteDir();
+        File intensities = layout.tablesIntensityWriteDir();
         File lineDistances = layout.lineDistanceWriteDir();
         assertTrue(attrs.mkdirs());
         assertTrue(objects.mkdirs());
@@ -323,7 +323,7 @@ public class MasterAggregationAnalysisTest {
     @Test
     public void execute_readsLegacyRawIntDenAsIntDenUnfiltered() throws Exception {
         File root = temp.newFolder("master-agg-legacy-intensity");
-        File intensities = FlashProjectLayout.forDirectory(root.getAbsolutePath()).intensityDataWriteDir();
+        File intensities = FlashProjectLayout.forDirectory(root.getAbsolutePath()).tablesIntensityWriteDir();
         assertTrue(intensities.mkdirs());
 
         writeCsv(new File(intensities, "GFAP.csv"),
@@ -345,7 +345,7 @@ public class MasterAggregationAnalysisTest {
     @Test
     public void execute_mixesLegacyAndNewIntensitySchemas() throws Exception {
         File root = temp.newFolder("master-agg-mixed-intensity");
-        File intensities = FlashProjectLayout.forDirectory(root.getAbsolutePath()).intensityDataWriteDir();
+        File intensities = FlashProjectLayout.forDirectory(root.getAbsolutePath()).tablesIntensityWriteDir();
         assertTrue(intensities.mkdirs());
 
         writeCsv(new File(intensities, "GFAP.csv"),
@@ -368,7 +368,7 @@ public class MasterAggregationAnalysisTest {
     @Test
     public void execute_prefersIntDenUnfilteredWhenLegacyColumnAlsoExists() throws Exception {
         File root = temp.newFolder("master-agg-prefer-new-intensity");
-        File intensities = FlashProjectLayout.forDirectory(root.getAbsolutePath()).intensityDataWriteDir();
+        File intensities = FlashProjectLayout.forDirectory(root.getAbsolutePath()).tablesIntensityWriteDir();
         assertTrue(intensities.mkdirs());
 
         writeCsv(new File(intensities, "GFAP.csv"),
@@ -383,7 +383,7 @@ public class MasterAggregationAnalysisTest {
     @Test
     public void execute_aggregatesNewBasicIntensitySchema() throws Exception {
         File root = temp.newFolder("master-agg-new-basic-intensity");
-        File intensities = FlashProjectLayout.forDirectory(root.getAbsolutePath()).intensityDataWriteDir();
+        File intensities = FlashProjectLayout.forDirectory(root.getAbsolutePath()).tablesIntensityWriteDir();
         assertTrue(intensities.mkdirs());
 
         writeCsv(new File(intensities, "Iba1.csv"),
@@ -401,7 +401,7 @@ public class MasterAggregationAnalysisTest {
     @Test
     public void execute_aggregatesNewBinarizedIntensityColumns() throws Exception {
         File root = temp.newFolder("master-agg-binarized-intensity");
-        File intensities = FlashProjectLayout.forDirectory(root.getAbsolutePath()).intensityDataWriteDir();
+        File intensities = FlashProjectLayout.forDirectory(root.getAbsolutePath()).tablesIntensityWriteDir();
         assertTrue(intensities.mkdirs());
 
         writeCsv(new File(intensities, "GFAP.csv"),
@@ -421,7 +421,7 @@ public class MasterAggregationAnalysisTest {
     @Test
     public void execute_aggregatesSpatialIntensityAndPairColumns() throws Exception {
         File root = temp.newFolder("master-agg-spatial-intensity");
-        File intensities = FlashProjectLayout.forDirectory(root.getAbsolutePath()).intensityDataWriteDir();
+        File intensities = FlashProjectLayout.forDirectory(root.getAbsolutePath()).tablesIntensityWriteDir();
         assertTrue(intensities.mkdirs());
 
         writeCsv(new File(intensities, "DAPI.csv"),
@@ -445,7 +445,7 @@ public class MasterAggregationAnalysisTest {
     @Test
     public void execute_writesSeparateMipAnd3dIntensityMasters() throws Exception {
         File root = temp.newFolder("master-agg-intensity-modes");
-        File intensities = FlashProjectLayout.forDirectory(root.getAbsolutePath()).intensityDataWriteDir();
+        File intensities = FlashProjectLayout.forDirectory(root.getAbsolutePath()).tablesIntensityWriteDir();
         assertTrue(intensities.mkdirs());
 
         writeCsv(new File(intensities, "DAPI.csv"),
@@ -492,7 +492,7 @@ public class MasterAggregationAnalysisTest {
     @Test
     public void execute_preservesChannelRoiMaskBasicAggregation() throws Exception {
         File root = temp.newFolder("master-agg-channel-roi-mask-intensity");
-        File intensities = FlashProjectLayout.forDirectory(root.getAbsolutePath()).intensityDataWriteDir();
+        File intensities = FlashProjectLayout.forDirectory(root.getAbsolutePath()).tablesIntensityWriteDir();
         assertTrue(intensities.mkdirs());
 
         writeCsv(new File(intensities, "GFAP in DAPI ROI.csv"),

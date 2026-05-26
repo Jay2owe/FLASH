@@ -40,9 +40,9 @@ public class IntensityDetailsWriterTest {
 
         File out = new File(analysisDetailsDir, "GFAP.txt");
         assertTrue(out.getAbsolutePath().contains(
-                "FLASH" + File.separator + "Image Analysis"
-                        + File.separator + "Image Intensities"
-                        + File.separator + "Analysis Details"));
+                "FLASH" + File.separator + "Results"
+                        + File.separator + "Run Records"
+                        + File.separator + "analysis_details"));
         String text = new String(Files.readAllBytes(out.toPath()), StandardCharsets.UTF_8);
 
         assertTrue(text.contains("// Filter source: Astrocyte cleanup (C2_Filters.ijm)"));
@@ -82,7 +82,7 @@ public class IntensityDetailsWriterTest {
                 "GFAP",
                 spatialConfig,
                 "Full stack",
-                "FLASH/Image Analysis/Image Intensities/Spatial Overlays",
+                "FLASH/Results/Analysis Images/Intensity Overlays",
                 "Coloc 2 checked at run time",
                 "No partial failures"
         );

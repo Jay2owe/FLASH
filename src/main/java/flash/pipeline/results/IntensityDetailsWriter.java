@@ -2,7 +2,6 @@ package flash.pipeline.results;
 
 import flash.pipeline.analyses.wizard.IntensitySpatialConfig;
 import flash.pipeline.io.FlashProjectLayout;
-import flash.pipeline.io.FlashProjectLayout.AnalysisFolder;
 import flash.pipeline.naming.ChannelFilenameCodec;
 
 import java.io.File;
@@ -17,7 +16,7 @@ import java.nio.file.StandardCopyOption;
 
 /**
  * Writes macro-style per-channel Analysis Details for Intensity Analysis.
- * Output: FLASH/Image Analysis/Image Intensities/Analysis Details/&lt;channel&gt;.txt
+ * Output target is supplied by {@link FlashProjectLayout#intensityAnalysisDetailsWriteDir()}.
  * Mirrors the tag structure used by ObjectAnalysisDetailsWriter:
  * {@code <Filter Macro>}, {@code <Analysis Macro>}, {@code <Threshold>}, {@code <In ROI>}.
  */
@@ -29,9 +28,8 @@ public final class IntensityDetailsWriter {
         if (projectDirectory == null) {
             throw new IllegalArgumentException("Project directory must not be null.");
         }
-        File intensityRoot = FlashProjectLayout.forDirectory(projectDirectory.getAbsolutePath())
-                .analysisWriteDir(AnalysisFolder.INTENSITY);
-        return new File(intensityRoot, "Analysis Details");
+        return FlashProjectLayout.forDirectory(projectDirectory.getAbsolutePath())
+                .intensityAnalysisDetailsWriteDir();
     }
 
     /**
