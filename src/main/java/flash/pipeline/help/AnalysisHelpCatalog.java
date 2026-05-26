@@ -508,11 +508,11 @@ public final class AnalysisHelpCatalog {
                         "Write new spatial or morphometry summary CSVs, and update the same object CSV tables with added spatial and Morph_ columns."),
                 list(
                         "Updated FLASH/Results/Tables/Objects/<channel>.csv files with added columns such as XM_um, YM_um, ZM_um, <channel>_DistToClosest_<partner>, <channel>_ClosestTo_<partner>, CPC, Voronoi, Cluster, and Morph_ measurements.",
-                        "FLASH/Image Analysis/Spatial Analysis/Spatial/Spatial_Statistics_<channel>.csv contains Ripley's K/L/G summaries when spatial statistics run.",
-                        "FLASH/Image Analysis/Spatial Analysis/Spatial/CPC_Spatial_Summary.csv and CPC_Multi_Target_Summary.csv summarize centroid-in-object colocalisation when CPC columns are available or recomputed.",
-                        "FLASH/Image Analysis/Spatial Analysis/Spatial/Voronoi_<channel>.csv, Interaction_Matrix.csv, and Phenotyping/Clusters_<channel>.csv are written when Voronoi or k-means phenotyping are selected.",
-                        "FLASH/Image Analysis/Spatial Analysis/Morphometry/ stores morphology, population summary, PPRP, and morphometry analysis-detail CSVs when morphometric options are selected.",
-                        "FLASH/Image Analysis/Spatial Analysis/Image Outputs/<animal>/Heatmaps/ stores density heatmap TIFF and PNG files when heatmaps are selected."),
+                        "FLASH/Results/Tables/Spatial/Spatial_Statistics_<channel>.csv contains Ripley's K/L/G summaries when spatial statistics run.",
+                        "FLASH/Results/Tables/Spatial/CPC_Spatial_Summary.csv and CPC_Multi_Target_Summary.csv summarize centroid-in-object colocalisation when CPC columns are available or recomputed.",
+                        "FLASH/Results/Tables/Spatial/Voronoi_<channel>.csv, Interaction_Matrix.csv, and Phenotyping/Clusters_<channel>.csv are written when Voronoi or k-means phenotyping are selected.",
+                        "FLASH/Results/Tables/Morphometry/ stores morphology, population summary, PPRP, and morphometry analysis-detail CSVs when morphometric options are selected.",
+                        "FLASH/Results/Analysis Images/Spatial Heatmaps/<animal>/Heatmaps/ stores density heatmap TIFF and PNG files when heatmaps are selected."),
                 list(
                         "Running this before 3D Object Analysis leaves no object CSVs to load, so Spatial Analysis has nothing to measure.",
                         "Bad segmentation creates bad spatial findings; inspect object maps and object counts before interpreting clustering, proximity, or morphology biologically.",
@@ -539,7 +539,7 @@ public final class AnalysisHelpCatalog {
                         "Use it when you need one project-level table for condition comparisons, animal-level summaries, or Excel export.",
                         "Use it again after changing condition assignments, ROI attributes, object outputs, spatial outputs, or aggregation granularity."),
                 list(
-                        "Per-analysis CSV files from FLASH/Image Analysis/Image Intensities/, FLASH/Results/Tables/Objects/, FLASH/Image Analysis/Spatial Analysis/, and any legacy Data Analysis folders that still contain compatible outputs.",
+                        "Per-analysis CSV files from FLASH/Image Analysis/Image Intensities/, FLASH/Results/Tables/Objects/, FLASH/Results/Tables/Spatial/, FLASH/Results/Tables/Morphometry/, and any legacy Data Analysis folders that still contain compatible outputs.",
                         "ROI attribute CSV files from FLASH/Results/Tables/ROIs/ when per-mm3 normalization or ROI metadata should be included.",
                         "Condition assignments saved in FLASH/Results Export/Conditions.csv, with legacy fallback when opening older projects.",
                         "A selected aggregation granularity and output mode, such as per-animal, per-hemisphere, per-region, per-section, raw, normalized, or both."),

@@ -63,8 +63,10 @@ public class AnalysisStatusScanner {
                         java.util.Collections.singletonList(layout.tablesObjectsWriteDir()))),
                 "3D Object Analysis");
         put(out, FLASH_Pipeline.IDX_SPATIAL,
-                fallbackStatus(directory, hasCsv(layout.spatialDataReadDirs())
-                        || hasCsv(layout.spatialMorphometryReadDirs())),
+                fallbackStatus(directory, hasCsv(
+                        java.util.Collections.singletonList(layout.tablesSpatialWriteDir()))
+                        || hasCsv(
+                        java.util.Collections.singletonList(layout.tablesMorphometryWriteDir()))),
                 "Spatial Analysis");
         put(out, FLASH_Pipeline.IDX_LINE_DISTANCE,
                 fallbackStatus(directory, hasFile(layout.lineDistanceReadDirs(),

@@ -1684,15 +1684,15 @@ public class SpatialAnalysis implements Analysis {
     }
 
     private static File spatialDataOutputDir(String directory) {
-        return FlashProjectLayout.forDirectory(directory).spatialDataWriteDir();
+        return FlashProjectLayout.forDirectory(directory).tablesSpatialWriteDir();
     }
 
     private static File spatialMorphometryOutputDir(String directory) {
-        return FlashProjectLayout.forDirectory(directory).spatialMorphometryWriteDir();
+        return FlashProjectLayout.forDirectory(directory).tablesMorphometryWriteDir();
     }
 
     private static File spatialImageOutputDir(String directory) {
-        return FlashProjectLayout.forDirectory(directory).spatialImageOutputsWriteDir();
+        return FlashProjectLayout.forDirectory(directory).analysisImagesSpatialHeatmapsDir();
     }
 
     static List<String> lineSetNames(File linesDir) {

@@ -132,7 +132,7 @@ public class SpatialAnalysisTest {
         assertNotNull(a);
         assertFalse(a.colIdx.containsKey("XM_um"));
         assertEquals(5.0, a.getDouble(0, "A_DistToClosest_B"), 1e-6);
-        assertFalse(new File(root, "FLASH/Image Analysis/Spatial Analysis/Spatial/Spatial_Statistics_A.csv").exists());
+        assertFalse(new File(root, "FLASH/Results/Tables/Spatial/Spatial_Statistics_A.csv").exists());
     }
 
     @Test
@@ -200,7 +200,7 @@ public class SpatialAnalysisTest {
         sa.setWizardConfig(config);
         sa.execute(root.getAbsolutePath());
 
-        File statsFile = new File(root, "FLASH/Image Analysis/Spatial Analysis/Spatial/Spatial_Statistics_A.csv");
+        File statsFile = new File(root, "FLASH/Results/Tables/Spatial/Spatial_Statistics_A.csv");
         assertTrue(statsFile.exists());
         assertFalse(new File(root, "Data Analysis/Spatial/Spatial_Statistics_A.csv").exists());
 
@@ -228,7 +228,7 @@ public class SpatialAnalysisTest {
         runSuppressed(root);
 
         assertFalse(new File(root,
-                "FLASH/Image Analysis/Spatial Analysis/Spatial/Spatial_Statistics_A.csv").exists());
+                "FLASH/Results/Tables/Spatial/Spatial_Statistics_A.csv").exists());
     }
 
     @Test
@@ -275,7 +275,7 @@ public class SpatialAnalysisTest {
         sa.execute(root.getAbsolutePath());
 
         File heatmapDir = new File(root,
-                "FLASH/Image Analysis/Spatial Analysis/Image Outputs/Mouse1/Heatmaps");
+                "FLASH/Results/Analysis Images/Spatial Heatmaps/Mouse1/Heatmaps");
         assertTrue(new File(heatmapDir, "Density_A_LH_SCN.tif").isFile());
         assertTrue(new File(heatmapDir, "Density_A_LH_SCN.png").isFile());
         assertFalse(new File(root, "Image Analysis/Mouse1/Heatmaps/Density_A_LH_SCN.tif").exists());
@@ -678,8 +678,8 @@ public class SpatialAnalysisTest {
         sa.execute(root.getAbsolutePath());
 
         assertEquals(4, sa.resolveCalls);
-        assertTrue(new File(root, "FLASH/Image Analysis/Spatial Analysis/Spatial/CPC_Spatial_Summary.csv").isFile());
-        assertTrue(new File(root, "FLASH/Image Analysis/Spatial Analysis/Spatial/CPC_Multi_Target_Summary.csv").isFile());
+        assertTrue(new File(root, "FLASH/Results/Tables/Spatial/CPC_Spatial_Summary.csv").isFile());
+        assertTrue(new File(root, "FLASH/Results/Tables/Spatial/CPC_Multi_Target_Summary.csv").isFile());
     }
 
     @Test
@@ -746,7 +746,7 @@ public class SpatialAnalysisTest {
         assertEquals("123", a.get(0, "Length"));
         assertEquals("0.42", a.get(0, "Morph_Sphericity"));
         assertEquals("88", b.get(0, "B_DistToClosest_A"));
-        assertFalse(new File(root, "FLASH/Image Analysis/Spatial Analysis/Morphometry").exists());
+        assertFalse(new File(root, "FLASH/Results/Tables/Morphometry").exists());
     }
 
     @Test

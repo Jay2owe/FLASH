@@ -64,7 +64,7 @@ public class SpatialArtifactScannerTest {
         List<SectionKey> sections = Arrays.asList(
                 SectionKey.of("Animal1", "LH_SCN"),
                 SectionKey.of("Animal1", "RH_SCN"));
-        touch(new File(layout.spatialImageOutputsWriteDir(),
+        touch(new File(layout.analysisImagesSpatialHeatmapsDir(),
                 "Animal1/Heatmaps/Density_"
                         + ChannelFilenameCodec.toSafe("IBA1") + "_LH_SCN.tif"));
 

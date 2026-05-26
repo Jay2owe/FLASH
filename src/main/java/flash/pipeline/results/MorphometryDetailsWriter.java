@@ -8,7 +8,7 @@ import java.nio.charset.StandardCharsets;
 
 /**
  * Writes analysis details for 3D morphometric features and composite indices
- * to {@code FLASH/Image Analysis/Spatial Analysis/Morphometry/Morphometry_Details.txt}.
+ * to {@code FLASH/Results/Tables/Morphometry/Morphometry_Details.txt}.
  */
 public final class MorphometryDetailsWriter {
 

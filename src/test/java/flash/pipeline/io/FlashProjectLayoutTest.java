@@ -31,12 +31,6 @@ public class FlashProjectLayoutTest {
                 layout.intensityAnalysisDetailsWriteDir());
         assertPath(new File(project, "FLASH/Results/Analysis Images/Objects/Analysis Details"),
                 layout.objectAnalysisDetailsWriteDir());
-        assertPath(new File(project, "FLASH/Image Analysis/Spatial Analysis/Spatial"),
-                layout.spatialDataWriteDir());
-        assertPath(new File(project, "FLASH/Image Analysis/Spatial Analysis/Morphometry"),
-                layout.spatialMorphometryWriteDir());
-        assertPath(new File(project, "FLASH/Image Analysis/Spatial Analysis/Image Outputs"),
-                layout.spatialImageOutputsWriteDir());
         assertPath(new File(project, "FLASH/Image Analysis/Line Distance Analysis"),
                 layout.lineDistanceWriteDir());
         assertPath(new File(project, "FLASH/Image Analysis/Line Distance Analysis/Line Sets"),
@@ -177,11 +171,6 @@ public class FlashProjectLayoutTest {
                 new File(project, "FLASH/3D Deconvolution"),
                 new File(project, "FLASH/02 - 3D Deconvolution"),
                 new File(project, "Image Analysis/Deconvolved"));
-        assertPaths(layout.analysisReadDirs(FlashProjectLayout.AnalysisFolder.SPATIAL),
-                new File(project, "FLASH/Image Analysis/Spatial Analysis"),
-                new File(project, "FLASH/06 - Spatial Analysis"),
-                new File(project, "Data Analysis/Spatial"),
-                new File(project, "Data Analysis/Morphometry"));
         assertPaths(layout.analysisReadDirs(FlashProjectLayout.AnalysisFolder.EXCEL),
                 new File(project, "FLASH/Results Export"),
                 new File(project, "FLASH/11 - Excel Summary Export"),
@@ -194,18 +183,6 @@ public class FlashProjectLayoutTest {
                 new File(project, "FLASH/Results/Analysis Images/Objects/Analysis Details"));
         assertPaths(layout.intensityAnalysisDetailsReadDirs(),
                 new File(project, "FLASH/Results/Run Records/analysis_details"));
-        assertPaths(layout.spatialDataReadDirs(),
-                new File(project, "FLASH/Image Analysis/Spatial Analysis/Spatial"),
-                new File(project, "FLASH/06 - Spatial Analysis/Spatial"),
-                new File(project, "Data Analysis/Spatial"));
-        assertPaths(layout.spatialMorphometryReadDirs(),
-                new File(project, "FLASH/Image Analysis/Spatial Analysis/Morphometry"),
-                new File(project, "FLASH/06 - Spatial Analysis/Morphometry"),
-                new File(project, "Data Analysis/Morphometry"));
-        assertPaths(layout.spatialImageOutputReadDirs(),
-                new File(project, "FLASH/Image Analysis/Spatial Analysis/Image Outputs"),
-                new File(project, "FLASH/06 - Spatial Analysis/Image Outputs"),
-                new File(project, "Image Analysis"));
         assertPaths(layout.lineDistanceReadDirs(),
                 new File(project, "FLASH/Image Analysis/Line Distance Analysis"),
                 new File(project, "FLASH/07 - Line Distance"),

@@ -86,10 +86,6 @@ public final class FlashProjectLayout {
         DECONVOLUTION("3D Deconvolution",
                 FLASH_DIR + File.separator + "02 - 3D Deconvolution",
                 IMAGE_ANALYSIS_DIR + File.separator + "Deconvolved"),
-        SPATIAL(IMAGE_ANALYSIS_DIR + File.separator + "Spatial Analysis",
-                FLASH_DIR + File.separator + "06 - Spatial Analysis",
-                DATA_ANALYSIS_DIR + File.separator + "Spatial",
-                DATA_ANALYSIS_DIR + File.separator + "Morphometry"),
         LINE_DISTANCE(IMAGE_ANALYSIS_DIR + File.separator + "Line Distance Analysis",
                 FLASH_DIR + File.separator + "07 - Line Distance",
                 DATA_ANALYSIS_DIR + File.separator + "Lines",
@@ -393,18 +389,6 @@ public final class FlashProjectLayout {
         return immutableList(objectAnalysisDetailsWriteDir());
     }
 
-    public File spatialDataWriteDir() {
-        return new File(analysisWriteDir(AnalysisFolder.SPATIAL), "Spatial");
-    }
-
-    public File spatialMorphometryWriteDir() {
-        return new File(analysisWriteDir(AnalysisFolder.SPATIAL), "Morphometry");
-    }
-
-    public File spatialImageOutputsWriteDir() {
-        return new File(analysisWriteDir(AnalysisFolder.SPATIAL), "Image Outputs");
-    }
-
     public File lineDistanceWriteDir() {
         return analysisWriteDir(AnalysisFolder.LINE_DISTANCE);
     }
@@ -477,27 +461,6 @@ public final class FlashProjectLayout {
 
     public List<File> intensityAnalysisDetailsReadDirs() {
         return Collections.singletonList(intensityAnalysisDetailsWriteDir());
-    }
-
-    public List<File> spatialDataReadDirs() {
-        return immutableList(spatialDataWriteDir(),
-                new File(projectRoot, FLASH_DIR + File.separator + "06 - Spatial Analysis"
-                        + File.separator + "Spatial"),
-                new File(projectRoot, DATA_ANALYSIS_DIR + File.separator + "Spatial"));
-    }
-
-    public List<File> spatialMorphometryReadDirs() {
-        return immutableList(spatialMorphometryWriteDir(),
-                new File(projectRoot, FLASH_DIR + File.separator + "06 - Spatial Analysis"
-                        + File.separator + "Morphometry"),
-                new File(projectRoot, DATA_ANALYSIS_DIR + File.separator + "Morphometry"));
-    }
-
-    public List<File> spatialImageOutputReadDirs() {
-        return immutableList(spatialImageOutputsWriteDir(),
-                new File(projectRoot, FLASH_DIR + File.separator + "06 - Spatial Analysis"
-                        + File.separator + "Image Outputs"),
-                new File(projectRoot, IMAGE_ANALYSIS_DIR));
     }
 
     public List<File> lineDistanceReadDirs() {

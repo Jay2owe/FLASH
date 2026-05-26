@@ -50,9 +50,9 @@ public final class SpatialArtifactScanner {
             }
         }
 
-        scanDensityHeatmaps(done, layout.spatialImageOutputsWriteDir(), channels, sectionKeys);
-        scanSpatialSidecars(done, layout.spatialDataWriteDir(), channels, sectionKeys);
-        scanPhenotypingSidecars(done, new File(layout.spatialDataWriteDir(), "Phenotyping"), channels, sectionKeys);
+        scanDensityHeatmaps(done, layout.analysisImagesSpatialHeatmapsDir(), channels, sectionKeys);
+        scanSpatialSidecars(done, layout.tablesSpatialWriteDir(), channels, sectionKeys);
+        scanPhenotypingSidecars(done, new File(layout.tablesSpatialWriteDir(), "Phenotyping"), channels, sectionKeys);
         scanLineDistanceSidecars(done, layout.lineDistanceWriteDir(), channels, sectionKeys);
 
         return new SpatialArtifactStatus(done, channels, sectionKeys);

@@ -188,8 +188,8 @@ public class AnalysisHelpCatalogTest {
         assertContains(topic.whenToUse, "without resegmenting images");
         assertContains(topic.inputs, "FLASH/Results/Tables/Objects/");
         assertContains(topic.workflow, "update the same object CSV tables");
-        assertContains(topic.outputs, "FLASH/Image Analysis/Spatial Analysis/Spatial/");
-        assertContains(topic.outputs, "FLASH/Image Analysis/Spatial Analysis/Morphometry/");
+        assertContains(topic.outputs, "FLASH/Results/Tables/Spatial/");
+        assertContains(topic.outputs, "FLASH/Results/Tables/Morphometry/");
         assertContains(topic.pitfalls, "Bad segmentation creates bad spatial findings");
         assertFalse("missing image references for " + topic.key, topic.images.isEmpty());
 
@@ -304,7 +304,7 @@ public class AnalysisHelpCatalogTest {
         AnalysisHelpTopic aggregation = AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_AGGREGATION);
         assertContains(aggregation.inputs, "FLASH/Image Analysis/Image Intensities/");
         assertContains(aggregation.inputs, "FLASH/Results/Tables/Objects/");
-        assertContains(aggregation.inputs, "FLASH/Image Analysis/Spatial Analysis/");
+        assertContains(aggregation.inputs, "FLASH/Results/Tables/Spatial/");
         assertContains(aggregation.inputs, "FLASH/Results Export/Conditions.csv");
 
         AnalysisHelpTopic statistics = AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_STATISTICS);
