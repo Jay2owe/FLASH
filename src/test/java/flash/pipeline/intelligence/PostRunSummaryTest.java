@@ -60,7 +60,7 @@ public class PostRunSummaryTest {
         File root = temp.newFolder("post-run-image-metrics");
         File exportDir = new File(root, "ImageJ Exports");
         File binDir = new File(root, ".bin");
-        File objectsDir = new File(root, "Data Analysis/Objects");
+        File objectsDir = FlashProjectLayout.forDirectory(root.getAbsolutePath()).tablesObjectsWriteDir();
         assertTrue(exportDir.mkdirs());
         assertTrue(binDir.mkdirs());
         assertTrue(objectsDir.mkdirs());

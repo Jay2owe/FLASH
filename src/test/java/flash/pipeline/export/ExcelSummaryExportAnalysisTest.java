@@ -109,9 +109,9 @@ public class ExcelSummaryExportAnalysisTest {
         conditions.put("Mouse2", "CondB");
         ConditionManifestIO.saveAssignments(dir.getAbsolutePath(), conditions);
 
-        File legacyDetails = new File(dir, "Data Analysis/Objects/Analysis Details");
-        assertTrue(legacyDetails.mkdirs());
-        Files.write(new File(legacyDetails, "GFAP.txt").toPath(), Arrays.asList(
+        File detailsDir = layout.objectAnalysisDetailsWriteDir();
+        assertTrue(detailsDir.mkdirs());
+        Files.write(new File(detailsDir, "GFAP.txt").toPath(), Arrays.asList(
                 "<Filter Macro>legacy filter macro</Filter Macro>",
                 "<Analysis Macro>legacy analysis macro</Analysis Macro>"));
 

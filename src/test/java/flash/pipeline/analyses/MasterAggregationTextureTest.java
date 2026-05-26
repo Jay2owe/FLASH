@@ -36,7 +36,7 @@ public class MasterAggregationTextureTest {
     @Test
     public void execute_aggregatesMorphTextureMeansAndClassLabelMode() throws Exception {
         File root = temp.newFolder("master-agg-texture");
-        File objects = FlashProjectLayout.forDirectory(root.getAbsolutePath()).objectDataWriteDir();
+        File objects = FlashProjectLayout.forDirectory(root.getAbsolutePath()).tablesObjectsWriteDir();
         assertTrue(objects.mkdirs());
 
         writeCsv(new File(objects, "Iba1.csv"),
@@ -82,7 +82,7 @@ public class MasterAggregationTextureTest {
     @Test
     public void execute_classFractionsOptInAddsRatiosAlongsideMode() throws Exception {
         File root = temp.newFolder("master-agg-texture-fractions");
-        File objects = FlashProjectLayout.forDirectory(root.getAbsolutePath()).objectDataWriteDir();
+        File objects = FlashProjectLayout.forDirectory(root.getAbsolutePath()).tablesObjectsWriteDir();
         assertTrue(objects.mkdirs());
 
         writeCsv(new File(objects, "Iba1.csv"),
@@ -116,7 +116,7 @@ public class MasterAggregationTextureTest {
     @Test
     public void execute_classFractionsPreserveClassGaps() throws Exception {
         File root = temp.newFolder("master-agg-texture-fraction-gaps");
-        File objects = FlashProjectLayout.forDirectory(root.getAbsolutePath()).objectDataWriteDir();
+        File objects = FlashProjectLayout.forDirectory(root.getAbsolutePath()).tablesObjectsWriteDir();
         assertTrue(objects.mkdirs());
 
         writeCsv(new File(objects, "Iba1.csv"),
@@ -142,7 +142,7 @@ public class MasterAggregationTextureTest {
     @Test
     public void execute_classFractionsCapAtSixteenColumnsAndLogWarning() throws Exception {
         File root = temp.newFolder("master-agg-texture-fraction-cap");
-        File objects = FlashProjectLayout.forDirectory(root.getAbsolutePath()).objectDataWriteDir();
+        File objects = FlashProjectLayout.forDirectory(root.getAbsolutePath()).tablesObjectsWriteDir();
         assertTrue(objects.mkdirs());
 
         StringBuilder rows = new StringBuilder();

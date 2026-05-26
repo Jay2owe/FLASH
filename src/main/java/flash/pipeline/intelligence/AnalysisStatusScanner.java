@@ -59,7 +59,8 @@ public class AnalysisStatusScanner {
                 fallbackStatus(directory, hasAnyFile(layout.presentationImagesDir())),
                 "Split and Merge Image Channels");
         put(out, FLASH_Pipeline.IDX_3D_OBJECT,
-                fallbackStatus(directory, hasCsv(layout.objectDataReadDirs())),
+                fallbackStatus(directory, hasCsv(
+                        java.util.Collections.singletonList(layout.tablesObjectsWriteDir()))),
                 "3D Object Analysis");
         put(out, FLASH_Pipeline.IDX_SPATIAL,
                 fallbackStatus(directory, hasCsv(layout.spatialDataReadDirs())

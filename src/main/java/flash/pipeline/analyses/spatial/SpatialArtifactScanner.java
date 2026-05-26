@@ -40,7 +40,7 @@ public final class SpatialArtifactScanner {
                 new LinkedHashMap<SpatialArtifactStatus.SectionChannelKey, EnumSet<SubAnalysis>>();
 
         for (String channel : channels) {
-            Set<String> columns = readObjectCsvHeader(layout.objectDataWriteDir(), channel);
+            Set<String> columns = readObjectCsvHeader(layout.tablesObjectsWriteDir(), channel);
             EnumSet<SubAnalysis> channelDone = detectColumnSignals(columns);
             flagChannelPairs(done, channel, sectionKeys, channelDone);
 

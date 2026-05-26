@@ -73,7 +73,7 @@ public class RunSettingsSnapshotTest {
                 null);
 
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(dir.getAbsolutePath());
-        File objectOutput = layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.OBJECTS);
+        File objectOutput = layout.analysisImagesObjectsRoot();
         File auditOutput = new File(layout.auditRoot(), "04 - 3D Object Analysis");
         File objectSettings = FlashProjectLayout.settingsDir(objectOutput);
         File auditSettings = FlashProjectLayout.settingsDir(auditOutput);

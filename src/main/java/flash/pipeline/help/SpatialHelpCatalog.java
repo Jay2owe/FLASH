@@ -44,7 +44,7 @@ public final class SpatialHelpCatalog {
                     "CPC for stricter 'is one inside another' geometry (engulfment, nuclei within cell bodies, puncta inside processes)."),
             section("Requires",
                     "Volumetric needs saved colocalisation percentages from 3D Object Analysis.",
-                    "CPC needs object label images under 3D Objects/Image Outputs/.",
+                    "CPC needs object label images under FLASH/Results/Analysis Images/Objects/Masks and Label Maps/.",
                     "Both need matching object CSVs."),
             section("Watch out",
                     "Thresholds are channel-specific - 10% overlap means different things for nuclei versus processes.",

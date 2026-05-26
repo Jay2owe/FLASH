@@ -120,9 +120,10 @@ public class LineDistanceAnalysisTest {
     @Test
     public void computeDistancesReadsObjectFallbackAndWritesLineDistanceCsvCopies() throws Exception {
         File dir = temp.newFolder("computePaths");
-        File legacyObjects = new File(dir, "Data Analysis/Objects");
-        assertTrue(legacyObjects.mkdirs());
-        writeCsv(new File(legacyObjects, "Marker_A.csv"),
+        File objects = flash.pipeline.io.FlashProjectLayout.forDirectory(dir.getAbsolutePath())
+                .tablesObjectsWriteDir();
+        assertTrue(objects.mkdirs());
+        writeCsv(new File(objects, "Marker_A.csv"),
                 "Region,XM,YM\nSCN1,10,20\n");
 
         LineDistanceAnalysis analysis = new LineDistanceAnalysis();
@@ -139,9 +140,10 @@ public class LineDistanceAnalysisTest {
     @Test
     public void computeDistancesReturnsGracefullyWhenSelectedSetsMissing() throws Exception {
         File dir = temp.newFolder("noSelectedLineSets");
-        File legacyObjects = new File(dir, "Data Analysis/Objects");
-        assertTrue(legacyObjects.mkdirs());
-        writeCsv(new File(legacyObjects, "Marker_A.csv"),
+        File objects = flash.pipeline.io.FlashProjectLayout.forDirectory(dir.getAbsolutePath())
+                .tablesObjectsWriteDir();
+        assertTrue(objects.mkdirs());
+        writeCsv(new File(objects, "Marker_A.csv"),
                 "Region,XM,YM\nSCN1,10,20\n");
 
         new LineDistanceAnalysis().computeDistances(dir.getAbsolutePath(),
@@ -153,9 +155,10 @@ public class LineDistanceAnalysisTest {
     @Test
     public void computeDistancesSkipsNonFiniteObjectCoordinates() throws Exception {
         File dir = temp.newFolder("nonFiniteLineDistance");
-        File legacyObjects = new File(dir, "Data Analysis/Objects");
-        assertTrue(legacyObjects.mkdirs());
-        writeCsv(new File(legacyObjects, "Marker_A.csv"),
+        File objects = flash.pipeline.io.FlashProjectLayout.forDirectory(dir.getAbsolutePath())
+                .tablesObjectsWriteDir();
+        assertTrue(objects.mkdirs());
+        writeCsv(new File(objects, "Marker_A.csv"),
                 "Region,XM,YM\nSCN1,NaN,20\nSCN1,3,4\n");
 
         File lines = LineDistanceAnalysis.lineSetWriteDir(dir.getAbsolutePath());

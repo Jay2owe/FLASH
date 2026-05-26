@@ -259,7 +259,7 @@ public class SpatialAnalysisTest {
         CalibrationIO.write(objectsDir, 1.0, 1.0, 1.0, "um");
 
         File animalDir = new File(FlashProjectLayout.forDirectory(root.getAbsolutePath())
-                .objectImageOutputsWriteDir(), "Mouse1");
+                .analysisImagesObjectsMasksDir(), "Mouse1");
         assertTrue(animalDir.mkdirs());
         writeLabelImage(new File(animalDir, "A_objects_LH_SCN.tif"), 20, 20, 2);
         writeChannel(objectsDir, "A.csv",
@@ -525,7 +525,7 @@ public class SpatialAnalysisTest {
     public void resolveCpcLabelFile_verifiesBaseHemispheresFromObjectCounts() throws Exception {
         File root = temp.newFolder("spatial-scn-base-verified");
         File objectsDir = objectsDir(root);
-        File animalDir = new File(new File(root, "Image Analysis"), "Mouse1Week2");
+        File animalDir = new File(FlashProjectLayout.forDirectory(root.getAbsolutePath()).analysisImagesObjectsMasksDir(), "Mouse1Week2");
         assertTrue(animalDir.mkdirs());
 
         writeLabelImage(new File(animalDir, "A_objects_LH_SCN.tif"), 2);
@@ -555,7 +555,7 @@ public class SpatialAnalysisTest {
     public void resolveCpcLabelFile_rejectsAmbiguousBaseHemisphereFallback() throws Exception {
         File root = temp.newFolder("spatial-scn-base-ambiguous");
         File objectsDir = objectsDir(root);
-        File animalDir = new File(new File(root, "Image Analysis"), "Mouse1Week2");
+        File animalDir = new File(FlashProjectLayout.forDirectory(root.getAbsolutePath()).analysisImagesObjectsMasksDir(), "Mouse1Week2");
         assertTrue(animalDir.mkdirs());
 
         writeLabelImage(new File(animalDir, "A_objects_LH_SCN.tif"), 2);
@@ -579,7 +579,7 @@ public class SpatialAnalysisTest {
     public void resolveCpcLabelFile_prefersScnSpecificNumberedSuffixes() throws Exception {
         File root = temp.newFolder("spatial-scn-numbered");
         File objectsDir = objectsDir(root);
-        File animalDir = new File(new File(root, "Image Analysis"), "Mouse1Week2");
+        File animalDir = new File(FlashProjectLayout.forDirectory(root.getAbsolutePath()).analysisImagesObjectsMasksDir(), "Mouse1Week2");
         assertTrue(animalDir.mkdirs());
 
         writeLabelImage(new File(animalDir, "A_objects_LH_SCN1.tif"), 1);
@@ -606,7 +606,7 @@ public class SpatialAnalysisTest {
     public void resolveCpcLabelFile_acceptsSingleLhBaseFileWhenOnlyOddRowsExist() throws Exception {
         File root = temp.newFolder("spatial-scn-single-lh");
         File objectsDir = objectsDir(root);
-        File animalDir = new File(new File(root, "Image Analysis"), "Mouse1Week2");
+        File animalDir = new File(FlashProjectLayout.forDirectory(root.getAbsolutePath()).analysisImagesObjectsMasksDir(), "Mouse1Week2");
         assertTrue(animalDir.mkdirs());
 
         writeLabelImage(new File(animalDir, "A_objects_LH_SCN.tif"), 2);
@@ -630,7 +630,7 @@ public class SpatialAnalysisTest {
     public void resolveCpcLabelFile_acceptsSingleRhBaseFileWhenOnlyEvenRowsExist() throws Exception {
         File root = temp.newFolder("spatial-scn-single-rh");
         File objectsDir = objectsDir(root);
-        File animalDir = new File(new File(root, "Image Analysis"), "Mouse1Week2");
+        File animalDir = new File(FlashProjectLayout.forDirectory(root.getAbsolutePath()).analysisImagesObjectsMasksDir(), "Mouse1Week2");
         assertTrue(animalDir.mkdirs());
 
         writeLabelImage(new File(animalDir, "A_objects_RH_SCN.tif"), 2);
@@ -654,7 +654,7 @@ public class SpatialAnalysisTest {
     public void execute_reusesCpcSectionGroupingWhenCpcColumnsAlreadyExist() throws Exception {
         File root = temp.newFolder("spatial-cpc-group-cache");
         File objectsDir = objectsDir(root);
-        File animalDir = new File(new File(root, "Image Analysis"), "Mouse1");
+        File animalDir = new File(FlashProjectLayout.forDirectory(root.getAbsolutePath()).analysisImagesObjectsMasksDir(), "Mouse1");
         assertTrue(animalDir.mkdirs());
 
         writeLabelImage(new File(animalDir, "A_objects_LH_SCN.tif"), 2);
@@ -824,14 +824,11 @@ public class SpatialAnalysisTest {
     }
 
     private File objectsDir(File root) {
-        File dataAnalysis = new File(root, "Data Analysis");
-        File objects = new File(dataAnalysis, "Objects");
-        assertTrue(objects.mkdirs());
-        return objects;
+        return flashObjectsDir(root);
     }
 
     private File flashObjectsDir(File root) {
-        File objects = FlashProjectLayout.forDirectory(root.getAbsolutePath()).objectDataWriteDir();
+        File objects = FlashProjectLayout.forDirectory(root.getAbsolutePath()).tablesObjectsWriteDir();
         assertTrue(objects.mkdirs());
         return objects;
     }

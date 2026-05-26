@@ -84,7 +84,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <p>Computes inter-marker nearest neighbor distances (3D Euclidean) between
  * every pair of object channels.
  *
- * <p>Input CSVs are read from {@code Data Analysis/Objects/} and updated
+ * <p>Input CSVs are read from {@code Results/Tables/Objects/} and updated
  * in-place with new distance columns. Pixel-space centroids ({@code XM/YM/ZM})
  * are preserved, while calibrated centroid columns ({@code XM_um/YM_um/ZM_um})
  * are appended when calibration is available.
@@ -205,7 +205,6 @@ public class SpatialAnalysis implements Analysis {
     private SpatialExecutionContext activeExecution = null;
     private boolean headless = false;
     private boolean suppressDialogs = false;
-    private boolean aggressiveMemory = false;
     private boolean verboseLogging = false;
     private int parallelThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
     private CLIConfig cliConfig = null;
@@ -593,11 +592,6 @@ public class SpatialAnalysis implements Analysis {
     }
 
     @Override
-    public void setAggressiveMemory(boolean aggressive) {
-        this.aggressiveMemory = aggressive;
-    }
-
-    @Override
     public void setVerboseLogging(boolean verbose) {
         this.verboseLogging = verbose;
     }
@@ -676,10 +670,10 @@ public class SpatialAnalysis implements Analysis {
 
     private SpatialExecutionContext prepareExecutionContext(String directory) {
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
-        File objectsDir = firstExistingDirectory(layout.objectDataReadDirs());
-        if (objectsDir == null) {
+        File objectsDir = layout.tablesObjectsWriteDir();
+        if (!objectsDir.isDirectory()) {
             warnUser("Spatial Analysis",
-                    "Objects directory not found:\n" + layout.objectDataWriteDir().getAbsolutePath()
+                    "Objects directory not found:\n" + objectsDir.getAbsolutePath()
                             + "\n\nRun 3D Object Analysis first.");
             return null;
         }
@@ -1608,8 +1602,8 @@ public class SpatialAnalysis implements Analysis {
             return channels;
         }
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
-        File objectsDir = firstExistingDirectory(layout.objectDataReadDirs());
-        if (objectsDir == null) {
+        File objectsDir = layout.tablesObjectsWriteDir();
+        if (!objectsDir.isDirectory()) {
             return channels;
         }
         for (String channelName : channelNames) {
@@ -1686,9 +1680,7 @@ public class SpatialAnalysis implements Analysis {
     }
 
     private static File objectImageOutputReadRoot(String directory) {
-        FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
-        File existing = firstExistingDirectory(layout.objectImageOutputReadDirs());
-        return existing == null ? layout.objectImageOutputsWriteDir() : existing;
+        return FlashProjectLayout.forDirectory(directory).analysisImagesObjectsMasksDir();
     }
 
     private static File spatialDataOutputDir(String directory) {
@@ -2583,13 +2575,6 @@ public class SpatialAnalysis implements Analysis {
                     }
                 }
 
-                if (aggressiveMemory) {
-                    if (verboseLogging) {
-                        IJ.log("    [DEBUG] Aggressive memory clearing after CPC pair...");
-                    }
-                    System.gc();
-                    IJ.freeMemory();
-                }
             }
         }
 

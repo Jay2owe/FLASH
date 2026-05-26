@@ -33,7 +33,7 @@ public class MasterAggregationAnalysisTest {
     public void execute_countsSectionsFromScnBeforeRegionAndComputesPerMm3() throws Exception {
         File root = temp.newFolder("master-agg-sections");
         File attrs = roiTables(root);
-        File objects = new File(root, "Data Analysis/Objects");
+        File objects = FlashProjectLayout.forDirectory(root.getAbsolutePath()).tablesObjectsWriteDir();
         assertTrue(attrs.mkdirs());
         assertTrue(objects.mkdirs());
 
@@ -91,7 +91,7 @@ public class MasterAggregationAnalysisTest {
     public void execute_usesPersistedFullStackDepthWhenVolumeColumnMissing() throws Exception {
         File root = temp.newFolder("master-agg-stack-depth");
         File attrs = roiTables(root);
-        File objects = new File(root, "Data Analysis/Objects");
+        File objects = FlashProjectLayout.forDirectory(root.getAbsolutePath()).tablesObjectsWriteDir();
         assertTrue(attrs.mkdirs());
         assertTrue(objects.mkdirs());
 
@@ -126,7 +126,7 @@ public class MasterAggregationAnalysisTest {
     public void execute_skipsFallbackWhenLegacyCalibrationHasNoStackDepth() throws Exception {
         File root = temp.newFolder("master-agg-legacy-cal");
         File attrs = roiTables(root);
-        File objects = new File(root, "Data Analysis/Objects");
+        File objects = FlashProjectLayout.forDirectory(root.getAbsolutePath()).tablesObjectsWriteDir();
         assertTrue(attrs.mkdirs());
         assertTrue(objects.mkdirs());
 
@@ -156,7 +156,7 @@ public class MasterAggregationAnalysisTest {
     public void execute_convertsPixelAreaWhenPhysicalCalibrationIsAvailable() throws Exception {
         File root = temp.newFolder("master-agg-pixel-area");
         File attrs = roiTables(root);
-        File objects = new File(root, "Data Analysis/Objects");
+        File objects = FlashProjectLayout.forDirectory(root.getAbsolutePath()).tablesObjectsWriteDir();
         assertTrue(attrs.mkdirs());
         assertTrue(objects.mkdirs());
 
@@ -186,7 +186,7 @@ public class MasterAggregationAnalysisTest {
     public void execute_skipsPixelAreaFallbackWithoutPhysicalCalibration() throws Exception {
         File root = temp.newFolder("master-agg-pixel-area-skip");
         File attrs = roiTables(root);
-        File objects = new File(root, "Data Analysis/Objects");
+        File objects = FlashProjectLayout.forDirectory(root.getAbsolutePath()).tablesObjectsWriteDir();
         assertTrue(attrs.mkdirs());
         assertTrue(objects.mkdirs());
 
@@ -214,7 +214,7 @@ public class MasterAggregationAnalysisTest {
     public void execute_quotesAnimalNamesInMasterCsv() throws Exception {
         File root = temp.newFolder("master-agg-quoted-animal");
         File attrs = roiTables(root);
-        File objects = new File(root, "Data Analysis/Objects");
+        File objects = FlashProjectLayout.forDirectory(root.getAbsolutePath()).tablesObjectsWriteDir();
         assertTrue(attrs.mkdirs());
         assertTrue(objects.mkdirs());
 
@@ -249,7 +249,7 @@ public class MasterAggregationAnalysisTest {
     public void execute_prefixesFormulaLikeAnimalNamesInMasterCsv() throws Exception {
         File root = temp.newFolder("master-agg-formula-animal");
         File attrs = roiTables(root);
-        File objects = new File(root, "Data Analysis/Objects");
+        File objects = FlashProjectLayout.forDirectory(root.getAbsolutePath()).tablesObjectsWriteDir();
         assertTrue(attrs.mkdirs());
         assertTrue(objects.mkdirs());
 
@@ -276,11 +276,11 @@ public class MasterAggregationAnalysisTest {
     }
 
     @Test
-    public void execute_readsNewObjectIntensityAndLineDistanceOutputsBeforeLegacy() throws Exception {
+    public void execute_readsNewObjectIntensityAndLineDistanceOutputs() throws Exception {
         File root = temp.newFolder("master-agg-new-layout");
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(root.getAbsolutePath());
         File attrs = roiTables(root);
-        File objects = layout.objectDataWriteDir();
+        File objects = layout.tablesObjectsWriteDir();
         File intensities = layout.intensityDataWriteDir();
         File lineDistances = layout.lineDistanceWriteDir();
         assertTrue(attrs.mkdirs());
@@ -302,15 +302,6 @@ public class MasterAggregationAnalysisTest {
                 "Animal Name,ROI,Region,SCN,Hemisphere,IntDen,%Area,RawIntDen",
                 "Mouse1,SCN1,SCN,1,LH,40,7,80");
 
-        File legacyObjects = new File(root, "Data Analysis/Objects");
-        assertTrue(legacyObjects.mkdirs());
-        writeCsv(new File(legacyObjects, "CK1D.csv"),
-                "Region,Hemisphere,ROI,Animal Name,Volume (micron^3),Surface (micron^2),IntDen,Mean,XM,YM,ZM",
-                "SCN,LH,SCN1,LegacyDuplicate,10,5,100,10,1,1,1");
-        writeCsv(new File(legacyObjects, "LegacyOnly.csv"),
-                "Region,Hemisphere,ROI,Animal Name,Volume (micron^3),Surface (micron^2),IntDen,Mean,XM,YM,ZM",
-                "SCN,LH,SCN1,LegacyMouse,10,5,100,10,1,1,1");
-
         MasterAggregationAnalysis analysis = new MasterAggregationAnalysis();
         analysis.setSuppressDialogs(true);
         analysis.execute(root.getAbsolutePath());
@@ -325,9 +316,7 @@ public class MasterAggregationAnalysisTest {
 
         assertTrue(objectHeader.contains("CK1D_Count"));
         assertTrue(objectHeader.contains("CK1D_DistTo_Line1Mean"));
-        assertTrue(objectHeader.contains("LegacyOnly_Count"));
         assertTrue(intensityHeader.contains("GFAP_ROI_IntDenMean"));
-        assertFalse(objectLines.toString().contains("LegacyDuplicate"));
         assertFalse(new File(root, "ImageJ Exports/3D Objects.csv").exists());
     }
 

@@ -89,9 +89,6 @@ public final class FlashProjectLayout {
         INTENSITY(IMAGE_ANALYSIS_DIR + File.separator + "Image Intensities",
                 FLASH_DIR + File.separator + "04 - Fluorescence Intensity",
                 DATA_ANALYSIS_DIR + File.separator + "ROI Intensities"),
-        OBJECTS(IMAGE_ANALYSIS_DIR + File.separator + "3D Objects",
-                FLASH_DIR + File.separator + "05 - 3D Object Analysis",
-                DATA_ANALYSIS_DIR + File.separator + "Objects"),
         SPATIAL(IMAGE_ANALYSIS_DIR + File.separator + "Spatial Analysis",
                 FLASH_DIR + File.separator + "06 - Spatial Analysis",
                 DATA_ANALYSIS_DIR + File.separator + "Spatial",
@@ -384,10 +381,6 @@ public final class FlashProjectLayout {
         return Collections.unmodifiableList(out);
     }
 
-    public File objectDataWriteDir() {
-        return new File(analysisWriteDir(AnalysisFolder.OBJECTS), "Objects");
-    }
-
     public File intensityDataWriteDir() {
         return analysisWriteDir(AnalysisFolder.INTENSITY);
     }
@@ -396,20 +389,13 @@ public final class FlashProjectLayout {
         return new File(intensityDataWriteDir(), "Analysis Details");
     }
 
+    // TODO(Stage 08): move under Results/Run Records/analysis_details/.
     public File objectAnalysisDetailsWriteDir() {
-        return new File(objectDataWriteDir(), "Analysis Details");
+        return new File(analysisImagesObjectsRoot(), "Analysis Details");
     }
 
     public List<File> objectAnalysisDetailsReadDirs() {
-        return immutableList(objectAnalysisDetailsWriteDir(),
-                new File(projectRoot, FLASH_DIR + File.separator + "05 - 3D Object Analysis"
-                        + File.separator + "Objects" + File.separator + "Analysis Details"),
-                new File(projectRoot, DATA_ANALYSIS_DIR + File.separator + "Objects"
-                        + File.separator + "Analysis Details"));
-    }
-
-    public File objectImageOutputsWriteDir() {
-        return new File(analysisWriteDir(AnalysisFolder.OBJECTS), "Image Outputs");
+        return immutableList(objectAnalysisDetailsWriteDir());
     }
 
     public File spatialDataWriteDir() {
@@ -504,20 +490,6 @@ public final class FlashProjectLayout {
                         + File.separator + "Analysis Details"),
                 new File(projectRoot, DATA_ANALYSIS_DIR + File.separator + "ROI Intensities"
                         + File.separator + "Analysis Details"));
-    }
-
-    public List<File> objectDataReadDirs() {
-        return immutableList(objectDataWriteDir(),
-                new File(projectRoot, FLASH_DIR + File.separator + "05 - 3D Object Analysis"
-                        + File.separator + "Objects"),
-                new File(projectRoot, DATA_ANALYSIS_DIR + File.separator + "Objects"));
-    }
-
-    public List<File> objectImageOutputReadDirs() {
-        return immutableList(objectImageOutputsWriteDir(),
-                new File(projectRoot, FLASH_DIR + File.separator + "05 - 3D Object Analysis"
-                        + File.separator + "Image Outputs"),
-                new File(projectRoot, IMAGE_ANALYSIS_DIR));
     }
 
     public List<File> spatialDataReadDirs() {

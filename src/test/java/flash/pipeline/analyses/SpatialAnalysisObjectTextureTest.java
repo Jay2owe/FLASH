@@ -276,11 +276,11 @@ public class SpatialAnalysisObjectTextureTest {
 
     private static Fixture createFixture(File root) throws Exception {
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(root.getAbsolutePath());
-        File objectsDir = layout.objectDataWriteDir();
+        File objectsDir = layout.tablesObjectsWriteDir();
         assertTrue(objectsDir.mkdirs());
         CalibrationIO.write(objectsDir, 1.0, 1.0, 1.0, "um");
 
-        File animalDir = new File(layout.objectImageOutputsWriteDir(), "Mouse1");
+        File animalDir = new File(layout.analysisImagesObjectsMasksDir(), "Mouse1");
         assertTrue(animalDir.mkdirs());
         File inputDir = new File(root, "input");
         assertTrue(inputDir.mkdirs());

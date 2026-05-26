@@ -62,11 +62,11 @@ public class ObjectAnalysisDetailsWriterTest {
     }
 
     @Test
-    public void analysisDetailsWriteDir_isInsideFlashObjectObjectsFolder() throws Exception {
+    public void analysisDetailsWriteDir_isInsideResultsAnalysisImagesObjectsFolder() throws Exception {
         File root = tempFolder.newFolder("object-details-layout");
 
         assertEquals(
-                new File(root, "FLASH/Image Analysis/3D Objects/Objects/Analysis Details").getAbsolutePath(),
+                new File(root, "FLASH/Results/Analysis Images/Objects/Analysis Details").getAbsolutePath(),
                 ObjectAnalysisDetailsWriter.analysisDetailsWriteDir(root).getAbsolutePath());
     }
 

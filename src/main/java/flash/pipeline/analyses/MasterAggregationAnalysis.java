@@ -1041,8 +1041,7 @@ public class MasterAggregationAnalysis implements Analysis {
         List<File> csvFiles = aggregationObjectCsvFiles(directory);
         if (csvFiles.isEmpty()) {
             FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
-            IJ.log("No object CSV files found in: " + layout.objectDataWriteDir().getAbsolutePath()
-                    + " or legacy object output folders.");
+            IJ.log("No object CSV files found in: " + layout.tablesObjectsWriteDir().getAbsolutePath());
             return false;
         }
 
@@ -2396,7 +2395,8 @@ public class MasterAggregationAnalysis implements Analysis {
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
         List<File> files = new ArrayList<File>();
         Set<String> seenCanonicalPaths = new HashSet<String>();
-        appendFirstNamedCsvs(files, seenCanonicalPaths, layout.objectDataReadDirs(), objectCsvFilter());
+        appendFirstNamedCsvs(files, seenCanonicalPaths,
+                java.util.Collections.singletonList(layout.tablesObjectsWriteDir()), objectCsvFilter());
         appendFirstNamedCsvs(files, seenCanonicalPaths, layout.spatialMorphometryReadDirs(), objectCsvFilter());
         appendFirstNamedCsvs(files, seenCanonicalPaths, layout.lineDistanceReadDirs(), objectCsvFilter());
         return files;
@@ -2405,7 +2405,8 @@ public class MasterAggregationAnalysis implements Analysis {
     private static List<File> objectCsvFiles(String directory) {
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
         List<File> files = new ArrayList<File>();
-        appendFirstNamedCsvs(files, new HashSet<String>(), layout.objectDataReadDirs(), objectCsvFilter());
+        appendFirstNamedCsvs(files, new HashSet<String>(),
+                java.util.Collections.singletonList(layout.tablesObjectsWriteDir()), objectCsvFilter());
         return files;
     }
 

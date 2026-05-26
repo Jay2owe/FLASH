@@ -53,12 +53,6 @@ public class FlashOutputLayoutCompatibilityTest {
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(
                 project.getAbsolutePath());
 
-        assertEquals(new File(project, "FLASH/Image Analysis/3D Objects/Objects"),
-                layout.objectDataReadDirs().get(0));
-        assertEquals(new File(project, "FLASH/05 - 3D Object Analysis/Objects"),
-                layout.objectDataReadDirs().get(1));
-        assertEquals(new File(project, "Data Analysis/Objects"),
-                layout.objectDataReadDirs().get(2));
         assertEquals(new File(project, "FLASH/Reports/Quality Report"),
                 layout.qualityReportReadDirs().get(0));
         assertEquals(new File(project, "Quality_Report"),

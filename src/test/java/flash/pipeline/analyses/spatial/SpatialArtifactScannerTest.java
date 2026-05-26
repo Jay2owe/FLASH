@@ -27,7 +27,7 @@ public class SpatialArtifactScannerTest {
     public void scanDetectsColumnOnlySubAnalysesForAllSectionsInChannel() throws Exception {
         File project = temp.newFolder("project");
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(project.getAbsolutePath());
-        writeHeader(layout.objectDataWriteDir(), "IBA1",
+        writeHeader(layout.tablesObjectsWriteDir(), "IBA1",
                 "Label",
                 "IBA1_CPCColoc_GFAP",
                 "Morph_Area_um2",

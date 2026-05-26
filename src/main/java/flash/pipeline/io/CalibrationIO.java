@@ -158,19 +158,12 @@ public final class CalibrationIO {
     }
 
     /**
-     * Reads calibration for a given experiment directory. Looks in the current
-     * object output folder first, then legacy object output folders.
+     * Reads calibration for a given experiment directory from the Results/Tables/Objects folder.
      *
      * @return the parsed calibration, or {@code null} if not found
      */
     public static PixelCalibration readFromDirectory(String directory) {
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
-        for (File objectsDir : layout.objectDataReadDirs()) {
-            PixelCalibration calibration = read(objectsDir);
-            if (calibration != null) {
-                return calibration;
-            }
-        }
-        return null;
+        return read(layout.tablesObjectsWriteDir());
     }
 }

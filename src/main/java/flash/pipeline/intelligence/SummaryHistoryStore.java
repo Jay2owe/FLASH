@@ -191,7 +191,8 @@ final class SummaryHistoryStore {
                                            Map<String, Integer> duplicateKeys,
                                            Map<String, String> identityToSnapshotKey) {
         for (File csvFile : firstNamedCsvFiles(
-                FlashProjectLayout.forDirectory(directory).objectDataReadDirs())) {
+                java.util.Collections.singletonList(
+                        FlashProjectLayout.forDirectory(directory).tablesObjectsWriteDir()))) {
             String lower = csvFile.getName().toLowerCase(Locale.ROOT);
             if (!lower.endsWith(".csv")) continue;
             if (lower.contains("temp_")) continue;

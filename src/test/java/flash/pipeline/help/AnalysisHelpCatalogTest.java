@@ -186,7 +186,7 @@ public class AnalysisHelpCatalogTest {
         assertNotNull(topic);
         assertContains(topic.summary, "3D Object Analysis");
         assertContains(topic.whenToUse, "without resegmenting images");
-        assertContains(topic.inputs, "FLASH/Image Analysis/3D Objects/Objects/");
+        assertContains(topic.inputs, "FLASH/Results/Tables/Objects/");
         assertContains(topic.workflow, "update the same object CSV tables");
         assertContains(topic.outputs, "FLASH/Image Analysis/Spatial Analysis/Spatial/");
         assertContains(topic.outputs, "FLASH/Image Analysis/Spatial Analysis/Morphometry/");
@@ -277,9 +277,9 @@ public class AnalysisHelpCatalogTest {
         assertContains(AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_INTENSITY).outputs,
                 "FLASH/Image Analysis/Image Intensities/<channel>.csv");
         assertContains(AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_3D_OBJECT).outputs,
-                "FLASH/Image Analysis/3D Objects/Objects/<channel>.csv");
+                "FLASH/Results/Tables/Objects/<channel>.csv");
         assertContains(AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_3D_OBJECT).outputs,
-                "FLASH/Image Analysis/3D Objects/Image Outputs/");
+                "FLASH/Results/Analysis Images/Objects/Masks and Label Maps/");
     }
 
     @Test
@@ -303,7 +303,7 @@ public class AnalysisHelpCatalogTest {
     public void resultsExportTopicsNameRequiredDependencies() {
         AnalysisHelpTopic aggregation = AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_AGGREGATION);
         assertContains(aggregation.inputs, "FLASH/Image Analysis/Image Intensities/");
-        assertContains(aggregation.inputs, "FLASH/Image Analysis/3D Objects/");
+        assertContains(aggregation.inputs, "FLASH/Results/Tables/Objects/");
         assertContains(aggregation.inputs, "FLASH/Image Analysis/Spatial Analysis/");
         assertContains(aggregation.inputs, "FLASH/Results Export/Conditions.csv");
 

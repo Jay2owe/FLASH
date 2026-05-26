@@ -76,14 +76,11 @@ public class CalibrationIOTest {
     }
 
     @Test
-    public void readFromDirectory_prefersFlashObjectCalibration() throws Exception {
+    public void readFromDirectory_readsFromTablesObjectsFolder() throws Exception {
         File project = temp.newFolder("project-new-calibration");
-        File legacyObjects = new File(project, "Data Analysis/Objects");
-        File flashObjects = FlashProjectLayout.forDirectory(project.getAbsolutePath()).objectDataWriteDir();
-        assertTrue(legacyObjects.mkdirs());
+        File flashObjects = FlashProjectLayout.forDirectory(project.getAbsolutePath()).tablesObjectsWriteDir();
         assertTrue(flashObjects.mkdirs());
 
-        CalibrationIO.write(legacyObjects, 1.0, 1.0, 1.0, "pixel");
         CalibrationIO.write(flashObjects, 2.0, 3.0, 4.0, 20.0, "um");
 
         CalibrationIO.PixelCalibration cal = CalibrationIO.readFromDirectory(project.getAbsolutePath());
@@ -97,19 +94,11 @@ public class CalibrationIOTest {
     }
 
     @Test
-    public void readFromDirectory_fallsBackToLegacyObjectCalibration() throws Exception {
-        File project = temp.newFolder("project-legacy-calibration");
-        File legacyObjects = new File(project, "Data Analysis/Objects");
-        assertTrue(legacyObjects.mkdirs());
-
-        CalibrationIO.write(legacyObjects, 1.25, 1.5, 2.5, "um");
+    public void readFromDirectory_returnsNullWhenNoCalibration() throws Exception {
+        File project = temp.newFolder("project-no-calibration");
 
         CalibrationIO.PixelCalibration cal = CalibrationIO.readFromDirectory(project.getAbsolutePath());
 
-        assertNotNull(cal);
-        assertEquals(1.25, cal.pixelWidth, 0.0);
-        assertEquals(1.5, cal.pixelHeight, 0.0);
-        assertEquals(2.5, cal.pixelDepth, 0.0);
-        assertEquals("um", cal.unit);
+        assertNull(cal);
     }
 }

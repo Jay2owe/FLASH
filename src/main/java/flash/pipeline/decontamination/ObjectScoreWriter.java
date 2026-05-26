@@ -81,13 +81,7 @@ public final class ObjectScoreWriter {
     public static File objectCsvFile(String directory, String channelName) {
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
         String filename = safeChannelName(channelName) + ".csv";
-        for (File dir : layout.objectDataReadDirs()) {
-            File candidate = new File(dir, filename);
-            if (candidate.isFile()) {
-                return candidate;
-            }
-        }
-        return new File(layout.objectDataWriteDir(), filename);
+        return new File(layout.tablesObjectsWriteDir(), filename);
     }
 
     public static List<ObjectMapDescriptor> locateObjectLabelMaps(String directory,
@@ -368,21 +362,17 @@ public final class ObjectScoreWriter {
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
         String prefix = safeChannelName(channelName) + "_objects";
         List<File> sorted = new ArrayList<File>();
-        for (File root : layout.objectImageOutputReadDirs()) {
-            File perAnimal = new File(root, clean(animalName));
-            if (!perAnimal.isDirectory()) {
-                continue;
-            }
+        File perAnimal = new File(layout.analysisImagesObjectsMasksDir(), clean(animalName));
+        if (perAnimal.isDirectory()) {
             File[] files = perAnimal.listFiles();
-            if (files == null) {
-                continue;
-            }
-            for (File file : files) {
-                String name = file.getName();
-                if (file.isFile()
-                        && name.toLowerCase(Locale.US).endsWith(".tif")
-                        && name.startsWith(prefix)) {
-                    sorted.add(file);
+            if (files != null) {
+                for (File file : files) {
+                    String name = file.getName();
+                    if (file.isFile()
+                            && name.toLowerCase(Locale.US).endsWith(".tif")
+                            && name.startsWith(prefix)) {
+                        sorted.add(file);
+                    }
                 }
             }
         }
@@ -420,13 +410,7 @@ public final class ObjectScoreWriter {
                 + "_objects"
                 + (suffix.isEmpty() ? "" : "_" + suffix)
                 + ".tif";
-        for (File root : layout.objectImageOutputReadDirs()) {
-            File candidate = new File(new File(root, metadata.getAnimalName()), name);
-            if (candidate.isFile()) {
-                return candidate;
-            }
-        }
-        return new File(new File(layout.objectImageOutputsWriteDir(), metadata.getAnimalName()), name);
+        return new File(new File(layout.analysisImagesObjectsMasksDir(), metadata.getAnimalName()), name);
     }
 
     private static boolean matchesAnimal(Map<String, String> row, String animalName) {

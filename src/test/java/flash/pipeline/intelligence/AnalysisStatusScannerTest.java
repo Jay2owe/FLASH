@@ -99,8 +99,8 @@ public class AnalysisStatusScannerTest {
     public void scan_detectsNewFlashOutputFolders() throws Exception {
         File dir = temp.newFolder("new-output-done");
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(dir.getAbsolutePath());
-        assertEquals(true, layout.objectDataWriteDir().mkdirs());
-        assertEquals(true, new File(layout.objectDataWriteDir(), "DAPI.csv").createNewFile());
+        assertEquals(true, layout.tablesObjectsWriteDir().mkdirs());
+        assertEquals(true, new File(layout.tablesObjectsWriteDir(), "DAPI.csv").createNewFile());
         assertEquals(true, layout.excelWriteDir().mkdirs());
         assertEquals(true, new File(layout.excelWriteDir(), "Summary.xlsx").createNewFile());
 

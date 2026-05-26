@@ -20,9 +20,11 @@ public class ObjectScoreWriterTest {
     @Test
     public void locatesObjectMapsFrom3DObjectCsvAndWritesPerObjectScores() throws Exception {
         File directory = Files.createTempDirectory("spectral-object-writer").toFile();
-        File objectsDir = new File(new File(directory, "Data Analysis"), "Objects");
+        flash.pipeline.io.FlashProjectLayout layout =
+                flash.pipeline.io.FlashProjectLayout.forDirectory(directory.getAbsolutePath());
+        File objectsDir = layout.tablesObjectsWriteDir();
         assertTrue(objectsDir.mkdirs());
-        File imageDir = new File(new File(directory, "Image Analysis"), "AnimalA");
+        File imageDir = new File(layout.analysisImagesObjectsMasksDir(), "AnimalA");
         assertTrue(imageDir.mkdirs());
 
         File objectCsv = new File(objectsDir, "Target.csv");
@@ -105,9 +107,11 @@ public class ObjectScoreWriterTest {
     @Test
     public void locatesObjectMapsFromFlashObjectLayout() throws Exception {
         File directory = Files.createTempDirectory("spectral-object-flash-reader").toFile();
-        File objectsDir = new File(directory, "FLASH/Image Analysis/3D Objects/Objects");
+        flash.pipeline.io.FlashProjectLayout layout =
+                flash.pipeline.io.FlashProjectLayout.forDirectory(directory.getAbsolutePath());
+        File objectsDir = layout.tablesObjectsWriteDir();
         assertTrue(objectsDir.mkdirs());
-        File imageDir = new File(directory, "FLASH/Image Analysis/3D Objects/Image Outputs/AnimalA");
+        File imageDir = new File(layout.analysisImagesObjectsMasksDir(), "AnimalA");
         assertTrue(imageDir.mkdirs());
 
         File objectCsv = new File(objectsDir, "Target.csv");

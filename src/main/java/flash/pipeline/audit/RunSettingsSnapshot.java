@@ -159,7 +159,7 @@ public final class RunSettingsSnapshot {
             case 1: return layout.analysisImagesRoiDir();
             case 2: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.DECONVOLUTION);
             case 3: return layout.presentationImagesRoot();
-            case 4: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.OBJECTS);
+            case 4: return layout.analysisImagesObjectsRoot();
             case 5: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.SPATIAL);
             case 6: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.LINE_DISTANCE);
             case 7: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.INTENSITY);
@@ -358,9 +358,6 @@ public final class RunSettingsSnapshot {
         if (method.isCellpose() && entry.engine != ModelEntry.Engine.CELLPOSE) {
             return Optional.empty();
         }
-        if (method.isTrainedRf() && entry.engine != ModelEntry.Engine.SMILE_RF) {
-            return Optional.empty();
-        }
         return Optional.of(entry);
     }
 
@@ -373,9 +370,6 @@ public final class RunSettingsSnapshot {
         }
         if (method.isCellpose()) {
             return safe(SegmentationMethod.cellposeModelKey(method));
-        }
-        if (method.isTrainedRf()) {
-            return safe(SegmentationMethod.trainedRfModelKey(method));
         }
         return "";
     }
@@ -392,9 +386,6 @@ public final class RunSettingsSnapshot {
         }
         if (method.isCellpose()) {
             return "cellpose";
-        }
-        if (method.isTrainedRf()) {
-            return "trained_rf";
         }
         return "classical";
     }

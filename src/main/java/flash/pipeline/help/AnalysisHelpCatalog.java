@@ -87,35 +87,30 @@ public final class AnalysisHelpCatalog {
         return new AnalysisHelpTopic(
                 FLASH_Pipeline.IDX_CREATE_BIN,
                 "train-custom-segmentation-models",
-                "Train custom segmentation models",
-                "Use project-registered custom StarDist, Cellpose, or trained RF models when stock segmentation settings cannot represent the objects reliably.",
+                "Custom segmentation models",
+                "Use project-registered custom StarDist or Cellpose models when stock segmentation settings cannot represent the objects reliably.",
                 list(
                         "Use this when stock Classical, Enhanced Classical, StarDist, or Cellpose settings repeatedly miss the same object class or include the same artefact.",
-                        "The Train Custom Engine launcher is hidden by default while its click-collection flow is redesigned.",
                         "For full written steps, see docs/training_segmentation_models.md in the FLASH source tree."),
                 list(
                         "Representative images opened in Set Up Configuration quality control.",
                         "Instance label images or external training data for StarDist and Cellpose models.",
                         "For StarDist or Cellpose, a model trained outside FLASH that can be imported through the Custom Model Manager."),
                 list(
-                        "Import finished StarDist and Cellpose models through the Custom Model Manager while the training launcher is hidden.",
-                        "Developers can re-enable the hidden launcher with the flash.trainCustomEngine.ui.enabled system property while testing the redesigned flow.",
+                        "Import finished StarDist and Cellpose models through the Custom Model Manager.",
                         "Cellpose 4, Cellpose-SAM, and cpsam models are not supported by the pinned Cellpose 3.1.1.2 runtime.",
                         "FLASH runs StarDist per slice as 2D detections with Z-linking; full 3D StarDist is not built in."),
                 list(
-                        "Run the wizard training step; Classical and Enhanced Classical train in FLASH, while StarDist and Cellpose export datasets for Python training.",
                         "For StarDist, train externally and export a Fiji-compatible TensorFlow SavedModel zip with model.export_TF().",
                         "For Cellpose, train with Cellpose 3 and import the trained file or registered model name.",
                         "Open the Custom Model Manager from the model row, then use Add StarDist... or Add Cellpose... to save the new catalog entry.",
                         "Apply the recommended segmentation token to the channel or keep the previous method."),
                 list(
                         "A project model catalog entry under Configuration/Segmentation Models/ in the selected project folder.",
-                        "For Smile RF, a serialized Random Forest model and metadata with click counts and base engine.",
                         "For StarDist and Cellpose, a packaged training dataset plus the imported model reference after external training.",
-                        "A stable segmentation token such as trained_rf:<modelKey>:base=<base> or model=<modelKey> on a deep-learning token."),
+                        "A stable segmentation token with model=<modelKey> on a deep-learning token."),
                 list(
-                        "Training on too few examples makes the model look precise on the preview but fail across the batch; start RF with roughly 20 to 30 positive and 20 to 30 negative clicks across several images.",
-                        "Deep StarDist and Cellpose networks are not trained inside FLASH; FLASH packages data and registers the resulting model.",
+                        "Deep StarDist and Cellpose networks are trained outside FLASH; FLASH registers the resulting model.",
                         "A model entry is project scoped. Copy the project catalog with the project if another machine needs to replay it.",
                         "Do not use Cellpose 4 / Cellpose-SAM outputs with this runtime until FLASH explicitly upgrades that backend.",
                         "Do not expect StarDist to use full volumetric context; FLASH links 2D per-slice detections through Z."),
@@ -164,7 +159,7 @@ public final class AnalysisHelpCatalog {
                 "Custom Model Manager",
                 "The Custom Model Manager lists stock and project-specific segmentation models and keeps stable model keys for reproducible saved methods.",
                 list(
-                        "Use this to import a Fiji-compatible StarDist model zip, add a Cellpose model file or registered name, inspect trained Smile RF entries, or clean up project models.",
+                        "Use this to import a Fiji-compatible StarDist model zip, add a Cellpose model file or registered name, or clean up project models.",
                         "Use it when a saved channel method references a missing model key and you need to restore or replace the project catalog entry.",
                         "Skip it for bundled stock models unless you only need to inspect which model is selected."),
                 list(
@@ -176,13 +171,13 @@ public final class AnalysisHelpCatalog {
                         "User-imported and user-trained entries can be renamed or deleted when the project owns them.",
                         "Model keys are the stable identifiers saved in segmentation tokens; display names are for users."),
                 list(
-                        "Open the manager from a StarDist or Cellpose parameter stage, or after a training wizard run.",
+                        "Open the manager from a StarDist or Cellpose parameter stage.",
                         "Filter by engine or source, select an entry, and review its key, source, file/resource path, defaults, and metadata.",
                         "Add or edit user entries, then return to the parameter stage and refresh the model list."),
                 list(
                         "Catalog JSON and copied files under Configuration/Segmentation Models/ in the selected project folder.",
                         "Project-relative file paths for portable replay and sharing.",
-                        "Stable model keys used by StarDist, Cellpose, and trained_rf segmentation method tokens."),
+                        "Stable model keys used by StarDist and Cellpose segmentation method tokens."),
                 list(
                         "Do not edit the same project catalog from two Fiji sessions at once; the most recent save wins.",
                         "A project-relative path is required for portable replay. Avoid depending on machine-local absolute paths.",
@@ -460,12 +455,12 @@ public final class AnalysisHelpCatalog {
                         "For each object, FLASH records morphometric measurements, redirected intensity measurements, centroid coordinates, and per-channel counts.",
                         "When enabled, pairwise colocalisation and centroid coincidence are calculated between channel pairs.",
                         "When enabled, process images are skeletonised and measured after subtracting the selected nuclear marker signal.",
-                        "FLASH saves object CSV tables, calibration data, analysis details, and any produced masks or object maps under the 3D Object Analysis folder."),
+                        "FLASH saves object CSV tables under FLASH/Results/Tables/Objects/, and any produced masks, masked images, and filtered inputs under FLASH/Results/Analysis Images/Objects/."),
                 list(
-                        "FLASH/Image Analysis/3D Objects/Objects/<channel>.csv contains object-level tables for each segmented channel.",
-                        "FLASH/Image Analysis/3D Objects/Objects/calibration.properties records calibration used with object CSV outputs.",
-                        "FLASH/Image Analysis/3D Objects/Objects/Analysis Details/ records object-analysis settings used for the run.",
-                        "FLASH/Image Analysis/3D Objects/Image Outputs/<animal>/ contains masked images and object-label maps when those image outputs are produced."),
+                        "FLASH/Results/Tables/Objects/<channel>.csv contains object-level tables for each segmented channel.",
+                        "FLASH/Results/Tables/Objects/calibration.properties records calibration used with object CSV outputs.",
+                        "FLASH/Results/Analysis Images/Objects/Analysis Details/ records object-analysis settings used for the run.",
+                        "FLASH/Results/Analysis Images/Objects/Masks and Label Maps/<animal>/ contains object label maps, with masked images and filtered inputs under sibling Masked Images and Filtered Inputs folders."),
                 list(
                         "Choosing the wrong object channel can produce plausible-looking counts for the wrong marker.",
                         "Size filters that are too strict can remove real cells, puncta, or processes; filters that are too loose can keep debris and merged objects.",
@@ -476,7 +471,7 @@ public final class AnalysisHelpCatalog {
                         "three-d-object",
                         image("setup.png", "3D object setup", "Segmentation, colocalisation, ROI filtering, and process-length options are selected before running object analysis."),
                         image("workflow.png", "3D object workflow", "Load configured channels, threshold or segment in 3D, filter objects, calculate measurements, then save object tables."),
-                        image("example-output.png", "3D object outputs", "Object CSVs, calibration, analysis details, masks, and object maps are saved under FLASH/Image Analysis/3D Objects.")));
+                        image("example-output.png", "3D object outputs", "Object CSVs are saved under FLASH/Results/Tables/Objects and masks, label maps, masked images, and filtered inputs are saved under FLASH/Results/Analysis Images/Objects.")));
     }
 
     private static AnalysisHelpTopic spatialTopic() {
@@ -496,8 +491,8 @@ public final class AnalysisHelpCatalog {
                         "Use it when segmentation looks acceptable but you want to change spatial-analysis choices such as nearest-neighbour distances, Ripley's K/L/G statistics, CPC summaries, Voronoi territories, density heatmaps, or k-means phenotyping.",
                         "Use the morphometry options when saved object label images should be re-read to add 2D shape, 3D shape, composite morphology, population scoring, or spatial-morphometric columns."),
                 list(
-                        "Object CSV files from FLASH/Image Analysis/3D Objects/Objects/, or the legacy Data Analysis/Objects folder for older projects.",
-                        "Object label images from FLASH/Image Analysis/3D Objects/Image Outputs/ when CPC, morphology, 3D morphometry, or heatmaps need saved object maps.",
+                        "Object CSV files from FLASH/Results/Tables/Objects/.",
+                        "Object label images from FLASH/Results/Analysis Images/Objects/Masks and Label Maps/ when CPC, morphology, 3D morphometry, or heatmaps need saved object maps.",
                         "Calibration metadata from the object output folder when distances, Ripley's K/L/G statistics, Voronoi territories, heatmaps, or micron-scaled morphometry should be reported in calibrated units.",
                         "Channel identities, object names, ROI or region columns, and optional colocalisation thresholds for deciding which partner objects count as overlapping.",
                         "Optional line ROI sets can be consumed from the existing line-distance workflow when the Spatial Analysis options dialog exposes line-distance calculation for the project."),
@@ -512,7 +507,7 @@ public final class AnalysisHelpCatalog {
                         "Group objects by ROI, region, or section, then compute selected nearest-neighbour, colocalisation, statistics, Voronoi, heatmap, phenotyping, and morphometry measurements.",
                         "Write new spatial or morphometry summary CSVs, and update the same object CSV tables with added spatial and Morph_ columns."),
                 list(
-                        "Updated FLASH/Image Analysis/3D Objects/Objects/<channel>.csv files with added columns such as XM_um, YM_um, ZM_um, <channel>_DistToClosest_<partner>, <channel>_ClosestTo_<partner>, CPC, Voronoi, Cluster, and Morph_ measurements.",
+                        "Updated FLASH/Results/Tables/Objects/<channel>.csv files with added columns such as XM_um, YM_um, ZM_um, <channel>_DistToClosest_<partner>, <channel>_ClosestTo_<partner>, CPC, Voronoi, Cluster, and Morph_ measurements.",
                         "FLASH/Image Analysis/Spatial Analysis/Spatial/Spatial_Statistics_<channel>.csv contains Ripley's K/L/G summaries when spatial statistics run.",
                         "FLASH/Image Analysis/Spatial Analysis/Spatial/CPC_Spatial_Summary.csv and CPC_Multi_Target_Summary.csv summarize centroid-in-object colocalisation when CPC columns are available or recomputed.",
                         "FLASH/Image Analysis/Spatial Analysis/Spatial/Voronoi_<channel>.csv, Interaction_Matrix.csv, and Phenotyping/Clusters_<channel>.csv are written when Voronoi or k-means phenotyping are selected.",
@@ -544,7 +539,7 @@ public final class AnalysisHelpCatalog {
                         "Use it when you need one project-level table for condition comparisons, animal-level summaries, or Excel export.",
                         "Use it again after changing condition assignments, ROI attributes, object outputs, spatial outputs, or aggregation granularity."),
                 list(
-                        "Per-analysis CSV files from FLASH/Image Analysis/Image Intensities/, FLASH/Image Analysis/3D Objects/, FLASH/Image Analysis/Spatial Analysis/, and any legacy Data Analysis folders that still contain compatible outputs.",
+                        "Per-analysis CSV files from FLASH/Image Analysis/Image Intensities/, FLASH/Results/Tables/Objects/, FLASH/Image Analysis/Spatial Analysis/, and any legacy Data Analysis folders that still contain compatible outputs.",
                         "ROI attribute CSV files from FLASH/Results/Tables/ROIs/ when per-mm3 normalization or ROI metadata should be included.",
                         "Condition assignments saved in FLASH/Results Export/Conditions.csv, with legacy fallback when opening older projects.",
                         "A selected aggregation granularity and output mode, such as per-animal, per-hemisphere, per-region, per-section, raw, normalized, or both."),

@@ -68,8 +68,6 @@ import flash.pipeline.objects.CpcUtils;
 import flash.pipeline.segmentation.EnhancedClassicalParameters;
 import flash.pipeline.segmentation.EnhancedClassicalRunner;
 import flash.pipeline.segmentation.MorphPredicate;
-import flash.pipeline.segmentation.TrainedRfParameters;
-import flash.pipeline.segmentation.TrainedRfRunner;
 import flash.pipeline.segmentation.catalog.ModelCatalog;
 import flash.pipeline.segmentation.catalog.ModelCatalogIO;
 import flash.pipeline.segmentation.catalog.ModelEntry;
@@ -133,6 +131,63 @@ public class ThreeDObjectAnalysis implements Analysis {
         CANCEL
     }
 
+    enum ExistingObjectDataMode {
+        OVERWRITE,
+        EXTEND,
+        SKIP,
+        CANCEL
+    }
+
+    interface ExistingObjectDataPrompt {
+        ExistingObjectDataMode choose(File outputDir, List<File> existingCsvs);
+    }
+
+    /** Bundles the three per-family object image output roots (masks/label maps, masked images, filtered inputs). */
+    static final class ObjectImageRoots {
+        final File masksRoot;
+        final File maskedRoot;
+        final File filteredRoot;
+
+        ObjectImageRoots(File masksRoot, File maskedRoot, File filteredRoot) {
+            this.masksRoot = masksRoot;
+            this.maskedRoot = maskedRoot;
+            this.filteredRoot = filteredRoot;
+        }
+
+        static ObjectImageRoots forDirectory(String directory) {
+            FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
+            return new ObjectImageRoots(
+                    layout.analysisImagesObjectsMasksDir(),
+                    layout.analysisImagesObjectsMaskedDir(),
+                    layout.analysisImagesObjectsFilteredDir());
+        }
+
+        File masksAnimalDir(String animalName) { return new File(masksRoot, animalName); }
+        File maskedAnimalDir(String animalName) { return new File(maskedRoot, animalName); }
+        File filteredAnimalDir(String animalName) { return new File(filteredRoot, animalName); }
+    }
+
+    private static final ExistingObjectDataPrompt DEFAULT_EXISTING_OBJECT_DATA_PROMPT =
+            new ExistingObjectDataPrompt() {
+                @Override
+                public ExistingObjectDataMode choose(File outputDir, List<File> existingCsvs) {
+                    Object[] options = new Object[]{"Extend Existing Data", "Overwrite Existing Data", "Cancel"};
+                    int choice = JOptionPane.showOptionDialog(
+                            null,
+                            existingObjectDataPromptMessage(outputDir, existingCsvs),
+                            "3D Object Analysis - Existing Data Found",
+                            JOptionPane.DEFAULT_OPTION,
+                            JOptionPane.WARNING_MESSAGE,
+                            null,
+                            options,
+                            options[0]);
+
+                    if (choice == 0) return ExistingObjectDataMode.EXTEND;
+                    if (choice == 1) return ExistingObjectDataMode.OVERWRITE;
+                    return ExistingObjectDataMode.CANCEL;
+                }
+            };
+
     interface SpatialOptionsDialogLauncher {
         SpatialAnalysisWizard.DerivedConfig launch(String directory,
                                                    List<String> channelNames,
@@ -161,7 +216,6 @@ public class ThreeDObjectAnalysis implements Analysis {
 
     private boolean headless = false;
     private boolean suppressDialogs = false;
-    private boolean aggressiveMemory = false;
     private boolean verboseLogging = false;
     private boolean skipExisting = false;
     private int parallelThreads = 1;
@@ -185,6 +239,8 @@ public class ThreeDObjectAnalysis implements Analysis {
             new LinkedHashMap<SectionKey, Map<String, ImagePlus>>();
     private SpatialOptionsDialogLauncher spatialOptionsDialogLauncher =
             DEFAULT_SPATIAL_OPTIONS_DIALOG_LAUNCHER;
+    private ExistingObjectDataPrompt existingObjectDataPrompt =
+            DEFAULT_EXISTING_OBJECT_DATA_PROMPT;
     private static final String OBJECT_PRESET_PLACEHOLDER = "(choose preset)";
     private final AtomicBoolean calibrationWritten = new AtomicBoolean(false);
     private boolean useDeconvolvedInput = true;
@@ -323,11 +379,6 @@ public class ThreeDObjectAnalysis implements Analysis {
     }
 
     @Override
-    public void setAggressiveMemory(boolean aggressive) {
-        this.aggressiveMemory = aggressive;
-    }
-
-    @Override
     public void setVerboseLogging(boolean verbose) {
         this.verboseLogging = verbose;
     }
@@ -381,6 +432,12 @@ public class ThreeDObjectAnalysis implements Analysis {
                 : launcher;
     }
 
+    void setExistingObjectDataPromptForTest(ExistingObjectDataPrompt prompt) {
+        this.existingObjectDataPrompt = prompt == null
+                ? DEFAULT_EXISTING_OBJECT_DATA_PROMPT
+                : prompt;
+    }
+
     private static boolean gateStarDistFeature(String featureDisplayName) {
         return FeatureDependencyGate.gate(DependencyId.STARDIST_RUNTIME,
                 "3D Object Analysis", featureDisplayName)
@@ -418,7 +475,6 @@ public class ThreeDObjectAnalysis implements Analysis {
         for (int i = 0; i < cfg.numChannels(); i++) {
             SegmentationMethod method = cfg.segmentationMethod(i);
             if (method.isStarDist()) return true;
-            if (method.isTrainedRf() && SegmentationMethod.trainedRfBase(method).isStarDist()) return true;
         }
         return false;
     }
@@ -428,7 +484,6 @@ public class ThreeDObjectAnalysis implements Analysis {
         for (int i = 0; i < cfg.numChannels(); i++) {
             SegmentationMethod method = cfg.segmentationMethod(i);
             if (method.isCellpose()) return true;
-            if (method.isTrainedRf() && SegmentationMethod.trainedRfBase(method).isCellpose()) return true;
         }
         return false;
     }
@@ -438,10 +493,6 @@ public class ThreeDObjectAnalysis implements Analysis {
         for (int i = 0; i < cfg.numChannels(); i++) {
             SegmentationMethod method = cfg.segmentationMethod(i);
             if (method.isEnhancedClassical()) return true;
-            if (method.isTrainedRf()
-                    && SegmentationMethod.trainedRfBase(method).isEnhancedClassical()) {
-                return true;
-            }
         }
         return false;
     }
@@ -451,10 +502,6 @@ public class ThreeDObjectAnalysis implements Analysis {
         for (int i = 0; i < cfg.numChannels(); i++) {
             SegmentationMethod method = cfg.segmentationMethod(i);
             if (method.isClassical()) return true;
-            if (method.isTrainedRf()
-                    && SegmentationMethod.trainedRfBase(method).isClassical()) {
-                return true;
-            }
         }
         return false;
     }
@@ -889,6 +936,21 @@ public class ThreeDObjectAnalysis implements Analysis {
             }
         }
 
+        ExistingObjectDataMode existingObjectDataMode =
+                resolveExistingObjectDataMode(directory, cfg.channelNames);
+        if (existingObjectDataMode == ExistingObjectDataMode.CANCEL) {
+            IJ.log("[FLASH] 3D Object Analysis cancelled because existing output handling was cancelled.");
+            return;
+        }
+        if (existingObjectDataMode == ExistingObjectDataMode.SKIP) {
+            IJ.log("All output CSVs already exist - skipping entire 3D Object Analysis.");
+            IJ.showProgress(1.0);
+            IJ.showStatus("");
+            return;
+        }
+        boolean extendExistingObjectData =
+                existingObjectDataMode == ExistingObjectDataMode.EXTEND;
+
         if (!prepareSpatialHandoffBeforeAnalysis(directory, cfg.channelNames, runSpatial)) {
             return;
         }
@@ -946,9 +1008,13 @@ public class ThreeDObjectAnalysis implements Analysis {
             IJ.log("Warning: failed writing segmentation model audit details: " + e.getMessage());
         }
 
-        File imageAnalysisRoot = layout.objectImageOutputsWriteDir();
+        ObjectImageRoots imageRoots = ObjectImageRoots.forDirectory(directory);
         //noinspection ResultOfMethodCallIgnored
-        imageAnalysisRoot.mkdirs();
+        imageRoots.masksRoot.mkdirs();
+        //noinspection ResultOfMethodCallIgnored
+        imageRoots.maskedRoot.mkdirs();
+        //noinspection ResultOfMethodCallIgnored
+        imageRoots.filteredRoot.mkdirs();
 
         // Per-channel accumulator tables (macro ultimately writes one CSV per channel)
         Map<String, ij.measure.ResultsTable> channelTables = new LinkedHashMap<>();
@@ -968,14 +1034,6 @@ public class ThreeDObjectAnalysis implements Analysis {
             qualityReport.add3DObjectParams(chNames, channelSummaries,
                     extractProcessLength, runSpatial, markerThresholds,
                     cfg.getZSliceConfig().summary());
-        }
-
-        // ── Skip-existing pre-scan: check output files BEFORE loading any pixels ──
-        if (skipExisting && allOutputCsvsExist(outDir, cfg.channelNames)) {
-            IJ.log("All output CSVs already exist — skipping entire 3D Object Analysis.");
-            IJ.showProgress(1.0);
-            IJ.showStatus("");
-            return;
         }
 
         DeferredImageSupplier supplier;
@@ -1021,14 +1079,14 @@ public class ThreeDObjectAnalysis implements Analysis {
             loader.start();
             IJ.log("Thread split: " + effectiveLoaders + " loaders, " + safeWorkers + " workers");
             compactLog = true;
-            processImagesParallel(loader, safeWorkers, directory, cfg, outDir, imageAnalysisRoot, channelTables,
+            processImagesParallel(loader, safeWorkers, directory, cfg, outDir, imageRoots, channelTables,
                     roiSets, extractProcessLength, nuclearMarkerIndex, processChannels,
                     analysisStartTime);
             compactLog = false;
         } else {
             compactLog = false;
             // ── Sequential processing: deferred loading with prefetch ──
-            processImagesSequential(supplier, totalImages, directory, cfg, outDir, imageAnalysisRoot, channelTables,
+            processImagesSequential(supplier, totalImages, directory, cfg, outDir, imageRoots, channelTables,
                     roiSets, extractProcessLength, nuclearMarkerIndex, processChannels,
                     analysisStartTime);
         }
@@ -1048,7 +1106,8 @@ public class ThreeDObjectAnalysis implements Analysis {
                 ResultsTableCleaner.keepOnlyColumns(e.getValue(), keep.toArray(new String[0]));
 
                 File out = objectOutputCsv(outDir, channelName);
-                CsvTableIO.writeResultsTableCsv(out, e.getValue(), keep);
+                writeObjectResultsCsv(directory, out, channelName, e.getValue(), keep,
+                        extendExistingObjectData);
 
                 // Write macro-style Analysis Details per channel
                 int cIndex = cfg.channelNames.indexOf(channelName);
@@ -1116,8 +1175,7 @@ public class ThreeDObjectAnalysis implements Analysis {
                                 cfg.channelNames.toArray(new String[0]),
                                 runSpatial,
                                 markerThresholds,
-                                resolvedModelEntry(modelCatalog, cfg.segmentationMethod(cIndex),
-                                        ModelEntry.Engine.SMILE_RF),
+                                null,
                                 cfg.segmentationMethod(cIndex)
                         );
                     }
@@ -1200,6 +1258,61 @@ public class ThreeDObjectAnalysis implements Analysis {
             if (selected) return true;
         }
         return false;
+    }
+
+    private ExistingObjectDataMode resolveExistingObjectDataMode(String directory,
+                                                                 List<String> channelNames) {
+        File outDir = objectCsvWriteDir(directory);
+        List<File> existingCsvs = existingObjectOutputCsvs(directory, channelNames);
+        if (existingCsvs.isEmpty()) {
+            return ExistingObjectDataMode.OVERWRITE;
+        }
+
+        if (skipExisting && allObjectOutputCsvsExist(directory, channelNames)) {
+            return ExistingObjectDataMode.SKIP;
+        }
+        if (skipExisting) {
+            IJ.log("Skip Existing is enabled; existing 3D Object Analysis CSVs will be extended.");
+            return ExistingObjectDataMode.EXTEND;
+        }
+
+        if (canPromptForExistingObjectData()) {
+            ExistingObjectDataMode mode = existingObjectDataPrompt.choose(outDir, existingCsvs);
+            return mode == null ? ExistingObjectDataMode.CANCEL : mode;
+        }
+
+        IJ.log("Existing 3D Object Analysis CSVs detected; non-interactive run will overwrite them.");
+        return ExistingObjectDataMode.OVERWRITE;
+    }
+
+    private boolean canPromptForExistingObjectData() {
+        return !suppressDialogs && !headless && cliConfig == null
+                && !GraphicsEnvironment.isHeadless();
+    }
+
+    private static String existingObjectDataPromptMessage(File outputDir, List<File> existingCsvs) {
+        StringBuilder message = new StringBuilder();
+        message.append("Existing 3D Object Analysis CSV data was found for this project.");
+        if (outputDir != null) {
+            message.append("\n\nNew output folder:\n").append(outputDir.getAbsolutePath());
+        }
+        message.append("\n\nChoose how this run should handle the saved data:\n\n")
+                .append("Extend Existing Data: keep the existing rows and append this run's rows.\n")
+                .append("Overwrite Existing Data: replace the existing CSVs with this run's rows only.\n\n")
+                .append("Existing channel CSVs: ");
+        if (existingCsvs == null || existingCsvs.isEmpty()) {
+            message.append("none");
+        } else {
+            int shown = Math.min(existingCsvs.size(), 5);
+            for (int i = 0; i < shown; i++) {
+                if (i > 0) message.append(", ");
+                message.append(existingCsvs.get(i).getName());
+            }
+            if (existingCsvs.size() > shown) {
+                message.append(", ...");
+            }
+        }
+        return message.toString();
     }
 
     private NoRoiDecision promptForNoRoiDecision() {
@@ -1480,7 +1593,6 @@ public class ThreeDObjectAnalysis implements Analysis {
         spatialAnalysis.setSuppressDialogs(suppressDialogs || cliConfig != null);
         spatialAnalysis.setMarkerThresholds(markerThresholds);
         spatialAnalysis.setParallelThreads(parallelThreads);
-        spatialAnalysis.setAggressiveMemory(aggressiveMemory);
         spatialAnalysis.setVerboseLogging(verboseLogging);
         spatialAnalysis.setCliConfig(cliConfig);
         if (wizardSpatialConfig != null) {
@@ -1652,7 +1764,7 @@ public class ThreeDObjectAnalysis implements Analysis {
             BinConfig cfg,
             ImagePlus imp,
             File outDir,
-            File imageAnalysisRoot,
+            ObjectImageRoots imageRoots,
             Map<String, ij.measure.ResultsTable> channelTables,
             int imageIndex,
             int scnIndex,
@@ -1684,7 +1796,7 @@ public class ThreeDObjectAnalysis implements Analysis {
 
         try {
             boolean[] channelHasObjects =
-                    run3DObjectsCounterPerChannel(directory, cfg, imp, outDir, imageAnalysisRoot, channelTables, scnIndex,
+                    run3DObjectsCounterPerChannel(directory, cfg, imp, outDir, imageRoots, channelTables, scnIndex,
                             animalName, parts,
                             extractProcessLength, nuclearMarkerIndex, processChannels,
                             cropRoi, clearRoi, seriesRegionLabel, roiLabel, roiBase);
@@ -1704,7 +1816,7 @@ public class ThreeDObjectAnalysis implements Analysis {
                         hemisphere, seriesRegionLabel, roiLabel, processChannels, nuclearMarkerIndex);
             }
 
-            saveObjectsImages(cfg, imageAnalysisRoot, animalName, hemisphere, roiLabel);
+            saveObjectsImages(cfg, imageRoots, animalName, hemisphere, roiLabel);
         } finally {
             clearRegistry();
         }
@@ -1713,7 +1825,7 @@ public class ThreeDObjectAnalysis implements Analysis {
     private void processImagesSequential(
             final DeferredImageSupplier supplier, final int totalImages,
             String directory, BinConfig cfg,
-            File outDir, File imageAnalysisRoot,
+            File outDir, ObjectImageRoots imageRoots,
             Map<String, ij.measure.ResultsTable> channelTables,
             RoiSetData[] roiSets,
             boolean extractProcessLength, int nuclearMarkerIndex, boolean[] processChannels,
@@ -1819,7 +1931,7 @@ public class ThreeDObjectAnalysis implements Analysis {
                             animalName, parts == null ? "" : parts.hemisphere, null);
                     try {
                         for (RoiSetData roiSet : roiSets) {
-                            processRoiSetFromFullCount(fullData, directory, cfg, imp, outDir, imageAnalysisRoot,
+                            processRoiSetFromFullCount(fullData, directory, cfg, imp, outDir, imageRoots,
                                     channelTables, i, scnIndex, animalName, parts,
                                     extractProcessLength, nuclearMarkerIndex, processChannels, roiSet);
                         }
@@ -1829,7 +1941,7 @@ public class ThreeDObjectAnalysis implements Analysis {
                 } else {
                     // Original path: count per ROI set
                     for (RoiSetData roiSet : roiSets) {
-                        processRoiSetForImage(directory, cfg, imp, outDir, imageAnalysisRoot, channelTables,
+                        processRoiSetForImage(directory, cfg, imp, outDir, imageRoots, channelTables,
                                 i, scnIndex, animalName, parts,
                                 extractProcessLength, nuclearMarkerIndex, processChannels, roiSet);
                     }
@@ -1855,11 +1967,6 @@ public class ThreeDObjectAnalysis implements Analysis {
                     IJ.log("  [DEBUG] Image processing time: " + formatDuration(imageElapsed));
                 }
 
-                if (aggressiveMemory) {
-                    if (verboseLogging) IJ.log("  [DEBUG] Aggressive memory clearing...");
-                    System.gc();
-                    IJ.freeMemory();
-                }
             }
         }
         prefetcher.shutdown();
@@ -1871,7 +1978,7 @@ public class ThreeDObjectAnalysis implements Analysis {
             final BoundedImageLoader loader,
             final int nThreads,
             final String directory, final BinConfig cfg,
-            final File outDir, final File imageAnalysisRoot,
+            final File outDir, final ObjectImageRoots imageRoots,
             final Map<String, ij.measure.ResultsTable> channelTables,
             final RoiSetData[] roiSets,
             final boolean extractProcessLength, final int nuclearMarkerIndex, final boolean[] processChannels,
@@ -1973,7 +2080,7 @@ public class ThreeDObjectAnalysis implements Analysis {
                                         animalName, parts == null ? "" : parts.hemisphere, null);
                                 try {
                                     for (RoiSetData roiSet : roiSets) {
-                                        processRoiSetFromFullCount(fullData, directory, cfg, imp, outDir, imageAnalysisRoot,
+                                        processRoiSetFromFullCount(fullData, directory, cfg, imp, outDir, imageRoots,
                                                 localChannelTables, idx, scnIndex, animalName, parts,
                                                 extractProcessLength, nuclearMarkerIndex, processChannels, roiSet);
                                     }
@@ -1982,7 +2089,7 @@ public class ThreeDObjectAnalysis implements Analysis {
                                 }
                             } else {
                                 for (RoiSetData roiSet : roiSets) {
-                                    processRoiSetForImage(directory, cfg, imp, outDir, imageAnalysisRoot, localChannelTables,
+                                    processRoiSetForImage(directory, cfg, imp, outDir, imageRoots, localChannelTables,
                                             idx, scnIndex, animalName, parts,
                                             extractProcessLength, nuclearMarkerIndex, processChannels, roiSet);
                                 }
@@ -2058,10 +2165,6 @@ public class ThreeDObjectAnalysis implements Analysis {
                             }
                             threadLocalRegistry.remove();
 
-                            if (aggressiveMemory) {
-                                System.gc();
-                                IJ.freeMemory();
-                            }
                         }
                     }
                 }
@@ -2269,10 +2372,10 @@ public class ThreeDObjectAnalysis implements Analysis {
         }
     }
 
-    /** Save objects images after colocalization. */
-    private void saveObjectsImages(BinConfig cfg, File imageAnalysisRoot, String animalName, String hemisphere, String region) {
+    /** Save objects images (label maps) after colocalization. */
+    private void saveObjectsImages(BinConfig cfg, ObjectImageRoots imageRoots, String animalName, String hemisphere, String region) {
         String hemiRegion = buildFileSuffix(hemisphere, region, animalName);
-        File perAnimal = new File(imageAnalysisRoot, animalName);
+        File perAnimal = imageRoots.masksAnimalDir(animalName);
         for (int c = 0; c < cfg.numChannels(); c++) {
             String chName = cfg.channelNames.get(c);
             ImagePlus objImg = getRegisteredImage(chName + "_objects");
@@ -2531,7 +2634,7 @@ public class ThreeDObjectAnalysis implements Analysis {
             BinConfig cfg,
             ImagePlus imp,
             File outDir,
-            File imageAnalysisRoot,
+            ObjectImageRoots imageRoots,
             Map<String, ij.measure.ResultsTable> channelTables,
             int scnIndex,
             String animalName,
@@ -2608,20 +2711,9 @@ public class ThreeDObjectAnalysis implements Analysis {
                 sizeTokens[c] = SegmentationMethod.minSize(segmentationMethod) + "-"
                         + (maxSize == Integer.MAX_VALUE ? "Infinity" : String.valueOf(maxSize));
             }
-            if (segmentationMethod.isTrainedRf()) {
-                SegmentationMethod base = SegmentationMethod.trainedRfBase(segmentationMethod);
-                if (base.isEnhancedClassical()) {
-                    thresholdTokens[c] = String.valueOf((int) Math.round(SegmentationMethod.threshold(base)));
-                    int maxSize = SegmentationMethod.maxSize(base);
-                    sizeTokens[c] = SegmentationMethod.minSize(base) + "-"
-                            + (maxSize == Integer.MAX_VALUE ? "Infinity" : String.valueOf(maxSize));
-                }
-            }
             isStarDist[c] = cfg.isStarDist(c);
             isCellpose[c] = cfg.isCellpose(c);
-            SegmentationMethod cellposeSettingsMethod = segmentationMethod.isTrainedRf()
-                    ? SegmentationMethod.trainedRfBase(segmentationMethod)
-                    : segmentationMethod;
+            SegmentationMethod cellposeSettingsMethod = segmentationMethod;
             sdProbThresh[c] = cfg.getStarDistProbThresh(c);
             sdNmsThresh[c] = cfg.getStarDistNmsThresh(c);
             sdLinkingMaxDistance[c] = cfg.getStarDistLinkingMaxDistance(c);
@@ -3006,23 +3098,26 @@ public class ThreeDObjectAnalysis implements Analysis {
 
                 appendStatsToChannelTable(res.getStatistics(), channelTables.get(channelName), scnIndex, animalName, hemisphere, regionLabel, roiLabel);
 
-                // Save masked image under the object-analysis image output folder.
-                File perAnimal = new File(imageAnalysisRoot, animalName);
+                // Save masked image under Results/Analysis Images/Objects/Masked Images/<animal>/.
+                File maskedAnimalDir = imageRoots.maskedAnimalDir(animalName);
                 //noinspection ResultOfMethodCallIgnored
-                perAnimal.mkdirs();
+                maskedAnimalDir.mkdirs();
+                File filteredAnimalDir = imageRoots.filteredAnimalDir(animalName);
+                //noinspection ResultOfMethodCallIgnored
+                filteredAnimalDir.mkdirs();
 
                 // Build suffix: hemisphere_region, or just one, or animal name for non-convention files
                 String maskedSuffix = buildFileSuffix(hemisphere, roiLabel, animalName);
                 String safeChannelName = ChannelFilenameCodec.toSafe(channelName);
                 if (res.getMaskedImage() != null) {
                     AsyncImageSaver.saveAsTiffAsync(res.getMaskedImage(),
-                            new File(perAnimal, safeChannelName + "_Masked" + (maskedSuffix.isEmpty() ? "" : "_" + maskedSuffix) + ".tif").getAbsolutePath());
+                            new File(maskedAnimalDir, safeChannelName + "_Masked" + (maskedSuffix.isEmpty() ? "" : "_" + maskedSuffix) + ".tif").getAbsolutePath());
                 }
 
-                // Save the pre-detection filtered image
+                // Save the pre-detection filtered image into Filtered Inputs/<animal>/
                 if (fr.preDetectionFiltered != null) {
                     AsyncImageSaver.saveAsTiffAsync(fr.preDetectionFiltered,
-                            new File(perAnimal, safeChannelName + "_Filtered"
+                            new File(filteredAnimalDir, safeChannelName + "_Filtered"
                                     + (maskedSuffix.isEmpty() ? "" : "_" + maskedSuffix) + ".tif").getAbsolutePath());
                 }
 
@@ -3113,20 +3208,9 @@ public class ThreeDObjectAnalysis implements Analysis {
                 sizeTokens[c] = SegmentationMethod.minSize(segmentationMethod) + "-"
                         + (maxSize == Integer.MAX_VALUE ? "Infinity" : String.valueOf(maxSize));
             }
-            if (segmentationMethod.isTrainedRf()) {
-                SegmentationMethod base = SegmentationMethod.trainedRfBase(segmentationMethod);
-                if (base.isEnhancedClassical()) {
-                    thresholdTokens[c] = String.valueOf((int) Math.round(SegmentationMethod.threshold(base)));
-                    int maxSize = SegmentationMethod.maxSize(base);
-                    sizeTokens[c] = SegmentationMethod.minSize(base) + "-"
-                            + (maxSize == Integer.MAX_VALUE ? "Infinity" : String.valueOf(maxSize));
-                }
-            }
             isStarDist[c] = cfg.isStarDist(c);
             isCellpose[c] = cfg.isCellpose(c);
-            SegmentationMethod cellposeSettingsMethod = segmentationMethod.isTrainedRf()
-                    ? SegmentationMethod.trainedRfBase(segmentationMethod)
-                    : segmentationMethod;
+            SegmentationMethod cellposeSettingsMethod = segmentationMethod;
             sdProbThresh[c] = cfg.getStarDistProbThresh(c);
             sdNmsThresh[c] = cfg.getStarDistNmsThresh(c);
             sdLinkingMaxDistance[c] = cfg.getStarDistLinkingMaxDistance(c);
@@ -3323,7 +3407,7 @@ public class ThreeDObjectAnalysis implements Analysis {
             BinConfig cfg,
             ImagePlus imp,
             File outDir,
-            File imageAnalysisRoot,
+            ObjectImageRoots imageRoots,
             Map<String, ij.measure.ResultsTable> channelTables,
             int imageIndex,
             int scnIndex,
@@ -3416,24 +3500,27 @@ public class ThreeDObjectAnalysis implements Analysis {
                 appendStatsToChannelTable(roiRes.getStatistics(), channelTables.get(channelName),
                         scnIndex, animalName, hemisphere, seriesRegionLabel, roiLabel);
 
-                // Save masked image per-ROI
-                File perAnimal = new File(imageAnalysisRoot, animalName);
+                // Save masked image per-ROI under Results/Analysis Images/Objects/Masked Images/<animal>/.
+                File maskedAnimalDir = imageRoots.maskedAnimalDir(animalName);
                 //noinspection ResultOfMethodCallIgnored
-                perAnimal.mkdirs();
+                maskedAnimalDir.mkdirs();
+                File filteredAnimalDir = imageRoots.filteredAnimalDir(animalName);
+                //noinspection ResultOfMethodCallIgnored
+                filteredAnimalDir.mkdirs();
                 String maskedSuffix = buildFileSuffix(hemisphere, roiLabel, animalName);
                 String safeChannelName = ChannelFilenameCodec.toSafe(channelName);
                 if (roiRes.getMaskedImage() != null) {
                     AsyncImageSaver.saveAsTiffAsync(roiRes.getMaskedImage(),
-                            new File(perAnimal, safeChannelName + "_Masked"
+                            new File(maskedAnimalDir, safeChannelName + "_Masked"
                                     + (maskedSuffix.isEmpty() ? "" : "_" + maskedSuffix) + ".tif").getAbsolutePath());
                 }
 
-                // Save pre-detection filtered image per-ROI (clone + crop from full)
+                // Save pre-detection filtered image per-ROI (clone + crop from full) under Filtered Inputs/<animal>/.
                 if (fr.preDetectionFiltered != null) {
                     ImagePlus roiPreDetection = ImageOps.duplicateThreadSafe(fr.preDetectionFiltered);
                     RoiOps.removeNonRoiThreadSafe(roiPreDetection, localCropRoi, localClearRoi);
                     AsyncImageSaver.saveAsTiffAsync(roiPreDetection,
-                            new File(perAnimal, safeChannelName + "_Filtered"
+                            new File(filteredAnimalDir, safeChannelName + "_Filtered"
                                     + (maskedSuffix.isEmpty() ? "" : "_" + maskedSuffix) + ".tif").getAbsolutePath());
                 }
 
@@ -3500,7 +3587,7 @@ public class ThreeDObjectAnalysis implements Analysis {
             }
 
             // Save objects images
-            saveObjectsImages(cfg, imageAnalysisRoot, animalName, hemisphere, roiLabel);
+            saveObjectsImages(cfg, imageRoots, animalName, hemisphere, roiLabel);
         } finally {
             clearRegistry();
         }
@@ -3936,107 +4023,6 @@ public class ThreeDObjectAnalysis implements Analysis {
                 croppedForSkeleton.flush();
             }
 
-            if (segmentationMethod != null && segmentationMethod.isTrainedRf()) {
-                ImagePlus rfCellposeCompanion = null;
-                try {
-                    SegmentationMethod rfBase = SegmentationMethod.trainedRfBase(segmentationMethod);
-                    TrainedRfParameters rfParams = TrainedRfParameters.fromMethod(
-                            segmentationMethod,
-                            projectRoot == null ? null : projectRoot.toPath(),
-                            ch,
-                            (int) Math.round(threshold),
-                            minSizeVox,
-                            maxSizeVox,
-                            0.5)
-                            .withWarningSink(new TrainedRfRunner.WarningSink() {
-                                @Override
-                                public void warn(String message) {
-                                    IJ.log(message);
-                                }
-                            });
-                    if (rfBase.isCellpose()) {
-                        int rfCompanionIndex = SegmentationMethod.cellposeChan2(rfBase);
-                        rfCellposeCompanion = prepareCellposeSecondChannelInput(
-                                c, channelName, ch, binDir,
-                                rfCompanionIndex, cellposeSecondChannel,
-                                cellposeSecondChannelName, cellposeSecondChannelFilterFilename);
-                        rfParams = rfParams.withCellposeCompanionImage(rfCellposeCompanion);
-                    }
-                    ImagePlus labelImage;
-                    try {
-                        labelImage = new TrainedRfRunner().run(filtered, rfParams);
-                    } catch (SegmentationRunFailureException e) {
-                        String failureReason = e.getMessage();
-                        IJ.log("    - [Ch " + (c + 1) + "] WARNING: " + failureReason);
-                        return new ChannelFilterResult(c, channelName, ch, null,
-                                null, 0, 0, true, failureReason);
-                    }
-
-                    if (labelImage == null) {
-                        String failureReason = "Trained RF segmentation failed";
-                        IJ.log("    - [Ch " + (c + 1) + "] WARNING: " + failureReason);
-                        return new ChannelFilterResult(c, channelName, ch, null,
-                                null, 0, 0, true, failureReason);
-                    }
-
-                    if (labelImage != null && (cropRoi != null || clearRoi != null)) {
-                        ij.gui.Roi filterRoi;
-                        if (classicalCentroidFilter) {
-                            filterRoi = (clearRoi != null) ? clearRoi : cropRoi;
-                        } else {
-                            filterRoi = (clearRoi != null)
-                                    ? (ij.gui.Roi) clearRoi.clone()
-                                    : (ij.gui.Roi) cropRoi.clone();
-                            if (cropRoi != null) {
-                                java.awt.Rectangle cropBounds = cropRoi.getBounds();
-                                filterRoi.setLocation(
-                                        filterRoi.getBounds().x - cropBounds.x,
-                                        filterRoi.getBounds().y - cropBounds.y);
-                            }
-                        }
-                        int beforeFilter = StarDist3DRunner.countLabels(labelImage);
-                        int removed = filterLabelsByCentroid(labelImage, filterRoi);
-                        int afterFilter = beforeFilter - removed;
-                        IJ.log("    Trained RF [" + channelName + "] ROI filter: " + beforeFilter
-                                + " -> " + afterFilter + " objects (" + removed + " outside "
-                                + roiSetName + " ROI removed)");
-
-                        if (classicalCentroidFilter) {
-                            RoiOps.removeNonRoiThreadSafe(filtered, cropRoi, clearRoi);
-                            RoiOps.removeNonRoiThreadSafe(ch, cropRoi, clearRoi);
-                            RoiOps.removeNonRoiThreadSafe(labelImage, cropRoi, clearRoi);
-                        }
-                    }
-
-                    ImagePlus binaryMask = ImageOps.duplicateThreadSafe(labelImage);
-                    binaryMask.setTitle(channelName + "_filtered");
-                    ij.ImageStack maskStack = binaryMask.getStack();
-                    for (int s = 1; s <= maskStack.getSize(); s++) {
-                        ij.process.ImageProcessor ip = maskStack.getProcessor(s);
-                        for (int p = 0; p < ip.getPixelCount(); p++) {
-                            ip.set(p, ip.get(p) > 0 ? 255 : 0);
-                        }
-                    }
-
-                    int nObjects = StarDist3DRunner.countLabels(labelImage);
-                    if (!compactLog) {
-                        IJ.log("    - [Ch " + (c + 1) + "] Trained RF segmentation (model="
-                                + SegmentationMethod.trainedRfModelKey(segmentationMethod)
-                                + ", base=" + SegmentationTokenParser.format(SegmentationMethod.trainedRfBase(segmentationMethod))
-                                + "): " + nObjects + " objects kept");
-                    }
-
-                    return new ChannelFilterResult(c, channelName, ch, binaryMask,
-                            null, minSizeVox, maxSizeVox, false, null,
-                            true, "Trained RF", labelImage,
-                            "Trained RF (model=" + SegmentationMethod.trainedRfModelKey(segmentationMethod)
-                                    + ", base=" + SegmentationTokenParser.format(SegmentationMethod.trainedRfBase(segmentationMethod)) + ")",
-                            preDetection);
-                } finally {
-                    closeQuietly(rfCellposeCompanion);
-                }
-            }
-
             return new ChannelFilterResult(c, channelName, ch, filtered,
                     threshold, minSizeVox, maxSizeVox, false, null,
                     false, "", null, "", preDetection,
@@ -4049,13 +4035,6 @@ public class ThreeDObjectAnalysis implements Analysis {
                     + "', segmentation='" + (segmentationMethod == null
                     ? "<unset>" : SegmentationTokenParser.format(segmentationMethod))
                     + "': " + errMsg);
-            if (segmentationMethod != null && segmentationMethod.isTrainedRf()) {
-                String modelKey = SegmentationMethod.trainedRfModelKey(segmentationMethod);
-                throw new FatalSegmentationException(
-                        "Trained RF segmentation failed for channel '" + channelName
-                                + "' using model '" + modelKey + "': " + errMsg,
-                        t);
-            }
             return new ChannelFilterResult(c, channelName, ch, null,
                     null, 0, 0, true, "filter error: " + errMsg);
         }
@@ -4744,12 +4723,6 @@ public class ThreeDObjectAnalysis implements Analysis {
                     + ", UseGpu=" + cfg.getCellposeUseGpu(channelIndex)
                     + ", CompanionChannel=" + companionSummary;
         }
-        if (cfg.isTrainedRf(channelIndex)) {
-            SegmentationMethod method = cfg.segmentationMethod(channelIndex);
-            return "Segmentation=Trained RF"
-                    + ", Model=" + SegmentationMethod.trainedRfModelKey(method)
-                    + ", Base=" + SegmentationTokenParser.format(SegmentationMethod.trainedRfBase(method));
-        }
         if (cfg.isEnhancedClassical(channelIndex)) {
             List<MorphPredicate> predicates = cfg.getEnhancedClassicalMorphPredicates(channelIndex);
             StringBuilder morph = new StringBuilder();
@@ -4780,8 +4753,6 @@ public class ThreeDObjectAnalysis implements Analysis {
             modelKey = SegmentationMethod.starDistModelKey(method);
         } else if (expectedEngine == ModelEntry.Engine.CELLPOSE && method.isCellpose()) {
             modelKey = SegmentationMethod.cellposeModelKey(method);
-        } else if (expectedEngine == ModelEntry.Engine.SMILE_RF && method.isTrainedRf()) {
-            modelKey = SegmentationMethod.trainedRfModelKey(method);
         }
         if (modelKey == null || modelKey.trim().isEmpty()) {
             return null;
@@ -5237,20 +5208,68 @@ public class ThreeDObjectAnalysis implements Analysis {
         return true;
     }
 
+    static boolean allObjectOutputCsvsExist(String directory, List<String> channelNames) {
+        if (channelNames == null) {
+            return false;
+        }
+        for (String chName : channelNames) {
+            if (existingObjectOutputCsv(directory, chName) == null) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    static List<File> existingObjectOutputCsvs(String directory, List<String> channelNames) {
+        List<File> existing = new ArrayList<File>();
+        Set<String> seenPaths = new LinkedHashSet<String>();
+        if (channelNames == null) {
+            return existing;
+        }
+        for (String chName : channelNames) {
+            File csv = existingObjectOutputCsv(directory, chName);
+            if (csv == null) continue;
+            String path = csv.getAbsolutePath();
+            if (seenPaths.add(path)) {
+                existing.add(csv);
+            }
+        }
+        return existing;
+    }
+
+    static File existingObjectOutputCsv(String directory, String channelName) {
+        for (File dir : objectCsvReadDirs(directory)) {
+            File csv = objectOutputCsv(dir, channelName);
+            if (csv.isFile()) {
+                return csv;
+            }
+        }
+        return null;
+    }
+
+    static void writeObjectResultsCsv(String directory, File outFile, String channelName,
+                                      ResultsTable table, List<String> orderedColumns,
+                                      boolean extendExistingData) {
+        if (extendExistingData) {
+            File existing = existingObjectOutputCsv(directory, channelName);
+            if (CsvTableIO.appendResultsTableCsv(outFile, existing, channelName,
+                    table, orderedColumns)) {
+                return;
+            }
+        }
+        CsvTableIO.writeResultsTableCsv(outFile, table, orderedColumns);
+    }
+
     static File objectCsvWriteDir(String directory) {
-        return FlashProjectLayout.forDirectory(directory).objectDataWriteDir();
+        return FlashProjectLayout.forDirectory(directory).tablesObjectsWriteDir();
     }
 
     static List<File> objectCsvReadDirs(String directory) {
-        return FlashProjectLayout.forDirectory(directory).objectDataReadDirs();
+        return Collections.singletonList(objectCsvWriteDir(directory));
     }
 
-    static File objectImageOutputWriteRoot(String directory) {
-        return FlashProjectLayout.forDirectory(directory).objectImageOutputsWriteDir();
-    }
-
-    static List<File> objectImageOutputReadRoots(String directory) {
-        return FlashProjectLayout.forDirectory(directory).objectImageOutputReadDirs();
+    static File objectImageOutputsRoot(String directory) {
+        return FlashProjectLayout.forDirectory(directory).analysisImagesObjectsRoot();
     }
 
     static File objectOutputCsv(File outDir, String channelName) {
