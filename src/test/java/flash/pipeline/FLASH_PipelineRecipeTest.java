@@ -37,7 +37,7 @@ public class FLASH_PipelineRecipeTest {
         labels[FLASH_Pipeline.IDX_CREATE_BIN] = "Create Bin File";
         labels[FLASH_Pipeline.IDX_DRAW_ROIS] = "Draw and Save ROIs";
         labels[FLASH_Pipeline.IDX_DECONVOLUTION] = "3D Deconvolution";
-        labels[FLASH_Pipeline.IDX_SPLIT_MERGE] = "Make Presentation-Ready Images";
+        labels[FLASH_Pipeline.IDX_SPLIT_MERGE] = "Make Presentation Images";
         labels[FLASH_Pipeline.IDX_3D_OBJECT] = "3D Object Analysis";
         labels[FLASH_Pipeline.IDX_SPATIAL] = "Spatial Analysis";
         labels[FLASH_Pipeline.IDX_LINE_DISTANCE] = "Line Distance Analysis";

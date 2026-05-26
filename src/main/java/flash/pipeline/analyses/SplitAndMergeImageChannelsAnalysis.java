@@ -20,7 +20,6 @@ import flash.pipeline.io.BoundedImageLoader;
 import flash.pipeline.io.ConditionManifestIO;
 import flash.pipeline.io.DeferredImageSupplier;
 import flash.pipeline.io.FlashProjectLayout;
-import flash.pipeline.io.FlashProjectLayout.AnalysisFolder;
 import flash.pipeline.io.ImageSourceDispatcher;
 import flash.pipeline.io.IoUtils;
 import flash.pipeline.io.SeriesMeta;
@@ -297,12 +296,13 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
         useDeconvolvedInput = mdr.useDeconvolvedInput;
         presentationTileRecords.clear();
 
-        File splitMergeRoot = splitMergeWriteRoot(directory);
-        File outRoot = splitMergeImageWriteRoot(directory);
-        File tifDir = splitMergeOmeTiffWriteRoot(directory);
-        File detailsRoot = splitMergeDetailsWriteRoot(directory);
+        FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
+        File outRoot = layout.presentationImagesDir();
+        File tifDir = OmeTiffIO.defaultOutputDir(layout);
+        // TODO(results-folder-layout-plan stage 08): consolidate analysis-details
+        // routing across analyses under Results/Run Records/analysis_details/.
+        File detailsRoot = splitMergeAnalysisDetailsRoot(layout);
         try {
-            IoUtils.mustMkdirs(splitMergeRoot);
             IoUtils.mustMkdirs(outRoot);
             IoUtils.mustMkdirs(tifDir);
             IoUtils.mustMkdirs(detailsRoot);
@@ -443,7 +443,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
 
         try {
             AnalysisDetailsWriter.write(
-                    splitMergeRoot,
+                    detailsRoot,
                     "Process Images",
                     channelNames,
                     channelColors,
@@ -459,7 +459,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
 
         try {
             SplitAndMergeDetailsWriter.write(
-                    splitMergeRoot,
+                    detailsRoot,
                     channelNames,
                     channelColors,
                     mdr.processMethodPerCh,
@@ -488,7 +488,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
         }
 
         AsyncImageSaver.waitForAllWithProgress(parallelThreads);
-        writePresentationTileOutputs(directory, splitMergeRoot, mdr.tileConfig);
+        writePresentationTileOutputs(directory, layout, mdr.tileConfig);
         long totalElapsed = System.currentTimeMillis() - loopStartTime;
         IJ.log("__________________________________________________________");
         IJ.log("Split and Merge Image Channels Analysis complete.");
@@ -897,10 +897,10 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
             bgChoices[i + 1] = channelNames[i] + (i == autoBackgroundIndex ? " (auto-detected)" : "");
         }
 
-        final PipelineDialog pd = new PipelineDialog("Make Presentation-Ready Images", PipelineDialog.Phase.SETUP);
+        final PipelineDialog pd = new PipelineDialog("Make Presentation Images", PipelineDialog.Phase.SETUP);
 
         // ── Section: Input ──
-        pd.addAnalysisHelpHeader("Make Presentation-Ready Images", FLASH_Pipeline.IDX_SPLIT_MERGE);
+        pd.addAnalysisHelpHeader("Make Presentation Images", FLASH_Pipeline.IDX_SPLIT_MERGE);
         pd.addSubHeader("Input");
         final ToggleSwitch useDeconvToggle = pd.addToggle("Use deconvolved stacks if available",
                 useDeconvolvedInput);
@@ -1374,8 +1374,8 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
 
     private static PresentationTileRecord representativePreviewRecord(File projectRoot) {
         if (projectRoot == null) return null;
-        File splitMergeRoot = splitMergeWriteRoot(projectRoot.getAbsolutePath());
-        File manifest = new File(splitMergeRoot, "Presentation_Image_Manifest.csv");
+        FlashProjectLayout layout = FlashProjectLayout.forDirectory(projectRoot.getAbsolutePath());
+        File manifest = presentationManifestFile(layout);
         if (manifest.isFile()) {
             try {
                 List<PresentationTileRecord> records = PresentationTileWriter.readManifest(manifest);
@@ -1390,7 +1390,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
             }
         }
 
-        PresentationTileRecord fromPng = representativePreviewRecordFromSavedPng(splitMergeRoot);
+        PresentationTileRecord fromPng = representativePreviewRecordFromSavedPng(layout.presentationImagesDir());
         if (fromPng != null) return fromPng;
 
         try {
@@ -1417,8 +1417,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
         return null;
     }
 
-    private static PresentationTileRecord representativePreviewRecordFromSavedPng(File splitMergeRoot) {
-        File imagesRoot = new File(splitMergeRoot, "Images");
+    private static PresentationTileRecord representativePreviewRecordFromSavedPng(File imagesRoot) {
         File png = firstPng(imagesRoot, 0);
         if (png == null) return null;
         try {
@@ -2020,7 +2019,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                 pixelHeightUm));
     }
 
-    private void writePresentationTileOutputs(String directory, File splitMergeRoot,
+    private void writePresentationTileOutputs(String directory, FlashProjectLayout layout,
                                               PresentationTileConfig config) {
         if (config == null || (!config.createOverviewTile() && !config.annotateIndividualImages())) {
             return;
@@ -2030,7 +2029,8 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
         synchronized (presentationTileRecords) {
             records = new ArrayList<PresentationTileRecord>(presentationTileRecords);
         }
-        records = mergeExistingPresentationManifest(splitMergeRoot, records);
+        File manifestFile = presentationManifestFile(layout);
+        records = mergeExistingPresentationManifest(manifestFile, records);
         if (records.isEmpty()) {
             IJ.log("  - Presentation overview tile skipped: no saved image records were found.");
             return;
@@ -2043,18 +2043,21 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
         Map<String, String> conditions = ConditionManifestIO.resolveAssignments(directory, animals);
 
         try {
-            PresentationTileWriter.writeRequestedOutputs(splitMergeRoot, records, conditions, config);
+            PresentationTileWriter.writeRequestedOutputs(
+                    layout.presentationAnnotatedDir(),
+                    layout.presentationTilesDir(),
+                    manifestFile,
+                    records, conditions, config);
         } catch (IOException e) {
             IJ.log("  - WARNING: failed to write presentation overview tile: " + e.getMessage());
         }
     }
 
     private static List<PresentationTileRecord> mergeExistingPresentationManifest(
-            File splitMergeRoot, List<PresentationTileRecord> currentRecords) {
+            File manifest, List<PresentationTileRecord> currentRecords) {
         LinkedHashMap<String, PresentationTileRecord> merged =
                 new LinkedHashMap<String, PresentationTileRecord>();
-        File manifest = new File(splitMergeRoot, "Presentation_Image_Manifest.csv");
-        if (manifest.isFile()) {
+        if (manifest != null && manifest.isFile()) {
             try {
                 List<PresentationTileRecord> existing = PresentationTileWriter.readManifest(manifest);
                 for (PresentationTileRecord record : existing) {
@@ -2493,20 +2496,26 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
         }
     }
 
-    static File splitMergeWriteRoot(String directory) {
-        return FlashProjectLayout.forDirectory(directory).analysisWriteDir(AnalysisFolder.SPLIT_MERGE);
-    }
-
     static File splitMergeImageWriteRoot(String directory) {
-        return new File(splitMergeWriteRoot(directory), "Images");
+        return FlashProjectLayout.forDirectory(directory).presentationImagesDir();
     }
 
     static File splitMergeOmeTiffWriteRoot(String directory) {
-        return new File(splitMergeWriteRoot(directory), "OME-TIFF");
+        return FlashProjectLayout.forDirectory(directory).presentationOmeTiffDir();
     }
 
-    static File splitMergeDetailsWriteRoot(String directory) {
-        return new File(splitMergeWriteRoot(directory), "Analysis Details");
+    static File splitMergeAnalysisDetailsRoot(String directory) {
+        return splitMergeAnalysisDetailsRoot(FlashProjectLayout.forDirectory(directory));
+    }
+
+    private static File splitMergeAnalysisDetailsRoot(FlashProjectLayout layout) {
+        // TODO(results-folder-layout-plan stage 08): unify analysis-details routing
+        // across analyses inside Results/Run Records/analysis_details/.
+        return new File(layout.analysisDetailsWriteDir(), "Split and Merge");
+    }
+
+    private static File presentationManifestFile(FlashProjectLayout layout) {
+        return new File(layout.presentationImagesRoot(), "Presentation_Image_Manifest.csv");
     }
 
     static boolean splitMergePrimaryChannelOutputExists(String directory, File primaryOutRoot,
@@ -2515,34 +2524,8 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
         String suffix = parts.fileSuffix();
         String pngName = ChannelFilenameCodec.toSafe(channelName)
                 + (suffix.isEmpty() ? "" : "_" + suffix) + ".png";
-        List<File> roots = splitMergeImageReadRoots(directory, primaryOutRoot);
-        for (int i = 0; i < roots.size(); i++) {
-            File check = new File(new File(roots.get(i), parts.animal), pngName);
-            if (check.exists()) return true;
-        }
-        return false;
-    }
-
-    private static List<File> splitMergeImageReadRoots(String directory, File primaryOutRoot) {
-        List<File> roots = new ArrayList<File>();
-        addUniqueRoot(roots, primaryOutRoot);
-        FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
-        addUniqueRoot(roots, new File(layout.analysisWriteDir(AnalysisFolder.SPLIT_MERGE), "Images"));
-        List<File> legacyDirs = layout.analysisLegacyDirs(AnalysisFolder.SPLIT_MERGE);
-        for (int i = 0; i < legacyDirs.size(); i++) {
-            addUniqueRoot(roots, new File(legacyDirs.get(i), "Images"));
-            addUniqueRoot(roots, legacyDirs.get(i));
-        }
-        return roots;
-    }
-
-    private static void addUniqueRoot(List<File> roots, File root) {
-        if (root == null) return;
-        String path = root.getAbsolutePath();
-        for (int i = 0; i < roots.size(); i++) {
-            if (roots.get(i).getAbsolutePath().equals(path)) return;
-        }
-        roots.add(root);
+        File check = new File(new File(primaryOutRoot, parts.animal), pngName);
+        return check.exists();
     }
 
     private static void closeAllWindowsExceptLog() {

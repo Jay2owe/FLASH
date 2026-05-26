@@ -360,7 +360,7 @@ public final class AnalysisHelpCatalog {
         return new AnalysisHelpTopic(
                 FLASH_Pipeline.IDX_SPLIT_MERGE,
                 "split-merge",
-                "Make Presentation-Ready Images",
+                "Make Presentation Images",
                 "Create per-channel images, merged composites, and display-ready exports for visual checking and figure preparation.",
                 list(
                         "Use this when you need channel-separated images, merged colour composites, or OME-TIFF exports for review, presentation, or figure assembly.",
@@ -378,11 +378,11 @@ public final class AnalysisHelpCatalog {
                         "FLASH reads the configured channel names, colours, display ranges, and optional autofluorescence identity.",
                         "Each image is split into channel-specific views and the selected display settings are applied to those exported images.",
                         "Selected channels are combined into merged colour composites, with additional merge specifications used when provided.",
-                        "FLASH saves the display outputs and split/merge run details under the Split and Merge analysis folder."),
+                        "FLASH saves the display outputs under Results/Presentation Images/ and records the run settings under Results/Run Records/."),
                 list(
-                        "FLASH/Presentation-Ready Images/Images/<animal>/ contains split-channel images and merged composite images.",
-                        "FLASH/Presentation-Ready Images/OME-TIFF/ contains OME-TIFF exports when that option is enabled.",
-                        "FLASH/Presentation-Ready Images/Analysis Details/ records split/merge settings used for the run.",
+                        "FLASH/Results/Presentation Images/Images/<animal>/ contains split-channel images and merged composite images.",
+                        "FLASH/Results/Presentation Images/OME-TIFF/ contains OME-TIFF exports when that option is enabled.",
+                        "FLASH/Results/Presentation Images/Annotated Images/ and FLASH/Results/Presentation Images/Tiles/ hold annotated copies and overview tiles when tile options are enabled.",
                         "Saved min-max display settings can also update the active configuration so later display exports use the same ranges."),
                 list(
                         "Contrast stretching, lookup-table colours, and merged composites are display choices, not quantitative fluorescence measurements.",
@@ -393,7 +393,7 @@ public final class AnalysisHelpCatalog {
                         "split-merge",
                         image("setup.png", "Split and merge setup", "Per-channel processing, merge, OME-TIFF, and background-subtraction options are reviewed before export."),
                         image("workflow.png", "Split and merge workflow", "Read configured channels, split images, apply display settings, create composites, then save display outputs."),
-                        image("example-output.png", "Split and merge outputs", "Split-channel images, merged composites, OME-TIFF files, and analysis details live under FLASH/Presentation-Ready Images.")));
+                        image("example-output.png", "Split and merge outputs", "Split-channel images, merged composites, OME-TIFF files, and annotated copies live under FLASH/Results/Presentation Images.")));
     }
 
     private static AnalysisHelpTopic intensityTopic() {

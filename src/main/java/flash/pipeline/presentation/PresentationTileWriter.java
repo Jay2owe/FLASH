@@ -46,26 +46,24 @@ public final class PresentationTileWriter {
 
     private PresentationTileWriter() {}
 
-    public static void writeRequestedOutputs(File splitMergeRoot,
+    public static void writeRequestedOutputs(File annotatedImagesDir,
+                                             File tilesDir,
+                                             File manifestFile,
                                              List<PresentationTileRecord> records,
                                              Map<String, String> conditions,
                                              PresentationTileConfig config) throws IOException {
-        if (splitMergeRoot == null || records == null || records.isEmpty() || config == null) {
+        if (manifestFile == null || records == null || records.isEmpty() || config == null) {
             return;
         }
 
-        IoUtils.mustMkdirs(splitMergeRoot);
-        if (config.annotateIndividualImages()) {
-            File annotatedRoot = new File(splitMergeRoot, "Annotated Images");
-            writeAnnotatedImageCopies(annotatedRoot, records, conditions, config);
+        if (config.annotateIndividualImages() && annotatedImagesDir != null) {
+            writeAnnotatedImageCopies(annotatedImagesDir, records, conditions, config);
         }
 
-        writeManifest(new File(splitMergeRoot, "Presentation_Image_Manifest.csv"),
-                records, conditions);
+        writeManifest(manifestFile, records, conditions);
 
-        if (config.createOverviewTile()) {
-            File tileRoot = new File(splitMergeRoot, "Tiles");
-            File out = new File(tileRoot, "Presentation_Overview_"
+        if (config.createOverviewTile() && tilesDir != null) {
+            File out = new File(tilesDir, "Presentation_Overview_"
                     + (config.groupRowsBy() == PresentationTileConfig.GroupRowsBy.CONDITION
                     ? "ByCondition" : "ByAnimal") + ".png");
             writeOverviewTile(out, records, conditions, config);

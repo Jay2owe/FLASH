@@ -21,6 +21,13 @@ import java.util.Locale;
 public class OmeTiffIO {
 
     /**
+     * Default OME-TIFF output directory: {@code FLASH/Results/Presentation Images/OME-TIFF/}.
+     */
+    public static File defaultOutputDir(FlashProjectLayout layout) {
+        return layout.presentationOmeTiffDir();
+    }
+
+    /**
      * Save an ImagePlus as a single-series OME-TIFF.
      *
      * Requirements/assumptions:

@@ -161,7 +161,8 @@ public class SplitAndMergeImageChannelsAnalysisTest {
 
         assertEquals(1, chooserCalls.get());
         assertFalse(new File(dir, "Images").exists());
-        assertFalse(SplitAndMergeImageChannelsAnalysis.splitMergeWriteRoot(dir.getAbsolutePath()).exists());
+        assertFalse(new File(new File(new File(dir, "FLASH"), "Results"),
+                "Presentation Images").exists());
     }
 
     @Test
@@ -243,38 +244,32 @@ public class SplitAndMergeImageChannelsAnalysisTest {
     }
 
     @Test
-    public void splitMergeOutputHelpersUseStageFolderLayout() throws Exception {
+    public void splitMergeOutputHelpersResolveToPresentationImagesLayout() throws Exception {
         File dir = temp.newFolder("layout");
-        File splitRoot = new File(new File(dir, "FLASH"), "Presentation-Ready Images");
+        File presentationRoot = new File(new File(new File(dir, "FLASH"), "Results"), "Presentation Images");
 
-        assertEquals(new File(splitRoot, "Images"),
+        assertEquals(new File(presentationRoot, "Images"),
                 SplitAndMergeImageChannelsAnalysis.splitMergeImageWriteRoot(dir.getAbsolutePath()));
-        assertEquals(new File(splitRoot, "OME-TIFF"),
+        assertEquals(new File(presentationRoot, "OME-TIFF"),
                 SplitAndMergeImageChannelsAnalysis.splitMergeOmeTiffWriteRoot(dir.getAbsolutePath()));
-        assertEquals(new File(splitRoot, "Analysis Details"),
-                SplitAndMergeImageChannelsAnalysis.splitMergeDetailsWriteRoot(dir.getAbsolutePath()));
+        assertEquals(
+                new File(new File(new File(new File(new File(dir, "FLASH"), "Results"),
+                        "Run Records"), "analysis_details"), "Split and Merge"),
+                SplitAndMergeImageChannelsAnalysis.splitMergeAnalysisDetailsRoot(dir.getAbsolutePath()));
     }
 
     @Test
-    public void splitMergeSkipExistingFindsLegacyPresentationFolders() throws Exception {
-        File dir = temp.newFolder("legacySplitMerge");
+    public void splitMergePrimaryOutputCheckUsesPresentationImagesDir() throws Exception {
+        File dir = temp.newFolder("primaryCheck");
         NameParts parts = new NameParts("Experiment", "Animal1", "LH", "Cortex");
         File primaryOutRoot = SplitAndMergeImageChannelsAnalysis.splitMergeImageWriteRoot(dir.getAbsolutePath());
 
-        File oldPresentationAnimalDir = new File(
-                new File(new File(new File(dir, "FLASH"), "Make Presentation-Ready Images"), "Images"),
-                "Animal1");
-        assertTrue(oldPresentationAnimalDir.mkdirs());
-        assertTrue(new File(oldPresentationAnimalDir, "DAPI_LH_Cortex.png").createNewFile());
+        File presentationAnimalDir = new File(primaryOutRoot, "Animal1");
+        assertTrue(presentationAnimalDir.mkdirs());
+        assertTrue(new File(presentationAnimalDir, "DAPI_LH_Cortex.png").createNewFile());
         assertTrue(SplitAndMergeImageChannelsAnalysis.splitMergePrimaryChannelOutputExists(
                 dir.getAbsolutePath(), primaryOutRoot, parts, "DAPI"));
-
-        File numberedAnimalDir = new File(
-                new File(new File(new File(dir, "FLASH"), "03 - Split and Merge"), "Images"),
-                "Animal1");
-        assertTrue(numberedAnimalDir.mkdirs());
-        assertTrue(new File(numberedAnimalDir, "GFAP_LH_Cortex.png").createNewFile());
-        assertTrue(SplitAndMergeImageChannelsAnalysis.splitMergePrimaryChannelOutputExists(
+        assertFalse(SplitAndMergeImageChannelsAnalysis.splitMergePrimaryChannelOutputExists(
                 dir.getAbsolutePath(), primaryOutRoot, parts, "GFAP"));
     }
 
@@ -385,8 +380,8 @@ public class SplitAndMergeImageChannelsAnalysisTest {
 
     @Test
     public void presentationManifestMergeKeepsDuplicateLabelsWhenImageIdsDiffer() throws Exception {
-        File splitMergeRoot = temp.newFolder("presentationMerge");
-        File images = new File(splitMergeRoot, "Images/Animal1");
+        File presentationRoot = temp.newFolder("presentationMerge");
+        File images = new File(presentationRoot, "Images/Animal1");
         assertTrue(images.mkdirs());
 
         File existingImage = new File(images, "DAPI_existing.png");
@@ -394,11 +389,11 @@ public class SplitAndMergeImageChannelsAnalysisTest {
         assertTrue(existingImage.createNewFile());
         assertTrue(currentImage.createNewFile());
 
+        File manifest = new File(presentationRoot, "Presentation_Image_Manifest.csv");
         PresentationTileRecord existing = new PresentationTileRecord(
                 existingImage, "Animal1", "LH", "Cortex", "source-series-001",
                 "DAPI", "DAPI", 0, 40, 40, 1.0, 1.0);
-        PresentationTileWriter.writeManifest(
-                new File(splitMergeRoot, "Presentation_Image_Manifest.csv"),
+        PresentationTileWriter.writeManifest(manifest,
                 Collections.singletonList(existing),
                 Collections.<String, String>emptyMap());
 
@@ -407,7 +402,7 @@ public class SplitAndMergeImageChannelsAnalysisTest {
                 "DAPI", "DAPI", 0, 40, 40, 1.0, 1.0);
 
         List<PresentationTileRecord> merged = invokeMergeExistingPresentationManifest(
-                splitMergeRoot, Collections.singletonList(current));
+                manifest, Collections.singletonList(current));
 
         assertEquals(2, merged.size());
         assertEquals(Arrays.asList("source-series-001", "source-series-002"),
@@ -620,12 +615,12 @@ public class SplitAndMergeImageChannelsAnalysisTest {
 
     @SuppressWarnings("unchecked")
     private static List<PresentationTileRecord> invokeMergeExistingPresentationManifest(
-            File splitMergeRoot,
+            File manifest,
             List<PresentationTileRecord> currentRecords) throws Exception {
         Method method = SplitAndMergeImageChannelsAnalysis.class.getDeclaredMethod(
                 "mergeExistingPresentationManifest", File.class, List.class);
         method.setAccessible(true);
-        return (List<PresentationTileRecord>) method.invoke(null, splitMergeRoot, currentRecords);
+        return (List<PresentationTileRecord>) method.invoke(null, manifest, currentRecords);
     }
 
     private static final class SyntheticDeferredImageSupplier extends DeferredImageSupplier {

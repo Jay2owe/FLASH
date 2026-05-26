@@ -117,7 +117,7 @@ public class FLASH_Pipeline implements PlugIn {
             "Set Up Configuration",
             "Draw and Save ROIs",
             "3D Deconvolution",
-            "Make Presentation-Ready Images",
+            "Make Presentation Images",
             "3D Object Analysis",
             "Spatial Analysis",
             "Line Distance Analysis",

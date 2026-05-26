@@ -158,7 +158,7 @@ public final class RunSettingsSnapshot {
             case 0: return layout.visibleConfigurationDir();
             case 1: return layout.analysisImagesRoiDir();
             case 2: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.DECONVOLUTION);
-            case 3: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.SPLIT_MERGE);
+            case 3: return layout.presentationImagesRoot();
             case 4: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.OBJECTS);
             case 5: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.SPATIAL);
             case 6: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.LINE_DISTANCE);

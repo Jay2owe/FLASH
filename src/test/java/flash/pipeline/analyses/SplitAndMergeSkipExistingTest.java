@@ -11,7 +11,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.List;
 
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 /**
  * Tests for the pre-flight skip-existing worklist builder in
@@ -68,21 +70,7 @@ public class SplitAndMergeSkipExistingTest {
     }
 
     @Test
-    public void skipExistingHonorsLegacyImagesWhenNewStageFolderIsPrimary() throws Exception {
-        File project = temp.newFolder("project");
-        File newOutRoot = SplitAndMergeImageChannelsAnalysis.splitMergeImageWriteRoot(project.getAbsolutePath());
-        NameParts parts = new NameParts("Experiment", "Animal1", "LH", "SCN");
-
-        File legacyOutput = new File(new File(new File(project, "Images"), "Animal1"), "DAPI_LH_SCN.png");
-        assertTrue(legacyOutput.getParentFile().mkdirs());
-        Files.write(legacyOutput.toPath(), "legacy".getBytes(StandardCharsets.UTF_8));
-
-        assertTrue(SplitAndMergeImageChannelsAnalysis.splitMergePrimaryChannelOutputExists(
-                project.getAbsolutePath(), newOutRoot, parts, "DAPI"));
-    }
-
-    @Test
-    public void skipExistingChecksNewStageFolderFirst() throws Exception {
+    public void skipExistingDetectsImageInsidePresentationImagesDir() throws Exception {
         File project = temp.newFolder("newProject");
         File newOutRoot = SplitAndMergeImageChannelsAnalysis.splitMergeImageWriteRoot(project.getAbsolutePath());
         NameParts parts = new NameParts("Experiment", "Animal1", "RH", "PVN");
@@ -92,6 +80,30 @@ public class SplitAndMergeSkipExistingTest {
         Files.write(newOutput.toPath(), "new".getBytes(StandardCharsets.UTF_8));
 
         assertTrue(SplitAndMergeImageChannelsAnalysis.splitMergePrimaryChannelOutputExists(
+                project.getAbsolutePath(), newOutRoot, parts, "DAPI"));
+    }
+
+    @Test
+    public void skipExistingReturnsFalseWhenNoOutputUnderPresentationImagesDir() throws Exception {
+        File project = temp.newFolder("missingProject");
+        File newOutRoot = SplitAndMergeImageChannelsAnalysis.splitMergeImageWriteRoot(project.getAbsolutePath());
+        NameParts parts = new NameParts("Experiment", "Animal1", "LH", "SCN");
+
+        assertFalse(SplitAndMergeImageChannelsAnalysis.splitMergePrimaryChannelOutputExists(
+                project.getAbsolutePath(), newOutRoot, parts, "DAPI"));
+    }
+
+    @Test
+    public void skipExistingIgnoresImageAtProjectRoot() throws Exception {
+        File project = temp.newFolder("projectWithLegacyImage");
+        File newOutRoot = SplitAndMergeImageChannelsAnalysis.splitMergeImageWriteRoot(project.getAbsolutePath());
+        NameParts parts = new NameParts("Experiment", "Animal1", "LH", "SCN");
+
+        File rootImage = new File(new File(new File(project, "Images"), "Animal1"), "DAPI_LH_SCN.png");
+        assertTrue(rootImage.getParentFile().mkdirs());
+        Files.write(rootImage.toPath(), "legacy".getBytes(StandardCharsets.UTF_8));
+
+        assertFalse(SplitAndMergeImageChannelsAnalysis.splitMergePrimaryChannelOutputExists(
                 project.getAbsolutePath(), newOutRoot, parts, "DAPI"));
     }
 }

@@ -56,8 +56,7 @@ public class AnalysisStatusScanner {
                         FlashProjectLayout.AnalysisFolder.DECONVOLUTION))),
                 "3D Deconvolution");
         put(out, FLASH_Pipeline.IDX_SPLIT_MERGE,
-                fallbackStatus(directory, hasAnyFile(layout.analysisReadDirs(
-                        FlashProjectLayout.AnalysisFolder.SPLIT_MERGE))),
+                fallbackStatus(directory, hasAnyFile(layout.presentationImagesDir())),
                 "Split and Merge Image Channels");
         put(out, FLASH_Pipeline.IDX_3D_OBJECT,
                 fallbackStatus(directory, hasCsv(layout.objectDataReadDirs())),

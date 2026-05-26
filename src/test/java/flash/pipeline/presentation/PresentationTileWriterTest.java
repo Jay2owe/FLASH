@@ -170,16 +170,19 @@ public class PresentationTileWriterTest {
                 .scaleBarPosition(PresentationTileConfig.Position.BOTTOM_RIGHT)
                 .build();
 
-        PresentationTileWriter.writeRequestedOutputs(root, Arrays.asList(record),
-                new LinkedHashMap<String, String>(), config);
+        File annotatedDir = new File(root, "Annotated Images");
+        File tilesDir = new File(root, "Tiles");
+        File manifest = new File(root, "Presentation_Image_Manifest.csv");
+        PresentationTileWriter.writeRequestedOutputs(annotatedDir, tilesDir, manifest,
+                Arrays.asList(record), new LinkedHashMap<String, String>(), config);
 
-        File annotated = new File(root, "Annotated Images/Animal1/DAPI_LH_Cortex.png");
+        File annotated = new File(annotatedDir, "Animal1/DAPI_LH_Cortex.png");
         assertTrue(annotated.isFile());
         BufferedImage image = ImageIO.read(annotated);
         assertTrue("scale bar should draw in white",
                 containsBrightPixel(image, 65, 30, 99, 49));
         assertNotNull("record should point to annotated derivative", record.annotatedImageFile());
-        assertTrue(new File(root, "Tiles/Presentation_Overview_ByAnimal.png").isFile());
+        assertTrue(new File(tilesDir, "Presentation_Overview_ByAnimal.png").isFile());
     }
 
     @Test
