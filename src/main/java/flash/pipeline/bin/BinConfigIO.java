@@ -148,7 +148,8 @@ public class BinConfigIO {
             String[] sizes = (lines.size() > 3) ? splitTokens(lines.get(3)) : new String[0];
             String[] minmax = (lines.size() > 4) ? splitTokens(lines.get(4)) : new String[0];
             String[] intensityThresholds = (lines.size() > 5) ? splitTokens(lines.get(5)) : new String[0];
-            String[] segmentationMethods = (lines.size() > 6) ? splitTokens(lines.get(6)) : new String[0];
+            boolean hasSegmentationMethodLine = lines.size() > 6;
+            String[] segmentationMethods = hasSegmentationMethodLine ? splitTokens(lines.get(6)) : new String[0];
             boolean hasFilterPresetLine = lines.size() > 7;
             String[] storedFilterPresets = hasFilterPresetLine ? splitTokens(lines.get(7)) : new String[0];
             boolean clickConfigPresent = (lines.size() > 9 && parseClickPresenceLine(lines.get(9)))
@@ -168,7 +169,7 @@ public class BinConfigIO {
             for (int i = 0; i < segmentationMethods.length; i++) {
                 cfg.addSegmentationMethodToken(segmentationMethods[i]);
             }
-            while (cfg.segmentationMethods.size() < cfg.numChannels()) {
+            while (!hasSegmentationMethodLine && cfg.segmentationMethods.size() < cfg.numChannels()) {
                 cfg.addSegmentationMethodToken("classical");
             }
             if (hasFilterPresetLine) {

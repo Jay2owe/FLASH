@@ -233,6 +233,24 @@ public class BinConfigIOTest {
     }
 
     @Test
+    public void readPartialBlankSegmentationLineRemainsMissing() throws IOException {
+        File dir = writeBinFile(
+                "DAPI GFP",
+                "Blue Green",
+                "default 500",
+                "100-Infinity 50-5000",
+                "None 0-4095",
+                "default 750",
+                ""
+        );
+
+        BinConfig cfg = BinConfigIO.readPartialFromDirectory(dir.getAbsolutePath());
+
+        assertTrue(cfg.segmentationMethods.isEmpty());
+        assertFalse(cfg.hasSegmentationMethods());
+    }
+
+    @Test
     public void writeFromConfigWritesFilterPresetMacrosForDirectAndCliSetup() throws IOException {
         File dir = tempFolder.newFolder("writeFilterMacros");
         BinConfig cfg = new BinConfig();
