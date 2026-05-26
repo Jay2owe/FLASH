@@ -7,6 +7,7 @@ import flash.pipeline.runtime.DependencyStatus;
 import flash.pipeline.runtime.FeatureDependencyGate;
 import ij.ImagePlus;
 import ij.gui.Roi;
+import ij.process.FloatProcessor;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -106,6 +107,18 @@ public class IntensitySpatialSyntheticValidationTest {
                 }));
         assertTrue(Double.isNaN(empty.value("Intensity_PatchinessCV4")));
         assertFalse(warnings.isEmpty());
+    }
+
+    @Test
+    public void maxIntensityProjectionUsesFiniteLaterSliceOverFirstSliceNan() {
+        ImagePlus source = new ImagePlus("nan-first",
+                new FloatProcessor(1, 1, new float[]{Float.NaN}, null));
+        source.setStack(source.getTitle(), source.getStack());
+        source.getStack().addSlice(new FloatProcessor(1, 1, new float[]{7.0f}, null));
+
+        ImagePlus mip = IntensitySpatialRunner.maxIntensityProjection(source, "mip");
+
+        assertEquals(7.0, mip.getProcessor().getf(0), 0.0);
     }
 
     @Test

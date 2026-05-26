@@ -31,10 +31,12 @@ public final class LineVocab {
 
     public LineVocab(int vocabularyVersion, List<Entry> entries) {
         this.vocabularyVersion = vocabularyVersion;
-        this.entries = Collections.unmodifiableList(new ArrayList<Entry>(entries));
+        this.entries = immutableEntries(entries);
         Map<String, Entry> mutable = new LinkedHashMap<String, Entry>();
         for (Entry entry : this.entries) {
-            mutable.put(entry.getLabel().toLowerCase(Locale.ROOT), entry);
+            String label = entry.getLabel();
+            if (label == null || label.trim().isEmpty()) continue;
+            mutable.put(label.trim().toLowerCase(Locale.ROOT), entry);
         }
         this.byLabel = Collections.unmodifiableMap(mutable);
     }
@@ -103,7 +105,7 @@ public final class LineVocab {
 
         for (Entry entry : entries) {
             for (String alias : entry.getAliases()) {
-                if (alias.toLowerCase(Locale.ROOT).equals(needle)) {
+                if (alias != null && alias.trim().toLowerCase(Locale.ROOT).equals(needle)) {
                     return entry;
                 }
             }
@@ -141,7 +143,7 @@ public final class LineVocab {
                 return existing;
             }
             for (String alias : match.getAliases()) {
-                if (existingLower.equals(alias.toLowerCase(Locale.ROOT))) {
+                if (alias != null && existingLower.equals(alias.trim().toLowerCase(Locale.ROOT))) {
                     return existing;
                 }
             }
@@ -159,14 +161,34 @@ public final class LineVocab {
         return out.toString("UTF-8");
     }
 
+    private static List<Entry> immutableEntries(List<Entry> entries) {
+        List<Entry> out = new ArrayList<Entry>();
+        if (entries != null) {
+            for (Entry entry : entries) {
+                if (entry != null && entry.getLabel() != null
+                        && !entry.getLabel().trim().isEmpty()) {
+                    out.add(entry);
+                }
+            }
+        }
+        return Collections.unmodifiableList(out);
+    }
+
     public static final class Entry {
         private final String label;
         private final List<String> aliases;
 
         public Entry(String label, List<String> aliases) {
-            this.label = label;
-            this.aliases = Collections.unmodifiableList(
-                    new ArrayList<String>(aliases == null ? Collections.<String>emptyList() : aliases));
+            this.label = label == null ? "" : label.trim();
+            List<String> cleanedAliases = new ArrayList<String>();
+            if (aliases != null) {
+                for (String alias : aliases) {
+                    if (alias != null && !alias.trim().isEmpty()) {
+                        cleanedAliases.add(alias.trim());
+                    }
+                }
+            }
+            this.aliases = Collections.unmodifiableList(cleanedAliases);
         }
 
         public String getLabel() {

@@ -107,4 +107,17 @@ public class LineVocabTest {
         aliases.add("c");
         assertEquals(2, entry.getAliases().size());
     }
+
+    @Test
+    public void constructorSkipsNullAndBlankEntriesAndTrimsAliases() {
+        LineVocab vocab = new LineVocab(3, Arrays.asList(
+                null,
+                new LineVocab.Entry("  Ventricle wall  ", Arrays.asList(" vw ", null, " ")),
+                new LineVocab.Entry(" ", Arrays.asList("ignored"))));
+
+        assertEquals(1, vocab.entries().size());
+        assertEquals("Ventricle wall", vocab.entries().get(0).getLabel());
+        assertEquals(Arrays.asList("vw"), vocab.entries().get(0).getAliases());
+        assertNotNull(vocab.findMatch("VW"));
+    }
 }

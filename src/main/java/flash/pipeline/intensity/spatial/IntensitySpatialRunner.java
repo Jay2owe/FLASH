@@ -395,7 +395,9 @@ public final class IntensitySpatialRunner {
             ImageProcessor ip = source.getStack().getProcessor(s);
             for (int p = 0; p < out.length; p++) {
                 float value = ip.getf(p);
-                if (value > out[p]) out[p] = value;
+                if (Float.isNaN(out[p]) || (!Float.isNaN(value) && value > out[p])) {
+                    out[p] = value;
+                }
             }
         }
         ImagePlus mip = new ImagePlus(title == null ? source.getTitle() + "_MIP" : title,

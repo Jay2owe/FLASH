@@ -863,8 +863,9 @@ public class IntensityAnalysisV2 implements Analysis {
             logOrientationResolution(metadata);
             OrientationOps.applyTransform(imp, metadata);
 
+            ImagePlus[] chans = null;
             try {
-                ImagePlus[] chans = ChannelSplitter.split(imp);
+                chans = ChannelSplitter.split(imp);
                 int n = resolveProcessableChannelCount(imp, chans, channelNames, idx);
                 IJ.log("  Channels split: " + n);
                 if (n <= 0) {
@@ -907,6 +908,7 @@ public class IntensityAnalysisV2 implements Analysis {
                 }
 
             } finally {
+                closeImages(chans);
                 imp.changes = false;
                 imp.close();
                 imp.flush();
@@ -1001,55 +1003,60 @@ public class IntensityAnalysisV2 implements Analysis {
                             logOrientationResolution(metadata);
                             OrientationOps.applyTransform(imp, metadata);
 
-                            ImagePlus[] chans = ChannelSplitter.split(imp);
-                            int n = resolveProcessableChannelCount(imp, chans, channelNames, idx);
-                            if (n <= 0) {
-                                IJ.log("[" + (idx + 1) + "/" + total
-                                        + "] WARNING: no processable channels for " + imp.getTitle()
-                                        + "; skipping image.");
-                                int done = completed.incrementAndGet();
-                                IJ.showProgress(done, total);
-                                continue;
-                            }
+                            ImagePlus[] chans = null;
+                            try {
+                                chans = ChannelSplitter.split(imp);
+                                int n = resolveProcessableChannelCount(imp, chans, channelNames, idx);
+                                if (n <= 0) {
+                                    IJ.log("[" + (idx + 1) + "/" + total
+                                            + "] WARNING: no processable channels for " + imp.getTitle()
+                                            + "; skipping image.");
+                                    int done = completed.incrementAndGet();
+                                    IJ.showProgress(done, total);
+                                    continue;
+                                }
 
-                            // Per-image local tables to collect results before merging
-                            IntensityOutputTables localTables = outputPlan.newTables();
+                                // Per-image local tables to collect results before merging
+                                IntensityOutputTables localTables = outputPlan.newTables();
 
-                            if (roiAnalysis) {
-                                for (int rSet = 0; rSet < roiZips.size(); rSet++) {
-                                    if (!roiZipSelected[rSet]) continue;
+                                if (roiAnalysis) {
+                                    for (int rSet = 0; rSet < roiZips.size(); rSet++) {
+                                        if (!roiZipSelected[rSet]) continue;
 
-                                    // Use preloaded ROI array -- no synchronization needed
-                                    int roiIndex = idx * 2;
-                                    Roi activeRoi;
-                                    if (preloadedRois[rSet] == null || roiIndex >= preloadedRois[rSet].length) {
-                                        IJ.log("[" + (idx + 1) + "/" + total + "] ERROR: ROI set '"
-                                                + roiZipNames[rSet] + "' missing ROI index " + roiIndex);
-                                        break;
+                                        // Use preloaded ROI array -- no synchronization needed
+                                        int roiIndex = idx * 2;
+                                        Roi activeRoi;
+                                        if (preloadedRois[rSet] == null || roiIndex >= preloadedRois[rSet].length) {
+                                            IJ.log("[" + (idx + 1) + "/" + total + "] ERROR: ROI set '"
+                                                    + roiZipNames[rSet] + "' missing ROI index " + roiIndex);
+                                            break;
+                                        }
+                                        activeRoi = (Roi) preloadedRois[rSet][roiIndex].clone();
+
+                                        runIntensityMeasurementsForThisImage(
+                                                parts, chans, n,
+                                                binarization, thresholds,
+                                                channelNames, roiChannelIndex1Based,
+                                                outputPlan, localTables, idx + 1, roiZipNames[rSet],
+                                                cfg, filterSources, binDir,
+                                                basicFilterMacro, activeRoi);
                                     }
-                                    activeRoi = (Roi) preloadedRois[rSet][roiIndex].clone();
-
+                                } else {
                                     runIntensityMeasurementsForThisImage(
                                             parts, chans, n,
                                             binarization, thresholds,
-                                            channelNames, roiChannelIndex1Based,
-                                            outputPlan, localTables, idx + 1, roiZipNames[rSet],
+                                            channelNames, -1,
+                                            outputPlan, localTables, idx + 1, null,
                                             cfg, filterSources, binDir,
-                                            basicFilterMacro, activeRoi);
+                                            basicFilterMacro, null);
                                 }
-                            } else {
-                                runIntensityMeasurementsForThisImage(
-                                        parts, chans, n,
-                                        binarization, thresholds,
-                                        channelNames, -1,
-                                        outputPlan, localTables, idx + 1, null,
-                                        cfg, filterSources, binDir,
-                                        basicFilterMacro, null);
-                            }
 
-                            // Merge local tables into master totalTables
-                            synchronized (totalTables) {
-                                totalTables.mergeFrom(localTables);
+                                // Merge local tables into master totalTables
+                                synchronized (totalTables) {
+                                    totalTables.mergeFrom(localTables);
+                                }
+                            } finally {
+                                closeImages(chans);
                             }
 
                             int done = completed.incrementAndGet();

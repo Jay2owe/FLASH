@@ -19,6 +19,7 @@ import java.util.Set;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 public class MarkerLibraryValidationTest {
@@ -141,6 +142,24 @@ public class MarkerLibraryValidationTest {
         assertNotNull(tmem119);
         assertTrue("TMEM119 should have no additional categories",
                 tmem119.getAdditionalCategories().isEmpty());
+    }
+
+    @Test
+    public void constructorDefensivelyHandlesNullsAndWhitespace() {
+        MarkerLibrary.Entry entry = new MarkerLibrary.Entry(
+                " marker_id ", " Marker Name ", Arrays.asList(" alias ", null, " "),
+                " category ", Arrays.asList(" extra ", null),
+                " pattern ", " size ", " Green ", " Default ", " round ",
+                false, " small ", " low ", Arrays.asList(" hint ", null), " notes ");
+        MarkerLibrary library = new MarkerLibrary(1, Arrays.asList(" category ", null), Arrays.asList(null, entry));
+
+        assertEquals(1, library.entries().size());
+        assertEquals("category", library.categories().get(0));
+        assertEquals(entry, library.byId(" marker_id "));
+        assertEquals(entry, library.byCategory(" extra ").get(0));
+        assertEquals(Arrays.asList("alias"), entry.getAliases());
+        assertEquals("Marker Name", entry.getDisplayName());
+        assertNull(library.byId(null));
     }
 
     private static boolean containsNuclearEntryInTopThree(List<MarkerLibrary.Entry> entries) {

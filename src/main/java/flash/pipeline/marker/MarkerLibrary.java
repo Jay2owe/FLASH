@@ -30,7 +30,7 @@ public final class MarkerLibrary {
     public MarkerLibrary(int libraryVersion, List<String> categories, List<Entry> entries) {
         this.libraryVersion = libraryVersion;
         this.categories = immutableStringList(categories);
-        this.entries = Collections.unmodifiableList(new ArrayList<Entry>(entries));
+        this.entries = immutableEntryList(entries);
         this.byId = indexById(this.entries);
         this.byCategory = indexByCategory(this.entries);
     }
@@ -76,11 +76,11 @@ public final class MarkerLibrary {
     }
 
     public Entry byId(String id) {
-        return byId.get(id);
+        return byId.get(id == null ? "" : id.trim());
     }
 
     public List<Entry> byCategory(String category) {
-        List<Entry> categoryEntries = byCategory.get(category);
+        List<Entry> categoryEntries = byCategory.get(category == null ? "" : category.trim());
         return categoryEntries == null ? Collections.<Entry>emptyList() : categoryEntries;
     }
 
@@ -120,7 +120,8 @@ public final class MarkerLibrary {
     private static Map<String, Entry> indexById(List<Entry> entries) {
         Map<String, Entry> out = new LinkedHashMap<String, Entry>();
         for (Entry entry : entries) {
-            out.put(entry.getId(), entry);
+            if (entry == null || entry.getId().trim().isEmpty()) continue;
+            out.put(entry.getId().trim(), entry);
         }
         return Collections.unmodifiableMap(out);
     }
@@ -133,10 +134,12 @@ public final class MarkerLibrary {
         Map<String, List<Entry>> mutable = new LinkedHashMap<String, List<Entry>>();
         for (Entry entry : entries) {
             java.util.Set<String> seen = new java.util.LinkedHashSet<String>();
+            if (entry == null) continue;
             seen.add(entry.getCategory());
             seen.addAll(entry.getAdditionalCategories());
             for (String category : seen) {
-                if (category == null || category.isEmpty()) continue;
+                if (category == null || category.trim().isEmpty()) continue;
+                category = category.trim();
                 List<Entry> categoryEntries = mutable.get(category);
                 if (categoryEntries == null) {
                     categoryEntries = new ArrayList<Entry>();
@@ -163,7 +166,27 @@ public final class MarkerLibrary {
     }
 
     private static List<String> immutableStringList(List<String> values) {
-        return Collections.unmodifiableList(new ArrayList<String>(values));
+        List<String> out = new ArrayList<String>();
+        if (values != null) {
+            for (String value : values) {
+                if (value != null && !value.trim().isEmpty()) {
+                    out.add(value.trim());
+                }
+            }
+        }
+        return Collections.unmodifiableList(out);
+    }
+
+    private static List<Entry> immutableEntryList(List<Entry> values) {
+        List<Entry> out = new ArrayList<Entry>();
+        if (values != null) {
+            for (Entry value : values) {
+                if (value != null) {
+                    out.add(value);
+                }
+            }
+        }
+        return Collections.unmodifiableList(out);
     }
 
     private static List<String> asStrings(List<Object> values) {
@@ -353,7 +376,7 @@ public final class MarkerLibrary {
         }
 
         private static String safe(String value) {
-            return value == null ? "" : value;
+            return value == null ? "" : value.trim();
         }
     }
 }
