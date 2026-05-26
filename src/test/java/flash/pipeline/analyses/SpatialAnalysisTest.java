@@ -312,7 +312,7 @@ public class SpatialAnalysisTest {
         analysis.execute(root.getAbsolutePath());
 
         assertTrue(new File(root,
-                "FLASH/Image Analysis/Line Distance Analysis/A.csv").isFile());
+                "FLASH/Results/Tables/Line Distance/A.csv").isFile());
     }
 
     @Test

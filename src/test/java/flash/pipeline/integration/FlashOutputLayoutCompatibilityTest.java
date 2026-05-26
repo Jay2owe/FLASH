@@ -11,7 +11,6 @@ import org.junit.rules.TemporaryFolder;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -60,34 +59,16 @@ public class FlashOutputLayoutCompatibilityTest {
     }
 
     @Test
-    public void spectralWriterUsesFlashOutputsAndReusesLegacyFiles() throws Exception {
+    public void spectralWriterUsesResultsLayout() throws Exception {
         File project = temp.newFolder("project");
 
         SpectralOutputWriter.ExpectedOutputs outputs =
                 SpectralOutputWriter.expectedOutputs(project.getAbsolutePath(),
                         0, "Sample_LH_SCN", "Target");
         assertEquals(new File(project,
-                        "FLASH/Spectral Decontamination/Image Outputs/"
+                        "FLASH/Results/Analysis Images/Spectral Decontamination/"
                                 + "Series 001 - Sample_LH_SCN/corrected_Target.tif"),
                 outputs.correctedImageFile);
-
-        File legacyImage = new File(project,
-                "Image Analysis/Series 001 - Sample_LH_SCN/"
-                        + "Spectral Decontamination/corrected_Target.tif");
-        assertTrue(legacyImage.getParentFile().mkdirs());
-        assertTrue(legacyImage.createNewFile());
-        assertTrue(SpectralOutputWriter.expectedOutputsExist(outputs, true, false));
-
-        File legacySummary = new File(project,
-                "Data Analysis/Spectral Decontamination/per_image_summary.csv");
-        assertTrue(legacySummary.getParentFile().mkdirs());
-        Files.write(legacySummary.toPath(),
-                ("SeriesIndex,SeriesNumber,SeriesName\n0,1,Sample_LH_SCN\n")
-                        .getBytes(StandardCharsets.UTF_8));
-
-        Map<Integer, Map<String, String>> rows =
-                SpectralOutputWriter.readPerImageSummaryRows(project.getAbsolutePath());
-        assertEquals("Sample_LH_SCN", rows.get(Integer.valueOf(0)).get("SeriesName"));
     }
 
     private static BinConfig minimalConfig(String channelName) {

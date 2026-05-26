@@ -282,7 +282,7 @@ public class MasterAggregationAnalysisTest {
         File attrs = roiTables(root);
         File objects = layout.tablesObjectsWriteDir();
         File intensities = layout.tablesIntensityWriteDir();
-        File lineDistances = layout.lineDistanceWriteDir();
+        File lineDistances = layout.tablesLineDistanceWriteDir();
         assertTrue(attrs.mkdirs());
         assertTrue(objects.mkdirs());
         assertTrue(intensities.mkdirs());

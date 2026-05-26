@@ -68,31 +68,29 @@ public class DeconvolutionIOTest {
     }
 
     @Test
-    public void mergedDeconvolvedOutputUsesCanonicalFileName() {
+    public void mergedDeconvolvedOutputLandsUnderAnalysisImagesDeconvolution() {
         File root = temp.getRoot();
+        File expectedDir = new File(new File(new File(new File(root, "FLASH"), "Results"),
+                "Analysis Images"), "Deconvolution");
         File merged = DeconvolutionIO.mergedDeconvFile(root, "My Image");
-        assertEquals(new File(new File(new File(root, "FLASH"), "3D Deconvolution"), "My Image_deconv.tif"), merged);
+        assertEquals(new File(expectedDir, "My Image_deconv.tif"), merged);
     }
 
     @Test
-    public void deconvolutionOutputsUseFlashAnalysisFolderWithLegacyReadFallback() {
+    public void deconvolutionOutputsUseAnalysisImagesDeconvolutionDir() {
         File root = temp.getRoot();
+        File expectedDir = new File(new File(new File(new File(root, "FLASH"), "Results"),
+                "Analysis Images"), "Deconvolution");
 
-        assertEquals(new File(new File(root, "FLASH"), "3D Deconvolution"),
-                DeconvolutionIO.deconvOutDir(root));
+        assertEquals(expectedDir, DeconvolutionIO.deconvOutDir(root));
 
         List<File> candidates = DeconvolutionIO.mergedDeconvFileReadCandidates(root, "My Image");
-        assertEquals(3, candidates.size());
-        assertEquals(new File(new File(new File(root, "FLASH"), "3D Deconvolution"), "My Image_deconv.tif"),
-                candidates.get(0));
-        assertEquals(new File(new File(new File(root, "FLASH"), "02 - 3D Deconvolution"), "My Image_deconv.tif"),
-                candidates.get(1));
-        assertEquals(new File(new File(new File(root, "Image Analysis"), "Deconvolved"), "My Image_deconv.tif"),
-                candidates.get(2));
+        assertEquals(1, candidates.size());
+        assertEquals(new File(expectedDir, "My Image_deconv.tif"), candidates.get(0));
     }
 
     @Test
-    public void cacheOutputsUseFlashCacheFolderWithLegacyReadFallback() {
+    public void cacheOutputsUseFlashCacheFolder() {
         File root = temp.getRoot();
         String paramsHash = "ABC123";
 
@@ -102,11 +100,9 @@ public class DeconvolutionIOTest {
                 DeconvolutionIO.cacheParamsDir(root, paramsHash));
 
         List<File> candidates = DeconvolutionIO.cacheFileReadCandidates(root, paramsHash, "My Image", 1);
-        assertEquals(2, candidates.size());
+        assertEquals(1, candidates.size());
         assertEquals(new File(new File(new File(new File(new File(root, "FLASH"), "Cache"), "3D Deconvolution"),
                         paramsHash), "My Image_C1.tif"),
                 candidates.get(0));
-        assertEquals(new File(new File(new File(root, ".deconv_cache"), paramsHash), "My Image_C1.tif"),
-                candidates.get(1));
     }
 }

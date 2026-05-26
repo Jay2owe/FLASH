@@ -46,6 +46,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -316,19 +317,17 @@ public class LineDistanceAnalysis implements Analysis {
     }
 
     static File lineDistanceOutputDir(String directory) {
-        return FlashProjectLayout.forDirectory(directory).lineDistanceWriteDir();
+        return FlashProjectLayout.forDirectory(directory).tablesLineDistanceWriteDir();
     }
 
-    static File lineSetWriteDir(String directory) {
-        return FlashProjectLayout.forDirectory(directory).lineSetWriteDir();
-    }
-
-    static List<File> lineSetReadDirs(String directory) {
-        return FlashProjectLayout.forDirectory(directory).lineSetReadDirs();
+    public static File lineSetWriteDir(String directory) {
+        return new File(
+                FlashProjectLayout.forDirectory(directory).tablesLineDistanceWriteDir(),
+                "Line Sets");
     }
 
     static List<String> lineSetNames(String directory) {
-        return lineSetNames(lineSetReadDirs(directory));
+        return lineSetNames(Collections.singletonList(lineSetWriteDir(directory)));
     }
 
     static List<String> lineSetNames(List<File> lineSetDirs) {
@@ -723,13 +722,6 @@ public class LineDistanceAnalysis implements Analysis {
         return safe;
     }
 
-    private static File firstExistingDirectory(List<File> dirs) {
-        for (File dir : dirs) {
-            if (dir != null && dir.isDirectory()) return dir;
-        }
-        return null;
-    }
-
     private static File resolveLineSetZip(String directory, File preferredDir, String lineName) {
         String fileName = lineName + ".zip";
         for (File dir : lineSetSearchDirs(directory, preferredDir)) {
@@ -743,9 +735,7 @@ public class LineDistanceAnalysis implements Analysis {
 
     private static List<File> lineSetSearchDirs(String directory, File preferredDir) {
         List<File> dirs = new ArrayList<File>();
-        for (File dir : lineSetReadDirs(directory)) {
-            addDirectoryIfDistinct(dirs, dir);
-        }
+        addDirectoryIfDistinct(dirs, lineSetWriteDir(directory));
         addDirectoryIfDistinct(dirs, preferredDir);
         return dirs;
     }

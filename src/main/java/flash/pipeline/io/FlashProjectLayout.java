@@ -75,25 +75,12 @@ public final class FlashProjectLayout {
     public static final String ORIENTATION_MANIFEST_FILENAME = "Image Orientation.csv";
     public static final String ORIENTATION_ALIASES_FILENAME = "Image Orientation Aliases.csv";
 
-    private static final String DATA_ANALYSIS_DIR = "Data Analysis";
-    private static final String IMAGE_ANALYSIS_DIR = "Image Analysis";
     private static final String IMAGEJ_EXPORTS_DIR = "ImageJ Exports";
     private static final String RESULTS_EXPORT_DIR = "Results Export";
 
     private final File projectRoot;
 
     public enum AnalysisFolder {
-        DECONVOLUTION("3D Deconvolution",
-                FLASH_DIR + File.separator + "02 - 3D Deconvolution",
-                IMAGE_ANALYSIS_DIR + File.separator + "Deconvolved"),
-        LINE_DISTANCE(IMAGE_ANALYSIS_DIR + File.separator + "Line Distance Analysis",
-                FLASH_DIR + File.separator + "07 - Line Distance",
-                DATA_ANALYSIS_DIR + File.separator + "Lines",
-                DATA_ANALYSIS_DIR + File.separator + "Objects"),
-        SPECTRAL("Spectral Decontamination",
-                FLASH_DIR + File.separator + "08 - Spectral Decontamination",
-                DATA_ANALYSIS_DIR + File.separator + "Spectral Decontamination",
-                IMAGE_ANALYSIS_DIR + File.separator + "Spectral Decontamination"),
         AGGREGATION(RESULTS_EXPORT_DIR,
                 FLASH_DIR + File.separator + "09 - Result Aggregation",
                 IMAGEJ_EXPORTS_DIR),
@@ -389,14 +376,6 @@ public final class FlashProjectLayout {
         return immutableList(objectAnalysisDetailsWriteDir());
     }
 
-    public File lineDistanceWriteDir() {
-        return analysisWriteDir(AnalysisFolder.LINE_DISTANCE);
-    }
-
-    public File lineSetWriteDir() {
-        return new File(lineDistanceWriteDir(), "Line Sets");
-    }
-
     public File aggregationWriteDir() {
         return analysisWriteDir(AnalysisFolder.AGGREGATION);
     }
@@ -461,19 +440,6 @@ public final class FlashProjectLayout {
 
     public List<File> intensityAnalysisDetailsReadDirs() {
         return Collections.singletonList(intensityAnalysisDetailsWriteDir());
-    }
-
-    public List<File> lineDistanceReadDirs() {
-        return immutableList(lineDistanceWriteDir(),
-                new File(projectRoot, FLASH_DIR + File.separator + "07 - Line Distance"),
-                new File(projectRoot, DATA_ANALYSIS_DIR + File.separator + "Objects"));
-    }
-
-    public List<File> lineSetReadDirs() {
-        return immutableList(lineSetWriteDir(),
-                new File(projectRoot, FLASH_DIR + File.separator + "07 - Line Distance"
-                        + File.separator + "Line Sets"),
-                new File(projectRoot, DATA_ANALYSIS_DIR + File.separator + "Lines"));
     }
 
     public File presetsRoot() {

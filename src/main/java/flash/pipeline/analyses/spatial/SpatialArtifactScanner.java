@@ -44,7 +44,7 @@ public final class SpatialArtifactScanner {
             EnumSet<SubAnalysis> channelDone = detectColumnSignals(columns);
             flagChannelPairs(done, channel, sectionKeys, channelDone);
 
-            Set<String> lineColumns = readObjectCsvHeader(layout.lineDistanceWriteDir(), channel);
+            Set<String> lineColumns = readObjectCsvHeader(layout.tablesLineDistanceWriteDir(), channel);
             if (matchesAny(lineColumns, LINE_DISTANCE_COLUMN)) {
                 flagChannelPairs(done, channel, sectionKeys, EnumSet.of(SubAnalysis.LINE_DISTANCE));
             }
@@ -53,7 +53,7 @@ public final class SpatialArtifactScanner {
         scanDensityHeatmaps(done, layout.analysisImagesSpatialHeatmapsDir(), channels, sectionKeys);
         scanSpatialSidecars(done, layout.tablesSpatialWriteDir(), channels, sectionKeys);
         scanPhenotypingSidecars(done, new File(layout.tablesSpatialWriteDir(), "Phenotyping"), channels, sectionKeys);
-        scanLineDistanceSidecars(done, layout.lineDistanceWriteDir(), channels, sectionKeys);
+        scanLineDistanceSidecars(done, layout.tablesLineDistanceWriteDir(), channels, sectionKeys);
 
         return new SpatialArtifactStatus(done, channels, sectionKeys);
     }

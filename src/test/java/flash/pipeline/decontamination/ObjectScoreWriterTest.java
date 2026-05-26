@@ -91,9 +91,9 @@ public class ObjectScoreWriterTest {
                 StandardCharsets.UTF_8);
         assertTrue(ObjectScoreWriter.perObjectScoresFile(directory.getAbsolutePath())
                 .getAbsolutePath()
-                .contains(new File("FLASH/Spectral Decontamination").getPath()));
+                .contains(new File("FLASH/Results/Tables/Spectral Decontamination").getPath()));
         assertTrue(cleanedMapFile.getAbsolutePath()
-                .contains(new File("FLASH/Spectral Decontamination/Image Outputs").getPath()));
+                .contains(new File("FLASH/Results/Analysis Images/Spectral Decontamination").getPath()));
         assertTrue(csv.contains("ObjectID"));
         assertTrue(csv.contains("SCN1"));
         assertTrue(csv.contains("7"));

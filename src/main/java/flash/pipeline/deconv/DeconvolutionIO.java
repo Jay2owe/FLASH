@@ -5,7 +5,6 @@ import flash.pipeline.io.FlashProjectLayout;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
@@ -23,35 +22,15 @@ public final class DeconvolutionIO {
     private DeconvolutionIO() {}
 
     public static File deconvOutDir(File rootDir) {
-        return layout(rootDir).analysisWriteDir(FlashProjectLayout.AnalysisFolder.DECONVOLUTION);
+        return layout(rootDir).analysisImagesDeconvolutionDir();
     }
 
     public static File cacheDir(File rootDir) {
         return new File(layout(rootDir).cacheRoot(), CACHE_SUBDIR);
     }
 
-    public static List<File> deconvOutReadDirs(File rootDir) {
-        return layout(rootDir).analysisReadDirs(FlashProjectLayout.AnalysisFolder.DECONVOLUTION);
-    }
-
-    public static List<File> cacheReadDirs(File rootDir) {
-        List<File> out = new ArrayList<File>();
-        out.add(cacheDir(rootDir));
-        out.add(new File(rootDir, ".deconv_cache"));
-        return Collections.unmodifiableList(out);
-    }
-
     public static File cacheParamsDir(File rootDir, String paramsHash) {
         return new File(cacheDir(rootDir), safeToken(paramsHash));
-    }
-
-    public static List<File> cacheParamsReadDirs(File rootDir, String paramsHash) {
-        List<File> out = new ArrayList<File>();
-        List<File> roots = cacheReadDirs(rootDir);
-        for (int i = 0; i < roots.size(); i++) {
-            out.add(new File(roots.get(i), safeToken(paramsHash)));
-        }
-        return Collections.unmodifiableList(out);
     }
 
     public static File deconvFile(File rootDir, String imageBaseName, int channelIndex) {
@@ -59,12 +38,7 @@ public final class DeconvolutionIO {
     }
 
     public static List<File> deconvFileReadCandidates(File rootDir, String imageBaseName, int channelIndex) {
-        List<File> out = new ArrayList<File>();
-        List<File> dirs = deconvOutReadDirs(rootDir);
-        for (int i = 0; i < dirs.size(); i++) {
-            out.add(new File(dirs.get(i), baseName(imageBaseName) + "_C" + channelIndex + ".tif"));
-        }
-        return Collections.unmodifiableList(out);
+        return Collections.singletonList(deconvFile(rootDir, imageBaseName, channelIndex));
     }
 
     public static File mergedDeconvFile(File rootDir, String imageBaseName) {
@@ -72,12 +46,7 @@ public final class DeconvolutionIO {
     }
 
     public static List<File> mergedDeconvFileReadCandidates(File rootDir, String imageBaseName) {
-        List<File> out = new ArrayList<File>();
-        List<File> dirs = deconvOutReadDirs(rootDir);
-        for (int i = 0; i < dirs.size(); i++) {
-            out.add(new File(dirs.get(i), baseName(imageBaseName) + "_deconv.tif"));
-        }
-        return Collections.unmodifiableList(out);
+        return Collections.singletonList(mergedDeconvFile(rootDir, imageBaseName));
     }
 
     public static File cacheFile(File rootDir, String paramsHash, String imageBaseName, int channelIndex) {
@@ -88,12 +57,7 @@ public final class DeconvolutionIO {
                                                      String paramsHash,
                                                      String imageBaseName,
                                                      int channelIndex) {
-        List<File> out = new ArrayList<File>();
-        List<File> dirs = cacheParamsReadDirs(rootDir, paramsHash);
-        for (int i = 0; i < dirs.size(); i++) {
-            out.add(new File(dirs.get(i), baseName(imageBaseName) + "_C" + channelIndex + ".tif"));
-        }
-        return Collections.unmodifiableList(out);
+        return Collections.singletonList(cacheFile(rootDir, paramsHash, imageBaseName, channelIndex));
     }
 
     public static File detailsFile(File rootDir, String imageBaseName) {

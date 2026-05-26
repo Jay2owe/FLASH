@@ -44,44 +44,6 @@ public class DeconvolvedInputResolverTest {
     }
 
     @Test
-    public void legacyMirrorFreshReturnsMirrorWhenNewOutputIsMissing() throws Exception {
-        File root = temp.newFolder("resolver-legacy");
-        File original = new File(root, "sample.tif");
-        Files.write(original.toPath(), "raw".getBytes(StandardCharsets.UTF_8));
-
-        File legacyMirror = DeconvolutionIO.mergedDeconvFileReadCandidates(root, "sample").get(1);
-        Files.createDirectories(legacyMirror.getParentFile().toPath());
-        Files.write(legacyMirror.toPath(), "deconv".getBytes(StandardCharsets.UTF_8));
-        assertTrue(original.setLastModified(1_000L));
-        assertTrue(legacyMirror.setLastModified(2_000L));
-
-        captureLogs();
-        assertEquals(legacyMirror, DeconvolvedInputResolver.resolveInput(original, true));
-        assertTrue(logs.get(0).contains("using deconvolved stack"));
-    }
-
-    @Test
-    public void newMirrorIsPreferredOverLegacyMirror() throws Exception {
-        File root = temp.newFolder("resolver-new-first");
-        File original = new File(root, "sample.tif");
-        Files.write(original.toPath(), "raw".getBytes(StandardCharsets.UTF_8));
-
-        File newMirror = DeconvolutionIO.mergedDeconvFileReadCandidates(root, "sample").get(0);
-        File legacyMirror = DeconvolutionIO.mergedDeconvFileReadCandidates(root, "sample").get(1);
-        Files.createDirectories(newMirror.getParentFile().toPath());
-        Files.createDirectories(legacyMirror.getParentFile().toPath());
-        Files.write(newMirror.toPath(), "new deconv".getBytes(StandardCharsets.UTF_8));
-        Files.write(legacyMirror.toPath(), "legacy deconv".getBytes(StandardCharsets.UTF_8));
-        assertTrue(original.setLastModified(1_000L));
-        assertTrue(newMirror.setLastModified(2_000L));
-        assertTrue(legacyMirror.setLastModified(3_000L));
-
-        captureLogs();
-        assertEquals(newMirror, DeconvolvedInputResolver.resolveInput(original, true));
-        assertTrue(logs.get(0).contains("using deconvolved stack"));
-    }
-
-    @Test
     public void mirrorStaleFallsBackToRaw() throws Exception {
         File root = temp.newFolder("resolver-stale");
         File original = new File(root, "sample.tif");

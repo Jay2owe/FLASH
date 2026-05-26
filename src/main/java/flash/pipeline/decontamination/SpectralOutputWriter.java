@@ -33,13 +33,6 @@ import java.util.TreeMap;
  */
 public final class SpectralOutputWriter {
 
-    public static final String DATA_OUTPUT_FOLDER =
-            FlashProjectLayout.FLASH_DIR + File.separator
-                    + FlashProjectLayout.AnalysisFolder.SPECTRAL.directoryName();
-    public static final String IMAGE_OUTPUT_FOLDER_NAME = "Image Outputs";
-    public static final String LEGACY_DATA_OUTPUT_FOLDER =
-            "Data Analysis" + File.separator + "Spectral Decontamination";
-    public static final String LEGACY_IMAGE_OUTPUT_FOLDER_NAME = "Spectral Decontamination";
     public static final String PER_IMAGE_SUMMARY_FILENAME = "per_image_summary.csv";
     public static final String CORRECTION_COEFFICIENTS_FILENAME = "correction_coefficients.csv";
     public static final String ANALYSIS_DETAILS_FILENAME = "analysis_details.txt";
@@ -87,8 +80,11 @@ public final class SpectralOutputWriter {
     }
 
     public static File dataOutputDirectory(String directory) {
-        return FlashProjectLayout.forDirectory(directory)
-                .analysisWriteDir(FlashProjectLayout.AnalysisFolder.SPECTRAL);
+        return FlashProjectLayout.forDirectory(directory).tablesSpectralWriteDir();
+    }
+
+    public static File imageOutputRoot(String directory) {
+        return FlashProjectLayout.forDirectory(directory).analysisImagesSpectralDir();
     }
 
     public static File perImageSummaryFile(String directory) {
@@ -108,12 +104,7 @@ public final class SpectralOutputWriter {
                                                  String seriesName,
                                                  String targetChannelName) {
         String imageFolderName = buildImageFolderName(seriesIndex, seriesName);
-        File imageOutputDirectory = new File(
-                new File(dataOutputDirectory(directory), IMAGE_OUTPUT_FOLDER_NAME),
-                imageFolderName);
-        File legacyImageOutputDirectory = new File(
-                new File(new File(directory, "Image Analysis"), imageFolderName),
-                LEGACY_IMAGE_OUTPUT_FOLDER_NAME);
+        File imageOutputDirectory = new File(imageOutputRoot(directory), imageFolderName);
         String safeTargetName = ChannelFilenameCodec.toSafe(
                 targetChannelName == null || targetChannelName.trim().isEmpty()
                         ? "target"
@@ -126,10 +117,8 @@ public final class SpectralOutputWriter {
                 relativePath(directory, imageOutputDirectory),
                 correctedImageFile,
                 maskImageFile,
-                immutableList(correctedImageFile,
-                        new File(legacyImageOutputDirectory, "corrected_" + safeTargetName + ".tif")),
-                immutableList(maskImageFile,
-                        new File(legacyImageOutputDirectory, "final_mask_" + safeTargetName + ".tif")));
+                Collections.singletonList(correctedImageFile),
+                Collections.singletonList(maskImageFile));
     }
 
     public static boolean expectedOutputsExist(ExpectedOutputs outputs,
@@ -413,13 +402,11 @@ public final class SpectralOutputWriter {
     }
 
     private static List<File> perImageSummaryReadFiles(String directory) {
-        return immutableList(perImageSummaryFile(directory),
-                new File(new File(directory, LEGACY_DATA_OUTPUT_FOLDER), PER_IMAGE_SUMMARY_FILENAME));
+        return Collections.singletonList(perImageSummaryFile(directory));
     }
 
     private static List<File> correctionCoefficientsReadFiles(String directory) {
-        return immutableList(correctionCoefficientsFile(directory),
-                new File(new File(directory, LEGACY_DATA_OUTPUT_FOLDER), CORRECTION_COEFFICIENTS_FILENAME));
+        return Collections.singletonList(correctionCoefficientsFile(directory));
     }
 
     private static Map<Integer, List<Map<String, String>>> readGroupedRowsBySeriesIndex(File file) throws IOException {
@@ -594,13 +581,6 @@ public final class SpectralOutputWriter {
             }
         }
         return null;
-    }
-
-    private static List<File> immutableList(File first, File second) {
-        List<File> out = new ArrayList<File>();
-        out.add(first);
-        out.add(second);
-        return Collections.unmodifiableList(out);
     }
 
     private static String clean(String value) {

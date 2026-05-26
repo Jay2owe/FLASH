@@ -2398,7 +2398,9 @@ public class MasterAggregationAnalysis implements Analysis {
                 java.util.Collections.singletonList(layout.tablesObjectsWriteDir()), objectCsvFilter());
         appendFirstNamedCsvs(files, seenCanonicalPaths,
                 java.util.Collections.singletonList(layout.tablesMorphometryWriteDir()), objectCsvFilter());
-        appendFirstNamedCsvs(files, seenCanonicalPaths, layout.lineDistanceReadDirs(), objectCsvFilter());
+        appendFirstNamedCsvs(files, seenCanonicalPaths,
+                java.util.Collections.singletonList(layout.tablesLineDistanceWriteDir()),
+                objectCsvFilter());
         return files;
     }
 

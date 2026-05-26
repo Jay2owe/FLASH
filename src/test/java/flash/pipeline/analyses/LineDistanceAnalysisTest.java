@@ -91,29 +91,24 @@ public class LineDistanceAnalysisTest {
     }
 
     @Test
-    public void lineDistancePathsUseFlashLayout() throws Exception {
+    public void lineDistancePathsUseResultsLayout() throws Exception {
         File dir = temp.newFolder("paths");
 
-        assertEquals(new File(dir, "FLASH/Image Analysis/Line Distance Analysis").getAbsolutePath(),
+        assertEquals(new File(dir, "FLASH/Results/Tables/Line Distance").getAbsolutePath(),
                 LineDistanceAnalysis.lineDistanceOutputDir(dir.getAbsolutePath()).getAbsolutePath());
-        assertEquals(new File(dir, "FLASH/Image Analysis/Line Distance Analysis/Line Sets").getAbsolutePath(),
+        assertEquals(new File(dir, "FLASH/Results/Tables/Line Distance/Line Sets").getAbsolutePath(),
                 LineDistanceAnalysis.lineSetWriteDir(dir.getAbsolutePath()).getAbsolutePath());
     }
 
     @Test
-    public void lineSetNamesPreferNewLayoutAndIncludeLegacyFallbacks() throws Exception {
+    public void lineSetNamesEnumerateZipsInWriteDir() throws Exception {
         File dir = temp.newFolder("lineSets");
-        FlashProjectLayout layout = FlashProjectLayout.forDirectory(dir.getAbsolutePath());
-        File newLines = layout.lineSetWriteDir();
-        File legacyLines = new File(dir, "Data Analysis/Lines");
-        assertTrue(newLines.mkdirs());
-        assertTrue(legacyLines.mkdirs());
-        assertTrue(new File(newLines, "Ventricle.zip").createNewFile());
-        assertTrue(new File(newLines, "Boundary.zip").createNewFile());
-        assertTrue(new File(legacyLines, "Ventricle.zip").createNewFile());
-        assertTrue(new File(legacyLines, "Legacy.zip").createNewFile());
+        File lineSets = LineDistanceAnalysis.lineSetWriteDir(dir.getAbsolutePath());
+        assertTrue(lineSets.mkdirs());
+        assertTrue(new File(lineSets, "Ventricle.zip").createNewFile());
+        assertTrue(new File(lineSets, "Boundary.zip").createNewFile());
 
-        assertEquals(Arrays.asList("Boundary", "Ventricle", "Legacy"),
+        assertEquals(Arrays.asList("Boundary", "Ventricle"),
                 LineDistanceAnalysis.lineSetNames(dir.getAbsolutePath()));
     }
 
@@ -131,7 +126,7 @@ public class LineDistanceAnalysisTest {
                 LineDistanceAnalysis.lineSetWriteDir(dir.getAbsolutePath()),
                 Arrays.asList("MissingLineSet"));
 
-        File out = new File(dir, "FLASH/Image Analysis/Line Distance Analysis/Marker_A.csv");
+        File out = new File(dir, "FLASH/Results/Tables/Line Distance/Marker_A.csv");
         assertTrue(out.isFile());
         assertTrue(new String(Files.readAllBytes(out.toPath()), StandardCharsets.UTF_8)
                 .contains("Region,XM,YM"));
@@ -149,7 +144,7 @@ public class LineDistanceAnalysisTest {
         new LineDistanceAnalysis().computeDistances(dir.getAbsolutePath(),
                 LineDistanceAnalysis.lineSetWriteDir(dir.getAbsolutePath()), null);
 
-        assertFalse(new File(dir, "FLASH/Image Analysis/Line Distance Analysis/Marker_A.csv").exists());
+        assertFalse(new File(dir, "FLASH/Results/Tables/Line Distance/Marker_A.csv").exists());
     }
 
     @Test
@@ -168,7 +163,7 @@ public class LineDistanceAnalysisTest {
         new LineDistanceAnalysis().computeDistances(dir.getAbsolutePath(), lines,
                 Arrays.asList(" Boundary ", "", null, "Boundary"));
 
-        File out = new File(dir, "FLASH/Image Analysis/Line Distance Analysis/Marker_A.csv");
+        File out = new File(dir, "FLASH/Results/Tables/Line Distance/Marker_A.csv");
         CsvTableIO.ChannelData cd = CsvTableIO.loadChannelCsv(out, "Marker_A");
         assertNotNull(cd);
         assertEquals("Inf", cd.get(0, "Marker_A_DistTo_Boundary"));

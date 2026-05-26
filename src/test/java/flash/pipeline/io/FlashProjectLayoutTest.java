@@ -31,10 +31,6 @@ public class FlashProjectLayoutTest {
                 layout.intensityAnalysisDetailsWriteDir());
         assertPath(new File(project, "FLASH/Results/Analysis Images/Objects/Analysis Details"),
                 layout.objectAnalysisDetailsWriteDir());
-        assertPath(new File(project, "FLASH/Image Analysis/Line Distance Analysis"),
-                layout.lineDistanceWriteDir());
-        assertPath(new File(project, "FLASH/Image Analysis/Line Distance Analysis/Line Sets"),
-                layout.lineSetWriteDir());
         assertPath(new File(project, "FLASH/Results Export"),
                 layout.aggregationWriteDir());
         assertPath(new File(project, "FLASH/Results Export"),
@@ -47,8 +43,6 @@ public class FlashProjectLayoutTest {
                 layout.excelWriteDir());
         assertPath(new File(project, "FLASH/Results Export/Summary.xlsx"),
                 layout.excelWriteFile(FlashProjectLayout.SUMMARY_WORKBOOK_FILENAME));
-        assertPath(new File(project, "FLASH/Spectral Decontamination"),
-                layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.SPECTRAL));
         assertPath(new File(project, "FLASH/.settings/Presets"), layout.presetsRoot());
         assertPath(new File(project, "FLASH/Reports"), layout.reportsRoot());
         assertPath(new File(project, "FLASH/Reports/Quality Report"), layout.qualityReportWriteDir());
@@ -167,10 +161,6 @@ public class FlashProjectLayoutTest {
         File project = temp.newFolder("project");
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(project.getAbsolutePath());
 
-        assertPaths(layout.analysisReadDirs(FlashProjectLayout.AnalysisFolder.DECONVOLUTION),
-                new File(project, "FLASH/3D Deconvolution"),
-                new File(project, "FLASH/02 - 3D Deconvolution"),
-                new File(project, "Image Analysis/Deconvolved"));
         assertPaths(layout.analysisReadDirs(FlashProjectLayout.AnalysisFolder.EXCEL),
                 new File(project, "FLASH/Results Export"),
                 new File(project, "FLASH/11 - Excel Summary Export"),
@@ -183,14 +173,6 @@ public class FlashProjectLayoutTest {
                 new File(project, "FLASH/Results/Analysis Images/Objects/Analysis Details"));
         assertPaths(layout.intensityAnalysisDetailsReadDirs(),
                 new File(project, "FLASH/Results/Run Records/analysis_details"));
-        assertPaths(layout.lineDistanceReadDirs(),
-                new File(project, "FLASH/Image Analysis/Line Distance Analysis"),
-                new File(project, "FLASH/07 - Line Distance"),
-                new File(project, "Data Analysis/Objects"));
-        assertPaths(layout.lineSetReadDirs(),
-                new File(project, "FLASH/Image Analysis/Line Distance Analysis/Line Sets"),
-                new File(project, "FLASH/07 - Line Distance/Line Sets"),
-                new File(project, "Data Analysis/Lines"));
         assertPaths(layout.aggregationReadDirs(),
                 new File(project, "FLASH/Results Export"),
                 new File(project, "FLASH/09 - Result Aggregation"),

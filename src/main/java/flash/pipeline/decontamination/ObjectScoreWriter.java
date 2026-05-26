@@ -292,14 +292,7 @@ public final class ObjectScoreWriter {
     }
 
     private static File perObjectScoresReadFile(String directory) {
-        File writeFile = perObjectScoresFile(directory);
-        if (writeFile.isFile()) {
-            return writeFile;
-        }
-        File legacyFile = new File(
-                new File(directory, SpectralOutputWriter.LEGACY_DATA_OUTPUT_FOLDER),
-                PER_OBJECT_SCORES_FILENAME);
-        return legacyFile.isFile() ? legacyFile : writeFile;
+        return perObjectScoresFile(directory);
     }
 
     private static List<ObjectMapDescriptor> locateFromObjectCsv(String directory,

@@ -52,8 +52,7 @@ public class AnalysisStatusScanner {
         tooltips.put(Integer.valueOf(FLASH_Pipeline.IDX_DRAW_ROIS),
                 roiTooltip(roiOutputs, orientationManifest));
         put(out, FLASH_Pipeline.IDX_DECONVOLUTION,
-                fallbackStatus(directory, hasAnyFile(layout.analysisReadDirs(
-                        FlashProjectLayout.AnalysisFolder.DECONVOLUTION))),
+                fallbackStatus(directory, hasAnyFile(layout.analysisImagesDeconvolutionDir())),
                 "3D Deconvolution");
         put(out, FLASH_Pipeline.IDX_SPLIT_MERGE,
                 fallbackStatus(directory, hasAnyFile(layout.presentationImagesDir())),
@@ -69,7 +68,8 @@ public class AnalysisStatusScanner {
                         java.util.Collections.singletonList(layout.tablesMorphometryWriteDir()))),
                 "Spatial Analysis");
         put(out, FLASH_Pipeline.IDX_LINE_DISTANCE,
-                fallbackStatus(directory, hasFile(layout.lineDistanceReadDirs(),
+                fallbackStatus(directory, hasFile(
+                        java.util.Collections.singletonList(layout.tablesLineDistanceWriteDir()),
                         "Spatial_Distances.csv")),
                 "Line Distance Analysis");
         put(out, FLASH_Pipeline.IDX_INTENSITY,
@@ -95,8 +95,8 @@ public class AnalysisStatusScanner {
                         FlashProjectLayout.LEGACY_SUMMARY_WORKBOOK_FILENAME)) != null),
                 "Excel Summary Export");
         put(out, FLASH_Pipeline.IDX_SPECTRAL_DECONTAMINATION,
-                fallbackStatus(directory, hasCsv(layout.analysisReadDirs(
-                        FlashProjectLayout.AnalysisFolder.SPECTRAL))),
+                fallbackStatus(directory, hasCsv(
+                        java.util.Collections.singletonList(layout.tablesSpectralWriteDir()))),
                 "Spectral Decontamination");
 
         return out;

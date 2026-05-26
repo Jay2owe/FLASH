@@ -80,11 +80,11 @@ public class SpectralPreviewSelectorTest {
     }
 
     @Test
-    public void previewSelectionFile_usesFlashSpectralFolder() throws Exception {
+    public void previewSelectionFile_usesResultsTablesSpectralFolder() throws Exception {
         File project = temp.newFolder("preview-path-project");
 
         assertEquals(new File(project,
-                        "FLASH/Spectral Decontamination/preview_selection.csv")
+                        "FLASH/Results/Tables/Spectral Decontamination/preview_selection.csv")
                         .getAbsolutePath(),
                 SpectralPreviewSelector.previewSelectionFile(project.getAbsolutePath()).getAbsolutePath());
     }

@@ -157,16 +157,16 @@ public final class RunSettingsSnapshot {
         switch (analysisIndex) {
             case 0: return layout.visibleConfigurationDir();
             case 1: return layout.analysisImagesRoiDir();
-            case 2: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.DECONVOLUTION);
+            case 2: return layout.analysisImagesDeconvolutionDir();
             case 3: return layout.presentationImagesRoot();
             case 4: return layout.analysisImagesObjectsRoot();
             case 5: return layout.tablesSpatialWriteDir();
-            case 6: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.LINE_DISTANCE);
+            case 6: return layout.tablesLineDistanceWriteDir();
             case 7: return layout.tablesIntensityWriteDir();
             case 8: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.AGGREGATION);
             case 9: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.STATISTICS);
             case 10: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.EXCEL);
-            case 11: return layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.SPECTRAL);
+            case 11: return layout.tablesSpectralWriteDir();
             default: return null;
         }
     }

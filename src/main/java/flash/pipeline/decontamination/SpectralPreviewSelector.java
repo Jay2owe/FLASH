@@ -27,7 +27,6 @@ import java.util.Set;
  */
 public class SpectralPreviewSelector {
 
-    public static final String OUTPUT_FOLDER = SpectralOutputWriter.DATA_OUTPUT_FOLDER;
     public static final String PREVIEW_SELECTION_FILENAME = "preview_selection.csv";
     public static final int DEFAULT_TYPICAL_IMAGES_PER_CONDITION = 2;
 

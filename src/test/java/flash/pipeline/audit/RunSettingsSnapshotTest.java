@@ -108,7 +108,7 @@ public class RunSettingsSnapshotTest {
         assertSnapshotExists(layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.AGGREGATION));
         assertSnapshotExists(layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.STATISTICS));
         assertSnapshotExists(layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.EXCEL));
-        assertSnapshotExists(layout.analysisWriteDir(FlashProjectLayout.AnalysisFolder.SPECTRAL));
+        assertSnapshotExists(layout.tablesSpectralWriteDir());
     }
 
     @Test

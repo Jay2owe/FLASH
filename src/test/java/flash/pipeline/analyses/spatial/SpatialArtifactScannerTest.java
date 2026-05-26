@@ -81,7 +81,7 @@ public class SpatialArtifactScannerTest {
     public void scanReadsLineDistanceOutputHeaders() throws Exception {
         File project = temp.newFolder("project");
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(project.getAbsolutePath());
-        writeHeader(layout.lineDistanceWriteDir(), "DAPI",
+        writeHeader(layout.tablesLineDistanceWriteDir(), "DAPI",
                 "Label",
                 "DAPI_DistTo_Midline");
 
