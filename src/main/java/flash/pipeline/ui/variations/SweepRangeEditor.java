@@ -1,6 +1,7 @@
 package flash.pipeline.ui.variations;
 
 import flash.pipeline.image.FilterMacroEditorModel;
+import flash.pipeline.ui.FlashTheme;
 
 import javax.swing.BorderFactory;
 import javax.swing.Box;
@@ -13,7 +14,6 @@ import javax.swing.JSpinner;
 import javax.swing.SpinnerNumberModel;
 import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
-import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
@@ -54,7 +54,7 @@ public final class SweepRangeEditor extends JPanel {
         }
         this.context = context;
         setOpaque(false);
-        setBorder(BorderFactory.createLineBorder(new Color(214, 220, 224)));
+        setBorder(BorderFactory.createLineBorder(FlashTheme.BORDER));
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
 
         stepLabel.setBorder(BorderFactory.createEmptyBorder(6, 10, 2, 10));
@@ -206,7 +206,7 @@ public final class SweepRangeEditor extends JPanel {
         JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 2));
         row.setOpaque(false);
         row.setBorder(BorderFactory.createEmptyBorder(0, 10, 6, 10));
-        previewLabel.setForeground(new Color(78, 93, 101));
+        previewLabel.setForeground(FlashTheme.TEXT_SUBHEADER);
         row.add(previewLabel);
         return row;
     }

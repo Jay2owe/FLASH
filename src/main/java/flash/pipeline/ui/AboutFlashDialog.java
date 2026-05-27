@@ -31,7 +31,6 @@ import java.awt.GradientPaint;
 import java.awt.GraphicsEnvironment;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
-import java.awt.Insets;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
@@ -48,12 +47,12 @@ import java.util.Locale;
 public final class AboutFlashDialog implements PlugIn {
 
     private static final Color HEADER_BG_TOP = FlashTheme.TEXT_HEADER;
-    private static final Color HEADER_BG_BOTTOM = new Color(84, 110, 122);
+    private static final Color HEADER_BG_BOTTOM = FlashTheme.TEXT_SUBHEADER;
     private static final Color HEADER_FG = FlashTheme.TEXT_ON_DARK;
     private static final Color HEADER_ACCENT = FlashTheme.WARNING_BORDER;
     private static final Color BODY_BG = FlashTheme.SURFACE;
-    private static final Color STEP_BG = new Color(250, 251, 252);
-    private static final Color STEP_BORDER = new Color(208, 215, 222);
+    private static final Color STEP_BG = FlashTheme.SURFACE_RAISED;
+    private static final Color STEP_BORDER = FlashTheme.BORDER;
     private static final Color TEXT_PRIMARY = FlashTheme.TEXT_PRIMARY;
     private static final Color TEXT_MUTED = FlashTheme.TEXT_MUTED;
 
@@ -104,7 +103,7 @@ public final class AboutFlashDialog implements PlugIn {
         GridBagConstraints g = new GridBagConstraints();
         g.gridx = 0;
         g.gridy = 0;
-        g.insets = new Insets(0, 0, 0, 0);
+        g.insets = FlashTheme.insets(0, 0, 0, 0);
 
         JLabel brand = new JLabel(renderSvgIcon("/flash/icons/bolt.svg", 48, HEADER_ACCENT));
         g.gridx = 0; header.add(brand, g);
@@ -153,7 +152,7 @@ public final class AboutFlashDialog implements PlugIn {
         GridBagConstraints g = new GridBagConstraints();
         g.gridy = 0;
         g.fill = GridBagConstraints.NONE;
-        g.insets = new Insets(0, 0, 0, 0);
+        g.insets = FlashTheme.insets(0, 0, 0, 0);
 
         g.gridx = 0; wf.add(makeStep("settings", "Setup", "channels · thresholds · z-slice"), g);
         g.gridx = 1; wf.add(makeArrow(), g);

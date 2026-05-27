@@ -2,6 +2,7 @@ package flash.pipeline.ui.variations;
 
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.image.FilterMacroEditorModel;
+import flash.pipeline.ui.FlashTheme;
 import flash.pipeline.ui.config.CellposeParameterStage;
 import flash.pipeline.ui.config.StarDistParameterStage;
 
@@ -17,7 +18,6 @@ import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
-import java.awt.Color;
 import java.awt.Dimension;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -126,7 +126,7 @@ public final class ParameterSweepEditor extends JPanel {
                 : macroCatalog;
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
         setOpaque(false);
-        setBorder(BorderFactory.createLineBorder(new Color(214, 220, 224)));
+        setBorder(BorderFactory.createLineBorder(FlashTheme.BORDER));
         build(sections == null
                 ? new ParameterSections(Collections.<ParameterDefinition>emptyList(),
                 Collections.<ParameterDefinition>emptyList())
@@ -300,7 +300,7 @@ public final class ParameterSweepEditor extends JPanel {
         row.setOpaque(false);
         row.setLayout(new BoxLayout(row, BoxLayout.X_AXIS));
         row.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(1, 0, 0, 0, new Color(230, 234, 238)),
+                BorderFactory.createMatteBorder(1, 0, 0, 0, FlashTheme.BORDER_MUTED),
                 BorderFactory.createEmptyBorder(4, 8, 4, 8)));
         row.setAlignmentX(LEFT_ALIGNMENT);
         advancedToggle = new JButton();
@@ -326,7 +326,7 @@ public final class ParameterSweepEditor extends JPanel {
         row.setOpaque(false);
         row.setLayout(new BoxLayout(row, BoxLayout.X_AXIS));
         row.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(1, 0, 0, 0, new Color(230, 234, 238)),
+                BorderFactory.createMatteBorder(1, 0, 0, 0, FlashTheme.BORDER_MUTED),
                 BorderFactory.createEmptyBorder(4, 8, 4, 8)));
         row.setAlignmentX(LEFT_ALIGNMENT);
 
@@ -437,7 +437,7 @@ public final class ParameterSweepEditor extends JPanel {
     private static JLabel headerLabel(String text) {
         JLabel label = new JLabel(text);
         label.setFont(label.getFont().deriveFont(java.awt.Font.BOLD, 11f));
-        label.setForeground(new Color(78, 93, 101));
+        label.setForeground(FlashTheme.TEXT_SUBHEADER);
         return label;
     }
 

@@ -4,6 +4,7 @@ import javax.swing.border.EmptyBorder;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Font;
+import java.awt.Insets;
 
 public final class FlashTheme {
 
@@ -15,6 +16,7 @@ public final class FlashTheme {
 
     public static final Color BORDER = new Color(225, 228, 232);
     public static final Color BORDER_STRONG = new Color(195, 200, 205);
+    public static final Color BORDER_MUTED = new Color(230, 234, 238);
 
     public static final Color TEXT_HEADER = new Color(55, 71, 79);
     public static final Color TEXT_SUBHEADER = new Color(78, 93, 101);
@@ -82,6 +84,10 @@ public final class FlashTheme {
 
     public static EmptyBorder pad(int top, int left, int bottom, int right) {
         return new EmptyBorder(top, left, bottom, right);
+    }
+
+    public static Insets insets(int top, int left, int bottom, int right) {
+        return new Insets(top, left, bottom, right);
     }
 
     public static Dimension helpButtonSize() {

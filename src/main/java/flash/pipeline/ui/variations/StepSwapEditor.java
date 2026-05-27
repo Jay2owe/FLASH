@@ -3,6 +3,7 @@ package flash.pipeline.ui.variations;
 import flash.pipeline.image.FilterMacroEditorModel;
 import flash.pipeline.image.FilterMacroParser;
 import flash.pipeline.image.FilterMacroParser.OpType;
+import flash.pipeline.ui.FlashTheme;
 import flash.pipeline.ui.sandbox.FilterAlternatives;
 import flash.pipeline.ui.sandbox.FilterAlternatives.Alternative;
 import flash.pipeline.ui.sandbox.FilterAlternatives.SlotRole;
@@ -17,7 +18,6 @@ import javax.swing.JScrollPane;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
-import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.util.ArrayList;
@@ -54,7 +54,7 @@ public final class StepSwapEditor extends JPanel {
         }
         this.context = context;
         setOpaque(false);
-        setBorder(BorderFactory.createLineBorder(new Color(214, 220, 224)));
+        setBorder(BorderFactory.createLineBorder(FlashTheme.BORDER));
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
 
         stepLabel.setBorder(BorderFactory.createEmptyBorder(6, 10, 2, 10));
@@ -62,7 +62,7 @@ public final class StepSwapEditor extends JPanel {
         add(stepLabel);
 
         hintLabel.setBorder(BorderFactory.createEmptyBorder(0, 10, 4, 10));
-        hintLabel.setForeground(new Color(120, 126, 132));
+        hintLabel.setForeground(FlashTheme.TEXT_MUTED);
         add(hintLabel);
 
         checkboxColumn.setOpaque(false);
