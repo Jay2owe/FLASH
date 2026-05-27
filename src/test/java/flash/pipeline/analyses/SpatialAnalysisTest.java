@@ -39,6 +39,15 @@ public class SpatialAnalysisTest {
     public TemporaryFolder temp = new TemporaryFolder();
 
     @Test
+    public void hideImageWindowsFlagAloneDoesNotSuppressSpatialPresetDialogs() {
+        assertTrue(SpatialAnalysis.canShowGuiDecisionDialog(false, null, false));
+        assertFalse(SpatialAnalysis.canShowGuiDecisionDialog(true, null, false));
+        assertFalse(SpatialAnalysis.canShowGuiDecisionDialog(
+                false, new flash.pipeline.cli.CLIConfig(), false));
+        assertFalse(SpatialAnalysis.canShowGuiDecisionDialog(false, null, true));
+    }
+
+    @Test
     public void execute_appendsCalibratedCentroidsAndUsesAllThreeAxes() throws Exception {
         File root = temp.newFolder("spatial-calibrated");
         File objectsDir = objectsDir(root);

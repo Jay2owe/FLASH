@@ -67,9 +67,33 @@ public class ThreeDObjectPresetIOTest {
         ThreeDObjectPreset loaded = io.load("my_object_preset");
         assertEquals("My Object Preset", loaded.getName());
         assertEquals(42.0, loaded.getColocThresholdPercent(), 0.0001);
+        assertFalse(loaded.isDoIntensityColoc());
         assertEquals("microglia", loaded.getProcessMarkerHints().get(0));
 
         io.delete("My Object Preset");
+    }
+
+    @Test
+    public void roundTripPreservesIntensityColocalizationFlag() throws Exception {
+        ThreeDObjectPresetIO io = new ThreeDObjectPresetIO(temp.newFolder("intensity-coloc"));
+        ThreeDObjectPreset preset = new ThreeDObjectPreset(
+                "Intensity Coloc",
+                "test",
+                "1",
+                false,
+                false,
+                true,
+                false,
+                false,
+                true,
+                30.0,
+                null,
+                null);
+
+        io.save(preset);
+
+        ThreeDObjectPreset loaded = io.load("intensity_coloc");
+        assertTrue(loaded.isDoIntensityColoc());
     }
 
     @Test

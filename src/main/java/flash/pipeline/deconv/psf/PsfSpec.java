@@ -28,6 +28,10 @@ public final class PsfSpec {
         this.numericalAperture = requirePositiveFinite("numericalAperture", numericalAperture);
         this.immersionRI = requirePositiveFinite("immersionRI", immersionRI);
         this.sampleRI = requirePositiveFinite("sampleRI", sampleRI);
+        if (this.numericalAperture >= this.immersionRI) {
+            throw new IllegalArgumentException("numericalAperture must be lower than immersionRI"
+                    + " (was NA=" + numericalAperture + ", immersionRI=" + immersionRI + ").");
+        }
         this.emissionWavelengthNm = requirePositiveFinite("emissionWavelengthNm", emissionWavelengthNm);
         this.pixelSizeXyNm = requirePositiveFinite("pixelSizeXyNm", pixelSizeXyNm);
         this.pixelSizeZNm = requirePositiveFinite("pixelSizeZNm", pixelSizeZNm);

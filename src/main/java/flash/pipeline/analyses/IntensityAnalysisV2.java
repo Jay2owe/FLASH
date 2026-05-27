@@ -58,6 +58,7 @@ import ij.io.Opener;
 
 import javax.swing.JTextField;
 import java.awt.Frame;
+import java.awt.GraphicsEnvironment;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -201,7 +202,7 @@ public class IntensityAnalysisV2 implements Analysis {
         if (safeChannels(channelNames).isEmpty()) {
             String message = "Intensity Analysis requires at least one configured channel name.";
             IJ.log("ERROR: " + message);
-            if (!headless && !suppressDialogs) {
+            if (canShowGuiDialog(suppressDialogs, cliConfig, GraphicsEnvironment.isHeadless())) {
                 IJ.error("Intensity Analysis", message);
             }
             return;
@@ -523,7 +524,7 @@ public class IntensityAnalysisV2 implements Analysis {
                 binarization, thresholds, channelNames, roiAnalysis, roiChannelIndex1Based);
         if (validationError != null) {
             IJ.log("ERROR: " + validationError);
-            if (!headless && !suppressDialogs) {
+            if (canShowGuiDialog(suppressDialogs, cliConfig, GraphicsEnvironment.isHeadless())) {
                 IJ.error("Fluorescence Intensity Analysis", validationError);
             }
             return;
@@ -658,7 +659,7 @@ public class IntensityAnalysisV2 implements Analysis {
             supplier = wrapInputSupplier(directory, supplier);
         } catch (Exception e) {
             IJ.log("Intensity Analysis: " + e.getMessage());
-            if (!headless && !suppressDialogs) {
+            if (canShowGuiDialog(suppressDialogs, cliConfig, GraphicsEnvironment.isHeadless())) {
                 IJ.showMessage("Intensity Analysis", e.getMessage());
             }
             return;
@@ -3199,6 +3200,12 @@ public class IntensityAnalysisV2 implements Analysis {
                 }
             }
         }
+    }
+
+    static boolean canShowGuiDialog(boolean suppressDialogs,
+                                    CLIConfig cliConfig,
+                                    boolean runtimeHeadless) {
+        return !suppressDialogs && cliConfig == null && !runtimeHeadless;
     }
 
     /** Closes all image windows and non-Log text windows, leaving the Log window visible. */

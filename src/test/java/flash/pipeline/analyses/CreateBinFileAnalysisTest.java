@@ -3,6 +3,7 @@ package flash.pipeline.analyses;
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinField;
 import flash.pipeline.bin.BinMacroIndex;
+import flash.pipeline.cli.CLIConfig;
 import flash.pipeline.image.NamedFilterLoader;
 import flash.pipeline.io.SeriesMeta;
 import flash.pipeline.runtime.DependencyService;
@@ -81,6 +82,21 @@ public class CreateBinFileAnalysisTest {
 
         assertFalse(new File(dir, ".bin/Channel_Data.txt").exists());
         assertFalse(new File(dir, "FLASH/Set Up Configuration/.settings/Channel_Data.txt").exists());
+    }
+
+    @Test(expected = IllegalStateException.class)
+    public void execute_headlessCliWithoutBinConfigFailsInsteadOfSilentSuccess() throws Exception {
+        File dir = temp.newFolder("headless-cli-no-bin");
+        CreateBinFileAnalysis analysis = new CreateBinFileAnalysis();
+        analysis.setHeadless(true);
+        analysis.setCliConfig(new CLIConfig());
+
+        analysis.execute(dir.getAbsolutePath());
+    }
+
+    @Test
+    public void setUpConfigurationDeclaresHeadedModeForMainGui() {
+        assertTrue(new CreateBinFileAnalysis().requiresHeadedMode());
     }
 
     @Test

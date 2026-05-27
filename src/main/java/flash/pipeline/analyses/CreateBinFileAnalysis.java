@@ -293,6 +293,11 @@ public class CreateBinFileAnalysis implements Analysis {
     }
 
     @Override
+    public boolean requiresHeadedMode() {
+        return true;
+    }
+
+    @Override
     public void setSuppressDialogs(boolean suppress) {
         this.suppressDialogs = suppress;
     }
@@ -831,6 +836,11 @@ public class CreateBinFileAnalysis implements Analysis {
 
         // ── Override existing .bin ───────────────────────────────────────
         if (headless || GraphicsEnvironment.isHeadless()) {
+            if (cliConfig != null) {
+                throw new IllegalStateException("Cannot run Set Up Configuration headless "
+                        + "without bin.* CLI parameters. Pass bin.preset=... or bin.channelN_* "
+                        + "options, or run setup interactively first.");
+            }
             IJ.log("[FLASH] Set Up Configuration is interactive and cannot run headless "
                     + "without bin.* CLI parameters. Skipping.");
             return;

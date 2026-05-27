@@ -38,6 +38,7 @@ import javax.swing.event.ListSelectionListener;
 
 import java.awt.Dimension;
 import java.awt.Font;
+import java.awt.GraphicsEnvironment;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
@@ -481,7 +482,7 @@ public class MasterAggregationAnalysis implements Analysis {
         File projectRoot = new File(directory);
 
         // Interactive configuration dialog when GUI is available.
-        if (!headless && !suppressDialogs && !configFromCli) {
+        if (canShowGuiDialog(suppressDialogs, configFromCli, GraphicsEnvironment.isHeadless())) {
             Set<String> animalsForDialog = loadObjectAnimalNames(directory);
             boolean hasVolumeData = detectHasVolumeData(directory, animalsForDialog);
             AggregationConfig chosen = showConfigDialog(
@@ -568,11 +569,17 @@ public class MasterAggregationAnalysis implements Analysis {
             }
         } else {
             IJ.log("Master Aggregation Analysis: No data directories found to aggregate.");
-            if (!headless && !suppressDialogs) {
+            if (canShowGuiDialog(suppressDialogs, configFromCli, GraphicsEnvironment.isHeadless())) {
                 IJ.showMessage("Master Aggregation Analysis",
                         "No data directories found to aggregate.");
             }
         }
+    }
+
+    static boolean canShowGuiDialog(boolean suppressDialogs,
+                                    boolean configFromCli,
+                                    boolean runtimeHeadless) {
+        return !suppressDialogs && !configFromCli && !runtimeHeadless;
     }
 
     // -------------------------------------------------- ROI Properties loading
@@ -1289,6 +1296,9 @@ public class MasterAggregationAnalysis implements Analysis {
                     String h = header[hi].trim();
                     String normalizedHeader = normalizeAggregationMetricHeader(h);
                     boolean isTextureCol = normalizedHeader.startsWith("MorphTexture_");
+                    boolean isRoiCostesCol = normalizedHeader.startsWith(channelName + "_ROICostesTa_")
+                            || normalizedHeader.startsWith(channelName + "_ROICostesTb_")
+                            || normalizedHeader.startsWith(channelName + "_ROICostesP_");
                     boolean isSpatialCol = normalizedHeader.contains("_DistToClosest_")
                             || h.contains("_DistTo_")
                             || normalizedHeader.contains("_VolContains")
@@ -1296,6 +1306,14 @@ public class MasterAggregationAnalysis implements Analysis {
                             || CHANNEL_AGNOSTIC_MORPH_COLS.contains(normalizedHeader)
                             || isTextureCol
                             || normalizedHeader.equals("Cluster")
+                            || normalizedHeader.startsWith(channelName + "_ObjPearson_")
+                            || normalizedHeader.startsWith(channelName + "_ObjMandersM1_")
+                            || normalizedHeader.startsWith(channelName + "_ObjMandersM2_")
+                            || normalizedHeader.startsWith(channelName + "_ObjCostesTa_")
+                            || normalizedHeader.startsWith(channelName + "_ObjCostesTb_")
+                            || normalizedHeader.startsWith(channelName + "_ObjPearsonT_")
+                            || normalizedHeader.startsWith(channelName + "_ObjCostesP_")
+                            || isRoiCostesCol
                             || normalizedHeader.startsWith(channelName + "_Pearson_")
                             || normalizedHeader.startsWith(channelName + "_Manders_M1_")
                             || normalizedHeader.startsWith(channelName + "_Manders_M2_")
@@ -1314,7 +1332,10 @@ public class MasterAggregationAnalysis implements Analysis {
                     String outCol = (needsPrefix ? prefix : "") + cleanH + (modal ? "Mode" : "Mean");
                     metrics.put(outCol, modal
                             ? modalIntegerValue(animalRows, hi)
-                            : meanFiniteValue(animalRows, hi));
+                            : (isRoiCostesCol
+                                    ? meanFiniteValueByUniqueSection(
+                                            animalRows, hi, scnCol, roiCol, regionCol, hemisphereCol)
+                                    : meanFiniteValue(animalRows, hi)));
                     if (textureClassFractions && modal) {
                         ClassFractionAggregation fractions = classFractionValues(
                                 animalRows, hi, (needsPrefix ? prefix : "") + cleanH + "_Fraction_");
@@ -2184,6 +2205,52 @@ public class MasterAggregationAnalysis implements Analysis {
             }
         }
         return n > 0 ? sum / n : 0.0;
+    }
+
+    private static double meanFiniteValueByUniqueSection(List<String[]> rows,
+                                                         int columnIndex,
+                                                         Integer scnCol,
+                                                         Integer roiCol,
+                                                         Integer regionCol,
+                                                         Integer hemisphereCol) {
+        Map<String, double[]> sectionStats = new LinkedHashMap<String, double[]>();
+        for (String[] row : rows) {
+            double value = parseDouble(safeGet(row, columnIndex));
+            if (Double.isNaN(value)) continue;
+
+            String key = repeatedSectionMetricKey(row, scnCol, roiCol, regionCol, hemisphereCol);
+            double[] stats = sectionStats.get(key);
+            if (stats == null) {
+                stats = new double[2];
+                sectionStats.put(key, stats);
+            }
+            stats[0] += value;
+            stats[1] += 1.0;
+        }
+
+        double sum = 0.0;
+        int n = 0;
+        for (double[] stats : sectionStats.values()) {
+            if (stats[1] <= 0.0) continue;
+            sum += stats[0] / stats[1];
+            n++;
+        }
+        return n > 0 ? sum / n : 0.0;
+    }
+
+    private static String repeatedSectionMetricKey(String[] row,
+                                                   Integer scnCol,
+                                                   Integer roiCol,
+                                                   Integer regionCol,
+                                                   Integer hemisphereCol) {
+        String roi = safeGet(row, roiCol).trim();
+        String hemisphere = safeGet(row, hemisphereCol).trim();
+        if (hemisphere.isEmpty()) {
+            hemisphere = parseHemisphereFromRoi(roi);
+        }
+        String region = safeGet(row, regionCol).trim();
+        String section = resolveSectionKey(row, scnCol, roiCol, regionCol);
+        return hemisphere + "\t" + region + "\t" + roi + "\t" + section;
     }
 
     private static double modalIntegerValue(List<String[]> rows, int columnIndex) {

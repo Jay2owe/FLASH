@@ -22,6 +22,7 @@ public final class ThreeDObjectPreset implements Preset<ThreeDObjectPreset> {
     private final String libraryVersion;
     private final boolean doVolumetric;
     private final boolean doCpc;
+    private final boolean doIntensityColoc;
     private final boolean extractProcessLength;
     private final boolean runSpatial;
     private final boolean classicalCentroidFiltering;
@@ -40,6 +41,23 @@ public final class ThreeDObjectPreset implements Preset<ThreeDObjectPreset> {
                               double colocThresholdPercent,
                               List<String> processMarkerHints,
                               List<String> nuclearMarkerHints) {
+        this(name, description, libraryVersion, doVolumetric, doCpc, false,
+                extractProcessLength, runSpatial, classicalCentroidFiltering,
+                colocThresholdPercent, processMarkerHints, nuclearMarkerHints);
+    }
+
+    public ThreeDObjectPreset(String name,
+                              String description,
+                              String libraryVersion,
+                              boolean doVolumetric,
+                              boolean doCpc,
+                              boolean doIntensityColoc,
+                              boolean extractProcessLength,
+                              boolean runSpatial,
+                              boolean classicalCentroidFiltering,
+                              double colocThresholdPercent,
+                              List<String> processMarkerHints,
+                              List<String> nuclearMarkerHints) {
         this.name = requireText("name", name);
         this.description = emptyToNull(description);
         this.libraryVersion = emptyToNull(libraryVersion) == null
@@ -47,6 +65,7 @@ public final class ThreeDObjectPreset implements Preset<ThreeDObjectPreset> {
                 : libraryVersion.trim();
         this.doVolumetric = doVolumetric;
         this.doCpc = doCpc;
+        this.doIntensityColoc = doIntensityColoc;
         this.extractProcessLength = extractProcessLength;
         this.runSpatial = runSpatial;
         this.classicalCentroidFiltering = classicalCentroidFiltering;
@@ -77,6 +96,10 @@ public final class ThreeDObjectPreset implements Preset<ThreeDObjectPreset> {
 
     public boolean isDoCpc() {
         return doCpc;
+    }
+
+    public boolean isDoIntensityColoc() {
+        return doIntensityColoc;
     }
 
     public boolean isExtractProcessLength() {
@@ -112,6 +135,7 @@ public final class ThreeDObjectPreset implements Preset<ThreeDObjectPreset> {
         root.put("libraryVersion", libraryVersion);
         root.put("doVolumetric", Boolean.valueOf(doVolumetric));
         root.put("doCpc", Boolean.valueOf(doCpc));
+        root.put("doIntensityColoc", Boolean.valueOf(doIntensityColoc));
         root.put("extractProcessLength", Boolean.valueOf(extractProcessLength));
         root.put("runSpatial", Boolean.valueOf(runSpatial));
         root.put("classicalCentroidFiltering", Boolean.valueOf(classicalCentroidFiltering));
@@ -139,6 +163,7 @@ public final class ThreeDObjectPreset implements Preset<ThreeDObjectPreset> {
                 stringOr(root.get("libraryVersion"), CURRENT_LIBRARY_VERSION),
                 JsonIO.booleanValue(root.get("doVolumetric"), false),
                 JsonIO.booleanValue(root.get("doCpc"), false),
+                JsonIO.booleanValue(root.get("doIntensityColoc"), false),
                 JsonIO.booleanValue(root.get("extractProcessLength"), false),
                 JsonIO.booleanValue(root.get("runSpatial"), false),
                 JsonIO.booleanValue(root.get("classicalCentroidFiltering"), false),

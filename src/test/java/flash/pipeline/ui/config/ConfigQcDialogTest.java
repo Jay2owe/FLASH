@@ -2,6 +2,7 @@ package flash.pipeline.ui.config;
 
 import flash.pipeline.help.SetupHelpCatalog;
 import flash.pipeline.help.SetupHelpTopic;
+import flash.pipeline.testutil.UiTestAssumptions;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import ij.ImagePlus;
 import ij.ImageStack;
@@ -553,7 +554,7 @@ public class ConfigQcDialogTest {
 
     @Test(timeout = 3000)
     public void shellOpensWithDummyControlsWhenDisplayIsAvailable() throws Exception {
-        assumeFalse(GraphicsEnvironment.isHeadless());
+        UiTestAssumptions.assumeInteractiveUiTestsEnabled();
 
         SwingUtilities.invokeAndWait(new Runnable() {
             @Override public void run() {

@@ -353,6 +353,7 @@ public class IntensitySpatialWizard extends WizardFlow {
                                            boolean selected) {
         Availability availability = availabilityFor(key);
         ToggleSwitch toggle = dialog.addToggle(label, availability.available && selected);
+        dialog.addHelpText(analysisHelpFor(key));
         if (!availability.available) {
             toggle.setSelected(false);
             toggle.setEnabled(false);
@@ -378,6 +379,45 @@ public class IntensitySpatialWizard extends WizardFlow {
             }
         }
         return toggle;
+    }
+
+    private static String analysisHelpFor(IntensitySpatialConfig.AnalysisKey key) {
+        switch (key) {
+            case PATCHINESS:
+                return "Tiles each ROI at multiple scales to report intensity inequality, Gini, and lacunarity.";
+            case HOTSPOTSCAN:
+                return "Runs local and global Moran tests to quantify clustered intensity without thresholding.";
+            case NULLMODEL:
+                return "Tests whether raw intensity variance matches a Poisson shot-noise model.";
+            case GRANULARITY:
+                return "Probes a ladder of spatial scales to estimate the dominant feature size.";
+            case DEPTH_PROFILE:
+                return "Bins signal by distance from the ROI edge to summarise rim-to-core gradients.";
+            case ANISOTROPY:
+                return "Uses 2D structure-tensor directionality to report coherency and dominant angle.";
+            case PERIODICITY:
+                return "Uses FFT power spectra to detect repeating bands, stripes, or layered patterns.";
+            case GLCM:
+                return "Reports Haralick grey-level co-occurrence texture metrics for each ROI.";
+            case TEXTURECLASS:
+                return "Clusters per-pixel texture features into reproducible low-to-high intensity classes.";
+            case SCALEDIVERGENCE:
+                return "Estimates multifractal scale behaviour for heterogeneous textures.";
+            case CROSSMARK:
+                return "Measures colocalisation, shifted cross-correlation, and mark correlation between channel pairs.";
+            case ENTROPY_MI:
+                return "Captures non-linear dependence between channel pairs using mutual information.";
+            case DISTANCE_SHELL:
+                return "Measures source-channel intensity in concentric shells around a binarised partner mask.";
+            case CROSSMARK_3D:
+                return "Runs colocalisation metrics on the full voxel volume instead of a projection.";
+            case DISTANCE_SHELL_3D:
+                return "Measures intensity in 3D shells around a partner-channel volume mask.";
+            case ANISOTROPY_3D:
+                return "Computes volumetric directionality from a native 3D structure tensor.";
+            default:
+                return "Adds this intensity-spatial metric family to the output CSVs.";
+        }
     }
 
     private static Set<IntensitySpatialConfig.AnalysisKey> defaultAnalysesForIntent(
@@ -732,6 +772,9 @@ public class IntensitySpatialWizard extends WizardFlow {
                     ? null
                     : dialog.addChoice("Setup helper", EMBEDDED_HELPER_OPTIONS,
                     answers.getString(FIELD_INTENT, INTENT_MANUAL));
+            if (helperChoice != null) {
+                dialog.addHelpText("Pick a question-driven preset, then adjust individual toggles below if needed.");
+            }
             final Map<IntensitySpatialConfig.AnalysisKey, ToggleSwitch> analysisToggles =
                     new LinkedHashMap<IntensitySpatialConfig.AnalysisKey, ToggleSwitch>();
 
@@ -750,6 +793,7 @@ public class IntensitySpatialWizard extends WizardFlow {
                     IntensitySpatialHelpCatalog.OUTPUT_SOURCE);
             final ToggleSwitch native3d = dialog.addToggle("Native 3D spatial measurements",
                     answers.getBoolean(FIELD_NATIVE_3D, false));
+            dialog.addHelpText("Unlocks volumetric cross-channel, shell, and anisotropy outputs when enough z-slices are available.");
             if (likelyStackDepth < IntensitySpatialConfig.MIN_NATIVE_3D_SLICES) {
                 native3d.setSelected(false);
                 native3d.setEnabled(false);
@@ -757,6 +801,7 @@ public class IntensitySpatialWizard extends WizardFlow {
                         + IntensitySpatialConfig.MIN_NATIVE_3D_SLICES + " z-slices.");
             }
             dialog.addToggle("Write visual overlays", answers.getBoolean(FIELD_OVERLAYS, false));
+            dialog.addHelpText("Requests visual QC overlays where an enabled analysis can produce them; numeric CSV outputs are unchanged.");
 
             dialog.addSetupHelpSubHeader("Single-channel distribution",
                     IntensitySpatialHelpCatalog.SINGLE_CHANNEL);
@@ -839,22 +884,31 @@ public class IntensitySpatialWizard extends WizardFlow {
                     IntensitySpatialHelpCatalog.PARAMETERS);
             dialog.addNumericField("Shell width (um)", doubleAnswer(answers, FIELD_SHELL_WIDTH,
                     IntensitySpatialConfig.DEFAULT_SHELL_WIDTH_UM), 1);
+            dialog.addHelpText("Thickness of each distance shell around a partner-channel mask.");
             dialog.addNumericField("Shell count", answers.getInt(FIELD_SHELL_COUNT,
                     IntensitySpatialConfig.DEFAULT_SHELL_COUNT), 0);
+            dialog.addHelpText("Number of shells; total radius is shell width times shell count.");
             dialog.addStringField("Tile scales (um)", answers.getString(FIELD_TILE_SCALES,
                     IntensitySpatialConfig.joinDoubles(IntensitySpatialConfig.DEFAULT_TILE_SCALES_UM)), 18);
+            dialog.addHelpText("Tile sizes for patchiness and lacunarity, entered as comma-separated microns.");
             dialog.addStringField("Granularity scales (um)", answers.getString(FIELD_GRANULARITY_SCALES,
                     IntensitySpatialConfig.joinDoubles(IntensitySpatialConfig.DEFAULT_GRANULARITY_SCALES_UM)), 18);
+            dialog.addHelpText("Feature-size ladder for granularity analysis, entered as comma-separated microns.");
             dialog.addNumericField("Depth bin width (um)", doubleAnswer(answers, FIELD_DEPTH_BIN,
                     IntensitySpatialConfig.DEFAULT_DEPTH_BIN_WIDTH_UM), 1);
+            dialog.addHelpText("Distance bin width for ROI boundary depth profiles.");
             dialog.addNumericField("Rim depth (um)", doubleAnswer(answers, FIELD_RIM_DEPTH,
                     IntensitySpatialConfig.DEFAULT_RIM_DEPTH_UM), 1);
+            dialog.addHelpText("Thickness of the edge zone used by rim-versus-core summaries.");
             dialog.addNumericField("Texture classes", answers.getInt(FIELD_TEXTURE_CLASSES,
                     IntensitySpatialConfig.DEFAULT_TEXTURE_CLASS_COUNT), 0);
+            dialog.addHelpText("Cluster count for texture-class analysis; 2 to 10 is usually practical.");
             dialog.addNumericField("Permutation count", answers.getInt(FIELD_PERMUTATIONS,
                     IntensitySpatialConfig.DEFAULT_PERMUTATIONS), 0);
+            dialog.addHelpText("Number of shuffles for hotspot and colocalisation significance tests.");
             dialog.addNumericField("Random seed", longAnswer(answers, FIELD_SEED,
                     IntensitySpatialConfig.DEFAULT_SEED), 0);
+            dialog.addHelpText("Seed for stochastic significance tests so runs are reproducible.");
             dialog.endAdvancedSection();
         }
 

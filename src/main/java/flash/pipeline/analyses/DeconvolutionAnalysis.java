@@ -206,9 +206,8 @@ public class DeconvolutionAnalysis implements Analysis {
             if (!isSelectedEngineReady(settings.engineKey)) {
                 return;
             }
-            if (!isPsfGeneratorAvailable()) {
-                return;
-            }
+            // PSF synthesis is performed natively by ScalarPsfSynthesizer, so the EPFL
+            // PSF Generator plugin is no longer required for deconvolution to run.
 
             DeconvPreviewDialog.Decision previewDecision =
                     showPreviewBeforeBatch(directory, representative, channelNames, settings);
@@ -1364,7 +1363,7 @@ public class DeconvolutionAnalysis implements Analysis {
                     psf = getOrCreatePsf(spec, settings.psfModel);
                     channelPeakUsedBytes = Math.max(channelPeakUsedBytes, usedHeapBytes());
                     if (psf == null) {
-                        String message = "PSF synthesis failed or plugin is missing";
+                        String message = "PSF synthesis failed";
                         channelOutcomes.add(channelNames[channelIndex] + ": " + message);
                         warnings.add(channelNames[channelIndex] + " " + message);
                         summaryWarnings.add("psfFailed");
@@ -1723,6 +1722,11 @@ public class DeconvolutionAnalysis implements Analysis {
         List<String> missing = new ArrayList<String>();
         if (!isPositiveFinite(resolved.numericalAperture)) missing.add("Numerical Aperture");
         if (!isPositiveFinite(resolved.immersionRi)) missing.add("Immersion RI");
+        if (isPositiveFinite(resolved.numericalAperture)
+                && isPositiveFinite(resolved.immersionRi)
+                && resolved.numericalAperture >= resolved.immersionRi) {
+            missing.add("Numerical Aperture must be lower than Immersion RI");
+        }
         if (!isPositiveFinite(resolved.sampleRi)) missing.add("Sample RI");
         if (!isPositiveFinite(resolved.zStepUm)) missing.add("Z-step");
         if (!isPositiveFinite(resolved.xyPixelSizeUm)) {

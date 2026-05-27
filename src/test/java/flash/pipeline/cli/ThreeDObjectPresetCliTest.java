@@ -10,14 +10,27 @@ public class ThreeDObjectPresetCliTest {
     @Test
     public void objectPresetAndNuclearMarkerOverrideParseAndSerialize() {
         CLIConfig parsed = CLIArgumentParser.parse(
-                "dir=[/tmp/data] object.preset=microglia_processes object.nuclear_marker=2");
+                "dir=[/tmp/data] object.preset=microglia_processes object.nuclear_marker=2 object.doIntensityColoc=true");
 
         assertTrue(parsed.getSelectedAnalyses()[4]);
         assertEquals("microglia_processes", parsed.getObject().getPresetName());
         assertEquals(Integer.valueOf(1), parsed.getObject().getNuclearMarkerIndex());
+        assertEquals(Boolean.TRUE, parsed.getObject().getDoIntensityColoc());
 
         CLIConfig reparsed = CLIArgumentParser.parse(CLIArgumentParser.serialize(parsed));
         assertEquals("microglia_processes", reparsed.getObject().getPresetName());
         assertEquals(Integer.valueOf(1), reparsed.getObject().getNuclearMarkerIndex());
+        assertEquals(Boolean.TRUE, reparsed.getObject().getDoIntensityColoc());
+    }
+
+    @Test
+    public void objectIntensityColocalizationAliasesParse() {
+        CLIConfig snakeCase = CLIArgumentParser.parse(
+                "dir=[/tmp/data] object.do_intensity_coloc=true");
+        CLIConfig descriptive = CLIArgumentParser.parse(
+                "dir=[/tmp/data] object.intensity_colocalization=true");
+
+        assertEquals(Boolean.TRUE, snakeCase.getObject().getDoIntensityColoc());
+        assertEquals(Boolean.TRUE, descriptive.getObject().getDoIntensityColoc());
     }
 }

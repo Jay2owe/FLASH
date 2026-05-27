@@ -1,9 +1,11 @@
 package flash.pipeline.deconv;
 
 import flash.pipeline.image.GpuProbe;
+import ij.Menus;
 
 import java.lang.reflect.Method;
 import java.util.HashMap;
+import java.util.Hashtable;
 import java.util.Map;
 
 public final class DeconvolutionAvailability {
@@ -33,10 +35,42 @@ public final class DeconvolutionAvailability {
     }
 
     public static boolean isIterativeDeconvolve3DAvailable() {
-        return cachedAnyClassAvailability(
-                "IterativeDeconvolve3D",
-                "Iterative_Deconvolve_3D",
-                "OptiNavLib.Iterative_Deconvolve_3D");
+        synchronized (CACHE) {
+            if (CACHE.containsKey("IterativeDeconvolve3D")) {
+                return CACHE.get("IterativeDeconvolve3D").booleanValue();
+            }
+        }
+
+        /*
+         * Iterative_Deconvolve_3D ships as a standalone default-package .class file in
+         * Fiji's plugins/ folder. Fiji's IJ.PluginClassLoader is the only loader that
+         * can resolve such files; the FLASH plugin's own class loader (and the thread
+         * context loader in some startup paths) cannot, so Class.forName returns
+         * ClassNotFoundException even when the file is correctly installed. ImageJ's
+         * command table is the authoritative source for whether
+         * IJ.run("Iterative Deconvolve 3D", ...) will succeed, so check it first.
+         * Fall back to class lookup so unit tests with a populated URLClassLoader
+         * continue to pass.
+         */
+        boolean available = hasImageJCommand("Iterative Deconvolve 3D")
+                || classExists("Iterative_Deconvolve_3D")
+                || classExists("OptiNavLib.Iterative_Deconvolve_3D");
+        synchronized (CACHE) {
+            CACHE.put("IterativeDeconvolve3D", Boolean.valueOf(available));
+        }
+        return available;
+    }
+
+    private static boolean hasImageJCommand(String commandName) {
+        if (commandName == null || commandName.isEmpty()) {
+            return false;
+        }
+        try {
+            Hashtable commands = Menus.getCommands();
+            return commands != null && commands.containsKey(commandName);
+        } catch (Throwable ignored) {
+            return false;
+        }
     }
 
     public static boolean isPsfGeneratorAvailable() {

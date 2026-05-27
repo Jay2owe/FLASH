@@ -3,72 +3,18 @@ package flash.pipeline.deconv.psf;
 import ij.ImagePlus;
 import ij.ImageStack;
 import ij.process.FloatProcessor;
-import org.junit.After;
-import org.junit.Before;
 import org.junit.Test;
 
-import java.util.ArrayList;
-import java.util.List;
-
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
 
 public class EpflPsfGeneratorAdapterTest {
 
-    @Before
-    public void setUp() {
-        EpflPsfGeneratorAdapter.resetForTest();
-    }
-
-    @After
-    public void tearDown() {
-        EpflPsfGeneratorAdapter.resetForTest();
-    }
-
-    @Test
-    public void unavailablePluginReturnsNullAndLogsExactlyOnce() {
-        final List<String> messages = new ArrayList<String>();
-        EpflPsfGeneratorAdapter.setAvailabilityProbeForTest(new EpflPsfGeneratorAdapter.AvailabilityProbe() {
-            @Override
-            public boolean isPsfGeneratorAvailable() {
-                return false;
-            }
-
-            @Override
-            public String installInstructionUrl(String engineKey) {
-                return "https://example.test/psf";
-            }
-        });
-        EpflPsfGeneratorAdapter.setImageJRunnerForTest(new EpflPsfGeneratorAdapter.ImageJRunner() {
-            @Override
-            public void run(String command, String options) {
-                throw new AssertionError("ImageJ should not be invoked when the plugin is unavailable.");
-            }
-
-            @Override
-            public int[] getWindowIds() {
-                return null;
-            }
-
-            @Override
-            public ImagePlus getImage(int id) {
-                return null;
-            }
-        });
-        EpflPsfGeneratorAdapter.setLogSinkForTest(new EpflPsfGeneratorAdapter.LogSink() {
-            @Override
-            public void log(String message) {
-                messages.add(message);
-            }
-        });
-
-        assertNull(EpflPsfGeneratorAdapter.synthesize(spec(), PsfModel.BORN_WOLF));
-        assertNull(EpflPsfGeneratorAdapter.synthesize(spec(), PsfModel.BORN_WOLF));
-
-        assertEquals(1, messages.size());
-        assertTrue(messages.get(0).contains("https://example.test/psf"));
-    }
+    /*
+     * The historical "unavailablePluginReturnsNull..." test was removed: PSF synthesis no
+     * longer depends on the EPFL PSF Generator plugin (its run(String) is GUI-only and
+     * ignored macro options). Synthesis is now performed natively by
+     * {@link ScalarPsfSynthesizer}, so an "unavailable plugin" code path no longer exists.
+     */
 
     @Test
     public void macroOptionStringBuilderIsPureAndStable() {
@@ -111,21 +57,6 @@ public class EpflPsfGeneratorAdapterTest {
         } finally {
             close(psf);
         }
-    }
-
-    private static PsfSpec spec() {
-        return new PsfSpec(
-                1.40,
-                1.515,
-                1.450,
-                520.0,
-                65.0,
-                250.0,
-                64,
-                64,
-                32,
-                ScopeModality.WIDEFIELD,
-                null);
     }
 
     private static ImagePlus offCenterPsf() {

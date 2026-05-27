@@ -1,6 +1,7 @@
 package flash.pipeline.runtime;
 
 import flash.pipeline.cellpose.CellposeRuntime;
+import ij.Menus;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -9,6 +10,7 @@ import javax.tools.JavaCompiler;
 import javax.tools.ToolProvider;
 import java.io.File;
 import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.net.URL;
 import java.net.URLClassLoader;
@@ -18,6 +20,7 @@ import java.util.Collections;
 import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.HashSet;
+import java.util.Hashtable;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -84,16 +87,32 @@ public class DependencyRegistryTest {
     }
 
     @Test
-    public void cellposeProbeDoesNotReportPresentBeforeAsyncProbeCompletes() {
-        CellposeRuntime.invalidateCache();
+    public void cellposeProbeWaitsForAsyncResultInsteadOfReportingPendingAsMissing() {
+        // Regression: the previous implementation returned a "still running"
+        // missing status immediately when the cache was unknown, so the
+        // startup dependency warning fired on every restart -- pushing users
+        // through a no-op Cellpose reinstall even when the runtime was
+        // healthy. cellposeProbe now blocks on the runtime probe (bounded by
+        // the runtime's own 20s subprocess timeout) and reports the actual
+        // result. With an empty Python path the underlying probe short-
+        // circuits to "not configured" without launching Python, so this
+        // assertion is fast and deterministic.
+        String originalPath = CellposeRuntime.getPythonPath();
+        CellposeRuntime.setPythonPath("");
+        try {
+            DependencyStatus status = DependencyRegistry.snapshotStatuses(Collections.singletonList(
+                    DependencyRegistry.get(DependencyId.CELLPOSE_RUNTIME)))
+                    .get(DependencyId.CELLPOSE_RUNTIME);
 
-        DependencyStatus status = DependencyRegistry.snapshotStatuses(Collections.singletonList(
-                DependencyRegistry.get(DependencyId.CELLPOSE_RUNTIME)))
-                .get(DependencyId.CELLPOSE_RUNTIME);
-
-        assertTrue(status.getDetailMessage(), status.isMissing());
-        assertTrue(status.getDetailMessage().contains("still running"));
-        CellposeRuntime.invalidateCache();
+            assertTrue(status.getDetailMessage(), status.isMissing());
+            String message = status.getDetailMessage();
+            assertTrue(message, message.toLowerCase().contains("not configured"));
+            assertFalse("Pending probe must not be reported as 'still running' missing: " + message,
+                    message.toLowerCase().contains("still running"));
+        } finally {
+            CellposeRuntime.setPythonPath(originalPath);
+            CellposeRuntime.invalidateCache();
+        }
     }
 
     @Test
@@ -391,6 +410,100 @@ public class DependencyRegistryTest {
                 DependencyRegistry.ProbeContext.class.getDeclaredConstructor(ClassLoader.class, File.class);
         constructor.setAccessible(true);
         return constructor.newInstance(loader, fijiDir);
+    }
+
+    /*
+     * Regression: previously the Iterative Deconvolve 3D probe was
+     * composite(classProbe("Iterative_Deconvolve_3D"), jarProbe(...)).
+     *
+     * In real Fiji that classProbe is unreliable because Iterative_Deconvolve_3D
+     * is a default-package, standalone .class file in plugins/. The FLASH plugin's
+     * class loader cannot resolve it (only IJ.PluginClassLoader can), so Class.forName
+     * returns ClassNotFoundException even when the file is correctly installed at the
+     * right path and SHA-1. The composite was therefore stuck reporting "missing"
+     * forever; the fixer's check() saw the file in place, reported success with
+     * "restart required", but the post-restart probe still failed - making auto-fix
+     * an infinite no-op loop.
+     *
+     * The fix routes the class-side detection through ImageJ's Menus command table
+     * (commandProbe), which IS authoritative for whether IJ.run("Iterative Deconvolve 3D")
+     * will work, with classProbe kept as an OR fallback for unit tests using
+     * URLClassLoader.
+     */
+    @Test
+    public void iterativeDeconvolve3DProbeReportsPresentWhenFileExistsAndImageJCommandIsRegistered()
+            throws Exception {
+        File fijiDir = temp.newFolder("iterative-deconv-3d-command-table");
+        File plugins = new File(fijiDir, "plugins");
+        assertTrue(plugins.mkdirs());
+        touch(plugins, "Iterative_Deconvolve_3D.class");
+
+        URLClassLoader emptyLoader = new URLClassLoader(new URL[0], null);
+        Hashtable<String, String> previousCommands = setPluginsTable(
+                "Iterative Deconvolve 3D", "Iterative_Deconvolve_3D");
+        try {
+            DependencyRegistry.ProbeContext context = newProbeContext(emptyLoader, fijiDir);
+            DependencyStatus status = DependencyRegistry
+                    .get(DependencyId.ITERATIVE_DECONVOLVE_3D_RUNTIME)
+                    .probe(context);
+
+            assertTrue(status.getDetailMessage(), status.isPresent());
+        } finally {
+            restorePluginsTable(previousCommands);
+            emptyLoader.close();
+        }
+    }
+
+    @Test
+    public void iterativeDeconvolve3DProbeReportsMissingWhenFileExistsButImageJCommandNotRegistered()
+            throws Exception {
+        File fijiDir = temp.newFolder("iterative-deconv-3d-pre-restart");
+        File plugins = new File(fijiDir, "plugins");
+        assertTrue(plugins.mkdirs());
+        touch(plugins, "Iterative_Deconvolve_3D.class");
+
+        URLClassLoader emptyLoader = new URLClassLoader(new URL[0], null);
+        Hashtable<String, String> previousCommands = clearPluginsTable();
+        try {
+            DependencyRegistry.ProbeContext context = newProbeContext(emptyLoader, fijiDir);
+            DependencyStatus status = DependencyRegistry
+                    .get(DependencyId.ITERATIVE_DECONVOLVE_3D_RUNTIME)
+                    .probe(context);
+
+            assertTrue(status.getDetailMessage(), status.isMissing());
+        } finally {
+            restorePluginsTable(previousCommands);
+            emptyLoader.close();
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Hashtable<String, String> setPluginsTable(String command, String className) throws Exception {
+        Field field = Menus.class.getDeclaredField("pluginsTable");
+        field.setAccessible(true);
+        Hashtable<String, String> previous = (Hashtable<String, String>) field.get(null);
+        Hashtable<String, String> next = new Hashtable<String, String>();
+        if (previous != null) {
+            next.putAll(previous);
+        }
+        next.put(command, className);
+        field.set(null, next);
+        return previous;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Hashtable<String, String> clearPluginsTable() throws Exception {
+        Field field = Menus.class.getDeclaredField("pluginsTable");
+        field.setAccessible(true);
+        Hashtable<String, String> previous = (Hashtable<String, String>) field.get(null);
+        field.set(null, new Hashtable<String, String>());
+        return previous;
+    }
+
+    private static void restorePluginsTable(Hashtable<String, String> previous) throws Exception {
+        Field field = Menus.class.getDeclaredField("pluginsTable");
+        field.setAccessible(true);
+        field.set(null, previous);
     }
 
     private static boolean contains(List<String> lines, String needle) {

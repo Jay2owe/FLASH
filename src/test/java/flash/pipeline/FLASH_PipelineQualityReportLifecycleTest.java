@@ -27,10 +27,10 @@ public class FLASH_PipelineQualityReportLifecycleTest {
     public void createQualityReportForRun_returnsFreshInstance() {
         QualityReport a = FLASH_Pipeline.createQualityReportForRun(
                 tmp.getRoot().getAbsolutePath(), true,
-                false, true, 4, false, false, "Auto-Overwrite");
+                false, true, 4, false, "Auto-Overwrite");
         QualityReport b = FLASH_Pipeline.createQualityReportForRun(
                 tmp.getRoot().getAbsolutePath(), true,
-                false, true, 4, false, false, "Auto-Overwrite");
+                false, true, 4, false, "Auto-Overwrite");
 
         assertNotSame("Each call must return a new instance", a, b);
         assertTrue(a.getSections().isEmpty());
@@ -41,14 +41,13 @@ public class FLASH_PipelineQualityReportLifecycleTest {
     public void createQualityReportForRun_appliesSettings() {
         QualityReport report = FLASH_Pipeline.createQualityReportForRun(
                 "/my/dir", true,
-                true, true, 8, true, true, "Skip Existing");
+                true, true, 8, true, "Skip Existing");
 
         assertTrue(report.isEnabled());
         assertEquals("/my/dir", report.getProjectDir());
         assertTrue(report.isHeadless());
         assertTrue(report.isParallel());
         assertEquals(8, report.getThreadCount());
-        assertTrue(report.isAggressiveMemory());
         assertTrue(report.isVerboseLogging());
         assertEquals("Skip Existing", report.getOverwriteBehavior());
     }
@@ -69,7 +68,7 @@ public class FLASH_PipelineQualityReportLifecycleTest {
 
         FLASH_Pipeline.createQualityReportForRun(
                 tmp.getRoot().getAbsolutePath(), true,
-                false, false, 1, false, false, "Auto-Overwrite");
+                false, false, 1, false, "Auto-Overwrite");
 
         assertFalse("Stale overlay must be removed", staleOverlay.exists());
         assertFalse("Stale HTML must be removed", staleHtml.exists());
@@ -86,7 +85,7 @@ public class FLASH_PipelineQualityReportLifecycleTest {
 
         FLASH_Pipeline.createQualityReportForRun(
                 tmp.getRoot().getAbsolutePath(), false,
-                false, false, 1, false, false, "Auto-Overwrite");
+                false, false, 1, false, "Auto-Overwrite");
 
         assertTrue("Overlays must survive when QC is disabled", existingOverlay.exists());
     }
@@ -96,7 +95,7 @@ public class FLASH_PipelineQualityReportLifecycleTest {
         // No report directory exists — should not throw
         QualityReport report = FLASH_Pipeline.createQualityReportForRun(
                 tmp.getRoot().getAbsolutePath(), true,
-                false, false, 1, false, false, "Auto-Overwrite");
+                false, false, 1, false, "Auto-Overwrite");
         assertNotNull(report);
     }
 

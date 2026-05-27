@@ -52,6 +52,7 @@ public class ThreeDObjectWizardTest {
 
                 assertEquals(intent[0], derived.doVolumetric);
                 assertEquals(intent[0], derived.doCpc);
+                assertFalse(derived.doIntensityColoc);
                 assertEquals(intent[1], derived.extractProcessLength);
                 assertEquals(intent[2], derived.runSpatial);
                 assertEquals(thresholds[i], derived.thresholdPercent, 0.0001);
@@ -66,11 +67,25 @@ public class ThreeDObjectWizardTest {
 
         assertTrue(derived.doVolumetric);
         assertTrue(derived.doCpc);
+        assertFalse(derived.doIntensityColoc);
         assertEquals(10.0, derived.thresholdPercent, 0.0001);
         assertEquals(Double.valueOf(10.0), derived.markerThresholds.get("DAPI"));
         assertEquals(Double.valueOf(10.0), derived.markerThresholds.get("IBA1"));
         assertFalse(derived.extractProcessLength);
         assertFalse(derived.runSpatial);
+    }
+
+    @Test
+    public void intensityColocalizationIntentCanBeEnabledWithoutVolumetricColoc() {
+        Map<String, Object> answers = new LinkedHashMap<String, Object>();
+        answers.put("intent.intensityColoc", Boolean.TRUE);
+
+        ThreeDObjectWizard.DerivedConfig derived = ThreeDObjectWizard.deriveConfig(
+                dapiIba1AbetaConfig(), dapiIba1AbetaIdentities(), answers, null);
+
+        assertFalse(derived.doVolumetric);
+        assertFalse(derived.doCpc);
+        assertTrue(derived.doIntensityColoc);
     }
 
     @Test

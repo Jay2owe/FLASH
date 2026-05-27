@@ -139,6 +139,43 @@ public class CsvTableIOTest {
     }
 
     @Test
+    public void objectIntensityColocColumnsUseCompactMetricNamesAndStableOrder() {
+        List<String> ordered = ObjectCsvColumnOrder.orderedColumns("A", Arrays.asList(
+                "A_CPCContains_B",
+                "A_ROICostesP_B",
+                "A_ObjMandersM2_B",
+                "A_ObjPearsonT_B",
+                "A_VolColoc30_B",
+                "A_ObjCostesTa_B",
+                "A_ObjPearson_B",
+                "Colocalisation with B",
+                "A_ROICostesTa_B",
+                "A_ObjCostesP_B",
+                "A_CPCColoc_B",
+                "A_ObjMandersM1_B",
+                "A_ObjCostesTb_B",
+                "A_ROICostesTb_B"
+        ), Arrays.asList("A", "B"));
+
+        assertEquals(Arrays.asList(
+                "Colocalisation with B",
+                "A_ObjPearson_B",
+                "A_ObjMandersM1_B",
+                "A_ObjMandersM2_B",
+                "A_ObjCostesTa_B",
+                "A_ObjCostesTb_B",
+                "A_ObjPearsonT_B",
+                "A_ObjCostesP_B",
+                "A_ROICostesTa_B",
+                "A_ROICostesTb_B",
+                "A_ROICostesP_B",
+                "A_VolColoc30_B",
+                "A_CPCColoc_B",
+                "A_CPCContains_B"
+        ), ordered);
+    }
+
+    @Test
     public void mergeResultsTableCsvAddsColumnsWithoutDroppingExistingOnes() throws Exception {
         File csv = temp.newFile("merge-results.csv");
         List<String> header = new ArrayList<String>(Arrays.asList("Region", "IntDen", "ManualNote"));

@@ -1,15 +1,14 @@
 package flash.pipeline.ui.variations;
 
+import flash.pipeline.testutil.UiTestAssumptions;
 import flash.pipeline.ui.config.ConfigQcContext;
 
 import ij.ImagePlus;
 import ij.ImageStack;
 import ij.process.ByteProcessor;
-import org.junit.Assume;
 import org.junit.Test;
 
 import javax.swing.SwingUtilities;
-import java.awt.GraphicsEnvironment;
 import java.io.File;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -21,10 +20,9 @@ import static org.junit.Assert.assertTrue;
 
 public class VariationsDialogTest {
 
-    @Test
+    @Test(timeout = 10000)
     public void constructStartAndCancelCycleCompletesPlaceholderSweep() throws Exception {
-        Assume.assumeFalse("PipelineDialog creates a JDialog in this codebase.",
-                GraphicsEnvironment.isHeadless());
+        UiTestAssumptions.assumeInteractiveUiTestsEnabled();
         final VariationsDialog[] holder = new VariationsDialog[1];
         final AtomicReference<ParameterCombo> accepted =
                 new AtomicReference<ParameterCombo>();
@@ -102,6 +100,7 @@ public class VariationsDialogTest {
     private static VariationsDialog startedDialog(
             final VariationEngineContext context,
             final ParameterSweep sweep) throws Exception {
+        UiTestAssumptions.assumeInteractiveUiTestsEnabled();
         final AtomicReference<VariationsDialog> ref =
                 new AtomicReference<VariationsDialog>();
         SwingUtilities.invokeAndWait(new Runnable() {

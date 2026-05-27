@@ -30,6 +30,14 @@ public class MasterAggregationAnalysisTest {
     public TemporaryFolder temp = new TemporaryFolder();
 
     @Test
+    public void hideImageWindowsFlagAloneDoesNotSuppressAggregationConfigDialog() {
+        assertTrue(MasterAggregationAnalysis.canShowGuiDialog(false, false, false));
+        assertFalse(MasterAggregationAnalysis.canShowGuiDialog(true, false, false));
+        assertFalse(MasterAggregationAnalysis.canShowGuiDialog(false, true, false));
+        assertFalse(MasterAggregationAnalysis.canShowGuiDialog(false, false, true));
+    }
+
+    @Test
     public void execute_countsSectionsFromScnBeforeRegionAndComputesPerMm3() throws Exception {
         File root = temp.newFolder("master-agg-sections");
         File attrs = roiTables(root);
@@ -317,6 +325,34 @@ public class MasterAggregationAnalysisTest {
         assertTrue(objectHeader.contains("CK1D_Count"));
         assertTrue(objectHeader.contains("CK1D_DistTo_Line1Mean"));
         assertTrue(intensityHeader.contains("GFAP_ROI_IntDenMean"));
+    }
+
+    @Test
+    public void execute_averagesRepeatedRoiCostesBySectionNotObjectCount() throws Exception {
+        File root = temp.newFolder("master-agg-roi-costes-weighting");
+        File objects = FlashProjectLayout.forDirectory(root.getAbsolutePath()).tablesObjectsWriteDir();
+        assertTrue(objects.mkdirs());
+
+        writeCsv(new File(objects, "A.csv"),
+                "Region,Hemisphere,ROI,Animal Name,SCN,Volume (micron^3),Surface (micron^2),"
+                        + "IntDen,Mean,XM,YM,ZM,A_ROICostesP_B,A_ObjPearson_B",
+                "SCN,LH,SCN1,Mouse1,1,10,5,100,10,1,1,1,0.1,1\n"
+                        + "SCN,LH,SCN1,Mouse1,1,10,5,100,10,1,1,1,0.1,2\n"
+                        + "SCN,LH,SCN1,Mouse1,1,10,5,100,10,1,1,1,0.1,3\n"
+                        + "SCN,LH,SCN2,Mouse1,2,10,5,100,10,1,1,1,0.9,9");
+
+        MasterAggregationAnalysis analysis = new MasterAggregationAnalysis();
+        analysis.setSuppressDialogs(true);
+        analysis.execute(root.getAbsolutePath());
+
+        List<String> lines = Files.readAllLines(
+                aggregationFile(root, "3D Objects.csv").toPath(),
+                StandardCharsets.UTF_8);
+        assertEquals(2, lines.size());
+
+        Map<String, String> row = csvRow(lines.get(0), lines.get(1));
+        assertEquals(0.5, Double.parseDouble(row.get("A_ROICostesP_BMean")), 0.0001);
+        assertEquals(3.75, Double.parseDouble(row.get("A_ObjPearson_BMean")), 0.0001);
     }
 
     @Test

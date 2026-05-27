@@ -1,81 +1,40 @@
 package flash.pipeline.deconv.psf;
 
-import flash.pipeline.deconv.DeconvolutionAvailability;
-import flash.pipeline.image.WindowManagerLock;
-import ij.IJ;
 import ij.ImagePlus;
 import ij.ImageStack;
-import ij.WindowManager;
 import ij.measure.Calibration;
 import ij.process.FloatProcessor;
 import ij.process.ImageConverter;
 import ij.process.ImageProcessor;
 import ij.process.StackConverter;
 
-import java.util.HashSet;
 import java.util.Locale;
-import java.util.Set;
-import java.util.concurrent.atomic.AtomicBoolean;
 
+/**
+ * Thin wrapper that produces 3D point-spread functions for the deconvolution pipeline.
+ *
+ * <p>Historically this class tried to drive the EPFL PSF Generator Fiji plugin via
+ * {@code IJ.run("PSF Generator", options)}, but that plugin's {@code run(String)} method
+ * only displays a Swing dialog and ignores macro options. The pipeline therefore got back
+ * no image, skipped every channel, and reported "finished" without doing any work.
+ *
+ * <p>PSF synthesis now runs natively in {@link ScalarPsfSynthesizer}; this class is kept
+ * only because {@link PsfCache} and existing call sites already reference it. The
+ * {@link #buildMacroOptions} helper is preserved as a record of the macro keys the old
+ * adapter attempted; it is no longer invoked at runtime.
+ */
 public final class EpflPsfGeneratorAdapter {
-
-    private static final String COMMAND_NAME = "PSF Generator";
-    private static final AtomicBoolean INSTALL_PROMPT_LOGGED = new AtomicBoolean(false);
-
-    private static volatile AvailabilityProbe availabilityProbe = new AvailabilityProbe() {
-        @Override
-        public boolean isPsfGeneratorAvailable() {
-            return DeconvolutionAvailability.isPsfGeneratorAvailable();
-        }
-
-        @Override
-        public String installInstructionUrl(String engineKey) {
-            return DeconvolutionAvailability.installInstructionUrl(engineKey);
-        }
-    };
-
-    private static volatile ImageJRunner imageJRunner = new ImageJRunner() {
-        @Override
-        public void run(String command, String options) {
-            IJ.run(command, options);
-        }
-
-        @Override
-        public int[] getWindowIds() {
-            return WindowManager.getIDList();
-        }
-
-        @Override
-        public ImagePlus getImage(int id) {
-            return WindowManager.getImage(id);
-        }
-    };
-
-    private static volatile LogSink logSink = new LogSink() {
-        @Override
-        public void log(String message) {
-            IJ.log(message);
-        }
-    };
 
     private EpflPsfGeneratorAdapter() {}
 
     public static ImagePlus synthesize(PsfSpec spec, PsfModel model) {
         if (spec == null) throw new IllegalArgumentException("spec is required.");
         if (model == null) throw new IllegalArgumentException("model is required.");
-
-        if (!availabilityProbe.isPsfGeneratorAvailable()) {
-            logMissingPluginOnce();
-            return null;
-        }
-
-        ImagePlus psf = runGenerator(buildMacroOptions(spec, model));
+        ImagePlus psf = ScalarPsfSynthesizer.synthesize(spec, model);
         if (psf == null) {
             return null;
         }
-
         convertTo32BitInPlace(psf);
-        normalizeInPlace(psf);
         centerBrightestVoxelInPlace(psf);
         return psf;
     }
@@ -83,14 +42,9 @@ public final class EpflPsfGeneratorAdapter {
     /**
      * Pure option-string builder for the EPFL PSF Generator macro API.
      *
-     * <p>No live {@code PSF_Generator} install was available on this machine on
-     * 2026-04-23. The only local Fiji hit was the older {@code Diffraction_PSF_3D} plugin, which
-     * is not the EPFL generator detected by {@link DeconvolutionAvailability#isPsfGeneratorAvailable()}.
-     * These option keys are therefore best-effort guesses based on the phase spec:
-     * {@code optical-model}, {@code na}, {@code ri-immersion}, {@code ri-sample},
-     * {@code wavelength}, {@code nx}, {@code ny}, {@code nz}, {@code resxy}, {@code resz},
-     * and confocal-only {@code pinhole}. Keep callers routing through this pure method so the
-     * mapping can be corrected later without touching the rest of the pipeline.</p>
+     * <p>Retained for historical reference and for the existing unit test; the returned
+     * string is no longer passed to {@code IJ.run} because the upstream plugin's
+     * {@code run(String)} method does not parse macro options.
      */
     static String buildMacroOptions(PsfSpec spec, PsfModel model) {
         StringBuilder sb = new StringBuilder();
@@ -108,55 +62,6 @@ public final class EpflPsfGeneratorAdapter {
             addNumericOption(sb, "pinhole", spec.getPinholeAiryUnits().doubleValue());
         }
         return sb.toString().trim();
-    }
-
-    static void setAvailabilityProbeForTest(AvailabilityProbe probe) {
-        availabilityProbe = probe == null ? availabilityProbe : probe;
-    }
-
-    static void setImageJRunnerForTest(ImageJRunner runner) {
-        imageJRunner = runner == null ? imageJRunner : runner;
-    }
-
-    static void setLogSinkForTest(LogSink sink) {
-        logSink = sink == null ? logSink : sink;
-    }
-
-    static void resetForTest() {
-        INSTALL_PROMPT_LOGGED.set(false);
-        availabilityProbe = new AvailabilityProbe() {
-            @Override
-            public boolean isPsfGeneratorAvailable() {
-                return DeconvolutionAvailability.isPsfGeneratorAvailable();
-            }
-
-            @Override
-            public String installInstructionUrl(String engineKey) {
-                return DeconvolutionAvailability.installInstructionUrl(engineKey);
-            }
-        };
-        imageJRunner = new ImageJRunner() {
-            @Override
-            public void run(String command, String options) {
-                IJ.run(command, options);
-            }
-
-            @Override
-            public int[] getWindowIds() {
-                return WindowManager.getIDList();
-            }
-
-            @Override
-            public ImagePlus getImage(int id) {
-                return WindowManager.getImage(id);
-            }
-        };
-        logSink = new LogSink() {
-            @Override
-            public void log(String message) {
-                IJ.log(message);
-            }
-        };
     }
 
     static double sum(ImagePlus image) {
@@ -257,78 +162,10 @@ public final class EpflPsfGeneratorAdapter {
         }
     }
 
-    interface AvailabilityProbe {
-        boolean isPsfGeneratorAvailable();
-        String installInstructionUrl(String engineKey);
-    }
-
-    interface ImageJRunner {
-        void run(String command, String options);
-        int[] getWindowIds();
-        ImagePlus getImage(int id);
-    }
-
-    interface LogSink {
-        void log(String message);
-    }
-
-    private static void logMissingPluginOnce() {
-        if (!INSTALL_PROMPT_LOGGED.compareAndSet(false, true)) return;
-        String url = availabilityProbe.installInstructionUrl("PsfGenerator");
-        String message = "PSF Generator is not installed. Install it from Fiji Updater or see "
-                + (url == null ? "<no install URL>" : url);
-        logSink.log(message);
-    }
-
-    private static ImagePlus runGenerator(String options) {
-        WindowManagerLock.LOCK.lock();
-        try {
-            int[] beforeIds = imageJRunner.getWindowIds();
-            imageJRunner.run(COMMAND_NAME, options);
-            ImagePlus generated = findGeneratedImage(beforeIds, imageJRunner.getWindowIds());
-            if (generated == null) {
-                return null;
-            }
-            ImagePlus duplicate = generated.duplicate();
-            duplicate.setTitle(generated.getTitle());
-            disposeImage(generated);
-            return duplicate;
-        } finally {
-            WindowManagerLock.LOCK.unlock();
-        }
-    }
-
-    private static ImagePlus findGeneratedImage(int[] beforeIds, int[] afterIds) {
-        if (afterIds == null || afterIds.length == 0) return null;
-        Set<Integer> seen = new HashSet<Integer>();
-        if (beforeIds != null) {
-            for (int id : beforeIds) {
-                seen.add(Integer.valueOf(id));
-            }
-        }
-        for (int i = afterIds.length - 1; i >= 0; i--) {
-            int id = afterIds[i];
-            if (seen.contains(Integer.valueOf(id))) continue;
-            ImagePlus image = imageJRunner.getImage(id);
-            if (image != null) return image;
-        }
-        return null;
-    }
-
     private static void convertTo32BitInPlace(ImagePlus image) {
         if (image.getBitDepth() == 32) return;
         if (image.getStackSize() > 1) new StackConverter(image).convertToGray32();
         else new ImageConverter(image).convertToGray32();
-    }
-
-    private static void disposeImage(ImagePlus image) {
-        if (image == null) return;
-        image.changes = false;
-        try {
-            image.close();
-        } finally {
-            image.flush();
-        }
     }
 
     private static void addBracketedOption(StringBuilder sb, String key, String value) {

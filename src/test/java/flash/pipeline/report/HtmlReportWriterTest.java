@@ -30,7 +30,7 @@ public class HtmlReportWriterTest {
         QualityReport report = new QualityReport();
         report.setEnabled(true);
         report.setDirectory("/test/project/alpha");
-        report.setGlobalSettings(false, true, 4, false, false, "Auto-Overwrite");
+        report.setGlobalSettings(false, true, 4, false, "Auto-Overwrite");
 
         File htmlFile = new File(tmp.getRoot(), "QC_Report.html");
         HtmlReportWriter.write(htmlFile, report);
@@ -46,7 +46,7 @@ public class HtmlReportWriterTest {
         QualityReport runA = new QualityReport();
         runA.setEnabled(true);
         runA.setDirectory("/data/run_alpha");
-        runA.setGlobalSettings(false, true, 4, false, false, "Auto-Overwrite");
+        runA.setGlobalSettings(false, true, 4, false, "Auto-Overwrite");
         Map<String, String> p1 = new LinkedHashMap<String, String>();
         p1.put("method", "Automatic");
         runA.addSection("Split and Merge", p1);
@@ -58,7 +58,7 @@ public class HtmlReportWriterTest {
         QualityReport runB = new QualityReport();
         runB.setEnabled(true);
         runB.setDirectory("/data/run_beta");
-        runB.setGlobalSettings(true, false, 1, false, false, "Skip Existing");
+        runB.setGlobalSettings(true, false, 1, false, "Skip Existing");
         Map<String, String> p2 = new LinkedHashMap<String, String>();
         p2.put("filter", "Median");
         runB.addSection("Intensity Analysis", p2);
@@ -84,7 +84,7 @@ public class HtmlReportWriterTest {
         QualityReport report = new QualityReport();
         report.setEnabled(true);
         report.setDirectory("/empty");
-        report.setGlobalSettings(false, false, 1, false, false, "Auto-Overwrite");
+        report.setGlobalSettings(false, false, 1, false, "Auto-Overwrite");
 
         File htmlFile = new File(tmp.getRoot(), "empty_report.html");
         HtmlReportWriter.write(htmlFile, report);
@@ -100,7 +100,7 @@ public class HtmlReportWriterTest {
         QualityReport report = new QualityReport();
         report.setEnabled(true);
         report.setDirectory("/spectral");
-        report.setGlobalSettings(false, true, 2, false, false, "Auto-Overwrite");
+        report.setGlobalSettings(false, true, 2, false, "Auto-Overwrite");
 
         Map<String, String> params = new LinkedHashMap<String, String>();
         params.put("Goal", "Create cleaned mask");

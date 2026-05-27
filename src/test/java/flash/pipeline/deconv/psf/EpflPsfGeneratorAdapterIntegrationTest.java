@@ -1,20 +1,20 @@
 package flash.pipeline.deconv.psf;
 
-import flash.pipeline.deconv.DeconvolutionAvailability;
 import ij.ImagePlus;
-import org.junit.Assume;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 
+/**
+ * Smoke test for the public {@link EpflPsfGeneratorAdapter#synthesize} entry point used by
+ * {@link PsfCache}. Synthesis now runs natively in {@link ScalarPsfSynthesizer}, so there is
+ * no longer an {@code Assume.assumeTrue} guard on an installed external plugin.
+ */
 public class EpflPsfGeneratorAdapterIntegrationTest {
 
     @Test
-    public void synthesizeProducesNormalizedCenteredBornWolfPsfWhenPluginIsAvailable() {
-        Assume.assumeTrue("EPFL PSF Generator is not available in this runtime.",
-                DeconvolutionAvailability.isPsfGeneratorAvailable());
-
+    public void synthesizeProducesNormalizedCenteredBornWolfPsf() {
         PsfSpec spec = new PsfSpec(
                 1.40,
                 1.515,

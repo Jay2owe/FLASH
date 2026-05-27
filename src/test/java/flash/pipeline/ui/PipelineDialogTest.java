@@ -1,21 +1,20 @@
 package flash.pipeline.ui;
 
+import flash.pipeline.testutil.UiTestAssumptions;
 import org.junit.Test;
 
 import javax.swing.SwingUtilities;
-import java.awt.GraphicsEnvironment;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
-import static org.junit.Assume.assumeFalse;
 
 public class PipelineDialogTest {
 
     @Test(timeout = 3000)
     public void modelessShowDialogOnEventThreadDoesNotBlockChildDialogEvents() throws Exception {
-        assumeFalse(GraphicsEnvironment.isHeadless());
+        UiTestAssumptions.assumeInteractiveUiTestsEnabled();
         final AtomicBoolean closeEventRan = new AtomicBoolean(false);
         final AtomicBoolean showDialogReturned = new AtomicBoolean(false);
 

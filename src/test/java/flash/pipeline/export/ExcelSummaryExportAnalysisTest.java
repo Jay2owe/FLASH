@@ -17,6 +17,7 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
@@ -24,6 +25,14 @@ public class ExcelSummaryExportAnalysisTest {
 
     @Rule
     public TemporaryFolder temp = new TemporaryFolder();
+
+    @Test
+    public void hideImageWindowsFlagAloneDoesNotSuppressExportConfigDialog() {
+        assertTrue(ExcelSummaryExportAnalysis.canShowGuiDialog(false, false, false));
+        assertFalse(ExcelSummaryExportAnalysis.canShowGuiDialog(true, false, false));
+        assertFalse(ExcelSummaryExportAnalysis.canShowGuiDialog(false, true, false));
+        assertFalse(ExcelSummaryExportAnalysis.canShowGuiDialog(false, false, true));
+    }
 
     @Test
     public void execute_readsQuotedStatisticsCsvIntoWorkbook() throws Exception {

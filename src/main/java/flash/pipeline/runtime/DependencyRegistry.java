@@ -927,9 +927,21 @@ public final class DependencyRegistry {
                 .description("Lightweight ImageJ 1.x Richardson-Lucy plugin used by the Iterative Deconvolve 3D engine.")
                 .affectedFeatures("Iterative Deconvolve 3D engine", "CPU Richardson-Lucy deconvolution fallback")
                 .criticality(DependencySpec.Criticality.OPTIONAL_FEATURE)
-                .detectionStrategyLabel("Composite class probe + plugin file presence probe")
+                .detectionStrategyLabel("ImageJ command probe + class probe + plugin file presence probe")
+                /*
+                 * Iterative_Deconvolve_3D.class is a default-package, standalone .class file.
+                 * Fiji's IJ.PluginClassLoader is the only loader that resolves such files; the
+                 * FLASH plugin's own class loader cannot, so Class.forName("Iterative_Deconvolve_3D")
+                 * from FLASH context returns ClassNotFoundException even when the file is correctly
+                 * installed. ImageJ's command table is the authoritative source for whether
+                 * IJ.run("Iterative Deconvolve 3D", ...) will work, so commandProbe is the primary
+                 * detection here; classProbe is kept as an OR fallback so unit tests using a
+                 * populated URLClassLoader continue to detect the class.
+                 */
                 .probe(composite(
-                        classProbe("Iterative_Deconvolve_3D"),
+                        anyOf(
+                                commandProbe("Iterative Deconvolve 3D"),
+                                classProbe("Iterative_Deconvolve_3D")),
                         jarProbe(ITERATIVE_DECONVOLVE_3D_FILES, Collections.<String>emptyList())))
                 .fixerStrategy(DependencySpec.FixerStrategy.DIRECT_JAR_DOWNLOAD)
                 .approxDownloadSizeBytes(ITERATIVE_DECONVOLVE_3D_RUNTIME_BYTES)
@@ -1135,6 +1147,44 @@ public final class DependencyRegistry {
         };
     }
 
+    private static DependencySpec.Probe anyOf(final DependencySpec.Probe... probes) {
+        return new DependencySpec.Probe() {
+            @Override
+            public DependencyStatus probe(ProbeContext context) {
+                if (probes == null || probes.length == 0) {
+                    return DependencyStatus.error("No probes were configured for this dependency.");
+                }
+                List<String> missing = new ArrayList<String>();
+                List<String> errors = new ArrayList<String>();
+                for (DependencySpec.Probe probe : probes) {
+                    if (probe == null) {
+                        continue;
+                    }
+                    DependencyStatus status = probe.probe(context);
+                    if (status == null) {
+                        continue;
+                    }
+                    if (status.isPresent()) {
+                        return status;
+                    }
+                    String detail = status.getDetailMessage();
+                    if (status.isError()) {
+                        errors.add(detail == null ? "" : detail);
+                    } else {
+                        missing.add(detail == null ? "" : detail);
+                    }
+                }
+                if (!missing.isEmpty()) {
+                    return DependencyStatus.missing(joinLines(missing));
+                }
+                if (!errors.isEmpty()) {
+                    return DependencyStatus.error(joinLines(errors));
+                }
+                return DependencyStatus.missing("No probe could detect this dependency.");
+            }
+        };
+    }
+
     private static DependencySpec.Probe composite(final DependencySpec.Probe... probes) {
         return new DependencySpec.Probe() {
             @Override
@@ -1172,13 +1222,18 @@ public final class DependencyRegistry {
         return new DependencySpec.Probe() {
             @Override
             public DependencyStatus probe(ProbeContext context) {
-                Status status = CellposeRuntime.cachedStatus();
-                if (status.unknown) {
-                    CellposeRuntime.probeAsync();
-                    return DependencyStatus.missing("Cellpose runtime check is still running. "
-                            + "Retry verification before launching Cellpose segmentation.");
+                // Block until the runtime probe resolves. The probe was kicked
+                // off async in FLASH_Pipeline.run() so this usually returns the
+                // already-finished result; falling through to the sync path is
+                // also fine -- the internal probe is bounded by its own 20s
+                // process timeout. Reporting a still-pending probe as missing
+                // (the previous behavior) made the startup warning fire on
+                // every restart even when Cellpose was correctly installed,
+                // pushing users through a no-op reinstall loop.
+                Status status = CellposeRuntime.probeConfigured();
+                if (status == null) {
+                    return DependencyStatus.error("Cellpose runtime probe returned no status.");
                 }
-                CellposeRuntime.probeAsync();
                 if (status.ready) {
                     return DependencyStatus.present(status.summary());
                 }

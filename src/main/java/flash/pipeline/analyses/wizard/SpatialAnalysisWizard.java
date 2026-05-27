@@ -99,7 +99,7 @@ public class SpatialAnalysisWizard extends WizardFlow {
         }
         applyMorphologyQuestion(out, morph);
 
-        String texture = answerString(safeAnswers, "texture.question", TEXTURE_NONE);
+        String texture = canonicalTextureQuestion(answerString(safeAnswers, "texture.question", TEXTURE_NONE));
         applyTextureQuestion(out, texture);
         int requestedTextureK = intAnswer(safeAnswers, "texture.k", 4);
         out.textureClassK = Math.max(2, Math.min(10, requestedTextureK));
@@ -250,6 +250,7 @@ public class SpatialAnalysisWizard extends WizardFlow {
     }
 
     private static void applyTextureQuestion(DerivedConfig out, String option) {
+        option = canonicalTextureQuestion(option);
         if (TEXTURE_GLCM.equals(option)) {
             out.doObjectGLCM = true;
         } else if (TEXTURE_FRACTAL.equals(option)) {
@@ -261,6 +262,40 @@ public class SpatialAnalysisWizard extends WizardFlow {
             out.doObjectFractal = true;
             out.doObjectTextureClass = true;
         }
+    }
+
+    private static String canonicalTextureQuestion(String option) {
+        if (option == null) return TEXTURE_NONE;
+        if (textureGlcmDisplayLabel().equals(option)) return TEXTURE_GLCM;
+        if (textureFractalDisplayLabel().equals(option)) return TEXTURE_FRACTAL;
+        if (textureClassDisplayLabel().equals(option)) return TEXTURE_CLASS;
+        if (textureAllDisplayLabel().equals(option)) return TEXTURE_ALL;
+        return option;
+    }
+
+    private static String textureQuestionDisplayLabel(String option) {
+        String canonical = canonicalTextureQuestion(option);
+        if (TEXTURE_GLCM.equals(canonical)) return textureGlcmDisplayLabel();
+        if (TEXTURE_FRACTAL.equals(canonical)) return textureFractalDisplayLabel();
+        if (TEXTURE_CLASS.equals(canonical)) return textureClassDisplayLabel();
+        if (TEXTURE_ALL.equals(canonical)) return textureAllDisplayLabel();
+        return canonical;
+    }
+
+    private static String textureGlcmDisplayLabel() {
+        return TEXTURE_GLCM + " (slow)";
+    }
+
+    private static String textureFractalDisplayLabel() {
+        return TEXTURE_FRACTAL + " (slow)";
+    }
+
+    private static String textureClassDisplayLabel() {
+        return TEXTURE_CLASS + " (slow)";
+    }
+
+    private static String textureAllDisplayLabel() {
+        return TEXTURE_ALL + " (slow)";
     }
 
     public static void enforceDependencies(DerivedConfig out,
@@ -478,20 +513,21 @@ public class SpatialAnalysisWizard extends WizardFlow {
 
         public void build(PipelineDialog dialog, AnswerMap answers) {
             dialog.addHeader("What object texture / complexity question are you asking?");
-            String selected = answers.getString("texture.question", TEXTURE_NONE);
+            String selected = textureQuestionDisplayLabel(
+                    answers.getString("texture.question", TEXTURE_NONE));
             dialog.addChoice("Texture question",
-                    new String[]{TEXTURE_NONE, TEXTURE_GLCM, TEXTURE_FRACTAL,
-                            TEXTURE_CLASS, TEXTURE_ALL},
+                    new String[]{TEXTURE_NONE, textureGlcmDisplayLabel(), textureFractalDisplayLabel(),
+                            textureClassDisplayLabel(), textureAllDisplayLabel()},
                     selected);
             dialog.beginAdvancedSection("spatial.texture.advanced");
-            dialog.addToggle("Native-3D texture (GLCM + texture classes)",
+            dialog.addToggle("Native-3D texture (GLCM + texture classes; very slow)",
                     answers.getBoolean("spatial.texture.native3d", false));
             dialog.addNumericField("Texture classes (k)", answers.getInt("texture.k", 4), 0);
             dialog.endAdvancedSection();
         }
 
         public void read(PipelineDialog dialog, AnswerMap answers) {
-            answers.put("texture.question", dialog.getNextChoice());
+            answers.put("texture.question", canonicalTextureQuestion(dialog.getNextChoice()));
             answers.put("spatial.texture.native3d", Boolean.valueOf(dialog.getNextBoolean()));
             answers.put("texture.k", Integer.valueOf((int) dialog.getNextNumber()));
         }

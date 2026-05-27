@@ -71,6 +71,7 @@ public class ThreeDObjectWizard extends WizardFlow {
         boolean spatial = booleanAnswer(answers, "intent.spatial", false);
         out.doVolumetric = coloc;
         out.doCpc = coloc;
+        out.doIntensityColoc = booleanAnswer(answers, "intent.intensityColoc", false);
         out.extractProcessLength = process;
         out.runSpatial = spatial;
         out.thresholdPercent = thresholdForStrictness(answerString(answers, "coloc.strictness",
@@ -106,11 +107,12 @@ public class ThreeDObjectWizard extends WizardFlow {
         ChannelIdentities safeIdentities = identities == null ? new ChannelIdentities(null) : identities;
         ThreeDObjectPreset safePreset = preset == null
                 ? new ThreeDObjectPreset("Count only", null, "1", false, false,
-                false, false, true, 30.0, null, null)
+                false, false, false, true, 30.0, null, null)
                 : preset;
         DerivedConfig out = new DerivedConfig(safeCfg.numChannels());
         out.doVolumetric = safePreset.isDoVolumetric();
         out.doCpc = safePreset.isDoCpc();
+        out.doIntensityColoc = safePreset.isDoIntensityColoc();
         out.extractProcessLength = safePreset.isExtractProcessLength();
         out.runSpatial = safePreset.isRunSpatial();
         out.classicalCentroidFiltering = safePreset.isClassicalCentroidFiltering();
@@ -264,6 +266,7 @@ public class ThreeDObjectWizard extends WizardFlow {
     public static final class DerivedConfig {
         public boolean doVolumetric;
         public boolean doCpc;
+        public boolean doIntensityColoc;
         public boolean extractProcessLength;
         public boolean runSpatial;
         public boolean classicalCentroidFiltering;
@@ -283,6 +286,7 @@ public class ThreeDObjectWizard extends WizardFlow {
             super("What are you trying to measure?");
             defaultAnswer("intent.count", Boolean.TRUE);
             defaultAnswer("intent.coloc", Boolean.FALSE);
+            defaultAnswer("intent.intensityColoc", Boolean.FALSE);
             defaultAnswer("intent.process", Boolean.FALSE);
             defaultAnswer("intent.spatial", Boolean.FALSE);
         }
@@ -291,6 +295,7 @@ public class ThreeDObjectWizard extends WizardFlow {
             dialog.addHeader("What are you trying to measure?");
             dialog.addToggle("Count objects per channel", true).setEnabled(false);
             dialog.addToggle("Colocalization between channels", answers.getBoolean("intent.coloc", false));
+            dialog.addToggle("Intensity Colocalization", answers.getBoolean("intent.intensityColoc", false));
             dialog.addToggle("Process length", answers.getBoolean("intent.process", false));
             dialog.addToggle("Spatial distribution / nearest-neighbour / morphology",
                     answers.getBoolean("intent.spatial", false));
@@ -299,6 +304,7 @@ public class ThreeDObjectWizard extends WizardFlow {
         public void read(PipelineDialog dialog, AnswerMap answers) {
             dialog.getNextBoolean();
             answers.put("intent.coloc", Boolean.valueOf(dialog.getNextBoolean()));
+            answers.put("intent.intensityColoc", Boolean.valueOf(dialog.getNextBoolean()));
             answers.put("intent.process", Boolean.valueOf(dialog.getNextBoolean()));
             answers.put("intent.spatial", Boolean.valueOf(dialog.getNextBoolean()));
         }

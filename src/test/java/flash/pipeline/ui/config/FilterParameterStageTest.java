@@ -560,6 +560,32 @@ public class FilterParameterStageTest {
     }
 
     @Test
+    public void fieldEditAfterInlineBuilderMutationDoesNotTreatDuplicateTitleAsStepParameter() {
+        RecordingMacroStore store = new RecordingMacroStore("Default", DEFAULT_MACRO);
+        FilterParameterStage stage = new FilterParameterStage(
+                Arrays.asList("Default", "Custom"), store, new RecordingPreviewAdapter(), null, null);
+
+        stage.buildControls(context(), new RecordingActions());
+        stage.onEnter(context(), new PreviewPairPanel("Original", "Adjusted"));
+
+        stage.simulateAddFilterForTest("Subtract Background");
+        stage.setParameterForTest("sigma", "4");
+
+        String macroAfterEdit = stage.currentMacroForTest();
+        assertTrue("Gaussian Blur must keep its edited sigma argument",
+                macroAfterEdit.contains("run(\"Gaussian Blur...\", \"sigma=4 stack\");"));
+        assertTrue("Subtract Background must keep its rolling argument",
+                macroAfterEdit.contains("run(\"Subtract Background...\", \"rolling=50 stack\");"));
+        assertFalse("Emitter setup title must not be copied onto Gaussian Blur",
+                macroAfterEdit.contains("run(\"Gaussian Blur...\", \"title=line_A"));
+
+        stage.simulateReorderForTest(0, 1);
+
+        assertEquals("4", stage.parameterFieldValueForTest("sigma"));
+        assertEquals("50", stage.parameterFieldValueForTest("rolling"));
+    }
+
+    @Test
     public void legacyAddFailureLeavesCurrentMacroUnchanged() {
         RecordingMacroStore store = new RecordingMacroStore("Default", DEFAULT_MACRO);
         RecordingActions actions = new RecordingActions();

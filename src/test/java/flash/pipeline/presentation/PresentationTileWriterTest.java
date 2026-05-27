@@ -54,11 +54,16 @@ public class PresentationTileWriterTest {
 
         assertTrue(out.isFile());
         BufferedImage tile = ImageIO.read(out);
-        int firstCellCenterX = 18 + 190 + 30;
-        int firstCellCenterY = 18 + 46 + 30 + 30;
-        Color firstCell = new Color(tile.getRGB(firstCellCenterX, firstCellCenterY), true);
+        int greenX = minDominantX(tile, Color.GREEN);
+        int redX = minDominantX(tile, Color.RED);
         assertTrue("first requested column should be GFAP/green",
-                firstCell.getGreen() > 180 && firstCell.getRed() < 80);
+                greenX >= 0 && redX >= 0 && greenX < redX);
+        assertTrue("overview tile should use tight horizontal layout", tile.getWidth() < 300);
+        assertTrue("overview tile should use tight vertical layout", tile.getHeight() < 150);
+        assertFalse("column headers should not draw a filled text background",
+                containsExactColor(tile, new Color(238, 241, 243)));
+        assertFalse("group labels should not draw a filled text background",
+                containsExactColor(tile, new Color(225, 230, 233)));
     }
 
     @Test
@@ -104,16 +109,14 @@ public class PresentationTileWriterTest {
         PresentationTileWriter.writeOverviewTile(out, records, conditions, config);
 
         BufferedImage tile = ImageIO.read(out);
-        assertEquals(282, tile.getHeight());
-        int cellCenterX = 18 + 190 + 40;
-        int firstRowCenterY = 18 + 46 + 30 + 40;
-        int secondRowCenterY = firstRowCenterY + 80 + 10;
-        Color firstCell = new Color(tile.getRGB(cellCenterX, firstRowCenterY), true);
-        Color secondCell = new Color(tile.getRGB(cellCenterX, secondRowCenterY), true);
+        int redY = minDominantY(tile, Color.RED);
+        int greenY = minDominantY(tile, Color.GREEN);
         assertTrue("first row should use the first source image",
-                firstCell.getRed() > 180 && firstCell.getGreen() < 80);
+                redY >= 0 && greenY >= 0 && redY < greenY);
         assertTrue("second row should use the second source image",
-                secondCell.getGreen() > 180 && secondCell.getRed() < 80);
+                greenY > redY);
+        assertTrue("overview tile should be tighter than the old fixed layout",
+                tile.getHeight() < 282);
     }
 
     @Test
@@ -186,6 +189,39 @@ public class PresentationTileWriterTest {
     }
 
     @Test
+    public void individualAnnotationsDrawTextWithoutBackgroundBox() throws Exception {
+        File root = temp.newFolder("transparent-label");
+        File images = new File(root, "Images/Animal1");
+        assertTrue(images.mkdirs());
+
+        File source = new File(images, "DAPI_LH_Cortex.png");
+        writeSolid(source, Color.YELLOW, 180, 80);
+        PresentationTileRecord record = new PresentationTileRecord(
+                source, "Animal1", "LH", "Cortex", "DAPI", "DAPI",
+                0, 180, 80, 1.0, 1.0);
+
+        PresentationTileConfig config = PresentationTileConfig.builder()
+                .createOverviewTile(false)
+                .annotateIndividualImages(true)
+                .labelMode(PresentationTileConfig.LabelMode.STAIN_NAME)
+                .labelFontSizePx(24)
+                .labelPosition(PresentationTileConfig.Position.TOP_LEFT)
+                .scaleBarEnabled(false)
+                .annotationColor(Color.WHITE)
+                .build();
+
+        File annotatedDir = new File(root, "Annotated Images");
+        File tilesDir = new File(root, "Tiles");
+        File manifest = new File(root, "Presentation_Image_Manifest.csv");
+        PresentationTileWriter.writeRequestedOutputs(annotatedDir, tilesDir, manifest,
+                Arrays.asList(record), new LinkedHashMap<String, String>(), config);
+
+        BufferedImage image = ImageIO.read(new File(annotatedDir, "Animal1/DAPI_LH_Cortex.png"));
+        assertFalse("annotation labels should not draw a dark backing box",
+                containsDarkPixel(image, 0, 0, 120, 50));
+    }
+
+    @Test
     public void manifestRewriteReplacesExistingFile() throws Exception {
         File root = temp.newFolder("manifest-rewrite");
         File image = new File(root, "DAPI.png");
@@ -248,6 +284,46 @@ public class PresentationTileWriterTest {
         assertEquals(320, preview.getHeight());
     }
 
+    @Test
+    public void annotationPreviewScalesLabelTextForLargeRepresentativeImages() {
+        PresentationTileRecord representative = new PresentationTileRecord(
+                null, "Animal1", "LH", "Cortex", "DAPI", "DAPI",
+                0, 4000, 2000, 0.5, 0.5);
+        PresentationTileConfig config = PresentationTileConfig.builder()
+                .labelMode(PresentationTileConfig.LabelMode.STAIN_NAME)
+                .labelFontSizePx(40)
+                .scaleBarEnabled(false)
+                .build();
+
+        BufferedImage preview = PresentationTileWriter.renderAnnotationPreview(config, representative);
+
+        assertTrue("large-image preview should not draw full-size label text",
+                maxBrightVerticalRun(preview, 0, 120, 0, 80) <= 12);
+    }
+
+    @Test
+    public void annotationPreviewScalesScaleBarThicknessForLargeRepresentativeImages() {
+        PresentationTileRecord representative = new PresentationTileRecord(
+                null, "Animal1", "LH", "Cortex", "DAPI", "DAPI",
+                0, 4000, 2000, 1.0, 1.0);
+        PresentationTileConfig config = PresentationTileConfig.builder()
+                .labelMode(PresentationTileConfig.LabelMode.NONE)
+                .labelFontSizePx(40)
+                .scaleBarEnabled(true)
+                .scaleBarLengthUm(1000.0)
+                .scaleBarThicknessPx(20)
+                .scaleBarPosition(PresentationTileConfig.Position.BOTTOM_RIGHT)
+                .build();
+
+        BufferedImage preview = PresentationTileWriter.renderAnnotationPreview(config, representative);
+        int run = maxBrightVerticalRun(preview,
+                preview.getWidth() - 80, preview.getWidth() - 4,
+                preview.getHeight() - 80, preview.getHeight() - 1);
+
+        assertTrue("scaled preview should still show a scale bar", run >= 1);
+        assertTrue("large-image preview should not draw full-size scale-bar thickness", run <= 6);
+    }
+
     private static PresentationTileRecord record(File file, String animal, String stain, int channelIndex) {
         return new PresentationTileRecord(file, animal, "LH", "Cortex", stain, stain,
                 channelIndex, 40, 40, 1.0, 1.0);
@@ -278,5 +354,101 @@ public class PresentationTileWriterTest {
             }
         }
         return false;
+    }
+
+    private static boolean containsDarkPixel(BufferedImage image,
+                                             int x0, int y0, int x1, int y1) {
+        for (int y = Math.max(0, y0); y <= Math.min(image.getHeight() - 1, y1); y++) {
+            for (int x = Math.max(0, x0); x <= Math.min(image.getWidth() - 1, x1); x++) {
+                Color c = new Color(image.getRGB(x, y), true);
+                double luminance = (0.2126 * c.getRed())
+                        + (0.7152 * c.getGreen())
+                        + (0.0722 * c.getBlue());
+                if (c.getAlpha() > 0 && luminance < 140.0) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsExactColor(BufferedImage image, Color color) {
+        int expected = color.getRGB();
+        for (int y = 0; y < image.getHeight(); y++) {
+            for (int x = 0; x < image.getWidth(); x++) {
+                if (image.getRGB(x, y) == expected) return true;
+            }
+        }
+        return false;
+    }
+
+    private static int minDominantX(BufferedImage image, Color color) {
+        int min = Integer.MAX_VALUE;
+        for (int y = 0; y < image.getHeight(); y++) {
+            for (int x = 0; x < image.getWidth(); x++) {
+                if (isDominantColor(image.getRGB(x, y), color)) {
+                    min = Math.min(min, x);
+                }
+            }
+        }
+        return min == Integer.MAX_VALUE ? -1 : min;
+    }
+
+    private static int minDominantY(BufferedImage image, Color color) {
+        int min = Integer.MAX_VALUE;
+        for (int y = 0; y < image.getHeight(); y++) {
+            for (int x = 0; x < image.getWidth(); x++) {
+                if (isDominantColor(image.getRGB(x, y), color)) {
+                    min = Math.min(min, y);
+                }
+            }
+        }
+        return min == Integer.MAX_VALUE ? -1 : min;
+    }
+
+    private static boolean isDominantColor(int rgb, Color color) {
+        Color c = new Color(rgb, true);
+        if (c.getAlpha() == 0) return false;
+        if (color.equals(Color.RED)) {
+            return c.getRed() > 180 && c.getGreen() < 80 && c.getBlue() < 80;
+        }
+        if (color.equals(Color.GREEN)) {
+            return c.getGreen() > 180 && c.getRed() < 80 && c.getBlue() < 80;
+        }
+        return Math.abs(c.getRed() - color.getRed()) < 20
+                && Math.abs(c.getGreen() - color.getGreen()) < 20
+                && Math.abs(c.getBlue() - color.getBlue()) < 20;
+    }
+
+    private static int maxBrightVerticalRun(BufferedImage image,
+                                            int x0,
+                                            int x1,
+                                            int y0,
+                                            int y1) {
+        int best = 0;
+        int minX = Math.max(0, x0);
+        int maxX = Math.min(image.getWidth() - 1, x1);
+        int minY = Math.max(0, y0);
+        int maxY = Math.min(image.getHeight() - 1, y1);
+        for (int x = minX; x <= maxX; x++) {
+            int current = 0;
+            for (int y = minY; y <= maxY; y++) {
+                if (isBrightWhite(image.getRGB(x, y))) {
+                    current++;
+                    best = Math.max(best, current);
+                } else {
+                    current = 0;
+                }
+            }
+        }
+        return best;
+    }
+
+    private static boolean isBrightWhite(int rgb) {
+        int a = (rgb >>> 24) & 0xff;
+        int r = (rgb >> 16) & 0xff;
+        int g = (rgb >> 8) & 0xff;
+        int b = rgb & 0xff;
+        return a > 0 && r > 240 && g > 240 && b > 240;
     }
 }

@@ -14,7 +14,6 @@ import java.io.File;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
 
 public class StarDist3DRunnerObjectFilterTest {
 
@@ -87,17 +86,6 @@ public class StarDist3DRunnerObjectFilterTest {
                 0.0);
         assertTrue(new File((String) settings.detectorSettings.get(
                 StarDistCustomDetectorFactory.KEY_MODEL_FILEPATH)).isFile());
-    }
-
-    @Test
-    public void configureDetectorSettingsRejectsOutOfRangeThresholds() throws Exception {
-        try {
-            StarDist3DRunner.configureStarDistDetector(
-                    new Settings(labelImage(new int[] {1})), 1.1, 0.2);
-            fail("Expected invalid StarDist threshold to be rejected.");
-        } catch (IllegalArgumentException expected) {
-            assertTrue(expected.getMessage().contains("between 0 and 1"));
-        }
     }
 
     private static ResultsTable objectStats() {

@@ -56,7 +56,6 @@ public class SpectralDecontaminationAnalysis implements Analysis {
 
     private boolean headless = false;
     private boolean suppressDialogs = false;
-    private boolean aggressiveMemory = false;
     private boolean verboseLogging = false;
     private boolean skipExisting = false;
     private int parallelThreads = 1;
@@ -73,13 +72,13 @@ public class SpectralDecontaminationAnalysis implements Analysis {
     }
 
     @Override
-    public void setSuppressDialogs(boolean suppress) {
-        this.suppressDialogs = suppress;
+    public boolean requiresHeadedMode() {
+        return true;
     }
 
     @Override
-    public void setAggressiveMemory(boolean aggressive) {
-        this.aggressiveMemory = aggressive;
+    public void setSuppressDialogs(boolean suppress) {
+        this.suppressDialogs = suppress;
     }
 
     @Override
@@ -140,7 +139,6 @@ public class SpectralDecontaminationAnalysis implements Analysis {
         IJ.log("Directory: " + directory);
         if (verboseLogging) {
             IJ.log("Headless: " + headless);
-            IJ.log("Aggressive memory clearing: " + aggressiveMemory);
             IJ.log("Skip existing: " + skipExisting);
             IJ.log("Parallel threads: " + parallelThreads);
             IJ.log("Loader threads: " + loaderThreads + " (" + loaderPercent + "%)");

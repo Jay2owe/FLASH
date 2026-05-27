@@ -101,7 +101,6 @@ public final class CLIArgumentParser {
 
         cfg.headless = getBooleanOption(macroOptions, "headless", true);
         cfg.parallel = getBooleanOption(macroOptions, "parallel", true);
-        cfg.aggressiveMemory = getBooleanOption(macroOptions, "aggressive_memory", false);
         cfg.verbose = getBooleanOption(macroOptions, "verbose", false);
         cfg.tifCache = getBooleanOption(macroOptions, "tif_cache", false);
         cfg.autoAggregate = !getBooleanOption(macroOptions, "no_aggregate", false);
@@ -210,7 +209,6 @@ public final class CLIArgumentParser {
                 + "  headless[=true|false] Hide image windows (default: on)\n"
                 + "  parallel[=true|false] Enable parallel processing (default: on)\n"
                 + "  threads=N             Thread count (default: cores/2)\n"
-                + "  aggressive_memory     Aggressive memory cleanup\n"
                 + "  verbose               Verbose logging\n"
                 + "  overwrite=auto|skip   Overwrite behavior (default: auto)\n"
                 + "  no_aggregate          Disable auto-aggregation (on by default)\n"
@@ -514,6 +512,18 @@ public final class CLIArgumentParser {
         }
         if (doCpc != null) {
             object.doCpc = Boolean.valueOf(parseBooleanValue("object.doCpc", doCpc, false));
+        }
+
+        String doIntensityColoc = getValue(options, "object.doIntensityColoc");
+        if (doIntensityColoc == null) {
+            doIntensityColoc = getValue(options, "object.do_intensity_coloc");
+        }
+        if (doIntensityColoc == null) {
+            doIntensityColoc = getValue(options, "object.intensity_colocalization");
+        }
+        if (doIntensityColoc != null) {
+            object.doIntensityColoc = Boolean.valueOf(parseBooleanValue(
+                    "object.doIntensityColoc", doIntensityColoc, false));
         }
 
         String extract = getValue(options, "object.extractProcessLength");

@@ -184,7 +184,7 @@ public class StatisticalAnalysis implements Analysis {
         if (conditionOrder.size() < 2) {
             String msg = "At least 2 conditions are required for statistical testing. Found: "
                     + conditionOrder.size() + ".";
-            if (headless || suppressDialogs) {
+            if (isUnattendedMode(suppressDialogs, cliConfig, GraphicsEnvironment.isHeadless())) {
                 msg += " Edit FLASH/Results/Tables/Project Summary/Conditions.csv to assign conditions.";
             }
             notifyUser("Statistical Analysis", msg);
@@ -295,7 +295,7 @@ public class StatisticalAnalysis implements Analysis {
 
         IJ.log("Statistical analysis complete: " + tested + " metrics tested, "
                 + skipped + " skipped (insufficient group size).");
-        if (!headless && !suppressDialogs) {
+        if (canShowGuiDialog(suppressDialogs, cliConfig, GraphicsEnvironment.isHeadless())) {
             IJ.showMessage("Statistical Analysis",
                     "Complete.\n" + tested + " metrics tested.\n"
                     + "Saved: " + outFile.getName());
@@ -317,7 +317,7 @@ public class StatisticalAnalysis implements Analysis {
     Map<String, String> resolveConditionAssignments(String directory, Set<String> animals) {
         Map<String, String> resolved = ConditionManifestIO.resolveAssignments(directory, animals);
 
-        if (headless || suppressDialogs) {
+        if (isUnattendedMode(suppressDialogs, cliConfig, GraphicsEnvironment.isHeadless())) {
             IJ.log("Using " + (ConditionManifestIO.getExistingFile(directory) != null
                     ? "manifest" : "auto-detected") + " condition assignments (unattended mode).");
             return resolved;
@@ -420,7 +420,7 @@ public class StatisticalAnalysis implements Analysis {
     }
 
     private void runStatisticsHelper(String directory, ConditionManifestPanel manifest) {
-        if (headless || suppressDialogs) return;
+        if (!canShowGuiDialog(suppressDialogs, cliConfig, GraphicsEnvironment.isHeadless())) return;
         try {
             LinkedHashMap<String, String> currentAssignments = manifest.collectAssignments();
             List<Integer> groupSizes = computeGroupSizes(currentAssignments);
@@ -460,7 +460,7 @@ public class StatisticalAnalysis implements Analysis {
     }
 
     private void handleSaveAsPreset(String directory, JComboBox<String> presetCombo) {
-        if (headless || suppressDialogs) return;
+        if (!canShowGuiDialog(suppressDialogs, cliConfig, GraphicsEnvironment.isHeadless())) return;
         String defaultName = "My Statistics Preset";
         String name = JOptionPane.showInputDialog(null,
                 "Preset name:",
@@ -565,9 +565,21 @@ public class StatisticalAnalysis implements Analysis {
      */
     private void notifyUser(String title, String message) {
         IJ.log(message.replace('\n', ' '));
-        if (!headless && !suppressDialogs) {
+        if (canShowGuiDialog(suppressDialogs, cliConfig, GraphicsEnvironment.isHeadless())) {
             IJ.showMessage(title, message);
         }
+    }
+
+    static boolean canShowGuiDialog(boolean suppressDialogs,
+                                    CLIConfig cliConfig,
+                                    boolean runtimeHeadless) {
+        return !suppressDialogs && cliConfig == null && !runtimeHeadless;
+    }
+
+    static boolean isUnattendedMode(boolean suppressDialogs,
+                                    CLIConfig cliConfig,
+                                    boolean runtimeHeadless) {
+        return !canShowGuiDialog(suppressDialogs, cliConfig, runtimeHeadless);
     }
 
     private static File existingProjectSummaryFile(FlashProjectLayout layout, String fileName) {

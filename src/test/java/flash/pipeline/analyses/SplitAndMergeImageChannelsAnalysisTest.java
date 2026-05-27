@@ -17,6 +17,8 @@ import flash.pipeline.presentation.PresentationTileRecord;
 import flash.pipeline.presentation.PresentationTileWriter;
 import ij.ImagePlus;
 import ij.ImageStack;
+import ij.process.ColorProcessor;
+import ij.process.ShortProcessor;
 import org.junit.After;
 import org.junit.Rule;
 import org.junit.Test;
@@ -75,6 +77,48 @@ public class SplitAndMergeImageChannelsAnalysisTest {
     }
 
     @Test
+    public void mergePseudoColorsToRgbHonoursPerChannelDisplayRange() throws Exception {
+        // 16-bit channel with raw values 0..3000 but display range clamped to 0..1000.
+        // The merge must rescale through (raw - min)/(max - min) — naively bit-shifting
+        // by 8 was the bug: it produced ~12 of 255 (≈5% brightness) for a pixel that the
+        // user wanted to see at full intensity.
+        ShortProcessor red = new ShortProcessor(2, 1);
+        red.set(0, 0);
+        red.set(1, 3000);
+        red.setMinAndMax(0, 1000);
+        ImagePlus redImp = new ImagePlus("red", red);
+
+        ShortProcessor blue = new ShortProcessor(2, 1);
+        blue.set(0, 500);
+        blue.set(1, 0);
+        blue.setMinAndMax(0, 1000);
+        ImagePlus blueImp = new ImagePlus("blue", blue);
+
+        Method merge = SplitAndMergeImageChannelsAnalysis.class.getDeclaredMethod(
+                "mergePseudoColorsToRgb", ImagePlus[].class, String[].class);
+        merge.setAccessible(true);
+        ImagePlus merged = (ImagePlus) merge.invoke(null,
+                (Object) new ImagePlus[]{redImp, blueImp},
+                (Object) new String[]{"Red", "Blue"});
+
+        assertNotNull(merged);
+        ColorProcessor cp = (ColorProcessor) merged.getProcessor();
+        int pixel0 = cp.get(0);
+        int pixel1 = cp.get(1);
+
+        // Pixel 0: red raw=0 (0%), blue raw=500 (50% of 0..1000 range) → (R=0, G=0, B≈128).
+        assertEquals("red @ pixel0", 0, (pixel0 >> 16) & 0xff);
+        assertEquals("green @ pixel0", 0, (pixel0 >> 8) & 0xff);
+        assertTrue("blue @ pixel0 should be ~128 (was " + (pixel0 & 0xff) + ")",
+                Math.abs((pixel0 & 0xff) - 128) <= 2);
+
+        // Pixel 1: red raw=3000 clamps above the 1000 max → R=255. Blue=0 → B=0.
+        assertEquals("red @ pixel1", 255, (pixel1 >> 16) & 0xff);
+        assertEquals("green @ pixel1", 0, (pixel1 >> 8) & 0xff);
+        assertEquals("blue @ pixel1", 0, pixel1 & 0xff);
+    }
+
+    @Test
     public void declaresSplitMergeBinRequirementsWithoutRoiBenefit() {
         SplitAndMergeImageChannelsAnalysis analysis = new SplitAndMergeImageChannelsAnalysis();
 
@@ -85,6 +129,30 @@ public class SplitAndMergeImageChannelsAnalysisTest {
                 BinField.Z_SLICE),
                 analysis.requiredBinFields());
         assertFalse(analysis.benefitsFromRois());
+    }
+
+    @Test
+    public void manualProcessingOverridesHideWindowsOnlyForInteractiveGuiRuns() {
+        assertTrue(SplitAndMergeImageChannelsAnalysis.hasManualProcessing(
+                new String[]{"None", "Manual"}));
+        assertFalse(SplitAndMergeImageChannelsAnalysis.hasManualProcessing(
+                new String[]{"None", "Automatic"}));
+
+        assertTrue(SplitAndMergeImageChannelsAnalysis.shouldOverrideHideWindowsForManualProcessing(
+                true, true, null, false));
+        assertFalse(SplitAndMergeImageChannelsAnalysis.shouldOverrideHideWindowsForManualProcessing(
+                true, true, new flash.pipeline.cli.CLIConfig(), false));
+        assertFalse(SplitAndMergeImageChannelsAnalysis.shouldOverrideHideWindowsForManualProcessing(
+                true, true, null, true));
+        assertFalse(SplitAndMergeImageChannelsAnalysis.shouldOverrideHideWindowsForManualProcessing(
+                false, true, null, false));
+    }
+
+    @Test
+    public void manualAdjustmentRunsWhenWindowsAreVisibleAndWorkerIsSequential() {
+        assertTrue(SplitAndMergeImageChannelsAnalysis.canRunManualAdjustment(false, false));
+        assertFalse(SplitAndMergeImageChannelsAnalysis.canRunManualAdjustment(true, false));
+        assertFalse(SplitAndMergeImageChannelsAnalysis.canRunManualAdjustment(false, true));
     }
 
     @Test

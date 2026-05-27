@@ -85,7 +85,6 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
 
     private boolean headless = false;
     private boolean suppressDialogs = false;
-    private boolean aggressiveMemory = false;
     private boolean verboseLogging = false;
     private boolean skipExisting = false;
     private boolean compactLog = false;
@@ -127,11 +126,6 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
         } else {
             IJ.showMessage(title, body);
         }
-    }
-
-    @Override
-    public void setAggressiveMemory(boolean aggressive) {
-        this.aggressiveMemory = aggressive;
     }
 
     @Override
@@ -295,6 +289,8 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
         if (mdr == null) return;
         useDeconvolvedInput = mdr.useDeconvolvedInput;
         presentationTileRecords.clear();
+        boolean hasManual = hasManualProcessing(mdr.processMethodPerCh);
+        enableVisibleWindowsForManualProcessingIfNeeded(hasManual);
 
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
         File outRoot = layout.presentationImagesDir();
@@ -312,10 +308,6 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
         }
 
         // Determine effective thread count early so we know which loading strategy to use
-        boolean hasManual = false;
-        for (String m : mdr.processMethodPerCh) {
-            if (METHOD_MANUAL.equals(m)) { hasManual = true; break; }
-        }
         final int effectiveThreads = (hasManual || parallelThreads <= 1) ? 1 : parallelThreads;
 
         // Both paths use DeferredImageSupplier; parallel path wraps it in BoundedImageLoader
@@ -696,11 +688,6 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                 IJ.log("  [DEBUG] Image processing time: " + formatDuration(imageElapsed));
             }
 
-            if (aggressiveMemory) {
-                if (verboseLogging) IJ.log("  [DEBUG] Aggressive memory clearing...");
-                System.gc();
-                IJ.freeMemory();
-            }
         }
         prefetcher.shutdown();
     }
@@ -823,10 +810,6 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                             IJ.log("[" + done + "/" + scheduled + "] " + partLabel
                                     + " Completed in " + formatDurationCompact(imageElapsed) + etaStr);
 
-                            if (aggressiveMemory) {
-                                System.gc();
-                                IJ.freeMemory();
-                            }
                         } catch (Exception e) {
                             String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
                             RuntimeException contextual = new RuntimeException(
@@ -2209,7 +2192,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                 if (!compactLog) IJ.log("    - Saturation: " + saturation);
                 break;
             case METHOD_MANUAL:
-                if (headless || parallelThreads > 1) {
+                if (!canRunManualAdjustment(headless, ParallelContext.isNested())) {
                     if (!compactLog) IJ.log("    - Manual adjustment skipped (headless/parallel mode)");
                 } else {
                     IJ.run(imp, "Brightness/Contrast...", "");
@@ -2233,6 +2216,34 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                 break;
             default:
                 break;
+        }
+    }
+
+    static boolean hasManualProcessing(String[] methods) {
+        if (methods == null) return false;
+        for (String method : methods) {
+            if (METHOD_MANUAL.equals(method)) return true;
+        }
+        return false;
+    }
+
+    static boolean shouldOverrideHideWindowsForManualProcessing(boolean hasManual,
+                                                                boolean headless,
+                                                                CLIConfig cliConfig,
+                                                                boolean runtimeHeadless) {
+        return hasManual && headless && cliConfig == null && !runtimeHeadless;
+    }
+
+    static boolean canRunManualAdjustment(boolean headless, boolean runningInParallelWorker) {
+        return !headless && !runningInParallelWorker;
+    }
+
+    private void enableVisibleWindowsForManualProcessingIfNeeded(boolean hasManual) {
+        if (shouldOverrideHideWindowsForManualProcessing(
+                hasManual, headless, cliConfig, GraphicsEnvironment.isHeadless())) {
+            IJ.log("[Make Presentation Images] Manual brightness/contrast needs visible windows; "
+                    + "overriding Hide Image Windows for this analysis.");
+            headless = false;
         }
     }
 
@@ -2302,18 +2313,29 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
 
             ij.process.ImageProcessor ip = imp.getProcessor();
             int bitDepth = imp.getBitDepth();
+            double dispMin = ip.getMin();
+            double dispMax = ip.getMax();
+            double dispRange = dispMax - dispMin;
+            if (!(dispRange > 0)) {
+                dispMin = 0;
+                dispMax = bitDepth == 16 ? 65535 : 255;
+                dispRange = dispMax - dispMin;
+            }
 
             for (int p = 0; p < w * h; p++) {
-                int val;
+                double raw;
                 if (bitDepth == 8) {
-                    val = ip.get(p) & 0xff;
+                    raw = ip.get(p) & 0xff;
                 } else if (bitDepth == 16) {
-                    val = (ip.get(p) & 0xffff) >>> 8;
+                    raw = ip.get(p) & 0xffff;
                 } else {
-                    val = (int) Math.round(ip.getf(p));
-                    if (val < 0) val = 0;
-                    if (val > 255) val = 255;
+                    raw = ip.getf(p);
                 }
+                double scaled = (raw - dispMin) / dispRange;
+                int val;
+                if (scaled <= 0) val = 0;
+                else if (scaled >= 1) val = 255;
+                else val = (int) Math.round(scaled * 255.0);
 
                 int packed = rgb[p];
                 int r = (packed >> 16) & 0xff;

@@ -295,6 +295,14 @@ public class ThreeDObjectAnalysisTest {
     }
 
     @Test
+    public void hideImageWindowsStillAllowsGuiDecisionDialogs() {
+        assertTrue(ThreeDObjectAnalysis.canShowGuiDecisionDialog(false, null, false));
+        assertFalse(ThreeDObjectAnalysis.canShowGuiDecisionDialog(true, null, false));
+        assertFalse(ThreeDObjectAnalysis.canShowGuiDecisionDialog(false, new CLIConfig(), false));
+        assertFalse(ThreeDObjectAnalysis.canShowGuiDecisionDialog(false, null, true));
+    }
+
+    @Test
     public void spatialHandoffKeepsNoninteractiveRunsNoninteractive() throws Exception {
         ThreeDObjectAnalysis suppressed = new ThreeDObjectAnalysis();
         final AtomicInteger suppressedLaunches = new AtomicInteger(0);

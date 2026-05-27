@@ -88,6 +88,17 @@ public class ColocZeroChannelTest {
         m.invoke(analysis, cfg, channelHasObjects, tables, 1, "AnimalA", "LH", "SCN", "SCN1");
     }
 
+    private static void invokeAppendIntensityColoc(ThreeDObjectAnalysis analysis, BinConfig cfg,
+                                                   boolean[] channelHasObjects,
+                                                   Map<String, ResultsTable> tables) throws Exception {
+        Method m = ThreeDObjectAnalysis.class.getDeclaredMethod(
+                "appendIntensityColocColumns",
+                BinConfig.class, boolean[].class, Map.class, int.class,
+                String.class, String.class, String.class, String.class);
+        m.setAccessible(true);
+        m.invoke(analysis, cfg, channelHasObjects, tables, 1, "AnimalA", "LH", "SCN", "SCN1");
+    }
+
     private static String captureImageJLogOutput(ThrowingRunnable action) throws Exception {
         PrintStream originalOut = System.out;
         ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -260,9 +271,42 @@ public class ColocZeroChannelTest {
         ResultsTable ch2 = tables.get("CH2");
         assertEquals(0.0, ch1.getValue("Colocalisation with CH2", 0), 0.001);
         assertEquals(0.0, ch2.getValue("Colocalisation with CH1", 0), 0.001);
-        assertEquals("NaN", ch1.getStringValue("CH1_Pearson_CH2", 0));
-        assertEquals("NaN", ch2.getStringValue("CH2_Pearson_CH1", 0));
+        assertEquals(-1, ch1.getColumnIndex("CH1_Pearson_CH2"));
+        assertEquals(-1, ch2.getColumnIndex("CH2_Pearson_CH1"));
         assertFalse(log.contains("channel dimensions differ"));
+    }
+
+    @Test
+    public void intensityColocComputesPerObjectMetricsAndRoiCostesSeparately() throws Exception {
+        BinConfig cfg = new BinConfig();
+        cfg.channelNames.add("CH1");
+        cfg.channelNames.add("CH2");
+
+        Map<String, ResultsTable> tables = new LinkedHashMap<>();
+        tables.put("CH1", new ResultsTable());
+        tables.put("CH2", new ResultsTable());
+        addObjectRows(tables.get("CH1"), 2, 1, "AnimalA", "LH", "SCN", "SCN1");
+        addObjectRows(tables.get("CH2"), 1, 1, "AnimalA", "LH", "SCN", "SCN1");
+
+        ThreeDObjectAnalysis analysis = new ThreeDObjectAnalysis();
+        registerImage(analysis, "CH1_objects", makeLabels(4, 1, 1,
+                new int[][] { new int[] { 1, 1, 2, 2 } }));
+        registerImage(analysis, "CH2_objects", makeLabels(4, 1, 1,
+                new int[][] { new int[] { 1, 1, 1, 1 } }));
+        registerImage(analysis, "CH1_unfiltered", makeLabels(4, 1, 1,
+                new int[][] { new int[] { 1, 2, 10, 20 } }));
+        registerImage(analysis, "CH2_unfiltered", makeLabels(4, 1, 1,
+                new int[][] { new int[] { 1, 2, 20, 10 } }));
+
+        invokeAppendIntensityColoc(analysis, cfg, new boolean[] { true, true }, tables);
+
+        ResultsTable ch1 = tables.get("CH1");
+        assertEquals(1.0, ch1.getValue("CH1_ObjPearson_CH2", 0), 0.0001);
+        assertEquals(-1.0, ch1.getValue("CH1_ObjPearson_CH2", 1), 0.0001);
+        assertTrue(ch1.getColumnIndex("CH1_ObjMandersM1_CH2") >= 0);
+        assertTrue(ch1.getColumnIndex("CH1_ObjCostesP_CH2") >= 0);
+        assertTrue(ch1.getColumnIndex("CH1_ROICostesP_CH2") >= 0);
+        assertEquals(-1, ch1.getColumnIndex("CH1_Manders_M1_CH2"));
     }
 
     @Test

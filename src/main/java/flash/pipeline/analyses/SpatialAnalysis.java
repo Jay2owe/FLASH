@@ -62,6 +62,7 @@ import javax.swing.JPanel;
 import javax.swing.JTextField;
 
 import java.awt.Dimension;
+import java.awt.GraphicsEnvironment;
 import java.io.File;
 import java.io.IOException;
 import java.io.PrintWriter;
@@ -2466,7 +2467,7 @@ public class SpatialAnalysis implements Analysis {
 
     private void warnUser(String title, String message) {
         IJ.log(message.replace('\n', ' '));
-        if (!headless && !suppressDialogs) {
+        if (canShowGuiDecisionDialog(suppressDialogs, cliConfig, GraphicsEnvironment.isHeadless())) {
             IJ.showMessage(title, message);
         }
     }
@@ -3607,6 +3608,9 @@ public class SpatialAnalysis implements Analysis {
             for (String col : cd.header) {
                 if (col.startsWith("Colocalisation with ")
                         || col.contains("_VolOverlap")
+                        || col.contains("_ObjPearson_")
+                        || col.contains("_ObjMandersM")
+                        || col.contains("_ObjCostes")
                         || col.contains("_Pearson_")
                         || col.contains("_Manders_M")
                         || col.contains("_Costes_")) {
@@ -4186,6 +4190,9 @@ public class SpatialAnalysis implements Analysis {
 
             addSelectedTextureColumns(cd, context);
             Map<SectionKey, List<Integer>> sections = groupByCpcSection(directory, channelName, cd);
+            int totalObjectRows = countSectionRows(sections);
+            IJ.log("  " + channelName + ": " + sections.size() + " sections, "
+                    + totalObjectRows + " object rows queued for object texture");
             Map<Integer, ObjectTextureFeatures.FeatureVector> vectorsByRow =
                     context.doObjectTextureClass
                             ? collectTextureFeatureVectors(channelName, cd, sections, rawResolver, provider)
@@ -4224,11 +4231,18 @@ public class SpatialAnalysis implements Analysis {
             int invalidClass3D = 0;
             int unreliableClass3D = 0;
             int skippedSingleSlice3D = 0;
+            int sectionCounter = 0;
+            int processedRows = 0;
+            long measurementStart = System.nanoTime();
 
             for (Map.Entry<SectionKey, List<Integer>> se : sections.entrySet()) {
                 SectionKey section = se.getKey();
                 List<Integer> rowIndices = se.getValue();
                 if (rowIndices.isEmpty()) continue;
+                sectionCounter++;
+                IJ.log("    Object texture measurement [" + sectionCounter + "/"
+                        + sections.size() + "]: " + section.labelFileName(channelName)
+                        + " (" + rowIndices.size() + " rows)");
 
                 ImagePlus labelImg = provider.get(channelName, section);
                 if (labelImg == null) {
@@ -4247,6 +4261,12 @@ public class SpatialAnalysis implements Analysis {
                     boolean hasLabelCol = cd.colIdx.containsKey("Label");
 
                     for (int rowIdx : rowIndices) {
+                        processedRows++;
+                        if (shouldLogObjectTextureProgress(processedRows, totalObjectRows)) {
+                            IJ.log("      Object texture measurement: " + processedRows
+                                    + "/" + totalObjectRows + " rows processed ("
+                                    + elapsedSeconds(measurementStart) + " s)");
+                        }
                         int label = resolveRowLabel(cd, rowIdx, hasLabelCol, labelImg);
                         mcib3d.geom2.Object3DInt obj = objMap.get(Integer.valueOf(label));
                         if (obj == null) continue;
@@ -4302,6 +4322,9 @@ public class SpatialAnalysis implements Analysis {
                         }
                         totalMeasured++;
                     }
+                    IJ.log("    Object texture measurement complete for "
+                            + section.labelFileName(channelName) + ": "
+                            + totalMeasured + " objects measured so far");
                 } catch (Exception e) {
                     IJ.log("    Object texture failed for " + section.labelFileName(channelName)
                             + ": " + e.getClass().getSimpleName() + " - " + e.getMessage());
@@ -4327,10 +4350,20 @@ public class SpatialAnalysis implements Analysis {
             LabelImageProvider provider) {
         Map<Integer, ObjectTextureFeatures.FeatureVector> vectors =
                 new LinkedHashMap<Integer, ObjectTextureFeatures.FeatureVector>();
+        int totalRows = countSectionRows(sections);
+        int sectionCounter = 0;
+        int processedRows = 0;
+        long start = System.nanoTime();
+        IJ.log("    Collecting texture-class features for " + channelName + ": "
+                + totalRows + " rows across " + sections.size() + " sections");
         for (Map.Entry<SectionKey, List<Integer>> se : sections.entrySet()) {
             SectionKey section = se.getKey();
             List<Integer> rowIndices = se.getValue();
             if (rowIndices.isEmpty()) continue;
+            sectionCounter++;
+            IJ.log("      Texture-class feature collection [" + sectionCounter + "/"
+                    + sections.size() + "]: " + section.labelFileName(channelName)
+                    + " (" + rowIndices.size() + " rows)");
 
             ImagePlus labelImg = provider.get(channelName, section);
             if (labelImg == null) continue;
@@ -4341,6 +4374,12 @@ public class SpatialAnalysis implements Analysis {
                 Map<Integer, mcib3d.geom2.Object3DInt> objMap = loadObjectMap(labelImg);
                 boolean hasLabelCol = cd.colIdx.containsKey("Label");
                 for (int rowIdx : rowIndices) {
+                    processedRows++;
+                    if (shouldLogObjectTextureProgress(processedRows, totalRows)) {
+                        IJ.log("        Texture-class features: " + processedRows
+                                + "/" + totalRows + " rows processed ("
+                                + elapsedSeconds(start) + " s)");
+                    }
                     int label = resolveRowLabel(cd, rowIdx, hasLabelCol, labelImg);
                     mcib3d.geom2.Object3DInt obj = objMap.get(Integer.valueOf(label));
                     if (obj == null) continue;
@@ -4355,6 +4394,9 @@ public class SpatialAnalysis implements Analysis {
                 closeLabelImage(labelImg, provider, channelName, section);
             }
         }
+        IJ.log("    Texture-class feature collection complete for " + channelName
+                + ": " + vectors.size() + "/" + totalRows + " rows with vectors ("
+                + elapsedSeconds(start) + " s)");
         return vectors;
     }
 
@@ -4367,10 +4409,21 @@ public class SpatialAnalysis implements Analysis {
             CalibrationIO.PixelCalibration calibration) {
         Map<Integer, ObjectTextureFeatures3D.FeatureVector> vectors =
                 new LinkedHashMap<Integer, ObjectTextureFeatures3D.FeatureVector>();
+        int totalRows = countSectionRows(sections);
+        int sectionCounter = 0;
+        int processedRows = 0;
+        long start = System.nanoTime();
+        IJ.log("    Collecting native-3D texture-class features for " + channelName + ": "
+                + totalRows + " rows across " + sections.size() + " sections");
         for (Map.Entry<SectionKey, List<Integer>> se : sections.entrySet()) {
             SectionKey section = se.getKey();
             List<Integer> rowIndices = se.getValue();
             if (rowIndices.isEmpty()) continue;
+            sectionCounter++;
+            IJ.log("      Native-3D texture feature collection [" + sectionCounter
+                    + "/" + sections.size() + "]: "
+                    + section.labelFileName(channelName) + " ("
+                    + rowIndices.size() + " rows)");
 
             ImagePlus labelImg = provider.get(channelName, section);
             if (labelImg == null) continue;
@@ -4382,6 +4435,12 @@ public class SpatialAnalysis implements Analysis {
                 Map<Integer, mcib3d.geom2.Object3DInt> objMap = loadObjectMap(labelImg);
                 boolean hasLabelCol = cd.colIdx.containsKey("Label");
                 for (int rowIdx : rowIndices) {
+                    processedRows++;
+                    if (shouldLogObjectTextureProgress(processedRows, totalRows)) {
+                        IJ.log("        Native-3D texture features: " + processedRows
+                                + "/" + totalRows + " rows processed ("
+                                + elapsedSeconds(start) + " s)");
+                    }
                     int label = resolveRowLabel(cd, rowIdx, hasLabelCol, labelImg);
                     mcib3d.geom2.Object3DInt obj = objMap.get(Integer.valueOf(label));
                     if (obj == null) continue;
@@ -4399,7 +4458,29 @@ public class SpatialAnalysis implements Analysis {
                 closeLabelImage(labelImg, provider, channelName, section);
             }
         }
+        IJ.log("    Native-3D texture feature collection complete for " + channelName
+                + ": " + vectors.size() + "/" + totalRows + " rows with vectors ("
+                + elapsedSeconds(start) + " s)");
         return vectors;
+    }
+
+    private static int countSectionRows(Map<SectionKey, List<Integer>> sections) {
+        if (sections == null || sections.isEmpty()) return 0;
+        int total = 0;
+        for (List<Integer> rows : sections.values()) {
+            if (rows != null) total += rows.size();
+        }
+        return total;
+    }
+
+    private static boolean shouldLogObjectTextureProgress(int processedRows, int totalRows) {
+        if (processedRows <= 0 || totalRows <= 0) return false;
+        return processedRows == 1 || processedRows == totalRows || processedRows % 100 == 0;
+    }
+
+    private static String elapsedSeconds(long startNanos) {
+        double seconds = (System.nanoTime() - startNanos) / 1000000000.0;
+        return String.format(Locale.ROOT, "%.1f", seconds);
     }
 
     private double[][] loadOrFitTextureCentroids(String directory,
@@ -5686,15 +5767,15 @@ public class SpatialAnalysis implements Analysis {
                                           boolean doNative3DTexture,
                                           int textureClassK) {
         opts.addHeader("Object Texture and Complexity");
-        spatialBindings.doObjectGLCMToggle = opts.addToggle("Object texture (GLCM)", doObjectGLCM);
+        spatialBindings.doObjectGLCMToggle = opts.addToggle("Object texture (GLCM; slow)", doObjectGLCM);
         spatialBindings.doObjectFractalToggle = opts.addToggle(
-                "Object complexity (fractal + lacunarity)", doObjectFractal);
+                "Object complexity (fractal + lacunarity; slow)", doObjectFractal);
         final ToggleSwitch textureClassToggle = opts.addToggle(
-                "Object texture classes", doObjectTextureClass);
+                "Object texture classes (slow)", doObjectTextureClass);
         spatialBindings.doObjectTextureClassToggle = textureClassToggle;
         opts.beginAdvancedSection("spatial.texture.advanced");
         spatialBindings.doNative3DTextureToggle = opts.addToggle(
-                "Native-3D texture (GLCM + texture classes)", doNative3DTexture);
+                "Native-3D texture (GLCM + texture classes; very slow)", doNative3DTexture);
         spatialBindings.textureClassKField = opts.addNumericField(
                 "Texture classes (k)", clampObjectTextureClassK(textureClassK), 0);
         opts.endAdvancedSection();
@@ -5852,7 +5933,7 @@ public class SpatialAnalysis implements Analysis {
     }
 
     private void handleSaveSpatialPreset(String directory, SpatialDialogBindings bindings) {
-        if (headless || suppressDialogs) return;
+        if (!canShowGuiDecisionDialog(suppressDialogs, cliConfig, GraphicsEnvironment.isHeadless())) return;
         if (bindings == null) {
             IJ.showMessage("Spatial Analysis", "Could not save preset: dialog options are not available.");
             return;
@@ -5881,6 +5962,12 @@ public class SpatialAnalysis implements Analysis {
         } catch (IllegalArgumentException e) {
             IJ.showMessage("Spatial Analysis", "Could not save preset: " + e.getMessage());
         }
+    }
+
+    static boolean canShowGuiDecisionDialog(boolean suppressDialogs,
+                                            CLIConfig cliConfig,
+                                            boolean runtimeHeadless) {
+        return !suppressDialogs && cliConfig == null && !runtimeHeadless;
     }
 
     private SpatialPreset buildSpatialPresetFromBindings(String name, SpatialDialogBindings bindings) {

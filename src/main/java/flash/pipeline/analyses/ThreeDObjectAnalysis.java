@@ -232,6 +232,7 @@ public class ThreeDObjectAnalysis implements Analysis {
     private boolean classicalCentroidFilter = true;
     private boolean doVolumetric = true;
     private boolean doCpc = true;
+    private boolean doIntensityColoc = false;
     private Map<String, Double> markerThresholds = new LinkedHashMap<String, Double>();
     private boolean wizardExtractProcessLength = false;
     private boolean wizardRunSpatial = false;
@@ -814,6 +815,10 @@ public class ThreeDObjectAnalysis implements Analysis {
                 objectBindings.doCpcToggle =
                         gdOpts.addToggle("Centroid coincidence (CPC)", doCpc);
                 gdOpts.addHelpText("Whether each object's centroid falls inside a partner object.");
+                objectBindings.doIntensityColocToggle =
+                        gdOpts.addToggle("Intensity Colocalization", doIntensityColoc);
+                gdOpts.addHelpText("Per-object Pearson and Manders, plus Costes thresholds/significance "
+                        + "at both object and image level.");
 
                 gdOpts.addHeader("Colocalisation Thresholds");
                 for (String chName : cfg.channelNames) {
@@ -862,6 +867,7 @@ public class ThreeDObjectAnalysis implements Analysis {
                 useDeconvolvedInput = gdOpts.getNextBoolean();
                 doVolumetric = gdOpts.getNextBoolean();
                 doCpc = gdOpts.getNextBoolean();
+                doIntensityColoc = gdOpts.getNextBoolean();
                 markerThresholds.clear();
                 for (String chName : cfg.channelNames) {
                     markerThresholds.put(chName, gdOpts.getNextNumber());
@@ -1047,7 +1053,7 @@ public class ThreeDObjectAnalysis implements Analysis {
             supplier = wrapInputSupplier(directory, supplier);
         } catch (Exception e) {
             IJ.log("3D Object Analysis: " + e.getMessage());
-            if (!headless && !suppressDialogs) {
+            if (canShowGuiDecisionDialog(suppressDialogs, cliConfig, GraphicsEnvironment.isHeadless())) {
                 IJ.showMessage("3D Object Analysis", e.getMessage());
             }
             IJ.showProgress(1.0);
@@ -1102,6 +1108,7 @@ public class ThreeDObjectAnalysis implements Analysis {
 
         // Ensure all coloc columns exist on each channel table
         if (doVolumetric) ensureAllColocColumns(cfg, channelTables);
+        if (doIntensityColoc) ensureAllIntensityColocColumns(cfg, channelTables);
         if (doCpc) ensureAllCpcColocColumns(cfg, channelTables);
 
         for (Map.Entry<String, ij.measure.ResultsTable> e : channelTables.entrySet()) {
@@ -1292,8 +1299,14 @@ public class ThreeDObjectAnalysis implements Analysis {
     }
 
     private boolean canPromptForExistingObjectData() {
-        return !suppressDialogs && !headless && cliConfig == null
-                && !GraphicsEnvironment.isHeadless();
+        return canShowGuiDecisionDialog(
+                suppressDialogs, cliConfig, GraphicsEnvironment.isHeadless());
+    }
+
+    static boolean canShowGuiDecisionDialog(boolean suppressDialogs,
+                                            CLIConfig cliConfig,
+                                            boolean runtimeHeadless) {
+        return !suppressDialogs && cliConfig == null && !runtimeHeadless;
     }
 
     private static String existingObjectDataPromptMessage(File outputDir, List<File> existingCsvs) {
@@ -1322,7 +1335,7 @@ public class ThreeDObjectAnalysis implements Analysis {
     }
 
     private NoRoiDecision promptForNoRoiDecision() {
-        if (suppressDialogs || headless || cliConfig != null || GraphicsEnvironment.isHeadless()) {
+        if (!canShowGuiDecisionDialog(suppressDialogs, cliConfig, GraphicsEnvironment.isHeadless())) {
             return NoRoiDecision.ANALYSE_FULL_IMAGE;
         }
 
@@ -1423,6 +1436,7 @@ public class ThreeDObjectAnalysis implements Analysis {
             }
             setToggle(bindings.doVolumetricToggle, doVolumetric);
             setToggle(bindings.doCpcToggle, doCpc);
+            setToggle(bindings.doIntensityColocToggle, doIntensityColoc);
             setToggle(bindings.extractProcessLengthToggle, wizardExtractProcessLength);
             setToggle(bindings.runSpatialToggle, wizardRunSpatial);
             setToggle(bindings.classicalCentroidFilterToggle, classicalCentroidFilter);
@@ -1441,7 +1455,7 @@ public class ThreeDObjectAnalysis implements Analysis {
     private void handleSaveThreeDObjectPreset(String directory,
                                               BinConfig cfg,
                                               ThreeDObjectDialogBindings bindings) {
-        if (headless || suppressDialogs) return;
+        if (!canShowGuiDecisionDialog(suppressDialogs, cliConfig, GraphicsEnvironment.isHeadless())) return;
         if (bindings == null) {
             IJ.showMessage("3D Object Analysis", "Could not save preset: dialog options are not available.");
             return;
@@ -1480,6 +1494,7 @@ public class ThreeDObjectAnalysis implements Analysis {
                 ThreeDObjectPreset.CURRENT_LIBRARY_VERSION,
                 isSelected(bindings.doVolumetricToggle),
                 isSelected(bindings.doCpcToggle),
+                isSelected(bindings.doIntensityColocToggle),
                 isSelected(bindings.extractProcessLengthToggle),
                 isSelected(bindings.runSpatialToggle),
                 isSelected(bindings.classicalCentroidFilterToggle),
@@ -1639,6 +1654,9 @@ public class ThreeDObjectAnalysis implements Analysis {
         if (object.getDoCpc() != null) {
             derived.doCpc = object.getDoCpc().booleanValue();
         }
+        if (object.getDoIntensityColoc() != null) {
+            derived.doIntensityColoc = object.getDoIntensityColoc().booleanValue();
+        }
         if (object.getExtractProcessLength() != null) {
             derived.extractProcessLength = object.getExtractProcessLength().booleanValue();
         }
@@ -1665,6 +1683,7 @@ public class ThreeDObjectAnalysis implements Analysis {
         if (derived == null) return;
         doVolumetric = derived.doVolumetric;
         doCpc = derived.doCpc;
+        doIntensityColoc = derived.doIntensityColoc;
         classicalCentroidFilter = derived.classicalCentroidFiltering;
         wizardExtractProcessLength = derived.extractProcessLength;
         wizardRunSpatial = derived.runSpatial;
@@ -1722,6 +1741,7 @@ public class ThreeDObjectAnalysis implements Analysis {
         ToggleSwitch useDeconvolvedInputToggle;
         ToggleSwitch doVolumetricToggle;
         ToggleSwitch doCpcToggle;
+        ToggleSwitch doIntensityColocToggle;
         ToggleSwitch extractProcessLengthToggle;
         ToggleSwitch runSpatialToggle;
         ToggleSwitch classicalCentroidFilterToggle;
@@ -1814,6 +1834,10 @@ public class ThreeDObjectAnalysis implements Analysis {
             }
             if (doCpc) {
                 appendCpcColocColumns(cfg, channelHasObjects, channelTables, scnIndex, animalName,
+                        hemisphere, seriesRegionLabel, roiLabel);
+            }
+            if (doIntensityColoc) {
+                appendIntensityColocColumns(cfg, channelHasObjects, channelTables, scnIndex, animalName,
                         hemisphere, seriesRegionLabel, roiLabel);
             }
 
@@ -2504,18 +2528,23 @@ public class ThreeDObjectAnalysis implements Analysis {
             if (other == null || other.equals(channelName)) continue;
             if (doVolumetric) {
                 keep.add(colocPercentCol(other));
-                keep.add(pearsonCol(channelName, other));
-                keep.add(mandersM1Col(channelName, other));
-                keep.add(mandersM2Col(channelName, other));
-                keep.add(costesTaCol(channelName, other));
-                keep.add(costesTbCol(channelName, other));
-                keep.add(pearsonThresholdedCol(channelName, other));
-                keep.add(costesPCol(channelName, other));
                 keep.add(volColocCol(channelName, other));
             }
             if (doCpc) {
                 keep.add(channelName + "_CPCColoc_" + other);
                 keep.add(channelName + "_CPCContains_" + other);
+            }
+            if (doIntensityColoc) {
+                keep.add(objPearsonCol(channelName, other));
+                keep.add(objMandersM1Col(channelName, other));
+                keep.add(objMandersM2Col(channelName, other));
+                keep.add(objCostesTaCol(channelName, other));
+                keep.add(objCostesTbCol(channelName, other));
+                keep.add(objPearsonThresholdedCol(channelName, other));
+                keep.add(objCostesPCol(channelName, other));
+                keep.add(roiCostesTaCol(channelName, other));
+                keep.add(roiCostesTbCol(channelName, other));
+                keep.add(roiCostesPCol(channelName, other));
             }
         }
 
@@ -3585,6 +3614,10 @@ public class ThreeDObjectAnalysis implements Analysis {
                 appendCpcColocColumns(cfg, channelHasObjects, channelTables, scnIndex, animalName,
                         hemisphere, seriesRegionLabel, roiLabel);
             }
+            if (doIntensityColoc) {
+                appendIntensityColocColumns(cfg, channelHasObjects, channelTables, scnIndex, animalName,
+                        hemisphere, seriesRegionLabel, roiLabel);
+            }
 
             // Process length extraction
             if (extractProcessLength && processChannels != null) {
@@ -4243,14 +4276,10 @@ public class ThreeDObjectAnalysis implements Analysis {
                 if (!aHas || !bHas) {
                     // Zero-fill both directions
                     if (aTable != null) {
-                        writeColocMetricsForThisImage(aTable, aChannel, bChannel, null, true,
-                                scnIndex, animalName, hemisphere, region, roiLabel);
                         setColocZerosForThisImage(aTable, overlapColAB, scnIndex, animalName, hemisphere, region, roiLabel);
                         setColocZerosForThisImage(aTable, colocColAB, scnIndex, animalName, hemisphere, region, roiLabel);
                     }
                     if (bTable != null) {
-                        writeColocMetricsForThisImage(bTable, bChannel, aChannel, null, false,
-                                scnIndex, animalName, hemisphere, region, roiLabel);
                         setColocZerosForThisImage(bTable, overlapColBA, scnIndex, animalName, hemisphere, region, roiLabel);
                         setColocZerosForThisImage(bTable, colocColBA, scnIndex, animalName, hemisphere, region, roiLabel);
                     }
@@ -4260,21 +4289,6 @@ public class ThreeDObjectAnalysis implements Analysis {
                     appendColocLogEntry(logEntries, logFirst, a, bChannel, "no objects in " + emptyChannel);
                     appendColocLogEntry(logEntries, logFirst, b, aChannel, "no objects in " + emptyChannel);
                     continue;
-                }
-
-                ColocalizationMetrics.Result metrics = (aTable != null || bTable != null)
-                        ? computeIntensityColocMetrics(aChannel, bChannel)
-                        : null;
-                if (aTable != null) {
-                    writeColocMetricsForThisImage(aTable, aChannel, bChannel, metrics, true,
-                            scnIndex, animalName, hemisphere, region, roiLabel);
-                }
-                if (bTable != null) {
-                    writeColocMetricsForThisImage(bTable, bChannel, aChannel, metrics, false,
-                            scnIndex, animalName, hemisphere, region, roiLabel);
-                }
-                if (metrics != null && metrics.randomizationSkipped) {
-                    IJ.log("    " + metrics.note + " (" + aChannel + " vs " + bChannel + ")");
                 }
 
                 try {
@@ -4582,48 +4596,178 @@ public class ThreeDObjectAnalysis implements Analysis {
         }
     }
 
-    private void writeColocMetricsForThisImage(ij.measure.ResultsTable table,
-                                               String sourceChannel,
-                                               String partnerChannel,
-                                               ColocalizationMetrics.Result metrics,
-                                               boolean sourceIsA,
-                                               int scnIndex,
-                                               String animalName,
-                                               String hemisphere,
-                                               String region,
-                                               String roiLabel) {
-        for (int r = 0; r < table.size(); r++) {
-            if (matchesRowMetadata(table, r, scnIndex, animalName, hemisphere, region, roiLabel)) {
-                writeColocMetricValues(table, r, sourceChannel, partnerChannel, metrics, sourceIsA);
+    private void appendIntensityColocColumns(
+            BinConfig cfg,
+            boolean[] channelHasObjects,
+            Map<String, ij.measure.ResultsTable> channelTables,
+            int scnIndex,
+            String animalName,
+            String hemisphere,
+            String region,
+            String roiLabel
+    ) {
+        int n = Math.min(cfg.numChannels(), channelHasObjects != null ? channelHasObjects.length : 0);
+        if (n == 0) return;
+
+        for (int sourceIdx = 0; sourceIdx < n; sourceIdx++) {
+            String sourceChannel = cfg.channelNames.get(sourceIdx);
+            ij.measure.ResultsTable sourceTable = channelTables.get(sourceChannel);
+            if (sourceTable == null) continue;
+
+            ImagePlus sourceLabels = getRegisteredImage(sourceChannel + "_objects");
+            ImagePlus sourceImage = getRegisteredImage(sourceChannel + "_unfiltered");
+            boolean sourceHasObjects = channelHasObjects[sourceIdx] && sourceLabels != null;
+
+            for (int partnerIdx = 0; partnerIdx < n; partnerIdx++) {
+                if (partnerIdx == sourceIdx) continue;
+                String partnerChannel = cfg.channelNames.get(partnerIdx);
+                ImagePlus partnerImage = getRegisteredImage(partnerChannel + "_unfiltered");
+
+                ColocalizationMetrics.Result roiMetrics =
+                        computeIntensityColocMetrics(sourceChannel, partnerChannel);
+                Map<Integer, ColocalizationMetrics.Result> objectMetrics = null;
+                if (sourceHasObjects && sourceImage != null && partnerImage != null) {
+                    objectMetrics = computeObjectIntensityColocMetrics(
+                            sourceLabels, sourceImage, partnerImage, sourceChannel, partnerChannel);
+                }
+                writeIntensityColocForThisImage(sourceTable, sourceChannel, partnerChannel,
+                        objectMetrics, roiMetrics, scnIndex, animalName, hemisphere, region, roiLabel);
             }
         }
     }
 
-    private void writeColocMetricValues(ij.measure.ResultsTable table,
-                                        int row,
-                                        String sourceChannel,
-                                        String partnerChannel,
-                                        ColocalizationMetrics.Result metrics,
-                                        boolean sourceIsA) {
-        double pearson = metrics == null ? Double.NaN : metrics.pearson;
-        double m1 = metrics == null ? Double.NaN
-                : (sourceIsA ? metrics.mandersM1 : metrics.mandersM2);
-        double m2 = metrics == null ? Double.NaN
-                : (sourceIsA ? metrics.mandersM2 : metrics.mandersM1);
-        double ta = metrics == null ? Double.NaN
-                : (sourceIsA ? metrics.costesTa : metrics.costesTb);
-        double tb = metrics == null ? Double.NaN
-                : (sourceIsA ? metrics.costesTb : metrics.costesTa);
-        double pearsonT = metrics == null ? Double.NaN : metrics.pearsonThresholded;
-        double p = metrics == null ? Double.NaN : metrics.costesP;
+    private Map<Integer, ColocalizationMetrics.Result> computeObjectIntensityColocMetrics(
+            ImagePlus sourceLabels,
+            ImagePlus sourceImage,
+            ImagePlus partnerImage,
+            String sourceChannel,
+            String partnerChannel) {
+        Map<Integer, ColocalizationMetrics.Result> out =
+                new LinkedHashMap<Integer, ColocalizationMetrics.Result>();
+        if (!sameDimensions(sourceLabels, sourceImage) || !sameDimensions(sourceLabels, partnerImage)) {
+            IJ.log("    [COLOC] per-object intensity metrics skipped for "
+                    + sourceChannel + " vs " + partnerChannel + ": dimensions differ");
+            return out;
+        }
 
-        setMetricValue(table, pearsonCol(sourceChannel, partnerChannel), row, pearson);
-        setMetricValue(table, mandersM1Col(sourceChannel, partnerChannel), row, m1);
-        setMetricValue(table, mandersM2Col(sourceChannel, partnerChannel), row, m2);
-        setMetricValue(table, costesTaCol(sourceChannel, partnerChannel), row, ta);
-        setMetricValue(table, costesTbCol(sourceChannel, partnerChannel), row, tb);
-        setMetricValue(table, pearsonThresholdedCol(sourceChannel, partnerChannel), row, pearsonT);
-        setMetricValue(table, costesPCol(sourceChannel, partnerChannel), row, p);
+        ij.ImageStack labelStack = sourceLabels.getStack();
+        ij.ImageStack sourceStack = sourceImage.getStack();
+        ij.ImageStack partnerStack = partnerImage.getStack();
+        int depth = Math.max(1, sourceLabels.getStackSize());
+        gnu.trove.map.hash.TIntIntHashMap sizes = new gnu.trove.map.hash.TIntIntHashMap();
+        for (int z = 1; z <= depth; z++) {
+            ij.process.ImageProcessor lp = labelStack.getProcessor(z);
+            int nPixels = lp.getPixelCount();
+            for (int i = 0; i < nPixels; i++) {
+                int label = lp.get(i);
+                if (label > 0) {
+                    sizes.adjustOrPutValue(label, 1, 1);
+                }
+            }
+        }
+
+        Map<Integer, double[]> sourceByLabel = new LinkedHashMap<Integer, double[]>();
+        Map<Integer, double[]> partnerByLabel = new LinkedHashMap<Integer, double[]>();
+        gnu.trove.map.hash.TIntIntHashMap offsets = new gnu.trove.map.hash.TIntIntHashMap();
+        gnu.trove.iterator.TIntIntIterator sizeIt = sizes.iterator();
+        while (sizeIt.hasNext()) {
+            sizeIt.advance();
+            int label = sizeIt.key();
+            int count = sizeIt.value();
+            sourceByLabel.put(Integer.valueOf(label), new double[count]);
+            partnerByLabel.put(Integer.valueOf(label), new double[count]);
+        }
+
+        int width = sourceLabels.getWidth();
+        int height = sourceLabels.getHeight();
+        for (int z = 1; z <= depth; z++) {
+            ij.process.ImageProcessor lp = labelStack.getProcessor(z);
+            ij.process.ImageProcessor sp = sourceStack.getProcessor(z);
+            ij.process.ImageProcessor pp = partnerStack.getProcessor(z);
+            int nPixels = lp.getPixelCount();
+            for (int i = 0; i < nPixels; i++) {
+                int label = lp.get(i);
+                if (label <= 0) continue;
+                int offset = offsets.get(label);
+                Integer key = Integer.valueOf(label);
+                sourceByLabel.get(key)[offset] = sp.getf(i);
+                partnerByLabel.get(key)[offset] = pp.getf(i);
+                offsets.put(label, offset + 1);
+            }
+        }
+
+        for (Map.Entry<Integer, double[]> entry : sourceByLabel.entrySet()) {
+            Integer label = entry.getKey();
+            double[] sourceValues = entry.getValue();
+            double[] partnerValues = partnerByLabel.get(label);
+            out.put(label, ColocalizationMetrics.compute(
+                    sourceValues, partnerValues, Math.max(1, sourceValues.length), 1, 1));
+        }
+        return out;
+    }
+
+    private static boolean sameDimensions(ImagePlus a, ImagePlus b) {
+        return a != null && b != null
+                && a.getWidth() == b.getWidth()
+                && a.getHeight() == b.getHeight()
+                && a.getStackSize() == b.getStackSize();
+    }
+
+    private void writeIntensityColocForThisImage(ij.measure.ResultsTable table,
+                                                 String sourceChannel,
+                                                 String partnerChannel,
+                                                 Map<Integer, ColocalizationMetrics.Result> objectMetrics,
+                                                 ColocalizationMetrics.Result roiMetrics,
+                                                 int scnIndex,
+                                                 String animalName,
+                                                 String hemisphere,
+                                                 String region,
+                                                 String roiLabel) {
+        for (int r = 0; r < table.size(); r++) {
+            if (!matchesRowMetadata(table, r, scnIndex, animalName, hemisphere, region, roiLabel)) {
+                continue;
+            }
+            int label = roundedLabel(table, r);
+            ColocalizationMetrics.Result object =
+                    objectMetrics == null ? null : objectMetrics.get(Integer.valueOf(label));
+            writeObjectIntensityMetricValues(table, r, sourceChannel, partnerChannel, object, roiMetrics);
+        }
+    }
+
+    private static int roundedLabel(ResultsTable table, int row) {
+        try {
+            return (int) Math.round(table.getValue("Label", row));
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    private void writeObjectIntensityMetricValues(ij.measure.ResultsTable table,
+                                                  int row,
+                                                  String sourceChannel,
+                                                  String partnerChannel,
+                                                  ColocalizationMetrics.Result object,
+                                                  ColocalizationMetrics.Result roi) {
+        setMetricValue(table, objPearsonCol(sourceChannel, partnerChannel), row,
+                object == null ? Double.NaN : object.pearson);
+        setMetricValue(table, objMandersM1Col(sourceChannel, partnerChannel), row,
+                object == null ? Double.NaN : object.mandersM1);
+        setMetricValue(table, objMandersM2Col(sourceChannel, partnerChannel), row,
+                object == null ? Double.NaN : object.mandersM2);
+        setMetricValue(table, objCostesTaCol(sourceChannel, partnerChannel), row,
+                object == null ? Double.NaN : object.costesTa);
+        setMetricValue(table, objCostesTbCol(sourceChannel, partnerChannel), row,
+                object == null ? Double.NaN : object.costesTb);
+        setMetricValue(table, objPearsonThresholdedCol(sourceChannel, partnerChannel), row,
+                object == null ? Double.NaN : object.pearsonThresholded);
+        setMetricValue(table, objCostesPCol(sourceChannel, partnerChannel), row,
+                object == null ? Double.NaN : object.costesP);
+        setMetricValue(table, roiCostesTaCol(sourceChannel, partnerChannel), row,
+                roi == null ? Double.NaN : roi.costesTa);
+        setMetricValue(table, roiCostesTbCol(sourceChannel, partnerChannel), row,
+                roi == null ? Double.NaN : roi.costesTb);
+        setMetricValue(table, roiCostesPCol(sourceChannel, partnerChannel), row,
+                roi == null ? Double.NaN : roi.costesP);
     }
 
     private void setMetricValue(ij.measure.ResultsTable table, String colName, int row, double value) {
@@ -4776,32 +4920,44 @@ public class ThreeDObjectAnalysis implements Analysis {
         return "Colocalisation with " + partner;
     }
 
-    private String pearsonCol(String source, String partner) {
-        return source + "_Pearson_" + partner;
+    private String objPearsonCol(String source, String partner) {
+        return source + "_ObjPearson_" + partner;
     }
 
-    private String mandersM1Col(String source, String partner) {
-        return source + "_Manders_M1_" + partner;
+    private String objMandersM1Col(String source, String partner) {
+        return source + "_ObjMandersM1_" + partner;
     }
 
-    private String mandersM2Col(String source, String partner) {
-        return source + "_Manders_M2_" + partner;
+    private String objMandersM2Col(String source, String partner) {
+        return source + "_ObjMandersM2_" + partner;
     }
 
-    private String costesTaCol(String source, String partner) {
-        return source + "_Costes_Ta_" + partner;
+    private String objCostesTaCol(String source, String partner) {
+        return source + "_ObjCostesTa_" + partner;
     }
 
-    private String costesTbCol(String source, String partner) {
-        return source + "_Costes_Tb_" + partner;
+    private String objCostesTbCol(String source, String partner) {
+        return source + "_ObjCostesTb_" + partner;
     }
 
-    private String pearsonThresholdedCol(String source, String partner) {
-        return source + "_Pearson_t_" + partner;
+    private String objPearsonThresholdedCol(String source, String partner) {
+        return source + "_ObjPearsonT_" + partner;
     }
 
-    private String costesPCol(String source, String partner) {
-        return source + "_Costes_p_" + partner;
+    private String objCostesPCol(String source, String partner) {
+        return source + "_ObjCostesP_" + partner;
+    }
+
+    private String roiCostesTaCol(String source, String partner) {
+        return source + "_ROICostesTa_" + partner;
+    }
+
+    private String roiCostesTbCol(String source, String partner) {
+        return source + "_ROICostesTb_" + partner;
+    }
+
+    private String roiCostesPCol(String source, String partner) {
+        return source + "_ROICostesP_" + partner;
     }
 
     /** Build thresholded volumetric coloc flag column name: SOURCE_VolColocN_PARTNER. */
@@ -4827,13 +4983,6 @@ public class ThreeDObjectAnalysis implements Analysis {
                     } catch (Exception e) {
                         t.setValue(overlapCol, 0, 0);
                     }
-                    ensureColocMetricColumn(t, pearsonCol(aChannel, bChannel));
-                    ensureColocMetricColumn(t, mandersM1Col(aChannel, bChannel));
-                    ensureColocMetricColumn(t, mandersM2Col(aChannel, bChannel));
-                    ensureColocMetricColumn(t, costesTaCol(aChannel, bChannel));
-                    ensureColocMetricColumn(t, costesTbCol(aChannel, bChannel));
-                    ensureColocMetricColumn(t, pearsonThresholdedCol(aChannel, bChannel));
-                    ensureColocMetricColumn(t, costesPCol(aChannel, bChannel));
                     try {
                         t.setValue(colocCol, 0, t.getValue(colocCol, 0));
                     } catch (Exception e) {
@@ -4851,7 +5000,28 @@ public class ThreeDObjectAnalysis implements Analysis {
 
     // ── CPC (Centre-Particle Coincidence) colocalization ──────────────
 
-    private void ensureColocMetricColumn(ij.measure.ResultsTable table, String colName) {
+    private void ensureAllIntensityColocColumns(BinConfig cfg, Map<String, ij.measure.ResultsTable> channelTables) {
+        for (String source : cfg.channelNames) {
+            ij.measure.ResultsTable t = channelTables.get(source);
+            if (t == null || t.size() == 0) continue;
+
+            for (String partner : cfg.channelNames) {
+                if (source.equals(partner)) continue;
+                ensureIntensityColocColumn(t, objPearsonCol(source, partner));
+                ensureIntensityColocColumn(t, objMandersM1Col(source, partner));
+                ensureIntensityColocColumn(t, objMandersM2Col(source, partner));
+                ensureIntensityColocColumn(t, objCostesTaCol(source, partner));
+                ensureIntensityColocColumn(t, objCostesTbCol(source, partner));
+                ensureIntensityColocColumn(t, objPearsonThresholdedCol(source, partner));
+                ensureIntensityColocColumn(t, objCostesPCol(source, partner));
+                ensureIntensityColocColumn(t, roiCostesTaCol(source, partner));
+                ensureIntensityColocColumn(t, roiCostesTbCol(source, partner));
+                ensureIntensityColocColumn(t, roiCostesPCol(source, partner));
+            }
+        }
+    }
+
+    private void ensureIntensityColocColumn(ij.measure.ResultsTable table, String colName) {
         if (table == null || table.size() == 0) return;
         if (table.getColumnIndex(colName) < 0) {
             table.setValue(colName, 0, "NaN");

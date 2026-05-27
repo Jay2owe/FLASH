@@ -218,7 +218,7 @@ public final class ObjectCsvColumnOrder {
         }
         partner = volColocPartner(channelName, col);
         if (partner != null) {
-            return new ColumnKey(5, partnerRank(partnerRanks, partner), 8, partner, originalIndex);
+            return new ColumnKey(5, partnerRank(partnerRanks, partner), 20, partner, originalIndex);
         }
 
         partner = distToClosestPartner(channelName, col);
@@ -294,19 +294,40 @@ public final class ObjectCsvColumnOrder {
     }
 
     private static MetricPartner intensityColocMetricPartner(String channelName, String col) {
-        MetricPartner metric = metricPartnerAfter(col, channelName + "_Pearson_t_", 6);
+        MetricPartner metric = metricPartnerAfter(col, channelName + "_ObjPearson_", 1);
         if (metric != null) return metric;
-        metric = metricPartnerAfter(col, channelName + "_Pearson_", 1);
+        metric = metricPartnerAfter(col, channelName + "_ObjMandersM1_", 2);
         if (metric != null) return metric;
-        metric = metricPartnerAfter(col, channelName + "_Manders_M1_", 2);
+        metric = metricPartnerAfter(col, channelName + "_ObjMandersM2_", 3);
         if (metric != null) return metric;
-        metric = metricPartnerAfter(col, channelName + "_Manders_M2_", 3);
+        metric = metricPartnerAfter(col, channelName + "_ObjCostesTa_", 4);
         if (metric != null) return metric;
-        metric = metricPartnerAfter(col, channelName + "_Costes_Ta_", 4);
+        metric = metricPartnerAfter(col, channelName + "_ObjCostesTb_", 5);
         if (metric != null) return metric;
-        metric = metricPartnerAfter(col, channelName + "_Costes_Tb_", 5);
+        metric = metricPartnerAfter(col, channelName + "_ObjPearsonT_", 6);
         if (metric != null) return metric;
-        return metricPartnerAfter(col, channelName + "_Costes_p_", 7);
+        metric = metricPartnerAfter(col, channelName + "_ObjCostesP_", 7);
+        if (metric != null) return metric;
+        metric = metricPartnerAfter(col, channelName + "_ROICostesTa_", 8);
+        if (metric != null) return metric;
+        metric = metricPartnerAfter(col, channelName + "_ROICostesTb_", 9);
+        if (metric != null) return metric;
+        metric = metricPartnerAfter(col, channelName + "_ROICostesP_", 10);
+        if (metric != null) return metric;
+
+        metric = metricPartnerAfter(col, channelName + "_Pearson_t_", 16);
+        if (metric != null) return metric;
+        metric = metricPartnerAfter(col, channelName + "_Pearson_", 11);
+        if (metric != null) return metric;
+        metric = metricPartnerAfter(col, channelName + "_Manders_M1_", 12);
+        if (metric != null) return metric;
+        metric = metricPartnerAfter(col, channelName + "_Manders_M2_", 13);
+        if (metric != null) return metric;
+        metric = metricPartnerAfter(col, channelName + "_Costes_Ta_", 14);
+        if (metric != null) return metric;
+        metric = metricPartnerAfter(col, channelName + "_Costes_Tb_", 15);
+        if (metric != null) return metric;
+        return metricPartnerAfter(col, channelName + "_Costes_p_", 17);
     }
 
     private static MetricPartner metricPartnerAfter(String col, String prefix, int order) {

@@ -8,11 +8,8 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 
 /**
  * Writes the small landing page for the user-facing results folder.
@@ -40,7 +37,7 @@ public final class StartHereWriter {
             } finally {
                 writer.close();
             }
-            moveAtomically(temp.toPath(), out.toPath());
+            IoUtils.moveReplacing(temp.toPath(), out.toPath());
             moved = true;
         } finally {
             if (!moved) {
@@ -48,15 +45,6 @@ public final class StartHereWriter {
             }
         }
         return out;
-    }
-
-    private static void moveAtomically(Path source, Path target) throws IOException {
-        try {
-            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING,
-                    StandardCopyOption.ATOMIC_MOVE);
-        } catch (AtomicMoveNotSupportedException e) {
-            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
-        }
     }
 
     private static String tempPrefix(File target) {

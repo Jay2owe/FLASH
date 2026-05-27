@@ -38,8 +38,6 @@ public final class PresentationTileWriter {
 
     private static final Color TILE_BG = Color.WHITE;
     private static final Color TILE_LINE = new Color(210, 210, 210);
-    private static final Color TILE_HEADER_BG = new Color(238, 241, 243);
-    private static final Color TILE_GROUP_BG = new Color(225, 230, 233);
     private static final Color TILE_TEXT = new Color(35, 35, 35);
     private static final Color TILE_HELP_TEXT = new Color(90, 90, 90);
     private static final int MAX_ANNOTATION_PREVIEW_DIMENSION = 640;
@@ -208,29 +206,17 @@ public final class PresentationTileWriter {
             byRowAndColumn.put(record.imageKey() + "\n" + record.outputName(), record);
         }
 
+        Font headerFont = new Font(Font.SANS_SERIF, Font.BOLD, 16);
+        Font rowFont = new Font(Font.SANS_SERIF, Font.PLAIN, 14);
+        Font groupFont = new Font(Font.SANS_SERIF, Font.BOLD, 15);
+
         int cell = config.cellSizePx();
-        int margin = 18;
-        int colGap = 10;
-        int rowGap = 10;
-        int rowLabelWidth = Math.max(190, Math.min(320, cell));
-        int colHeaderHeight = 46;
-        int groupHeaderHeight = 30;
+        int groupCount = groupCount(rows);
+        TileLayout layout = createTileLayout(columns, rows, cell, groupCount,
+                headerFont, rowFont, groupFont);
 
-        int groupCount = 0;
-        String lastGroup = null;
-        for (Row row : rows) {
-            if (!row.groupLabel.equals(lastGroup)) {
-                groupCount++;
-                lastGroup = row.groupLabel;
-            }
-        }
-
-        int width = margin * 2 + rowLabelWidth + columns.size() * cell
-                + Math.max(0, columns.size() - 1) * colGap;
-        int height = margin * 2 + colHeaderHeight
-                + groupCount * groupHeaderHeight
-                + rows.size() * cell
-                + Math.max(0, rows.size() - 1) * rowGap;
+        int width = layout.width;
+        int height = layout.height;
 
         BufferedImage tile = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
         Graphics2D g = tile.createGraphics();
@@ -239,36 +225,32 @@ public final class PresentationTileWriter {
             g.setColor(TILE_BG);
             g.fillRect(0, 0, width, height);
 
-            Font headerFont = new Font(Font.SANS_SERIF, Font.BOLD, 16);
-            Font rowFont = new Font(Font.SANS_SERIF, Font.PLAIN, 14);
-            Font groupFont = new Font(Font.SANS_SERIF, Font.BOLD, 15);
+            int x0 = layout.margin + layout.rowLabelWidth + layout.rowLabelGap;
+            int y = layout.margin;
+            drawColumnHeaders(g, columns, x0, y, cell, layout.colGap,
+                    layout.headerHeight, headerFont);
+            y += layout.headerHeight;
 
-            int x0 = margin + rowLabelWidth;
-            int y = margin;
-            drawColumnHeaders(g, columns, x0, y, cell, colGap, colHeaderHeight, headerFont);
-            y += colHeaderHeight;
-
-            lastGroup = null;
-            for (Row row : rows) {
+            String lastGroup = null;
+            for (int r = 0; r < rows.size(); r++) {
+                Row row = rows.get(r);
                 if (!row.groupLabel.equals(lastGroup)) {
-                    g.setColor(TILE_GROUP_BG);
-                    g.fillRect(margin, y, width - margin * 2, groupHeaderHeight - 4);
-                    g.setColor(TILE_TEXT);
-                    g.setFont(groupFont);
-                    FontMetrics fm = g.getFontMetrics();
-                    g.drawString(row.groupLabel, margin + 10,
-                            y + ((groupHeaderHeight - 4) + fm.getAscent() - fm.getDescent()) / 2);
-                    y += groupHeaderHeight;
+                    drawGroupLabel(g, row.groupLabel, layout.margin, y,
+                            width - layout.margin * 2, layout.groupHeaderHeight, groupFont);
+                    y += layout.groupHeaderHeight;
                     lastGroup = row.groupLabel;
                 }
 
-                drawRowLabel(g, row.label, margin, y, rowLabelWidth - 10, cell, rowFont);
+                drawRowLabel(g, row.label, layout.margin, y, layout.rowLabelWidth, cell, rowFont);
                 for (int c = 0; c < columns.size(); c++) {
-                    int x = x0 + c * (cell + colGap);
+                    int x = x0 + c * (cell + layout.colGap);
                     PresentationTileRecord record = byRowAndColumn.get(row.key + "\n" + columns.get(c));
                     drawCell(g, record, conditions, config, x, y, cell);
                 }
-                y += cell + rowGap;
+                y += cell;
+                if (r < rows.size() - 1) {
+                    y += layout.rowGap;
+                }
             }
         } finally {
             g.dispose();
@@ -278,6 +260,54 @@ public final class PresentationTileWriter {
         if (parent != null) IoUtils.mustMkdirs(parent);
         writePngAtomically(tile, outputFile);
         IJ.log("  - Presentation overview tile written: " + outputFile.getAbsolutePath());
+    }
+
+    private static TileLayout createTileLayout(List<String> columns,
+                                               List<Row> rows,
+                                               int cell,
+                                               int groupCount,
+                                               Font headerFont,
+                                               Font rowFont,
+                                               Font groupFont) {
+        BufferedImage scratch = new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = scratch.createGraphics();
+        try {
+            applyQualityHints(g);
+            FontMetrics headerFm = g.getFontMetrics(headerFont);
+            FontMetrics rowFm = g.getFontMetrics(rowFont);
+            FontMetrics groupFm = g.getFontMetrics(groupFont);
+            int margin = 6;
+            int colGap = 4;
+            int rowGap = 4;
+            int rowLabelGap = 6;
+            int rowLabelWidth = tightRowLabelWidth(rows, rowFm, cell);
+            if (rowLabelWidth <= 0) rowLabelGap = 0;
+            int headerHeight = headerFm.getHeight() + 4;
+            int groupHeaderHeight = groupFm.getHeight() + 4;
+            int width = margin * 2 + rowLabelWidth + rowLabelGap
+                    + columns.size() * cell
+                    + Math.max(0, columns.size() - 1) * colGap;
+            int height = margin * 2 + headerHeight
+                    + groupCount * groupHeaderHeight
+                    + rows.size() * cell
+                    + Math.max(0, rows.size() - 1) * rowGap;
+            return new TileLayout(width, height, margin, colGap, rowGap,
+                    rowLabelWidth, rowLabelGap, headerHeight, groupHeaderHeight);
+        } finally {
+            g.dispose();
+        }
+    }
+
+    private static int groupCount(List<Row> rows) {
+        int count = 0;
+        String lastGroup = null;
+        for (Row row : rows) {
+            if (!row.groupLabel.equals(lastGroup)) {
+                count++;
+                lastGroup = row.groupLabel;
+            }
+        }
+        return count;
     }
 
     private static void writePngAtomically(BufferedImage image, File outputFile) throws IOException {
@@ -337,33 +367,24 @@ public final class PresentationTileWriter {
         try {
             applyQualityHints(g);
             drawSyntheticPreviewBackground(g, w, h);
-            PresentationTileRecord record = scaledPreviewRecord(representative, w, h, previewScale);
+            PresentationTileRecord record = previewRecord(representative, sourceW, sourceH);
             Map<String, String> conditions = new LinkedHashMap<String, String>();
             conditions.put(record.animal(), "Control");
             drawAnnotations(g, record, conditions, config,
-                    new Rectangle(0, 0, w, h), 1.0);
+                    new Rectangle(0, 0, w, h), previewScale, previewScale, previewScale);
         } finally {
             g.dispose();
         }
         return preview;
     }
 
-    private static PresentationTileRecord scaledPreviewRecord(PresentationTileRecord representative,
-                                                              int width,
-                                                              int height,
-                                                              double previewScale) {
+    private static PresentationTileRecord previewRecord(PresentationTileRecord representative,
+                                                        int width,
+                                                        int height) {
         if (representative == null) {
             return new PresentationTileRecord(
                     null, "Animal1", "LH", "Cortex", "DAPI", "DAPI",
                     0, width, height, 0.5, 0.5);
-        }
-        double pixelWidthUm = representative.pixelWidthUm();
-        double pixelHeightUm = representative.pixelHeightUm();
-        if (Double.isFinite(pixelWidthUm) && previewScale > 0) {
-            pixelWidthUm = pixelWidthUm / previewScale;
-        }
-        if (Double.isFinite(pixelHeightUm) && previewScale > 0) {
-            pixelHeightUm = pixelHeightUm / previewScale;
         }
         return new PresentationTileRecord(
                 null,
@@ -376,8 +397,8 @@ public final class PresentationTileWriter {
                 representative.channelIndex(),
                 width,
                 height,
-                pixelWidthUm,
-                pixelHeightUm);
+                representative.pixelWidthUm(),
+                representative.pixelHeightUm());
     }
 
     private static double previewScale(int width, int height) {
@@ -412,27 +433,34 @@ public final class PresentationTileWriter {
         FontMetrics fm = g.getFontMetrics();
         for (int i = 0; i < columns.size(); i++) {
             int x = x0 + i * (cell + colGap);
-            g.setColor(TILE_HEADER_BG);
-            g.fillRect(x, y, cell, headerHeight - 8);
-            g.setColor(TILE_LINE);
-            g.drawRect(x, y, cell, headerHeight - 8);
             g.setColor(TILE_TEXT);
-            String label = columns.get(i);
-            int textX = x + Math.max(6, (cell - fm.stringWidth(label)) / 2);
-            int textY = y + ((headerHeight - 8) + fm.getAscent() - fm.getDescent()) / 2;
+            String label = fitSingleLine(columns.get(i), fm, cell);
+            int textX = x + Math.max(0, (cell - fm.stringWidth(label)) / 2);
+            int textY = y + 2 + fm.getAscent();
             g.drawString(label, textX, textY);
         }
     }
 
-    private static void drawRowLabel(Graphics2D g, String label,
-                                     int x, int y, int width, int height, Font font) {
+    private static void drawGroupLabel(Graphics2D g, String label,
+                                       int x, int y, int width, int height, Font font) {
+        if (height <= 0 || width <= 0) return;
         g.setFont(font);
         g.setColor(TILE_TEXT);
         FontMetrics fm = g.getFontMetrics();
-        List<String> lines = wrap(label, fm, width);
+        String fitted = fitSingleLine(label, fm, width);
+        g.drawString(fitted, x, y + 2 + fm.getAscent());
+    }
+
+    private static void drawRowLabel(Graphics2D g, String label,
+                                     int x, int y, int width, int height, Font font) {
+        if (width <= 0 || height <= 0) return;
+        g.setFont(font);
+        g.setColor(TILE_TEXT);
+        FontMetrics fm = g.getFontMetrics();
+        List<String> lines = fitWrappedLines(label, fm, width, height);
         int lineHeight = fm.getHeight();
         int totalHeight = lines.size() * lineHeight;
-        int textY = y + Math.max(fm.getAscent() + 4,
+        int textY = y + Math.max(fm.getAscent(),
                 (height - totalHeight) / 2 + fm.getAscent());
         for (String line : lines) {
             g.drawString(line, x, textY);
@@ -491,16 +519,31 @@ public final class PresentationTileWriter {
                                         PresentationTileConfig config,
                                         Rectangle imageRect,
                                         double scaleFactor) {
+        drawAnnotations(g, record, conditions, config, imageRect,
+                scaleFactor, 1.0, Math.max(0.6, scaleFactor));
+    }
+
+    private static void drawAnnotations(Graphics2D g,
+                                        PresentationTileRecord record,
+                                        Map<String, String> conditions,
+                                        PresentationTileConfig config,
+                                        Rectangle imageRect,
+                                        double scaleFactor,
+                                        double styleScale,
+                                        double scaleBarThicknessScale) {
         if (record == null || config == null || imageRect == null) return;
+        double safeStyleScale = styleScale > 0 && Double.isFinite(styleScale) ? styleScale : 1.0;
+        double safeThicknessScale = scaleBarThicknessScale > 0 && Double.isFinite(scaleBarThicknessScale)
+                ? scaleBarThicknessScale : safeStyleScale;
         if (config.labelMode() != PresentationTileConfig.LabelMode.NONE) {
             String label = labelText(record, conditions, config);
             if (!label.isEmpty()) {
                 drawTextLabel(g, label, imageRect, config.labelPosition(),
-                        config.labelFontSizePx(), config.annotationColor());
+                        config.labelFontSizePx(), config.annotationColor(), safeStyleScale);
             }
         }
         if (config.scaleBarEnabled()) {
-            drawScaleBar(g, record, imageRect, scaleFactor, config);
+            drawScaleBar(g, record, imageRect, scaleFactor, safeStyleScale, safeThicknessScale, config);
         }
     }
 
@@ -508,17 +551,19 @@ public final class PresentationTileWriter {
                                      PresentationTileRecord record,
                                      Rectangle imageRect,
                                      double scaleFactor,
+                                     double styleScale,
+                                     double thicknessScale,
                                      PresentationTileConfig config) {
         double pixelWidthUm = record.pixelWidthUm();
         if (!Double.isFinite(pixelWidthUm) || pixelWidthUm <= 0) {
             return;
         }
         int barLen = (int) Math.round((config.scaleBarLengthUm() / pixelWidthUm) * scaleFactor);
-        int inset = Math.max(8, config.labelFontSizePx() / 2);
+        int inset = scaledDimension(Math.max(8, config.labelFontSizePx() / 2), styleScale);
         barLen = Math.min(barLen, imageRect.width - inset * 2);
         if (barLen < 4) return;
 
-        int thickness = Math.max(1, (int) Math.round(config.scaleBarThicknessPx() * Math.max(0.6, scaleFactor)));
+        int thickness = scaledDimension(config.scaleBarThicknessPx(), thicknessScale);
         int x = horizontalPosition(config.scaleBarPosition(), imageRect, inset, barLen);
         int y = verticalPosition(config.scaleBarPosition(), imageRect, inset, thickness);
 
@@ -526,16 +571,17 @@ public final class PresentationTileWriter {
         g.fillRect(x, y, barLen, thickness);
 
         String label = formatScale(config.scaleBarLengthUm()) + " um";
+        int baseFontSize = Math.max(8, (int) Math.round(config.labelFontSizePx() * 0.78));
         Font font = new Font(Font.SANS_SERIF, Font.BOLD,
-                Math.max(8, (int) Math.round(config.labelFontSizePx() * 0.78)));
+                scaledDimension(baseFontSize, styleScale));
         g.setFont(font);
         FontMetrics fm = g.getFontMetrics();
         int textX = x + Math.max(0, (barLen - fm.stringWidth(label)) / 2);
-        int textY = y - 4;
+        int textY = y - scaledDimension(4, styleScale);
         if (isTop(config.scaleBarPosition())) {
-            textY = y + thickness + fm.getAscent() + 3;
+            textY = y + thickness + fm.getAscent() + scaledDimension(3, styleScale);
         }
-        drawTextBox(g, label, textX, textY, fm, config.annotationColor());
+        drawAnnotationText(g, label, textX, textY, config.annotationColor());
     }
 
     private static void drawTextLabel(Graphics2D g,
@@ -543,11 +589,13 @@ public final class PresentationTileWriter {
                                       Rectangle imageRect,
                                       PresentationTileConfig.Position position,
                                       int fontSize,
-                                      Color color) {
-        Font font = new Font(Font.SANS_SERIF, Font.BOLD, fontSize);
+                                      Color color,
+                                      double styleScale) {
+        Font font = new Font(Font.SANS_SERIF, Font.BOLD,
+                scaledDimension(fontSize, styleScale));
         g.setFont(font);
         FontMetrics fm = g.getFontMetrics();
-        int inset = Math.max(8, fontSize / 2);
+        int inset = scaledDimension(Math.max(8, fontSize / 2), styleScale);
         int textW = fm.stringWidth(text);
         int textX = horizontalPosition(position, imageRect, inset, textW);
         int textY;
@@ -556,28 +604,18 @@ public final class PresentationTileWriter {
         } else {
             textY = imageRect.y + imageRect.height - inset;
         }
-        drawTextBox(g, text, textX, textY, fm, color);
+        drawAnnotationText(g, text, textX, textY, color);
     }
 
-    private static void drawTextBox(Graphics2D g, String text, int textX, int baseline,
-                                    FontMetrics fm, Color color) {
-        int padX = 5;
-        int padY = 3;
-        int boxX = textX - padX;
-        int boxY = baseline - fm.getAscent() - padY;
-        int boxW = fm.stringWidth(text) + padX * 2;
-        int boxH = fm.getAscent() + fm.getDescent() + padY * 2;
-
-        Color bg = isLight(color)
-                ? new Color(0, 0, 0, 145)
-                : new Color(255, 255, 255, 185);
-        java.awt.Composite oldComposite = g.getComposite();
-        g.setComposite(AlphaComposite.SrcOver);
-        g.setColor(bg);
-        g.fillRect(boxX, boxY, boxW, boxH);
-        g.setComposite(oldComposite);
+    private static void drawAnnotationText(Graphics2D g, String text, int textX, int baseline,
+                                           Color color) {
         g.setColor(color);
         g.drawString(text, textX, baseline);
+    }
+
+    private static int scaledDimension(int value, double scale) {
+        double safeScale = scale > 0 && Double.isFinite(scale) ? scale : 1.0;
+        return Math.max(1, (int) Math.round(value * safeScale));
     }
 
     private static int horizontalPosition(PresentationTileConfig.Position position,
@@ -761,18 +799,90 @@ public final class PresentationTileWriter {
         return lines;
     }
 
+    private static int tightRowLabelWidth(List<Row> rows, FontMetrics fm, int cell) {
+        int maxTextWidth = 0;
+        int longestWordWidth = 0;
+        for (Row row : rows) {
+            String label = row == null ? "" : row.label;
+            String source = label == null ? "" : label.trim();
+            maxTextWidth = Math.max(maxTextWidth, fm.stringWidth(source));
+            if (!source.isEmpty()) {
+                String[] words = source.split("\\s+");
+                for (String word : words) {
+                    longestWordWidth = Math.max(longestWordWidth, fm.stringWidth(word));
+                }
+            }
+        }
+        if (maxTextWidth <= 0) return 0;
+
+        int preferredMin = Math.min(96, Math.max(56, cell / 2));
+        int minWidth = Math.min(maxTextWidth, Math.max(longestWordWidth, preferredMin));
+        int maxWidth = Math.min(maxTextWidth, Math.max(minWidth, Math.min(260, Math.max(96, cell))));
+        int availableHeight = Math.max(fm.getHeight(), cell - 2);
+        for (int width = minWidth; width <= maxWidth; width += 4) {
+            if (rowLabelsFit(rows, fm, width, availableHeight)) {
+                return width;
+            }
+        }
+        return maxWidth;
+    }
+
+    private static boolean rowLabelsFit(List<Row> rows, FontMetrics fm, int width, int height) {
+        int lineHeight = fm.getHeight();
+        int maxLines = Math.max(1, height / Math.max(1, lineHeight));
+        for (Row row : rows) {
+            List<String> lines = wrap(row == null ? "" : row.label, fm, width);
+            if (lines.size() > maxLines) return false;
+            for (String line : lines) {
+                if (fm.stringWidth(line) > width) return false;
+            }
+        }
+        return true;
+    }
+
+    private static List<String> fitWrappedLines(String text, FontMetrics fm, int width, int height) {
+        List<String> wrapped = wrap(text, fm, width);
+        int maxLines = Math.max(1, height / Math.max(1, fm.getHeight()));
+        List<String> out = new ArrayList<String>();
+        int count = Math.min(wrapped.size(), maxLines);
+        for (int i = 0; i < count; i++) {
+            String line = wrapped.get(i);
+            if (i == count - 1 && wrapped.size() > count) {
+                line = ellipsize(line, fm, width);
+            } else {
+                line = fitSingleLine(line, fm, width);
+            }
+            out.add(line);
+        }
+        if (out.isEmpty()) out.add("");
+        return out;
+    }
+
+    private static String fitSingleLine(String text, FontMetrics fm, int width) {
+        String clean = text == null ? "" : text.trim();
+        if (width <= 0 || clean.isEmpty()) return "";
+        if (fm.stringWidth(clean) <= width) return clean;
+        return ellipsize(clean, fm, width);
+    }
+
+    private static String ellipsize(String text, FontMetrics fm, int width) {
+        if (width <= 0) return "";
+        String suffix = "...";
+        if (fm.stringWidth(suffix) > width) return "";
+        String clean = text == null ? "" : text.trim();
+        int end = clean.length();
+        while (end > 0) {
+            String candidate = clean.substring(0, end).trim() + suffix;
+            if (fm.stringWidth(candidate) <= width) return candidate;
+            end--;
+        }
+        return suffix;
+    }
+
     private static int compareText(String a, String b) {
         String aa = a == null ? "" : a;
         String bb = b == null ? "" : b;
         return aa.compareToIgnoreCase(bb);
-    }
-
-    private static boolean isLight(Color color) {
-        if (color == null) return true;
-        double luminance = (0.2126 * color.getRed())
-                + (0.7152 * color.getGreen())
-                + (0.0722 * color.getBlue());
-        return luminance >= 128;
     }
 
     private static String absolutePath(File file) {
@@ -816,6 +926,38 @@ public final class PresentationTileWriter {
             return String.valueOf((long) Math.round(value));
         }
         return String.format(java.util.Locale.US, "%.2f", value);
+    }
+
+    private static final class TileLayout {
+        final int width;
+        final int height;
+        final int margin;
+        final int colGap;
+        final int rowGap;
+        final int rowLabelWidth;
+        final int rowLabelGap;
+        final int headerHeight;
+        final int groupHeaderHeight;
+
+        TileLayout(int width,
+                   int height,
+                   int margin,
+                   int colGap,
+                   int rowGap,
+                   int rowLabelWidth,
+                   int rowLabelGap,
+                   int headerHeight,
+                   int groupHeaderHeight) {
+            this.width = width;
+            this.height = height;
+            this.margin = margin;
+            this.colGap = colGap;
+            this.rowGap = rowGap;
+            this.rowLabelWidth = rowLabelWidth;
+            this.rowLabelGap = rowLabelGap;
+            this.headerHeight = headerHeight;
+            this.groupHeaderHeight = groupHeaderHeight;
+        }
     }
 
     private static final class Row {

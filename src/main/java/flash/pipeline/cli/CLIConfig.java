@@ -31,7 +31,6 @@ public class CLIConfig {
     boolean headless = true;
     boolean parallel = true;
     int threads = Math.max(1, Runtime.getRuntime().availableProcessors() / 2);
-    boolean aggressiveMemory = false;
     boolean verbose = false;
     String overwriteBehavior = "Auto-Overwrite";
     boolean autoAggregate = true;
@@ -59,7 +58,6 @@ public class CLIConfig {
     public boolean isHeadless() { return headless; }
     public boolean isParallel() { return parallel; }
     public int getThreads() { return threads; }
-    public boolean isAggressiveMemory() { return aggressiveMemory; }
     public boolean isVerbose() { return verbose; }
     public String getOverwriteBehavior() { return overwriteBehavior; }
     public boolean isAutoAggregate() { return autoAggregate; }
@@ -104,7 +102,6 @@ public class CLIConfig {
 
         if (headless) parts.add("headless");
         if (parallel) parts.add("parallel");
-        if (aggressiveMemory) parts.add("aggressive_memory");
         if (verbose) parts.add("verbose");
         if (tifCache) parts.add("tif_cache");
         if (!autoAggregate) parts.add("no_aggregate");
@@ -196,6 +193,9 @@ public class CLIConfig {
         }
         if (object.doCpc != null) {
             parts.add("object.doCpc=" + object.doCpc);
+        }
+        if (object.doIntensityColoc != null) {
+            parts.add("object.doIntensityColoc=" + object.doIntensityColoc);
         }
         if (object.extractProcessLength != null) {
             parts.add("object.extractProcessLength=" + object.extractProcessLength);
@@ -583,6 +583,7 @@ public class CLIConfig {
         String presetName = null;
         Boolean doVolumetric = null;
         Boolean doCpc = null;
+        Boolean doIntensityColoc = null;
         Boolean extractProcessLength = null;
         Boolean runSpatial = null;
         Boolean classicalCentroidFiltering = null;
@@ -592,6 +593,7 @@ public class CLIConfig {
         public String getPresetName() { return presetName; }
         public Boolean getDoVolumetric() { return doVolumetric; }
         public Boolean getDoCpc() { return doCpc; }
+        public Boolean getDoIntensityColoc() { return doIntensityColoc; }
         public Boolean getExtractProcessLength() { return extractProcessLength; }
         public Boolean getRunSpatial() { return runSpatial; }
         public Boolean getClassicalCentroidFiltering() { return classicalCentroidFiltering; }
@@ -602,6 +604,7 @@ public class CLIConfig {
             return (presetName != null && !presetName.trim().isEmpty())
                     || doVolumetric != null
                     || doCpc != null
+                    || doIntensityColoc != null
                     || extractProcessLength != null
                     || runSpatial != null
                     || classicalCentroidFiltering != null

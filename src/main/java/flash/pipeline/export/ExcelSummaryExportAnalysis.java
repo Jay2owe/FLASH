@@ -134,7 +134,7 @@ public class ExcelSummaryExportAnalysis implements Analysis {
 
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
 
-        if (!headless && !suppressDialogs && !configFromCli) {
+        if (canShowGuiDialog(suppressDialogs, configFromCli, GraphicsEnvironment.isHeadless())) {
             ExcelExportPreset chosen = showConfigDialog(new File(directory), preset);
             if (chosen == null) {
                 IJ.log("Excel Summary Export cancelled by user.");
@@ -226,7 +226,7 @@ public class ExcelSummaryExportAnalysis implements Analysis {
             IJ.log("Excel saved: " + outFile.getAbsolutePath());
         } catch (Exception e) {
             IJ.log("Error writing Excel: " + e.getMessage());
-            if (!headless && !suppressDialogs) {
+            if (canShowGuiDialog(suppressDialogs, configFromCli, GraphicsEnvironment.isHeadless())) {
                 IJ.showMessage("Excel Summary Export", "Error: " + e.getMessage());
             }
         }
@@ -234,9 +234,15 @@ public class ExcelSummaryExportAnalysis implements Analysis {
 
     private void notifyUser(String title, String message) {
         IJ.log(message.replace('\n', ' '));
-        if (!headless && !suppressDialogs) {
+        if (canShowGuiDialog(suppressDialogs, configFromCli, GraphicsEnvironment.isHeadless())) {
             IJ.showMessage(title, message);
         }
+    }
+
+    static boolean canShowGuiDialog(boolean suppressDialogs,
+                                    boolean configFromCli,
+                                    boolean runtimeHeadless) {
+        return !suppressDialogs && !configFromCli && !runtimeHeadless;
     }
 
     private static File existingProjectSummaryFile(FlashProjectLayout layout, String fileName) {

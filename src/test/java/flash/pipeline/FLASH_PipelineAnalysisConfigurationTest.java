@@ -1,9 +1,12 @@
 package flash.pipeline;
 
 import flash.pipeline.analyses.Analysis;
+import flash.pipeline.analyses.CreateBinFileAnalysis;
+import flash.pipeline.bin.BinSetupDispatcher;
 import flash.pipeline.report.QualityReport;
 import org.junit.Test;
 
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -19,7 +22,6 @@ public class FLASH_PipelineAnalysisConfigurationTest {
     static class SpyAnalysis implements Analysis {
         boolean headless;
         boolean requiresHeadedMode;
-        boolean aggressiveMemory;
         boolean verboseLogging;
         boolean skipExisting;
         int parallelThreads;
@@ -33,7 +35,6 @@ public class FLASH_PipelineAnalysisConfigurationTest {
         @Override public void execute(String directory) {}
         @Override public boolean requiresHeadedMode() { return requiresHeadedMode; }
         @Override public void setHeadless(boolean h) { headless = h; }
-        @Override public void setAggressiveMemory(boolean a) { aggressiveMemory = a; }
         @Override public void setVerboseLogging(boolean v) { verboseLogging = v; }
         @Override public void setSkipExisting(boolean s) { skipExisting = s; }
         @Override public void setParallelThreads(int t) { parallelThreads = t; }
@@ -127,6 +128,19 @@ public class FLASH_PipelineAnalysisConfigurationTest {
     }
 
     @Test
+    public void configureAnalysis_opensSetUpConfigurationInGuiEvenWhenHideWindowsDefaultIsOn() throws Exception {
+        FLASH_Pipeline pipeline = new FLASH_Pipeline();
+        CreateBinFileAnalysis analysis = new CreateBinFileAnalysis();
+
+        pipeline.configureAnalysis(analysis, FLASH_Pipeline.IDX_CREATE_BIN, false, new QualityReport());
+
+        Field headless = CreateBinFileAnalysis.class.getDeclaredField("headless");
+        headless.setAccessible(true);
+        assertFalse("Set Up Configuration must not be skipped by the GUI hide-windows default",
+                headless.getBoolean(analysis));
+    }
+
+    @Test
     public void configureAnalysis_keepsHeadedOnlyAnalysisHeadlessInCli() {
         FLASH_Pipeline pipeline = new FLASH_Pipeline();
         SpyAnalysis spy = new SpyAnalysis();
@@ -188,6 +202,23 @@ public class FLASH_PipelineAnalysisConfigurationTest {
                 failing, FLASH_Pipeline.IDX_INTENSITY, "C:/fake/project"));
     }
 
+    @Test
+    public void guiExecutionTreatsCancelledBinSetupAsNotCompleted() throws Exception {
+        FLASH_Pipeline pipeline = new FLASH_Pipeline();
+        Analysis cancelled = new Analysis() {
+            @Override public void execute(String directory) {
+                markLastBinSetupOutcome(BinSetupDispatcher.Outcome.CANCELLED);
+            }
+        };
+
+        try {
+            assertFalse(pipeline.executeAnalysisSafelyForGui(
+                    cancelled, FLASH_Pipeline.IDX_INTENSITY, "C:/fake/project"));
+        } finally {
+            BinSetupDispatcher.clearLastFieldSources();
+        }
+    }
+
     @Test(expected = ThreadDeath.class)
     public void guiExecutionRethrowsThreadDeath() {
         FLASH_Pipeline pipeline = new FLASH_Pipeline();
@@ -199,5 +230,18 @@ public class FLASH_PipelineAnalysisConfigurationTest {
 
         pipeline.executeAnalysisSafelyForGui(
                 failing, FLASH_Pipeline.IDX_INTENSITY, "C:/fake/project");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void markLastBinSetupOutcome(BinSetupDispatcher.Outcome outcome) {
+        try {
+            Field field = BinSetupDispatcher.class.getDeclaredField("lastOutcome");
+            field.setAccessible(true);
+            ThreadLocal<BinSetupDispatcher.Outcome> lastOutcome =
+                    (ThreadLocal<BinSetupDispatcher.Outcome>) field.get(null);
+            lastOutcome.set(outcome);
+        } catch (Exception e) {
+            throw new AssertionError(e);
+        }
     }
 }

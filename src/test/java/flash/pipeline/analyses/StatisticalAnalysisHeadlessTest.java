@@ -26,6 +26,16 @@ public class StatisticalAnalysisHeadlessTest {
     @Rule
     public TemporaryFolder temp = new TemporaryFolder();
 
+    @Test
+    public void hideImageWindowsFlagAloneIsNotUnattendedMode() {
+        assertTrue(StatisticalAnalysis.canShowGuiDialog(false, null, false));
+        assertFalse(StatisticalAnalysis.isUnattendedMode(false, null, false));
+
+        assertFalse(StatisticalAnalysis.canShowGuiDialog(true, null, false));
+        assertFalse(StatisticalAnalysis.canShowGuiDialog(false, new CLIConfig(), false));
+        assertFalse(StatisticalAnalysis.canShowGuiDialog(false, null, true));
+    }
+
     /**
      * Headless execution with a pre-existing manifest and master CSV
      * should write Statistics.csv without any Swing interaction.
@@ -150,6 +160,7 @@ public class StatisticalAnalysisHeadlessTest {
 
         StatisticalAnalysis analysis = new StatisticalAnalysis();
         analysis.setHeadless(true);
+        analysis.setSuppressDialogs(true);
 
         LinkedHashSet<String> animals = new LinkedHashSet<String>();
         animals.add("Syn1");

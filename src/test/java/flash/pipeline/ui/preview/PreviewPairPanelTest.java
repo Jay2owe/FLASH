@@ -1,6 +1,7 @@
 package flash.pipeline.ui.preview;
 
 import flash.pipeline.click.ClickStore;
+import flash.pipeline.testutil.UiTestAssumptions;
 import ij.ImagePlus;
 import ij.ImageStack;
 import ij.measure.ResultsTable;
@@ -817,9 +818,9 @@ public class PreviewPairPanelTest {
         assertEquals("Adjusted / output preview", pair.adjustedPreviewTitleForTest());
     }
 
-    @Test
+    @Test(timeout = 5000)
     public void largePreviewUsesCurrentWindowAsOwnerWhenAvailable() {
-        assumeFalse(GraphicsEnvironment.isHeadless());
+        UiTestAssumptions.assumeInteractiveUiTestsEnabled();
 
         Frame owner = new Frame("Owner");
         PreviewPairPanel pair = new PreviewPairPanel(null, "Original", "Adjusted");
@@ -835,9 +836,9 @@ public class PreviewPairPanelTest {
         }
     }
 
-    @Test
+    @Test(timeout = 5000)
     public void displayControlsButtonUsesCurrentWindowAsOwnerWhenAvailable() {
-        assumeFalse(GraphicsEnvironment.isHeadless());
+        UiTestAssumptions.assumeInteractiveUiTestsEnabled();
 
         Frame owner = new Frame("Owner");
         PreviewPairPanel pair = new PreviewPairPanel(null, "Original", "Adjusted");

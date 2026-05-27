@@ -112,7 +112,7 @@ public final class FilterParameterStage implements ConfigQcStage {
             "This pipeline has branches. Use Custom macro... to edit the visual structure.";
 
     private static final Pattern RUN_LINE_PATTERN = Pattern.compile(
-            "run\\s*\\(\\s*\"[^\"]+\"\\s*,\\s*\"([^\"]*)\"\\s*\\)");
+            "run\\s*\\(\\s*\"([^\"]+)\"(?:\\s*,\\s*\"([^\"]*)\")?\\s*\\)");
     private static final int ACCORDION_MIN_SCROLL_HEIGHT = 160;
 
     /**
@@ -1752,7 +1752,8 @@ public final class FilterParameterStage implements ConfigQcStage {
         Matcher m = RUN_LINE_PATTERN.matcher(macro);
         int idx = 0;
         while (m.find()) {
-            if (idx == targetIndex) return m.group(1);
+            if (!isNodeRunCommand(m.group(1))) continue;
+            if (idx == targetIndex) return runOptions(m);
             idx++;
         }
         return null;
@@ -1790,7 +1791,8 @@ public final class FilterParameterStage implements ConfigQcStage {
             Matcher m = RUN_LINE_PATTERN.matcher(safe(macroForArgs));
             int idx = 0;
             while (m.find() && idx < summaries.size()) {
-                hiddenBuilder.updateNodeArgs(summaries.get(idx).id, m.group(1));
+                if (!isNodeRunCommand(m.group(1))) continue;
+                hiddenBuilder.updateNodeArgs(summaries.get(idx).id, runOptions(m));
                 idx++;
             }
         } catch (IllegalStateException nonLinear) {
@@ -1799,6 +1801,17 @@ public final class FilterParameterStage implements ConfigQcStage {
             DagIR seed = IjmToDagLoader.load(safe(currentDisplayMacro));
             hiddenBuilder = new FilterBuilderPanel(seed, null, null, null);
         }
+    }
+
+    private static boolean isNodeRunCommand(String command) {
+        if (command == null) return false;
+        return !"duplicate".equals(normalizeCommandKey(command));
+    }
+
+    private static String runOptions(Matcher matcher) {
+        if (matcher == null || matcher.groupCount() < 2) return "";
+        String options = matcher.group(2);
+        return options == null ? "" : options;
     }
 
     private void refreshLinearityFlag() {

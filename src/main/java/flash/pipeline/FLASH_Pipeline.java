@@ -49,6 +49,7 @@ import flash.pipeline.runtime.DependencyService;
 import flash.pipeline.runtime.DependencySpec;
 import flash.pipeline.runtime.DependencyStatus;
 import flash.pipeline.runtime.FeatureDependencyGate;
+import flash.pipeline.runtime.ImageJRestartHelper;
 import flash.pipeline.runtime.PluginInstallGuard;
 
 import ij.IJ;
@@ -94,7 +95,6 @@ public class FLASH_Pipeline implements PlugIn {
     private String directory = null;
     private boolean cliInvocation = false;
     private boolean headlessMode = true;
-    private boolean aggressiveMemory = false;
     private boolean verboseLogging = false;
     private boolean autoAggregate = true;
     private boolean parallelProcessing = true;
@@ -112,6 +112,8 @@ public class FLASH_Pipeline implements PlugIn {
 
     private ImageCache imageCache = null;
     private final DependencyService dependencyService = new DependencyService();
+    private boolean dependencyRestartPending = false;
+    private String dependencyRestartMessage = "";
     private CLIConfig cliConfig = null;
 
     private final String[] analyses = {
@@ -241,7 +243,7 @@ public class FLASH_Pipeline implements PlugIn {
             // Fresh QC report for this run — prevents state leaking across runs
             QualityReport qualityReport = createQualityReportForRun(
                     directory, generateQcReport, headlessMode, parallelProcessing,
-                    parallelThreadCount, aggressiveMemory, verboseLogging, overwriteBehavior);
+                    parallelThreadCount, verboseLogging, overwriteBehavior);
 
             // Count selected analyses to suppress intermediate dialogs
             int selectedCount = 0;
@@ -340,7 +342,6 @@ public class FLASH_Pipeline implements PlugIn {
         headlessMode = cfg.isHeadless();
         parallelProcessing = cfg.isParallel();
         parallelThreadCount = cfg.getThreads();
-        aggressiveMemory = cfg.isAggressiveMemory();
         verboseLogging = cfg.isVerbose();
         overwriteBehavior = cfg.getOverwriteBehavior();
         autoAggregate = cfg.isAutoAggregate();
@@ -390,7 +391,7 @@ public class FLASH_Pipeline implements PlugIn {
         // Fresh QC report for this CLI invocation
         QualityReport qualityReport = createQualityReportForRun(
                 directory, generateQcReport, headlessMode, parallelProcessing,
-                parallelThreadCount, aggressiveMemory, verboseLogging, overwriteBehavior);
+                parallelThreadCount, verboseLogging, overwriteBehavior);
 
         GpuConcurrency.logEffectivePermits();
 
@@ -408,7 +409,12 @@ public class FLASH_Pipeline implements PlugIn {
                 BinSetupDispatcher.clearLastFieldSources();
                 try {
                     analysis.execute(directory);
-                    completedAnalyses[i] = true;
+                    if (BinSetupDispatcher.getLastOutcome() == BinSetupDispatcher.Outcome.CANCELLED) {
+                        IJ.log("[CLI] " + analyses[i] + " cancelled during setup.");
+                        failedAnalyses.add(analyses[i]);
+                    } else {
+                        completedAnalyses[i] = true;
+                    }
                 } catch (Throwable t) {
                     IJ.handleException(t);
                     IJ.log("[CLI] " + analyses[i] + " FAILED: " + t.getMessage());
@@ -435,6 +441,10 @@ public class FLASH_Pipeline implements PlugIn {
                 BinSetupDispatcher.clearLastFieldSources();
                 try {
                     aggAnalysis.execute(directory);
+                    if (BinSetupDispatcher.getLastOutcome() == BinSetupDispatcher.Outcome.CANCELLED) {
+                        IJ.log("[CLI] " + analyses[IDX_AGGREGATION] + " (auto) cancelled during setup.");
+                        failedAnalyses.add(analyses[IDX_AGGREGATION] + " (auto)");
+                    }
                 } catch (Throwable t) {
                     IJ.handleException(t);
                     IJ.log("[CLI] " + analyses[IDX_AGGREGATION] + " (auto) FAILED: " + t.getMessage());
@@ -1068,7 +1078,7 @@ public class FLASH_Pipeline implements PlugIn {
         String label = analysisLabel(index);
         try {
             analysis.execute(runDirectory);
-            return true;
+            return BinSetupDispatcher.getLastOutcome() != BinSetupDispatcher.Outcome.CANCELLED;
         } catch (Throwable t) {
             rethrowControlThrowable(t);
             reportGuiStepFailure(label, t);
@@ -1168,9 +1178,6 @@ public class FLASH_Pipeline implements PlugIn {
         opts.addToggle("Cache Images as TIFs", useTifCache);
         opts.addHelpText("Save raw images as individual TIF files on first load. "
                 + "Subsequent analyses load from TIFs instead of re-parsing the .lif file (much faster).");
-        opts.addToggle("Aggressive Memory Clearing", aggressiveMemory);
-        opts.addHelpText("Explicitly frees memory after each image. Useful for large datasets "
-                + "that cause out-of-memory errors.");
 
         opts.addHeader("Logging");
         opts.addToggle("Verbose Logging / Debug Mode", verboseLogging);
@@ -1205,7 +1212,6 @@ public class FLASH_Pipeline implements PlugIn {
             gpuPermits = Math.max(0, (int) opts.getNextNumber());
             GpuConcurrency.setUserOverride(gpuPermits);
             useTifCache = opts.getNextBoolean();
-            aggressiveMemory = opts.getNextBoolean();
             verboseLogging = opts.getNextBoolean();
             overwriteBehavior = opts.getNextChoice();
             autoAggregate = opts.getNextBoolean();
@@ -1219,6 +1225,11 @@ public class FLASH_Pipeline implements PlugIn {
         }
 
         while (true) {
+            if (dependencyRestartPending) {
+                showDependencyRestartPrompt();
+                return;
+            }
+
             List<DependencyService.DialogRow> rows = refreshDependencyAttentionRows();
             if (rows.isEmpty()) {
                 return;
@@ -1259,11 +1270,19 @@ public class FLASH_Pipeline implements PlugIn {
             pd.showDialog();
             String action = pd.getActionCommand();
             if ("auto_fix_all".equals(action)) {
-                runAutoFixAll(fixPlan);
+                DependencyRepairOutcome outcome = runAutoFixAll(fixPlan);
+                if (outcome.shouldPauseForRestart()) {
+                    markDependencyRestartPending(outcome.getMessage());
+                    showDependencyRestartPrompt();
+                    return;
+                }
                 continue;
             }
             if ("open_dependencies".equals(action)) {
                 showDependenciesDialog();
+                if (dependencyRestartPending) {
+                    return;
+                }
                 continue;
             }
             return;
@@ -1308,6 +1327,11 @@ public class FLASH_Pipeline implements PlugIn {
     }
 
     private void showDependenciesDialog() {
+        if (dependencyRestartPending) {
+            showDependencyRestartPrompt();
+            return;
+        }
+
         while (true) {
             dependencyService.refreshStatuses();
             List<DependencyService.DialogRow> rows = dependencyService.getDialogRows();
@@ -1345,11 +1369,21 @@ public class FLASH_Pipeline implements PlugIn {
                 continue;
             }
             if ("auto_fix_all".equals(action)) {
-                runAutoFixAll(fixPlan);
+                DependencyRepairOutcome outcome = runAutoFixAll(fixPlan);
+                if (outcome.shouldPauseForRestart()) {
+                    markDependencyRestartPending(outcome.getMessage());
+                    showDependencyRestartPrompt();
+                    return;
+                }
                 continue;
             }
             if (action != null && action.startsWith("row:")) {
-                handleDependencyRowAction(action);
+                DependencyRepairOutcome outcome = handleDependencyRowAction(action);
+                if (outcome.shouldPauseForRestart()) {
+                    markDependencyRestartPending(outcome.getMessage());
+                    showDependencyRestartPrompt();
+                    return;
+                }
                 continue;
             }
             return;
@@ -1412,11 +1446,11 @@ public class FLASH_Pipeline implements PlugIn {
         return card;
     }
 
-    private void handleDependencyRowAction(String actionCommand) {
+    private DependencyRepairOutcome handleDependencyRowAction(String actionCommand) {
         String[] parts = actionCommand.split(":", 3);
         if (parts.length != 3) {
             IJ.showMessage("Pipeline Dependencies", "Could not parse dependency action: " + actionCommand);
-            return;
+            return DependencyRepairOutcome.none();
         }
 
         DependencyId dependencyId;
@@ -1424,7 +1458,7 @@ public class FLASH_Pipeline implements PlugIn {
             dependencyId = DependencyId.valueOf(parts[1]);
         } catch (IllegalArgumentException e) {
             IJ.showMessage("Pipeline Dependencies", "Unknown dependency: " + parts[1]);
-            return;
+            return DependencyRepairOutcome.none();
         }
 
         String actionId = parts[2];
@@ -1442,29 +1476,39 @@ public class FLASH_Pipeline implements PlugIn {
             if (result.getMessage() != null && !result.getMessage().trim().isEmpty()) {
                 sb.append("\n\n").append(result.getMessage().trim());
             }
+            DependencyRepairOutcome outcome = DependencyRepairOutcome.fromResult(result, sb.toString());
+            if (outcome.shouldPauseForRestart()) {
+                return outcome;
+            }
             showScrollableMessage(
                     "Pipeline Dependencies - " + dependencyName,
                     sb.toString(),
                     result.isSuccess() ? JOptionPane.INFORMATION_MESSAGE : JOptionPane.WARNING_MESSAGE);
+            return outcome;
         }
+
+        return DependencyRepairOutcome.fromResult(result, "");
     }
 
-    private void runAutoFixAll(DependencyFixPlan plan) {
+    private DependencyRepairOutcome runAutoFixAll(DependencyFixPlan plan) {
         if (!confirmAutoFixAll(plan)) {
-            return;
+            return DependencyRepairOutcome.none();
         }
         if (plan.getDependenciesToFix().isEmpty()) {
-            return;
+            return DependencyRepairOutcome.none();
         }
 
         List<DependencyFixResult> results = new java.util.ArrayList<DependencyFixResult>();
         boolean restartRequired = false;
+        boolean successfulRestartRepair = false;
         boolean allSucceeded = true;
         for (DependencySpec spec : plan.getDependenciesToFix()) {
             DependencyFixResult result = dependencyService.runDialogAction(
                     spec.getId(), DependencyService.DialogAction.AUTO_FIX);
             results.add(result);
             restartRequired = restartRequired || result.isRestartRequired();
+            successfulRestartRepair = successfulRestartRepair
+                    || (result.isSuccess() && result.isRestartRequired());
             allSucceeded = allSucceeded && result.isSuccess();
         }
         dependencyService.invalidateStatusCache();
@@ -1491,10 +1535,128 @@ public class FLASH_Pipeline implements PlugIn {
         }
         appendSkippedDependencies(sb, "Skipped healthy", plan.getAlreadySatisfied());
         appendSkippedDependencies(sb, "Not fixable in-app", plan.getBlockedDependencies());
+
+        DependencyRepairOutcome repairOutcome = new DependencyRepairOutcome(
+                restartRequired,
+                successfulRestartRepair,
+                sb.toString());
+        if (repairOutcome.shouldPauseForRestart()) {
+            return repairOutcome;
+        }
+
         showScrollableMessage(
                 "Pipeline Dependencies - Auto-Fix All",
                 sb.toString(),
                 allSucceeded ? JOptionPane.INFORMATION_MESSAGE : JOptionPane.WARNING_MESSAGE);
+        return repairOutcome;
+    }
+
+    private void markDependencyRestartPending(String detailMessage) {
+        dependencyRestartPending = true;
+        dependencyRestartMessage = detailMessage == null ? "" : detailMessage.trim();
+    }
+
+    private void showDependencyRestartPrompt() {
+        if (cliInvocation || GraphicsEnvironment.isHeadless()) {
+            return;
+        }
+
+        PipelineDialog dialog = new PipelineDialog("Restart ImageJ/Fiji");
+        dialog.setDefaultButtonsVisible(false);
+        dialog.addHeader("Restart Required");
+        dialog.addMessage("Dependency repair finished, but ImageJ/Fiji must restart before the new files are loaded.");
+        dialog.addHelpText("The Dependencies window will show this restart prompt instead of re-running Auto-Fix for the repaired dependencies in this session.");
+
+        if (dependencyRestartMessage != null && !dependencyRestartMessage.trim().isEmpty()) {
+            dialog.addComponent(createRestartDetailBox(dependencyRestartMessage.trim()));
+        }
+
+        boolean canRestart = ImageJRestartHelper.canRestartAutomatically();
+        if (!canRestart) {
+            dialog.addHelpText("Automatic restart is unavailable because FLASH could not find the ImageJ/Fiji launcher. Close and reopen ImageJ/Fiji manually.");
+        }
+
+        JButton restartButton = dialog.addFooterButton("Restart ImageJ/Fiji");
+        restartButton.setEnabled(canRestart);
+        if (!canRestart) {
+            restartButton.setToolTipText("Close and reopen ImageJ/Fiji manually.");
+        }
+        restartButton.addActionListener(e -> dialog.closeWithAction("restart_imagej"));
+
+        JButton laterButton = dialog.addFooterButton("Later");
+        laterButton.addActionListener(e -> dialog.closeWithAction("later"));
+
+        dialog.showDialog();
+        if (!"restart_imagej".equals(dialog.getActionCommand())) {
+            return;
+        }
+
+        ImageJRestartHelper.RestartResult result = ImageJRestartHelper.launchRestartHelper();
+        if (!result.isSuccess()) {
+            showScrollableMessage(
+                    "Restart ImageJ/Fiji",
+                    result.getMessage(),
+                    JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
+        IJ.log("[FLASH] " + result.getMessage());
+        IJ.showStatus("Restarting ImageJ/Fiji...");
+        IJ.run("Quit");
+    }
+
+    private static JScrollPane createRestartDetailBox(String detail) {
+        JTextArea area = new JTextArea(detail == null ? "" : detail);
+        area.setEditable(false);
+        area.setLineWrap(true);
+        area.setWrapStyleWord(true);
+        area.setCaretPosition(0);
+        area.setBackground(new Color(245, 245, 245));
+        area.setFont(area.getFont().deriveFont(Font.PLAIN, 11f));
+
+        JScrollPane scrollPane = new JScrollPane(area);
+        scrollPane.setPreferredSize(new java.awt.Dimension(640, 160));
+        scrollPane.setAlignmentX(Component.LEFT_ALIGNMENT);
+        return scrollPane;
+    }
+
+    private static final class DependencyRepairOutcome {
+        private static final DependencyRepairOutcome NONE =
+                new DependencyRepairOutcome(false, false, "");
+
+        private final boolean restartRequired;
+        private final boolean successfulRestartRepair;
+        private final String message;
+
+        private DependencyRepairOutcome(boolean restartRequired,
+                                        boolean successfulRestartRepair,
+                                        String message) {
+            this.restartRequired = restartRequired;
+            this.successfulRestartRepair = successfulRestartRepair;
+            this.message = message == null ? "" : message.trim();
+        }
+
+        static DependencyRepairOutcome none() {
+            return NONE;
+        }
+
+        static DependencyRepairOutcome fromResult(DependencyFixResult result, String message) {
+            if (result == null) {
+                return NONE;
+            }
+            return new DependencyRepairOutcome(
+                    result.isRestartRequired(),
+                    result.isSuccess() && result.isRestartRequired(),
+                    message);
+        }
+
+        boolean shouldPauseForRestart() {
+            return restartRequired && successfulRestartRepair;
+        }
+
+        String getMessage() {
+            return message;
+        }
     }
 
     private boolean confirmAutoFixAll(DependencyFixPlan plan) {
@@ -1629,8 +1791,8 @@ public class FLASH_Pipeline implements PlugIn {
      */
     static QualityReport createQualityReportForRun(String dir, boolean enabled,
                                                     boolean headless, boolean parallel,
-                                                    int threadCount, boolean aggressiveMemory,
-                                                    boolean verboseLogging, String overwriteBehavior) {
+                                                    int threadCount, boolean verboseLogging,
+                                                    String overwriteBehavior) {
         if (enabled) {
             cleanStaleReportArtifacts(dir);
         }
@@ -1638,7 +1800,7 @@ public class FLASH_Pipeline implements PlugIn {
         report.setEnabled(enabled);
         report.setDirectory(dir);
         report.setGlobalSettings(headless, parallel, threadCount,
-                aggressiveMemory, verboseLogging, overwriteBehavior);
+                verboseLogging, overwriteBehavior);
         return report;
     }
 
@@ -1683,7 +1845,6 @@ public class FLASH_Pipeline implements PlugIn {
         }
         FeatureDependencyGate.setUiMode(isDependencyGateUnattended());
         analysis.setHeadless(analysisHeadless);
-        analysis.setAggressiveMemory(aggressiveMemory);
         analysis.setVerboseLogging(verboseLogging);
         analysis.setSkipExisting("Skip Existing".equals(overwriteBehavior));
         analysis.setParallelThreads(parallelProcessing ? parallelThreadCount : 1);

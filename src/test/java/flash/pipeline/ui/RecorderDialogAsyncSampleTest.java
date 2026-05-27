@@ -1,12 +1,12 @@
 package flash.pipeline.ui;
 
 import flash.pipeline.testutil.TestWait;
+import flash.pipeline.testutil.UiTestAssumptions;
 import ij.ImagePlus;
 import ij.WindowManager;
 import ij.plugin.frame.Recorder;
 import ij.process.ByteProcessor;
 import org.junit.After;
-import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -34,7 +34,7 @@ public class RecorderDialogAsyncSampleTest {
 
     @Before
     public void setUp() throws Exception {
-        Assume.assumeFalse(GraphicsEnvironment.isHeadless());
+        UiTestAssumptions.assumeInteractiveUiTestsEnabled();
         closeRecorderDialogsAndImages();
         resetRecorderText();
     }
@@ -49,7 +49,7 @@ public class RecorderDialogAsyncSampleTest {
         Recorder.recordInMacros = false;
     }
 
-    @Test
+    @Test(timeout = 10000)
     public void dialogIsVisibleAndControlsAreDisabledWhileSampleLoads() throws Exception {
         final CountDownLatch supplierEntered = new CountDownLatch(1);
         final CountDownLatch releaseSupplier = new CountDownLatch(1);
@@ -85,7 +85,7 @@ public class RecorderDialogAsyncSampleTest {
         run.awaitCleanExit();
     }
 
-    @Test
+    @Test(timeout = 10000)
     public void closingDialogWhileSampleWorkerIsBlockedDropsLateSample() throws Exception {
         final CountDownLatch supplierEntered = new CountDownLatch(1);
         final CountDownLatch releaseSupplier = new CountDownLatch(1);
@@ -122,7 +122,7 @@ public class RecorderDialogAsyncSampleTest {
         assertNull(findShowingWindow("Late sample"));
     }
 
-    @Test
+    @Test(timeout = 10000)
     public void displayHookCommandsAreExcludedFromCapturedDiff() throws Exception {
         final CountDownLatch hookRan = new CountDownLatch(1);
         RecorderDialog.SampleSupplier supplier = new RecorderDialog.SampleSupplier() {
@@ -180,6 +180,7 @@ public class RecorderDialogAsyncSampleTest {
                 }
             }
         }, "RecorderDialogAsyncSampleTest-" + label);
+        run.thread.setDaemon(true);
         run.thread.start();
         return run;
     }

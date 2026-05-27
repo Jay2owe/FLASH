@@ -18,8 +18,10 @@ import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
 import javax.swing.KeyStroke;
+import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.WindowConstants;
 import java.awt.BorderLayout;
@@ -377,10 +379,11 @@ public final class ConfigQcDialog {
         controlsPanel.removeAll();
         clearPreviewButtonRegistration();
         JComponent controls = stage.buildControls(context, actions);
+        boolean expandable = stage.controlsCanExpand();
         if (controls != null) {
-            controlsPanel.add(controls, BorderLayout.CENTER);
+            controlsPanel.add(expandable ? wrapInScrollPane(controls) : controls, BorderLayout.CENTER);
         }
-        applyControlsExpansionMode(stage.controlsCanExpand());
+        applyControlsExpansionMode(expandable);
         refreshStageLayout();
         stage.onEnter(context, previewPair);
         if (controlsExpandable) {
@@ -439,6 +442,19 @@ public final class ConfigQcDialog {
                 rootPanel.repaint();
             }
         });
+    }
+
+    private static JScrollPane wrapInScrollPane(JComponent controls) {
+        ConfigQcScrollableBody body = new ConfigQcScrollableBody(new BorderLayout());
+        body.add(controls, BorderLayout.CENTER);
+        JScrollPane scroll = new JScrollPane(body);
+        scroll.setBorder(null);
+        scroll.setOpaque(false);
+        scroll.getViewport().setOpaque(false);
+        scroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+        scroll.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED);
+        scroll.getVerticalScrollBar().setUnitIncrement(16);
+        return scroll;
     }
 
     private void applyControlsExpansionMode(boolean expandable) {

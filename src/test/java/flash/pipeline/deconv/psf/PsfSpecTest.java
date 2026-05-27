@@ -24,6 +24,22 @@ public class PsfSpecTest {
         assertFalse(first.equals(second));
     }
 
+    @Test(expected = IllegalArgumentException.class)
+    public void numericalApertureMustBeLowerThanImmersionRefractiveIndex() {
+        new PsfSpec(
+                1.40,
+                1.33,
+                1.33,
+                520.0,
+                65.0,
+                250.0,
+                64,
+                64,
+                32,
+                ScopeModality.WIDEFIELD,
+                null);
+    }
+
     private static PsfSpec spec(double wavelengthNm, double pixelSizeZNm) {
         return new PsfSpec(
                 1.40,

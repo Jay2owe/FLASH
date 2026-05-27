@@ -2,6 +2,7 @@ package flash.pipeline.ui.variations;
 
 import flash.pipeline.image.FilterMacroEditorModel;
 import flash.pipeline.testutil.TestWait;
+import flash.pipeline.testutil.UiTestAssumptions;
 import flash.pipeline.ui.config.ConfigQcContext;
 import flash.pipeline.ui.config.FilterParameterStage;
 
@@ -9,11 +10,9 @@ import ij.ImagePlus;
 import ij.process.ByteProcessor;
 import ij.process.FloatProcessor;
 
-import org.junit.Assume;
 import org.junit.Test;
 
 import javax.swing.SwingUtilities;
-import java.awt.GraphicsEnvironment;
 import java.io.File;
 import java.util.Arrays;
 import java.util.Collections;
@@ -31,10 +30,9 @@ import static org.junit.Assert.assertTrue;
 
 public class MacroVariationsDialogRunTest {
 
-    @Test
+    @Test(timeout = 10000)
     public void runButtonPopulatesFilterSweepCells() throws Exception {
-        Assume.assumeFalse("PipelineDialog creates a JDialog in this codebase.",
-                GraphicsEnvironment.isHeadless());
+        UiTestAssumptions.assumeInteractiveUiTestsEnabled();
         final AtomicReference<MacroVariationsDialog> ref =
                 new AtomicReference<MacroVariationsDialog>();
 
@@ -85,11 +83,10 @@ public class MacroVariationsDialogRunTest {
         }
     }
 
-    @Test
+    @Test(timeout = 10000)
     public void cancellingMidSweepReEnablesRunButtonAndMarksCellsCancelled()
             throws Exception {
-        Assume.assumeFalse("PipelineDialog creates a JDialog in this codebase.",
-                GraphicsEnvironment.isHeadless());
+        UiTestAssumptions.assumeInteractiveUiTestsEnabled();
         final BlockingPreviewAdapter adapter = new BlockingPreviewAdapter();
         final AtomicReference<MacroVariationsDialog> ref =
                 new AtomicReference<MacroVariationsDialog>();
