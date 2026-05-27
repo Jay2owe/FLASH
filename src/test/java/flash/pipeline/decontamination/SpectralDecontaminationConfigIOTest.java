@@ -88,6 +88,22 @@ public class SpectralDecontaminationConfigIOTest {
     }
 
     @Test
+    public void writeCreatesParentDirectoryBeforeAtomicReplace() throws Exception {
+        File file = new File(tempFolder.getRoot(), "new-settings/"
+                + SpectralDecontaminationConfigIO.CONFIG_FILENAME);
+        SpectralDecontaminationConfig config = new SpectralDecontaminationConfig();
+        config.setTargetChannelIndex(1);
+        config.setGoal(SpectralDecontaminationConfig.Goal.SCORE_EXISTING_OBJECTS);
+
+        SpectralDecontaminationConfigIO.write(file, config);
+        SpectralDecontaminationConfig read = SpectralDecontaminationConfigIO.read(file);
+
+        assertTrue(file.isFile());
+        assertEquals(1, read.getTargetChannelIndex());
+        assertEquals(SpectralDecontaminationConfig.Goal.SCORE_EXISTING_OBJECTS, read.getGoal());
+    }
+
+    @Test
     public void readOrDefaultUsesChannelCountWhenFileIsMissing() throws Exception {
         File dir = tempFolder.newFolder("data");
 

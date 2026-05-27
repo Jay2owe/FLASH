@@ -5,6 +5,7 @@ import flash.pipeline.io.FlashProjectLayout;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
@@ -99,7 +100,12 @@ public class SpectralDecontaminationConfigIO {
         if (config == null) {
             throw new IllegalArgumentException("config must not be null");
         }
-        Files.write(file.toPath(), toJson(config).getBytes(StandardCharsets.UTF_8));
+        AtomicFileWriter.writeUtf8(file, new AtomicFileWriter.WriterAction() {
+            @Override
+            public void write(Writer writer) throws IOException {
+                writer.write(toJson(config));
+            }
+        });
     }
 
     static String toJson(SpectralDecontaminationConfig config) {

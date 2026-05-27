@@ -2,6 +2,7 @@ package flash.pipeline.decontamination;
 
 import ij.ImagePlus;
 import ij.ImageStack;
+import ij.measure.Calibration;
 import ij.process.ShortProcessor;
 import org.junit.Test;
 
@@ -86,6 +87,40 @@ public class ObjectDecontaminationScorerTest {
         assertEquals(90.0 / 110.0, score.getCorrectedTargetRetentionFraction(), 0.0001);
     }
 
+    @Test
+    public void cleanedObjectMapCopyPreservesStackMetadataWithoutMutatingLabels() {
+        ImagePlus labels = labelImage(2, 1, new int[]{1, 2}, new int[]{3, 4});
+        ImagePlus source = multiChannelImage(2, 1, 2,
+                new int[][]{
+                        {100, 10},
+                        {100, 100}
+                },
+                new int[][]{
+                        {1, 200},
+                        {1, 1}
+                });
+        Calibration calibration = new Calibration();
+        calibration.pixelWidth = 0.5;
+        labels.setCalibration(calibration);
+        SpectralDecontaminationConfig config = new SpectralDecontaminationConfig();
+        config.setTargetChannelIndex(0);
+        config.setBleedThroughChannelIndexes(Arrays.asList(Integer.valueOf(1)));
+
+        ImagePlus cleaned = ObjectDecontaminationScorer.score(
+                        labels,
+                        source,
+                        config,
+                        null,
+                        new ObjectDecontaminationScorer.Settings())
+                .getCleanedObjectMap();
+
+        assertEquals(2, cleaned.getNSlices());
+        assertEquals(0.5, cleaned.getCalibration().pixelWidth, 0.0);
+        assertArrayEquals(new int[]{1, 2}, labelPixels(labels, 1));
+        assertArrayEquals(new int[]{1, 0}, labelPixels(cleaned, 1));
+        assertArrayEquals(new int[]{3, 4}, labelPixels(cleaned, 2));
+    }
+
     private static SpectralDecontaminationConfig baseConfig() {
         SpectralDecontaminationConfig config = new SpectralDecontaminationConfig();
         config.setTargetChannelIndex(0);
@@ -104,6 +139,19 @@ public class ObjectDecontaminationScorerTest {
         return image;
     }
 
+    private static ImagePlus multiChannelImage(int width, int height, int slices, int[][]... channelPlanes) {
+        ImageStack stack = new ImageStack(width, height);
+        for (int slice = 0; slice < slices; slice++) {
+            for (int channel = 0; channel < channelPlanes.length; channel++) {
+                stack.addSlice(new ShortProcessor(width, height,
+                        toShorts(channelPlanes[channel][slice]), null));
+            }
+        }
+        ImagePlus image = new ImagePlus("source", stack);
+        image.setDimensions(channelPlanes.length, slices, 1);
+        return image;
+    }
+
     private static ImagePlus singleChannelImage(int width, int height, int[] pixels) {
         ImageStack stack = new ImageStack(width, height);
         stack.addSlice(new ShortProcessor(width, height, toShorts(pixels), null));
@@ -113,10 +161,16 @@ public class ObjectDecontaminationScorerTest {
     }
 
     private static ImagePlus labelImage(int width, int height, int[] pixels) {
+        return labelImage(width, height, new int[][]{pixels});
+    }
+
+    private static ImagePlus labelImage(int width, int height, int[]... planes) {
         ImageStack stack = new ImageStack(width, height);
-        stack.addSlice(new ShortProcessor(width, height, toShorts(pixels), null));
+        for (int[] pixels : planes) {
+            stack.addSlice(new ShortProcessor(width, height, toShorts(pixels), null));
+        }
         ImagePlus image = new ImagePlus("labels", stack);
-        image.setDimensions(1, 1, 1);
+        image.setDimensions(1, planes.length, 1);
         return image;
     }
 
@@ -129,9 +183,13 @@ public class ObjectDecontaminationScorerTest {
     }
 
     private static int[] labelPixels(ImagePlus image) {
+        return labelPixels(image, 1);
+    }
+
+    private static int[] labelPixels(ImagePlus image, int slice) {
         int[] pixels = new int[image.getWidth() * image.getHeight()];
         for (int i = 0; i < pixels.length; i++) {
-            pixels[i] = image.getStack().getProcessor(1).get(i);
+            pixels[i] = image.getStack().getProcessor(slice).get(i);
         }
         return pixels;
     }

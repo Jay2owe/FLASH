@@ -134,7 +134,7 @@ public final class ObjectDecontaminationScorer {
         if (labelMap == null) {
             throw new IllegalArgumentException("Object label image is required.");
         }
-        ImagePlus cleaned = labelMap.duplicate();
+        ImagePlus cleaned = duplicateStack(labelMap, "cleaned_objects");
         cleaned.setTitle("cleaned_objects");
 
         Set<Integer> rejectedLabels = new HashSet<Integer>();
@@ -160,6 +160,26 @@ public final class ObjectDecontaminationScorer {
             }
         }
         return cleaned;
+    }
+
+    private static ImagePlus duplicateStack(ImagePlus image, String title) {
+        ImageStack sourceStack = image.getStack();
+        ImageStack copyStack = new ImageStack(image.getWidth(), image.getHeight());
+        for (int slice = 1; slice <= sourceStack.getSize(); slice++) {
+            copyStack.addSlice(sourceStack.getProcessor(slice).duplicate());
+        }
+        ImagePlus copy = new ImagePlus(title, copyStack);
+        copy.setDimensions(
+                Math.max(1, image.getNChannels()),
+                Math.max(1, image.getNSlices()),
+                Math.max(1, image.getNFrames()));
+        if (copy.getNChannels() > 1 || copy.getNSlices() > 1 || copy.getNFrames() > 1) {
+            copy.setOpenAsHyperStack(true);
+        }
+        if (image.getCalibration() != null) {
+            copy.setCalibration(image.getCalibration().copy());
+        }
+        return copy;
     }
 
     private static void validateLabelMap(ImagePlus labelMap, ImagePlus sourceImage) {
