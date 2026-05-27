@@ -102,6 +102,25 @@ public class LifIOTest {
     }
 
     @Test
+    public void requireReadableLifFile_rejectsSymlinkedLifFiles() throws Exception {
+        File dir = temp.newFolder("symlink-readable-lif");
+        File outside = temp.newFile("outside-readable.lif");
+        Path link = new File(dir, "linked.lif").toPath();
+        try {
+            Files.createSymbolicLink(link, outside.toPath());
+        } catch (UnsupportedOperationException | SecurityException | java.io.IOException e) {
+            return;
+        }
+
+        try {
+            LifIO.requireReadableLifFile(link.toFile());
+            fail("Expected symbolic-link .lif file to be rejected.");
+        } catch (java.io.IOException e) {
+            assertTrue(e.getMessage().contains("symbolic-link"));
+        }
+    }
+
+    @Test
     public void requireSingleLifFile_returnsOnlyMatch() throws Exception {
         File dir = temp.newFolder("one");
         File lif = new File(dir, "experiment.lif");

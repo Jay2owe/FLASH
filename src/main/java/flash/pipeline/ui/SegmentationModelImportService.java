@@ -6,6 +6,7 @@ import flash.pipeline.segmentation.StarDistModelZipValidator;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.Locale;
 import java.util.logging.Level;
@@ -121,7 +122,10 @@ public final class SegmentationModelImportService {
             throw new IOException(label + " file is required.");
         }
         Path file = sourceFile.toAbsolutePath().normalize();
-        if (!Files.isRegularFile(file)) {
+        if (Files.isSymbolicLink(file)) {
+            throw new IOException(label + " file must not be a symbolic link: " + file);
+        }
+        if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
             throw new IOException(label + " file does not exist: " + file);
         }
         if (!Files.isReadable(file)) {

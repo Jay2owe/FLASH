@@ -2,6 +2,7 @@ package flash.pipeline.segmentation;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.Enumeration;
 import java.util.HashSet;
@@ -22,7 +23,8 @@ public final class StarDistModelZipValidator {
     }
 
     public static Scan validate(Path file, String invalidMarkerMessage) throws IOException {
-        if (file == null || !Files.isRegularFile(file)) {
+        if (file == null || Files.isSymbolicLink(file)
+                || !Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
             throw new IOException("StarDist model zip does not exist: " + file);
         }
         String name = file.getFileName() == null ? "" : file.getFileName().toString();

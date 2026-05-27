@@ -130,6 +130,27 @@ public class SegmentationModelImportValidationTest {
     }
 
     @Test
+    public void starDistSymlinkRejected() throws Exception {
+        Path root = temp.newFolder("stardist-symlink").toPath();
+        Path real = zip(root.resolve("imports").resolve("real.zip"),
+                "saved_model.pb");
+        Path link = root.resolve("imports").resolve("linked.zip");
+        try {
+            Files.createSymbolicLink(link, real);
+        } catch (UnsupportedOperationException | SecurityException | java.io.IOException e) {
+            return;
+        }
+        SegmentationModelManagerController controller = new SegmentationModelManagerController(root);
+
+        try {
+            controller.addStarDistModel(link, "Linked StarDist", null, null);
+            fail("Expected symbolic-link StarDist model to fail.");
+        } catch (Exception expected) {
+            assertTrue(expected.getMessage().contains("symbolic link"));
+        }
+    }
+
+    @Test
     public void cellposeMissingFileRejected() throws Exception {
         Path root = temp.newFolder("cellpose-missing").toPath();
         SegmentationModelManagerController controller = new SegmentationModelManagerController(root);
@@ -139,6 +160,28 @@ public class SegmentationModelImportValidationTest {
             fail("Expected missing Cellpose file to fail.");
         } catch (Exception expected) {
             assertTrue(expected.getMessage().contains("does not exist"));
+        }
+    }
+
+    @Test
+    public void cellposeSymlinkRejected() throws Exception {
+        Path root = temp.newFolder("cellpose-symlink").toPath();
+        Path real = root.resolve("imports").resolve("real.model");
+        Files.createDirectories(real.getParent());
+        Files.write(real, "model".getBytes(StandardCharsets.UTF_8));
+        Path link = root.resolve("imports").resolve("linked.model");
+        try {
+            Files.createSymbolicLink(link, real);
+        } catch (UnsupportedOperationException | SecurityException | java.io.IOException e) {
+            return;
+        }
+        SegmentationModelManagerController controller = new SegmentationModelManagerController(root);
+
+        try {
+            controller.addCellposeFileModel(link, "Linked Cellpose", null, null);
+            fail("Expected symbolic-link Cellpose model to fail.");
+        } catch (Exception expected) {
+            assertTrue(expected.getMessage().contains("symbolic link"));
         }
     }
 

@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.URISyntaxException;
 import java.net.URL;
+import java.nio.file.LinkOption;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -90,11 +91,13 @@ public final class ModelCatalog {
             throw new IOException("Cannot add a null model entry.");
         }
         ModelCatalogIO.validateEntry(entry, false);
-        if (sourceFile == null || !Files.isRegularFile(sourceFile)) {
+        Path source = sourceFile == null ? null : sourceFile.toAbsolutePath().normalize();
+        if (source == null || Files.isSymbolicLink(source)
+                || !Files.isRegularFile(source, LinkOption.NOFOLLOW_LINKS)) {
             throw new IOException("Model file does not exist: " + sourceFile);
         }
 
-        String fileName = sourceFile.getFileName().toString();
+        String fileName = source.getFileName().toString();
         requireSafeFileName(fileName);
 
         Path filesRoot = filesDirectory().toAbsolutePath().normalize();
@@ -108,7 +111,7 @@ public final class ModelCatalog {
         if (!target.startsWith(targetDir)) {
             throw new IOException("Model file resolves outside catalog model directory: " + fileName);
         }
-        Files.copy(sourceFile, target, StandardCopyOption.REPLACE_EXISTING);
+        Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING);
 
         String relativePath = catalogDir.toAbsolutePath().normalize()
                 .relativize(target.toAbsolutePath().normalize())

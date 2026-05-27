@@ -10,6 +10,7 @@ import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -63,7 +64,8 @@ public final class ObjectClassifierPersistence {
     }
 
     public static RandomForest loadModel(Path path) throws IOException, ClassNotFoundException {
-        if (path == null || !Files.isRegularFile(path)) {
+        if (path == null || Files.isSymbolicLink(path)
+                || !Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
             throw new IOException("Smile Random Forest model file does not exist: " + path);
         }
         try (InputStream in = Files.newInputStream(path);

@@ -6,7 +6,10 @@ import ij.ImagePlus;
 import flash.pipeline.intelligence.JunkFileFilter;
 
 import java.io.File;
+import java.io.IOException;
+import java.nio.file.LinkOption;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -121,6 +124,7 @@ public class LifIO {
      */
     public static List<ImagePlus> openAllImages(File lifFile, boolean virtual) throws Exception {
         BioFormatsRuntime.markUsage();
+        lifFile = requireReadableLifFile(lifFile);
         if (virtual) {
             // Virtual stacks: open series-by-series rather than via
             // setOpenAllSeries(true). Per the project quirks list and the
@@ -214,6 +218,7 @@ public class LifIO {
      */
     public static List<ImagePlus> openWithUI(File lifFile) throws Exception {
         BioFormatsRuntime.markUsage();
+        lifFile = requireReadableLifFile(lifFile);
         ImporterOptions options = new ImporterOptions();
         options.setId(lifFile.getAbsolutePath());
         options.setWindowless(false);
@@ -236,6 +241,7 @@ public class LifIO {
      */
     public static List<ImagePlus> openRandomSeries(File lifFile, int count) throws Exception {
         BioFormatsRuntime.markUsage();
+        lifFile = requireReadableLifFile(lifFile);
         // First, determine total series count using a lightweight reader
         int totalSeries;
         try (Memoizer reader = new Memoizer(new ImageReader())) {
@@ -267,6 +273,7 @@ public class LifIO {
      * Invalid indices are ignored.
      */
     public static List<ImagePlus> openSelectedSeries(File lifFile, List<Integer> selectedSeriesIndices) throws Exception {
+        lifFile = requireReadableLifFile(lifFile);
         if (selectedSeriesIndices == null || selectedSeriesIndices.isEmpty()) {
             return new ArrayList<ImagePlus>();
         }
@@ -331,6 +338,7 @@ public class LifIO {
      */
     public static int getSeriesCount(File lifFile) throws Exception {
         BioFormatsRuntime.markUsage();
+        lifFile = requireReadableLifFile(lifFile);
         try (Memoizer reader = new Memoizer(new ImageReader())) {
             reader.setId(lifFile.getAbsolutePath());
             return reader.getSeriesCount();
@@ -344,6 +352,7 @@ public class LifIO {
      */
     public static List<SeriesMeta> readAllSeriesMetadata(File lifFile) throws Exception {
         BioFormatsRuntime.markUsage();
+        lifFile = requireReadableLifFile(lifFile);
         List<SeriesMeta> metas = new ArrayList<>();
         loci.formats.meta.MetadataStore store = loci.formats.MetadataTools.createOMEXMLMetadata();
         try (Memoizer reader = new Memoizer(new ImageReader())) {
@@ -406,5 +415,23 @@ public class LifIO {
             }
         }
         return out;
+    }
+
+    static File requireReadableLifFile(File lifFile) throws IOException {
+        if (lifFile == null) {
+            throw new IOException(".lif file is required.");
+        }
+        Path path = lifFile.toPath();
+        if (Files.isSymbolicLink(path)) {
+            throw new IOException("Refusing to open symbolic-link .lif file: " + lifFile);
+        }
+        if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IOException(".lif file does not exist: " + lifFile);
+        }
+        String name = lifFile.getName() == null ? "" : lifFile.getName().toLowerCase(Locale.ROOT);
+        if (!name.endsWith(".lif")) {
+            throw new IOException("Expected a .lif file: " + lifFile);
+        }
+        return lifFile.getCanonicalFile();
     }
 }
