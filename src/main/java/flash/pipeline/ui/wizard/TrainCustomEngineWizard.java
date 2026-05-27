@@ -9,11 +9,11 @@ import flash.pipeline.segmentation.catalog.ModelEntry;
 import flash.pipeline.ui.FlashTheme;
 import flash.pipeline.ui.HelpButton;
 import flash.pipeline.ui.PipelineDialog;
+import flash.pipeline.ui.ToggleSwitch;
 
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
-import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JFileChooser;
 import javax.swing.JLabel;
@@ -146,21 +146,20 @@ public final class TrainCustomEngineWizard {
         JPanel imagePanel = new JPanel();
         imagePanel.setOpaque(false);
         imagePanel.setLayout(new BoxLayout(imagePanel, BoxLayout.Y_AXIS));
-        final Map<String, JCheckBox> boxes = new LinkedHashMap<String, JCheckBox>();
+        final Map<String, ToggleSwitch> boxes = new LinkedHashMap<String, ToggleSwitch>();
         List<TrainCustomEngineWorkflow.ImageSummary> images = workflow.clickSummary().perImage;
         for (int i = 0; i < images.size(); i++) {
             final TrainCustomEngineWorkflow.ImageSummary summary = images.get(i);
-            final JCheckBox box = new JCheckBox(summary.imageName + ": "
-                    + summary.positive + " pos / " + summary.negative + " neg",
-                    !summary.excluded);
-            box.setOpaque(false);
-            box.addActionListener(e -> {
-                workflow.setImageExcluded(summary.imageName, !box.isSelected());
-                gate.setText(workflow.clickGateMessage());
-                updateClickStepPrimary(dialog, workflow);
+            final ToggleSwitch box = new ToggleSwitch(!summary.excluded);
+            box.addChangeListener(new Runnable() {
+                @Override public void run() {
+                    workflow.setImageExcluded(summary.imageName, !box.isSelected());
+                    gate.setText(workflow.clickGateMessage());
+                    updateClickStepPrimary(dialog, workflow);
+                }
             });
             boxes.put(summary.imageName, box);
-            imagePanel.add(box);
+            imagePanel.add(clickSummaryRow(box, summary));
         }
         if (boxes.isEmpty()) {
             JLabel empty = new JLabel("No clicks have been captured for this channel.");
@@ -171,7 +170,7 @@ public final class TrainCustomEngineWizard {
         updateClickStepPrimary(dialog, workflow);
 
         boolean ok = dialog.showDialog();
-        for (Map.Entry<String, JCheckBox> entry : boxes.entrySet()) {
+        for (Map.Entry<String, ToggleSwitch> entry : boxes.entrySet()) {
             workflow.setImageExcluded(entry.getKey(), !entry.getValue().isSelected());
         }
         if (!ok) {
@@ -187,6 +186,19 @@ public final class TrainCustomEngineWizard {
         boolean ready = workflow != null && workflow.canProceedFromClicks();
         dialog.setPrimaryButtonText(ready ? "Next" : "Collect clicks");
         dialog.setPrimaryButtonEnabled(true);
+    }
+
+    private static JPanel clickSummaryRow(ToggleSwitch toggle,
+                                          TrainCustomEngineWorkflow.ImageSummary summary) {
+        JPanel row = new JPanel();
+        row.setOpaque(false);
+        row.setLayout(new BoxLayout(row, BoxLayout.X_AXIS));
+        row.add(toggle);
+        JLabel label = new JLabel("  " + summary.imageName + ": "
+                + summary.positive + " pos / " + summary.negative + " neg");
+        label.setForeground(FlashTheme.TEXT_PRIMARY);
+        row.add(label);
+        return row;
     }
 
     private static StepResult showTrainStep(Window owner, TrainCustomEngineWorkflow workflow) {
