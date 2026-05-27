@@ -15,7 +15,7 @@ import java.util.Locale;
  * directory (typically FLASH/Results/Run Records/analysis_details/Split and Merge/).
  *
  * Records per-channel display range settings, merge configuration,
- * background subtraction, orientation, and timing information.
+ * background subtraction, and timing information.
  */
 public final class SplitAndMergeDetailsWriter {
 
@@ -24,7 +24,7 @@ public final class SplitAndMergeDetailsWriter {
     /**
      * Writes a SplitAndMerge_Details.txt file summarising the processing parameters.
      *
-     * @param outputDirectory       the split/merge root output directory
+     * @param outputDirectory       the split/merge analysis-details directory
      * @param channelNames          array of channel names
      * @param channelColors         array of channel colour names
      * @param processMethodPerCh    display range method per channel (None/Automatic/Manual/Custom)
@@ -35,7 +35,6 @@ public final class SplitAndMergeDetailsWriter {
      * @param subtractBackground    whether background subtraction was enabled
      * @param backgroundIndex       index of the background channel (-1 if none)
      * @param subtractFromChannels  which channels had background subtracted
-     * @param orientation           hemisphere string used for orientation (may be null)
      * @param imagesProcessed       total number of images processed
      * @param startTimeMillis       processing start time in millis (for runtime calculation)
      */

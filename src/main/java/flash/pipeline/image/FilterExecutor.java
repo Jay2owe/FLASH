@@ -111,6 +111,11 @@ public final class FilterExecutor {
     }
 
     /**
+     * Runs an IJ1 macro fragment under a safety sandbox, optionally preserving
+     * known secondary output images.
+     *
+     * @param imp input image made current for the macro, or {@code null}
+     * @param macroCall macro invocation to run
      * @param keepTitles optional set of image titles to spare from the
      *                   {@link #closeStrayImages} sweep — used when a macro
      *                   intentionally produces a secondary output (e.g. a
