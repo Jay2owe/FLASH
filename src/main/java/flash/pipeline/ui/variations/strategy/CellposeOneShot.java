@@ -128,6 +128,10 @@ public final class CellposeOneShot implements VariationStrategy {
             }
             long durationMs = Math.max(1L, System.currentTimeMillis() - started);
             VariationResult result = resultFor(combo, label, input, durationMs);
+            if (isCancelled(cancelCheck)) {
+                closeIfOwned(result.label(), input, cropped);
+                return;
+            }
             if (cache != null) {
                 cache.put(cacheKey, result.label());
             }

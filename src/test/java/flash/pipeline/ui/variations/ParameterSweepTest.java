@@ -9,6 +9,7 @@ import java.util.Map;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 public class ParameterSweepTest {
 
@@ -87,6 +88,27 @@ public class ParameterSweepTest {
         assertFalse(sweep.toCanonicalJson().contains("Gaussian Blur"));
     }
 
+    @Test
+    public void cellCountSaturatesWhenCartesianProductWouldOverflowLong() {
+        Map<ParameterKey, ParameterValueList> values =
+                new LinkedHashMap<ParameterKey, ParameterValueList>();
+        ParameterValueList tenValues = ParameterValueList.ofInts(
+                0, 1, 2, 3, 4, 5, 6, 7, 8, 9);
+        for (int i = 0; i < 19; i++) {
+            values.put(new TestKey("k" + i), tenValues);
+        }
+        ParameterSweep sweep = new ParameterSweep(ParameterSweep.Method.CLASSICAL,
+                values, CropSpec.full(), "DAPI", "abc");
+
+        assertEquals(Long.MAX_VALUE, sweep.cellCount());
+        try {
+            sweep.combos();
+            fail("Expected oversized sweep to be rejected before allocation.");
+        } catch (IllegalStateException expected) {
+            assertTrue(expected.getMessage().contains("too many parameter combinations"));
+        }
+    }
+
     private static ParameterSweep sweepWithScrambledInputOrder() {
         Map<ParameterId, ParameterValueList> values = new LinkedHashMap<ParameterId, ParameterValueList>();
         values.put(ParameterId.MAX_SIZE, ParameterValueList.ofInts(100));
@@ -94,5 +116,25 @@ public class ParameterSweepTest {
         values.put(ParameterId.THRESHOLD, ParameterValueList.ofInts(1, 2, 3));
         return new ParameterSweep(ParameterSweep.Method.CLASSICAL,
                 values, CropSpec.full(), "DAPI", "abc");
+    }
+
+    private static final class TestKey implements ParameterKey {
+        private final String key;
+
+        TestKey(String key) {
+            this.key = key;
+        }
+
+        @Override public String stableKey() {
+            return key;
+        }
+
+        @Override public String displayLabel() {
+            return key;
+        }
+
+        @Override public ValueKind valueKind() {
+            return ValueKind.NUMBER;
+        }
     }
 }

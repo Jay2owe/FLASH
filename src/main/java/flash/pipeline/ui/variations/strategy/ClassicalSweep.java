@@ -131,6 +131,10 @@ public final class ClassicalSweep implements VariationStrategy {
             if (label == null) {
                 label = emptyLabelMapLike(input);
             }
+            if (isCancelled(cancelCheck)) {
+                closeIfOwned(label, input, cropped);
+                return;
+            }
             if (cache != null) {
                 cache.put(cacheKey, label);
             }
@@ -172,6 +176,13 @@ public final class ClassicalSweep implements VariationStrategy {
             return;
         }
         previewAdapter.close(cropped);
+    }
+
+    private void closeIfOwned(ImagePlus image, ImagePlus firstOwner, ImagePlus secondOwner) {
+        if (image == null || image == firstOwner || image == secondOwner) {
+            return;
+        }
+        previewAdapter.close(image);
     }
 
     private static boolean isCancelled(BooleanSupplier cancelCheck) {

@@ -13,6 +13,7 @@ import flash.pipeline.ui.variations.ParameterValueList;
 import flash.pipeline.ui.variations.PresetSweepCombo;
 import flash.pipeline.ui.variations.PresetSweepKey;
 import flash.pipeline.ui.variations.SlotSubstitutionKey;
+import flash.pipeline.ui.variations.VariationCache;
 import flash.pipeline.ui.variations.VariationResult;
 
 import ij.ImagePlus;
@@ -21,6 +22,7 @@ import ij.process.FloatProcessor;
 
 import org.junit.Test;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -217,6 +219,44 @@ public class FilterSweepStrategyTest {
         }
 
         assertEquals(0, published.get());
+    }
+
+    @Test
+    public void cancellationBeforePublishDoesNotPopulateDiskCache() {
+        FilterParameterId sigma =
+                new FilterParameterId(0, 0, 0, "Gaussian Blur", "sigma");
+        Map<ParameterKey, ParameterValueList> values =
+                new LinkedHashMap<ParameterKey, ParameterValueList>();
+        values.put(sigma, ParameterValueList.ofDoubles(1.0d));
+        final ParameterSweep sweep = new ParameterSweep(ParameterSweep.Method.FILTER,
+                values, CropSpec.full(), "DAPI", "image-a", "filter:macrohash");
+        FilterMacroEditorModel.MacroDefinition macro = FilterMacroEditorModel.parse(
+                "run(\"Gaussian Blur...\", \"sigma=1\");\n");
+        File bin = new File("target/filter-sweep-cancel-cache-test-"
+                + System.nanoTime());
+        VariationCache cache = new VariationCache(bin);
+        FilterSweepStrategy strategy = new FilterSweepStrategy(macro,
+                new SyntheticPreviewAdapter(), sourceImage(), cache);
+        final List<VariationResult> published = new ArrayList<VariationResult>();
+        final AtomicInteger checks = new AtomicInteger();
+
+        strategy.dispatch(sweep,
+                new Consumer<VariationResult>() {
+                    @Override public void accept(VariationResult result) {
+                        published.add(result);
+                    }
+                },
+                new BooleanSupplier() {
+                    @Override public boolean getAsBoolean() {
+                        return checks.incrementAndGet() >= 4;
+                    }
+                });
+
+        String cacheKey = VariationCache.keyFor(sweep, sweep.combos().get(0));
+        File cacheFile = new File(new File(bin, "variations_cache"),
+                cacheKey + ".tif");
+        assertEquals(0, published.size());
+        assertFalse(cacheFile.exists());
     }
 
     private static ImagePlus sourceImage() {

@@ -165,10 +165,14 @@ public final class ParameterSweep {
     public long cellCount() {
         long count = 1L;
         for (ParameterValueList values : valueLists.values()) {
-            count *= values.size();
-            if (count < 0L) {
+            int size = values.size();
+            if (size <= 0) {
+                return 0L;
+            }
+            if (count > Long.MAX_VALUE / size) {
                 return Long.MAX_VALUE;
             }
+            count *= size;
         }
         return count;
     }

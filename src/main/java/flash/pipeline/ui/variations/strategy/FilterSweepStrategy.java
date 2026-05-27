@@ -220,6 +220,10 @@ public final class FilterSweepStrategy implements VariationStrategy {
             }
             Metrics metrics = metricsFor(filtered);
             long durationMs = Math.max(1L, System.currentTimeMillis() - started);
+            if (isCancelled(cancelCheck)) {
+                closeIfOwned(filtered, perComboSource);
+                return;
+            }
             if (cache != null) {
                 cache.put(cacheKey, filtered);
             }

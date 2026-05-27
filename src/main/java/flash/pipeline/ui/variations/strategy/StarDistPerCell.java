@@ -111,6 +111,10 @@ public final class StarDistPerCell implements VariationStrategy {
             }
             long durationMs = Math.max(1L, System.currentTimeMillis() - started);
             VariationResult result = resultFor(combo, label, input, parameters, durationMs);
+            if (isCancelled(cancelCheck)) {
+                closeIfOwned(result.label(), input, cropped);
+                return;
+            }
             if (cache != null) {
                 cache.put(cacheKey, result.label());
             }
@@ -161,6 +165,13 @@ public final class StarDistPerCell implements VariationStrategy {
             return;
         }
         previewAdapter.close(cropped);
+    }
+
+    private void closeIfOwned(ImagePlus image, ImagePlus firstOwner, ImagePlus secondOwner) {
+        if (image == null || image == firstOwner || image == secondOwner) {
+            return;
+        }
+        previewAdapter.close(image);
     }
 
     private static StarDistParameterStage.Parameters overlay(

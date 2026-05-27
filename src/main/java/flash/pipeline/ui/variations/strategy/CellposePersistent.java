@@ -197,6 +197,10 @@ public final class CellposePersistent implements VariationStrategy {
                 }
                 VariationResult variationResult = resultFor(item.combo,
                         result.labelImage(), input, result.durationMs());
+                if (isCancelled(cancelCheck)) {
+                    closeIfOwned(variationResult.label(), input, cropped);
+                    return null;
+                }
                 if (cache != null) {
                     cache.put(item.cacheKey, variationResult.label());
                 }
