@@ -24,6 +24,7 @@ import flash.pipeline.deconv.wizard.DeconvPresetIO;
 import flash.pipeline.deconv.wizard.ImageConsultantWizard;
 import flash.pipeline.image.HeapBudget;
 import flash.pipeline.intelligence.MetadataDiagnostics;
+import flash.pipeline.io.AsyncImageSaver;
 import flash.pipeline.io.IoUtils;
 import flash.pipeline.io.LifIO;
 import flash.pipeline.io.SeriesMeta;
@@ -1196,6 +1197,8 @@ public class DeconvolutionAnalysis implements Analysis {
             long started = now();
             List<String> warnings = new ArrayList<String>();
             List<String> channelOutcomes = new ArrayList<String>();
+            boolean[] deconvolvedChannelsForMerge = new boolean[channelNames.length];
+            boolean selectedChannelFailed = false;
 
             ResolvedSeriesSettings resolved = resolveSeriesSettings(job.seriesInfo, settings, channelNames.length);
             long peakUsedBytes = usedHeapBytes();
@@ -1255,6 +1258,7 @@ public class DeconvolutionAnalysis implements Analysis {
                 File existingOutFile = DeconvolutionIO.firstExistingFile(
                         DeconvolutionIO.deconvFileReadCandidates(rootDir, job.baseName, channelIndex));
                 if (skipExisting && existingOutFile != null) {
+                    deconvolvedChannelsForMerge[channelIndex] = true;
                     channelOutcomes.add(channelNames[channelIndex] + ": skipped existing output");
                     appendSummaryRow(summaryReport,
                             job.baseName,
@@ -1275,11 +1279,33 @@ public class DeconvolutionAnalysis implements Analysis {
                 File cacheHitFile = DeconvolutionIO.firstFreshFile(job.sourceFile,
                         DeconvolutionIO.cacheFileReadCandidates(rootDir, paramsHash, job.baseName, channelIndex));
 
+                try {
+                    deleteFileIfExists(outFile);
+                } catch (IOException e) {
+                    String message = "failed to remove stale output before recompute: " + e.getMessage();
+                    warnings.add(channelNames[channelIndex] + " " + message);
+                    channelOutcomes.add(channelNames[channelIndex] + ": failed");
+                    summaryWarnings.add("staleOutputDeleteFailed");
+                    selectedChannelFailed = true;
+                    appendSummaryRow(summaryReport,
+                            job.baseName,
+                            channelNames[channelIndex],
+                            engine,
+                            settings,
+                            sizeXYZ(job.seriesInfo),
+                            now() - channelStarted,
+                            channelPeakUsedBytes,
+                            false,
+                            summaryWarnings);
+                    continue;
+                }
+
                 if (settings.useCache && cacheHitFile != null) {
                     boolean cacheHit = false;
                     try {
                         copyFile(cacheHitFile, outFile);
                         channelOutcomes.add(channelNames[channelIndex] + ": cache hit");
+                        deconvolvedChannelsForMerge[channelIndex] = true;
                         cacheHit = true;
                     } catch (IOException e) {
                         warnings.add("Cache copy failed for " + channelNames[channelIndex] + ": " + e.getMessage());
@@ -1310,6 +1336,7 @@ public class DeconvolutionAnalysis implements Analysis {
                     if (channelStack == null) {
                         channelOutcomes.add(channelNames[channelIndex] + ": skipped (channel could not be opened)");
                         summaryWarnings.add("openFailed");
+                        selectedChannelFailed = true;
                         continue;
                     }
                     sizeXYZ = sizeXYZ(channelStack);
@@ -1322,6 +1349,7 @@ public class DeconvolutionAnalysis implements Analysis {
                         channelOutcomes.add(channelNames[channelIndex] + ": " + message);
                         warnings.add(channelNames[channelIndex] + " " + message);
                         summaryWarnings.add("memorySkip");
+                        selectedChannelFailed = true;
                         continue;
                     }
 
@@ -1340,6 +1368,7 @@ public class DeconvolutionAnalysis implements Analysis {
                         channelOutcomes.add(channelNames[channelIndex] + ": " + message);
                         warnings.add(channelNames[channelIndex] + " " + message);
                         summaryWarnings.add("psfFailed");
+                        selectedChannelFailed = true;
                         continue;
                     }
 
@@ -1355,16 +1384,24 @@ public class DeconvolutionAnalysis implements Analysis {
                     deconvolved = engine.deconvolve(channelStack, psf, params);
                     channelPeakUsedBytes = Math.max(channelPeakUsedBytes, usedHeapBytes());
                     saveTiff(deconvolved, outFile);
-                    if (settings.useCache) {
-                        copyFile(outFile, cacheFile);
-                    }
+                    deconvolvedChannelsForMerge[channelIndex] = true;
                     channelOutcomes.add(channelNames[channelIndex] + ": written (" + paramsHash + ")");
+                    if (settings.useCache) {
+                        try {
+                            copyFile(outFile, cacheFile);
+                        } catch (IOException e) {
+                            warnings.add("Cache write failed for " + channelNames[channelIndex] + ": " + e.getMessage());
+                            summaryWarnings.add("cacheWriteFailed");
+                        }
+                    }
                 } catch (DeconvolutionException e) {
+                    selectedChannelFailed = true;
                     warnings.add(channelNames[channelIndex] + " failed: " + e.getMessage());
                     channelOutcomes.add(channelNames[channelIndex] + ": failed");
                     summaryWarnings.add("failed");
                     IJ.log("Deconvolution failed [" + job.baseName + ", " + channelNames[channelIndex] + "]: " + e.getMessage());
                 } catch (Exception e) {
+                    selectedChannelFailed = true;
                     warnings.add(channelNames[channelIndex] + " failed: " + e.getMessage());
                     channelOutcomes.add(channelNames[channelIndex] + ": failed");
                     summaryWarnings.add("failed");
@@ -1387,11 +1424,22 @@ public class DeconvolutionAnalysis implements Analysis {
                         summaryWarnings);
             }
 
-            try {
-                writeMergedOutput(directory, rootDir, job, channelNames.length, settings.selectedChannels);
-            } catch (Exception e) {
-                warnings.add("Merged deconvolved output failed: " + e.getMessage());
-                IJ.log("Could not write merged deconvolved output for " + job.baseName + ": " + e.getMessage());
+            if (selectedChannelFailed) {
+                warnings.add("Merged deconvolved output skipped because at least one selected channel failed.");
+                try {
+                    deleteFileIfExists(DeconvolutionIO.mergedDeconvFile(rootDir, job.baseName));
+                } catch (IOException e) {
+                    warnings.add("Could not remove stale merged deconvolved output: " + e.getMessage());
+                    IJ.log("Could not remove stale merged deconvolved output for "
+                            + job.baseName + ": " + e.getMessage());
+                }
+            } else {
+                try {
+                    writeMergedOutput(directory, rootDir, job, channelNames.length, deconvolvedChannelsForMerge);
+                } catch (Exception e) {
+                    warnings.add("Merged deconvolved output failed: " + e.getMessage());
+                    IJ.log("Could not write merged deconvolved output for " + job.baseName + ": " + e.getMessage());
+                }
             }
 
             long elapsed = now() - started;
@@ -1406,6 +1454,7 @@ public class DeconvolutionAnalysis implements Analysis {
                 IJ.log("Could not finalize deconvolution summary report: " + e.getMessage());
             }
         }
+        AsyncImageSaver.waitForAll();
 
         if (!suppressDialogs && !headless) {
             JOptionPane.showMessageDialog(null, "3D deconvolution finished.", TITLE, JOptionPane.INFORMATION_MESSAGE);
@@ -1541,7 +1590,7 @@ public class DeconvolutionAnalysis implements Analysis {
                                    File rootDir,
                                    SeriesJob job,
                                    int channelCount,
-                                   boolean[] selectedChannels) throws Exception {
+                                   boolean[] deconvolvedChannels) throws Exception {
         if (job == null || channelCount <= 0) return;
 
         File mergedFile = DeconvolutionIO.mergedDeconvFile(rootDir, job.baseName);
@@ -1556,9 +1605,9 @@ public class DeconvolutionAnalysis implements Analysis {
             for (int channelIndex = 0; channelIndex < channelCount; channelIndex++) {
                 File channelFile = DeconvolutionIO.firstExistingFile(
                         DeconvolutionIO.deconvFileReadCandidates(rootDir, job.baseName, channelIndex));
-                boolean useDeconvolvedChannel = selectedChannels != null
-                        && channelIndex < selectedChannels.length
-                        && selectedChannels[channelIndex]
+                boolean useDeconvolvedChannel = deconvolvedChannels != null
+                        && channelIndex < deconvolvedChannels.length
+                        && deconvolvedChannels[channelIndex]
                         && channelFile != null
                         && channelFile.isFile();
                 if (useDeconvolvedChannel) {
@@ -1669,17 +1718,21 @@ public class DeconvolutionAnalysis implements Analysis {
                                                 RunSettings settings,
                                                 ResolvedSeriesSettings resolved) {
         List<String> missing = new ArrayList<String>();
-        if (resolved.numericalAperture <= 0.0) missing.add("Numerical Aperture");
-        if (resolved.immersionRi <= 0.0) missing.add("Immersion RI");
-        if (resolved.sampleRi <= 0.0) missing.add("Sample RI");
-        if (resolved.zStepUm <= 0.0) missing.add("Z-step");
-        if (resolved.xyPixelSizeUm <= 0.0) {
+        if (!isPositiveFinite(resolved.numericalAperture)) missing.add("Numerical Aperture");
+        if (!isPositiveFinite(resolved.immersionRi)) missing.add("Immersion RI");
+        if (!isPositiveFinite(resolved.sampleRi)) missing.add("Sample RI");
+        if (!isPositiveFinite(resolved.zStepUm)) missing.add("Z-step");
+        if (!isPositiveFinite(resolved.xyPixelSizeUm)) {
             missing.add("XY pixel size");
+        }
+        if (settings.scopeModality == ScopeModality.CONFOCAL
+                && !isPositiveFinite(resolved.pinholeAiryUnits)) {
+            missing.add("Pinhole");
         }
         for (int i = 0; i < resolved.emissionWavelengthsNm.length; i++) {
             if (i < settings.selectedChannels.length && !settings.selectedChannels[i]) continue;
             double value = resolved.emissionWavelengthsNm[i];
-            if (Double.isNaN(value) || value <= 0.0) {
+            if (!isPositiveFinite(value)) {
                 missing.add(settings.channelNames[i] + " emission wavelength");
             }
         }
@@ -2267,7 +2320,8 @@ public class DeconvolutionAnalysis implements Analysis {
     private static Double parseNullableDouble(String raw) {
         if (raw == null || raw.trim().isEmpty()) return null;
         try {
-            return Double.valueOf(Double.parseDouble(raw.trim()));
+            double value = Double.parseDouble(raw.trim());
+            return isPositiveFinite(value) ? Double.valueOf(value) : null;
         } catch (NumberFormatException e) {
             return null;
         }
@@ -2282,9 +2336,13 @@ public class DeconvolutionAnalysis implements Analysis {
     }
 
     private static double firstPositive(Double primary, Double fallback) {
-        if (primary != null && primary.doubleValue() > 0.0) return primary.doubleValue();
-        if (fallback != null && fallback.doubleValue() > 0.0) return fallback.doubleValue();
+        if (primary != null && isPositiveFinite(primary.doubleValue())) return primary.doubleValue();
+        if (fallback != null && isPositiveFinite(fallback.doubleValue())) return fallback.doubleValue();
         return Double.NaN;
+    }
+
+    private static boolean isPositiveFinite(double value) {
+        return !Double.isNaN(value) && !Double.isInfinite(value) && value > 0.0;
     }
 
     private static String humanMiB(long bytes) {
@@ -2316,6 +2374,11 @@ public class DeconvolutionAnalysis implements Analysis {
                 Files.deleteIfExists(temp.toPath());
             }
         }
+    }
+
+    private static void deleteFileIfExists(File file) throws IOException {
+        if (file == null) return;
+        Files.deleteIfExists(file.toPath());
     }
 
     private static void moveReplacing(File source, File target) throws IOException {

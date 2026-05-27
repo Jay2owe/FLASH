@@ -30,6 +30,7 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
@@ -139,6 +140,53 @@ public class DeconvolutionAnalysisTest {
         assertEquals(3, info.emissionWavelengthNm.length);
     }
 
+    @Test
+    public void failedRecomputeRemovesStaleOutputsAndSkipsMergedMirror() throws Exception {
+        File root = temp.newFolder("deconvolution-stale");
+        File source = new File(root, "synthetic.lif");
+        Files.write(source.toPath(), "lif".getBytes(StandardCharsets.UTF_8));
+
+        final ImagePlus blurred = gaussianPointSource("blurred", 32, 32, 5, 2.0, 1.0, 50.0);
+        final ImagePlus psf = gaussianPointSource("psf", 7, 7, 3, 1.0, 1.0, 1.0);
+        TestDeconvolutionAnalysis analysis = new TestDeconvolutionAnalysis(
+                source,
+                blurred,
+                psf,
+                syntheticSeriesInfo(),
+                failingEngine());
+        analysis.setHeadless(true);
+        analysis.setSuppressDialogs(true);
+        analysis.setCliConfig(CLIArgumentParser.parse(
+                "dir=[" + root.getAbsolutePath().replace('\\', '/') + "] "
+                        + "analysisIndex=2 "
+                        + "deconv.enabled=true "
+                        + "deconv.engine=DL2 "
+                        + "deconv.algorithm=RL "
+                        + "deconv.scopeModality=widefield "
+                        + "deconv.channels=0 "
+                        + "deconv.useCache=false"));
+
+        File staleChannel = DeconvolutionIO.deconvFile(root, "synthetic", 0);
+        File staleMerged = DeconvolutionIO.mergedDeconvFile(root, "synthetic");
+        Files.createDirectories(staleChannel.getParentFile().toPath());
+        Files.write(staleChannel.toPath(), "old-channel".getBytes(StandardCharsets.UTF_8));
+        Files.write(staleMerged.toPath(), "old-merged".getBytes(StandardCharsets.UTF_8));
+
+        try {
+            analysis.execute(root.getAbsolutePath());
+
+            assertFalse("failed recompute must not leave stale per-channel output", staleChannel.exists());
+            assertFalse("failed recompute must not leave stale merged deconvolved mirror", staleMerged.exists());
+            File details = DeconvolutionIO.detailsFile(root, "synthetic");
+            String detailsText = new String(Files.readAllBytes(details.toPath()), StandardCharsets.UTF_8);
+            assertTrue(detailsText.contains("synthetic failure"));
+            assertTrue(detailsText.contains("Merged deconvolved output skipped"));
+        } finally {
+            close(blurred);
+            close(psf);
+        }
+    }
+
     private static MetadataDiagnostics.SeriesInfo syntheticSeriesInfo() {
         MetadataDiagnostics.SeriesInfo info = new MetadataDiagnostics.SeriesInfo();
         info.file = "synthetic.lif";
@@ -194,6 +242,40 @@ public class DeconvolutionAnalysisTest {
                 FloatProcessor processor = (FloatProcessor) output.getStack().getProcessor(centerZ);
                 processor.setf(centerX, centerY, (float) (peak(output) * 1.5));
                 return output;
+            }
+        };
+    }
+
+    private static DeconvolutionEngine failingEngine() {
+        return new DeconvolutionEngine() {
+            @Override
+            public String key() {
+                return "DL2";
+            }
+
+            @Override
+            public String displayName() {
+                return "Failing DL2";
+            }
+
+            @Override
+            public String description() {
+                return "Throws for stale-output regression coverage";
+            }
+
+            @Override
+            public boolean isAvailable() {
+                return true;
+            }
+
+            @Override
+            public List<Algorithm> supportedAlgorithms() {
+                return Arrays.asList(Algorithm.RL, Algorithm.RL_TV);
+            }
+
+            @Override
+            public ImagePlus deconvolve(ImagePlus stack, ImagePlus psf, DeconvParams params) throws DeconvolutionException {
+                throw new DeconvolutionException("synthetic failure");
             }
         };
     }

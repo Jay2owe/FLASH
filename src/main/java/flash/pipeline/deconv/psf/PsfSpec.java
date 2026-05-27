@@ -139,14 +139,14 @@ public final class PsfSpec {
 
     private static double requirePositiveFinite(String label, double value) {
         if (Double.isNaN(value) || Double.isInfinite(value) || value <= 0.0) {
-            throw new IllegalArgumentException(label + " must be finite and > 0.");
+            throw new IllegalArgumentException(label + " must be finite and > 0 (was " + value + ").");
         }
         return value;
     }
 
     private static int requirePositive(String label, int value) {
         if (value <= 0) {
-            throw new IllegalArgumentException(label + " must be > 0.");
+            throw new IllegalArgumentException(label + " must be > 0 (was " + value + ").");
         }
         return value;
     }
@@ -156,7 +156,7 @@ public final class PsfSpec {
         if (Double.isNaN(value.doubleValue())
                 || Double.isInfinite(value.doubleValue())
                 || value.doubleValue() <= 0.0) {
-            throw new IllegalArgumentException(label + " must be null or finite and > 0.");
+            throw new IllegalArgumentException(label + " must be null or finite and > 0 (was " + value + ").");
         }
         return value;
     }
