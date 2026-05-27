@@ -194,7 +194,7 @@ public class SpatialAnalysis implements Analysis {
             "MorphTexture_F3D8"
     };
 
-    private Map<String, Double> markerThresholds = new HashMap<String, Double>();
+    private Map<String, Double> markerThresholds = new LinkedHashMap<String, Double>();
     private final Map<String, ScnParityFallbackSummary> scnParityFallbackCache =
             new HashMap<String, ScnParityFallbackSummary>();
     private final Set<String> scnParityFallbackWarnings = new LinkedHashSet<String>();
@@ -618,7 +618,7 @@ public class SpatialAnalysis implements Analysis {
      */
     public void setMarkerThresholds(Map<String, Double> thresholds) {
         if (thresholds != null) {
-            this.markerThresholds = thresholds;
+            this.markerThresholds = new LinkedHashMap<String, Double>(thresholds);
         }
     }
 
