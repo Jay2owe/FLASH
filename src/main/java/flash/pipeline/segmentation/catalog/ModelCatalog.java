@@ -13,7 +13,6 @@ import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -24,8 +23,14 @@ import java.util.stream.Stream;
  * Project-scoped in-memory catalog of stock and user segmentation models.
  */
 public final class ModelCatalog {
+    private static final int MAX_STOCK_RESOURCE_CACHE_ENTRIES = 64;
     private static final Map<String, Path> STOCK_RESOURCE_CACHE =
-            new HashMap<String, Path>();
+            new LinkedHashMap<String, Path>(32, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<String, Path> eldest) {
+                    return size() > MAX_STOCK_RESOURCE_CACHE_ENTRIES;
+                }
+            };
 
     private final Path projectRoot;
     private final Path catalogDir;
