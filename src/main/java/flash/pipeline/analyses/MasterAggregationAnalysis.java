@@ -1355,10 +1355,14 @@ public class MasterAggregationAnalysis implements Analysis {
         List<String> columns = new ArrayList<String>();
         columns.add("AnimalName");
         columns.add("numSections");
+        Set<String> seenMetricColumns = new LinkedHashSet<String>();
+        seenMetricColumns.add("AnimalName");
+        seenMetricColumns.add("numSections");
         for (Map.Entry<String, Map<String, LinkedHashMap<String, Double>>> chEntry : channelRawData.entrySet()) {
             for (LinkedHashMap<String, Double> metrics : chEntry.getValue().values()) {
                 for (String key : metrics.keySet()) {
-                    if (columns.contains(key) || "numSections".equals(key)) continue;
+                    if (seenMetricColumns.contains(key)) continue;
+                    seenMetricColumns.add(key);
                     boolean isSummable = summableColumns.contains(key);
                     if (!isSummable || keepRawSummables) {
                         columns.add(key);
@@ -1986,10 +1990,13 @@ public class MasterAggregationAnalysis implements Analysis {
             List<String> columns = new ArrayList<String>();
             columns.add("AnimalName");
             columns.add("numSections");
+            Set<String> seenColumns = new LinkedHashSet<String>();
+            seenColumns.add("AnimalName");
+            seenColumns.add("numSections");
             for (Map.Entry<String, Map<String, LinkedHashMap<String, Double>>> chEntry : bucket.channelData.entrySet()) {
                 for (LinkedHashMap<String, Double> metrics : chEntry.getValue().values()) {
                     for (String key : metrics.keySet()) {
-                        if (!columns.contains(key) && !"numSections".equals(key)) {
+                        if (seenColumns.add(key)) {
                             columns.add(key);
                         }
                     }
