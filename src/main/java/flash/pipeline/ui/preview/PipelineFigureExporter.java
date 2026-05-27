@@ -40,7 +40,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Locale;
 
 public final class PipelineFigureExporter {
 
@@ -55,6 +54,7 @@ public final class PipelineFigureExporter {
     private static final Color BORDER = FlashTheme.BORDER_STRONG;
     private static final Color LABEL = FlashTheme.TEXT_PRIMARY;
     private static final Font LABEL_FONT = FlashTheme.caption().deriveFont(Font.BOLD);
+    private static final char[] HEX = "0123456789abcdef".toCharArray();
 
     private PipelineFigureExporter() {
     }
@@ -553,12 +553,13 @@ public final class PipelineFigureExporter {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] bytes = digest.digest(raw.getBytes(StandardCharsets.UTF_8));
-            StringBuilder out = new StringBuilder(bytes.length * 2);
+            char[] chars = new char[bytes.length * 2];
             for (int i = 0; i < bytes.length; i++) {
-                out.append(String.format(Locale.ROOT, "%02x",
-                        Integer.valueOf(bytes[i] & 0xff)));
+                int v = bytes[i] & 0xff;
+                chars[i * 2] = HEX[v >>> 4];
+                chars[i * 2 + 1] = HEX[v & 0x0f];
             }
-            return out.toString();
+            return new String(chars);
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 is unavailable", e);
         }

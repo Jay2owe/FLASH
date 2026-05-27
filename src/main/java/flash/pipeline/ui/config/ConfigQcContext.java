@@ -17,10 +17,10 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 
 public final class ConfigQcContext {
+    private static final char[] HEX = "0123456789abcdef".toCharArray();
 
     public static final class ConfigQcImage {
         private final int seriesIndex;
@@ -372,11 +372,13 @@ public final class ConfigQcContext {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] bytes = digest.digest(value.getBytes(StandardCharsets.UTF_8));
-            StringBuilder sb = new StringBuilder(bytes.length * 2);
+            char[] chars = new char[bytes.length * 2];
             for (int i = 0; i < bytes.length; i++) {
-                sb.append(String.format(Locale.ROOT, "%02x", Integer.valueOf(bytes[i] & 0xff)));
+                int v = bytes[i] & 0xff;
+                chars[i * 2] = HEX[v >>> 4];
+                chars[i * 2 + 1] = HEX[v & 0x0f];
             }
-            return sb.toString();
+            return new String(chars);
         } catch (NoSuchAlgorithmException e) {
             return Integer.toHexString(value.hashCode());
         }
