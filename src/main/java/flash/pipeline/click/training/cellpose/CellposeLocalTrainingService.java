@@ -228,16 +228,9 @@ public final class CellposeLocalTrainingService {
         Files.createDirectories(modelsDir);
         Path logFile = dir.resolve(LOG_FILENAME);
         Path commandFile = commandFile(dir, trainCommandFile);
-        List<String> command;
-        String commandText;
-        if (Files.isRegularFile(commandFile)) {
-            commandText = new String(Files.readAllBytes(commandFile), StandardCharsets.UTF_8).trim();
-            command = parseCommandLine(commandText);
-        } else {
-            command = buildCommand(dir, baseModel, safeConfig);
-            commandText = displayCommand(command);
-            Files.write(commandFile, Collections.singletonList(commandText), StandardCharsets.UTF_8);
-        }
+        List<String> command = buildCommand(dir, baseModel, safeConfig);
+        String commandText = displayCommand(command);
+        Files.write(commandFile, Collections.singletonList(commandText), StandardCharsets.UTF_8);
         if (command.isEmpty()) {
             throw new IOException("Cellpose training command is empty: " + commandFile);
         }

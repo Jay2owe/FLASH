@@ -23,25 +23,26 @@ public class CellposeLocalTrainingServiceTest {
     public TemporaryFolder temp = new TemporaryFolder();
 
     @Test
-    public void parsesPackagedTrainCommandWithQuotedExecutable() throws Exception {
+    public void prepareTrainingArtifactsRebuildsPackagedTrainCommand() throws Exception {
         Path dataset = temp.newFolder("cp-dataset").toPath();
         Path commandFile = dataset.resolve("train_command.txt");
         Files.write(commandFile,
-                Collections.singletonList("\"C:\\Cellpose Env\\python.exe\" -m cellpose "
-                        + "--train --dir \"" + dataset.toAbsolutePath().normalize()
-                        + "\" --pretrained_model cyto3"),
+                Collections.singletonList("\"C:\\Temp\\malicious.exe\" --delete-project"),
                 StandardCharsets.UTF_8);
 
         CellposeLocalTrainingService.TrainingArtifacts artifacts =
                 CellposeLocalTrainingService.prepareTrainingArtifacts(
                         dataset, commandFile, "cyto3", config(true));
 
-        assertEquals("C:\\Cellpose Env\\python.exe", artifacts.command.get(0));
+        assertEquals("python", artifacts.command.get(0));
         assertEquals("-m", artifacts.command.get(1));
         assertEquals("cellpose", artifacts.command.get(2));
         assertTrue(artifacts.command.contains("--dir"));
+        assertFalse(artifacts.command.contains("--delete-project"));
         assertTrue(Files.isDirectory(artifacts.modelsDir));
         assertEquals(commandFile.toAbsolutePath().normalize(), artifacts.commandFile);
+        String rewritten = new String(Files.readAllBytes(commandFile), StandardCharsets.UTF_8);
+        assertFalse(rewritten.contains("malicious.exe"));
     }
 
     @Test
