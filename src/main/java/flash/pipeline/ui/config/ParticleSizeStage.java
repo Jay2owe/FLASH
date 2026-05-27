@@ -195,6 +195,7 @@ public final class ParticleSizeStage implements ConfigQcStage {
     public boolean lockIn(ConfigQcContext context) {
         try {
             SizeToken token = collectSizeToken();
+            validateSizeToken(token, filteredSource);
             sizeStore.set(token.toToken());
             savedSize = token;
             restartSize = null;
@@ -394,8 +395,10 @@ public final class ParticleSizeStage implements ConfigQcStage {
         final SizeToken token;
         final int minSize;
         final int maxSize;
+        final ImagePlus previewSource = filteredSource;
         try {
             token = collectSizeToken();
+            validateSizeToken(token, filteredSource);
             minSize = ObjectsCounter3DWrapper.parseMinSizeVoxels(token.minText, 100);
             maxSize = ObjectsCounter3DWrapper.parseMaxSizeVoxels(token.maxText, filteredSource);
         } catch (RuntimeException e) {
@@ -406,7 +409,7 @@ public final class ParticleSizeStage implements ConfigQcStage {
         setButtonsEnabled(false);
         previewWorker = new SwingWorker<ObjectsCounter3DWrapper.Result, Void>() {
             @Override protected ObjectsCounter3DWrapper.Result doInBackground() throws Exception {
-                return previewAdapter.runPreview(filteredSource, thresholdValue.intValue(), minSize, maxSize);
+                return previewAdapter.runPreview(previewSource, thresholdValue.intValue(), minSize, maxSize);
             }
 
             @Override protected void done() {
@@ -428,6 +431,7 @@ public final class ParticleSizeStage implements ConfigQcStage {
             throw new IllegalStateException("No particle-size input image is available.");
         }
         SizeToken token = collectSizeToken();
+        validateSizeToken(token, filteredSource);
         int minSize = ObjectsCounter3DWrapper.parseMinSizeVoxels(token.minText, 100);
         int maxSize = ObjectsCounter3DWrapper.parseMaxSizeVoxels(token.maxText, filteredSource);
         setPreviewState(PreviewPairPanel.PreviewState.RUNNING, "Running object preview...");
@@ -585,6 +589,16 @@ public final class ParticleSizeStage implements ConfigQcStage {
         return new SizeToken(String.valueOf(min), max);
     }
 
+    static void validateSizeToken(SizeToken token, ImagePlus source) {
+        SizeToken safe = token == null ? new SizeToken("100", "Infinity") : token;
+        int minSize = ObjectsCounter3DWrapper.parseMinSizeVoxels(safe.minText, 100);
+        int maxSize = ObjectsCounter3DWrapper.parseMaxSizeVoxels(safe.maxText, source);
+        if (isFiniteMaxToken(safe.maxText) && maxSize <= minSize) {
+            throw new IllegalArgumentException(
+                    "Maximum object size must be greater than minimum object size.");
+        }
+    }
+
     private boolean refreshSizeFilterPreview() {
         if (labelPreview == null || objectStats == null) {
             refreshSizeCutoffPanelOnly();
@@ -592,6 +606,7 @@ public final class ParticleSizeStage implements ConfigQcStage {
         }
         try {
             SizeToken token = collectSizeToken();
+            validateSizeToken(token, filteredSource);
             int minSize = ObjectsCounter3DWrapper.parseMinSizeVoxels(token.minText, 100);
             int maxSize = ObjectsCounter3DWrapper.parseMaxSizeVoxels(token.maxText, filteredSource);
             boolean maxFinite = isFiniteMaxToken(token.maxText);
@@ -616,6 +631,7 @@ public final class ParticleSizeStage implements ConfigQcStage {
         if (sizeCutoffPanel == null) return;
         try {
             SizeToken token = collectSizeToken();
+            validateSizeToken(token, filteredSource);
             int minSize = ObjectsCounter3DWrapper.parseMinSizeVoxels(token.minText, 100);
             int maxSize = ObjectsCounter3DWrapper.parseMaxSizeVoxels(token.maxText, filteredSource);
             boolean maxFinite = isFiniteMaxToken(token.maxText);

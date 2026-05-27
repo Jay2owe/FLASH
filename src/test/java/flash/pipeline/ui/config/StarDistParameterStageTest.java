@@ -116,6 +116,16 @@ public class StarDistParameterStageTest {
     }
 
     @Test
+    public void detectionThresholdsAreClampedToUnitRange() {
+        StarDistParameterStage.Parameters params = new StarDistParameterStage.Parameters(
+                1.5d, -0.2d, 5.0d, 5.0d, 1, 0.0d,
+                Double.POSITIVE_INFINITY, 0.0d, 0.0d);
+
+        assertEquals(1.0d, params.probabilityThreshold, 0.001);
+        assertEquals(0.0d, params.nmsThreshold, 0.001);
+    }
+
+    @Test
     public void textFieldEditMarksPreviewStaleWithoutRunningPreview() {
         RecordingStore store = new RecordingStore("stardist:0.5:0.4");
         RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();

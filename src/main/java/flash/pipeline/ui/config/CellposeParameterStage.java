@@ -135,7 +135,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
                           boolean dumpCellprob) {
             this.modelToken = normalizeModelKey(modelToken);
             this.secondChannelIndex = sanitizeSecondChannelForKnownModel(this.modelToken, secondChannelIndex);
-            this.diameter = sanitizeNonNegative(diameter);
+            this.diameter = sanitizePositive(diameter, BinConfig.DEFAULT_CELLPOSE_DIAMETER);
             this.flowThreshold = flowThreshold;
             this.cellprobThreshold = cellprobThreshold;
             this.useGpu = useGpu;
@@ -391,6 +391,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
         try {
             Parameters parameters = collectParameters();
             ParticleSizeStage.SizeToken size = collectSizeToken();
+            ParticleSizeStage.validateSizeToken(size, filteredSource);
             parameterStore.save(formatMethod(parameters));
             sizeStore.set(size.toToken());
             savedParameters = parameters;
@@ -1227,11 +1228,13 @@ public final class CellposeParameterStage implements ConfigQcStage {
             return;
         }
         final Parameters parameters = collectParameters();
+        final ConfigQcContext previewContext = activeContext;
+        final ImagePlus previewSource = filteredSource;
         setPreviewState(PreviewPairPanel.PreviewState.RUNNING, "Running Cellpose preview...");
         setButtonsEnabled(false);
         previewWorker = new SwingWorker<ImagePlus, Void>() {
             @Override protected ImagePlus doInBackground() throws Exception {
-                return runPreviewWithCompanion(parameters);
+                return runPreviewWithCompanion(parameters, previewContext, previewSource);
             }
 
             @Override protected void done() {
@@ -1258,20 +1261,22 @@ public final class CellposeParameterStage implements ConfigQcStage {
         Parameters parameters = collectParameters();
         setPreviewState(PreviewPairPanel.PreviewState.RUNNING, "Running Cellpose preview...");
         try {
-            installLabelPreview(runPreviewWithCompanion(parameters), parameters);
+            installLabelPreview(runPreviewWithCompanion(parameters, activeContext, filteredSource), parameters);
         } catch (SegmentationRunFailureException e) {
             setPreviewFailure(e);
         }
     }
 
-    private ImagePlus runPreviewWithCompanion(Parameters parameters) throws Exception {
+    private ImagePlus runPreviewWithCompanion(Parameters parameters,
+                                              ConfigQcContext context,
+                                              ImagePlus source) throws Exception {
         ImagePlus companion = null;
         try {
             if (parameters.secondChannelIndex >= 0) {
                 companion = previewAdapter.createFilteredCompanionSource(
-                        activeContext, parameters.secondChannelIndex);
+                        context, parameters.secondChannelIndex);
             }
-            return previewAdapter.runPreview(filteredSource, companion, parameters);
+            return previewAdapter.runPreview(source, companion, parameters);
         } finally {
             if (companion != null) previewAdapter.close(companion);
         }
@@ -1480,6 +1485,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
         }
         try {
             ParticleSizeStage.SizeToken token = collectSizeToken();
+            ParticleSizeStage.validateSizeToken(token, filteredSource);
             int minSize = ObjectsCounter3DWrapper.parseMinSizeVoxels(token.minText, 100);
             int maxSize = ObjectsCounter3DWrapper.parseMaxSizeVoxels(token.maxText, filteredSource);
             boolean maxFinite = isFiniteMaxToken(token.maxText);
@@ -1504,6 +1510,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
         if (sizeCutoffPanel == null) return;
         try {
             ParticleSizeStage.SizeToken token = collectSizeToken();
+            ParticleSizeStage.validateSizeToken(token, filteredSource);
             int minSize = ObjectsCounter3DWrapper.parseMinSizeVoxels(token.minText, 100);
             int maxSize = ObjectsCounter3DWrapper.parseMaxSizeVoxels(token.maxText, filteredSource);
             boolean maxFinite = isFiniteMaxToken(token.maxText);
@@ -2177,7 +2184,12 @@ public final class CellposeParameterStage implements ConfigQcStage {
     }
 
     private static double sanitizeNonNegative(double value) {
-        return Math.max(0, value);
+        return Double.isFinite(value) ? Math.max(0, value) : 0;
+    }
+
+    private static double sanitizePositive(double value, double fallback) {
+        if (!Double.isFinite(value) || value <= 0) return fallback;
+        return value;
     }
 
     private static String normalizeMaxText(String value) {

@@ -1273,11 +1273,12 @@ public final class FilterParameterStage implements ConfigQcStage {
         }
         syncFieldBindings();
         final String macro = currentMacro;
+        final ImagePlus previewSource = sourceImage;
         setPreviewState(PreviewPairPanel.PreviewState.RUNNING, "Running filter preview...");
         setButtonsEnabled(false);
         previewWorker = new SwingWorker<ImagePlus, Void>() {
             @Override protected ImagePlus doInBackground() throws Exception {
-                return previewAdapter.createFilteredPreview(sourceImage, macro);
+                return previewAdapter.createFilteredPreview(previewSource, macro);
             }
 
             @Override protected void done() {

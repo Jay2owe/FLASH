@@ -107,13 +107,17 @@ public final class StarDistParameterStage implements ConfigQcStage {
                           double qualityMin,
                           double intensityMin,
                           String modelKey) {
-            this.probabilityThreshold = probabilityThreshold;
-            this.nmsThreshold = nmsThreshold;
+            this.probabilityThreshold = sanitizeUnit(probabilityThreshold,
+                    BinConfig.DEFAULT_STARDIST_PROB_THRESH);
+            this.nmsThreshold = sanitizeUnit(nmsThreshold,
+                    BinConfig.DEFAULT_STARDIST_NMS_THRESH);
             this.linkingMaxDistance = sanitizeNonNegative(linkingMaxDistance);
             this.gapClosingMaxDistance = sanitizeNonNegative(gapClosingMaxDistance);
             this.maxFrameGap = sanitizeFrameGap(maxFrameGap);
             this.areaMin = sanitizeNonNegative(areaMin);
-            this.areaMax = areaMax <= 0 ? Double.POSITIVE_INFINITY : areaMax;
+            this.areaMax = !Double.isFinite(areaMax) || areaMax <= 0
+                    ? Double.POSITIVE_INFINITY
+                    : areaMax;
             this.qualityMin = sanitizeNonNegative(qualityMin);
             this.intensityMin = sanitizeNonNegative(intensityMin);
             this.modelKey = normalizeModelKey(modelKey);
@@ -1019,11 +1023,12 @@ public final class StarDistParameterStage implements ConfigQcStage {
         }
         final Parameters parameters = collectParameters();
         final Parameters runParameters = previewRunParameters(parameters);
+        final ImagePlus previewSource = filteredSource;
         setPreviewState(PreviewPairPanel.PreviewState.RUNNING, "Running StarDist preview...");
         setButtonsEnabled(false);
         previewWorker = new SwingWorker<ImagePlus, Void>() {
             @Override protected ImagePlus doInBackground() throws Exception {
-                return previewAdapter.runPreview(filteredSource, runParameters);
+                return previewAdapter.runPreview(previewSource, runParameters);
             }
 
             @Override protected void done() {
@@ -1792,7 +1797,14 @@ public final class StarDistParameterStage implements ConfigQcStage {
     }
 
     private static double sanitizeNonNegative(double value) {
-        return Math.max(0, value);
+        return Double.isFinite(value) ? Math.max(0, value) : 0;
+    }
+
+    private static double sanitizeUnit(double value, double fallback) {
+        double safe = Double.isFinite(value) ? value : fallback;
+        if (safe < 0) return 0;
+        if (safe > 1) return 1;
+        return safe;
     }
 
     private static int sanitizeFrameGap(double value) {

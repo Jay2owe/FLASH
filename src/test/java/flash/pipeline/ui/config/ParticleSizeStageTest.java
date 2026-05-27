@@ -184,6 +184,21 @@ public class ParticleSizeStageTest {
     }
 
     @Test
+    public void lockInRejectsFiniteMaxNotGreaterThanMin() {
+        RecordingStore store = new RecordingStore("1-Infinity");
+        ParticleSizeStage stage = new ParticleSizeStage(store, new RecordingPreviewAdapter());
+        ConfigQcContext context = context();
+
+        stage.buildControls(context, new RecordingActions());
+        stage.onEnter(context, new PreviewPairPanel("Original", "Adjusted"));
+        stage.setMinSizeForTest("20");
+        stage.setMaxSizeForTest("20");
+
+        assertFalse(stage.lockIn(context));
+        assertEquals("1-Infinity", store.token);
+    }
+
+    @Test
     public void restartKeepsCurrentEditedSizeAfterStageRebuild() {
         RecordingStore store = new RecordingStore("1-Infinity");
         ParticleSizeStage stage = new ParticleSizeStage(store, new RecordingPreviewAdapter());

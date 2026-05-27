@@ -250,6 +250,7 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
         }
         try {
             ParticleSizeStage.SizeToken size = collectSizeToken();
+            validateSizeToken(size);
             String threshold = currentThresholdToken();
             thresholdStore.set(threshold);
             sizeStore.set(size.toToken());
@@ -520,6 +521,7 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
         final int previewMinSize;
         final int previewMaxSize;
         final ParticleSizeStage.SizeToken token;
+        final ImagePlus previewSource = filteredSource;
         try {
             token = collectSizeToken();
             threshold = currentThresholdValue();
@@ -535,7 +537,7 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
         if (actions != null) actions.setPreviewButtonRunning(true);
         previewWorker = new SwingWorker<ObjectsCounter3DWrapper.Result, Void>() {
             @Override protected ObjectsCounter3DWrapper.Result doInBackground() throws Exception {
-                return previewAdapter.runPreview(filteredSource, threshold, previewMinSize, previewMaxSize);
+                return previewAdapter.runPreview(previewSource, threshold, previewMinSize, previewMaxSize);
             }
 
             @Override protected void done() {
@@ -570,8 +572,7 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
     }
 
     private void validateSizeToken(ParticleSizeStage.SizeToken token) {
-        ObjectsCounter3DWrapper.parseMinSizeVoxels(token.minText, 100);
-        ObjectsCounter3DWrapper.parseMaxSizeVoxels(token.maxText, filteredSource);
+        ParticleSizeStage.validateSizeToken(token, filteredSource);
     }
 
     private int minSizeVoxels(ParticleSizeStage.SizeToken token) {

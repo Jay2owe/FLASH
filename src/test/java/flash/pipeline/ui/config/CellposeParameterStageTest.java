@@ -98,6 +98,14 @@ public class CellposeParameterStageTest {
     }
 
     @Test
+    public void nonPositiveDiameterFallsBackToDefault() {
+        CellposeParameterStage.Parameters params = new CellposeParameterStage.Parameters(
+                "cellpose_cyto3", -1, 0.0d, 0.4d, 0.0d, false);
+
+        assertEquals(30.0d, params.diameter, 0.001);
+    }
+
+    @Test
     public void textFieldEditMarksPreviewStaleWithoutRunningPreview() {
         RecordingStore store = new RecordingStore("cellpose:30.0:cyto3:0.4:0.0:gpu=false");
         RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
