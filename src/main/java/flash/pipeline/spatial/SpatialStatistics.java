@@ -15,6 +15,8 @@ public final class SpatialStatistics {
 
     private SpatialStatistics() {}
 
+    private static final long DEFAULT_MONTE_CARLO_SEED = 0x5F1A5EEDL;
+
     public static final class RectangularWindow {
         public final double minX;
         public final double minY;
@@ -197,7 +199,7 @@ public final class SpatialStatistics {
                                                          RectangularWindow window,
                                                          int nPoints,
                                                          double[] radii) {
-        return monteCarloEnvelopes(nSimulations, window, nPoints, radii, System.nanoTime());
+        return monteCarloEnvelopes(nSimulations, window, nPoints, radii, DEFAULT_MONTE_CARLO_SEED);
     }
 
     public static MonteCarloEnvelope monteCarloEnvelopes(int nSimulations,

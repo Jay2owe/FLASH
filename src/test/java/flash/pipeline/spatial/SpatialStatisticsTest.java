@@ -104,6 +104,21 @@ public class SpatialStatisticsTest {
     }
 
     @Test
+    public void monteCarloEnvelopes_defaultSeedIsReproducible() {
+        SpatialStatistics.RectangularWindow window =
+                new SpatialStatistics.RectangularWindow(0.0, 0.0, 1.0, 1.0);
+        double[] radii = new double[]{0.05, 0.10, 0.15};
+
+        SpatialStatistics.MonteCarloEnvelope first =
+                SpatialStatistics.monteCarloEnvelopes(25, window, 20, radii);
+        SpatialStatistics.MonteCarloEnvelope second =
+                SpatialStatistics.monteCarloEnvelopes(25, window, 20, radii);
+
+        assertArrayEquals(first.lower, second.lower, 0.0);
+        assertArrayEquals(first.upper, second.upper, 0.0);
+    }
+
+    @Test
     public void heatmapSkipsNonFiniteCentroidsAndWeights() {
         double[][] centroids = new double[][]{
                 {2.0, 2.0},
