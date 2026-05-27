@@ -1,8 +1,8 @@
 package flash.pipeline.roi;
 
 import ij.IJ;
-import ij.gui.GenericDialog;
 import ij.plugin.frame.RoiManager;
+import flash.pipeline.ui.PipelineDialog;
 
 /**
  * Strict validator for ROI Manager contents to preserve Jamie macro indexing assumptions:
@@ -71,9 +71,9 @@ public final class RoiSetValidator {
             }
             body.append("Fix the ROI Manager ordering and try again.");
 
-            GenericDialog gd = new GenericDialog("ROI Validation Failed");
-            gd.addMessage(body.toString());
-            gd.showDialog();
+            PipelineDialog dialog = new PipelineDialog("ROI Validation Failed");
+            dialog.addMessage(body.toString().replace("\n", "<br>"));
+            dialog.showDialog();
             IJ.log("ROI Validation Failed: " + e.getMessage());
             if (partialZipPath != null && !partialZipPath.isEmpty()) {
                 IJ.log("ROI Validation Failed: partial set saved to " + partialZipPath);
