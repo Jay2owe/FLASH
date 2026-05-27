@@ -67,8 +67,17 @@ public final class RoiOps {
             ij.ImageStack newStack = new ij.ImageStack(bounds.width, bounds.height);
             for (int s = 1; s <= oldStack.getSize(); s++) {
                 ij.process.ImageProcessor ip = oldStack.getProcessor(s);
-                ip.setRoi(bounds);
-                newStack.addSlice(oldStack.getSliceLabel(s), ip.crop());
+                java.awt.Rectangle oldRoi = ip.getRoi();
+                try {
+                    ip.setRoi(bounds);
+                    newStack.addSlice(oldStack.getSliceLabel(s), ip.crop());
+                } finally {
+                    if (oldRoi != null) {
+                        ip.setRoi(oldRoi);
+                    } else {
+                        ip.resetRoi();
+                    }
+                }
             }
             imp.setStack(newStack);
             imp.setDimensions(nCh, nSl, nFr);
@@ -89,9 +98,18 @@ public final class RoiOps {
             ij.ImageStack stack = imp.getStack();
             for (int s = 1; s <= stack.getSize(); s++) {
                 ij.process.ImageProcessor ip = stack.getProcessor(s);
-                ip.setRoi(adjustedRoi);
-                ip.setColor(0);
-                ip.fillOutside(adjustedRoi);
+                java.awt.Rectangle oldRoi = ip.getRoi();
+                try {
+                    ip.setRoi(adjustedRoi);
+                    ip.setColor(0);
+                    ip.fillOutside(adjustedRoi);
+                } finally {
+                    if (oldRoi != null) {
+                        ip.setRoi(oldRoi);
+                    } else {
+                        ip.resetRoi();
+                    }
+                }
             }
             imp.deleteRoi();
         }

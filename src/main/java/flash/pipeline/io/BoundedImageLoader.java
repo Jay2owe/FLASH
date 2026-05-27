@@ -10,6 +10,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Bounded producer-consumer image loader. Loads images from a
@@ -44,6 +45,8 @@ public class BoundedImageLoader {
     private final AtomicInteger nextLoadIndex = new AtomicInteger(0);
     private final AtomicInteger producersFinished = new AtomicInteger(0);
     private final AtomicBoolean allProducersDone = new AtomicBoolean(false);
+    private final AtomicReference<RuntimeException> loadFailure =
+            new AtomicReference<RuntimeException>();
     private ExecutorService loaderPool;
     /** Optional series names from .lif metadata, indexed by series number. */
     private List<String> seriesNames;
@@ -126,10 +129,11 @@ public class BoundedImageLoader {
                         if (i >= indicesToLoad.size()) break;
 
                         int idx = indicesToLoad.get(i);
+                        String seriesLabel = "series " + (idx + 1);
                         try {
                             String loaderTag = effectiveLoaders > 1
                                     ? "Loader " + loaderNum : "Loader";
-                            String seriesLabel = (seriesNames != null && idx < seriesNames.size()
+                            seriesLabel = (seriesNames != null && idx < seriesNames.size()
                                     && seriesNames.get(idx) != null)
                                     ? seriesNames.get(idx) : "series " + (idx + 1);
                             IJ.log(loaderTag + ": loading " + seriesLabel
@@ -159,12 +163,16 @@ public class BoundedImageLoader {
                                 queue.put(new IndexedImage(idx, imp));
                             } else {
                                 IJ.log("WARNING: Series " + (idx + 1) + " returned null, skipping");
+                                recordLoadFailure("Series " + (idx + 1)
+                                        + " (" + seriesLabel + ") returned null");
                             }
                         } catch (InterruptedException e) {
                             Thread.currentThread().interrupt();
                             break;
                         } catch (Exception e) {
                             IJ.log("WARNING: Failed to load series " + (idx + 1) + ": " + e.getMessage());
+                            recordLoadFailure("Failed to load series " + (idx + 1)
+                                    + " (" + seriesLabel + ")", e);
                         }
                     }
                     if (producersFinished.incrementAndGet() >= Math.min(loaderThreads, indicesToLoad.size())) {
@@ -184,7 +192,11 @@ public class BoundedImageLoader {
         while (true) {
             IndexedImage img = queue.poll(200, TimeUnit.MILLISECONDS);
             if (img != null) return img;
-            if (allProducersDone.get() && queue.isEmpty()) return null;
+            if (allProducersDone.get() && queue.isEmpty()) {
+                RuntimeException failure = loadFailure.get();
+                if (failure != null) throw failure;
+                return null;
+            }
         }
     }
 
@@ -204,5 +216,16 @@ public class BoundedImageLoader {
             remaining.image.close();
             remaining.image.flush();
         }
+    }
+
+    private void recordLoadFailure(String message) {
+        recordLoadFailure(message, null);
+    }
+
+    private void recordLoadFailure(String message, Throwable cause) {
+        RuntimeException failure = cause == null
+                ? new IllegalStateException(message)
+                : new IllegalStateException(message, cause);
+        loadFailure.compareAndSet(null, failure);
     }
 }
