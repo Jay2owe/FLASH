@@ -81,10 +81,10 @@ public class CLIArgumentParserTest {
     @Test
     public void parse_windowsPathWithSpacesAndFlagLikeSubstring() {
         CLIConfig cfg = CLIArgumentParser.parse(
-                "dir=[C:\\Users\\jamie\\path with run_3d\\data] run_intensity");
+                "dir=[D:\\Lab Data\\path with run_3d\\data] run_intensity");
 
         assertNotNull(cfg);
-        assertEquals("C:\\Users\\jamie\\path with run_3d\\data", cfg.getDirectory());
+        assertEquals("D:\\Lab Data\\path with run_3d\\data", cfg.getDirectory());
         assertFalse(cfg.getSelectedAnalyses()[4]);
         assertTrue(cfg.getSelectedAnalyses()[7]);
     }
