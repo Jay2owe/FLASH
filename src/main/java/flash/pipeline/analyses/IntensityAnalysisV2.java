@@ -1252,7 +1252,7 @@ public class IntensityAnalysisV2 implements Analysis {
         // scnIndex is folded into roiLabel (e.g. "SCN5") -- no separate SCN column.
         String roiBase = roiSetName == null ? "" : roiSetName;
         final String roiLabel = parts == null
-                ? (scnIndex1Based > 0 && !roiBase.matches(".*\\d$") ? roiBase + scnIndex1Based : roiBase)
+                ? (scnIndex1Based > 0 && !endsWithDigit(roiBase) ? roiBase + scnIndex1Based : roiBase)
                 : parts.analysisRegionLabel(roiBase, scnIndex1Based);
 
         // Capture effectively-final references for inner class access
@@ -3115,6 +3115,12 @@ public class IntensityAnalysisV2 implements Analysis {
             if (value) return true;
         }
         return false;
+    }
+
+    private static boolean endsWithDigit(String value) {
+        return value != null
+                && !value.isEmpty()
+                && Character.isDigit(value.charAt(value.length() - 1));
     }
 
     private DeferredImageSupplier wrapInputSupplier(String directory, final DeferredImageSupplier rawSupplier) throws Exception {

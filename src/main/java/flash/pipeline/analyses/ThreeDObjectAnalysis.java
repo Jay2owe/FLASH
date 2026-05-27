@@ -98,6 +98,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Pattern;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JOptionPane;
@@ -124,6 +125,8 @@ import java.util.concurrent.locks.ReentrantLock;
  */
 public class ThreeDObjectAnalysis implements Analysis {
     private static final String FULL_IMAGE_ROI_SET_NAME = "Full image";
+    private static final Pattern MULTICOLOC_INTERACTION_COUNT_PATTERN =
+            Pattern.compile("(\\d+)\\s+(convergent|interaction)");
 
     private enum NoRoiDecision {
         DRAW_ROIS,
@@ -1784,7 +1787,7 @@ public class ThreeDObjectAnalysis implements Analysis {
                 ? ""
                 : parts.csvRegion();
         String roiLabel = parts == null
-                ? (scnIndex > 0 && !roiBase.matches(".*\\d$") ? roiBase + scnIndex : roiBase)
+                ? (scnIndex > 0 && !endsWithDigit(roiBase) ? roiBase + scnIndex : roiBase)
                 : parts.analysisRegionLabel(roiBase, scnIndex);
 
         if (!compactLog) {
@@ -3425,7 +3428,7 @@ public class ThreeDObjectAnalysis implements Analysis {
         String hemisphere = parts == null ? "" : parts.hemisphere;
         String seriesRegionLabel = parts == null ? "" : parts.csvRegion();
         String roiLabel = parts == null
-                ? (scnIndex > 0 && !roiBase.matches(".*\\d$") ? roiBase + scnIndex : roiBase)
+                ? (scnIndex > 0 && !endsWithDigit(roiBase) ? roiBase + scnIndex : roiBase)
                 : parts.analysisRegionLabel(roiBase, scnIndex);
 
         if (!compactLog) {
@@ -5118,7 +5121,7 @@ public class ThreeDObjectAnalysis implements Analysis {
         for (String line : added.split("\n")) {
             String trimmed = line.trim().toLowerCase(Locale.ROOT);
             // 3D MultiColoc typically logs "N convergent convergences found"
-            java.util.regex.Matcher m = java.util.regex.Pattern.compile("(\\d+)\\s+(convergent|interaction)").matcher(trimmed);
+            java.util.regex.Matcher m = MULTICOLOC_INTERACTION_COUNT_PATTERN.matcher(trimmed);
             if (m.find()) {
                 try {
                     return Integer.parseInt(m.group(1));
@@ -5127,6 +5130,12 @@ public class ThreeDObjectAnalysis implements Analysis {
             }
         }
         return 0;
+    }
+
+    private static boolean endsWithDigit(String value) {
+        return value != null
+                && !value.isEmpty()
+                && Character.isDigit(value.charAt(value.length() - 1));
     }
 
     private DeferredImageSupplier wrapInputSupplier(String directory, final DeferredImageSupplier rawSupplier) throws Exception {
