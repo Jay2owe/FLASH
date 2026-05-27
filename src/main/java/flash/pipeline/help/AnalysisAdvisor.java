@@ -10,7 +10,7 @@ import loci.formats.ImageReader;
 import java.io.File;
 import java.io.IOException;
 import java.util.Collections;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -27,8 +27,14 @@ import java.util.concurrent.TimeUnit;
 public final class AnalysisAdvisor {
 
     private static final long DIMENSION_SNIFF_TIMEOUT_MS = 4000L;
+    private static final int MAX_DIMENSION_CACHE_ENTRIES = 64;
     private static final Map<String, DimensionSniff> DIMENSION_CACHE =
-            Collections.synchronizedMap(new HashMap<String, DimensionSniff>());
+            Collections.synchronizedMap(new LinkedHashMap<String, DimensionSniff>(32, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<String, DimensionSniff> eldest) {
+                    return size() > MAX_DIMENSION_CACHE_ENTRIES;
+                }
+            });
 
     public AdvisorResult recommend(File directory) {
         if (directory == null || !directory.isDirectory()) {
