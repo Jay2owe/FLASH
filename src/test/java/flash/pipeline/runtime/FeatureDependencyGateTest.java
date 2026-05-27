@@ -1,6 +1,7 @@
 package flash.pipeline.runtime;
 
 import org.junit.After;
+import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -15,12 +16,23 @@ import static org.junit.Assert.assertTrue;
 
 public class FeatureDependencyGateTest {
 
+    private static String originalHeadlessProperty;
     private FakeUiHooks ui;
     private CountingOpener opener;
 
     @BeforeClass
     public static void forceHeadlessProperty() {
+        originalHeadlessProperty = System.getProperty("java.awt.headless");
         System.setProperty("java.awt.headless", "true");
+    }
+
+    @AfterClass
+    public static void restoreHeadlessProperty() {
+        if (originalHeadlessProperty == null) {
+            System.clearProperty("java.awt.headless");
+        } else {
+            System.setProperty("java.awt.headless", originalHeadlessProperty);
+        }
     }
 
     @Before

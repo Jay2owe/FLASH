@@ -5,7 +5,9 @@ import ij.ImageStack;
 import ij.process.ByteProcessor;
 import ij.process.FloatProcessor;
 import ij.process.ShortProcessor;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 
 import java.io.File;
 import java.nio.charset.StandardCharsets;
@@ -21,9 +23,12 @@ import static org.junit.Assert.assertTrue;
 
 public class SpectralOutputWriterTest {
 
+    @Rule
+    public TemporaryFolder temp = new TemporaryFolder();
+
     @Test
     public void writesExpectedBatchFilesAndRows() throws Exception {
-        File directory = Files.createTempDirectory("spectral-output-writer").toFile();
+        File directory = temp.newFolder("spectral-output-writer");
         SpectralOutputWriter.RunMetadata runMetadata = runMetadata();
         SpectralOutputWriter.ExpectedOutputs outputs =
                 SpectralOutputWriter.expectedOutputs(directory.getAbsolutePath(), 0, "Mouse1_LH_SCN", "Target/A");
@@ -140,7 +145,7 @@ public class SpectralOutputWriterTest {
 
     @Test
     public void reloadsAndRewritesRowsForSkipExistingRuns() throws Exception {
-        File directory = Files.createTempDirectory("spectral-skip-existing").toFile();
+        File directory = temp.newFolder("spectral-skip-existing");
         SpectralOutputWriter.RunMetadata runMetadata = runMetadata();
 
         List<Map<String, String>> summaryRows = new ArrayList<Map<String, String>>();
@@ -215,7 +220,7 @@ public class SpectralOutputWriterTest {
 
     @Test
     public void writesOptionalParameterMapOutputs() throws Exception {
-        File directory = Files.createTempDirectory("spectral-parameter-map").toFile();
+        File directory = temp.newFolder("spectral-parameter-map");
         SpectralOutputWriter.ExpectedOutputs outputs =
                 SpectralOutputWriter.expectedOutputs(directory.getAbsolutePath(), 0, "Mouse1_LH_SCN", "Target");
 

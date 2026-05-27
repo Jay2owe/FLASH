@@ -1,15 +1,19 @@
 package flash.pipeline.stardist;
 
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 
 import java.io.File;
-import java.nio.file.Files;
 import java.util.List;
 
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class RuntimeCheckerTest {
+
+    @Rule
+    public TemporaryFolder temp = new TemporaryFolder();
 
     @Test
     public void checkReportsConflictingStarDistJarBesideExpectedJar() throws Exception {
@@ -49,8 +53,8 @@ public class RuntimeCheckerTest {
         assertTrue(issues.isEmpty());
     }
 
-    private static File completeStarDistRuntime(String prefix) throws Exception {
-        File fijiDir = Files.createTempDirectory(prefix).toFile();
+    private File completeStarDistRuntime(String prefix) throws Exception {
+        File fijiDir = temp.newFolder(prefix);
         File jars = new File(fijiDir, "jars");
         File plugins = new File(fijiDir, "plugins");
         assertTrue(jars.mkdirs());

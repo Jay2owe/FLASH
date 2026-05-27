@@ -20,7 +20,9 @@ import ij.ImagePlus;
 import ij.process.ByteProcessor;
 import ij.process.FloatProcessor;
 
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -40,6 +42,9 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 
 public class FilterSweepStrategyTest {
+
+    @Rule
+    public TemporaryFolder temp = new TemporaryFolder();
 
     @Test
     public void publishesFilterResultsInSweepDispatchOrder() {
@@ -222,7 +227,7 @@ public class FilterSweepStrategyTest {
     }
 
     @Test
-    public void cancellationBeforePublishDoesNotPopulateDiskCache() {
+    public void cancellationBeforePublishDoesNotPopulateDiskCache() throws Exception {
         FilterParameterId sigma =
                 new FilterParameterId(0, 0, 0, "Gaussian Blur", "sigma");
         Map<ParameterKey, ParameterValueList> values =
@@ -231,9 +236,9 @@ public class FilterSweepStrategyTest {
         final ParameterSweep sweep = new ParameterSweep(ParameterSweep.Method.FILTER,
                 values, CropSpec.full(), "DAPI", "image-a", "filter:macrohash");
         FilterMacroEditorModel.MacroDefinition macro = FilterMacroEditorModel.parse(
-                "run(\"Gaussian Blur...\", \"sigma=1\");\n");
-        File bin = new File("target/filter-sweep-cancel-cache-test-"
-                + System.nanoTime());
+                "run(\"Gaussian Blur...\", \"sigma=1\");\n"
+                        + "run(\"Subtract Background...\", \"rolling=4\");\n");
+        File bin = temp.newFolder("filter-sweep-cancel-cache-test");
         VariationCache cache = new VariationCache(bin);
         FilterSweepStrategy strategy = new FilterSweepStrategy(macro,
                 new SyntheticPreviewAdapter(), sourceImage(), cache);

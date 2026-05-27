@@ -3,7 +3,9 @@ package flash.pipeline.decontamination;
 import ij.ImagePlus;
 import ij.ImageStack;
 import ij.process.ShortProcessor;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 
 import java.io.File;
 import java.nio.charset.StandardCharsets;
@@ -17,9 +19,12 @@ import static org.junit.Assert.assertTrue;
 
 public class ObjectScoreWriterTest {
 
+    @Rule
+    public TemporaryFolder temp = new TemporaryFolder();
+
     @Test
     public void locatesObjectMapsFrom3DObjectCsvAndWritesPerObjectScores() throws Exception {
-        File directory = Files.createTempDirectory("spectral-object-writer").toFile();
+        File directory = temp.newFolder("spectral-object-writer");
         flash.pipeline.io.FlashProjectLayout layout =
                 flash.pipeline.io.FlashProjectLayout.forDirectory(directory.getAbsolutePath());
         File objectsDir = layout.tablesObjectsWriteDir();
@@ -106,7 +111,7 @@ public class ObjectScoreWriterTest {
 
     @Test
     public void locatesObjectMapsFromFlashObjectLayout() throws Exception {
-        File directory = Files.createTempDirectory("spectral-object-flash-reader").toFile();
+        File directory = temp.newFolder("spectral-object-flash-reader");
         flash.pipeline.io.FlashProjectLayout layout =
                 flash.pipeline.io.FlashProjectLayout.forDirectory(directory.getAbsolutePath());
         File objectsDir = layout.tablesObjectsWriteDir();

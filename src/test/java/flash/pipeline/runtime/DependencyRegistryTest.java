@@ -1,7 +1,9 @@
 package flash.pipeline.runtime;
 
 import flash.pipeline.cellpose.CellposeRuntime;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 
 import javax.tools.JavaCompiler;
 import javax.tools.ToolProvider;
@@ -26,6 +28,9 @@ import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 public class DependencyRegistryTest {
+
+    @Rule
+    public TemporaryFolder temp = new TemporaryFolder();
 
     @Test
     public void everyDependencyIdHasExactlyOneSpec() {
@@ -176,12 +181,13 @@ public class DependencyRegistryTest {
 
     @Test
     public void epflPsfGeneratorProbeAcceptsRootImageJPluginClass() throws Exception {
-        File fijiDir = Files.createTempDirectory("psf-generator-fiji").toFile();
+        File fijiDir = temp.newFolder("psf-generator-fiji");
         File plugins = new File(fijiDir, "plugins");
         assertTrue(plugins.mkdirs());
         touch(plugins, "PSF_Generator.jar");
 
-        URLClassLoader loader = compileRootClass("PSF_Generator");
+        URLClassLoader loader = compileRootClass("PSF_Generator",
+                temp.newFolder("psf-generator-class"));
         try {
             DependencyRegistry.ProbeContext context = newProbeContext(loader, fijiDir);
             DependencyStatus status = DependencyRegistry.get(DependencyId.EPFL_PSF_GENERATOR_RUNTIME).probe(context);
@@ -194,7 +200,7 @@ public class DependencyRegistryTest {
 
     @Test
     public void repairSchedulesLockedConflictingJarAndCurrentSessionIgnoresIt() throws Exception {
-        File fijiDir = Files.createTempDirectory("locked-pinned-jar").toFile();
+        File fijiDir = temp.newFolder("locked-pinned-jar");
         File jars = new File(fijiDir, "jars");
         assertTrue(jars.mkdirs());
         touch(jars, "demo-1.0.jar");
@@ -235,7 +241,7 @@ public class DependencyRegistryTest {
 
     @Test
     public void checkReportsWrongVersionJarFromAlternateFijiFolder() throws Exception {
-        File fijiDir = Files.createTempDirectory("alternate-folder-pinned-jar").toFile();
+        File fijiDir = temp.newFolder("alternate-folder-pinned-jar");
         File jars = new File(fijiDir, "jars");
         File plugins = new File(fijiDir, "plugins");
         assertTrue(jars.mkdirs());
@@ -261,7 +267,8 @@ public class DependencyRegistryTest {
 
     @Test
     public void deferredDisableScriptEscapesSourcePathBeforeColon() throws Exception {
-        File script = File.createTempFile("flash-runtime-disable-test-", ".ps1");
+        File script = File.createTempFile("flash-runtime-disable-test-", ".ps1",
+                temp.getRoot());
         Method method = DependencyRegistry.class.getDeclaredMethod("writeDeferredDisableScript", File.class);
         method.setAccessible(true);
 
@@ -274,7 +281,7 @@ public class DependencyRegistryTest {
 
     @Test
     public void failedDisableMessageDoesNotAskWhetherFijiIsRunning() throws Exception {
-        File fijiDir = Files.createTempDirectory("failed-disable-message").toFile();
+        File fijiDir = temp.newFolder("failed-disable-message");
         File jars = new File(fijiDir, "jars");
         assertTrue(jars.mkdirs());
         touch(jars, "demo-1.0.jar");
@@ -364,11 +371,10 @@ public class DependencyRegistryTest {
         return file;
     }
 
-    private static URLClassLoader compileRootClass(String simpleName) throws Exception {
+    private static URLClassLoader compileRootClass(String simpleName, File root) throws Exception {
         JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
         assertTrue("Tests require a JDK compiler", compiler != null);
 
-        File root = Files.createTempDirectory(simpleName.toLowerCase()).toFile();
         File sourceFile = new File(root, simpleName + ".java");
         String source = "public class " + simpleName + " {}\n";
         Files.write(sourceFile.toPath(), source.getBytes(StandardCharsets.UTF_8));

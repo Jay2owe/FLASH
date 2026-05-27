@@ -1,9 +1,10 @@
 package flash.pipeline.runtime;
 
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 
 import java.io.File;
-import java.nio.file.Files;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
@@ -12,9 +13,12 @@ import static org.junit.Assert.assertTrue;
 
 public class ExcelRuntimeCheckerTest {
 
+    @Rule
+    public TemporaryFolder temp = new TemporaryFolder();
+
     @Test
     public void checkReportsMissingCoreExcelJars() throws Exception {
-        File fijiDir = Files.createTempDirectory("excel-runtime-missing").toFile();
+        File fijiDir = temp.newFolder("excel-runtime-missing");
         new File(fijiDir, "jars").mkdirs();
         new File(fijiDir, "plugins").mkdirs();
 
@@ -27,7 +31,7 @@ public class ExcelRuntimeCheckerTest {
 
     @Test
     public void checkAcceptsCompatibleExistingOptionalSupportJars() throws Exception {
-        File fijiDir = Files.createTempDirectory("excel-runtime-compatible").toFile();
+        File fijiDir = temp.newFolder("excel-runtime-compatible");
         File jars = new File(fijiDir, "jars");
         jars.mkdirs();
         new File(fijiDir, "plugins").mkdirs();
@@ -49,7 +53,7 @@ public class ExcelRuntimeCheckerTest {
 
     @Test
     public void checkReportsWrongCorePoiVersion() throws Exception {
-        File fijiDir = Files.createTempDirectory("excel-runtime-wrong-version").toFile();
+        File fijiDir = temp.newFolder("excel-runtime-wrong-version");
         File jars = new File(fijiDir, "jars");
         jars.mkdirs();
         new File(fijiDir, "plugins").mkdirs();

@@ -2,9 +2,11 @@ package flash.pipeline.cellpose;
 
 import flash.pipeline.segmentation.catalog.ModelCatalogIO;
 import flash.pipeline.segmentation.catalog.ModelEntry;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 
-import java.nio.file.Files;
+import java.io.File;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Collections;
@@ -16,9 +18,13 @@ import static org.junit.Assert.assertTrue;
 
 public class CellposeRegisteredModelsTest {
 
+    @Rule
+    public TemporaryFolder temp = new TemporaryFolder();
+
     @Test
     public void parsesListModelsResponseIntoCatalogEntries() throws Exception {
-        Path customPath = Files.createTempFile("microglia_cp", ".pth");
+        Path customPath = File.createTempFile("microglia_cp", ".pth",
+                temp.getRoot()).toPath();
         String json = "{\"id\":\"x\",\"models\":["
                 + "{\"name\":\"cyto3\",\"builtin\":true},"
                 + "{\"name\":\"microglia_cp\",\"builtin\":false,\"path\":\""
