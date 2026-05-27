@@ -244,16 +244,16 @@ public class QualityReport {
                                            ImagePlus original, ImagePlus mask, String lutColor) {
         if (!enabled) return;
         if (!reserveChannelQcRecord(imageName, channelName)) return;
-        if (original == null) {
+        if (!hasReadablePixels(original)) {
             addChannelQcRecord(imageName, new ChannelQC(channelName, lutColor, null, null, null));
             return;
         }
 
         try {
             // Take the middle Z-slice; use the smaller stack if dimensions differ
-            int origSlices = original.getNSlices();
-            int maskSlices = mask == null ? origSlices : mask.getNSlices();
-            int midSlice = Math.max(1, Math.min(origSlices, maskSlices) / 2);
+            int origSlices = Math.max(1, original.getStackSize());
+            int maskSlices = hasReadablePixels(mask) ? Math.max(1, mask.getStackSize()) : origSlices;
+            int midSlice = Math.max(1, (Math.min(origSlices, maskSlices) + 1) / 2);
 
             // Get original slice as BufferedImage with LUT color
             ImageProcessor origIp = original.getStack().getProcessor(Math.min(midSlice, origSlices)).duplicate();
@@ -261,7 +261,7 @@ public class QualityReport {
 
             BufferedImage maskBi = null;
             BufferedImage overlay = null;
-            if (mask != null) {
+            if (hasReadablePixels(mask)) {
                 // Get mask slice as BufferedImage (binary -> white)
                 ImageProcessor maskIp = mask.getStack().getProcessor(Math.min(midSlice, maskSlices)).duplicate();
                 maskBi = maskIp.getBufferedImage();
@@ -311,15 +311,23 @@ public class QualityReport {
             IJ.log("  QC Report: failed to capture " + channelName + " for " + imageName + ": " + e.getMessage());
             // Fallback: still add the channel with whatever we managed to capture
             try {
-                int fallbackSlice = Math.max(1, original.getNSlices() / 2);
+                int fallbackSlice = Math.max(1, (Math.max(1, original.getStackSize()) + 1) / 2);
                 ImageProcessor fbIp = original.getStack().getProcessor(fallbackSlice).duplicate();
                 String origB64Only = toBase64Jpeg(applyLutColor(fbIp, lutColor), 0.7f);
                 ChannelQC fallbackQc = new ChannelQC(channelName, lutColor, origB64Only, null, null);
                 addChannelQcRecord(imageName, fallbackQc);
             } catch (Exception ignored) {
-                // nothing more we can do
+                addChannelQcRecord(imageName, new ChannelQC(channelName, lutColor, null, null, null));
             }
         }
+    }
+
+    private static boolean hasReadablePixels(ImagePlus image) {
+        return image != null
+                && image.getWidth() > 0
+                && image.getHeight() > 0
+                && image.getStack() != null
+                && image.getStack().getSize() > 0;
     }
 
     private boolean reserveChannelQcRecord(String imageName, String channelName) {
@@ -374,16 +382,18 @@ public class QualityReport {
 
     // ── Accessors for HtmlReportWriter ──
 
-    public String getProjectDir() { return projectDir; }
+    public synchronized String getProjectDir() { return projectDir; }
     public long getStartTime() { return startTime; }
-    public boolean isHeadless() { return headless; }
-    public boolean isParallel() { return parallel; }
-    public int getThreadCount() { return threadCount; }
-    public boolean isAggressiveMemory() { return aggressiveMemory; }
-    public boolean isVerboseLogging() { return verboseLogging; }
-    public String getOverwriteBehavior() { return overwriteBehavior; }
-    public List<AnalysisSection> getSections() { return sections; }
-    public Map<String, List<ChannelQC>> getImageQcData() {
+    public synchronized boolean isHeadless() { return headless; }
+    public synchronized boolean isParallel() { return parallel; }
+    public synchronized int getThreadCount() { return threadCount; }
+    public synchronized boolean isAggressiveMemory() { return aggressiveMemory; }
+    public synchronized boolean isVerboseLogging() { return verboseLogging; }
+    public synchronized String getOverwriteBehavior() { return overwriteBehavior; }
+    public synchronized List<AnalysisSection> getSections() {
+        return new ArrayList<AnalysisSection>(sections);
+    }
+    public synchronized Map<String, List<ChannelQC>> getImageQcData() {
         List<Map.Entry<String, List<ChannelQC>>> entries =
                 new ArrayList<Map.Entry<String, List<ChannelQC>>>(imageQcData.entrySet());
         Collections.sort(entries, new Comparator<Map.Entry<String, List<ChannelQC>>>() {
@@ -403,7 +413,7 @@ public class QualityReport {
                     return String.CASE_INSENSITIVE_ORDER.compare(safeOrderKey(a.channelName), safeOrderKey(b.channelName));
                 }
             });
-            ordered.put(entry.getKey(), channels);
+            ordered.put(entry.getKey(), Collections.unmodifiableList(channels));
         }
         return ordered;
     }
@@ -411,8 +421,10 @@ public class QualityReport {
     private static String safeOrderKey(String value) {
         return value == null ? "" : value;
     }
-    public int getSkippedChannelQcRecords() { return skippedChannelQcRecords; }
-    public List<SpectralPreviewQC> getSpectralPreviewData() { return spectralPreviewData; }
+    public synchronized int getSkippedChannelQcRecords() { return skippedChannelQcRecords; }
+    public synchronized List<SpectralPreviewQC> getSpectralPreviewData() {
+        return new ArrayList<SpectralPreviewQC>(spectralPreviewData);
+    }
 
     // ── Helper classes ──
 
@@ -423,7 +435,9 @@ public class QualityReport {
 
         AnalysisSection(String name, Map<String, String> params, long timestamp) {
             this.name = name;
-            this.params = params;
+            this.params = params == null
+                    ? Collections.<String, String>emptyMap()
+                    : Collections.unmodifiableMap(new LinkedHashMap<String, String>(params));
             this.timestamp = timestamp;
         }
     }

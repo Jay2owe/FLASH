@@ -179,6 +179,41 @@ public class QualityReportTest {
     }
 
     @Test
+    public void addChannelQC_recordsPlaceholderWhenImageHasNoPixels() {
+        QualityReport report = new QualityReport();
+        report.setEnabled(true);
+
+        report.addChannelQC("Image1", "DAPI", new ImagePlus(), null, "Blue");
+
+        QualityReport.ChannelQC qc = report.getImageQcData().get("Image1").get(0);
+        assertEquals("DAPI", qc.channelName);
+        assertNull(qc.originalB64);
+        assertNull(qc.maskB64);
+        assertNull(qc.overlayB64);
+    }
+
+    @Test
+    public void accessorsReturnSnapshotsNotLiveCollections() {
+        QualityReport report = new QualityReport();
+        report.setEnabled(true);
+        report.setDirectory(tmp.getRoot().getAbsolutePath());
+
+        Map<String, String> params = new LinkedHashMap<String, String>();
+        params.put("key", "value");
+        report.addSection("Analysis", params);
+        params.put("key", "changed");
+
+        assertEquals("value", report.getSections().get(0).params.get("key"));
+
+        report.getSections().clear();
+        assertEquals(1, report.getSections().size());
+
+        report.addChannelQC("Image1", "DAPI", tinyImage(), null, "Blue");
+        report.getImageQcData().clear();
+        assertEquals(1, report.getImageQcData().size());
+    }
+
+    @Test
     public void addChannelQC_capsStoredImages() {
         String previous = System.getProperty(QualityReport.MAX_CHANNEL_QC_PROPERTY);
         System.setProperty(QualityReport.MAX_CHANNEL_QC_PROPERTY, "2");

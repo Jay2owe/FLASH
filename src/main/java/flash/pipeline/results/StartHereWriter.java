@@ -8,7 +8,11 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 
 /**
  * Writes the small landing page for the user-facing results folder.
@@ -26,13 +30,39 @@ public final class StartHereWriter {
         if (parent != null) {
             IoUtils.mustMkdirs(parent);
         }
-        Writer writer = new OutputStreamWriter(new FileOutputStream(out), StandardCharsets.UTF_8);
+        File temp = File.createTempFile(tempPrefix(out), ".tmp",
+                parent == null ? new File(".") : parent);
+        boolean moved = false;
         try {
-            writer.write(render(layout));
+            Writer writer = new OutputStreamWriter(new FileOutputStream(temp), StandardCharsets.UTF_8);
+            try {
+                writer.write(render(layout));
+            } finally {
+                writer.close();
+            }
+            moveAtomically(temp.toPath(), out.toPath());
+            moved = true;
         } finally {
-            writer.close();
+            if (!moved) {
+                Files.deleteIfExists(temp.toPath());
+            }
         }
         return out;
+    }
+
+    private static void moveAtomically(Path source, Path target) throws IOException {
+        try {
+            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.ATOMIC_MOVE);
+        } catch (AtomicMoveNotSupportedException e) {
+            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+
+    private static String tempPrefix(File target) {
+        String name = target == null ? "start-here" : target.getName();
+        String clean = name.replaceAll("[^A-Za-z0-9._-]", "_");
+        return clean.length() < 3 ? "tmp" + clean : clean;
     }
 
     static String render(FlashProjectLayout layout) {
