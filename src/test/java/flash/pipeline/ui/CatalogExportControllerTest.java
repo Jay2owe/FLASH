@@ -20,6 +20,7 @@ import java.util.zip.ZipOutputStream;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 public class CatalogExportControllerTest {
     @Rule
@@ -78,6 +79,50 @@ public class CatalogExportControllerTest {
         assertEquals(1, summary.conflictCount);
         assertEquals("Project wins", ModelCatalogIO.read(destRoot)
                 .get(added.modelKey).get().name);
+    }
+
+    @Test
+    public void importRejectsCatalogZipThatExpandsPastLimit() throws Exception {
+        Path sourceRoot = temp.newFolder("zip-bomb-source").toPath();
+        Path zip = temp.newFolder("zip-bomb-export").toPath().resolve("catalog.zip");
+        try (ZipOutputStream out = new ZipOutputStream(Files.newOutputStream(zip))) {
+            out.putNextEntry(new ZipEntry(ModelCatalogIO.CATALOG_FILENAME));
+            out.write("{\"version\":1,\"models\":[]}".getBytes(StandardCharsets.UTF_8));
+            out.closeEntry();
+            out.putNextEntry(new ZipEntry("files/model/payload.bin"));
+            out.write("0123456789abcdef".getBytes(StandardCharsets.UTF_8));
+            out.closeEntry();
+        }
+
+        try {
+            new CatalogExportController(sourceRoot, 1024L * 1024L, 32L, 100)
+                    .importCatalog(zip, CatalogExportController.ConflictPolicy.KEEP_PROJECT);
+            fail("Expected oversized expanded catalog zip to fail.");
+        } catch (java.io.IOException e) {
+            assertTrue(e.getMessage().contains("expands too large"));
+        }
+    }
+
+    @Test
+    public void importRejectsCatalogZipWithTooManyEntries() throws Exception {
+        Path sourceRoot = temp.newFolder("entry-limit-source").toPath();
+        Path zip = temp.newFolder("entry-limit-export").toPath().resolve("catalog.zip");
+        try (ZipOutputStream out = new ZipOutputStream(Files.newOutputStream(zip))) {
+            out.putNextEntry(new ZipEntry(ModelCatalogIO.CATALOG_FILENAME));
+            out.write("{\"version\":1,\"models\":[]}".getBytes(StandardCharsets.UTF_8));
+            out.closeEntry();
+            out.putNextEntry(new ZipEntry("files/model/one.bin"));
+            out.write("1".getBytes(StandardCharsets.UTF_8));
+            out.closeEntry();
+        }
+
+        try {
+            new CatalogExportController(sourceRoot, 1024L * 1024L, 1024L, 1)
+                    .importCatalog(zip, CatalogExportController.ConflictPolicy.KEEP_PROJECT);
+            fail("Expected too many catalog zip entries to fail.");
+        } catch (java.io.IOException e) {
+            assertTrue(e.getMessage().contains("too many entries"));
+        }
     }
 
     private static Path validZip(Path path) throws Exception {

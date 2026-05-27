@@ -25,18 +25,34 @@ import java.util.zip.ZipOutputStream;
  * Non-Swing import/export controller for project segmentation model catalogs.
  */
 public final class CatalogExportController {
+    public static final long MAX_CATALOG_ZIP_BYTES = 512L * 1024L * 1024L;
+    public static final long MAX_CATALOG_EXPANDED_BYTES = 2L * 1024L * 1024L * 1024L;
+    public static final int MAX_CATALOG_ZIP_ENTRIES = 20000;
+
     public enum ConflictPolicy {
         KEEP_PROJECT,
         REPLACE_WITH_IMPORTED
     }
 
     private final Path projectRoot;
+    private final long maxZipBytes;
+    private final long maxExpandedBytes;
+    private final int maxEntries;
 
     public CatalogExportController(Path projectRoot) {
+        this(projectRoot, MAX_CATALOG_ZIP_BYTES, MAX_CATALOG_EXPANDED_BYTES,
+                MAX_CATALOG_ZIP_ENTRIES);
+    }
+
+    CatalogExportController(Path projectRoot, long maxZipBytes,
+                            long maxExpandedBytes, int maxEntries) {
         if (projectRoot == null) {
             throw new IllegalArgumentException("Project root must not be null.");
         }
         this.projectRoot = projectRoot.toAbsolutePath().normalize();
+        this.maxZipBytes = Math.max(1L, maxZipBytes);
+        this.maxExpandedBytes = Math.max(1L, maxExpandedBytes);
+        this.maxEntries = Math.max(1, maxEntries);
     }
 
     public void exportCatalog(Path destinationZip) throws IOException {
@@ -77,11 +93,17 @@ public final class CatalogExportController {
         if (sourceZip == null || !Files.isRegularFile(sourceZip)) {
             throw new IOException("Catalog zip does not exist: " + sourceZip);
         }
+        long zipBytes = Files.size(sourceZip);
+        if (zipBytes > maxZipBytes) {
+            throw new IOException("Catalog zip is too large: " + zipBytes
+                    + " bytes (max " + maxZipBytes + ").");
+        }
         ConflictPolicy policy = conflictPolicy == null
                 ? ConflictPolicy.KEEP_PROJECT : conflictPolicy;
         Path tempRoot = Files.createTempDirectory("flash_catalog_import_");
         try {
-            unzipSafely(sourceZip.toAbsolutePath().normalize(), tempRoot);
+            unzipSafely(sourceZip.toAbsolutePath().normalize(), tempRoot,
+                    maxExpandedBytes, maxEntries);
             Path importedCatalogFile = findCatalogJson(tempRoot);
             Path importedCatalogDir = importedCatalogFile.getParent();
             List<ModelEntry> importedEntries =
@@ -164,12 +186,21 @@ public final class CatalogExportController {
         return out;
     }
 
-    private static void unzipSafely(Path zip, Path targetDir) throws IOException {
+    private static void unzipSafely(Path zip, Path targetDir,
+                                    long maxExpandedBytes,
+                                    int maxEntries) throws IOException {
         Path root = targetDir.toAbsolutePath().normalize();
+        long expandedBytes = 0L;
+        int entriesSeen = 0;
         try (ZipInputStream in = new ZipInputStream(Files.newInputStream(zip))) {
             ZipEntry entry;
             byte[] buffer = new byte[8192];
             while ((entry = in.getNextEntry()) != null) {
+                entriesSeen++;
+                if (entriesSeen > maxEntries) {
+                    throw new IOException("Catalog zip has too many entries: "
+                            + entriesSeen + " (max " + maxEntries + ").");
+                }
                 String name = entry.getName() == null ? "" : entry.getName().replace('\\', '/');
                 while (name.startsWith("/")) {
                     name = name.substring(1);
@@ -192,6 +223,12 @@ public final class CatalogExportController {
                 try (OutputStream output = Files.newOutputStream(out)) {
                     int read;
                     while ((read = in.read(buffer)) >= 0) {
+                        expandedBytes += read;
+                        if (expandedBytes > maxExpandedBytes) {
+                            throw new IOException("Catalog zip expands too large: "
+                                    + expandedBytes + " bytes (max "
+                                    + maxExpandedBytes + ").");
+                        }
                         output.write(buffer, 0, read);
                     }
                 }
