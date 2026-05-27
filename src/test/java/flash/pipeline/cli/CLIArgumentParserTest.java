@@ -52,6 +52,16 @@ public class CLIArgumentParserTest {
         assertFalse(CLIArgumentParser.hasCliOptions("excel.metric_dir=[/tmp/results]"));
     }
 
+    @Test
+    public void hasCliOptions_ignoresDirInsideBracketedValue() {
+        assertFalse(CLIArgumentParser.hasCliOptions("note=[dry run dir=[/tmp/data]]"));
+    }
+
+    @Test
+    public void hasCliOptions_ignoresDirInsideQuotedValue() {
+        assertFalse(CLIArgumentParser.hasCliOptions("note=\"dry run dir=[/tmp/data]\""));
+    }
+
     // ── parse: directory ──
 
     @Test
@@ -66,6 +76,17 @@ public class CLIArgumentParserTest {
         CLIConfig cfg = CLIArgumentParser.parse("dir=[C:/path with spaces/data]");
         assertNotNull(cfg);
         assertEquals("C:/path with spaces/data", cfg.getDirectory());
+    }
+
+    @Test
+    public void parse_windowsPathWithSpacesAndFlagLikeSubstring() {
+        CLIConfig cfg = CLIArgumentParser.parse(
+                "dir=[C:\\Users\\jamie\\path with run_3d\\data] run_intensity");
+
+        assertNotNull(cfg);
+        assertEquals("C:\\Users\\jamie\\path with run_3d\\data", cfg.getDirectory());
+        assertFalse(cfg.getSelectedAnalyses()[4]);
+        assertTrue(cfg.getSelectedAnalyses()[7]);
     }
 
     @Test
@@ -356,6 +377,18 @@ public class CLIArgumentParserTest {
         // 'dir' must NOT match the 'dir' inside 'metric_dir='.
         assertEquals("/data", CLIArgumentParser.getValue(
                 "excel.metric_dir=raw_values dir=[/data]", "dir"));
+    }
+
+    @Test
+    public void getValue_skipsKeyInsideEarlierBracketedValue() {
+        assertEquals("/data", CLIArgumentParser.getValue(
+                "note=[dry run dir=[/wrong/path]] dir=[/data]", "dir"));
+    }
+
+    @Test
+    public void getValue_skipsKeyInsideEarlierQuotedValue() {
+        assertEquals("/data", CLIArgumentParser.getValue(
+                "note=\"dry run dir=[/wrong/path]\" dir=[/data]", "dir"));
     }
 
     @Test

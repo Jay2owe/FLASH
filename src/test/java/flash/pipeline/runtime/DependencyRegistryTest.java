@@ -1,5 +1,6 @@
 package flash.pipeline.runtime;
 
+import flash.pipeline.cellpose.CellposeRuntime;
 import org.junit.Test;
 
 import javax.tools.JavaCompiler;
@@ -75,6 +76,19 @@ public class DependencyRegistryTest {
         assertTrue(status.isError());
         assertTrue(status.getDetailMessage().contains("Throwing dependency"));
         assertTrue(status.getDetailMessage().contains("boom"));
+    }
+
+    @Test
+    public void cellposeProbeDoesNotReportPresentBeforeAsyncProbeCompletes() {
+        CellposeRuntime.invalidateCache();
+
+        DependencyStatus status = DependencyRegistry.snapshotStatuses(Collections.singletonList(
+                DependencyRegistry.get(DependencyId.CELLPOSE_RUNTIME)))
+                .get(DependencyId.CELLPOSE_RUNTIME);
+
+        assertTrue(status.getDetailMessage(), status.isMissing());
+        assertTrue(status.getDetailMessage().contains("still running"));
+        CellposeRuntime.invalidateCache();
     }
 
     @Test

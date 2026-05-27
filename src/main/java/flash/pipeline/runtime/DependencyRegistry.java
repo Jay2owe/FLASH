@@ -1175,7 +1175,8 @@ public final class DependencyRegistry {
                 Status status = CellposeRuntime.cachedStatus();
                 if (status.unknown) {
                     CellposeRuntime.probeAsync();
-                    return DependencyStatus.present("Cellpose runtime check is still running.");
+                    return DependencyStatus.missing("Cellpose runtime check is still running. "
+                            + "Retry verification before launching Cellpose segmentation.");
                 }
                 CellposeRuntime.probeAsync();
                 if (status.ready) {

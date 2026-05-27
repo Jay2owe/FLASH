@@ -1168,18 +1168,8 @@ public final class CLIArgumentParser {
         if (options == null || options.isEmpty() || key == null || key.isEmpty()) {
             return null;
         }
-        String lower = options.toLowerCase(Locale.ROOT);
-        String keyEq = key.toLowerCase(Locale.ROOT) + "=";
-        int from = 0;
-        while (true) {
-            int i = lower.indexOf(keyEq, from);
-            if (i < 0) return null;
-            if (i > 0 && !Character.isWhitespace(options.charAt(i - 1))) {
-                from = i + 1;
-                continue;
-            }
-            return parseValueAfter(options, i + keyEq.length());
-        }
+        int i = findTopLevelKey(options, key);
+        return i < 0 ? null : parseValueAfter(options, i + key.length() + 1);
     }
 
     private static String parseValueAfter(String options, int start) {
@@ -1260,17 +1250,45 @@ public final class CLIArgumentParser {
         if (options == null || options.isEmpty() || key == null || key.isEmpty()) {
             return -1;
         }
-        String lower = options.toLowerCase(Locale.ROOT);
-        String keyEq = key.toLowerCase(Locale.ROOT) + "=";
-        int from = 0;
-        while (true) {
-            int i = lower.indexOf(keyEq, from);
-            if (i < 0) return -1;
-            if (i == 0 || Character.isWhitespace(options.charAt(i - 1))) {
-                return i + keyEq.length();
+        int i = findTopLevelKey(options, key);
+        return i < 0 ? -1 : i + key.length() + 1;
+    }
+
+    private static int findTopLevelKey(String options, String key) {
+        String keyEq = key + "=";
+        int bracketDepth = 0;
+        char quote = 0;
+        for (int i = 0; i <= options.length() - keyEq.length(); i++) {
+            char ch = options.charAt(i);
+            if (ch == '\\' && i + 1 < options.length()) {
+                i++;
+                continue;
             }
-            from = i + 1;
+            if (quote != 0) {
+                if (ch == quote) {
+                    quote = 0;
+                }
+                continue;
+            }
+            if ((ch == '"' || ch == '\'') && bracketDepth == 0) {
+                quote = ch;
+                continue;
+            }
+            if (ch == '[') {
+                bracketDepth++;
+                continue;
+            }
+            if (ch == ']' && bracketDepth > 0) {
+                bracketDepth--;
+                continue;
+            }
+            if (bracketDepth == 0
+                    && (i == 0 || Character.isWhitespace(options.charAt(i - 1)))
+                    && options.regionMatches(true, i, keyEq, 0, keyEq.length())) {
+                return i;
+            }
         }
+        return -1;
     }
 
     private static boolean hasClosingBracket(String options, int start) {
