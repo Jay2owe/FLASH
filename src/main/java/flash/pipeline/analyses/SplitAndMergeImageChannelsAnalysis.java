@@ -2152,7 +2152,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
             IoUtils.mustMkdirs(outDir);
             try (Writer w = new OutputStreamWriter(new FileOutputStream(detailsFile), StandardCharsets.UTF_8)) {
             w.write("Image: " + imageTitle + "\n");
-            w.write("Processed: " + new SimpleDateFormat("yyyy-MM-dd HH:mm").format(new Date()) + "\n");
+            w.write("Processed: " + new SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.ROOT).format(new Date()) + "\n");
             w.write("Hemisphere: " + (parts.hemisphere.isEmpty() ? "N/A" : parts.hemisphere) + "\n");
             w.write("Region: " + (parts.region.isEmpty() ? "N/A" : parts.region) + "\n");
             w.write("\n");

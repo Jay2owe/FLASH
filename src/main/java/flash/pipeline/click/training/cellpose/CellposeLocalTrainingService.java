@@ -168,6 +168,8 @@ public final class CellposeLocalTrainingService {
         } finally {
             stream.close();
         }
+        Collections.sort(images);
+        Collections.sort(masks);
         if (images.isEmpty()) {
             throw new IOException("Cellpose training dataset has no image TIFFs: " + dir);
         }

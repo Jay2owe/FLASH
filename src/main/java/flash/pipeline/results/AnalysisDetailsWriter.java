@@ -7,6 +7,7 @@ import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.Locale;
 
 /**
  * Java implementation of macro saveAnalysisDetails().
@@ -30,7 +31,7 @@ public final class AnalysisDetailsWriter {
         File analysisDir = new File(rootDirectory, "Analysis Details");
         flash.pipeline.io.IoUtils.mustMkdirs(analysisDir);
 
-        String date = new SimpleDateFormat("d-M-yyyy").format(new Date());
+        String date = new SimpleDateFormat("d-M-yyyy", Locale.ROOT).format(new Date());
         File saveDir = new File(analysisDir, nameOfAnalysis + " (" + date + ")");
         flash.pipeline.io.IoUtils.mustMkdirs(saveDir);
 

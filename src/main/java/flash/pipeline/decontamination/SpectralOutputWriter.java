@@ -326,7 +326,7 @@ public final class SpectralOutputWriter {
                 writer.write("Spectral Decontamination - Analysis Details\n");
                 writer.write("=========================================\n\n");
                 writer.write("Timestamp: "
-                        + new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date()) + "\n");
+                        + new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.ROOT).format(new Date()) + "\n");
                 writer.write("Goal: " + clean(details.goalLabel) + "\n");
                 writer.write("Config Version: " + details.configVersion + "\n");
                 writer.write("Config ID: " + clean(details.configId) + "\n");

@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -35,8 +36,8 @@ public class HtmlReportWriter {
         html.append("<div class=\"header\">\n");
         html.append("<h1>FLASH - Quality Control Report</h1>\n");
         html.append("<p class=\"meta\">Project: <code>").append(esc(report.getProjectDir())).append("</code></p>\n");
-        html.append("<p class=\"meta\">Generated: ").append(new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date())).append("</p>\n");
-        html.append("<p class=\"meta\">Analysis started: ").append(new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date(report.getStartTime()))).append("</p>\n");
+        html.append("<p class=\"meta\">Generated: ").append(new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.ROOT).format(new Date())).append("</p>\n");
+        html.append("<p class=\"meta\">Analysis started: ").append(new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.ROOT).format(new Date(report.getStartTime()))).append("</p>\n");
         html.append("</div>\n\n");
 
         // Global Settings
@@ -50,7 +51,7 @@ public class HtmlReportWriter {
         html.append("</tbody>\n</table>\n</details>\n\n");
 
         // Per-analysis sections
-        SimpleDateFormat timeFmt = new SimpleDateFormat("HH:mm:ss");
+        SimpleDateFormat timeFmt = new SimpleDateFormat("HH:mm:ss", Locale.ROOT);
         boolean has3DQcData = !report.getImageQcData().isEmpty();
         boolean hasSpectralPreviewData = !report.getSpectralPreviewData().isEmpty();
 

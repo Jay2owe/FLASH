@@ -14,10 +14,10 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Deque;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -153,13 +153,15 @@ public final class StarDistLocalTrainingService {
         if (rawNames.isEmpty()) {
             throw new IOException("StarDist training dataset has no raw TIFFs: " + rawDir);
         }
-        Set<String> missingLabels = new HashSet<String>(rawNames);
+        Set<String> missingLabels = new TreeSet<String>(String.CASE_INSENSITIVE_ORDER);
+        missingLabels.addAll(rawNames);
         missingLabels.removeAll(labelNames);
         if (!missingLabels.isEmpty()) {
             throw new IOException("StarDist training dataset is missing label TIFFs in "
                     + labelsDir + ": " + missingLabels);
         }
-        Set<String> extraLabels = new HashSet<String>(labelNames);
+        Set<String> extraLabels = new TreeSet<String>(String.CASE_INSENSITIVE_ORDER);
+        extraLabels.addAll(labelNames);
         extraLabels.removeAll(rawNames);
         if (!extraLabels.isEmpty()) {
             throw new IOException("StarDist training dataset has label TIFFs without raw pairs in "
@@ -168,7 +170,7 @@ public final class StarDistLocalTrainingService {
     }
 
     private static Set<String> tiffNames(Path dir) throws IOException {
-        Set<String> out = new HashSet<String>();
+        Set<String> out = new TreeSet<String>(String.CASE_INSENSITIVE_ORDER);
         java.util.stream.Stream<Path> stream = Files.list(dir);
         try {
             java.util.Iterator<Path> iterator = stream.iterator();

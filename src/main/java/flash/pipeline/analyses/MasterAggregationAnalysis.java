@@ -584,7 +584,7 @@ public class MasterAggregationAnalysis implements Analysis {
      * Returns mean volume (mm³) per animal name.
      */
     private Map<String, Double> loadRoiVolumeMm3Mean(String directory, File selectedRoiFile) {
-        Map<String, Double> result = new HashMap<String, Double>();
+        Map<String, Double> result = new LinkedHashMap<String, Double>();
         if (selectedRoiFile == null) return result;
         File attribDir = selectedRoiFile.getParentFile();
         if (!attribDir.isDirectory()) {
@@ -958,7 +958,7 @@ public class MasterAggregationAnalysis implements Analysis {
      * Counts unique section identifiers per animal from ROI Properties or Objects CSVs.
      */
     private Map<String, Integer> loadNumSections(String directory, File selectedRoiFile) {
-        Map<String, Integer> result = new HashMap<String, Integer>();
+        Map<String, Integer> result = new LinkedHashMap<String, Integer>();
 
         // Try ROI Properties tables first (most accurate)
         File attribDir = firstExistingRoiTablesDir(directory);
@@ -997,7 +997,7 @@ public class MasterAggregationAnalysis implements Analysis {
             CsvSupport.RecordReader csv = CsvSupport.openRecordReader(csvFile);
             try {
                 CsvSupport.Record headerRecord = csv.readRecord();
-                if (headerRecord == null) return new HashMap<String, Integer>();
+                if (headerRecord == null) return new LinkedHashMap<String, Integer>();
                 String[] header = CsvSupport.parseRecord(headerRecord.text);
 
                 Map<String, Integer> colIdx = new HashMap<String, Integer>();
@@ -1009,8 +1009,8 @@ public class MasterAggregationAnalysis implements Analysis {
                 Integer roiCol = colIdx.get("ROI");
                 Integer regionCol = colIdx.get("Region");
                 Integer scnCol = colIdx.get("SCN");
-                if (animalCol == null) return new HashMap<String, Integer>();
-                if (scnCol == null && roiCol == null && regionCol == null) return new HashMap<String, Integer>();
+                if (animalCol == null) return new LinkedHashMap<String, Integer>();
+                if (scnCol == null && roiCol == null && regionCol == null) return new LinkedHashMap<String, Integer>();
 
                 CsvSupport.Record record;
                 while ((record = csv.readRecord()) != null) {
@@ -1031,7 +1031,7 @@ public class MasterAggregationAnalysis implements Analysis {
                 csv.close();
             }
         } catch (IOException e) {
-            return new HashMap<String, Integer>();
+            return new LinkedHashMap<String, Integer>();
         }
 
         Map<String, Integer> result = new LinkedHashMap<String, Integer>();

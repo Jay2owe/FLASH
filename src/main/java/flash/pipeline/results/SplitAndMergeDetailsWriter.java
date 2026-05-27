@@ -7,6 +7,7 @@ import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.Locale;
 
 /**
  * Writes analysis details for the Split and Merge Image Channels analysis.
@@ -67,7 +68,7 @@ public final class SplitAndMergeDetailsWriter {
             w.write("=================================================\n\n");
 
             // Timestamp
-            String timestamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
+            String timestamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.ROOT).format(new Date());
             w.write("Processing Timestamp: " + timestamp + "\n");
             w.write("Images Processed: " + imagesProcessed + "\n\n");
 
