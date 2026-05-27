@@ -102,13 +102,19 @@ public final class CellposeLocalTrainingService {
                     "Command: " + displayCommand(artifacts.command));
             ProcessSpec spec = new ProcessSpec(artifacts.command, artifacts.datasetDir,
                     config.timeoutSeconds, config.stallTimeoutSeconds);
-            ProcessResult result = runner.run(spec,
-                    new LoggingLineConsumer(writer, logLock, logFailure, "STDOUT",
-                            artifacts.datasetDir, artifacts.modelsDir, reportedModel,
-                            safeProgress, stdoutTail),
-                    new LoggingLineConsumer(writer, logLock, logFailure, "STDERR",
-                            artifacts.datasetDir, artifacts.modelsDir, reportedModel,
-                            safeProgress, stderrTail));
+            ProcessResult result;
+            try {
+                result = runner.run(spec,
+                        new LoggingLineConsumer(writer, logLock, logFailure, "STDOUT",
+                                artifacts.datasetDir, artifacts.modelsDir, reportedModel,
+                                safeProgress, stdoutTail),
+                        new LoggingLineConsumer(writer, logLock, logFailure, "STDERR",
+                                artifacts.datasetDir, artifacts.modelsDir, reportedModel,
+                                safeProgress, stderrTail));
+            } catch (IOException e) {
+                throw trainingIoFailure("Local Cellpose training", e,
+                        artifacts.logFile, stdoutTail, stderrTail);
+            }
             if (logFailure[0] != null) {
                 throw logFailure[0];
             }
@@ -420,6 +426,21 @@ public final class CellposeLocalTrainingService {
         appendTail(message, "stderr", stderr);
         appendTail(message, "stdout", stdout);
         return message.toString();
+    }
+
+    private static IOException trainingIoFailure(String label,
+                                                 IOException cause,
+                                                 Path logFile,
+                                                 StreamTail stdout,
+                                                 StreamTail stderr) {
+        StringBuilder message = new StringBuilder(label)
+                .append(" failed: ")
+                .append(cause == null ? "unknown I/O failure" : cause.getMessage())
+                .append(". Log: ")
+                .append(logFile);
+        appendTail(message, "stderr", stderr);
+        appendTail(message, "stdout", stdout);
+        return new IOException(message.toString(), cause);
     }
 
     private static void appendTail(StringBuilder message, String name, StreamTail tail) {

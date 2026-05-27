@@ -52,7 +52,10 @@ public final class ObjectClassifierPersistence {
         if (model == null) {
             throw new IOException("Random Forest model must not be null.");
         }
-        Files.createDirectories(path.getParent());
+        Path parent = path.getParent();
+        if (parent != null) {
+            Files.createDirectories(parent);
+        }
         try (OutputStream out = Files.newOutputStream(path);
              ObjectOutputStream objects = new ObjectOutputStream(out)) {
             objects.writeObject(model);

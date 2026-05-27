@@ -120,6 +120,27 @@ public class StarDistLocalTrainingServiceTest {
     }
 
     @Test
+    public void runnerIoFailureIncludesCapturedStreams() throws Exception {
+        Path dataset = datasetDir();
+        FakeRunner runner = new FakeRunner(0);
+        runner.stdout.add("Epoch 1/4");
+        runner.stderr.add("loading tensorflow");
+        runner.failure = new IOException("Local StarDist training produced no output for 2 seconds.");
+        StarDistLocalTrainingService service = new StarDistLocalTrainingService(
+                config(true, "python", "", "conda", 4), runner);
+
+        try {
+            service.train(new StarDistDatasetPackager.PackagingResult(dataset, 1, 1, 0),
+                    "Stalled model", StarDistLocalTrainingService.NO_PROGRESS);
+            fail("Expected runner I/O failure to throw.");
+        } catch (IOException expected) {
+            assertTrue(expected.getMessage().contains("no output for 2 seconds"));
+            assertTrue(expected.getMessage().contains("loading tensorflow"));
+            assertTrue(expected.getMessage().contains("Epoch 1/4"));
+        }
+    }
+
+    @Test
     public void trainRefusesUnpairedDatasetBeforeLaunchingProcess() throws Exception {
         Path dataset = temp.newFolder("stardist-unpaired").toPath();
         Files.createDirectories(dataset.resolve("raw"));
@@ -194,6 +215,7 @@ public class StarDistLocalTrainingServiceTest {
         final List<String> stdout = new ArrayList<String>();
         final List<String> stderr = new ArrayList<String>();
         boolean writeValidZip = true;
+        IOException failure;
         List<String> command;
 
         FakeRunner(int exitCode) {
@@ -210,6 +232,9 @@ public class StarDistLocalTrainingServiceTest {
             }
             for (String line : stderr) {
                 err.accept(line);
+            }
+            if (failure != null) {
+                throw failure;
             }
             if (exitCode == 0) {
                 Path zip = argumentAfter(spec.command, "--output-zip");

@@ -81,6 +81,27 @@ public class ObjectClassifierTrainerTest {
 
         assertNotNull(result.model);
         assertTrue(result.crossValAccuracy >= 0.9);
+        assertEquals(1, result.featureNames.length);
+        assertEquals("volume", result.featureNames[0]);
+    }
+
+    @Test
+    public void dropsPartiallyNonFiniteFeaturesBeforeTraining() {
+        String[] names = new String[] {"volume", "quality"};
+        List<ObjectFeatureExtractor.FeatureRow> positives = new ArrayList<ObjectFeatureExtractor.FeatureRow>();
+        List<ObjectFeatureExtractor.FeatureRow> negatives = new ArrayList<ObjectFeatureExtractor.FeatureRow>();
+        for (int i = 0; i < 30; i++) {
+            positives.add(new ObjectFeatureExtractor.FeatureRow(i + 1,
+                    new double[] {300 + i, i == 0 ? Double.NaN : 0.9}, names));
+            negatives.add(new ObjectFeatureExtractor.FeatureRow(i + 101,
+                    new double[] {50 + i, 0.2}, names));
+        }
+
+        ObjectClassifierTrainer.TrainingResult result =
+                new ObjectClassifierTrainer().train(positives, negatives, 11);
+
+        assertNotNull(result.model);
+        assertArrayEquals(new String[] {"volume"}, result.featureNames);
     }
 
     @Test

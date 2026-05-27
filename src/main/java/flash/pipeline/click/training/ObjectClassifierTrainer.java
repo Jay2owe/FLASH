@@ -74,7 +74,7 @@ public final class ObjectClassifierTrainer {
                     + safeNegatives.size() + " negative.");
         }
 
-        String[] featureNames = dropAllMissingFeatures(
+        String[] featureNames = dropNonFiniteFeatures(
                 determineFeatureNames(safePositives, safeNegatives),
                 safePositives,
                 safeNegatives);
@@ -160,23 +160,29 @@ public final class ObjectClassifierTrainer {
     static String[] dropAllMissingFeatures(String[] featureNames,
                                            List<ObjectFeatureExtractor.FeatureRow> positives,
                                            List<ObjectFeatureExtractor.FeatureRow> negatives) {
+        return dropNonFiniteFeatures(featureNames, positives, negatives);
+    }
+
+    static String[] dropNonFiniteFeatures(String[] featureNames,
+                                          List<ObjectFeatureExtractor.FeatureRow> positives,
+                                          List<ObjectFeatureExtractor.FeatureRow> negatives) {
         if (featureNames == null || featureNames.length == 0) return new String[0];
         List<String> kept = new ArrayList<String>();
         for (String featureName : featureNames) {
-            if (hasFiniteValue(featureName, positives) || hasFiniteValue(featureName, negatives)) {
+            if (allRowsFinite(featureName, positives) && allRowsFinite(featureName, negatives)) {
                 kept.add(featureName);
             }
         }
         return kept.toArray(new String[0]);
     }
 
-    private static boolean hasFiniteValue(String featureName, List<ObjectFeatureExtractor.FeatureRow> rows) {
-        if (rows == null) return false;
+    private static boolean allRowsFinite(String featureName, List<ObjectFeatureExtractor.FeatureRow> rows) {
+        if (rows == null || rows.isEmpty()) return false;
         for (ObjectFeatureExtractor.FeatureRow row : rows) {
             double value = ObjectFeatureExtractor.alignedValue(row, featureName);
-            if (Double.isFinite(value)) return true;
+            if (!Double.isFinite(value)) return false;
         }
-        return false;
+        return true;
     }
 
     private static ObjectFeatureExtractor.FeatureRow firstRow(List<ObjectFeatureExtractor.FeatureRow> rows) {

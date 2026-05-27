@@ -140,6 +140,30 @@ public class CellposeLocalTrainingServiceTest {
     }
 
     @Test
+    public void runnerIoFailureIncludesCapturedStreams() throws Exception {
+        Path dataset = temp.newFolder("cp-stall").toPath();
+        writeMinimalDataset(dataset);
+        Path commandFile = commandFile(dataset);
+        FakeRunner runner = new FakeRunner(0, false);
+        runner.stdout.add("Epoch 1/4");
+        runner.stderr.add("still importing cellpose");
+        runner.failure = new IOException("Local Cellpose training produced no output for 2 seconds.");
+        CellposeLocalTrainingService service =
+                new CellposeLocalTrainingService(config(true), runner);
+
+        try {
+            service.train(new CellposeDatasetPackager.PackagingResult(
+                            dataset, commandFile, 1, 1, 1, 1),
+                    "Stalled Cellpose", CellposeLocalTrainingService.NO_PROGRESS);
+            fail("Expected runner I/O failure to throw.");
+        } catch (IOException expected) {
+            assertTrue(expected.getMessage().contains("no output for 2 seconds"));
+            assertTrue(expected.getMessage().contains("still importing cellpose"));
+            assertTrue(expected.getMessage().contains("Epoch 1/4"));
+        }
+    }
+
+    @Test
     public void trainRefusesMissingMaskPairBeforeLaunchingProcess() throws Exception {
         Path dataset = temp.newFolder("cp-missing-mask").toPath();
         Files.write(dataset.resolve("image_001.tif"),
@@ -192,6 +216,7 @@ public class CellposeLocalTrainingServiceTest {
         final boolean reportModelPath;
         final List<String> stdout = new ArrayList<String>();
         final List<String> stderr = new ArrayList<String>();
+        IOException failure;
         List<String> command;
 
         FakeRunner(int exitCode, boolean reportModelPath) {
@@ -209,6 +234,9 @@ public class CellposeLocalTrainingServiceTest {
             }
             for (String line : stderr) {
                 err.accept(line);
+            }
+            if (failure != null) {
+                throw failure;
             }
             if (exitCode == 0) {
                 Path model = spec.workingDirectory.resolve("models")

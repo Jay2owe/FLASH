@@ -47,7 +47,14 @@ public final class ObjectClassifierScorer {
         for (int row = 0; row < rows.size(); row++) {
             ObjectFeatureExtractor.FeatureRow featureRow = rows.get(row);
             for (int col = 0; col < modelFeatureNames.length; col++) {
-                values[row][col] = ObjectFeatureExtractor.alignedValue(featureRow, modelFeatureNames[col]);
+                String featureName = modelFeatureNames[col];
+                double value = ObjectFeatureExtractor.alignedValue(featureRow, featureName);
+                if (!Double.isFinite(value)) {
+                    int label = featureRow == null ? -1 : featureRow.label;
+                    throw new IllegalArgumentException("Non-finite RF feature '" + featureName
+                            + "' for label " + label + ".");
+                }
+                values[row][col] = value;
             }
         }
         DataFrame frame = DataFrame.of(values, modelFeatureNames);

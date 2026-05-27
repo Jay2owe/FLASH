@@ -59,6 +59,22 @@ public class ObjectClassifierScorerTest {
                 .isEmpty());
     }
 
+    @Test
+    public void nonFiniteScoreFeatureFailsWithLabelAndFeatureName() {
+        ObjectClassifierTrainer.TrainingResult trained =
+                new ObjectClassifierTrainer().train(rows(30, true), rows(30, false), 17);
+        List<ObjectFeatureExtractor.FeatureRow> rows = Arrays.asList(
+                new ObjectFeatureExtractor.FeatureRow(42, new double[] {Double.NaN}, NAMES));
+
+        try {
+            new ObjectClassifierScorer().score(trained.model, trained.featureNames, rows, 0.5);
+            fail("Expected non-finite score feature to fail fast.");
+        } catch (IllegalArgumentException expected) {
+            assertTrue(expected.getMessage().contains("volume"));
+            assertTrue(expected.getMessage().contains("label 42"));
+        }
+    }
+
     private static List<ObjectFeatureExtractor.FeatureRow> rows(int count, boolean positive) {
         List<ObjectFeatureExtractor.FeatureRow> rows = new ArrayList<ObjectFeatureExtractor.FeatureRow>();
         for (int i = 0; i < count; i++) {
