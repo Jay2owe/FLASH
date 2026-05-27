@@ -639,10 +639,14 @@ public final class TrainCustomEngineWorkflow {
 
     public void setImageExcluded(String imageName, boolean excluded) {
         String key = safe(imageName);
+        boolean changed;
         if (excluded) {
-            excludedImages.add(key);
+            changed = excludedImages.add(key);
         } else {
-            excludedImages.remove(key);
+            changed = excludedImages.remove(key);
+        }
+        if (changed) {
+            invalidateTrainingState();
         }
     }
 
@@ -780,6 +784,21 @@ public final class TrainCustomEngineWorkflow {
         externalModelFile = file;
         step = Step.RESULT_REVIEW;
         return true;
+    }
+
+    private void invalidateTrainingState() {
+        rfResult = null;
+        starDistPackage = null;
+        starDistTraining = null;
+        cellposePackage = null;
+        cellposeTraining = null;
+        externalModelFile = null;
+        savedEntry = null;
+        recommendedMethodToken = null;
+        warningMessage = "";
+        if (step != Step.PICK_BASE && step != Step.CANCELLED && step != Step.DONE) {
+            step = Step.REVIEW_CLICKS;
+        }
     }
 
     public String defaultModelName() {

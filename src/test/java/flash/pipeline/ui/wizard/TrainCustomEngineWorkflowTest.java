@@ -280,6 +280,59 @@ public class TrainCustomEngineWorkflowTest {
     }
 
     @Test
+    public void changingIncludedClicksInvalidatesCompletedTraining() throws Exception {
+        final int[] trainCalls = new int[] {0};
+        TrainCustomEngineWorkflow.RfTrainingService trainer =
+                new TrainCustomEngineWorkflow.RfTrainingService() {
+                    @Override public ObjectClassifierTrainer.TrainingResult train(
+                            TrainCustomEngineWorkflow.Base base,
+                            TrainCustomEngineWorkflow.ClickSelection selection,
+                            TrainCustomEngineWorkflow.ProgressListener progress) {
+                        trainCalls[0]++;
+                        return new ObjectClassifierTrainer.TrainingResult(
+                                null,
+                                new String[] {"volume"},
+                                0.88,
+                                new double[] {1.0},
+                                selection.summary.positive,
+                                selection.summary.negative,
+                                ObjectClassifierTrainer.QualityFlag.OK);
+                    }
+                };
+        TrainCustomEngineWorkflow workflow = workflow(
+                new RecordingMethodStore("classical"),
+                clickStoreTwoImages(),
+                services(trainer, null, null, new RecordingCatalogService(), "rf_changed"));
+        workflow.selectBase(TrainCustomEngineWorkflow.Base.CLASSICAL);
+
+        workflow.runTrainingStep(TrainCustomEngineWorkflow.NO_PROGRESS);
+        workflow.saveModel("Initial RF", "description");
+
+        assertEquals(1, trainCalls[0]);
+        assertTrue(workflow.isTrainingComplete());
+        assertNotNull(workflow.savedEntry());
+
+        workflow.setImageExcluded("Image2", true);
+
+        assertEquals(TrainCustomEngineWorkflow.Step.REVIEW_CLICKS, workflow.step());
+        assertTrue(workflow.canProceedFromClicks());
+        assertFalse(workflow.isTrainingComplete());
+        assertNull(workflow.savedEntry());
+        assertNull(workflow.recommendedMethodToken());
+        try {
+            workflow.saveModel("Stale RF", "description");
+            fail("Expected stale training result to be rejected.");
+        } catch (IllegalStateException expected) {
+            assertTrue(expected.getMessage().contains("Train the Random Forest"));
+        }
+
+        workflow.runTrainingStep(TrainCustomEngineWorkflow.NO_PROGRESS);
+
+        assertEquals(2, trainCalls[0]);
+        assertTrue(workflow.isTrainingComplete());
+    }
+
+    @Test
     public void interruptedTrainingProgressCancelsWorkflowBeforeSavingResult() throws Exception {
         TrainCustomEngineWorkflow workflow = workflow(
                 new RecordingMethodStore("classical"),
@@ -432,6 +485,17 @@ public class TrainCustomEngineWorkflowTest {
         }
         for (int i = 0; i < negative; i++) {
             store.add(new ClickStore.Click("Image1", 2, i + 101, 1,
+                    i, 1, ClickStore.Verdict.NEGATIVE, i));
+        }
+        return store;
+    }
+
+    private static ClickStore clickStoreTwoImages() {
+        ClickStore store = clickStore(20, 20);
+        for (int i = 0; i < 5; i++) {
+            store.add(new ClickStore.Click("Image2", 2, i + 201, 1,
+                    i, 0, ClickStore.Verdict.POSITIVE, i));
+            store.add(new ClickStore.Click("Image2", 2, i + 301, 1,
                     i, 1, ClickStore.Verdict.NEGATIVE, i));
         }
         return store;
