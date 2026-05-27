@@ -151,8 +151,17 @@ public final class CsvTableIO {
         try {
             return CsvSupport.parseRecord(line);
         } catch (IOException e) {
-            throw new IllegalArgumentException("Malformed CSV record: " + e.getMessage(), e);
+            throw new IllegalArgumentException("Malformed CSV record for input "
+                    + previewCsvInput(line) + ": " + e.getMessage(), e);
         }
+    }
+
+    private static String previewCsvInput(String value) {
+        if (value == null) {
+            return "<null>";
+        }
+        String flat = value.replace("\r", "\\r").replace("\n", "\\n");
+        return flat.length() <= 120 ? "'" + flat + "'" : "'" + flat.substring(0, 120) + "...'";
     }
 
     /**

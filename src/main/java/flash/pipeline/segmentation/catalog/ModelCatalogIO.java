@@ -19,11 +19,14 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * Reads and writes the project-scoped segmentation model catalog.
  */
 public final class ModelCatalogIO {
+    private static final Logger LOGGER = Logger.getLogger(ModelCatalogIO.class.getName());
     public static final int CATALOG_VERSION = 1;
     static final String CONFIGURATION_DIR = "Configuration";
     static final String CATALOG_DIR = "Segmentation Models";
@@ -42,16 +45,7 @@ public final class ModelCatalogIO {
         List<ModelEntry> fetch(List<String> existingModelKeys);
     }
 
-    private static volatile WarningSink warningSink = new WarningSink() {
-        @Override
-        public void warn(String message) {
-            try {
-                IJ.log("[FLASH] " + message);
-            } catch (Throwable ignored) {
-                System.err.println("[FLASH] " + message);
-            }
-        }
-    };
+    private static volatile WarningSink warningSink = defaultWarningSink();
     private static volatile DiscoveryProvider discoveryProvider = new DiscoveryProvider() {
         @Override
         public List<ModelEntry> fetch(List<String> existingModelKeys) {
@@ -137,16 +131,7 @@ public final class ModelCatalogIO {
     }
 
     static void setWarningSinkForTests(WarningSink sink) {
-        warningSink = sink == null ? new WarningSink() {
-            @Override
-            public void warn(String message) {
-                try {
-                    IJ.log("[FLASH] " + message);
-                } catch (Throwable ignored) {
-                    System.err.println("[FLASH] " + message);
-                }
-            }
-        } : sink;
+        warningSink = sink == null ? defaultWarningSink() : sink;
     }
 
     static void setDiscoveryProviderForTests(DiscoveryProvider provider) {
@@ -324,7 +309,9 @@ public final class ModelCatalogIO {
             engine = ModelEntry.Engine.fromJson(JsonIO.stringValue(map.get("engine")));
             source = ModelEntry.Source.fromJson(JsonIO.stringValue(map.get("source")));
         } catch (IllegalArgumentException e) {
-            throw new IOException(e.getMessage(), e);
+            throw new IOException("Malformed model catalog entry: engine='"
+                    + JsonIO.stringValue(map.get("engine")) + "', source='"
+                    + JsonIO.stringValue(map.get("source")) + "': " + e.getMessage(), e);
         }
         return new ModelEntry(
                 JsonIO.stringValue(map.get("modelKey")),
@@ -341,6 +328,19 @@ public final class ModelCatalogIO {
                 copyObjectMap(JsonIO.asObject(map.get("defaults"))),
                 copyObjectMap(JsonIO.asObject(map.get("metadata"))),
                 JsonIO.booleanValue(map.get("supportsSecondChannel"), false));
+    }
+
+    private static WarningSink defaultWarningSink() {
+        return new WarningSink() {
+            @Override
+            public void warn(String message) {
+                try {
+                    IJ.log("[FLASH] " + message);
+                } catch (Throwable t) {
+                    LOGGER.log(Level.WARNING, "[FLASH] " + message, t);
+                }
+            }
+        };
     }
 
     private static Set<String> copyTags(List<Object> input) {

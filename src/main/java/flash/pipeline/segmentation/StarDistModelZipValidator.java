@@ -29,7 +29,7 @@ public final class StarDistModelZipValidator {
         }
         String name = file.getFileName() == null ? "" : file.getFileName().toString();
         if (!name.toLowerCase(Locale.ROOT).endsWith(".zip")) {
-            throw new IOException("StarDist models must be .zip files.");
+            throw new IOException("StarDist models must be .zip files: " + file);
         }
         long compressedBytes = Files.size(file);
         if (compressedBytes > MAX_ZIP_BYTES) {
@@ -40,10 +40,10 @@ public final class StarDistModelZipValidator {
         try (ZipFile zip = new ZipFile(file.toFile())) {
             Scan scan = scan(zip);
             if (!scan.hasFileEntry) {
-                throw new IOException("StarDist model zip is empty.");
+                throw new IOException("StarDist model zip is empty: " + file);
             }
             if (scan.marker == null) {
-                throw new IOException(invalidMarkerMessage);
+                throw new IOException(invalidMarkerMessage + " File: " + file);
             }
             return scan;
         } catch (IOException e) {
@@ -51,10 +51,11 @@ public final class StarDistModelZipValidator {
                     && (e.getMessage().contains("empty")
                     || e.getMessage().contains("too large")
                     || e.getMessage().contains("unsafe")
-                    || e.getMessage().equals(invalidMarkerMessage))) {
+                    || e.getMessage().startsWith(invalidMarkerMessage))) {
                 throw e;
             }
-            throw new IOException("StarDist model zip could not be read: " + e.getMessage(), e);
+            throw new IOException("StarDist model zip could not be read at " + file
+                    + ": " + e.getMessage(), e);
         }
     }
 

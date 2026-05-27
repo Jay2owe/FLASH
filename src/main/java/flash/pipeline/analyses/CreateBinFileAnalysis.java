@@ -4487,34 +4487,46 @@ public class CreateBinFileAnalysis implements Analysis {
                 String existingMethod = cfg.segmentationMethods.get(ch);
                 if (existingMethod.startsWith("stardist:")) {
                     String[] sdParts = existingMethod.split(":");
+                    String savedContext = "channel " + (ch + 1) + " StarDist ";
                     if (sdParts.length >= 2) {
-                        try { probThresh = Double.parseDouble(sdParts[1]); } catch (NumberFormatException ignored) {}
+                        probThresh = parseSavedSegmentationDouble(sdParts[1], probThresh,
+                                savedContext + "probability threshold");
                     }
                     if (sdParts.length >= 3) {
-                        try { nmsThresh = Double.parseDouble(sdParts[2]); } catch (NumberFormatException ignored) {}
+                        nmsThresh = parseSavedSegmentationDouble(sdParts[2], nmsThresh,
+                                savedContext + "NMS threshold");
                     }
                     // Parse key=value pairs (tracking params + post-detection filters).
                     for (int p = 3; p < sdParts.length; p++) {
                         if (sdParts[p].startsWith("linking=")) {
-                            try { linkingMaxDistance = sanitizeNonNegative(Double.parseDouble(sdParts[p].substring(8))); } catch (NumberFormatException ignored) {}
+                            linkingMaxDistance = parseSavedSegmentationNonNegative(
+                                    sdParts[p].substring(8), linkingMaxDistance,
+                                    savedContext + "linking distance");
                         } else if (sdParts[p].startsWith("gapClosing=")) {
-                            try { gapClosingMaxDistance = sanitizeNonNegative(Double.parseDouble(sdParts[p].substring(11))); } catch (NumberFormatException ignored) {}
+                            gapClosingMaxDistance = parseSavedSegmentationNonNegative(
+                                    sdParts[p].substring(11), gapClosingMaxDistance,
+                                    savedContext + "gap-closing distance");
                         } else if (sdParts[p].startsWith("frameGap=")) {
-                            try { maxFrameGap = sanitizeFrameGap(Double.parseDouble(sdParts[p].substring(9))); } catch (NumberFormatException ignored) {}
+                            maxFrameGap = parseSavedSegmentationFrameGap(
+                                    sdParts[p].substring(9), maxFrameGap,
+                                    savedContext + "frame gap");
                         } else if (sdParts[p].startsWith("area=")) {
                             String val = sdParts[p].substring(5);
                             String[] range = val.split("-", 2);
-                            try { areaMin = Double.parseDouble(range[0]); } catch (NumberFormatException ignored) {}
+                            areaMin = parseSavedSegmentationDouble(range[0], areaMin,
+                                    savedContext + "minimum area");
                             if (range.length > 1) {
-                                try {
-                                    areaMax = "Infinity".equalsIgnoreCase(range[1])
-                                            ? Double.POSITIVE_INFINITY : Double.parseDouble(range[1]);
-                                } catch (NumberFormatException ignored) {}
+                                areaMax = "Infinity".equalsIgnoreCase(range[1])
+                                        ? Double.POSITIVE_INFINITY
+                                        : parseSavedSegmentationDouble(range[1], areaMax,
+                                        savedContext + "maximum area");
                             }
                         } else if (sdParts[p].startsWith("quality=")) {
-                            try { qualityMin = Double.parseDouble(sdParts[p].substring(8)); } catch (NumberFormatException ignored) {}
+                            qualityMin = parseSavedSegmentationDouble(sdParts[p].substring(8),
+                                    qualityMin, savedContext + "minimum quality");
                         } else if (sdParts[p].startsWith("intensity=")) {
-                            try { intensityMin = Double.parseDouble(sdParts[p].substring(10)); } catch (NumberFormatException ignored) {}
+                            intensityMin = parseSavedSegmentationDouble(sdParts[p].substring(10),
+                                    intensityMin, savedContext + "minimum intensity");
                         }
                     }
                 }
@@ -4797,17 +4809,21 @@ public class CreateBinFileAnalysis implements Analysis {
                 int secondChannelIndex = -1;
                 if (existingMethod.startsWith("cellpose:")) {
                     String[] cpParts = existingMethod.split(":");
+                    String savedContext = "channel " + (ch + 1) + " Cellpose ";
                     if (cpParts.length >= 2) {
-                        try { diameter = Double.parseDouble(cpParts[1]); } catch (NumberFormatException ignored) {}
+                        diameter = parseSavedSegmentationDouble(cpParts[1], diameter,
+                                savedContext + "diameter");
                     }
                     if (cpParts.length >= 3 && cpParts[2] != null && !cpParts[2].trim().isEmpty()) {
                         modelToken = cpParts[2].trim();
                     }
                     if (cpParts.length >= 4) {
-                        try { flowThreshold = Double.parseDouble(cpParts[3]); } catch (NumberFormatException ignored) {}
+                        flowThreshold = parseSavedSegmentationDouble(cpParts[3], flowThreshold,
+                                savedContext + "flow threshold");
                     }
                     if (cpParts.length >= 5) {
-                        try { cellprobThreshold = Double.parseDouble(cpParts[4]); } catch (NumberFormatException ignored) {}
+                        cellprobThreshold = parseSavedSegmentationDouble(cpParts[4], cellprobThreshold,
+                                savedContext + "cell probability threshold");
                     }
                     for (int p = 5; p < cpParts.length; p++) {
                         if (cpParts[p].startsWith("gpu=")) {
@@ -6012,7 +6028,10 @@ public class CreateBinFileAnalysis implements Analysis {
                         double imageMax = thresholdPreview.getProcessor().getMax();
                         IJ.setThreshold(thresholdPreview, t, Math.max(t, imageMax));
                         thresholdPreview.updateAndDraw();
-                    } catch (NumberFormatException ignored) {}
+                    } catch (NumberFormatException e) {
+                        IJ.log("    - WARNING: Invalid saved object threshold for " + chLabel
+                                + "='" + curThresh + "'; leaving ImageJ threshold unchanged.");
+                    }
                 }
 
                 String thresholdAction = showThresholdAdjustmentDialog(
@@ -8977,6 +8996,29 @@ public class CreateBinFileAnalysis implements Analysis {
         } catch (NumberFormatException e) {
             return fallback;
         }
+    }
+
+    private static double parseSavedSegmentationDouble(String raw, double fallback, String context) {
+        if (raw == null) {
+            IJ.log("    - WARNING: Missing saved segmentation value for " + context
+                    + "; using " + fallback + ".");
+            return fallback;
+        }
+        try {
+            return Double.parseDouble(raw);
+        } catch (NumberFormatException e) {
+            IJ.log("    - WARNING: Invalid saved segmentation value for " + context
+                    + "='" + raw + "'; using " + fallback + ".");
+            return fallback;
+        }
+    }
+
+    private static double parseSavedSegmentationNonNegative(String raw, double fallback, String context) {
+        return sanitizeNonNegative(parseSavedSegmentationDouble(raw, fallback, context));
+    }
+
+    private static int parseSavedSegmentationFrameGap(String raw, int fallback, String context) {
+        return sanitizeFrameGap(parseSavedSegmentationDouble(raw, fallback, context));
     }
 
     private static double sanitizeNonNegative(double value) {

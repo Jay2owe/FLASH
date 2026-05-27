@@ -1078,7 +1078,10 @@ public class ThreeDObjectAnalysis implements Analysis {
                 List<String> names = new ArrayList<String>();
                 for (SeriesMeta m : metas) names.add(m.name);
                 loader.setSeriesNames(names);
-            } catch (Exception ignore) { }
+            } catch (Exception e) {
+                IJ.log("    - WARNING: Could not read series names for 3D object loader progress in "
+                        + directory + ": " + e.getMessage());
+            }
             loader.start();
             IJ.log("Thread split: " + effectiveLoaders + " loaders, " + safeWorkers + " workers");
             compactLog = true;

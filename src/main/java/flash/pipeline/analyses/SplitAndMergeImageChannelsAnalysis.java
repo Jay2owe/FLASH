@@ -401,7 +401,10 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
             List<SeriesMeta> metas = ImageSourceDispatcher.readAllMetadata(directory);
             seriesNames = new ArrayList<String>();
             for (SeriesMeta m : metas) seriesNames.add(m.name);
-        } catch (Exception ignore) { }
+        } catch (Exception e) {
+            IJ.log("    - WARNING: Could not read series names for split/merge loader progress in "
+                    + directory + ": " + e.getMessage());
+        }
 
         long loopStartTime = System.currentTimeMillis();
 
@@ -2280,7 +2283,10 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
             ImagePlus imp = chans[i];
             if (imp == null) continue;
             if (imp.getWidth() != w || imp.getHeight() != h) {
-                throw new IllegalArgumentException("All channels must have same dimensions");
+                throw new IllegalArgumentException("Channel " + (i + 1)
+                        + " dimensions " + imp.getWidth() + "x" + imp.getHeight()
+                        + " do not match expected " + w + "x" + h
+                        + " while merging pseudo-colors.");
             }
 
             String cname = (channelColors != null && i < channelColors.length && channelColors[i] != null)

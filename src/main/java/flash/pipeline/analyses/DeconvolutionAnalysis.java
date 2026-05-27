@@ -1695,7 +1695,10 @@ public class DeconvolutionAnalysis implements Analysis {
         try {
             config = BinConfigIO.readFromDirectory(directory);
             channelCount = Math.max(channelCount, config.numChannels());
-        } catch (IOException ignored) {}
+        } catch (IOException e) {
+            IJ.log("    - WARNING: Could not read channel names from " + directory
+                    + "; using metadata channel count only: " + e.getMessage());
+        }
 
         if (channelCount <= 0) return new String[0];
         String[] names = new String[channelCount];

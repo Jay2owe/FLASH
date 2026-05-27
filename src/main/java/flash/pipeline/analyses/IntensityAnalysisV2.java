@@ -725,7 +725,10 @@ public class IntensityAnalysisV2 implements Analysis {
                 List<String> names = new ArrayList<String>();
                 for (SeriesMeta m : metas) names.add(m.name);
                 loader.setSeriesNames(names);
-            } catch (Exception ignore) { }
+            } catch (Exception e) {
+                IJ.log("    - WARNING: Could not read series names for intensity loader progress in "
+                        + directory + ": " + e.getMessage());
+            }
             loader.start();
             IJ.log("Thread split: " + effectiveLoaders + " loaders, " + safeThreads + " workers");
             compactLog = true;

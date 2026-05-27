@@ -71,6 +71,9 @@ public final class CsvSupport {
     }
 
     public static String[] parseRecord(String record) throws IOException {
+        if (record == null) {
+            throw new IOException("CSV record is null");
+        }
         List<String> fields = new ArrayList<String>();
         StringBuilder field = new StringBuilder();
         boolean inQuotes = false;
@@ -99,7 +102,9 @@ public final class CsvSupport {
                     field.setLength(0);
                     afterClosingQuote = false;
                 } else if (!Character.isWhitespace(ch)) {
-                    throw new IOException("Unexpected character '" + ch + "' after closing quote");
+                    throw new IOException("Unexpected character '" + ch
+                            + "' after closing quote at column " + (i + 1)
+                            + " in record: " + preview(record));
                 }
                 continue;
             }
@@ -109,7 +114,8 @@ public final class CsvSupport {
                 field.setLength(0);
             } else if (ch == '"') {
                 if (field.length() != 0) {
-                    throw new IOException("Unexpected quote inside unquoted field");
+                    throw new IOException("Unexpected quote inside unquoted field at column "
+                            + (i + 1) + " in record: " + preview(record));
                 }
                 inQuotes = true;
             } else {
@@ -118,7 +124,7 @@ public final class CsvSupport {
         }
 
         if (inQuotes) {
-            throw new IOException("Unterminated quoted field");
+            throw new IOException("Unterminated quoted field in record: " + preview(record));
         }
 
         fields.add(field.toString());
@@ -143,6 +149,14 @@ public final class CsvSupport {
             sb.append(escapeField(values.get(i)));
         }
         return sb.toString();
+    }
+
+    private static String preview(String value) {
+        if (value == null) {
+            return "<null>";
+        }
+        String flat = value.replace("\r", "\\r").replace("\n", "\\n");
+        return flat.length() <= 120 ? "'" + flat + "'" : "'" + flat.substring(0, 120) + "...'";
     }
 
     public static String spreadsheetSafeFieldValue(String value) {

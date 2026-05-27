@@ -204,7 +204,8 @@ public final class StarDistLocalTrainingService {
                     "Not a StarDist / CSBDeep SavedModel: missing saved_model.pb "
                     + "(or config.json + thresholds.json): " + file);
         } catch (IOException e) {
-            throw new IOException(e.getMessage() + ": " + file, e);
+            throw new IOException("Invalid StarDist model zip output '" + file
+                    + "': " + e.getMessage(), e);
         }
     }
 
