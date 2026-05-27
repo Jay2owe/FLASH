@@ -18,9 +18,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -30,6 +33,7 @@ public final class Cellpose3DRunner {
     private static final String INPUT_STACK_BASENAME = "cellpose_input";
     private static final String MASK_SUFFIX = "_cp_masks.tif";
     private static final long CELLPOSE_TIMEOUT_SECONDS = 1800L;
+    private static final int MAX_BITSET_LABEL = 10_000_000;
 
     private Cellpose3DRunner() {}
 
@@ -235,16 +239,24 @@ public final class Cellpose3DRunner {
 
     public static int countLabels(ImagePlus labelImage) {
         if (labelImage == null || labelImage.getStack() == null) return 0;
-        double maxVal = 0;
+        BitSet labels = new BitSet();
+        Set<Integer> highLabels = null;
         int nSlices = labelImage.getStackSize();
         for (int s = 1; s <= nSlices; s++) {
             ImageProcessor ip = labelImage.getStack().getProcessor(s);
-            double sliceMax = ip.getStats().max;
-            if (Double.isFinite(sliceMax) && sliceMax > maxVal) {
-                maxVal = sliceMax;
+            if (ip == null) continue;
+            for (int i = 0; i < ip.getPixelCount(); i++) {
+                int label = labelFromPixel(ip.getf(i));
+                if (label <= 0) continue;
+                if (label <= MAX_BITSET_LABEL) {
+                    labels.set(label);
+                } else {
+                    if (highLabels == null) highLabels = new HashSet<Integer>();
+                    highLabels.add(Integer.valueOf(label));
+                }
             }
         }
-        return maxVal > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) maxVal;
+        return labels.cardinality() + (highLabels == null ? 0 : highLabels.size());
     }
 
     public static ImagePlus prepareRuntimeInput(ImagePlus primaryInput, ImagePlus companionInput, String channelName) {
@@ -480,7 +492,7 @@ public final class Cellpose3DRunner {
             command.add("0");
         }
         command.add("--diameter");
-        command.add(formatDiameterPixels(input, diameter));
+        command.add(formatDiameterPixels(input, requirePositiveDiameter(diameter)));
         command.add("--flow_threshold");
         command.add(String.valueOf(flowThreshold));
         command.add("--cellprob_threshold");
@@ -649,7 +661,7 @@ public final class Cellpose3DRunner {
             throw new IllegalArgumentException("Label and cell probability images must have matching dimensions.");
         }
 
-        int maxLabel = countLabels(labelImage);
+        int maxLabel = maxPositiveLabel(labelImage);
         double[] sums = new double[maxLabel + 1];
         long[] counts = new long[maxLabel + 1];
         for (int s = 1; s <= labelImage.getStackSize(); s++) {
@@ -722,6 +734,34 @@ public final class Cellpose3DRunner {
         }
         double diameterPixels = diameterInUnits / pixelWidth;
         return String.valueOf(diameterPixels);
+    }
+
+    private static double requirePositiveDiameter(double diameter) {
+        if (!Double.isFinite(diameter) || diameter <= 0.0d) {
+            throw new IllegalArgumentException("Cellpose diameter must be finite and greater than 0.");
+        }
+        return diameter;
+    }
+
+    private static int maxPositiveLabel(ImagePlus labelImage) {
+        if (labelImage == null || labelImage.getStack() == null) return 0;
+        int maxLabel = 0;
+        for (int s = 1; s <= labelImage.getStackSize(); s++) {
+            ImageProcessor ip = labelImage.getStack().getProcessor(s);
+            if (ip == null) continue;
+            for (int i = 0; i < ip.getPixelCount(); i++) {
+                int label = labelFromPixel(ip.getf(i));
+                if (label > maxLabel) {
+                    maxLabel = label;
+                }
+            }
+        }
+        return maxLabel;
+    }
+
+    private static int labelFromPixel(float value) {
+        if (!Float.isFinite(value) || value <= 0f) return 0;
+        return value > Integer.MAX_VALUE ? 0 : Math.round(value);
     }
 
     private static void deleteRecursively(Path root) {

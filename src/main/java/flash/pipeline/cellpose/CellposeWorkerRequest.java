@@ -24,7 +24,7 @@ public final class CellposeWorkerRequest {
             throw new IllegalArgumentException("id must not be empty");
         }
         this.id = id;
-        this.diameter = sanitizeNonNegative(diameter);
+        this.diameter = requirePositiveDiameter(diameter);
         this.flowThreshold = flowThreshold;
         this.cellprobThreshold = cellprobThreshold;
         this.dumpCellprob = dumpCellprob;
@@ -74,10 +74,10 @@ public final class CellposeWorkerRequest {
         return dumpCellprob;
     }
 
-    private static double sanitizeNonNegative(double value) {
-        if (!Double.isFinite(value)) {
-            return 0.0d;
+    private static double requirePositiveDiameter(double value) {
+        if (!Double.isFinite(value) || value <= 0.0d) {
+            throw new IllegalArgumentException("diameter must be finite and greater than 0");
         }
-        return Math.max(0.0d, value);
+        return value;
     }
 }

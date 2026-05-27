@@ -112,6 +112,15 @@ public class SegmentationTokenParserTest {
     }
 
     @Test
+    public void strictTokensRejectOutOfRangeRuntimeParameters() {
+        assertInvalid("stardist:1.1:0.4", "between 0 and 1");
+        assertInvalid("stardist:0.5:-0.1", "between 0 and 1");
+        assertInvalid("stardist:0.5:0.4:prob=2.0", "between 0 and 1");
+        assertInvalid("cellpose:0:cyto3:0.4:0.0", "greater than 0");
+        assertInvalid("cellpose:30:cyto3:0.4:0.0:diameter=-4", "greater than 0");
+    }
+
+    @Test
     public void morphPredicateEncodedAndUnencodedRoundTrip() {
         String unencoded = "enhanced_classical:thresh=10:minSize=20:maxSize=300:"
                 + "morph=sphericity>=0.6,elongation<=2.0";
@@ -137,5 +146,14 @@ public class SegmentationTokenParserTest {
 
         assertEquals(0.2, SegmentationMethod.starDistPostFilters(method).qualityMin, 0.001);
         assertEquals("stardist:0.5:0.4:quality=0.2", SegmentationTokenParser.format(method));
+    }
+
+    private static void assertInvalid(String token, String messageFragment) {
+        try {
+            SegmentationTokenParser.parse(token);
+            fail("Expected invalid segmentation token to throw: " + token);
+        } catch (IllegalArgumentException expected) {
+            assertTrue(expected.getMessage(), expected.getMessage().contains(messageFragment));
+        }
     }
 }

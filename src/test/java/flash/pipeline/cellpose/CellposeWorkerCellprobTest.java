@@ -14,6 +14,7 @@ import java.util.Optional;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 public class CellposeWorkerCellprobTest {
 
@@ -38,6 +39,16 @@ public class CellposeWorkerCellprobTest {
                 request, new ImagePlus("input", new ShortProcessor(1, 1)));
 
         assertFalse(payload.containsKey("dump_cellprob"));
+    }
+
+    @Test
+    public void requestRejectsNonPositiveDiameter() {
+        try {
+            new CellposeWorkerRequest("v01", 0.0d, 0.4d, 0.0d);
+            fail("Expected non-positive Cellpose diameter to be rejected.");
+        } catch (IllegalArgumentException expected) {
+            assertTrue(expected.getMessage().contains("greater than 0"));
+        }
     }
 
     @Test

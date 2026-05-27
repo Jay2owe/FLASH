@@ -100,13 +100,15 @@ public final class SegmentationTokenParser {
         if (parts.length < 3 || isEmpty(parts[1]) || isEmpty(parts[2])) {
             throw new IllegalArgumentException("StarDist token must include probability and NMS thresholds: " + raw);
         }
-        validateFiniteDouble(parts[1], "StarDist probability", raw);
-        validateFiniteDouble(parts[2], "StarDist NMS", raw);
+        validateUnitInterval(parts[1], "StarDist probability", raw);
+        validateUnitInterval(parts[2], "StarDist NMS", raw);
 
         LinkedHashMap<String, String> params = new LinkedHashMap<String, String>();
         params.put("prob", parts[1].trim());
         params.put("nms", parts[2].trim());
         putKeyValues(params, parts, 3);
+        validateUnitInterval(params, "prob", "StarDist probability", raw);
+        validateUnitInterval(params, "nms", "StarDist NMS", raw);
         validateDouble(params, "linking", false, raw);
         validateDouble(params, "gapClosing", false, raw);
         validateInt(params, "frameGap", false, raw);
@@ -120,7 +122,7 @@ public final class SegmentationTokenParser {
         if (parts.length < 2 || isEmpty(parts[1])) {
             throw new IllegalArgumentException("Cellpose token must include diameter: " + raw);
         }
-        validateFiniteDouble(parts[1], "Cellpose diameter", raw);
+        validatePositiveDouble(parts[1], "Cellpose diameter", raw);
         LinkedHashMap<String, String> params = new LinkedHashMap<String, String>();
         params.put("diameter", parts[1].trim());
 
@@ -145,6 +147,7 @@ public final class SegmentationTokenParser {
             putKeyValues(params, parts, 5);
         }
 
+        validatePositiveDouble(params, "diameter", true, "Cellpose diameter", raw);
         validateDouble(params, "flow", false, raw);
         validateDouble(params, "cellprob", false, raw);
         validateBoolean(params, "gpu", false, raw);
@@ -271,6 +274,32 @@ public final class SegmentationTokenParser {
         validateFiniteDouble(value, key, raw);
     }
 
+    private static void validatePositiveDouble(Map<String, String> params,
+                                               String key,
+                                               boolean required,
+                                               String label,
+                                               String raw) {
+        String value = params.get(key);
+        if (value == null || value.trim().isEmpty()) {
+            if (required) {
+                throw new IllegalArgumentException("Missing " + key + " in segmentation token: " + raw);
+            }
+            return;
+        }
+        validatePositiveDouble(value, label, raw);
+    }
+
+    private static void validateUnitInterval(Map<String, String> params,
+                                             String key,
+                                             String label,
+                                             String raw) {
+        String value = params.get(key);
+        if (value == null || value.trim().isEmpty()) {
+            throw new IllegalArgumentException("Missing " + key + " in segmentation token: " + raw);
+        }
+        validateUnitInterval(value, label, raw);
+    }
+
     private static void validateInt(Map<String, String> params,
                                     String key,
                                     boolean required,
@@ -309,6 +338,31 @@ public final class SegmentationTokenParser {
         if (!isFiniteDouble(value)) {
             throw new IllegalArgumentException("Invalid " + label + " in segmentation token: " + raw);
         }
+    }
+
+    private static void validatePositiveDouble(String value, String label, String raw) {
+        double parsed = parseRequiredFiniteDouble(value, label, raw);
+        if (parsed <= 0.0d) {
+            throw new IllegalArgumentException(label + " must be greater than 0 in segmentation token: " + raw);
+        }
+    }
+
+    private static void validateUnitInterval(String value, String label, String raw) {
+        double parsed = parseRequiredFiniteDouble(value, label, raw);
+        if (parsed < 0.0d || parsed > 1.0d) {
+            throw new IllegalArgumentException(label + " must be between 0 and 1 in segmentation token: " + raw);
+        }
+    }
+
+    private static double parseRequiredFiniteDouble(String value, String label, String raw) {
+        try {
+            double parsed = Double.parseDouble(value == null ? "" : value.trim());
+            if (Double.isFinite(parsed)) {
+                return parsed;
+            }
+        } catch (NumberFormatException ignored) {
+        }
+        throw new IllegalArgumentException("Invalid " + label + " in segmentation token: " + raw);
     }
 
     private static boolean isFiniteDouble(String value) {

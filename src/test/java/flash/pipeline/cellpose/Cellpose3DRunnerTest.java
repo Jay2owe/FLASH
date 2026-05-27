@@ -17,6 +17,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 public class Cellpose3DRunnerTest {
 
@@ -133,6 +134,15 @@ public class Cellpose3DRunnerTest {
         stack.addSlice(processor);
         ImagePlus labels = new ImagePlus("float-labels", stack);
 
+        assertEquals(1, Cellpose3DRunner.countLabels(labels));
+    }
+
+    @Test
+    public void countLabelsCountsDistinctPositiveLabelsRatherThanMaximumLabelValue() {
+        ImagePlus labels = maskStack(4, 1, new int[][][] {
+                { {0, 0, 1}, {1, 0, 7}, {2, 0, 7} }
+        });
+
         assertEquals(2, Cellpose3DRunner.countLabels(labels));
     }
 
@@ -140,6 +150,26 @@ public class Cellpose3DRunnerTest {
     public void formatDiameterPixelsHandlesNullInputAndNonFiniteDiameter() {
         assertEquals("0", Cellpose3DRunner.formatDiameterPixels(null, Double.NaN));
         assertEquals("12.0", Cellpose3DRunner.formatDiameterPixels(null, 12.0));
+    }
+
+    @Test
+    public void buildCellposeCommandRejectsNonPositiveDiameter() throws Exception {
+        Path tempDir = temp.newFolder("cellpose-bad-diameter").toPath();
+        try {
+            Cellpose3DRunner.buildCellposeCommand(
+                    "C:\\python.exe",
+                    tempDir.resolve("cellpose_input.tif"),
+                    tempDir,
+                    "cyto3",
+                    createStack(4, 3, 1),
+                    0.0,
+                    0.4,
+                    0.0,
+                    false);
+            fail("Expected non-positive Cellpose diameter to be rejected.");
+        } catch (IllegalArgumentException expected) {
+            assertTrue(expected.getMessage().contains("greater than 0"));
+        }
     }
 
     @Test

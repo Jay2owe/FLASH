@@ -503,6 +503,8 @@ public class StarDist3DRunner {
         if (modelFile == null || !modelFile.isFile()) {
             throw new IOException("StarDist model file does not exist: " + modelFile);
         }
+        requireUnitThreshold("StarDist probability threshold", probThresh);
+        requireUnitThreshold("StarDist NMS threshold", nmsThresh);
         StarDistCustomDetectorFactory factory = new StarDistCustomDetectorFactory();
         settings.detectorFactory = factory;
         settings.detectorSettings = factory.getDefaultSettings();
@@ -513,6 +515,12 @@ public class StarDist3DRunner {
                 Double.valueOf(probThresh));
         settings.detectorSettings.put(StarDistCustomDetectorFactory.KEY_OVERLAP_THRESHOLD,
                 Double.valueOf(nmsThresh));
+    }
+
+    private static void requireUnitThreshold(String label, double value) {
+        if (!Double.isFinite(value) || value < 0.0d || value > 1.0d) {
+            throw new IllegalArgumentException(label + " must be finite and between 0 and 1.");
+        }
     }
 
     static void setWarningSinkForTest(WarningSink sink) {
