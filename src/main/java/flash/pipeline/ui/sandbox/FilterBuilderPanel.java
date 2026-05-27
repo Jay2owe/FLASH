@@ -94,6 +94,8 @@ public final class FilterBuilderPanel extends JPanel {
     private ImagePlus sourceImage;
     private ImagePlus previewImage;
     private boolean busy = false;
+    private volatile boolean disposed = false;
+    private int previewGeneration = 0;
 
     public FilterBuilderPanel(DagIR seed,
                               PreviewPairPanel sharedPreview,
@@ -382,6 +384,8 @@ public final class FilterBuilderPanel extends JPanel {
      * Call when the host window is closing.
      */
     public void releaseResources() {
+        disposed = true;
+        nextPreviewGeneration();
         if (runner != null) {
             runner.close(previewImage);
             if (sourceImage != previewImage) {
@@ -535,12 +539,16 @@ public final class FilterBuilderPanel extends JPanel {
 
     private void preview(final DagIR dag) {
         final Window owner = SwingUtilities.getWindowAncestor(this);
+        if (disposed) {
+            return;
+        }
         if (runner == null) {
             IJ.showMessage("Sandbox Preview", "No preview image is available.");
             previews.setAdjustedState(PreviewPairPanel.PreviewState.ERROR,
                     "No preview image is available.");
             return;
         }
+        final int generation = nextPreviewGeneration();
         refreshSourcePreview();
         setBusy(true, "Running preview...");
         previews.setAdjustedState(PreviewPairPanel.PreviewState.RUNNING, "Running preview...");
@@ -559,8 +567,17 @@ public final class FilterBuilderPanel extends JPanel {
                         rendered = FilterExecutor.runDagThreadSafe(sandboxSource, dag);
                     }
                     final ImagePlus previewResult = rendered;
+                    if (!isPreviewCurrent(generation)) {
+                        closePreviewImage(rendered);
+                        rendered = null;
+                        return;
+                    }
                     SwingUtilities.invokeLater(new Runnable() {
                         @Override public void run() {
+                            if (!isPreviewCurrent(generation)) {
+                                runner.close(previewResult);
+                                return;
+                            }
                             try {
                                 previewImage = runner.showPreview(previewResult, previewImage);
                                 previews.setAdjusted(previewImage);
@@ -582,8 +599,14 @@ public final class FilterBuilderPanel extends JPanel {
                     rendered = null;
                 } catch (final Exception ex) {
                     final String message = ex.getMessage();
+                    if (!isPreviewCurrent(generation)) {
+                        return;
+                    }
                     SwingUtilities.invokeLater(new Runnable() {
                         @Override public void run() {
+                            if (!isPreviewCurrent(generation)) {
+                                return;
+                            }
                             JOptionPane.showMessageDialog(owner,
                                     "Preview failed:\n" + message,
                                     "Sandbox Preview",
@@ -603,6 +626,21 @@ public final class FilterBuilderPanel extends JPanel {
         }, "sandbox-dag-preview");
         worker.setDaemon(true);
         worker.start();
+    }
+
+    private synchronized int nextPreviewGeneration() {
+        previewGeneration++;
+        return previewGeneration;
+    }
+
+    private synchronized boolean isPreviewCurrent(int generation) {
+        return !disposed && generation == previewGeneration;
+    }
+
+    private void closePreviewImage(ImagePlus image) {
+        if (runner != null) {
+            runner.close(image);
+        }
     }
 
     static ImagePlus duplicateForSandbox(ImagePlus source) {

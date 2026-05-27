@@ -7,7 +7,10 @@ import ij.ImageStack;
 import ij.process.ByteProcessor;
 import org.junit.Test;
 
+import java.lang.reflect.Method;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.Assert.assertEquals;
@@ -224,6 +227,65 @@ public class FilterBuilderPanelTest {
                 7, source.getProcessor().get(0, 0));
     }
 
+    @Test(timeout = 5000)
+    public void releasedPanelIgnoresLatePreviewWorkerResult() throws Exception {
+        final CountDownLatch workerStarted = new CountDownLatch(1);
+        final CountDownLatch allowWorker = new CountDownLatch(1);
+        final CountDownLatch executionSourceClosed = new CountDownLatch(1);
+        final AtomicInteger shown = new AtomicInteger(0);
+        final AtomicInteger closed = new AtomicInteger(0);
+
+        FilterBuilderPanel.PreviewRunner runner = new FilterBuilderPanel.PreviewRunner() {
+            @Override public ImagePlus getSourceForDisplay() {
+                return image("display-source");
+            }
+
+            @Override public ImagePlus createSource() throws Exception {
+                workerStarted.countDown();
+                assertTrue("Preview worker did not receive the release signal",
+                        allowWorker.await(2, TimeUnit.SECONDS));
+                return image("execution-source");
+            }
+
+            @Override public ImagePlus showPreview(ImagePlus result, ImagePlus existingPreview) {
+                shown.incrementAndGet();
+                return result;
+            }
+
+            @Override public void close(ImagePlus imp) {
+                if (imp != null) {
+                    closed.incrementAndGet();
+                    if (imp.getTitle() != null && imp.getTitle().startsWith("execution-source")) {
+                        executionSourceClosed.countDown();
+                    }
+                    imp.close();
+                }
+            }
+        };
+
+        FilterBuilderPanel panel = new FilterBuilderPanel(IjmToDagLoader.load(SEED_MACRO),
+                null, runner, null);
+
+        invokePreview(panel, panel.currentDag());
+        assertTrue("Preview worker did not start",
+                workerStarted.await(2, TimeUnit.SECONDS));
+
+        panel.releaseResources();
+        allowWorker.countDown();
+        assertTrue("Preview worker did not close its execution source",
+                executionSourceClosed.await(2, TimeUnit.SECONDS));
+        javax.swing.SwingUtilities.invokeAndWait(new Runnable() {
+            @Override public void run() {
+                // Flush any stale publish runnable if one was queued.
+            }
+        });
+
+        assertEquals("Released panels must not publish late preview results",
+                0, shown.get());
+        assertTrue("Late preview result/source images should be closed",
+                closed.get() > 0);
+    }
+
     private static FilterBuilderPanel.PreviewRunner noopRunner() {
         return new FilterBuilderPanel.PreviewRunner() {
             @Override public ImagePlus createSource() {
@@ -244,5 +306,11 @@ public class FilterBuilderPanelTest {
         ImageStack stack = new ImageStack(2, 2);
         stack.addSlice(new ByteProcessor(2, 2));
         return new ImagePlus(title, stack);
+    }
+
+    private static void invokePreview(FilterBuilderPanel panel, DagIR dag) throws Exception {
+        Method method = FilterBuilderPanel.class.getDeclaredMethod("preview", DagIR.class);
+        method.setAccessible(true);
+        method.invoke(panel, dag);
     }
 }
