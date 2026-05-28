@@ -1,20 +1,29 @@
 package flash.pipeline.bin;
 
 import org.junit.Test;
+import org.junit.Rule;
+import org.junit.rules.TemporaryFolder;
 
+import java.io.ByteArrayOutputStream;
 import java.io.BufferedReader;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 
 public class ChannelConfigGoldenFixtureTest {
     private static final String FIXTURE_ROOT = "channel-config/fixtures/";
+
+    @Rule
+    public TemporaryFolder temp = new TemporaryFolder();
 
     @Test
     public void threeChannelClassicalCommittedRoundTripIsByteStable() throws Exception {
@@ -50,6 +59,18 @@ public class ChannelConfigGoldenFixtureTest {
                 BinConfigIO.toLines(binConfig));
     }
 
+    @Test
+    public void threeChannelClassicalCommittedFixtureMatchesLegacyWriterBytes() throws Exception {
+        ChannelConfig channelConfig = ChannelConfigCodec.decode(readResource("3ch_classical_committed.json"));
+        File project = temp.newFolder("legacy-writer");
+
+        BinConfigIO.writeFromConfig(project.getAbsolutePath(), ChannelConfigIO.toBinConfig(channelConfig));
+
+        assertArrayEquals(readResourceBytes("3ch_classical_committed.Channel_Data.txt"),
+                Files.readAllBytes(new File(project,
+                        "FLASH/Config/.settings/Channel_Data.txt").toPath()));
+    }
+
     private static void assertRoundTripByteStable(String fixtureName) throws Exception {
         String source = readResource(fixtureName);
         ChannelConfig decoded = ChannelConfigCodec.decode(source);
@@ -70,6 +91,23 @@ public class ChannelConfigGoldenFixtureTest {
                 out.append(new String(buffer, 0, read, StandardCharsets.UTF_8));
             }
             return out.toString();
+        } finally {
+            in.close();
+        }
+    }
+
+    private static byte[] readResourceBytes(String fixtureName) throws IOException {
+        InputStream in = ChannelConfigGoldenFixtureTest.class.getClassLoader()
+                .getResourceAsStream(FIXTURE_ROOT + fixtureName);
+        assertNotNull("Missing fixture " + fixtureName, in);
+        try {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] buffer = new byte[4096];
+            int read;
+            while ((read = in.read(buffer)) >= 0) {
+                out.write(buffer, 0, read);
+            }
+            return out.toByteArray();
         } finally {
             in.close();
         }
