@@ -419,19 +419,26 @@ public class LifIO {
 
     static File requireReadableLifFile(File lifFile) throws IOException {
         if (lifFile == null) {
-            throw new IOException(".lif file is required.");
+            throw new IOException("Bio-Formats container file is required.");
         }
         Path path = lifFile.toPath();
         if (Files.isSymbolicLink(path)) {
-            throw new IOException("Refusing to open symbolic-link .lif file: " + lifFile);
+            throw new IOException("Refusing to open symbolic-link container file: " + lifFile);
         }
         if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
-            throw new IOException(".lif file does not exist: " + lifFile);
+            throw new IOException("Container file does not exist: " + lifFile);
         }
         String name = lifFile.getName() == null ? "" : lifFile.getName().toLowerCase(Locale.ROOT);
-        if (!name.endsWith(".lif")) {
-            throw new IOException("Expected a .lif file: " + lifFile);
+        if (!isSupportedContainerFileName(name)) {
+            throw new IOException("Expected a Bio-Formats container file: " + lifFile);
         }
         return lifFile.getCanonicalFile();
+    }
+
+    private static boolean isSupportedContainerFileName(String lowerName) {
+        for (String extension : ImageSourceDispatcher.CONTAINER_EXTENSIONS) {
+            if (lowerName.endsWith(extension)) return true;
+        }
+        return false;
     }
 }

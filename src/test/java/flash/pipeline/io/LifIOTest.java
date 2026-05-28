@@ -121,6 +121,17 @@ public class LifIOTest {
     }
 
     @Test
+    public void requireReadableLifFile_acceptsBioFormatsContainerExtensions() throws Exception {
+        File dir = temp.newFolder("container-readable");
+        File czi = new File(dir, "experiment.czi");
+        assertTrue(czi.createNewFile());
+
+        File result = LifIO.requireReadableLifFile(czi);
+
+        assertEquals(czi.getCanonicalFile(), result);
+    }
+
+    @Test
     public void requireSingleLifFile_returnsOnlyMatch() throws Exception {
         File dir = temp.newFolder("one");
         File lif = new File(dir, "experiment.lif");
