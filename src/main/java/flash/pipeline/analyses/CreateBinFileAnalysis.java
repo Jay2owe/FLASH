@@ -79,6 +79,7 @@ import flash.pipeline.ui.config.TrainedRfSummaryStage;
 import flash.pipeline.ui.config.ZSliceSelectionStage;
 import flash.pipeline.ui.sandbox.SandboxDialog;
 import flash.pipeline.ui.wizard.MarkerAutoComplete;
+import flash.pipeline.ui.wizard.ResumePromptDialog;
 import flash.pipeline.ui.wizard.TrainCustomEngineWizard;
 import flash.pipeline.ui.wizard.TrainCustomEngineWorkflow;
 import flash.pipeline.zslice.ZSliceConfig;
@@ -1086,7 +1087,9 @@ public class CreateBinFileAnalysis implements Analysis {
             int choice = showResumePrompt(draft);
             if (choice == 2) return;
             if (choice == 1) {
-                ChannelConfigIO.delete(FlashProjectLayout.settingsDir(binFolder));
+                File settingsDir = channelConfigSettingsDir(binFolder);
+                ChannelConfigIO.delete(settingsDir);
+                deleteRecursively(new File(settingsDir, ".draft"));
             } else {
                 cfg = draft.cfg;
                 customSettings = draft.customSettings;
@@ -1227,21 +1230,12 @@ public class CreateBinFileAnalysis implements Analysis {
     // ── Selective override flow (with Back navigation) ──────────────────
 
     protected int showResumePrompt(WizardResumeState draft) {
-        if (GraphicsEnvironment.isHeadless()) return 0;
-        PipelineDialog pd = setupAnalysisDialog("Set Up Configuration - Resume Draft");
-        pd.addSetupHelpHeader("Resume Draft", SetupHelpCatalog.CHANNEL_IDENTITY);
-        pd.addMessage("A saved Set Up Configuration draft was found.");
-        if (draft != null) {
-            pd.addMessage("Last saved step: " + draft.stepIndex + " of 6 - " + draft.stepLabel);
-            for (String line : draft.progressLines) {
-                pd.addMessage(line);
-            }
-        }
-        pd.addChoice("Action", new String[]{"Resume", "Start over", "Cancel"}, "Resume");
-        if (!pd.showDialog()) return 2;
-        String choice = pd.getNextChoice();
-        if ("Start over".equals(choice)) return 1;
-        if ("Cancel".equals(choice)) return 2;
+        ResumePromptDialog.Choice choice = ResumePromptDialog.show(
+                null,
+                draft == null ? Collections.<String>emptyList() : draft.progressLines,
+                draft == null ? 0L : draft.lastUpdatedMillis);
+        if (choice == ResumePromptDialog.Choice.START_OVER) return 1;
+        if (choice == ResumePromptDialog.Choice.CANCEL) return 2;
         return 0;
     }
 
@@ -1302,7 +1296,7 @@ public class CreateBinFileAnalysis implements Analysis {
 
     private boolean handleCancelRequest(Window owner, File binFolder, BinUserConfig cfg,
                                         boolean[][] customSettings, int step, String label) {
-        File settingsDir = FlashProjectLayout.settingsDir(binFolder);
+        File settingsDir = channelConfigSettingsDir(binFolder);
         File draftFile = new File(settingsDir, ChannelConfigIO.FILE_NAME);
         ChannelConfig current = ChannelConfigIO.read(settingsDir);
         CancelConfirmationDialog.Choice choice = showCancelConfirmation(
@@ -1323,15 +1317,24 @@ public class CreateBinFileAnalysis implements Analysis {
         return false;
     }
 
+    private File channelConfigSettingsDir(File binFolder) {
+        if (binFolder != null && FlashProjectLayout.SETTINGS_DIR.equals(binFolder.getName())) {
+            return binFolder;
+        }
+        return FlashProjectLayout.settingsDir(binFolder);
+    }
+
     protected static final class WizardResumeState {
         final BinUserConfig cfg;
         final boolean[][] customSettings;
         final int stepIndex;
         final String stepLabel;
         final List<String> progressLines;
+        final long lastUpdatedMillis;
 
         WizardResumeState(BinUserConfig cfg, boolean[][] customSettings,
-                          int stepIndex, String stepLabel, List<String> progressLines) {
+                          int stepIndex, String stepLabel, List<String> progressLines,
+                          long lastUpdatedMillis) {
             this.cfg = cfg;
             this.customSettings = copySettings(customSettings);
             this.stepIndex = stepIndex;
@@ -1339,11 +1342,12 @@ public class CreateBinFileAnalysis implements Analysis {
             this.progressLines = progressLines == null
                     ? Collections.<String>emptyList()
                     : new ArrayList<String>(progressLines);
+            this.lastUpdatedMillis = lastUpdatedMillis;
         }
     }
 
     WizardResumeState readWizardResumeState(File binFolder) {
-        ChannelConfig channelConfig = ChannelConfigIO.read(FlashProjectLayout.settingsDir(binFolder));
+        ChannelConfig channelConfig = ChannelConfigIO.read(channelConfigSettingsDir(binFolder));
         if (channelConfig == null || channelConfig.channels == null || channelConfig.channels.isEmpty()
                 || allPropertiesHaveStatus(channelConfig, ChannelConfig.PropertyStatus.COMMITTED)) {
             return null;
@@ -1354,7 +1358,8 @@ public class CreateBinFileAnalysis implements Analysis {
                 customSettingsFromExtras(channelConfig.extras),
                 stepIndex,
                 stringExtra(channelConfig.extras, EXTRA_LAST_STEP_LABEL, wizardStepLabel(stepIndex)),
-                buildProgressLines(channelConfig, stepIndex));
+                buildProgressLines(channelConfig, stepIndex),
+                channelConfig.writtenAtMillis);
     }
 
     private void persistIncremental(File binFolder, BinUserConfig user, boolean[][] customSettings,
@@ -1377,7 +1382,7 @@ public class CreateBinFileAnalysis implements Analysis {
                     markPropertyCommit(channel, propertyKeys[i], ChannelConfig.PropertyStatus.CONFIGURED);
                 }
             }
-            ChannelConfigIO.write(FlashProjectLayout.settingsDir(binFolder), cc);
+            ChannelConfigIO.writeWithDerivedLegacy(channelConfigSettingsDir(binFolder), cc);
         } catch (IOException e) {
             IJ.log("FLASH: incremental config write failed: " + e.getMessage());
         }
@@ -1391,7 +1396,7 @@ public class CreateBinFileAnalysis implements Analysis {
             markAllKnown(channel, ChannelConfig.PropertyStatus.COMMITTED);
         }
         try {
-            ChannelConfigIO.write(FlashProjectLayout.settingsDir(binFolder), cc);
+            ChannelConfigIO.writeWithDerivedLegacy(channelConfigSettingsDir(binFolder), cc);
         } catch (IOException e) {
             IJ.log("FLASH: final config write failed: " + e.getMessage());
             throw new RuntimeException(e);
@@ -1402,7 +1407,7 @@ public class CreateBinFileAnalysis implements Analysis {
                                             int stepIndex, String stepLabel,
                                             int channelIndex, String propertyKey,
                                             ChannelConfig.PropertyStatus status) {
-        File settingsDir = FlashProjectLayout.settingsDir(binFolder);
+        File settingsDir = channelConfigSettingsDir(binFolder);
         ChannelConfig existing = ChannelConfigIO.read(settingsDir);
         ChannelConfig next = ChannelConfigIO.fromBinUserConfig(user);
         next.writerId = "FLASH";
@@ -8380,26 +8385,18 @@ public class CreateBinFileAnalysis implements Analysis {
     }
 
     private void writeBinConfigFiles(File binFolder, BinUserConfig cfg) throws IOException {
-        Path channelData = binFolder.toPath().resolve("Channel_Data.txt");
-        List<String> filterPresetTokens = new ArrayList<String>();
-        for (int i = 0; i < cfg.filterPresets.size(); i++) {
-            filterPresetTokens.add(BinConfigIO.encodeFilterPresetToken(
-                    safeFilterPresetSelection(cfg.filterPresets.get(i), "Custom")));
+        ChannelConfig cc = ChannelConfigIO.fromBinUserConfig(cfg);
+        cc.writerId = "FLASH";
+        cc.writtenAtMillis = System.currentTimeMillis();
+        cc.clickCaptureUsed = new File(binFolder, "Clicks.json").isFile();
+        for (int i = 0; i < cc.channels.size(); i++) {
+            ChannelConfig.Channel channel = cc.channels.get(i);
+            if (cfg != null && cfg.filterPresets != null && i < cfg.filterPresets.size()) {
+                channel.filterPreset = safeFilterPresetSelection(cfg.filterPresets.get(i), "Custom");
+            }
+            markAllKnown(channel, ChannelConfig.PropertyStatus.COMMITTED);
         }
-        List<String> lines = new ArrayList<String>(10);
-        lines.add(String.join("\t", cfg.names));
-        lines.add(String.join("\t", cfg.colors));
-        lines.add(String.join("\t", cfg.objectThresholds));
-        lines.add(String.join("\t", cfg.sizes));
-        lines.add(String.join("\t", cfg.minmax));
-        lines.add(String.join("\t", cfg.intensityThresholds));
-        lines.add(String.join("\t", cfg.segmentationMethods));
-        lines.add(String.join("\t", filterPresetTokens));
-        lines.add(ZSliceConfigIO.modeLine(cfg.zSliceMode));
-        lines.add(BinConfigIO.clicksModeLine(new File(binFolder, "Clicks.json").isFile()));
-        BinConfigIO.writeAtomic(channelData, lines);
-        ZSliceConfigIO.writeSelections(binFolder, cfg.getZSliceConfig());
-        writeChannelIdentities(binFolder, cfg);
+        ChannelConfigIO.writeWithDerivedLegacy(channelConfigSettingsDir(binFolder), cc);
         File projectRoot = projectRootForConfigurationDir(binFolder);
         AnalysisStatusScanner.writeSidecar(projectRoot,
                 AnalysisStatusScanner.CREATE_BIN_ID,

@@ -239,7 +239,20 @@ public class BinConfigIO {
             throw new IOException("Failed to create " + binFolder.getAbsolutePath());
         }
 
-        List<String> lines = new ArrayList<String>();
+        List<String> lines = toLines(safe, safe.clickConfigPresent || clicksFileExists(binFolder));
+
+        writeAtomic(layout.channelDataWriteFile().toPath(), lines);
+        ZSliceConfigIO.writeSelections(binFolder, new ZSliceConfig(safe.zSliceMode, safe.zSliceSelections));
+        writeFilterMacrosFromConfig(binFolder, safe);
+    }
+
+    public static List<String> toLines(BinConfig cfg) {
+        BinConfig safe = cfg == null ? new BinConfig() : cfg;
+        return toLines(safe, safe.clickConfigPresent);
+    }
+
+    private static List<String> toLines(BinConfig safe, boolean clicksPresent) {
+        List<String> lines = new ArrayList<String>(10);
         lines.add(joinTokens(safe.channelNames));
         lines.add(joinTokens(safe.channelColors));
         lines.add(joinTokens(safe.channelThresholds));
@@ -254,11 +267,8 @@ public class BinConfigIO {
         }
         lines.add(joinTokens(filterPresetTokens));
         lines.add(ZSliceConfigIO.modeLine(safe.zSliceMode));
-        lines.add(clicksModeLine(clicksFileExists(binFolder)));
-
-        writeAtomic(layout.channelDataWriteFile().toPath(), lines);
-        ZSliceConfigIO.writeSelections(binFolder, new ZSliceConfig(safe.zSliceMode, safe.zSliceSelections));
-        writeFilterMacrosFromConfig(binFolder, safe);
+        lines.add(clicksModeLine(clicksPresent));
+        return lines;
     }
 
     /**

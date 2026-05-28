@@ -2,6 +2,8 @@ package flash.pipeline.bin;
 
 import flash.pipeline.zslice.ZSliceMode;
 import flash.pipeline.zslice.ZSliceRange;
+import flash.pipeline.zslice.ZSliceConfig;
+import flash.pipeline.zslice.ZSliceConfigIO;
 import flash.pipeline.zslice.ZSliceSelection;
 import ij.IJ;
 
@@ -10,6 +12,7 @@ import java.io.IOException;
 import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -38,6 +41,24 @@ public final class ChannelConfigIO {
         }
         BinConfigIO.writeAtomic(new File(settingsDir, FILE_NAME).toPath(),
                 Arrays.asList(ChannelConfigCodec.encode(cfg)));
+    }
+
+    public static void writeWithDerivedLegacy(File settingsDir, ChannelConfig cfg) throws IOException {
+        write(settingsDir, cfg);
+        if (settingsDir == null) {
+            return;
+        }
+
+        File channelData = new File(settingsDir, "Channel_Data.txt");
+        if (hasCompleteChannel(cfg)) {
+            BinConfigIO.writeAtomic(channelData.toPath(), BinConfigIO.toLines(toBinConfig(cfg)));
+        } else {
+            Files.deleteIfExists(channelData.toPath());
+            Files.deleteIfExists(new File(settingsDir, "Channel_Data.txt.tmp").toPath());
+        }
+
+        ZSliceConfigIO.writeSelections(settingsDir, zSliceConfigFromConfig(cfg));
+        writeChannelIdentitiesFromConfig(settingsDir, cfg);
     }
 
     public static ChannelConfig read(File settingsDir) {
@@ -167,6 +188,29 @@ public final class ChannelConfigIO {
         return true;
     }
 
+    static boolean hasCompleteChannel(ChannelConfig cfg) {
+        if (cfg == null || cfg.channels == null || cfg.channels.isEmpty()) {
+            return false;
+        }
+        for (int i = 0; i < cfg.channels.size(); i++) {
+            ChannelConfig.Channel channel = cfg.channels.get(i);
+            if (channel == null) {
+                continue;
+            }
+            boolean complete = true;
+            for (int p = 0; p < PROPERTIES.size(); p++) {
+                if (statusOf(channel, PROPERTIES.get(p)) == ChannelConfig.PropertyStatus.PENDING) {
+                    complete = false;
+                    break;
+                }
+            }
+            if (complete) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static File file(File settingsDir) {
         return settingsDir == null ? null : new File(settingsDir, FILE_NAME);
     }
@@ -217,6 +261,47 @@ public final class ChannelConfigIO {
                 cfg.zSliceSelections.put(String.valueOf(selection.seriesIndex), selection.range);
             }
         }
+    }
+
+    private static ZSliceConfig zSliceConfigFromConfig(ChannelConfig cfg) {
+        LinkedHashMap<Integer, ZSliceSelection> selections = new LinkedHashMap<Integer, ZSliceSelection>();
+        if (cfg != null && cfg.zSliceSelections != null) {
+            for (Map.Entry<String, ZSliceRange> entry : cfg.zSliceSelections.entrySet()) {
+                Integer seriesIndex = parseInteger(entry.getKey());
+                ZSliceRange range = entry.getValue();
+                if (seriesIndex == null || range == null) {
+                    continue;
+                }
+                selections.put(seriesIndex, new ZSliceSelection(
+                        seriesIndex.intValue(), "", range.endSlice, range));
+            }
+        }
+        ZSliceMode mode = cfg == null || cfg.zSliceMode == null ? ZSliceMode.FULL : cfg.zSliceMode;
+        return new ZSliceConfig(mode, selections);
+    }
+
+    private static void writeChannelIdentitiesFromConfig(File settingsDir, ChannelConfig cfg) throws IOException {
+        List<ChannelIdentities.Entry> entries = new ArrayList<ChannelIdentities.Entry>();
+        if (cfg != null && cfg.channels != null) {
+            for (int i = 0; i < cfg.channels.size(); i++) {
+                ChannelConfig.Channel channel = cfg.channels.get(i);
+                if (channel == null || channel.markerId == null || channel.markerId.trim().isEmpty()) {
+                    continue;
+                }
+                entries.add(new ChannelIdentities.Entry(
+                        i,
+                        channel.markerId,
+                        channel.markerShape,
+                        channel.markerCrowdingSensitive));
+            }
+        }
+        if (entries.isEmpty()) {
+            if (settingsDir != null) {
+                Files.deleteIfExists(new File(settingsDir, ChannelIdentitiesIO.FILE_NAME).toPath());
+            }
+            return;
+        }
+        ChannelIdentitiesIO.write(settingsDir, new ChannelIdentities(entries));
     }
 
     private static void markCommitted(ChannelConfig.Channel channel) {

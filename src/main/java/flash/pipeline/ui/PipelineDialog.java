@@ -173,6 +173,13 @@ public class PipelineDialog {
         backButton.addActionListener(e -> { wasBackPressed = true; wasCanceled = true; dialog.dispose(); });
         okButton.addActionListener(e -> { wasCanceled = false; dialog.dispose(); });
         cancelButton.addActionListener(e -> requestCancelClose());
+        dialog.getRootPane().getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW)
+                .put(KeyStroke.getKeyStroke("ESCAPE"), "cancelDialog");
+        dialog.getRootPane().getActionMap().put("cancelDialog", new AbstractAction() {
+            @Override public void actionPerformed(java.awt.event.ActionEvent e) {
+                requestCancelClose();
+            }
+        });
         backButton.setVisible(false);
         rightButtonPanel.add(backButton);
         rightButtonPanel.add(cancelButton);
@@ -967,6 +974,11 @@ public class PipelineDialog {
     /** Enables or disables the primary default button. */
     public void setPrimaryButtonEnabled(boolean enabled) {
         okButton.setEnabled(enabled);
+    }
+
+    public void focusPrimaryButtonOnShow() {
+        dialog.getRootPane().setDefaultButton(okButton);
+        requestFocusOnShow(okButton);
     }
 
     /** Makes this dialog modeless so image windows remain interactive while it is open. */
