@@ -17,6 +17,7 @@ import java.awt.event.WindowEvent;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.function.Supplier;
 
 /**
  * Custom dialog with modern toggle switches instead of plain AWT checkboxes.
@@ -68,6 +69,7 @@ public class PipelineDialog {
     private boolean customLocation = false;
     private Phase currentPhase;
     private String breadcrumbStepText;
+    private Supplier<Boolean> cancelConfirmation;
 
     // Ordered lists for retrieval
     private final List<ToggleSwitch> toggles = new ArrayList<ToggleSwitch>();
@@ -119,7 +121,12 @@ public class PipelineDialog {
         dialog = owner == null
                 ? new JDialog((Frame) null, title, true)
                 : new JDialog(owner, title, Dialog.ModalityType.APPLICATION_MODAL);
-        dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+        dialog.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
+        dialog.addWindowListener(new WindowAdapter() {
+            @Override public void windowClosing(WindowEvent e) {
+                requestCancelClose();
+            }
+        });
         java.awt.image.BufferedImage brand = flash.pipeline.ui.FlashIcons.brandImage(32);
         if (brand != null) dialog.setIconImage(brand);
 
@@ -165,7 +172,7 @@ public class PipelineDialog {
         styleActionButton(cancelButton, CANCEL_ACTION_BG, CANCEL_ACTION_FG, CANCEL_ACTION_BORDER);
         backButton.addActionListener(e -> { wasBackPressed = true; wasCanceled = true; dialog.dispose(); });
         okButton.addActionListener(e -> { wasCanceled = false; dialog.dispose(); });
-        cancelButton.addActionListener(e -> { wasCanceled = true; dialog.dispose(); });
+        cancelButton.addActionListener(e -> requestCancelClose());
         backButton.setVisible(false);
         rightButtonPanel.add(backButton);
         rightButtonPanel.add(cancelButton);
@@ -181,6 +188,10 @@ public class PipelineDialog {
     /** Returns the backing Swing window for owned child dialogs. */
     public Window getWindow() {
         return dialog;
+    }
+
+    public void setCancelConfirmation(Supplier<Boolean> shouldExitCancelFlow) {
+        this.cancelConfirmation = shouldExitCancelFlow;
     }
 
     /**
@@ -924,6 +935,12 @@ public class PipelineDialog {
 
     public boolean wasCanceled() {
         return wasCanceled;
+    }
+
+    private void requestCancelClose() {
+        if (cancelConfirmation != null && !cancelConfirmation.get()) return;
+        wasCanceled = true;
+        dialog.dispose();
     }
 
     /** Enables the Back button on this dialog. */
