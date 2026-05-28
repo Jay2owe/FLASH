@@ -69,30 +69,45 @@ public class DeferredImageSupplierMultiContainerTest {
     }
 
     @Test
-    public void outOfRangeIncludeIndexesAreDroppedSilently() {
-        DeferredImageSupplier s = DeferredImageSupplier.multiContainerForTests(
-                Arrays.asList(A),
-                new int[]{3},
-                Arrays.<List<Integer>>asList(
-                        Arrays.asList(Integer.valueOf(0), Integer.valueOf(99), Integer.valueOf(2))));
-
-        // 99 is dropped; 0 and 2 survive.
-        assertEquals(2, s.getTotalSeries());
-        assertSame(A, s.getContainerFileForSeries(0));
-        assertSame(A, s.getContainerFileForSeries(1));
-    }
-
-    @Test
-    public void allIncludesNarrowedToEmpty_throws() {
+    public void outOfRangeIncludeIndexesThrowClearly() {
         try {
             DeferredImageSupplier.multiContainerForTests(
                     Arrays.asList(A),
                     new int[]{3},
-                    Arrays.<List<Integer>>asList(Arrays.asList(Integer.valueOf(99))));
+                    Arrays.<List<Integer>>asList(
+                            Arrays.asList(Integer.valueOf(0), Integer.valueOf(99), Integer.valueOf(2))));
+            fail("Expected IllegalArgumentException");
+        } catch (IllegalArgumentException e) {
+            assertTrue(e.getMessage().contains("series index 99"));
+            assertTrue(e.getMessage().contains("total series 3"));
+        }
+    }
+
+    @Test
+    public void allContainersReportZeroSeries_throws() {
+        try {
+            DeferredImageSupplier.multiContainerForTests(
+                    Arrays.asList(A),
+                    new int[]{0},
+                    null);
             fail("Expected IllegalArgumentException");
         } catch (IllegalArgumentException e) {
             assertTrue(e.getMessage().contains("no series remain"));
         }
+    }
+
+    @Test
+    public void zeroSeriesContainerBeforeValidContainer_routesValidContainer() {
+        DeferredImageSupplier s = DeferredImageSupplier.multiContainerForTests(
+                Arrays.asList(A, B),
+                new int[]{0, 2},
+                Arrays.<List<Integer>>asList(
+                        Collections.<Integer>emptyList(),
+                        Collections.<Integer>emptyList()));
+
+        assertEquals(2, s.getTotalSeries());
+        assertSame(B, s.getContainerFileForSeries(0));
+        assertSame(B, s.getContainerFileForSeries(1));
     }
 
     @Test

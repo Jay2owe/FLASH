@@ -175,9 +175,9 @@ public class DeferredImageSupplier {
                 for (Integer s : included) {
                     if (s == null) continue;
                     int local = s.intValue();
-                    if (local >= 0 && local < totalInContainer) {
-                        refs.add(new SeriesRef(c, local));
-                    }
+                    validateIncludedSeriesIndex(
+                            "multiContainer", container, c, local, totalInContainer);
+                    refs.add(new SeriesRef(c, local));
                 }
             }
         }
@@ -219,7 +219,9 @@ public class DeferredImageSupplier {
                 for (Integer s : include) {
                     if (s == null) continue;
                     int local = s.intValue();
-                    if (local >= 0 && local < total) refs.add(new SeriesRef(c, local));
+                    validateIncludedSeriesIndex(
+                            "multiContainerForTests", containers.get(c), c, local, total);
+                    refs.add(new SeriesRef(c, local));
                 }
             }
         }
@@ -230,8 +232,57 @@ public class DeferredImageSupplier {
         return new DeferredImageSupplier(containers, perContainerSeriesCounts, Collections.unmodifiableList(refs));
     }
 
+    private static void validateIncludedSeriesIndex(String context, File container,
+                                                    int containerIndex, int local,
+                                                    int totalInContainer) {
+        if (local >= 0 && local < totalInContainer) {
+            return;
+        }
+        String label = container == null ? ("container " + containerIndex) : container.getName();
+        throw new IllegalArgumentException(
+                context + ": series index " + local + " is out of range for "
+                        + label + " (container index " + containerIndex
+                        + ", total series " + totalInContainer + ")");
+    }
+
+    private static void validateResolvedRoutingTable(List<File> containers,
+                                                     int[] localCounts,
+                                                     List<SeriesRef> resolvedRefs) {
+        if (containers == null || containers.isEmpty()) {
+            throw new IllegalArgumentException("multiContainer: containers required");
+        }
+        if (localCounts == null || localCounts.length != containers.size()) {
+            throw new IllegalArgumentException(
+                    "multiContainer: local series-count table must match container count");
+        }
+        if (resolvedRefs == null || resolvedRefs.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "multiContainer: no series remain after applying per-container series filters");
+        }
+        for (int c = 0; c < localCounts.length; c++) {
+            if (localCounts[c] < 0) {
+                throw new IllegalArgumentException(
+                        "multiContainer: negative series count for container index " + c);
+            }
+        }
+        for (SeriesRef ref : resolvedRefs) {
+            if (ref == null) {
+                throw new IllegalArgumentException("multiContainer: routing table contains a null series ref");
+            }
+            if (ref.containerIndex < 0 || ref.containerIndex >= containers.size()) {
+                throw new IllegalArgumentException(
+                        "multiContainer: routing table container index out of range: "
+                                + ref.containerIndex);
+            }
+            validateIncludedSeriesIndex("multiContainer routing table",
+                    containers.get(ref.containerIndex), ref.containerIndex,
+                    ref.localSeriesIndex, localCounts[ref.containerIndex]);
+        }
+    }
+
     /** Internal constructor for the multiContainer factory. */
     private DeferredImageSupplier(List<File> containers, int[] localCounts, List<SeriesRef> resolvedRefs) {
+        validateResolvedRoutingTable(containers, localCounts, resolvedRefs);
         this.mode = Mode.CONTAINER;
         this.containerFiles = Collections.unmodifiableList(new ArrayList<File>(containers));
         this.containerFile = this.containerFiles.get(0);
@@ -240,7 +291,7 @@ public class DeferredImageSupplier {
                 ? this.containerFiles.get(0).getName()
                 : this.containerFiles.get(0).getName() + " (+" + (this.containerFiles.size() - 1) + " more)";
         this.containerSeriesCounts = localCounts.clone();
-        this.seriesRefs = resolvedRefs;
+        this.seriesRefs = Collections.unmodifiableList(new ArrayList<SeriesRef>(resolvedRefs));
         this.totalSeries = resolvedRefs.size();
     }
 
@@ -483,6 +534,12 @@ public class DeferredImageSupplier {
     private ImagePlus openContainerSeries(SeriesRef ref, boolean virtual, int channelIndex) throws Exception {
         File container = containerFiles.get(ref.containerIndex);
         int localTotal = containerSeriesCounts[ref.containerIndex];
+        if (ref.localSeriesIndex < 0 || ref.localSeriesIndex >= localTotal) {
+            throw new IllegalStateException(
+                    "CONTAINER routing table points to local series "
+                            + ref.localSeriesIndex + " in " + container.getName()
+                            + ", but that container reports " + localTotal + " series.");
+        }
 
         ImporterOptions options = new ImporterOptions();
         options.setId(container.getAbsolutePath());
