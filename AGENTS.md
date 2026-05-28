@@ -22,7 +22,7 @@ There is also an Obsidian-format vault at `graphify-out/obsidian/` with one note
 ## Build
 
 ```bash
-export JAVA_HOME="/c/Program Files/Java/jdk-25.0.2"
+export JAVA_HOME="/c/Users/Owner/OneDrive - Imperial College London/ImageJ/Experiments/First Experiment Round/Combined/Oracle_JDK-23"
 bash mvnw clean package -Denforcer.skip=true
 ```
 
