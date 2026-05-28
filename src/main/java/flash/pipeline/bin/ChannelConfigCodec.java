@@ -14,6 +14,7 @@ import java.util.Map;
 public final class ChannelConfigCodec {
     private static final int SCHEMA_VERSION = 1;
 
+    private static final String K_COMMENT = "_comment";
     private static final String K_SCHEMA_VERSION = "schemaVersion";
     private static final String K_WRITER_ID = "writerId";
     private static final String K_WRITTEN_AT_MILLIS = "writtenAtMillis";
@@ -59,6 +60,7 @@ public final class ChannelConfigCodec {
 
     private static Map<String, Object> toJsonObject(ChannelConfig cfg) {
         Map<String, Object> root = JsonIO.object();
+        appendComment(root, cfg.extras);
         root.put(K_SCHEMA_VERSION, Integer.valueOf(cfg.schemaVersion));
         root.put(K_WRITER_ID, cfg.writerId);
         root.put(K_WRITTEN_AT_MILLIS, Long.valueOf(cfg.writtenAtMillis));
@@ -97,6 +99,7 @@ public final class ChannelConfigCodec {
                 continue;
             }
             Map<String, Object> row = JsonIO.object();
+            appendComment(row, channel.extras);
             row.put(K_INDEX, Integer.valueOf(channel.index));
             row.put(K_NAME, channel.name);
             row.put(K_COLOR, channel.color);
@@ -252,6 +255,12 @@ public final class ChannelConfigCodec {
         }
     }
 
+    private static void appendComment(Map<String, Object> target, Map<String, Object> extras) {
+        if (extras != null && extras.containsKey(K_COMMENT)) {
+            target.put(K_COMMENT, extras.get(K_COMMENT));
+        }
+    }
+
     private static Map<String, Boolean> rootKnownKeys() {
         Map<String, Boolean> keys = new LinkedHashMap<String, Boolean>();
         keys.put(K_SCHEMA_VERSION, Boolean.TRUE);
@@ -307,6 +316,13 @@ public final class ChannelConfigCodec {
                     break;
                 case '{':
                 case '[':
+                    if (i + 1 < json.length()
+                            && ((ch == '{' && json.charAt(i + 1) == '}')
+                            || (ch == '[' && json.charAt(i + 1) == ']'))) {
+                        out.append(ch).append(json.charAt(i + 1));
+                        i++;
+                        break;
+                    }
                     out.append(ch);
                     indent++;
                     newline(out, indent);

@@ -42,8 +42,10 @@ Project/
 |-- Configuration/
 |   `-- Segmentation Models/
 `-- FLASH/
-    |-- Set Up Configuration/
+    |-- Config/
     |   `-- .settings/
+    |       |-- channel_config.json
+    |       `-- Channel_Data.txt
     |-- Results/
     |   |-- START_HERE.html
     |   |-- Summary.xlsx
@@ -84,6 +86,8 @@ The main dialog groups modules into setup, image preparation, display, image ana
 Interactive configuration quality checks use an embedded FLASH preview screen instead of separate native ImageJ Brightness/Contrast, Threshold, or 3D Objects Counter windows. The preview keeps the original image stacked above the adjusted or output image, and **Large view** opens a bigger raw-vs-adjusted comparison where that helps.
 
 Display min/max and threshold controls update the preview live. Filter parameters, StarDist, Cellpose, and 3D object previews rerun only from their explicit preview buttons.
+
+Configuration is stored in `FLASH/Config/.settings/channel_config.json`; `Channel_Data.txt` in the same folder is a derived compatibility projection for downstream analyses. Cancelling setup offers Save & Exit, Keep Working, or Discard & Exit so partial progress can be resumed.
 
 ### Segmentation Models And Click Training
 

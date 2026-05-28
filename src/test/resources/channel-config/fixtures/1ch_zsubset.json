@@ -1,0 +1,49 @@
+{
+  "_comment": "1-channel configuration with Z-slice subset selections for three series.",
+  "schemaVersion": 1,
+  "writerId": "FLASH stage 08 fixture",
+  "writtenAtMillis": 1700000003000,
+  "channels": [
+    {
+      "index": 0,
+      "name": "DAPI",
+      "color": "Blue",
+      "markerId": "dapi",
+      "markerShape": "nucleus",
+      "markerCrowdingSensitive": false,
+      "threshold": "default",
+      "size": "100-Infinity",
+      "minmax": "None",
+      "intensityThreshold": "default",
+      "segmentationMethod": "classical",
+      "filterPreset": "Default",
+      "status": {
+        "name": "committed",
+        "color": "committed",
+        "marker": "committed",
+        "threshold": "committed",
+        "size": "committed",
+        "minmax": "committed",
+        "intensityThreshold": "committed",
+        "segmentation": "committed",
+        "filter": "committed"
+      }
+    }
+  ],
+  "zSliceMode": "PER_IMAGE",
+  "zSliceSelections": {
+    "0": {
+      "startSlice": 2,
+      "endSlice": 8
+    },
+    "1": {
+      "startSlice": 4,
+      "endSlice": 10
+    },
+    "2": {
+      "startSlice": 6,
+      "endSlice": 12
+    }
+  },
+  "clickCaptureUsed": false
+}

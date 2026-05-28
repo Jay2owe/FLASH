@@ -1,0 +1,111 @@
+{
+  "_comment": "4-channel mixed-status configuration preserving Cellpose and nested trained-RF segmentation tokens.",
+  "schemaVersion": 1,
+  "writerId": "FLASH stage 08 fixture",
+  "writtenAtMillis": 1700000002000,
+  "channels": [
+    {
+      "index": 0,
+      "name": "DAPI",
+      "color": "Blue",
+      "markerId": "dapi",
+      "markerShape": "nucleus",
+      "markerCrowdingSensitive": false,
+      "threshold": "default",
+      "size": "100-Infinity",
+      "minmax": "None",
+      "intensityThreshold": "default",
+      "segmentationMethod": "classical",
+      "filterPreset": "Default",
+      "status": {
+        "name": "committed",
+        "color": "committed",
+        "marker": "committed",
+        "threshold": "committed",
+        "size": "committed",
+        "minmax": "committed",
+        "intensityThreshold": "committed",
+        "segmentation": "committed",
+        "filter": "committed"
+      }
+    },
+    {
+      "index": 1,
+      "name": "IBA1",
+      "color": "Green",
+      "markerId": "iba1",
+      "markerShape": "cell",
+      "markerCrowdingSensitive": true,
+      "threshold": "425",
+      "size": "60-6000",
+      "minmax": "0-4095",
+      "intensityThreshold": "225",
+      "segmentationMethod": "cellpose:30.0:0.4:0.0:gpu=false:chan2=0:model=cellpose_cyto3",
+      "filterPreset": "Ramified Cells (Microglia/Astrocytes)",
+      "status": {
+        "name": "committed",
+        "color": "committed",
+        "marker": "committed",
+        "threshold": "committed",
+        "size": "committed",
+        "minmax": "committed",
+        "intensityThreshold": "committed",
+        "segmentation": "committed",
+        "filter": "committed"
+      }
+    },
+    {
+      "index": 2,
+      "name": "GFAP",
+      "color": "Magenta",
+      "markerId": "gfap",
+      "markerShape": "process",
+      "markerCrowdingSensitive": false,
+      "threshold": "500",
+      "size": "75-6500",
+      "minmax": "100-3500",
+      "intensityThreshold": "275",
+      "segmentationMethod": "cellpose:24.0:0.35:-0.2:gpu=true:chan2=1:model=cellpose_nuclei",
+      "filterPreset": "Overlapping Cellular Marker",
+      "status": {
+        "name": "configured",
+        "color": "configured",
+        "marker": "configured",
+        "threshold": "configured",
+        "size": "configured",
+        "minmax": "configured",
+        "intensityThreshold": "configured",
+        "segmentation": "configured",
+        "filter": "configured"
+      }
+    },
+    {
+      "index": 3,
+      "name": "NeuN",
+      "color": "Red",
+      "markerId": "neun",
+      "markerShape": "nucleus",
+      "markerCrowdingSensitive": false,
+      "threshold": "650",
+      "size": "80-7000",
+      "minmax": "150-3800",
+      "intensityThreshold": "325",
+      "segmentationMethod": "trained_rf:rf_cellpose_cleanup:base=cellpose%3A24.0%3A0.35%3A-0.2%3Agpu%3Dtrue%3Achan2%3D0%3Amodel%3Dcellpose_nuclei",
+      "filterPreset": "Default",
+      "status": {
+        "name": "committed",
+        "color": "committed",
+        "marker": "committed",
+        "threshold": "committed",
+        "size": "committed",
+        "minmax": "committed",
+        "intensityThreshold": "committed",
+        "segmentation": "configured",
+        "filter": "committed"
+      }
+    }
+  ],
+  "zSliceMode": "FULL",
+  "zSliceSelections": {},
+  "clickCaptureUsed": true
+}

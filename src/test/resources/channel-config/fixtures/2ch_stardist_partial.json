@@ -1,0 +1,61 @@
+{
+  "_comment": "2-channel partial configuration: channel 1 is committed StarDist, channel 2 still has threshold and size pending.",
+  "schemaVersion": 1,
+  "writerId": "FLASH stage 08 fixture",
+  "writtenAtMillis": 1700000001000,
+  "channels": [
+    {
+      "index": 0,
+      "name": "DAPI",
+      "color": "Blue",
+      "markerId": "dapi",
+      "markerShape": "nucleus",
+      "markerCrowdingSensitive": false,
+      "threshold": "default",
+      "size": "100-Infinity",
+      "minmax": "None",
+      "intensityThreshold": "default",
+      "segmentationMethod": "stardist:0.62:0.31:linking=4.0:gapClosing=7.0:frameGap=2:area=20.0-Infinity:quality=0.25:intensity=80.0:model=stardist_dsb2018",
+      "filterPreset": "Default",
+      "status": {
+        "name": "committed",
+        "color": "committed",
+        "marker": "committed",
+        "threshold": "committed",
+        "size": "committed",
+        "minmax": "committed",
+        "intensityThreshold": "committed",
+        "segmentation": "committed",
+        "filter": "committed"
+      }
+    },
+    {
+      "index": 1,
+      "name": "IBA1",
+      "color": "Green",
+      "markerId": "iba1",
+      "markerShape": "cell",
+      "markerCrowdingSensitive": true,
+      "threshold": "",
+      "size": "",
+      "minmax": "0-4095",
+      "intensityThreshold": "250",
+      "segmentationMethod": "classical",
+      "filterPreset": "Punctate Signal / High Background",
+      "status": {
+        "name": "configured",
+        "color": "configured",
+        "marker": "configured",
+        "threshold": "pending",
+        "size": "pending",
+        "minmax": "configured",
+        "intensityThreshold": "configured",
+        "segmentation": "configured",
+        "filter": "configured"
+      }
+    }
+  ],
+  "zSliceMode": "FULL",
+  "zSliceSelections": {},
+  "clickCaptureUsed": false
+}

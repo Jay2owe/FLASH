@@ -1,0 +1,86 @@
+{
+  "_comment": "3-channel all-committed classical configuration paired with a derived Channel_Data.txt golden file.",
+  "schemaVersion": 1,
+  "writerId": "FLASH stage 08 fixture",
+  "writtenAtMillis": 1700000000000,
+  "channels": [
+    {
+      "index": 0,
+      "name": "DAPI",
+      "color": "Blue",
+      "markerId": "dapi",
+      "markerShape": "nucleus",
+      "markerCrowdingSensitive": false,
+      "threshold": "default",
+      "size": "100-Infinity",
+      "minmax": "None",
+      "intensityThreshold": "default",
+      "segmentationMethod": "classical",
+      "filterPreset": "Default",
+      "status": {
+        "name": "committed",
+        "color": "committed",
+        "marker": "committed",
+        "threshold": "committed",
+        "size": "committed",
+        "minmax": "committed",
+        "intensityThreshold": "committed",
+        "segmentation": "committed",
+        "filter": "committed"
+      }
+    },
+    {
+      "index": 1,
+      "name": "IBA1",
+      "color": "Green",
+      "markerId": "iba1",
+      "markerShape": "cell",
+      "markerCrowdingSensitive": true,
+      "threshold": "450",
+      "size": "50-5000",
+      "minmax": "0-4095",
+      "intensityThreshold": "250",
+      "segmentationMethod": "classical",
+      "filterPreset": "Punctate Signal / High Background",
+      "status": {
+        "name": "committed",
+        "color": "committed",
+        "marker": "committed",
+        "threshold": "committed",
+        "size": "committed",
+        "minmax": "committed",
+        "intensityThreshold": "committed",
+        "segmentation": "committed",
+        "filter": "committed"
+      }
+    },
+    {
+      "index": 2,
+      "name": "GFAP",
+      "color": "Magenta",
+      "markerId": "gfap",
+      "markerShape": "process",
+      "markerCrowdingSensitive": false,
+      "threshold": "600",
+      "size": "75-6500",
+      "minmax": "100-3500",
+      "intensityThreshold": "300",
+      "segmentationMethod": "classical",
+      "filterPreset": "Ramified Cells (Microglia/Astrocytes)",
+      "status": {
+        "name": "committed",
+        "color": "committed",
+        "marker": "committed",
+        "threshold": "committed",
+        "size": "committed",
+        "minmax": "committed",
+        "intensityThreshold": "committed",
+        "segmentation": "committed",
+        "filter": "committed"
+      }
+    }
+  ],
+  "zSliceMode": "FULL",
+  "zSliceSelections": {},
+  "clickCaptureUsed": false
+}
