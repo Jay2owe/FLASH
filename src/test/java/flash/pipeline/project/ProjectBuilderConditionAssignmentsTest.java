@@ -127,6 +127,33 @@ public class ProjectBuilderConditionAssignmentsTest {
         assertEquals("M", keys.get(2));
     }
 
+    @Test
+    public void mixedIncludedSourceTypes_detectsContainerPlusBareTiff() {
+        ProjectFile project = new ProjectFile();
+        project.items.add(sourceItem("D:/data/alpha.lif", true));
+        project.items.add(sourceItem("D:/data/beta.tif", true));
+
+        assertTrue(ProjectBuilderDialog.hasMixedIncludedSourceTypes(project));
+    }
+
+    @Test
+    public void mixedIncludedSourceTypes_ignoresExcludedRows() {
+        ProjectFile project = new ProjectFile();
+        project.items.add(sourceItem("D:/data/alpha.lif", true));
+        project.items.add(sourceItem("D:/data/beta.tif", false));
+
+        assertFalse(ProjectBuilderDialog.hasMixedIncludedSourceTypes(project));
+    }
+
+    @Test
+    public void mixedIncludedSourceTypes_treatsOmeTiffAsContainer() {
+        ProjectFile project = new ProjectFile();
+        project.items.add(sourceItem("D:/data/alpha.lif", true));
+        project.items.add(sourceItem("D:/data/beta.ome.tif", true));
+
+        assertFalse(ProjectBuilderDialog.hasMixedIncludedSourceTypes(project));
+    }
+
     private static ProjectFile projectWith(ProjectFile.Item... items) {
         ProjectFile project = new ProjectFile();
         for (ProjectFile.Item item : items) {
@@ -140,6 +167,13 @@ public class ProjectBuilderConditionAssignmentsTest {
         item.path = "/dummy/" + animalId + ".lif";
         item.animalId = animalId;
         item.condition = condition;
+        item.include = include;
+        return item;
+    }
+
+    private static ProjectFile.Item sourceItem(String path, boolean include) {
+        ProjectFile.Item item = new ProjectFile.Item();
+        item.path = path;
         item.include = include;
         return item;
     }

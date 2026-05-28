@@ -14,6 +14,7 @@ import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JFileChooser;
+import javax.swing.JList;
 import javax.swing.JLabel;
 import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
@@ -25,6 +26,7 @@ import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.TransferHandler;
+import javax.swing.ListSelectionModel;
 import javax.swing.WindowConstants;
 import javax.swing.filechooser.FileFilter;
 import java.awt.BorderLayout;
@@ -50,6 +52,7 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -95,6 +98,8 @@ public final class ProjectBuilderDialog {
                 t.setDaemon(true);
                 return t;
             });
+    private final AtomicInteger probeGeneration = new AtomicInteger();
+    private volatile boolean closed;
 
     private Result result;
 
@@ -141,6 +146,9 @@ public final class ProjectBuilderDialog {
         content.add(buildFooter(), BorderLayout.SOUTH);
 
         dialog.setContentPane(content);
+        if (suggestedSourceFolder != null) {
+            loadExistingProjectIfPresent(suggestedSourceFolder, false);
+        }
         dialog.pack();
         dialog.setMinimumSize(new Dimension(720, 480));
         dialog.setLocationRelativeTo(owner);
@@ -156,6 +164,8 @@ public final class ProjectBuilderDialog {
             dlg.dialog.setVisible(true);
             return dlg.result;
         } finally {
+            dlg.closed = true;
+            dlg.probeGeneration.incrementAndGet();
             dlg.probeExecutor.shutdownNow();
         }
     }
@@ -214,8 +224,11 @@ public final class ProjectBuilderDialog {
                 JFileChooser chooser = new JFileChooser();
                 chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
                 if (chooser.showOpenDialog(dialog) == JFileChooser.APPROVE_OPTION) {
-                    addFolderRecursively(chooser.getSelectedFile());
-                    seedOutputRootIfBlank(chooser.getSelectedFile());
+                    File selected = chooser.getSelectedFile();
+                    if (!loadExistingProjectIfPresent(selected, true)) {
+                        addFolderRecursively(selected);
+                        seedOutputRootIfBlank(selected);
+                    }
                 }
             }
         });
@@ -405,24 +418,35 @@ public final class ProjectBuilderDialog {
     }
 
     private void probeSeriesCountAsync(final int row, final File source) {
+        if (closed) return;
         final String lowered = source.getName().toLowerCase(Locale.ROOT);
         final boolean isContainer = isContainerExtension(lowered);
-        probeExecutor.submit(new SwingWorker<Integer, Void>() {
-            @Override protected Integer doInBackground() throws Exception {
-                if (!isContainer) return Integer.valueOf(1);
-                return Integer.valueOf(LifIO.getSeriesCount(source));
-            }
-            @Override protected void done() {
-                try {
-                    int count = get().intValue();
-                    if (row < model.getRowCount() && model.get(row).source.equals(source)) {
-                        model.setSeriesCount(row, count);
-                    }
-                } catch (Exception e) {
-                    IJ.log("[FLASH] Series probe failed for " + source.getName() + ": " + e.getMessage());
+        final int generation = probeGeneration.get();
+        try {
+            probeExecutor.submit(new SwingWorker<Integer, Void>() {
+                @Override protected Integer doInBackground() throws Exception {
+                    if (!isContainer) return Integer.valueOf(1);
+                    return Integer.valueOf(LifIO.getSeriesCount(source));
                 }
+                @Override protected void done() {
+                    if (closed || generation != probeGeneration.get() || !dialog.isDisplayable()) {
+                        return;
+                    }
+                    try {
+                        int count = get().intValue();
+                        if (row < model.getRowCount() && model.get(row).source.equals(source)) {
+                            model.setSeriesCount(row, count);
+                        }
+                    } catch (Exception e) {
+                        IJ.log("[FLASH] Series probe failed for " + source.getName() + ": " + e.getMessage());
+                    }
+                }
+            });
+        } catch (RejectedExecutionException e) {
+            if (!closed) {
+                IJ.log("[FLASH] Series probe was rejected for " + source.getName() + ": " + e.getMessage());
             }
-        });
+        }
     }
 
     private void openSeriesDialog(int rowIndex) {
@@ -488,39 +512,76 @@ public final class ProjectBuilderDialog {
                     "Recent projects", JOptionPane.INFORMATION_MESSAGE);
             return;
         }
-        String[] labels = new String[recents.size()];
+        final String[] labels = new String[recents.size()];
         for (int i = 0; i < recents.size(); i++) {
             RecentProject r = recents.get(i);
-            labels[i] = (r.name.isEmpty() ? "(unnamed)" : r.name) + " — " + r.path;
+            labels[i] = (r.name.isEmpty() ? "(unnamed)" : r.name) + " - " + r.path;
         }
-        String pick = (String) JOptionPane.showInputDialog(dialog,
-                "Choose a recent project:",
-                "Open recent",
-                JOptionPane.PLAIN_MESSAGE,
-                null, labels, labels[0]);
-        if (pick == null) return;
-        for (int i = 0; i < labels.length; i++) {
-            if (labels[i].equals(pick)) {
-                loadRecent(recents.get(i));
-                return;
-            }
+        JList<String> list = new JList<String>(labels);
+        list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        list.setSelectedIndex(0);
+        list.setVisibleRowCount(Math.min(12, labels.length));
+        JScrollPane scroll = new JScrollPane(list);
+        scroll.setPreferredSize(new Dimension(680, Math.min(300, 28 * labels.length + 24)));
+
+        int choice = JOptionPane.showConfirmDialog(dialog,
+                scroll, "Open recent", JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+        if (choice != JOptionPane.OK_OPTION || list.getSelectedIndex() < 0) {
+            return;
         }
+        loadRecent(recents.get(list.getSelectedIndex()));
     }
 
     private void loadRecent(RecentProject recent) {
         File projectJson = new File(recent.path);
         File settingsDir = projectJson.getParentFile();
+        File fallbackOutputRoot = FlashProjectLayout.projectRootForConfigurationDir(settingsDir);
+        loadProjectFromSettingsDir(settingsDir, fallbackOutputRoot, true);
+    }
+
+    private boolean loadExistingProjectIfPresent(File outputRoot, boolean promptIfModelHasRows) {
+        File settingsDir = existingProjectSettingsDir(outputRoot);
+        if (settingsDir == null) {
+            return false;
+        }
+        if (promptIfModelHasRows && model.getRowCount() > 0) {
+            int choice = JOptionPane.showConfirmDialog(dialog,
+                    "This folder already contains a FLASH project.\n"
+                            + "Open that project instead of adding source files from the folder?",
+                    "Open existing project", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
+            if (choice != JOptionPane.YES_OPTION) {
+                return false;
+            }
+        }
+        return loadProjectFromSettingsDir(settingsDir, outputRoot, promptIfModelHasRows);
+    }
+
+    private boolean loadProjectFromSettingsDir(File settingsDir, File fallbackOutputRoot, boolean showErrors) {
         ProjectFile loaded = ProjectFileIO.read(settingsDir);
         if (loaded == null) {
-            JOptionPane.showMessageDialog(dialog,
-                    "Could not read project file:\n" + projectJson.getAbsolutePath(),
-                    "Open failed", JOptionPane.WARNING_MESSAGE);
-            return;
+            if (showErrors) {
+                File projectJson = settingsDir == null ? null : new File(settingsDir, ProjectFileIO.FILE_NAME);
+                JOptionPane.showMessageDialog(dialog,
+                        "Could not read project file:\n"
+                                + (projectJson == null ? "(unknown)" : projectJson.getAbsolutePath()),
+                        "Open failed", JOptionPane.WARNING_MESSAGE);
+            }
+            return false;
         }
+        loadProject(loaded, fallbackOutputRoot);
+        return true;
+    }
+
+    private void loadProject(ProjectFile loaded, File fallbackOutputRoot) {
+        probeGeneration.incrementAndGet();
         model.clear();
         model.loadFromProjectFile(loaded);
         nameField.setText(loaded.name == null ? "" : loaded.name);
-        outputRootField.setText(loaded.outputRoot == null ? "" : loaded.outputRoot);
+        String outputRoot = loaded.outputRoot == null ? "" : loaded.outputRoot.trim();
+        if (outputRoot.isEmpty() && fallbackOutputRoot != null) {
+            outputRoot = fallbackOutputRoot.getAbsolutePath();
+        }
+        outputRootField.setText(outputRoot);
         // Re-probe series counts (counts are not persisted).
         for (int i = 0; i < model.getRowCount(); i++) {
             probeSeriesCountAsync(i, model.get(i).source);
@@ -548,6 +609,15 @@ public final class ProjectBuilderDialog {
         }
 
         File outputRoot = new File(outRoot);
+        ProjectFile project = model.toProjectFile(name, outputRoot.getAbsolutePath(), WRITER_ID);
+        if (hasMixedIncludedSourceTypes(project)) {
+            JOptionPane.showMessageDialog(dialog,
+                    "This project mixes multi-series container files and bare TIFF files.\n"
+                            + "Please save those source types as separate FLASH projects.",
+                    "Validation", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
         if (!outputRoot.exists() && !outputRoot.mkdirs()) {
             JOptionPane.showMessageDialog(dialog,
                     "Could not create output root:\n" + outputRoot.getAbsolutePath(),
@@ -569,7 +639,6 @@ public final class ProjectBuilderDialog {
             return;
         }
 
-        ProjectFile project = model.toProjectFile(name, outputRoot.getAbsolutePath(), WRITER_ID);
         File projectFile = new File(settingsDir, ProjectFileIO.FILE_NAME);
         try {
             ProjectFileIO.write(settingsDir, project);
@@ -638,6 +707,36 @@ public final class ProjectBuilderDialog {
         return n;
     }
 
+    static boolean hasMixedIncludedSourceTypes(ProjectFile project) {
+        boolean sawContainer = false;
+        boolean sawBareTiff = false;
+        if (project == null || project.items == null) return false;
+        for (ProjectFile.Item item : project.items) {
+            if (item == null || !item.include || item.path == null) continue;
+            String name = new File(item.path).getName().toLowerCase(Locale.ROOT);
+            if (isContainerExtension(name)) {
+                sawContainer = true;
+            } else if (isBareTiffExtension(name)) {
+                sawBareTiff = true;
+            }
+            if (sawContainer && sawBareTiff) return true;
+        }
+        return false;
+    }
+
+    static File existingProjectSettingsDir(File outputRoot) {
+        if (outputRoot == null || !outputRoot.isDirectory()) return null;
+        File settingsDir = FlashProjectLayout.forDirectory(outputRoot.getAbsolutePath())
+                .configurationWriteDir();
+        return ProjectFileIO.exists(settingsDir) ? settingsDir : null;
+    }
+
+    static List<File> collectAcceptedSourcesForTests(File folder) {
+        List<File> out = new ArrayList<File>();
+        collectAcceptedSources(folder, out);
+        return out;
+    }
+
     private void seedOutputRootIfBlank(File source) {
         if (source == null) return;
         if (outputRootField.getText().trim().isEmpty()) {
@@ -664,11 +763,19 @@ public final class ProjectBuilderDialog {
         return false;
     }
 
+    private static boolean isBareTiffExtension(String loweredName) {
+        return !isContainerExtension(loweredName)
+                && (loweredName.endsWith(".tif") || loweredName.endsWith(".tiff"));
+    }
+
     private static void collectAcceptedSources(File folder, List<File> out) {
         File[] children = folder.listFiles();
         if (children == null) return;
         for (File child : children) {
             if (child.isDirectory()) {
+                if (FlashProjectLayout.FLASH_DIR.equalsIgnoreCase(child.getName())) {
+                    continue;
+                }
                 // Recurse one level — typical lab folders nest condition subfolders
                 // under a parent. We do NOT walk the whole tree to avoid swallowing
                 // unrelated trees the user did not mean to include.
