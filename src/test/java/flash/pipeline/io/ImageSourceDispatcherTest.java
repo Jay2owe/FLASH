@@ -1,5 +1,7 @@
 package flash.pipeline.io;
 
+import flash.pipeline.project.ProjectFile;
+import flash.pipeline.project.ProjectFileIO;
 import ij.IJ;
 import ij.ImagePlus;
 import org.junit.After;
@@ -11,6 +13,7 @@ import org.junit.rules.TemporaryFolder;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.PrintStream;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
@@ -175,6 +178,78 @@ public class ImageSourceDispatcherTest {
 
         assertEquals(ImageSourceDispatcher.SourceMode.TIFF_LOOSE,
                 ImageSourceDispatcher.detectMode(dir.getAbsolutePath()));
+    }
+
+    @Test
+    public void projectJsonWithTiffSources_usesManifestInsteadOfFolderScan() throws Exception {
+        File outputRoot = temp.newFolder("manifest-tiff-output");
+        File sourceRoot = temp.newFolder("manifest-tiff-sources");
+        File alpha = new File(sourceRoot, "alpha.tif");
+        File beta = new File(sourceRoot, "beta.tiff");
+        assertTrue(alpha.createNewFile());
+        assertTrue(beta.createNewFile());
+
+        ProjectFile project = new ProjectFile();
+        project.name = "Manifest TIFFs";
+        project.outputRoot = outputRoot.getAbsolutePath();
+        project.items.add(projectItem(alpha));
+        project.items.add(projectItem(beta));
+        writeProject(outputRoot, project);
+
+        assertEquals(ImageSourceDispatcher.SourceMode.TIFF_LOOSE,
+                ImageSourceDispatcher.detectMode(outputRoot.getAbsolutePath()));
+
+        DeferredImageSupplier supplier =
+                ImageSourceDispatcher.createSupplier(outputRoot.getAbsolutePath());
+        assertEquals(DeferredImageSupplier.Mode.TIFF_FOLDER, supplier.getMode());
+        assertEquals(2, supplier.getTotalSeries());
+        assertEquals(alpha.getAbsolutePath(),
+                supplier.getContainerFileForSeries(0).getAbsolutePath());
+        assertEquals(beta.getAbsolutePath(),
+                supplier.getContainerFileForSeries(1).getAbsolutePath());
+    }
+
+    @Test
+    public void projectJsonMixingContainerAndTiff_throwsInsteadOfFallingBack() throws Exception {
+        File outputRoot = temp.newFolder("manifest-mixed-output");
+        File sourceRoot = temp.newFolder("manifest-mixed-sources");
+        File lif = new File(sourceRoot, "alpha.lif");
+        File tiff = new File(sourceRoot, "beta.tif");
+        assertTrue(lif.createNewFile());
+        assertTrue(tiff.createNewFile());
+
+        ProjectFile project = new ProjectFile();
+        project.items.add(projectItem(lif));
+        project.items.add(projectItem(tiff));
+        writeProject(outputRoot, project);
+
+        try {
+            ImageSourceDispatcher.detectMode(outputRoot.getAbsolutePath());
+            fail("Expected mixed manifest to throw");
+        } catch (IllegalArgumentException e) {
+            assertTrue(e.getMessage().contains("mixes multi-series container files and bare TIFF files"));
+        }
+    }
+
+    @Test
+    public void projectJsonWithInvalidTiffSeries_throwsClearly() throws Exception {
+        File outputRoot = temp.newFolder("manifest-invalid-tiff-output");
+        File sourceRoot = temp.newFolder("manifest-invalid-tiff-sources");
+        File tiff = new File(sourceRoot, "alpha.tif");
+        assertTrue(tiff.createNewFile());
+
+        ProjectFile project = new ProjectFile();
+        ProjectFile.Item item = projectItem(tiff);
+        item.series.addAll(Arrays.asList(Integer.valueOf(0), Integer.valueOf(1)));
+        project.items.add(item);
+        writeProject(outputRoot, project);
+
+        try {
+            ImageSourceDispatcher.detectMode(outputRoot.getAbsolutePath());
+            fail("Expected invalid TIFF series to throw");
+        } catch (IllegalArgumentException e) {
+            assertTrue(e.getMessage().contains("single-series TIFF"));
+        }
     }
 
     @Test
@@ -377,6 +452,19 @@ public class ImageSourceDispatcherTest {
         imp.close();
         assertTrue("synthesised TIFF must exist", target.isFile() && target.length() > 0);
         return dir;
+    }
+
+    private static ProjectFile.Item projectItem(File source) {
+        ProjectFile.Item item = new ProjectFile.Item();
+        item.path = source.getAbsolutePath();
+        item.include = true;
+        return item;
+    }
+
+    private static void writeProject(File outputRoot, ProjectFile project) throws Exception {
+        ProjectFileIO.write(
+                FlashProjectLayout.forDirectory(outputRoot.getAbsolutePath()).configurationWriteDir(),
+                project);
     }
 
     private static int countOccurrences(String text, String token) {

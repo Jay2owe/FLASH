@@ -100,17 +100,16 @@ public final class ImageSourceDispatcher {
     public static SourceMode detectMode(String directory) {
         File dir = requireDirectory(directory);
         // When a project.json is present, sources come from its item list
-        // rather than directory scanning. We only support container items in
-        // the new path for now — TIFFs flow through the legacy folder scan.
+        // rather than directory scanning.
         ProjectSources projectSources = tryReadProjectSources(dir);
         if (projectSources != null) {
-            if (projectSources.containers.isEmpty()) {
-                throw new IllegalArgumentException(
-                        "project.json at " + dir.getAbsolutePath()
-                                + " has no included container items. "
-                                + "Tick at least one .lif/.czi/... row in the project builder.");
+            if (projectSources.hasContainers()) {
+                return SourceMode.CONTAINER;
             }
-            return SourceMode.CONTAINER;
+            if (projectSources.hasTiffs()) {
+                return SourceMode.TIFF_LOOSE;
+            }
+            throw emptyProjectSourcesError(dir);
         }
 
         List<File> containers = listContainers(dir);
@@ -137,14 +136,25 @@ public final class ImageSourceDispatcher {
                 + " (.lif/.czi/.nd2/...) OR .tif files in input/ OR loose .tif files.");
     }
 
-    /** Container files + per-container series narrowing, sourced from project.json. */
+    /** Source files + per-container series narrowing, sourced from project.json. */
     private static final class ProjectSources {
         final List<File> containers;
         /** Parallel to {@link #containers}; empty entry = "all series in that container". */
         final List<List<Integer>> includedSeriesPerContainer;
-        ProjectSources(List<File> containers, List<List<Integer>> included) {
+        final List<File> tiffs;
+        final String displayName;
+        ProjectSources(List<File> containers, List<List<Integer>> included,
+                       List<File> tiffs, String displayName) {
             this.containers = containers;
             this.includedSeriesPerContainer = included;
+            this.tiffs = tiffs;
+            this.displayName = displayName;
+        }
+        boolean hasContainers() {
+            return containers != null && !containers.isEmpty();
+        }
+        boolean hasTiffs() {
+            return tiffs != null && !tiffs.isEmpty();
         }
     }
 
@@ -160,24 +170,37 @@ public final class ImageSourceDispatcher {
         }
         List<File> containers = new ArrayList<File>();
         List<List<Integer>> includes = new ArrayList<List<Integer>>();
+        List<File> tiffs = new ArrayList<File>();
         for (ProjectFile.Item item : project.items) {
             if (item == null || !item.include) continue;
             if (item.path == null || item.path.trim().isEmpty()) continue;
             File source = new File(item.path);
-            if (!isContainerExtension(source.getName())) {
-                // TIFF-only items can't ride the multi-container path; skip the
-                // project file entirely and fall back to folder scanning, which
-                // is what the user expects for a single-folder TIFF project.
-                return null;
-            }
             if (!source.isFile()) {
                 IJ.log("[FLASH] project.json refers to missing source, skipping: " + source.getAbsolutePath());
                 continue;
             }
-            containers.add(source);
-            includes.add(item.series == null ? Collections.<Integer>emptyList() : new ArrayList<Integer>(item.series));
+            if (isContainerExtension(source.getName())) {
+                containers.add(source);
+                includes.add(item.series == null
+                        ? Collections.<Integer>emptyList()
+                        : new ArrayList<Integer>(item.series));
+            } else if (isBareTiffExtension(source.getName())) {
+                validateTiffSeriesSelection(source, item.series);
+                tiffs.add(source);
+            } else {
+                throw new IllegalArgumentException(
+                        "project.json at " + outputRoot.getAbsolutePath()
+                                + " includes unsupported source file: "
+                                + source.getAbsolutePath());
+            }
         }
-        return new ProjectSources(containers, includes);
+        if (!containers.isEmpty() && !tiffs.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "project.json at " + outputRoot.getAbsolutePath()
+                            + " mixes multi-series container files and bare TIFF files. "
+                            + "FLASH currently requires those source types to be opened as separate projects.");
+        }
+        return new ProjectSources(containers, includes, tiffs, projectDisplayName(project, outputRoot));
     }
 
     private static boolean isContainerExtension(String name) {
@@ -189,6 +212,33 @@ public final class ImageSourceDispatcher {
         return false;
     }
 
+    private static boolean isBareTiffExtension(String name) {
+        if (name == null || isContainerExtension(name)) return false;
+        String lower = name.toLowerCase(java.util.Locale.ROOT);
+        for (String ext : TIFF_EXTENSIONS) {
+            if (lower.endsWith(ext)) return true;
+        }
+        return false;
+    }
+
+    private static void validateTiffSeriesSelection(File source, List<Integer> series) {
+        if (series == null || series.isEmpty()) return;
+        for (Integer s : series) {
+            if (s != null && s.intValue() != 0) {
+                throw new IllegalArgumentException(
+                        "project.json selects non-zero series for single-series TIFF source: "
+                                + source.getAbsolutePath());
+            }
+        }
+    }
+
+    private static String projectDisplayName(ProjectFile project, File outputRoot) {
+        if (project != null && project.name != null && !project.name.trim().isEmpty()) {
+            return project.name.trim();
+        }
+        return outputRoot == null ? "" : outputRoot.getName();
+    }
+
     /**
      * Returns a {@link DeferredImageSupplier} for {@code directory} using the
      * mode chosen by {@link #detectMode(String)}.
@@ -197,8 +247,14 @@ public final class ImageSourceDispatcher {
         File dir = requireDirectory(directory);
         ProjectSources projectSources = tryReadProjectSources(dir);
         if (projectSources != null) {
-            return DeferredImageSupplier.multiContainer(
-                    projectSources.containers, projectSources.includedSeriesPerContainer);
+            if (projectSources.hasContainers()) {
+                return DeferredImageSupplier.multiContainer(
+                        projectSources.containers, projectSources.includedSeriesPerContainer);
+            }
+            if (projectSources.hasTiffs()) {
+                return new DeferredImageSupplier(projectSources.tiffs, projectSources.displayName);
+            }
+            throw emptyProjectSourcesError(dir);
         }
 
         SourceMode mode = detectMode(directory);
@@ -234,6 +290,10 @@ public final class ImageSourceDispatcher {
         File dir = requireDirectory(directory);
         ProjectSources projectSources = tryReadProjectSources(dir);
         if (projectSources != null) {
+            if (projectSources.hasTiffs()) {
+                return DeferredImageSupplier.readTiffFolderMetadata(
+                        projectSources.tiffs, projectSources.displayName);
+            }
             List<SeriesMeta> out = new ArrayList<SeriesMeta>();
             int globalOffset = 0;
             for (int c = 0; c < projectSources.containers.size(); c++) {
@@ -246,7 +306,10 @@ public final class ImageSourceDispatcher {
                     out.add(meta.withIndex(globalOffset++));
                 }
             }
-            return out;
+            if (!out.isEmpty()) {
+                return out;
+            }
+            throw emptyProjectSourcesError(dir);
         }
 
         SourceMode mode = detectMode(directory);
@@ -499,6 +562,13 @@ public final class ImageSourceDispatcher {
             sb.append("\ninput/ TIFFs: ").append(joinNames(subTiffs));
         }
         return new IllegalArgumentException(sb.toString());
+    }
+
+    private static IllegalArgumentException emptyProjectSourcesError(File dir) {
+        return new IllegalArgumentException(
+                "project.json at " + dir.getAbsolutePath()
+                        + " has no included source items. "
+                        + "Tick at least one source row in the project builder.");
     }
 
     private static String joinNames(List<File> files) {
