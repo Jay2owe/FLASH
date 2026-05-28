@@ -1,5 +1,6 @@
 package flash.pipeline.project;
 
+import flash.pipeline.io.ConditionManifestIO;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.ImageSourceDispatcher;
 import flash.pipeline.io.LifIO;
@@ -579,6 +580,18 @@ public final class ProjectBuilderDialog {
             return;
         }
 
+        // Mirror per-row conditions to Conditions.csv so the existing
+        // aggregation / stats / Excel pipeline (which already reads via
+        // ConditionManifestIO) honours the project's explicit assignments
+        // without any downstream changes.
+        try {
+            ConditionManifestIO.saveAssignments(
+                    outputRoot.getAbsolutePath(),
+                    deriveConditionAssignments(project));
+        } catch (IOException ex) {
+            IJ.log("[FLASH] Could not write Conditions.csv: " + ex.getMessage());
+        }
+
         if (pluginsDir != null) {
             try {
                 RecentProjectsStore.recordOpened(pluginsDir,
@@ -590,6 +603,31 @@ public final class ProjectBuilderDialog {
 
         result = new Result(project, outputRoot, projectFile);
         dialog.dispose();
+    }
+
+    /**
+     * Derive the animalId → condition map written to Conditions.csv.
+     *
+     * <p>Only items where {@code include=true} contribute. Items without an
+     * explicit condition are omitted so the downstream
+     * {@link ConditionManifestIO#resolveAssignments} fallback path
+     * ({@code ConditionNameParser.detectCondition}) still applies to them.
+     *
+     * <p>When two items share an animalId with conflicting conditions,
+     * the last-seen wins — the order in the project file is the order the
+     * user added the rows.
+     */
+    static java.util.LinkedHashMap<String, String> deriveConditionAssignments(ProjectFile project) {
+        java.util.LinkedHashMap<String, String> out = new java.util.LinkedHashMap<String, String>();
+        if (project == null || project.items == null) return out;
+        for (ProjectFile.Item item : project.items) {
+            if (item == null || !item.include) continue;
+            String animal = item.animalId == null ? "" : item.animalId.trim();
+            String condition = item.condition == null ? "" : item.condition.trim();
+            if (animal.isEmpty() || condition.isEmpty()) continue;
+            out.put(animal, condition);
+        }
+        return out;
     }
 
     private int countIncluded() {
