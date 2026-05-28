@@ -52,9 +52,11 @@ import flash.pipeline.runtime.FeatureDependencyGate;
 import flash.pipeline.runtime.ImageJRestartHelper;
 import flash.pipeline.runtime.PluginInstallGuard;
 
+import flash.pipeline.project.ProjectBuilderDialog;
+import flash.pipeline.project.RecentProjectsStore;
+
 import ij.IJ;
 import ij.Macro;
-import ij.io.DirectoryChooser;
 import ij.plugin.PlugIn;
 
 import javax.swing.BorderFactory;
@@ -213,12 +215,15 @@ public class FLASH_Pipeline implements PlugIn {
         showStartupDependencyWarningIfNeeded();
 
         if (directory == null) {
-            DirectoryChooser dc = new DirectoryChooser("Choose a Directory");
-            directory = dc.getDirectory();
-            if (directory == null) {
-                IJ.showMessage("Error", "No directory chosen, plugin cancelled.");
+            ProjectBuilderDialog.Result picked = ProjectBuilderDialog.open(
+                    null, RecentProjectsStore.resolvePluginsDir(), null);
+            if (picked == null) {
+                IJ.showMessage("Error", "No project chosen, plugin cancelled.");
                 return;
             }
+            // The plugin treats `directory` as the project output root from this
+            // point onward; source files come from the project's item list.
+            directory = picked.outputRoot.getAbsolutePath();
         }
 
         // L-10: if this folder already contains a prior run's output dirs,
@@ -534,10 +539,12 @@ public class FLASH_Pipeline implements PlugIn {
             final JLabel dirLabel = pd.addMessage(directory);
             JButton changeBtn = pd.addButton("Change Directory");
             changeBtn.addActionListener(e -> {
-                DirectoryChooser dc = new DirectoryChooser("Choose a new Directory");
-                String newDir = dc.getDirectory();
-                if (newDir != null) {
-                    directory = newDir;
+                ProjectBuilderDialog.Result picked = ProjectBuilderDialog.open(
+                        javax.swing.SwingUtilities.getWindowAncestor(changeBtn),
+                        RecentProjectsStore.resolvePluginsDir(),
+                        directory == null ? null : new java.io.File(directory));
+                if (picked != null) {
+                    directory = picked.outputRoot.getAbsolutePath();
                     dirLabel.setText("<html><body width='280'>" + directory + "</body></html>");
                     startAnalysisStatusScan(directory, pd, statusRowsByAnalysis, statusRowsReady,
                             pendingStatuses, pendingScanner);
