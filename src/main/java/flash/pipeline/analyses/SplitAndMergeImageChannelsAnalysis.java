@@ -430,7 +430,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
         // Saturations are stored display-processing settings, so they follow
         // the active project configuration folder rather than image outputs.
         saveSaturations(directory, channelNames, mdr.processMethodPerCh, mdr.saturationsPerCh);
-        IJ.log("  - Saturations saved to FLASH/Set Up Configuration/.settings/Saturations.txt");
+        IJ.log("  - Saturations saved to FLASH/Config/.settings/Saturations.txt");
 
         // Sync min-max values back to Channel_Data.txt line 5
         updateBinMinMax(directory, mdr.processMethodPerCh, mdr.customMinMaxPerCh, nCh);

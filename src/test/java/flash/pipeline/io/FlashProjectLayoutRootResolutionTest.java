@@ -44,7 +44,7 @@ public class FlashProjectLayoutRootResolutionTest {
     @Test
     public void setupSettingsConfigurationDirResolvesToProjectRoot() throws Exception {
         File project = temp.newFolder("project");
-        File configDir = new File(project, "FLASH/Set Up Configuration/.settings");
+        File configDir = new File(project, "FLASH/Config/.settings");
 
         assertPath(project, FlashProjectLayout.projectRootForConfigurationDir(configDir));
     }

@@ -45,7 +45,7 @@ public final class FlashProjectLayout {
     public static final String RUN_HISTORY_FILENAME = "run_history.csv";
     public static final String QC_REPORT_FILENAME = "QC_Report.html";
     public static final String SETTINGS_DIR = ".settings";
-    public static final String CONFIGURATION_DIR = "Set Up Configuration";
+    public static final String CONFIGURATION_DIR = "Config";
     public static final String PRESETS_DIR = "Presets";
     public static final String CACHE_DIR = "Cache";
     public static final String STATUS_DIR = "Status";

@@ -35,7 +35,7 @@ public class MacroStoreSaveAsPresetTest {
     @Test
     public void saveAsPreset_roundTripPersistsByteForByte() throws Exception {
         File project = temp.newFolder("project-saveAsPreset");
-        File binFolder = new File(project, "FLASH/Set Up Configuration/.settings");
+        File binFolder = new File(project, "FLASH/Config/.settings");
         assertTrue(binFolder.mkdirs());
 
         CreateBinFileAnalysis analysis = new CreateBinFileAnalysis();
@@ -65,7 +65,7 @@ public class MacroStoreSaveAsPresetTest {
     @Test
     public void saveAsPreset_emptyNameIsRejected() throws Exception {
         File project = temp.newFolder("project-saveAsPreset-empty");
-        File binFolder = new File(project, "FLASH/Set Up Configuration/.settings");
+        File binFolder = new File(project, "FLASH/Config/.settings");
         assertTrue(binFolder.mkdirs());
 
         CreateBinFileAnalysis analysis = new CreateBinFileAnalysis();

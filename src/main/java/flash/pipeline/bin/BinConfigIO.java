@@ -34,7 +34,7 @@ public class BinConfigIO {
 
     /**
      * Reads the active Set Up Configuration file:
-     *   Directory/FLASH/Set Up Configuration/.settings/Channel_Data.txt
+     *   Directory/FLASH/Config/.settings/Channel_Data.txt
      * falling back to legacy configuration locations for older projects.
      *
      * Expected lines:

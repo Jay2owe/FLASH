@@ -81,7 +81,7 @@ public class CreateBinFileAnalysisTest {
         analysis.execute(dir.getAbsolutePath());
 
         assertFalse(new File(dir, ".bin/Channel_Data.txt").exists());
-        assertFalse(new File(dir, "FLASH/Set Up Configuration/.settings/Channel_Data.txt").exists());
+        assertFalse(new File(dir, "FLASH/Config/.settings/Channel_Data.txt").exists());
     }
 
     @Test(expected = IllegalStateException.class)
@@ -979,7 +979,7 @@ public class CreateBinFileAnalysisTest {
     }
 
     private static File configurationDir(File dir) {
-        return new File(dir, "FLASH/Set Up Configuration/.settings");
+        return new File(dir, "FLASH/Config/.settings");
     }
 
     private static File configurationFile(File dir, String name) {

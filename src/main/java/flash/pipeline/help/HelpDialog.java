@@ -31,7 +31,7 @@ public final class HelpDialog {
     };
 
     private static final String[][] GLOSSARY = {
-            {"Configuration folder", "per-experiment setup: channel names, thresholds, and particle sizes. Lives in FLASH/Set Up Configuration. Required by every analysis."},
+            {"Configuration folder", "per-experiment setup: channel names, thresholds, and particle sizes. Lives in FLASH/Config. Required by every analysis."},
             {"ROI (Region of Interest)", "a hand-drawn region used to restrict counting/intensity. Each image needs its own ROI set."},
             {"Colocalisation", "measuring how much two markers occupy the same space. FLASH supports volumetric overlap (% of object A inside object B) and CPC (centroid coincidence)."},
             {"Headless mode", "image windows are not shown during a run. Faster on big batches."},

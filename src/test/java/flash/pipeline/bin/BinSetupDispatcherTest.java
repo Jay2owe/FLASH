@@ -417,7 +417,7 @@ public class BinSetupDispatcherTest {
     }
 
     private static File configurationDir(File dir) {
-        return new File(dir, "FLASH/Set Up Configuration/.settings");
+        return new File(dir, "FLASH/Config/.settings");
     }
 
     private static File configurationFile(File dir, String name) {

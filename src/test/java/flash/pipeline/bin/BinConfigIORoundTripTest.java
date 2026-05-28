@@ -65,7 +65,7 @@ public class BinConfigIORoundTripTest {
 
         BinConfigIO.writeFromConfig(dir.getAbsolutePath(), cfg);
 
-        File written = new File(dir, "FLASH/Set Up Configuration/.settings/Channel_Data.txt");
+        File written = new File(dir, "FLASH/Config/.settings/Channel_Data.txt");
         List<String> lines = Files.readAllLines(written.toPath(), StandardCharsets.UTF_8);
         assertEquals("future_engine:some=value", lines.get(6));
         BinConfig reread = BinConfigIO.readFromDirectory(dir.getAbsolutePath());

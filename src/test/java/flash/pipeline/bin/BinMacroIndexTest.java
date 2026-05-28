@@ -69,7 +69,7 @@ public class BinMacroIndexTest {
     }
 
     private static File configurationDir(File project) {
-        return new File(project, "FLASH/Set Up Configuration/.settings");
+        return new File(project, "FLASH/Config/.settings");
     }
 
     private static void writePreset(File project, String relativeDir, String name) throws Exception {

@@ -22,7 +22,7 @@ public final class SetupHelpCatalog {
                     "Channel name: the marker, stain, or signal identity written into outputs.",
                     "LUT: the display colour used for previews and generated images."),
             section("Saved output",
-                    "FLASH saves these choices in FLASH/Set Up Configuration/.settings/Channel_Data.txt."));
+                    "FLASH saves these choices in FLASH/Config/.settings/Channel_Data.txt."));
 
     public static final SetupHelpTopic ANALYSIS_SCOPE = topic(
             "analysis-scope",
@@ -52,7 +52,7 @@ public final class SetupHelpCatalog {
                     "Restart from first image: review the z-slice choices again from the start.",
                     "Apply current range to all remaining images: reuse this range for the remaining images where it fits."),
             section("Saved output",
-                    "FLASH saves selected ranges in FLASH/Set Up Configuration/.settings/ZSlice_Selections.csv."),
+                    "FLASH saves selected ranges in FLASH/Config/.settings/ZSlice_Selections.csv."),
             section("Watch out",
                     "Changing the z-slice range changes counts, volumes, intensities, and presentation-ready images."));
 

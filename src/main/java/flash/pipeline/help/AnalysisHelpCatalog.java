@@ -205,15 +205,15 @@ public final class AnalysisHelpCatalog {
                         "Pick threshold and filter values for objects you want to count, and choose intensity thresholds for signal measurements.",
                         "Confirm whether the full Z-stack or a saved Z-slice range should be used before saving the configuration."),
                 list(
-                        "FLASH writes the configuration to FLASH/Set Up Configuration/.settings/Channel_Data.txt.",
-                        "Per-channel filter macros are saved as FLASH/Set Up Configuration/.settings/C1_Filters.ijm, C2_Filters.ijm, and so on.",
-                        "Channel identities are saved in FLASH/Set Up Configuration/.settings/channel_identities.json, and Z-slice choices are saved in FLASH/Set Up Configuration/.settings/ZSlice_Selections.csv when used.",
+                        "FLASH writes the configuration to FLASH/Config/.settings/Channel_Data.txt.",
+                        "Per-channel filter macros are saved as FLASH/Config/.settings/C1_Filters.ijm, C2_Filters.ijm, and so on.",
+                        "Channel identities are saved in FLASH/Config/.settings/channel_identities.json, and Z-slice choices are saved in FLASH/Config/.settings/ZSlice_Selections.csv when used.",
                         "Later analyses read these files automatically; they do not ask for the same channel setup again."),
                 list(
-                        "FLASH/Set Up Configuration/.settings/Channel_Data.txt with channel names, lookup-table colours, thresholds, particle-size filters, display ranges, intensity thresholds, filter presets, segmentation methods, and Z-slice mode.",
-                        "FLASH/Set Up Configuration/.settings/channel_identities.json when marker identities were recorded.",
-                        "FLASH/Set Up Configuration/.settings/C1_Filters.ijm and matching filter macro files for channels that need object filtering.",
-                        "FLASH/Set Up Configuration/.settings/ZSlice_Selections.csv when analysis is limited to selected Z slices."),
+                        "FLASH/Config/.settings/Channel_Data.txt with channel names, lookup-table colours, thresholds, particle-size filters, display ranges, intensity thresholds, filter presets, segmentation methods, and Z-slice mode.",
+                        "FLASH/Config/.settings/channel_identities.json when marker identities were recorded.",
+                        "FLASH/Config/.settings/C1_Filters.ijm and matching filter macro files for channels that need object filtering.",
+                        "FLASH/Config/.settings/ZSlice_Selections.csv when analysis is limited to selected Z slices."),
                 list(
                         "A wrong channel identity can make every later output hard to interpret, even if the analysis runs successfully.",
                         "Thresholds copied from a different experiment can miss dim signal or include background; check representative images before batch runs.",
@@ -223,7 +223,7 @@ public final class AnalysisHelpCatalog {
                         "set-up-configuration",
                         image("setup.png", "Setup dialog", "Channel names, thresholds, filters, segmentation methods, and Z-slice choices are reviewed before saving."),
                         image("workflow.png", "Configuration workflow", "Choose folder, inspect channels, assign identities, tune filters, save configuration, then run downstream analyses."),
-                        image("example-output.png", "Saved configuration files", "The active setup lives in FLASH/Set Up Configuration so it can be reused by the rest of the pipeline.")));
+                        image("example-output.png", "Saved configuration files", "The active setup lives in FLASH/Config so it can be reused by the rest of the pipeline.")));
     }
 
     private static AnalysisHelpTopic drawAndSaveRoisTopic() {
@@ -330,11 +330,11 @@ public final class AnalysisHelpCatalog {
                         "Select a correction goal and feature stack, such as linear unmixing, quiet-channel gating, local autofluorescence correction, or object scoring.",
                         "Preview the correction, inspect coefficients or thresholds, then save the settings before running the batch."),
                 list(
-                        "FLASH saves dataset-level settings to FLASH/Set Up Configuration/.settings/Spectral_Decontamination_Config.json.",
+                        "FLASH saves dataset-level settings to FLASH/Config/.settings/Spectral_Decontamination_Config.json.",
                         "Batch summaries and coefficients are written to FLASH/Results/Tables/Spectral Decontamination/.",
                         "Corrected images, masks, cleaned object maps, and parameter maps are written under FLASH/Results/Analysis Images/Spectral Decontamination/."),
                 list(
-                        "FLASH/Set Up Configuration/.settings/Spectral_Decontamination_Config.json records channel roles, correction goal, conditions, and selected feature stack.",
+                        "FLASH/Config/.settings/Spectral_Decontamination_Config.json records channel roles, correction goal, conditions, and selected feature stack.",
                         "FLASH/Results/Tables/Spectral Decontamination/per_image_summary.csv summarizes each processed image.",
                         "FLASH/Results/Tables/Spectral Decontamination/correction_coefficients.csv records fitted correction values when the chosen stack produces them.",
                         "FLASH/Results/Tables/Spectral Decontamination/preview_selection.csv records the preview subset when saved.",

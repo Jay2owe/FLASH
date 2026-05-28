@@ -18,14 +18,19 @@ public class FlashProjectLayoutTest {
     public TemporaryFolder temp = new TemporaryFolder();
 
     @Test
+    public void configurationDirIsConfig() {
+        assertEquals("Config", FlashProjectLayout.CONFIGURATION_DIR);
+    }
+
+    @Test
     public void writePaths_areUnderFlashRoot() throws Exception {
         File project = temp.newFolder("project");
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(project.getAbsolutePath());
 
         assertPath(new File(project, "FLASH"), layout.flashRoot());
-        assertPath(new File(project, "FLASH/Set Up Configuration"), layout.visibleConfigurationDir());
-        assertPath(new File(project, "FLASH/Set Up Configuration/.settings"), layout.configurationWriteDir());
-        assertPath(new File(project, "FLASH/Set Up Configuration/.settings/Channel_Data.txt"),
+        assertPath(new File(project, "FLASH/Config"), layout.visibleConfigurationDir());
+        assertPath(new File(project, "FLASH/Config/.settings"), layout.configurationWriteDir());
+        assertPath(new File(project, "FLASH/Config/.settings/Channel_Data.txt"),
                 layout.channelDataWriteFile());
         assertPath(new File(project, "FLASH/Results/Tables/Project Summary/Conditions.csv"),
                 layout.projectSummaryWriteFile(FlashProjectLayout.CONDITIONS_FILENAME));
@@ -113,17 +118,17 @@ public class FlashProjectLayoutTest {
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(project.getAbsolutePath());
 
         assertPaths(layout.configurationReadDirs(),
-                new File(project, "FLASH/Set Up Configuration/.settings"),
-                new File(project, "FLASH/Set Up Configuration"),
+                new File(project, "FLASH/Config/.settings"),
+                new File(project, "FLASH/Config"),
                 new File(project, "FLASH/00 - Configuration"),
                 new File(project, ".bin"));
         assertPaths(layout.channelDataReadFiles(),
-                new File(project, "FLASH/Set Up Configuration/.settings/Channel_Data.txt"),
-                new File(project, "FLASH/Set Up Configuration/Channel_Data.txt"),
+                new File(project, "FLASH/Config/.settings/Channel_Data.txt"),
+                new File(project, "FLASH/Config/Channel_Data.txt"),
                 new File(project, "FLASH/00 - Configuration/Channel_Data.txt"),
                 new File(project, ".bin/Channel_Data.txt"));
         assertNull(layout.existingConfigurationDir());
-        assertPath(new File(project, "FLASH/Set Up Configuration/.settings/Channel_Data.txt"),
+        assertPath(new File(project, "FLASH/Config/.settings/Channel_Data.txt"),
                 layout.channelDataReadFile());
         assertFalse(new File(project, "FLASH").exists());
         assertFalse(new File(project, ".bin").exists());
@@ -135,7 +140,7 @@ public class FlashProjectLayoutTest {
         assertPath(legacyBin, layout.existingConfigurationDir());
         assertPath(legacyChannelData, layout.channelDataReadFile());
 
-        File newConfig = new File(project, "FLASH/Set Up Configuration/.settings");
+        File newConfig = new File(project, "FLASH/Config/.settings");
         assertTrue(newConfig.mkdirs());
         File newChannelData = new File(newConfig, "Channel_Data.txt");
         assertTrue(newChannelData.createNewFile());

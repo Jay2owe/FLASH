@@ -49,7 +49,7 @@ public class SpectralDecontaminationConfigIOTest {
         SpectralDecontaminationConfigIO.writeToDirectory(dir.getAbsolutePath(), config);
         SpectralDecontaminationConfig read = SpectralDecontaminationConfigIO.readFromDirectory(dir.getAbsolutePath());
 
-        assertTrue(new File(dir, "FLASH/Set Up Configuration/.settings/"
+        assertTrue(new File(dir, "FLASH/Config/.settings/"
                 + SpectralDecontaminationConfigIO.CONFIG_FILENAME).isFile());
         assertFalse(new File(new File(dir, ".bin"),
                 SpectralDecontaminationConfigIO.CONFIG_FILENAME).exists());
