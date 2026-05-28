@@ -1,0 +1,295 @@
+package flash.pipeline.project;
+
+import flash.pipeline.ui.wizard.JsonIO;
+
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * JSON codec for {@link ProjectFile}. Mirrors
+ * {@link flash.pipeline.bin.ChannelConfigCodec}: pretty-printed output,
+ * unknown keys preserved under {@code extras} on round-trip, strict
+ * schemaVersion enforcement.
+ */
+public final class ProjectFileCodec {
+    private static final int SCHEMA_VERSION = 1;
+
+    private static final String K_COMMENT = "_comment";
+    private static final String K_SCHEMA_VERSION = "schemaVersion";
+    private static final String K_WRITER_ID = "writerId";
+    private static final String K_WRITTEN_AT_MILLIS = "writtenAtMillis";
+    private static final String K_NAME = "name";
+    private static final String K_OUTPUT_ROOT = "outputRoot";
+    private static final String K_ITEMS = "items";
+
+    private static final String K_PATH = "path";
+    private static final String K_SERIES = "series";
+    private static final String K_INCLUDE = "include";
+    private static final String K_ANIMAL_ID = "animalId";
+    private static final String K_HEMISPHERE = "hemisphere";
+    private static final String K_REGION = "region";
+    private static final String K_CONDITION = "condition";
+    private static final String K_NOTES = "notes";
+
+    private ProjectFileCodec() {
+    }
+
+    public static String encode(ProjectFile project) {
+        return prettyPrint(JsonIO.write(toJsonObject(project == null ? new ProjectFile() : project)));
+    }
+
+    public static ProjectFile decode(String json) throws IOException {
+        return fromJsonObject(JsonIO.parseObject(json));
+    }
+
+    public static ProjectFile decodeOrNull(String json) {
+        try {
+            return decode(json);
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    private static Map<String, Object> toJsonObject(ProjectFile project) {
+        Map<String, Object> root = JsonIO.object();
+        appendComment(root, project.extras);
+        root.put(K_SCHEMA_VERSION, Integer.valueOf(project.schemaVersion));
+        root.put(K_WRITER_ID, project.writerId);
+        root.put(K_WRITTEN_AT_MILLIS, Long.valueOf(project.writtenAtMillis));
+        root.put(K_NAME, project.name);
+        root.put(K_OUTPUT_ROOT, project.outputRoot);
+        root.put(K_ITEMS, itemsToJson(project.items));
+        appendUnknown(root, project.extras);
+        return root;
+    }
+
+    private static ProjectFile fromJsonObject(Map<String, Object> root) throws IOException {
+        ProjectFile project = new ProjectFile();
+        project.schemaVersion = JsonIO.intValue(root.get(K_SCHEMA_VERSION), -1);
+        if (project.schemaVersion != SCHEMA_VERSION) {
+            throw new IOException("Unsupported project_file schemaVersion: " + project.schemaVersion);
+        }
+
+        project.writerId = JsonIO.stringValue(root.get(K_WRITER_ID));
+        project.writtenAtMillis = longValue(root.get(K_WRITTEN_AT_MILLIS), 0L);
+        project.name = JsonIO.stringValue(root.get(K_NAME));
+        project.outputRoot = JsonIO.stringValue(root.get(K_OUTPUT_ROOT));
+        project.items = itemsFromJson(JsonIO.asList(root.get(K_ITEMS)));
+        project.extras = extras(root, rootKnownKeys());
+        return project;
+    }
+
+    private static List<Object> itemsToJson(List<ProjectFile.Item> items) {
+        List<Object> rows = new ArrayList<Object>();
+        if (items == null) {
+            return rows;
+        }
+        for (ProjectFile.Item item : items) {
+            if (item == null) {
+                continue;
+            }
+            Map<String, Object> row = JsonIO.object();
+            appendComment(row, item.extras);
+            row.put(K_PATH, item.path);
+            row.put(K_SERIES, seriesToJson(item.series));
+            row.put(K_INCLUDE, Boolean.valueOf(item.include));
+            row.put(K_ANIMAL_ID, item.animalId);
+            row.put(K_HEMISPHERE, item.hemisphere);
+            row.put(K_REGION, item.region);
+            row.put(K_CONDITION, item.condition);
+            row.put(K_NOTES, item.notes);
+            appendUnknown(row, item.extras);
+            rows.add(row);
+        }
+        return rows;
+    }
+
+    private static List<ProjectFile.Item> itemsFromJson(List<Object> values) {
+        List<ProjectFile.Item> items = new ArrayList<ProjectFile.Item>();
+        if (values == null) {
+            return items;
+        }
+        for (Object value : values) {
+            Map<String, Object> row = JsonIO.asObject(value);
+            ProjectFile.Item item = new ProjectFile.Item();
+            item.path = JsonIO.stringValue(row.get(K_PATH));
+            item.series = seriesFromJson(JsonIO.asList(row.get(K_SERIES)));
+            item.include = JsonIO.booleanValue(row.get(K_INCLUDE), true);
+            item.animalId = JsonIO.stringValue(row.get(K_ANIMAL_ID));
+            item.hemisphere = JsonIO.stringValue(row.get(K_HEMISPHERE));
+            item.region = JsonIO.stringValue(row.get(K_REGION));
+            item.condition = JsonIO.stringValue(row.get(K_CONDITION));
+            item.notes = JsonIO.stringValue(row.get(K_NOTES));
+            item.extras = extras(row, itemKnownKeys());
+            items.add(item);
+        }
+        return items;
+    }
+
+    private static List<Object> seriesToJson(List<Integer> series) {
+        List<Object> out = new ArrayList<Object>();
+        if (series == null) {
+            return out;
+        }
+        for (Integer s : series) {
+            if (s != null) {
+                out.add(s);
+            }
+        }
+        return out;
+    }
+
+    private static List<Integer> seriesFromJson(List<Object> values) {
+        List<Integer> out = new ArrayList<Integer>();
+        if (values == null) {
+            return out;
+        }
+        for (Object value : values) {
+            if (value instanceof Number) {
+                out.add(Integer.valueOf(((Number) value).intValue()));
+            } else if (value != null) {
+                try {
+                    out.add(Integer.valueOf(String.valueOf(value).trim()));
+                } catch (NumberFormatException ignored) {
+                    // skip non-integer series tokens silently — extras path handles unknown shapes
+                }
+            }
+        }
+        return out;
+    }
+
+    private static long longValue(Object value, long fallback) {
+        if (value instanceof Number) {
+            return ((Number) value).longValue();
+        }
+        if (value == null) {
+            return fallback;
+        }
+        try {
+            return Long.parseLong(String.valueOf(value).trim());
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
+    private static Map<String, Object> extras(Map<String, Object> source, Map<String, Boolean> knownKeys) {
+        Map<String, Object> out = new LinkedHashMap<String, Object>();
+        if (source == null) {
+            return out;
+        }
+        for (Map.Entry<String, Object> entry : source.entrySet()) {
+            if (!knownKeys.containsKey(entry.getKey())) {
+                out.put(entry.getKey(), entry.getValue());
+            }
+        }
+        return out;
+    }
+
+    private static void appendUnknown(Map<String, Object> target, Map<String, Object> extras) {
+        if (extras == null) {
+            return;
+        }
+        for (Map.Entry<String, Object> entry : extras.entrySet()) {
+            if (!target.containsKey(entry.getKey())) {
+                target.put(entry.getKey(), entry.getValue());
+            }
+        }
+    }
+
+    private static void appendComment(Map<String, Object> target, Map<String, Object> extras) {
+        if (extras != null && extras.containsKey(K_COMMENT)) {
+            target.put(K_COMMENT, extras.get(K_COMMENT));
+        }
+    }
+
+    private static Map<String, Boolean> rootKnownKeys() {
+        Map<String, Boolean> keys = new LinkedHashMap<String, Boolean>();
+        keys.put(K_SCHEMA_VERSION, Boolean.TRUE);
+        keys.put(K_WRITER_ID, Boolean.TRUE);
+        keys.put(K_WRITTEN_AT_MILLIS, Boolean.TRUE);
+        keys.put(K_NAME, Boolean.TRUE);
+        keys.put(K_OUTPUT_ROOT, Boolean.TRUE);
+        keys.put(K_ITEMS, Boolean.TRUE);
+        return keys;
+    }
+
+    private static Map<String, Boolean> itemKnownKeys() {
+        Map<String, Boolean> keys = new LinkedHashMap<String, Boolean>();
+        keys.put(K_PATH, Boolean.TRUE);
+        keys.put(K_SERIES, Boolean.TRUE);
+        keys.put(K_INCLUDE, Boolean.TRUE);
+        keys.put(K_ANIMAL_ID, Boolean.TRUE);
+        keys.put(K_HEMISPHERE, Boolean.TRUE);
+        keys.put(K_REGION, Boolean.TRUE);
+        keys.put(K_CONDITION, Boolean.TRUE);
+        keys.put(K_NOTES, Boolean.TRUE);
+        return keys;
+    }
+
+    private static String prettyPrint(String json) {
+        StringBuilder out = new StringBuilder();
+        int indent = 0;
+        boolean inString = false;
+        boolean escaped = false;
+        for (int i = 0; i < json.length(); i++) {
+            char ch = json.charAt(i);
+            if (inString) {
+                out.append(ch);
+                if (escaped) {
+                    escaped = false;
+                } else if (ch == '\\') {
+                    escaped = true;
+                } else if (ch == '"') {
+                    inString = false;
+                }
+                continue;
+            }
+            switch (ch) {
+                case '"':
+                    inString = true;
+                    out.append(ch);
+                    break;
+                case '{':
+                case '[':
+                    if (i + 1 < json.length()
+                            && ((ch == '{' && json.charAt(i + 1) == '}')
+                            || (ch == '[' && json.charAt(i + 1) == ']'))) {
+                        out.append(ch).append(json.charAt(i + 1));
+                        i++;
+                        break;
+                    }
+                    out.append(ch);
+                    indent++;
+                    newline(out, indent);
+                    break;
+                case '}':
+                case ']':
+                    indent--;
+                    newline(out, indent);
+                    out.append(ch);
+                    break;
+                case ',':
+                    out.append(ch);
+                    newline(out, indent);
+                    break;
+                case ':':
+                    out.append(": ");
+                    break;
+                default:
+                    out.append(ch);
+                    break;
+            }
+        }
+        return out.toString();
+    }
+
+    private static void newline(StringBuilder out, int indent) {
+        out.append('\n');
+        for (int i = 0; i < indent; i++) {
+            out.append("  ");
+        }
+    }
+}
