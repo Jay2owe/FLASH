@@ -7,6 +7,7 @@ import flash.pipeline.bin.BinField;
 import flash.pipeline.bin.BinMacroIndex;
 import flash.pipeline.bin.ChannelIdentities;
 import flash.pipeline.bin.ChannelIdentitiesIO;
+import flash.pipeline.bin.WizardDraft;
 import flash.pipeline.cellpose.Cellpose3DRunner;
 import flash.pipeline.cellpose.CellposeModel;
 import flash.pipeline.cellpose.CellposeRuntime;
@@ -56,6 +57,7 @@ import flash.pipeline.stardist.StarDist3DRunner;
 import flash.pipeline.stardist.StarDistDetector;
 import flash.pipeline.ui.CustomFilterContinueDialog;
 import flash.pipeline.ui.CustomFilterEntryDialog;
+import flash.pipeline.ui.CancelConfirmationDialog;
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.ToggleSwitch;
 import flash.pipeline.ui.config.ConfigQcContext;
@@ -255,6 +257,12 @@ public class CreateBinFileAnalysis implements Analysis {
     private BinConfig settingsStatusReference = null;
     private List<String> activeEmbeddedStagePath = Collections.emptyList();
     private int activeEmbeddedStagePathIndex = -1;
+    private File activeWizardDraftBinFolder = null;
+    private BinUserConfig activeWizardDraftCfg = null;
+    private boolean[][] activeWizardDraftCustomSettings = null;
+    private int activeWizardDraftStep = 1;
+    private String activeWizardDraftLabel = "";
+    private CancelConfirmationDialog.Choice lastWizardCancelChoice = null;
     private final ConfigQcContext.FilteredStackCache setupFilteredStackCache =
             new ConfigQcContext.FilteredStackCache();
 
@@ -523,6 +531,7 @@ public class CreateBinFileAnalysis implements Analysis {
         int n = cfg.names.isEmpty() ? 3 : cfg.names.size();
         while (true) {
             PipelineDialog count = new PipelineDialog("Set Up Configuration - Channel Names");
+            installWizardCancelHook(count);
             count.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
             count.addSetupHelpSubHeader("Channel Names", SetupHelpCatalog.CHANNEL_IDENTITY);
             count.addNumericField("Number of channels", n, 0);
@@ -536,6 +545,7 @@ public class CreateBinFileAnalysis implements Analysis {
             padConfigToChannelCount(cfg, n);
             trimConfigToChannelCount(cfg, n);
             PipelineDialog names = new PipelineDialog("Set Up Configuration - Channel Names");
+            installWizardCancelHook(names);
             names.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
             names.addSetupHelpSubHeader("Channel Names", SetupHelpCatalog.CHANNEL_IDENTITY);
             names.addMessage("Name each image channel.");
@@ -556,6 +566,7 @@ public class CreateBinFileAnalysis implements Analysis {
         if (!canShowFilteredDialogs()) return false;
         ensureConfigHasChannels(cfg);
         PipelineDialog dialog = new PipelineDialog("Set Up Configuration - Channel Colours");
+        installWizardCancelHook(dialog);
         dialog.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
         dialog.addSetupHelpSubHeader("Channel Colours", SetupHelpCatalog.CHANNEL_IDENTITY);
         for (int i = 0; i < cfg.names.size(); i++) {
@@ -574,6 +585,7 @@ public class CreateBinFileAnalysis implements Analysis {
         if (!canShowFilteredDialogs()) return false;
         ensureConfigHasChannels(cfg);
         PipelineDialog dialog = new PipelineDialog("Set Up Configuration - Filter Presets");
+        installWizardCancelHook(dialog);
         dialog.setModal(false);
         dialog.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
         dialog.addSetupHelpSubHeader("Filter Presets", SetupHelpCatalog.FILTER_PARAMETERS);
@@ -601,6 +613,7 @@ public class CreateBinFileAnalysis implements Analysis {
         if (!canShowFilteredDialogs()) return false;
         ensureConfigHasChannels(cfg);
         PipelineDialog dialog = new PipelineDialog("Set Up Configuration - Segmentation Methods");
+        installWizardCancelHook(dialog);
         dialog.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
         dialog.addSetupHelpSubHeader("Segmentation Methods", SetupHelpCatalog.SEGMENTATION_METHOD);
         boolean starDistAvailable = StarDistDetector.isAvailable();
@@ -1051,11 +1064,29 @@ public class CreateBinFileAnalysis implements Analysis {
         boolean[][] customSettings = null;
 
         int step = 1; // 1=collectConfig, 2=analysisScope, 3=granularFork, 4=zSliceQC, 5=channelQC, 6=save
+        WizardDraft.Snapshot draft = WizardDraft.read(binFolder);
+        if (draft != null) {
+            int choice = showResumePrompt(draft);
+            if (choice == 2) return;
+            if (choice == 1) {
+                WizardDraft.delete(binFolder);
+            } else {
+                cfg = draft.cfg;
+                customSettings = draft.customSettings;
+                step = Math.max(1, Math.min(6, draft.stepIndex));
+            }
+        }
+
+        try {
         while (step >= 1 && step <= 6) {
+            setWizardDraftContext(binFolder, cfg, customSettings, step, wizardStepLabel(step));
             switch (step) {
                 case 1: {
                     cfg = collectBinConfigFromUser(directory, binFolder, existing, cfg);
                     if (cfg == null) {
+                        if (!shouldExitAfterWizardCancel(binFolder, cfg, customSettings, step, wizardStepLabel(step))) {
+                            break;
+                        }
                         if (!hasFiles(binFolder)) deleteRecursively(binFolder);
                         IJ.showMessage("Set Up Configuration", "Cancelled.");
                         return;
@@ -1068,6 +1099,9 @@ public class CreateBinFileAnalysis implements Analysis {
                     Boolean scopeAccepted = showAnalysisScopeDialog(cfg, true);
                     if (scopeAccepted == null) {
                         if (lastWasBack) { step = 1; break; }
+                        if (!shouldExitAfterWizardCancel(binFolder, cfg, customSettings, step, wizardStepLabel(step))) {
+                            break;
+                        }
                         if (!hasFiles(binFolder)) deleteRecursively(binFolder);
                         IJ.showMessage("Set Up Configuration", "Cancelled.");
                         return;
@@ -1077,6 +1111,7 @@ public class CreateBinFileAnalysis implements Analysis {
                 }
                 case 3: {
                     customSettings = settingsMatrixForChannelCount(customSettings, cfg.names.size());
+                    setWizardDraftContext(binFolder, cfg, customSettings, step, wizardStepLabel(step));
                     BinConfig previousStatusReference = settingsStatusReference;
                     settingsStatusReference = existing;
                     boolean[][] selectedSettings;
@@ -1088,6 +1123,9 @@ public class CreateBinFileAnalysis implements Analysis {
                     }
                     if (selectedSettings == null) {
                         if (lastWasBack) { step = 2; break; }
+                        if (!shouldExitAfterWizardCancel(binFolder, cfg, customSettings, step, wizardStepLabel(step))) {
+                            break;
+                        }
                         if (!hasFiles(binFolder)) deleteRecursively(binFolder);
                         IJ.showMessage("Set Up Configuration", "Cancelled.");
                         return;
@@ -1101,6 +1139,9 @@ public class CreateBinFileAnalysis implements Analysis {
                     String zSliceResult = interactiveZSliceSubsetQC(directory, cfg);
                     if ("back".equals(zSliceResult)) { step = 3; break; }
                     if ("cancel".equals(zSliceResult)) {
+                        if (!shouldExitAfterWizardCancel(binFolder, cfg, customSettings, step, wizardStepLabel(step))) {
+                            break;
+                        }
                         if (!hasFiles(binFolder)) deleteRecursively(binFolder);
                         IJ.showMessage("Set Up Configuration", "Cancelled.");
                         return;
@@ -1115,6 +1156,9 @@ public class CreateBinFileAnalysis implements Analysis {
                                     qcSettings);
                     showQcOpenMessageIfPresent(qcOpenResult);
                     if (qcOpenResult.isCancel()) {
+                        if (!shouldExitAfterWizardCancel(binFolder, cfg, customSettings, step, wizardStepLabel(step))) {
+                            break;
+                        }
                         if (!hasFiles(binFolder)) deleteRecursively(binFolder);
                         if (!hasText(qcOpenResult.message)) {
                             IJ.showMessage("Set Up Configuration", "Cancelled.");
@@ -1128,6 +1172,9 @@ public class CreateBinFileAnalysis implements Analysis {
                         cleanupImages(qcOpenResult.images);
                         if ("back".equals(qcResult)) { step = 3; break; }
                         if ("cancel".equals(qcResult)) {
+                            if (!shouldExitAfterWizardCancel(binFolder, cfg, customSettings, step, wizardStepLabel(step))) {
+                                break;
+                            }
                             if (!hasFiles(binFolder)) deleteRecursively(binFolder);
                             IJ.showMessage("Set Up Configuration", "Cancelled.");
                             return;
@@ -1139,14 +1186,186 @@ public class CreateBinFileAnalysis implements Analysis {
                 }
                 case 6: {
                     writeBinConfigFiles(binFolder, cfg);
+                    WizardDraft.delete(binFolder);
                     IJ.showMessage("Set Up Configuration", "Created configuration in:\n" + binFolder.getAbsolutePath());
                     return;
                 }
             }
         }
+        } finally {
+            clearWizardDraftContext();
+        }
     }
 
     // ── Selective override flow (with Back navigation) ──────────────────
+
+    protected int showResumePrompt(WizardDraft.Snapshot draft) {
+        if (GraphicsEnvironment.isHeadless()) return 0;
+        PipelineDialog pd = setupAnalysisDialog("Set Up Configuration - Resume Draft");
+        pd.addSetupHelpHeader("Resume Draft", SetupHelpCatalog.CHANNEL_IDENTITY);
+        pd.addMessage("A saved Set Up Configuration draft was found.");
+        if (draft != null) {
+            pd.addMessage("Last saved step: " + draft.stepIndex + " of 6 - " + draft.stepLabel);
+        }
+        pd.addChoice("Action", new String[]{"Resume", "Start over", "Cancel"}, "Resume");
+        if (!pd.showDialog()) return 2;
+        String choice = pd.getNextChoice();
+        if ("Start over".equals(choice)) return 1;
+        if ("Cancel".equals(choice)) return 2;
+        return 0;
+    }
+
+    protected CancelConfirmationDialog.Choice showCancelConfirmation(Window owner, String stepLabel,
+                                                                     List<String> progressLines,
+                                                                     String draftPath) {
+        return CancelConfirmationDialog.show(owner, stepLabel, progressLines, draftPath);
+    }
+
+    private void setWizardDraftContext(File binFolder, BinUserConfig cfg,
+                                       boolean[][] customSettings, int step, String label) {
+        activeWizardDraftBinFolder = binFolder;
+        activeWizardDraftCfg = cfg;
+        activeWizardDraftCustomSettings = customSettings;
+        activeWizardDraftStep = step;
+        activeWizardDraftLabel = label == null ? "" : label;
+        lastWizardCancelChoice = null;
+    }
+
+    private void clearWizardDraftContext() {
+        activeWizardDraftBinFolder = null;
+        activeWizardDraftCfg = null;
+        activeWizardDraftCustomSettings = null;
+        activeWizardDraftStep = 1;
+        activeWizardDraftLabel = "";
+        lastWizardCancelChoice = null;
+    }
+
+    private void installWizardCancelHook(final PipelineDialog dialog) {
+        if (dialog == null || activeWizardDraftBinFolder == null) return;
+        dialog.setCancelConfirmation(new java.util.function.Supplier<Boolean>() {
+            @Override public Boolean get() {
+                return Boolean.valueOf(handleCancelRequest(
+                        dialog.getWindow(),
+                        activeWizardDraftBinFolder,
+                        activeWizardDraftCfg,
+                        activeWizardDraftCustomSettings,
+                        activeWizardDraftStep,
+                        activeWizardDraftLabel));
+            }
+        });
+    }
+
+    private boolean shouldExitAfterWizardCancel(File binFolder, BinUserConfig cfg,
+                                                boolean[][] customSettings, int step, String label) {
+        if (lastWizardCancelChoice == CancelConfirmationDialog.Choice.SAVE_AND_EXIT
+                || lastWizardCancelChoice == CancelConfirmationDialog.Choice.DISCARD_AND_EXIT) {
+            lastWizardCancelChoice = null;
+            return true;
+        }
+        return handleCancelRequest(null, binFolder, cfg, customSettings, step, label);
+    }
+
+    private boolean handleCancelRequest(File binFolder, BinUserConfig cfg,
+                                        boolean[][] customSettings, int step, String label) {
+        return handleCancelRequest(null, binFolder, cfg, customSettings, step, label);
+    }
+
+    private boolean handleCancelRequest(Window owner, File binFolder, BinUserConfig cfg,
+                                        boolean[][] customSettings, int step, String label) {
+        File draftFile = new File(new File(binFolder, WizardDraft.DRAFT_DIR), WizardDraft.DRAFT_FILE);
+        CancelConfirmationDialog.Choice choice = showCancelConfirmation(
+                owner,
+                "Step " + step + " of 6 - " + label,
+                buildProgressLines(cfg, customSettings, step),
+                draftFile.getAbsolutePath());
+        lastWizardCancelChoice = choice;
+        if (choice == CancelConfirmationDialog.Choice.SAVE_AND_EXIT) {
+            try {
+                WizardDraft.write(binFolder, new WizardDraft.Snapshot(
+                        cfg, customSettings, step, label, System.currentTimeMillis()));
+                return true;
+            } catch (IOException e) {
+                IJ.handleException(e);
+                return false;
+            }
+        }
+        if (choice == CancelConfirmationDialog.Choice.DISCARD_AND_EXIT) {
+            WizardDraft.delete(binFolder);
+            return true;
+        }
+        return false;
+    }
+
+    private List<String> buildProgressLines(BinUserConfig cfg, boolean[][] customSettings, int step) {
+        List<String> lines = new ArrayList<String>();
+        lines.add(progressLine(step, 1, "Channel names and markers", cfg == null ? 0 : cfg.names.size(), 0));
+        lines.add(progressLine(step, 2, "Analysis scope", 0, 0));
+        lines.add(progressLine(step, 3, "Settings mode", countSelected(customSettings), totalSettings(customSettings)));
+        int zDone = cfg == null ? 0 : cfg.zSliceSelections.size();
+        lines.add(progressLine(step, 4, "Z-slice ranges", zDone, 0));
+        lines.add(progressLine(step, 5, "Quality check", countFilledQcValues(cfg), Math.max(0, cfg == null ? 0 : cfg.names.size())));
+        lines.add(progressLine(step, 6, "Save configuration", 0, 0));
+        return lines;
+    }
+
+    private static String progressLine(int currentStep, int lineStep, String label, int done, int total) {
+        String status = currentStep > lineStep ? "Done" : (currentStep == lineStep ? "Current" : "Pending");
+        String detail = total > 0 ? " (" + done + " of " + total + ")" : (done > 0 ? " (" + done + ")" : "");
+        return status + " - " + label + detail + " (Step " + lineStep + ")";
+    }
+
+    private static int countSelected(boolean[][] customSettings) {
+        if (customSettings == null) return 0;
+        int count = 0;
+        for (int r = 0; r < customSettings.length; r++) {
+            if (customSettings[r] == null) continue;
+            for (int c = 0; c < customSettings[r].length; c++) {
+                if (customSettings[r][c]) count++;
+            }
+        }
+        return count;
+    }
+
+    private static int totalSettings(boolean[][] customSettings) {
+        if (customSettings == null) return 0;
+        int count = 0;
+        for (int r = 0; r < customSettings.length; r++) {
+            count += customSettings[r] == null ? 0 : customSettings[r].length;
+        }
+        return count;
+    }
+
+    private static int countFilledQcValues(BinUserConfig cfg) {
+        if (cfg == null) return 0;
+        int count = 0;
+        count += presentValues(cfg.minmax, "None");
+        count += presentValues(cfg.objectThresholds, "default");
+        count += presentValues(cfg.intensityThresholds, "default");
+        count += presentValues(cfg.sizes, "100-Infinity");
+        return count;
+    }
+
+    private static int presentValues(List<String> values, String defaultValue) {
+        if (values == null) return 0;
+        int count = 0;
+        for (int i = 0; i < values.size(); i++) {
+            String value = values.get(i);
+            if (hasText(value) && !value.equals(defaultValue)) count++;
+        }
+        return count;
+    }
+
+    private static String wizardStepLabel(int step) {
+        switch (step) {
+            case 1: return "Channel Identity";
+            case 2: return "Analysis Scope";
+            case 3: return "Settings Mode";
+            case 4: return "Z-slice QC";
+            case 5: return "Quality Check";
+            case 6: return "Save Configuration";
+            default: return "Set Up Configuration";
+        }
+    }
 
     private void handleSelectiveOverride(String directory, File binFolder, BinConfig existing,
                                          boolean doMinMax, boolean doThresholds,
@@ -1192,6 +1411,7 @@ public class CreateBinFileAnalysis implements Analysis {
             switch (step) {
                 case 1: { // Filter presets
                     PipelineDialog pd = new PipelineDialog("Override Filter Presets");
+                    installWizardCancelHook(pd);
                     pd.setModal(false);
                     pd.addHeader("Filter Preset Per Channel");
                     pd.addHelpText("'Custom' opens the standard Set Filter and Parameters QC step with the current channel macro loaded. Saved custom filters can be reused from this list on later runs.");
@@ -1371,6 +1591,7 @@ public class CreateBinFileAnalysis implements Analysis {
                                                boolean[][] initialSettings,
                                                BinConfig statusConfig) {
         PipelineDialog fork = new PipelineDialog("Settings Mode");
+        installWizardCancelHook(fork);
         fork.enableBackButton();
         fork.addSetupHelpHeader("Settings Mode", SetupHelpCatalog.SETTINGS_MODE);
         fork.addMessage("Toggle ON the settings you want to adjust interactively per channel.");
@@ -1837,25 +2058,25 @@ public class CreateBinFileAnalysis implements Analysis {
 
     // ── User config collection (with internal Back navigation) ──────────
 
-    static class BinUserConfig {
-        final List<String> names;
-        final List<String> colors;
-        final List<String> objectThresholds;
-        final List<String> sizes;
-        final List<String> minmax;
-        final List<String> filterPresets;
-        final List<String> intensityThresholds;
-        final List<String> segmentationMethods;
-        final List<String> markerIds;
-        final List<String> markerShapes;
-        final List<Boolean> markerCrowdingSensitive;
-        ZSliceMode zSliceMode;
-        final LinkedHashMap<Integer, ZSliceSelection> zSliceSelections;
+    public static class BinUserConfig {
+        public final List<String> names;
+        public final List<String> colors;
+        public final List<String> objectThresholds;
+        public final List<String> sizes;
+        public final List<String> minmax;
+        public final List<String> filterPresets;
+        public final List<String> intensityThresholds;
+        public final List<String> segmentationMethods;
+        public final List<String> markerIds;
+        public final List<String> markerShapes;
+        public final List<Boolean> markerCrowdingSensitive;
+        public ZSliceMode zSliceMode;
+        public final LinkedHashMap<Integer, ZSliceSelection> zSliceSelections;
 
-        BinUserConfig(List<String> names, List<String> colors,
-                      List<String> objectThresholds, List<String> sizes,
-                      List<String> minmax, List<String> filterPresets,
-                      List<String> intensityThresholds) {
+        public BinUserConfig(List<String> names, List<String> colors,
+                             List<String> objectThresholds, List<String> sizes,
+                             List<String> minmax, List<String> filterPresets,
+                             List<String> intensityThresholds) {
             this.names = names;
             this.colors = colors;
             this.objectThresholds = objectThresholds;
@@ -1877,11 +2098,11 @@ public class CreateBinFileAnalysis implements Analysis {
             }
         }
 
-        boolean usesZSliceSubset() {
+        public boolean usesZSliceSubset() {
             return zSliceMode != null && zSliceMode.usesSubset();
         }
 
-        ZSliceConfig getZSliceConfig() {
+        public ZSliceConfig getZSliceConfig() {
             return new ZSliceConfig(zSliceMode, zSliceSelections);
         }
     }
@@ -2091,6 +2312,7 @@ public class CreateBinFileAnalysis implements Analysis {
             n = seriesInfo.sizeC;
         } else {
             PipelineDialog gdCount = setupAnalysisDialog("Set Up Configuration");
+            installWizardCancelHook(gdCount);
             gdCount.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
             gdCount.addSetupHelpSubHeader("Channel Setup", SetupHelpCatalog.CHANNEL_IDENTITY);
             gdCount.addNumericField("Number of channels", 3, 0);
@@ -2109,7 +2331,9 @@ public class CreateBinFileAnalysis implements Analysis {
                 trimConfigToChannelCount(draftConfig, n);
             }
             final BinUserConfig dialogDefaults = normalizedConfigForChannelCount(existing, draftConfig, n);
+            activeWizardDraftCfg = dialogDefaults;
             PipelineDialog pd = setupAnalysisDialog("Set Up Configuration - Channel Identity");
+            installWizardCancelHook(pd);
             pd.setModal(false);
             if (existing == null) pd.enableBackButton();
             pd.addSetupHelpHeader("Channel Identity", SetupHelpCatalog.CHANNEL_IDENTITY);
@@ -2124,8 +2348,10 @@ public class CreateBinFileAnalysis implements Analysis {
                 if (pd.wasBackPressed() && existing == null) {
                     draftConfig = buildBinUserConfigFromDialog(channelCount, existing,
                             dialogDefaults, binBindings);
+                    activeWizardDraftCfg = draftConfig;
                     // Go back to channel count
                     PipelineDialog gdCount2 = new PipelineDialog("Set Up Configuration");
+                    installWizardCancelHook(gdCount2);
                     gdCount2.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
                     gdCount2.addSetupHelpSubHeader("Channel Setup", SetupHelpCatalog.CHANNEL_IDENTITY);
                     gdCount2.addNumericField("Number of channels", n, 0);
@@ -2767,6 +2993,7 @@ public class CreateBinFileAnalysis implements Analysis {
             PipelineDialog dialog = owner == null
                     ? new PipelineDialog("Save Custom Filter Preset")
                     : new PipelineDialog(owner, "Save Custom Filter Preset");
+            installWizardCancelHook(dialog);
             dialog.addHeader("Save Filter Preset");
             dialog.addMessage("Name this custom filter so it appears in the Filter Preset list on later runs.");
             dialog.addStringField("Preset name", value, 28);
@@ -2834,6 +3061,7 @@ public class CreateBinFileAnalysis implements Analysis {
     private Boolean showAnalysisScopeDialog(BinUserConfig cfg, boolean allowBack) {
         lastWasBack = false;
         PipelineDialog pd = setupAnalysisDialog("Set Up Configuration - Analysis Scope");
+        installWizardCancelHook(pd);
         if (allowBack) pd.enableBackButton();
         pd.addSetupHelpHeader("Analysis Scope", SetupHelpCatalog.ANALYSIS_SCOPE);
         pd.addMessage("Choose whether the analysis should use the full z-stack or a contiguous z-slice subset.");
@@ -2924,6 +3152,7 @@ public class CreateBinFileAnalysis implements Analysis {
         int totalSeries = qcSeriesMetas.size();
 
         PipelineDialog pd = new PipelineDialog("Quality Check - Image Selection");
+        installWizardCancelHook(pd);
         pd.addSetupHelpHeader("Select Images for Quality Check", SetupHelpCatalog.QC_IMAGE_SELECTION);
         pd.addMessage("File: " + lifFile.getName() + "  (" + totalSeries + " image series found)");
         JComboBox<String> modeChoice = pd.addChoice("Selection mode",
@@ -3056,6 +3285,7 @@ public class CreateBinFileAnalysis implements Analysis {
 
         PipelineDialog dialog = new PipelineDialog(
                 "Min/Max QC Metadata Review", PipelineDialog.Phase.SETUP);
+        installWizardCancelHook(dialog);
         dialog.addHeader("Animal and Condition Review");
         dialog.addMessage("Min and max per condition uses these labels to choose QC images. "
                 + "Correct any guessed animal names or condition groups before the scan starts.");
@@ -3404,6 +3634,7 @@ public class CreateBinFileAnalysis implements Analysis {
 
     private List<Integer> showManualQcSeriesSelection(File lifFile, List<SeriesMeta> metas) {
         PipelineDialog pd = new PipelineDialog("Quality Check - Manual Selection");
+        installWizardCancelHook(pd);
         pd.addHeader("Manual QC Image Selection");
         pd.addMessage("Select the image series to open for QC.");
         ToggleSwitch[] toggles = new ToggleSwitch[metas.size()];
@@ -3656,6 +3887,7 @@ public class CreateBinFileAnalysis implements Analysis {
     private String showCustomFilterPreviewAction(String title, String summary, int imgIdx, int totalImages,
                                                  ImagePlus previewImage, String savedToast) {
         PipelineDialog pd = new PipelineDialog(title);
+        installWizardCancelHook(pd);
         pd.addMessage(summary);
         pd.addSpacer(8);
 
@@ -3776,6 +4008,7 @@ public class CreateBinFileAnalysis implements Analysis {
                 String suggestionHint = zSliceDefault.hint;
                 while (true) {
                     PipelineDialog pd = new PipelineDialog("Set Up Configuration - Z-Slice Subset");
+                    installWizardCancelHook(pd);
                     pd.enableBackButton();
                     pd.setPrimaryButtonText("Lock in");
                     pd.setModal(false);
@@ -3972,6 +4205,7 @@ public class CreateBinFileAnalysis implements Analysis {
         String manualLabel = "Continue manually on all " + remainingCount + " remaining images";
 
         PipelineDialog dlg = new PipelineDialog("Set Up Configuration - Range Does Not Fit All Remaining");
+        installWizardCancelHook(dlg);
         dlg.addSetupHelpHeader("Range Does Not Fit Every Remaining Image",
                 SetupHelpCatalog.Z_SLICE_PARTIAL_APPLY);
         dlg.addMessage("The range " + range.toToken() + " fits " + compatibleCount
@@ -4123,6 +4357,7 @@ public class CreateBinFileAnalysis implements Analysis {
         String manualLabel = "Continue manually on all " + remainingCount + " remaining images";
 
         PipelineDialog dlg = new PipelineDialog("Set Up Configuration - Range Does Not Fit All Remaining");
+        installWizardCancelHook(dlg);
         dlg.addHeader("Range Does Not Fit Every Remaining Image");
         dlg.addMessage("The range " + range.toToken() + " fits " + compatibleCount
                 + " of " + remainingCount + " remaining image" + (remainingCount == 1 ? "" : "s") + ".");
@@ -4203,6 +4438,7 @@ public class CreateBinFileAnalysis implements Analysis {
         boolean absoluteAvailable = suggestedAbsoluteRange != null && canApplyAbsoluteRangeToAll(cfg, suggestedAbsoluteRange);
 
         PipelineDialog pd = new PipelineDialog("Set Up Configuration - Finalise Z-Slice Subset");
+        installWizardCancelHook(pd);
         pd.addSetupHelpHeader("Finalise Z-Slice Subset", SetupHelpCatalog.Z_SLICE_FINALISE);
         pd.addMessage("Review how the saved z-slice selections should be applied across the dataset.");
         pd.addMessage("Suggested shared slice count: " + targetCount);
@@ -4244,6 +4480,7 @@ public class CreateBinFileAnalysis implements Analysis {
         }
 
         PipelineDialog sameCountDialog = new PipelineDialog("Set Up Configuration - Same Slice Count");
+        installWizardCancelHook(sameCountDialog);
         sameCountDialog.addSetupHelpHeader("Same Slice Count", SetupHelpCatalog.Z_SLICE_SAME_COUNT);
         sameCountDialog.addMessage("Each image will keep " + targetCount
                 + " slices, based on the smallest selected range.");
@@ -4568,6 +4805,7 @@ public class CreateBinFileAnalysis implements Analysis {
 
                     PipelineDialog sdDialog = new PipelineDialog(
                             "StarDist 3D Parameters \u2014 C" + channelNum + " (" + cfg.names.get(ch) + ")");
+                    installWizardCancelHook(sdDialog);
                     sdDialog.setModal(false);
                     sdDialog.enableBackButton();
                     sdDialog.setPrimaryButtonText("Lock in");
@@ -4870,6 +5108,7 @@ public class CreateBinFileAnalysis implements Analysis {
 
                     PipelineDialog cpDialog = new PipelineDialog(
                             "Cellpose Parameters \u2014 C" + channelNum + " (" + cfg.names.get(ch) + ")");
+                    installWizardCancelHook(cpDialog);
                     cpDialog.setModal(false);
                     cpDialog.enableBackButton();
                     cpDialog.setPrimaryButtonText("Lock in");
@@ -5253,6 +5492,7 @@ public class CreateBinFileAnalysis implements Analysis {
 
                         // Confirmation: particle size
                         PipelineDialog gdSize = new PipelineDialog("Particle Sizes \u2014 " + chLabel);
+                        installWizardCancelHook(gdSize);
                         gdSize.enableBackButton();
                         gdSize.setPrimaryButtonText("Lock in");
                         gdSize.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
@@ -7483,6 +7723,7 @@ public class CreateBinFileAnalysis implements Analysis {
 
     private String showLockInSkipDialog(String title, String header, String[] messages, ImagePlus anchorImage) {
         PipelineDialog dialog = new PipelineDialog(title);
+        installWizardCancelHook(dialog);
         dialog.setModal(false);
         dialog.setPrimaryButtonText("Lock in");
         if (header != null && !header.trim().isEmpty()) {
@@ -7509,8 +7750,9 @@ public class CreateBinFileAnalysis implements Analysis {
                                                  String currentThresholdToken,
                                                  int imgIdx,
                                                  int totalImages,
-                                                 ImagePlus anchorImage) {
+        ImagePlus anchorImage) {
         PipelineDialog dialog = new PipelineDialog(title);
+        installWizardCancelHook(dialog);
         dialog.setModal(false);
         dialog.setPrimaryButtonText("Lock in");
         dialog.addHeader("Adjust Channel Threshold");
@@ -7531,6 +7773,7 @@ public class CreateBinFileAnalysis implements Analysis {
 
     private String showContinueRestartDialog(String title, String summary, int imgIdx, int totalImages) {
         PipelineDialog pd = new PipelineDialog(title);
+        installWizardCancelHook(pd);
         pd.addMessage(summary);
         pd.addSpacer(8);
 
@@ -7569,6 +7812,7 @@ public class CreateBinFileAnalysis implements Analysis {
         String fieldValue = defaultThresholdFieldValue(readThreshold, persistedToken);
         while (true) {
             PipelineDialog dialog = new PipelineDialog(dialogTitle);
+            installWizardCancelHook(dialog);
             dialog.enableBackButton();
             dialog.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
             dialog.addSetupHelpSubHeader(header, SetupHelpCatalog.CHANNEL_THRESHOLD);

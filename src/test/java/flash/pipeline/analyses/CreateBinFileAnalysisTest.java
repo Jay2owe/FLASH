@@ -3,11 +3,13 @@ package flash.pipeline.analyses;
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinField;
 import flash.pipeline.bin.BinMacroIndex;
+import flash.pipeline.bin.WizardDraft;
 import flash.pipeline.cli.CLIConfig;
 import flash.pipeline.image.NamedFilterLoader;
 import flash.pipeline.io.SeriesMeta;
 import flash.pipeline.runtime.DependencyService;
 import flash.pipeline.runtime.FeatureDependencyGate;
+import flash.pipeline.ui.CancelConfirmationDialog;
 import flash.pipeline.ui.CustomFilterEntryDialog;
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.ToggleSwitch;
@@ -35,6 +37,7 @@ import javax.swing.JComboBox;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.GraphicsEnvironment;
+import java.awt.Window;
 import java.io.File;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
@@ -50,6 +53,7 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
@@ -111,6 +115,54 @@ public class CreateBinFileAnalysisTest {
     @Test
     public void escapeHtmlText_returnsEmptyStringForNull() {
         assertEquals("", CreateBinFileAnalysis.escapeHtmlText(null));
+    }
+
+    @Test
+    public void cancelSaveAndExitWritesDraft() throws Exception {
+        File binFolder = temp.newFolder("cancel-save-draft");
+        CreateBinFileAnalysis.BinUserConfig cfg = oneChannelConfig("Default");
+        boolean[][] customSettings = new boolean[][]{{true}, {false}};
+        CancelChoiceAnalysis analysis = new CancelChoiceAnalysis(
+                CancelConfirmationDialog.Choice.SAVE_AND_EXIT);
+
+        assertTrue(invokeHandleCancelRequest(analysis, binFolder, cfg, customSettings, 3, "Settings Mode"));
+
+        WizardDraft.Snapshot draft = WizardDraft.read(binFolder);
+        assertEquals(3, draft.stepIndex);
+        assertEquals("Settings Mode", draft.stepLabel);
+        assertEquals(cfg.names, draft.cfg.names);
+        assertArrayEquals(customSettings[0], draft.customSettings[0]);
+    }
+
+    @Test
+    public void cancelDiscardAndExitDeletesDraft() throws Exception {
+        File binFolder = temp.newFolder("cancel-discard-draft");
+        WizardDraft.write(binFolder, new WizardDraft.Snapshot(
+                oneChannelConfig("Default"), null, 2, "Analysis Scope", 1L));
+        CancelChoiceAnalysis analysis = new CancelChoiceAnalysis(
+                CancelConfirmationDialog.Choice.DISCARD_AND_EXIT);
+
+        assertTrue(invokeHandleCancelRequest(analysis, binFolder,
+                oneChannelConfig("Default"), null, 2, "Analysis Scope"));
+
+        assertFalse(WizardDraft.exists(binFolder));
+    }
+
+    @Test
+    public void resumeFromDraftRestoresCfg() throws Exception {
+        File binFolder = temp.newFolder("resume-draft");
+        CreateBinFileAnalysis.BinUserConfig cfg = oneChannelConfig("Custom");
+        cfg.names.set(0, "GFAP");
+        boolean[][] customSettings = new boolean[][]{{false}, {true}};
+        WizardDraft.write(binFolder, new WizardDraft.Snapshot(
+                cfg, customSettings, 5, "Quality Check", 1L));
+
+        WizardDraft.Snapshot draft = WizardDraft.read(binFolder);
+
+        assertEquals(5, draft.stepIndex);
+        assertEquals("GFAP", draft.cfg.names.get(0));
+        assertEquals("Custom", draft.cfg.filterPresets.get(0));
+        assertArrayEquals(customSettings[1], draft.customSettings[1]);
     }
 
     @Test
@@ -1119,6 +1171,29 @@ public class CreateBinFileAnalysisTest {
                 Boolean.valueOf(writeConfigOnDemote))).booleanValue();
     }
 
+    private static boolean invokeHandleCancelRequest(CreateBinFileAnalysis analysis,
+                                                     File binFolder,
+                                                     CreateBinFileAnalysis.BinUserConfig cfg,
+                                                     boolean[][] customSettings,
+                                                     int step,
+                                                     String label) throws Exception {
+        Method method = CreateBinFileAnalysis.class.getDeclaredMethod(
+                "handleCancelRequest",
+                File.class,
+                CreateBinFileAnalysis.BinUserConfig.class,
+                boolean[][].class,
+                int.class,
+                String.class);
+        method.setAccessible(true);
+        return ((Boolean) method.invoke(
+                analysis,
+                binFolder,
+                cfg,
+                customSettings,
+                Integer.valueOf(step),
+                label)).booleanValue();
+    }
+
     private static Double invokeReadThresholdFromImage(CreateBinFileAnalysis analysis,
                                                        ImagePlus imp) throws Exception {
         Method method = CreateBinFileAnalysis.class.getDeclaredMethod("readThresholdFromImage", ImagePlus.class);
@@ -1468,6 +1543,23 @@ public class CreateBinFileAnalysisTest {
             visited.add("qc");
             qcFields = fields == null ? Collections.<BinField>emptySet() : EnumSet.copyOf(fields);
             return true;
+        }
+    }
+
+    private static final class CancelChoiceAnalysis extends CreateBinFileAnalysis {
+        private final CancelConfirmationDialog.Choice choice;
+
+        CancelChoiceAnalysis(CancelConfirmationDialog.Choice choice) {
+            this.choice = choice;
+        }
+
+        @Override
+        protected CancelConfirmationDialog.Choice showCancelConfirmation(
+                Window owner,
+                String stepLabel,
+                List<String> progressLines,
+                String draftPath) {
+            return choice;
         }
     }
 }
