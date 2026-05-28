@@ -701,7 +701,7 @@ public class ThreeDObjectAnalysis implements Analysis {
             return;
         }
 
-        BinConfig cfg = BinConfigIO.readPartialFromDirectory(directory);
+        BinConfig cfg = loadBinConfig(directory);
         RecipeReplayModelResolver.validate(new File(directory).toPath(), cfg.segmentationMethods);
         if (usesClassicalSegmentation(cfg)
                 && !FeatureDependencyGate.gate(DependencyId.OBJECTS_COUNTER_3D,
@@ -1248,6 +1248,10 @@ public class ThreeDObjectAnalysis implements Analysis {
         }
 
         if (!suppressDialogs) IJ.showMessage("3D Object Analysis", "Finished.");
+    }
+
+    BinConfig loadBinConfig(String directory) {
+        return BinConfigIO.readPartialFromDirectory(directory);
     }
 
     private void ensureStringColumn(ResultsTable t, String col) {

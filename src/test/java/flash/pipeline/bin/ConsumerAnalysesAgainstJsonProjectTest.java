@@ -11,6 +11,7 @@ import flash.pipeline.analyses.StatisticalAnalysis;
 import flash.pipeline.analyses.ThreeDObjectAnalysis;
 import flash.pipeline.decontamination.SpectralDecontaminationAnalysis;
 import flash.pipeline.export.ExcelSummaryExportAnalysis;
+import flash.pipeline.intelligence.MetadataDiagnostics;
 import flash.pipeline.io.FlashProjectLayout;
 import org.junit.Rule;
 import org.junit.Test;
@@ -19,8 +20,12 @@ import org.junit.rules.TemporaryFolder;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -35,72 +40,71 @@ public class ConsumerAnalysesAgainstJsonProjectTest {
 
     @Test
     public void threeDObjectAnalysisReadsJsonOnlyProject() throws Exception {
-        assertJsonOnlyReadProducesValidConfig(new ThreeDObjectAnalysis(), ReadMode.PARTIAL);
+        assertAnalysisLoaderProducesValidConfig(new ThreeDObjectAnalysis(), "loadBinConfig");
     }
 
     @Test
     public void spatialAnalysisReadsJsonOnlyProject() throws Exception {
-        assertJsonOnlyReadProducesValidConfig(new SpatialAnalysis(), ReadMode.PARTIAL);
+        assertNoBinConfigReadPath(SpatialAnalysis.class);
     }
 
     @Test
     public void intensityAnalysisV2ReadsJsonOnlyProject() throws Exception {
-        assertJsonOnlyReadProducesValidConfig(new IntensityAnalysisV2(), ReadMode.PARTIAL);
+        assertAnalysisLoaderProducesValidConfig(new IntensityAnalysisV2(), "loadBinConfig");
     }
 
     @Test
     public void splitMergeReadsJsonOnlyProject() throws Exception {
-        assertJsonOnlyReadProducesValidConfig(new SplitAndMergeImageChannelsAnalysis(), ReadMode.PARTIAL);
+        assertAnalysisLoaderProducesValidConfig(new SplitAndMergeImageChannelsAnalysis(), "loadBinConfig");
     }
 
     @Test
     public void drawAndSaveROIsReadsJsonOnlyProject() throws Exception {
-        assertJsonOnlyReadProducesValidConfig(new DrawAndSaveROIsAnalysis(), ReadMode.PARTIAL);
+        assertAnalysisLoaderProducesValidConfig(new DrawAndSaveROIsAnalysis(), "loadBinConfig");
     }
 
     @Test
     public void deconvolutionReadsJsonOnlyProject() throws Exception {
-        assertJsonOnlyReadProducesValidConfig(new DeconvolutionAnalysis(), ReadMode.COMPLETE);
+        File projectRoot = jsonOnlyProject();
+        String[] names = invokeDeconvolutionChannelResolver(projectRoot);
+        assertEquals(Arrays.asList("DAPI", "IBA1", "GFAP"), Arrays.asList(names));
     }
 
     @Test
     public void lineDistanceReadsJsonOnlyProject() throws Exception {
-        assertJsonOnlyReadProducesValidConfig(new LineDistanceAnalysis(), ReadMode.PARTIAL);
+        File projectRoot = jsonOnlyProject();
+        BinConfig actual = invokeStaticBinConfigLoader(LineDistanceAnalysis.class,
+                "readBinConfigForLineDrawing", projectRoot);
+        assertValidMatchingConfig(expectedConfig(projectRoot), actual);
     }
 
     @Test
     public void aggregationReadsJsonOnlyProject() throws Exception {
-        assertJsonOnlyReadProducesValidConfig(new MasterAggregationAnalysis(), ReadMode.PARTIAL);
+        File projectRoot = jsonOnlyProject();
+        Set<String> channels = invokeKnownIntensityChannels(projectRoot);
+        assertEquals(new HashSet<String>(Arrays.asList("DAPI", "IBA1", "GFAP")), channels);
     }
 
     @Test
     public void statisticsReadsJsonOnlyProject() throws Exception {
-        assertJsonOnlyReadProducesValidConfig(new StatisticalAnalysis(), ReadMode.PARTIAL);
+        assertNoBinConfigReadPath(StatisticalAnalysis.class);
     }
 
     @Test
     public void excelReadsJsonOnlyProject() throws Exception {
-        assertJsonOnlyReadProducesValidConfig(new ExcelSummaryExportAnalysis(), ReadMode.PARTIAL);
+        assertNoBinConfigReadPath(ExcelSummaryExportAnalysis.class);
     }
 
     @Test
     public void spectralDecontaminationReadsJsonOnlyProject() throws Exception {
-        assertJsonOnlyReadProducesValidConfig(new SpectralDecontaminationAnalysis(), ReadMode.COMPLETE);
+        assertAnalysisLoaderProducesValidConfig(new SpectralDecontaminationAnalysis(), "loadBinConfig");
     }
 
-    private void assertJsonOnlyReadProducesValidConfig(Object consumer, ReadMode mode) throws Exception {
-        assertNotNull(consumer);
+    private void assertAnalysisLoaderProducesValidConfig(Object consumer, String methodName) throws Exception {
         File projectRoot = jsonOnlyProject();
-        FlashProjectLayout layout = FlashProjectLayout.forDirectory(projectRoot.getAbsolutePath());
-        assertFalse(layout.channelDataWriteFile().exists());
+        BinConfig actual = invokeBinConfigLoader(consumer, methodName, projectRoot);
 
-        ChannelConfig channelConfig = ChannelConfigIO.read(layout.configurationWriteDir());
-        BinConfig expected = ChannelConfigIO.toBinConfig(channelConfig);
-        BinConfig actual = mode == ReadMode.COMPLETE
-                ? BinConfigIO.readFromDirectory(projectRoot.getAbsolutePath())
-                : BinConfigIO.readPartialFromDirectory(projectRoot.getAbsolutePath());
-
-        assertValidMatchingConfig(expected, actual);
+        assertValidMatchingConfig(expectedConfig(projectRoot), actual);
     }
 
     private File jsonOnlyProject() throws Exception {
@@ -120,6 +124,82 @@ public class ConsumerAnalysesAgainstJsonProjectTest {
         return projectRoot;
     }
 
+    private static BinConfig expectedConfig(File projectRoot) {
+        FlashProjectLayout layout = FlashProjectLayout.forDirectory(projectRoot.getAbsolutePath());
+        assertFalse(layout.channelDataWriteFile().exists());
+        ChannelConfig channelConfig = ChannelConfigIO.read(layout.configurationWriteDir());
+        return ChannelConfigIO.toBinConfig(channelConfig, layout.configurationWriteDir());
+    }
+
+    private static BinConfig invokeBinConfigLoader(Object consumer, String methodName,
+                                                   File projectRoot) throws Exception {
+        assertNotNull(consumer);
+        Method method = findMethod(consumer.getClass(), methodName, String.class);
+        method.setAccessible(true);
+        return (BinConfig) method.invoke(consumer, projectRoot.getAbsolutePath());
+    }
+
+    private static BinConfig invokeStaticBinConfigLoader(Class<?> consumerClass, String methodName,
+                                                         File projectRoot) throws Exception {
+        Method method = findMethod(consumerClass, methodName, String.class);
+        method.setAccessible(true);
+        return (BinConfig) method.invoke(null, projectRoot.getAbsolutePath());
+    }
+
+    private static String[] invokeDeconvolutionChannelResolver(File projectRoot) throws Exception {
+        DeconvolutionAnalysis analysis = new DeconvolutionAnalysis();
+        Method method = DeconvolutionAnalysis.class.getDeclaredMethod(
+                "resolveChannelNames", String.class, MetadataDiagnostics.SeriesInfo.class);
+        method.setAccessible(true);
+        return (String[]) method.invoke(analysis, projectRoot.getAbsolutePath(), null);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Set<String> invokeKnownIntensityChannels(File projectRoot) throws Exception {
+        Method method = MasterAggregationAnalysis.class.getDeclaredMethod(
+                "knownIntensityChannels", String.class);
+        method.setAccessible(true);
+        return (Set<String>) method.invoke(null, projectRoot.getAbsolutePath());
+    }
+
+    private static Method findMethod(Class<?> type, String name, Class<?>... parameterTypes)
+            throws NoSuchMethodException {
+        Class<?> current = type;
+        while (current != null) {
+            try {
+                return current.getDeclaredMethod(name, parameterTypes);
+            } catch (NoSuchMethodException e) {
+                current = current.getSuperclass();
+            }
+        }
+        throw new NoSuchMethodException(type.getName() + "." + name);
+    }
+
+    private static void assertNoBinConfigReadPath(Class<?> consumerClass) throws Exception {
+        String resource = "/" + consumerClass.getName().replace('.', '/') + ".class";
+        InputStream in = consumerClass.getResourceAsStream(resource);
+        assertNotNull("Missing bytecode resource for " + consumerClass.getName(), in);
+        byte[] bytes;
+        try {
+            bytes = readAllBytes(in);
+        } finally {
+            in.close();
+        }
+        String bytecode = new String(bytes, "ISO-8859-1");
+        assertFalse(consumerClass.getName() + " unexpectedly references BinConfigIO",
+                bytecode.contains("flash/pipeline/bin/BinConfigIO"));
+    }
+
+    private static byte[] readAllBytes(InputStream in) throws IOException {
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        byte[] buffer = new byte[4096];
+        int n;
+        while ((n = in.read(buffer)) >= 0) {
+            out.write(buffer, 0, n);
+        }
+        return out.toByteArray();
+    }
+
     private static void assertValidMatchingConfig(BinConfig expected, BinConfig actual) throws IOException {
         assertNotNull(actual);
         assertEquals(3, actual.numChannels());
@@ -137,8 +217,4 @@ public class ConsumerAnalysesAgainstJsonProjectTest {
         assertEquals(expected.zSliceSelections.keySet(), actual.zSliceSelections.keySet());
     }
 
-    private enum ReadMode {
-        PARTIAL,
-        COMPLETE
-    }
 }

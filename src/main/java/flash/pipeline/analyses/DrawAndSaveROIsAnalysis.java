@@ -158,7 +158,7 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
         }
 
         // ── Main dialog ────────────────────────────────────────────────
-        BinConfig roiBinCfg = BinConfigIO.readPartialFromDirectory(directory);
+        BinConfig roiBinCfg = loadBinConfig(directory);
         String[] roiChannelChoices = buildRoiChannelChoices(roiBinCfg);
         String defaultRoiChannelChoice = defaultRoiChannelChoice(roiBinCfg, roiChannelChoices);
         boolean showZSliceSourceChoice = shouldShowZSliceSourceChoice(roiBinCfg);
@@ -564,6 +564,10 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
             LineDistanceAnalysis lineAnalysis = new LineDistanceAnalysis();
             lineAnalysis.drawLineSet(directory, linesDir, lineSetName);
         }
+    }
+
+    BinConfig loadBinConfig(String directory) {
+        return BinConfigIO.readPartialFromDirectory(directory);
     }
 
     private static void showOrLog(String title, String body) {

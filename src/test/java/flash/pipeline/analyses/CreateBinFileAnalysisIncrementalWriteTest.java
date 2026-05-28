@@ -82,6 +82,24 @@ public class CreateBinFileAnalysisIncrementalWriteTest {
     }
 
     @Test
+    public void finalCommitPreservesUnknownExtrasAndCustomSettings() throws Exception {
+        File binFolder = temp.newFolder("commit-extras");
+        ChannelConfig seeded = ChannelConfigIO.fromBinUserConfig(twoChannelConfig());
+        seeded.extras.put("futureRootKey", "keep");
+        seeded.channels.get(0).extras.put("futureChannelKey", "keep-channel");
+        ChannelConfigIO.write(FlashProjectLayout.settingsDir(binFolder), seeded);
+
+        invokePersistCommit(new CreateBinFileAnalysis(), binFolder, twoChannelConfig(),
+                new boolean[][]{{true, false}, {false, true}});
+
+        ChannelConfig cfg = ChannelConfigIO.read(FlashProjectLayout.settingsDir(binFolder));
+        assertEquals("keep", cfg.extras.get("futureRootKey"));
+        assertEquals("keep-channel", cfg.channels.get(0).extras.get("futureChannelKey"));
+        assertEquals(6, ((Number) cfg.extras.get("lastStepIndex")).intValue());
+        assertTrue(cfg.extras.containsKey("customSettings"));
+    }
+
+    @Test
     public void cancelSaveAndExitLeavesJsonInLatestState() throws Exception {
         File binFolder = temp.newFolder("cancel-save");
         CreateBinFileAnalysis.BinUserConfig user = twoChannelConfig();
@@ -133,6 +151,87 @@ public class CreateBinFileAnalysisIncrementalWriteTest {
         assertEquals("Quality Check", state.stepLabel);
         assertEquals("IBA1", state.cfg.names.get(1));
         assertArrayEquals(new boolean[]{false, true}, state.customSettings[1]);
+    }
+
+    @Test
+    public void handleFullCreationCancelSavePreservesPartialJsonAndResumeState() throws Exception {
+        File projectRoot = temp.newFolder("handle-full-cancel");
+        File binFolder = FlashProjectLayout.forDirectory(projectRoot.getAbsolutePath()).configurationWriteDir();
+        assertTrue(binFolder.mkdirs());
+        CancelDuringQcAnalysis analysis = new CancelDuringQcAnalysis();
+
+        analysis.handleFullCreation(projectRoot.getAbsolutePath(), binFolder, null);
+
+        ChannelConfig cfg = ChannelConfigIO.read(binFolder);
+        assertNotNull(cfg);
+        assertEquals(2, cfg.channels.size());
+        assertEquals("DAPI", cfg.channels.get(0).name);
+        assertEquals(ChannelConfig.PropertyStatus.CONFIGURED,
+                cfg.channels.get(0).statusOf(ChannelConfig.P_THRESHOLD));
+        assertEquals(ChannelConfig.PropertyStatus.CONFIGURED,
+                cfg.channels.get(0).statusOf(ChannelConfig.P_SIZE));
+        assertEquals("IBA1", cfg.channels.get(1).name);
+        assertEquals("Green", cfg.channels.get(1).color);
+        assertEquals(ChannelConfig.PropertyStatus.PENDING,
+                cfg.channels.get(1).statusOf(ChannelConfig.P_THRESHOLD));
+        assertEquals(5, ((Number) cfg.extras.get("lastStepIndex")).intValue());
+
+        CreateBinFileAnalysis.WizardResumeState resume =
+                new CreateBinFileAnalysis().readWizardResumeState(projectRoot.getAbsolutePath(), binFolder);
+        assertNotNull(resume);
+        assertEquals(5, resume.stepIndex);
+        assertEquals(cfg.channels.get(0).name, resume.cfg.names.get(0));
+        assertEquals(cfg.channels.get(1).color, resume.cfg.colors.get(1));
+        assertEquals(cfg.channels.get(1).threshold, resume.cfg.objectThresholds.get(1));
+    }
+
+    @Test
+    public void resumeStateWarnsWhenCurrentChannelCountDiffers() throws Exception {
+        File binFolder = temp.newFolder("resume-count-mismatch");
+        ChannelConfig cfg = ChannelConfigIO.fromBinUserConfig(twoChannelConfig());
+        cfg.channels.get(0).status.put(ChannelConfig.P_THRESHOLD, ChannelConfig.PropertyStatus.PENDING);
+        cfg.extras.put("lastStepIndex", Integer.valueOf(2));
+        ChannelConfigIO.write(FlashProjectLayout.settingsDir(binFolder), cfg);
+
+        CreateBinFileAnalysis.WizardResumeState state =
+                new ChannelCountAnalysis(3).readWizardResumeState("current-project", binFolder);
+
+        assertNotNull(state);
+        assertTrue(state.progressLines.get(0).contains("Current image metadata reports 3 channels"));
+        assertTrue(state.progressLines.get(0).contains("Start Over"));
+    }
+
+    @Test
+    public void futureSchemaVersionDoesNotCrashResumePrelude() throws Exception {
+        File binFolder = temp.newFolder("future-schema");
+        File settingsDir = FlashProjectLayout.settingsDir(binFolder);
+        assertTrue(settingsDir.mkdirs());
+        java.nio.file.Files.write(new File(settingsDir, ChannelConfigIO.FILE_NAME).toPath(),
+                Arrays.asList("{\"schemaVersion\":2,\"channels\":[]}"),
+                java.nio.charset.StandardCharsets.UTF_8);
+
+        assertEquals(null, new CreateBinFileAnalysis().readWizardResumeState(binFolder));
+    }
+
+    @Test
+    public void channelCountChangeDropsStalePerChannelStatuses() throws Exception {
+        File binFolder = temp.newFolder("channel-count-change");
+        ChannelConfig seeded = ChannelConfigIO.fromBinUserConfig(twoChannelConfig());
+        seeded.channels.add(ChannelConfigIO.fromBinUserConfig(twoChannelConfig()).channels.get(0));
+        for (ChannelConfig.Channel channel : seeded.channels) {
+            channel.status.put(ChannelConfig.P_THRESHOLD, ChannelConfig.PropertyStatus.CONFIGURED);
+        }
+        ChannelConfigIO.write(FlashProjectLayout.settingsDir(binFolder), seeded);
+
+        invokePersistIncremental(new CreateBinFileAnalysis(), binFolder, twoChannelConfig(), null,
+                1, "Channel Identity", -1, null);
+
+        ChannelConfig cfg = ChannelConfigIO.read(FlashProjectLayout.settingsDir(binFolder));
+        assertEquals(2, cfg.channels.size());
+        assertEquals(ChannelConfig.PropertyStatus.PENDING,
+                cfg.channels.get(0).statusOf(ChannelConfig.P_THRESHOLD));
+        assertEquals(ChannelConfig.PropertyStatus.CONFIGURED,
+                cfg.channels.get(0).statusOf(ChannelConfig.P_NAME));
     }
 
     @Test
@@ -255,6 +354,85 @@ public class CreateBinFileAnalysisIncrementalWriteTest {
                 List<String> progressLines,
                 String draftPath) {
             return choice;
+        }
+    }
+
+    private static final class ChannelCountAnalysis extends CreateBinFileAnalysis {
+        private final int count;
+
+        ChannelCountAnalysis(int count) {
+            this.count = count;
+        }
+
+        @Override
+        protected int detectCurrentChannelCount(String directory) {
+            return count;
+        }
+    }
+
+    private static final class CancelDuringQcAnalysis extends CreateBinFileAnalysis {
+        @Override
+        protected BinUserConfig collectBinConfigFromUser(String directory, File binFolder,
+                                                        flash.pipeline.bin.BinConfig existing,
+                                                        BinUserConfig draft) {
+            return twoChannelConfig();
+        }
+
+        @Override
+        protected Boolean showAnalysisScopeDialog(BinUserConfig cfg, boolean allowBack) {
+            return Boolean.FALSE;
+        }
+
+        @Override
+        protected boolean[][] showGranularCustomFork(BinUserConfig cfg,
+                                                     boolean showFilterParameters,
+                                                     boolean showMinMax,
+                                                     boolean showThreshold,
+                                                     boolean showParticleSize,
+                                                     boolean showSegmentationMethod,
+                                                     boolean[][] initialSettings) {
+            boolean[][] settings = new boolean[6][cfg.names.size()];
+            settings[2][0] = true;
+            settings[2][1] = true;
+            return settings;
+        }
+
+        @Override
+        protected QcImageOpenResult openImagesForQC(String directory, File binFolder,
+                                                    BinUserConfig cfg, boolean[][] customSettings) {
+            ChannelConfig partial = ChannelConfigIO.fromBinUserConfig(cfg);
+            partial.extras.put("lastStepIndex", Integer.valueOf(5));
+            partial.extras.put("lastStepLabel", "Quality Check");
+            for (ChannelConfig.Channel channel : partial.channels) {
+                for (String key : propertyKeys()) {
+                    channel.status.put(key, ChannelConfig.PropertyStatus.PENDING);
+                }
+                channel.status.put(ChannelConfig.P_NAME, ChannelConfig.PropertyStatus.CONFIGURED);
+                channel.status.put(ChannelConfig.P_COLOR, ChannelConfig.PropertyStatus.CONFIGURED);
+                channel.status.put(ChannelConfig.P_MARKER, ChannelConfig.PropertyStatus.CONFIGURED);
+            }
+            ChannelConfig.Channel first = partial.channels.get(0);
+            first.status.put(ChannelConfig.P_THRESHOLD, ChannelConfig.PropertyStatus.CONFIGURED);
+            first.status.put(ChannelConfig.P_SIZE, ChannelConfig.PropertyStatus.CONFIGURED);
+            first.status.put(ChannelConfig.P_MINMAX, ChannelConfig.PropertyStatus.CONFIGURED);
+            first.status.put(ChannelConfig.P_INTENSITY, ChannelConfig.PropertyStatus.CONFIGURED);
+            first.status.put(ChannelConfig.P_SEGMENTATION, ChannelConfig.PropertyStatus.CONFIGURED);
+            first.status.put(ChannelConfig.P_FILTER, ChannelConfig.PropertyStatus.CONFIGURED);
+            try {
+                ChannelConfigIO.write(binFolder, partial);
+            } catch (java.io.IOException e) {
+                throw new AssertionError(e);
+            }
+            return QcImageOpenResult.cancel("");
+        }
+
+        @Override
+        protected CancelConfirmationDialog.Choice showCancelConfirmation(
+                java.awt.Window owner,
+                String stepLabel,
+                List<String> progressLines,
+                String draftPath) {
+            return CancelConfirmationDialog.Choice.SAVE_AND_EXIT;
         }
     }
 }

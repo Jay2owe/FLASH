@@ -1075,14 +1075,14 @@ public class CreateBinFileAnalysis implements Analysis {
 
     // ── Full creation flow (with Back navigation) ───────────────────────
 
-    private void handleFullCreation(String directory, File binFolder, BinConfig existing) throws IOException {
+    void handleFullCreation(String directory, File binFolder, BinConfig existing) throws IOException {
         writeDefaultFilter(binFolder);
 
         BinUserConfig cfg = null;
         boolean[][] customSettings = null;
 
         int step = 1; // 1=collectConfig, 2=analysisScope, 3=granularFork, 4=zSliceQC, 5=channelQC, 6=save
-        WizardResumeState draft = readWizardResumeState(binFolder);
+        WizardResumeState draft = readWizardResumeState(directory, binFolder);
         if (draft != null) {
             int choice = showResumePrompt(draft);
             if (choice == 2) return;
@@ -1215,7 +1215,6 @@ public class CreateBinFileAnalysis implements Analysis {
                     break;
                 }
                 case 6: {
-                    writeBinConfigFiles(binFolder, cfg);
                     persistCommit(binFolder, cfg, customSettings);
                     IJ.showMessage("Set Up Configuration", "Created configuration in:\n" + binFolder.getAbsolutePath());
                     return;
@@ -1347,19 +1346,45 @@ public class CreateBinFileAnalysis implements Analysis {
     }
 
     WizardResumeState readWizardResumeState(File binFolder) {
+        return readWizardResumeState(null, binFolder);
+    }
+
+    WizardResumeState readWizardResumeState(String directory, File binFolder) {
         ChannelConfig channelConfig = ChannelConfigIO.read(channelConfigSettingsDir(binFolder));
         if (channelConfig == null || channelConfig.channels == null || channelConfig.channels.isEmpty()
                 || allPropertiesHaveStatus(channelConfig, ChannelConfig.PropertyStatus.COMMITTED)) {
             return null;
         }
         int stepIndex = readStepIndex(channelConfig);
+        List<String> progressLines = buildProgressLines(channelConfig, stepIndex);
+        int currentChannelCount = detectCurrentChannelCount(directory);
+        int savedChannelCount = channelConfig.channels.size();
+        if (currentChannelCount > 0 && savedChannelCount > 0 && currentChannelCount != savedChannelCount) {
+            progressLines = new ArrayList<String>(progressLines);
+            progressLines.add(0, "! Current image metadata reports " + currentChannelCount
+                    + " channels; saved progress has " + savedChannelCount
+                    + ". Choose Start Over to change channel count.");
+        }
         return new WizardResumeState(
                 binUserConfigFromChannelConfig(channelConfig),
                 customSettingsFromExtras(channelConfig.extras),
                 stepIndex,
                 stringExtra(channelConfig.extras, EXTRA_LAST_STEP_LABEL, wizardStepLabel(stepIndex)),
-                buildProgressLines(channelConfig, stepIndex),
+                progressLines,
                 channelConfig.writtenAtMillis);
+    }
+
+    protected int detectCurrentChannelCount(String directory) {
+        if (directory == null || directory.trim().isEmpty()) {
+            return 0;
+        }
+        try {
+            MetadataDiagnostics.SeriesInfo seriesInfo = ChannelSetupWizard.firstSeriesInfo(directory);
+            return seriesInfo == null ? 0 : seriesInfo.sizeC;
+        } catch (RuntimeException e) {
+            IJ.log("[FLASH] Could not inspect current channel count for resume prompt: " + e.getMessage());
+            return 0;
+        }
     }
 
     private void persistIncremental(File binFolder, BinUserConfig user, boolean[][] customSettings,
@@ -1389,14 +1414,8 @@ public class CreateBinFileAnalysis implements Analysis {
     }
 
     private void persistCommit(File binFolder, BinUserConfig user, boolean[][] customSettings) {
-        ChannelConfig cc = mergeIntoExisting(
-                binFolder, user, customSettings, 6, wizardStepLabel(6),
-                -1, null, ChannelConfig.PropertyStatus.COMMITTED);
-        for (ChannelConfig.Channel channel : cc.channels) {
-            markAllKnown(channel, ChannelConfig.PropertyStatus.COMMITTED);
-        }
         try {
-            ChannelConfigIO.writeWithDerivedLegacy(channelConfigSettingsDir(binFolder), cc);
+            writeFinalChannelConfig(binFolder, user, customSettings);
         } catch (IOException e) {
             IJ.log("FLASH: final config write failed: " + e.getMessage());
             throw new RuntimeException(e);
@@ -1414,6 +1433,10 @@ public class CreateBinFileAnalysis implements Analysis {
         next.writtenAtMillis = System.currentTimeMillis();
         if (existing != null) {
             next.extras.putAll(existing.extras);
+            next.clickCaptureUsed = existing.clickCaptureUsed;
+        }
+        if (new File(settingsDir, "Clicks.json").isFile()) {
+            next.clickCaptureUsed = true;
         }
         next.extras.put(EXTRA_LAST_STEP_INDEX, Integer.valueOf(stepIndex));
         next.extras.put(EXTRA_LAST_STEP_LABEL, stepLabel == null ? "" : stepLabel);
@@ -1421,9 +1444,12 @@ public class CreateBinFileAnalysis implements Analysis {
             next.extras.put(EXTRA_CUSTOM_SETTINGS, customSettingsToJson(customSettings));
         }
 
+        boolean sameChannelCount = existing != null
+                && existing.channels != null
+                && existing.channels.size() == next.channels.size();
         for (int i = 0; i < next.channels.size(); i++) {
             ChannelConfig.Channel channel = next.channels.get(i);
-            ChannelConfig.Channel old = channelAt(existing, i);
+            ChannelConfig.Channel old = sameChannelCount ? channelAt(existing, i) : null;
             channel.status.clear();
             if (old != null) {
                 channel.extras.putAll(old.extras);
@@ -1918,11 +1944,11 @@ public class CreateBinFileAnalysis implements Analysis {
                 showParticleSize, false, initialSettings);
     }
 
-    private boolean[][] showGranularCustomFork(BinUserConfig cfg,
-                                               boolean showFilterParameters, boolean showMinMax,
-                                               boolean showThreshold, boolean showParticleSize,
-                                               boolean showSegmentationMethod,
-                                               boolean[][] initialSettings) {
+    protected boolean[][] showGranularCustomFork(BinUserConfig cfg,
+                                                 boolean showFilterParameters, boolean showMinMax,
+                                                 boolean showThreshold, boolean showParticleSize,
+                                                 boolean showSegmentationMethod,
+                                                 boolean[][] initialSettings) {
         BinUserConfig safe = cfg == null
                 ? new BinUserConfig(new ArrayList<String>(), new ArrayList<String>(),
                 new ArrayList<String>(), new ArrayList<String>(), new ArrayList<String>(),
@@ -2652,12 +2678,12 @@ public class CreateBinFileAnalysis implements Analysis {
         }
     }
 
-    private BinUserConfig collectBinConfigFromUser(String directory, File binFolder, BinConfig existing) {
+    protected BinUserConfig collectBinConfigFromUser(String directory, File binFolder, BinConfig existing) {
         return collectBinConfigFromUser(directory, binFolder, existing, null);
     }
 
-    private BinUserConfig collectBinConfigFromUser(String directory, File binFolder,
-                                                  BinConfig existing, BinUserConfig draft) {
+    protected BinUserConfig collectBinConfigFromUser(String directory, File binFolder,
+                                                    BinConfig existing, BinUserConfig draft) {
         BinUserConfig draftConfig = copyBinUserConfig(draft);
         MetadataDiagnostics.SeriesInfo seriesInfo = existing == null && draftConfig == null
                 ? ChannelSetupWizard.firstSeriesInfo(directory)
@@ -3417,7 +3443,7 @@ public class CreateBinFileAnalysis implements Analysis {
         }
     }
 
-    private Boolean showAnalysisScopeDialog(BinUserConfig cfg, boolean allowBack) {
+    protected Boolean showAnalysisScopeDialog(BinUserConfig cfg, boolean allowBack) {
         lastWasBack = false;
         PipelineDialog pd = setupAnalysisDialog("Set Up Configuration - Analysis Scope");
         installWizardCancelHook(pd);
@@ -3492,8 +3518,8 @@ public class CreateBinFileAnalysis implements Analysis {
         return QcOpenPreparation.ready(lifFile, orderedIndexes);
     }
 
-    private QcImageOpenResult openImagesForQC(String directory, File binFolder,
-                                              BinUserConfig cfg, boolean[][] customSettings) {
+    protected QcImageOpenResult openImagesForQC(String directory, File binFolder,
+                                                BinUserConfig cfg, boolean[][] customSettings) {
         QcOpenPreparation lifResolution = resolveQcLifFile(directory);
         if (!lifResolution.isReady()) {
             return QcImageOpenResult.fromPreparation(lifResolution, "");
@@ -4308,7 +4334,7 @@ public class CreateBinFileAnalysis implements Analysis {
         return binCfg;
     }
 
-    private String interactiveZSliceSubsetQC(String directory, BinUserConfig cfg) {
+    protected String interactiveZSliceSubsetQC(String directory, BinUserConfig cfg) {
         if (cfg == null || !cfg.usesZSliceSubset()) return "done";
         if (!gateBioFormatsFeature("Set Up Configuration z-slice subset preview")) {
             return "back";
@@ -5012,8 +5038,8 @@ public class CreateBinFileAnalysis implements Analysis {
         return new ZSliceRange(start, end);
     }
 
-    private String interactiveQC(List<QcImageSelection> images, BinUserConfig cfg, File binFolder,
-                                  boolean[][] customSettings) {
+    protected String interactiveQC(List<QcImageSelection> images, BinUserConfig cfg, File binFolder,
+                                   boolean[][] customSettings) {
         if (useSequentialEmbeddedQcWorkflow()) {
             return interactiveSequentialEmbeddedQC(images, cfg, binFolder, customSettings);
         }
@@ -8384,11 +8410,15 @@ public class CreateBinFileAnalysis implements Analysis {
         }
     }
 
-    private void writeBinConfigFiles(File binFolder, BinUserConfig cfg) throws IOException {
-        ChannelConfig cc = ChannelConfigIO.fromBinUserConfig(cfg);
-        cc.writerId = "FLASH";
-        cc.writtenAtMillis = System.currentTimeMillis();
-        cc.clickCaptureUsed = new File(binFolder, "Clicks.json").isFile();
+    protected void writeBinConfigFiles(File binFolder, BinUserConfig cfg) throws IOException {
+        writeFinalChannelConfig(binFolder, cfg, null);
+    }
+
+    private void writeFinalChannelConfig(File binFolder, BinUserConfig cfg,
+                                         boolean[][] customSettings) throws IOException {
+        ChannelConfig cc = mergeIntoExisting(
+                binFolder, cfg, customSettings, 6, wizardStepLabel(6),
+                -1, null, ChannelConfig.PropertyStatus.COMMITTED);
         for (int i = 0; i < cc.channels.size(); i++) {
             ChannelConfig.Channel channel = cc.channels.get(i);
             if (cfg != null && cfg.filterPresets != null && i < cfg.filterPresets.size()) {

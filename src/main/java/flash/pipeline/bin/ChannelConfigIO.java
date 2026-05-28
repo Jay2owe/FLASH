@@ -5,6 +5,7 @@ import flash.pipeline.zslice.ZSliceRange;
 import flash.pipeline.zslice.ZSliceConfig;
 import flash.pipeline.zslice.ZSliceConfigIO;
 import flash.pipeline.zslice.ZSliceSelection;
+import flash.pipeline.click.ClicksConfigIO;
 import ij.IJ;
 
 import java.io.File;
@@ -51,7 +52,7 @@ public final class ChannelConfigIO {
 
         File channelData = new File(settingsDir, "Channel_Data.txt");
         if (hasCompleteChannel(cfg)) {
-            BinConfigIO.writeAtomic(channelData.toPath(), BinConfigIO.toLines(toBinConfig(cfg)));
+            BinConfigIO.writeAtomic(channelData.toPath(), BinConfigIO.toLines(toBinConfig(cfg, settingsDir)));
         } else {
             Files.deleteIfExists(channelData.toPath());
             Files.deleteIfExists(new File(settingsDir, "Channel_Data.txt.tmp").toPath());
@@ -120,8 +121,20 @@ public final class ChannelConfigIO {
         }
         out.zSliceMode = cfg.zSliceMode == null ? ZSliceMode.FULL : cfg.zSliceMode;
         out.zSliceConfigPresent = true;
-        out.clickConfigPresent = cfg.clickCaptureUsed;
         copyZSliceSelections(cfg, out);
+        if (out.zSliceMode != null && out.zSliceMode.usesSubset() && out.zSliceSelections.isEmpty()) {
+            out.zSliceMode = ZSliceMode.FULL;
+            out.zSliceConfigPresent = false;
+        }
+        out.clickConfigPresent = cfg.clickCaptureUsed;
+        return out;
+    }
+
+    public static BinConfig toBinConfig(ChannelConfig cfg, File settingsDir) {
+        BinConfig out = toBinConfig(cfg);
+        if (out.clickConfigPresent) {
+            out.clickConfigPresent = ClicksConfigIO.exists(settingsDir);
+        }
         return out;
     }
 

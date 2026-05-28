@@ -197,7 +197,7 @@ public class IntensityAnalysisV2 implements Analysis {
             return;
         }
 
-        BinConfig cfg = BinConfigIO.readPartialFromDirectory(directory);
+        BinConfig cfg = loadBinConfig(directory);
         String[] channelNames = cfg.channelNames.toArray(new String[0]);
         if (safeChannels(channelNames).isEmpty()) {
             String message = "Intensity Analysis requires at least one configured channel name.";
@@ -786,6 +786,10 @@ public class IntensityAnalysisV2 implements Analysis {
             IJ.log("Intensity Analysis complete. Total time: " + formatDuration(totalTime));
         }
         if (!suppressDialogs) IJ.showMessage("Intensity Analysis", "Finished.");
+    }
+
+    BinConfig loadBinConfig(String directory) {
+        return BinConfigIO.readPartialFromDirectory(directory);
     }
 
     // ── Sequential processing (original path, with thread-safe ops) ──

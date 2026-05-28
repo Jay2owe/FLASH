@@ -261,7 +261,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
             return;
         }
 
-        BinConfig binCfg = BinConfigIO.readPartialFromDirectory(directory);
+        BinConfig binCfg = loadBinConfig(directory);
         String[] channelNames = binCfg.channelNames.toArray(new String[0]);
         String[] channelColors = binCfg.channelColors.toArray(new String[0]);
         String[] binMinMax = binCfg.channelMinMax.isEmpty()
@@ -503,6 +503,10 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
 
         closeAllWindowsExceptLog();
         if (!suppressDialogs) showOrLog("Split/Merge", "Finished.");
+    }
+
+    BinConfig loadBinConfig(String directory) {
+        return BinConfigIO.readPartialFromDirectory(directory);
     }
 
     // ── Pre-flight worklist builder ──

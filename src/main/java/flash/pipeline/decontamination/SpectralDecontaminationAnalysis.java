@@ -149,7 +149,7 @@ public class SpectralDecontaminationAnalysis implements Analysis {
 
         BinConfig binConfig;
         try {
-            binConfig = BinConfigIO.readFromDirectory(directory);
+            binConfig = loadBinConfig(directory);
         } catch (IOException e) {
             String message = "Could not read channel names from Configuration folder/Channel_Data.txt. "
                     + "Run Set Up Configuration before Spectral Decontamination. " + e.getMessage();
@@ -278,6 +278,10 @@ public class SpectralDecontaminationAnalysis implements Analysis {
                 runBatch(directory, binConfig, selected, metas, candidates,
                         previewResult.outputFile, setup.renderedPreviews);
         showInteractiveBatchResult(directory, batchResult, previewResult);
+    }
+
+    BinConfig loadBinConfig(String directory) throws IOException {
+        return BinConfigIO.readFromDirectory(directory);
     }
 
     private InteractiveSetupResult completeInteractiveSetup(String directory,

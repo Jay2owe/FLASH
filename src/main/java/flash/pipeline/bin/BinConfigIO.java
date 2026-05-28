@@ -55,7 +55,7 @@ public class BinConfigIO {
         if (ChannelConfigIO.exists(settingsDir)) {
             ChannelConfig channelConfig = ChannelConfigIO.read(settingsDir);
             if (ChannelConfigIO.allChannelsCommitted(channelConfig)) {
-                return ChannelConfigIO.toBinConfig(channelConfig);
+                return ChannelConfigIO.toBinConfig(channelConfig, settingsDir);
             }
         }
         File channelData = layout.channelDataReadFile();
@@ -144,7 +144,7 @@ public class BinConfigIO {
         if (ChannelConfigIO.exists(settingsDir)) {
             ChannelConfig channelConfig = ChannelConfigIO.read(settingsDir);
             if (channelConfig != null) {
-                return ChannelConfigIO.toBinConfig(channelConfig);
+                return ChannelConfigIO.toBinConfig(channelConfig, settingsDir);
             }
         }
         File channelData = layout.channelDataReadFile();
