@@ -44,4 +44,13 @@ public final class SeriesMeta {
                 && !"pixels".equalsIgnoreCase(unit)
                 && pixelWidth != 0 && pixelHeight != 0;
     }
+
+    /**
+     * Returns a copy with {@link #index} replaced. Used when concatenating
+     * per-container metadata into a single global-index series list.
+     */
+    public SeriesMeta withIndex(int newIndex) {
+        return new SeriesMeta(newIndex, name, width, height, nSlices, nChannels,
+                pixelWidth, pixelHeight, pixelDepth, unit);
+    }
 }

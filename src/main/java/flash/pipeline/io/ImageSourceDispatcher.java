@@ -2,6 +2,8 @@ package flash.pipeline.io;
 
 import ij.IJ;
 import flash.pipeline.intelligence.JunkFileFilter;
+import flash.pipeline.project.ProjectFile;
+import flash.pipeline.project.ProjectFileIO;
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.ToggleSwitch;
 
@@ -97,6 +99,20 @@ public final class ImageSourceDispatcher {
      */
     public static SourceMode detectMode(String directory) {
         File dir = requireDirectory(directory);
+        // When a project.json is present, sources come from its item list
+        // rather than directory scanning. We only support container items in
+        // the new path for now — TIFFs flow through the legacy folder scan.
+        ProjectSources projectSources = tryReadProjectSources(dir);
+        if (projectSources != null) {
+            if (projectSources.containers.isEmpty()) {
+                throw new IllegalArgumentException(
+                        "project.json at " + dir.getAbsolutePath()
+                                + " has no included container items. "
+                                + "Tick at least one .lif/.czi/... row in the project builder.");
+            }
+            return SourceMode.CONTAINER;
+        }
+
         List<File> containers = listContainers(dir);
         if (!containers.isEmpty()) {
             return SourceMode.CONTAINER;
@@ -121,13 +137,71 @@ public final class ImageSourceDispatcher {
                 + " (.lif/.czi/.nd2/...) OR .tif files in input/ OR loose .tif files.");
     }
 
+    /** Container files + per-container series narrowing, sourced from project.json. */
+    private static final class ProjectSources {
+        final List<File> containers;
+        /** Parallel to {@link #containers}; empty entry = "all series in that container". */
+        final List<List<Integer>> includedSeriesPerContainer;
+        ProjectSources(List<File> containers, List<List<Integer>> included) {
+            this.containers = containers;
+            this.includedSeriesPerContainer = included;
+        }
+    }
+
+    private static ProjectSources tryReadProjectSources(File outputRoot) {
+        File settingsDir = FlashProjectLayout.forDirectory(outputRoot.getAbsolutePath())
+                .configurationWriteDir();
+        if (!ProjectFileIO.exists(settingsDir)) {
+            return null;
+        }
+        ProjectFile project = ProjectFileIO.read(settingsDir);
+        if (project == null || project.items == null) {
+            return null;
+        }
+        List<File> containers = new ArrayList<File>();
+        List<List<Integer>> includes = new ArrayList<List<Integer>>();
+        for (ProjectFile.Item item : project.items) {
+            if (item == null || !item.include) continue;
+            if (item.path == null || item.path.trim().isEmpty()) continue;
+            File source = new File(item.path);
+            if (!isContainerExtension(source.getName())) {
+                // TIFF-only items can't ride the multi-container path; skip the
+                // project file entirely and fall back to folder scanning, which
+                // is what the user expects for a single-folder TIFF project.
+                return null;
+            }
+            if (!source.isFile()) {
+                IJ.log("[FLASH] project.json refers to missing source, skipping: " + source.getAbsolutePath());
+                continue;
+            }
+            containers.add(source);
+            includes.add(item.series == null ? Collections.<Integer>emptyList() : new ArrayList<Integer>(item.series));
+        }
+        return new ProjectSources(containers, includes);
+    }
+
+    private static boolean isContainerExtension(String name) {
+        if (name == null) return false;
+        String lower = name.toLowerCase(java.util.Locale.ROOT);
+        for (String ext : CONTAINER_EXTENSIONS) {
+            if (lower.endsWith(ext)) return true;
+        }
+        return false;
+    }
+
     /**
      * Returns a {@link DeferredImageSupplier} for {@code directory} using the
      * mode chosen by {@link #detectMode(String)}.
      */
     public static DeferredImageSupplier createSupplier(String directory) throws Exception {
+        File dir = requireDirectory(directory);
+        ProjectSources projectSources = tryReadProjectSources(dir);
+        if (projectSources != null) {
+            return DeferredImageSupplier.multiContainer(
+                    projectSources.containers, projectSources.includedSeriesPerContainer);
+        }
+
         SourceMode mode = detectMode(directory);
-        File dir = new File(directory);
         if (mode == SourceMode.TIFF_LOOSE
                 && LooseTiffRelocator.shouldPrompt(directory)
                 && !LooseTiffRelocator.isHeadless()) {
@@ -157,8 +231,25 @@ public final class ImageSourceDispatcher {
      * {@link DeferredImageSupplier#readTiffFolderMetadata(List, String)}.
      */
     public static List<SeriesMeta> readAllMetadata(String directory) throws Exception {
+        File dir = requireDirectory(directory);
+        ProjectSources projectSources = tryReadProjectSources(dir);
+        if (projectSources != null) {
+            List<SeriesMeta> out = new ArrayList<SeriesMeta>();
+            int globalOffset = 0;
+            for (int c = 0; c < projectSources.containers.size(); c++) {
+                File container = projectSources.containers.get(c);
+                List<SeriesMeta> perContainer = LifIO.readAllSeriesMetadata(container);
+                List<Integer> include = projectSources.includedSeriesPerContainer.get(c);
+                boolean includeAll = include == null || include.isEmpty();
+                for (SeriesMeta meta : perContainer) {
+                    if (!includeAll && !include.contains(Integer.valueOf(meta.index))) continue;
+                    out.add(meta.withIndex(globalOffset++));
+                }
+            }
+            return out;
+        }
+
         SourceMode mode = detectMode(directory);
-        File dir = new File(directory);
         switch (mode) {
             case CONTAINER:
                 return LifIO.readAllSeriesMetadata(selectContainer(dir));
