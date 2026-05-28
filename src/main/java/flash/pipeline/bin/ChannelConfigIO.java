@@ -58,6 +58,18 @@ public final class ChannelConfigIO {
         return file != null && file.isFile();
     }
 
+    public static void delete(File settingsDir) {
+        File file = file(settingsDir);
+        if (file == null || !file.isFile()) {
+            return;
+        }
+        try {
+            Files.deleteIfExists(file.toPath());
+        } catch (IOException e) {
+            IJ.log("[FLASH] Could not delete " + file.getAbsolutePath() + ": " + e.getMessage());
+        }
+    }
+
     public static BinConfig toBinConfig(ChannelConfig cfg) {
         BinConfig out = new BinConfig();
         if (cfg == null) {

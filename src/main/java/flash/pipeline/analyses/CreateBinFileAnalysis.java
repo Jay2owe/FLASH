@@ -5,9 +5,10 @@ import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinConfigIO;
 import flash.pipeline.bin.BinField;
 import flash.pipeline.bin.BinMacroIndex;
+import flash.pipeline.bin.ChannelConfig;
+import flash.pipeline.bin.ChannelConfigIO;
 import flash.pipeline.bin.ChannelIdentities;
 import flash.pipeline.bin.ChannelIdentitiesIO;
-import flash.pipeline.bin.WizardDraft;
 import flash.pipeline.cellpose.Cellpose3DRunner;
 import flash.pipeline.cellpose.CellposeModel;
 import flash.pipeline.cellpose.CellposeRuntime;
@@ -184,11 +185,27 @@ public class CreateBinFileAnalysis implements Analysis {
             "flash.filterPresetOptionsUpdating";
     private static final String FILTER_OPTIONS_WAS_DISPLAYABLE_PROPERTY =
             "flash.filterPresetOptionsWasDisplayable";
+    private static final String EXTRA_LAST_STEP_INDEX = "lastStepIndex";
+    private static final String EXTRA_LAST_STEP_LABEL = "lastStepLabel";
+    private static final String EXTRA_CUSTOM_SETTINGS = "customSettings";
+    private static final List<String> CHANNEL_CONFIG_PROPERTIES;
     static {
         String[] bundled = NamedFilterLoader.FILTER_NAMES;
         FILTER_PRESETS = new String[bundled.length + 1]; // bundled + Custom
         System.arraycopy(bundled, 0, FILTER_PRESETS, 0, bundled.length);
         FILTER_PRESETS[bundled.length] = "Custom";
+
+        List<String> props = new ArrayList<String>();
+        props.add(ChannelConfig.P_NAME);
+        props.add(ChannelConfig.P_COLOR);
+        props.add(ChannelConfig.P_MARKER);
+        props.add(ChannelConfig.P_THRESHOLD);
+        props.add(ChannelConfig.P_SIZE);
+        props.add(ChannelConfig.P_MINMAX);
+        props.add(ChannelConfig.P_INTENSITY);
+        props.add(ChannelConfig.P_SEGMENTATION);
+        props.add(ChannelConfig.P_FILTER);
+        CHANNEL_CONFIG_PROPERTIES = Collections.unmodifiableList(props);
     }
 
     private static final Map<String, String> FILTER_DESCRIPTIONS = new HashMap<String, String>();
@@ -257,11 +274,11 @@ public class CreateBinFileAnalysis implements Analysis {
     private BinConfig settingsStatusReference = null;
     private List<String> activeEmbeddedStagePath = Collections.emptyList();
     private int activeEmbeddedStagePathIndex = -1;
-    private File activeWizardDraftBinFolder = null;
-    private BinUserConfig activeWizardDraftCfg = null;
-    private boolean[][] activeWizardDraftCustomSettings = null;
-    private int activeWizardDraftStep = 1;
-    private String activeWizardDraftLabel = "";
+    private File activeWizardBinFolder = null;
+    private BinUserConfig activeWizardCfg = null;
+    private boolean[][] activeWizardCustomSettings = null;
+    private int activeWizardStep = 1;
+    private String activeWizardLabel = "";
     private CancelConfirmationDialog.Choice lastWizardCancelChoice = null;
     private final ConfigQcContext.FilteredStackCache setupFilteredStackCache =
             new ConfigQcContext.FilteredStackCache();
@@ -1064,12 +1081,12 @@ public class CreateBinFileAnalysis implements Analysis {
         boolean[][] customSettings = null;
 
         int step = 1; // 1=collectConfig, 2=analysisScope, 3=granularFork, 4=zSliceQC, 5=channelQC, 6=save
-        WizardDraft.Snapshot draft = WizardDraft.read(binFolder);
+        WizardResumeState draft = readWizardResumeState(binFolder);
         if (draft != null) {
             int choice = showResumePrompt(draft);
             if (choice == 2) return;
             if (choice == 1) {
-                WizardDraft.delete(binFolder);
+                ChannelConfigIO.delete(FlashProjectLayout.settingsDir(binFolder));
             } else {
                 cfg = draft.cfg;
                 customSettings = draft.customSettings;
@@ -1092,6 +1109,8 @@ public class CreateBinFileAnalysis implements Analysis {
                         return;
                     }
                     writeChannelFilters(binFolder, cfg);
+                    persistIncremental(binFolder, cfg, customSettings,
+                            1, wizardStepLabel(1), -1, null);
                     step = 2;
                     break;
                 }
@@ -1106,6 +1125,8 @@ public class CreateBinFileAnalysis implements Analysis {
                         IJ.showMessage("Set Up Configuration", "Cancelled.");
                         return;
                     }
+                    persistIncremental(binFolder, cfg, customSettings,
+                            2, wizardStepLabel(2), -1, null);
                     step = 3;
                     break;
                 }
@@ -1131,6 +1152,8 @@ public class CreateBinFileAnalysis implements Analysis {
                         return;
                     }
                     customSettings = selectedSettings;
+                    persistIncremental(binFolder, cfg, customSettings,
+                            3, wizardStepLabel(3), -1, null);
                     step = cfg.usesZSliceSubset() ? 4
                             : (needsQcImages(customSettings, cfg) ? 5 : 6);
                     break;
@@ -1146,6 +1169,8 @@ public class CreateBinFileAnalysis implements Analysis {
                         IJ.showMessage("Set Up Configuration", "Cancelled.");
                         return;
                     }
+                    persistIncremental(binFolder, cfg, customSettings,
+                            4, wizardStepLabel(4), -1, null);
                     step = needsQcImages(customSettings, cfg) ? 5 : 6;
                     break;
                 }
@@ -1181,12 +1206,14 @@ public class CreateBinFileAnalysis implements Analysis {
                         }
                         // "done" or "skip" → proceed to save
                     }
+                    persistIncremental(binFolder, cfg, customSettings,
+                            5, wizardStepLabel(5), -1, null);
                     step = 6;
                     break;
                 }
                 case 6: {
                     writeBinConfigFiles(binFolder, cfg);
-                    WizardDraft.delete(binFolder);
+                    persistCommit(binFolder, cfg, customSettings);
                     IJ.showMessage("Set Up Configuration", "Created configuration in:\n" + binFolder.getAbsolutePath());
                     return;
                 }
@@ -1199,13 +1226,16 @@ public class CreateBinFileAnalysis implements Analysis {
 
     // ── Selective override flow (with Back navigation) ──────────────────
 
-    protected int showResumePrompt(WizardDraft.Snapshot draft) {
+    protected int showResumePrompt(WizardResumeState draft) {
         if (GraphicsEnvironment.isHeadless()) return 0;
         PipelineDialog pd = setupAnalysisDialog("Set Up Configuration - Resume Draft");
         pd.addSetupHelpHeader("Resume Draft", SetupHelpCatalog.CHANNEL_IDENTITY);
         pd.addMessage("A saved Set Up Configuration draft was found.");
         if (draft != null) {
             pd.addMessage("Last saved step: " + draft.stepIndex + " of 6 - " + draft.stepLabel);
+            for (String line : draft.progressLines) {
+                pd.addMessage(line);
+            }
         }
         pd.addChoice("Action", new String[]{"Resume", "Start over", "Cancel"}, "Resume");
         if (!pd.showDialog()) return 2;
@@ -1223,34 +1253,34 @@ public class CreateBinFileAnalysis implements Analysis {
 
     private void setWizardDraftContext(File binFolder, BinUserConfig cfg,
                                        boolean[][] customSettings, int step, String label) {
-        activeWizardDraftBinFolder = binFolder;
-        activeWizardDraftCfg = cfg;
-        activeWizardDraftCustomSettings = customSettings;
-        activeWizardDraftStep = step;
-        activeWizardDraftLabel = label == null ? "" : label;
+        activeWizardBinFolder = binFolder;
+        activeWizardCfg = cfg;
+        activeWizardCustomSettings = customSettings;
+        activeWizardStep = step;
+        activeWizardLabel = label == null ? "" : label;
         lastWizardCancelChoice = null;
     }
 
     private void clearWizardDraftContext() {
-        activeWizardDraftBinFolder = null;
-        activeWizardDraftCfg = null;
-        activeWizardDraftCustomSettings = null;
-        activeWizardDraftStep = 1;
-        activeWizardDraftLabel = "";
+        activeWizardBinFolder = null;
+        activeWizardCfg = null;
+        activeWizardCustomSettings = null;
+        activeWizardStep = 1;
+        activeWizardLabel = "";
         lastWizardCancelChoice = null;
     }
 
     private void installWizardCancelHook(final PipelineDialog dialog) {
-        if (dialog == null || activeWizardDraftBinFolder == null) return;
+        if (dialog == null || activeWizardBinFolder == null) return;
         dialog.setCancelConfirmation(new java.util.function.Supplier<Boolean>() {
             @Override public Boolean get() {
                 return Boolean.valueOf(handleCancelRequest(
                         dialog.getWindow(),
-                        activeWizardDraftBinFolder,
-                        activeWizardDraftCfg,
-                        activeWizardDraftCustomSettings,
-                        activeWizardDraftStep,
-                        activeWizardDraftLabel));
+                        activeWizardBinFolder,
+                        activeWizardCfg,
+                        activeWizardCustomSettings,
+                        activeWizardStep,
+                        activeWizardLabel));
             }
         });
     }
@@ -1272,28 +1302,314 @@ public class CreateBinFileAnalysis implements Analysis {
 
     private boolean handleCancelRequest(Window owner, File binFolder, BinUserConfig cfg,
                                         boolean[][] customSettings, int step, String label) {
-        File draftFile = new File(new File(binFolder, WizardDraft.DRAFT_DIR), WizardDraft.DRAFT_FILE);
+        File settingsDir = FlashProjectLayout.settingsDir(binFolder);
+        File draftFile = new File(settingsDir, ChannelConfigIO.FILE_NAME);
+        ChannelConfig current = ChannelConfigIO.read(settingsDir);
         CancelConfirmationDialog.Choice choice = showCancelConfirmation(
                 owner,
                 "Step " + step + " of 6 - " + label,
-                buildProgressLines(cfg, customSettings, step),
+                current == null
+                        ? buildProgressLines(cfg, customSettings, step)
+                        : buildProgressLines(current, step),
                 draftFile.getAbsolutePath());
         lastWizardCancelChoice = choice;
         if (choice == CancelConfirmationDialog.Choice.SAVE_AND_EXIT) {
-            try {
-                WizardDraft.write(binFolder, new WizardDraft.Snapshot(
-                        cfg, customSettings, step, label, System.currentTimeMillis()));
-                return true;
-            } catch (IOException e) {
-                IJ.handleException(e);
-                return false;
-            }
+            return true;
         }
         if (choice == CancelConfirmationDialog.Choice.DISCARD_AND_EXIT) {
-            WizardDraft.delete(binFolder);
+            ChannelConfigIO.delete(settingsDir);
             return true;
         }
         return false;
+    }
+
+    protected static final class WizardResumeState {
+        final BinUserConfig cfg;
+        final boolean[][] customSettings;
+        final int stepIndex;
+        final String stepLabel;
+        final List<String> progressLines;
+
+        WizardResumeState(BinUserConfig cfg, boolean[][] customSettings,
+                          int stepIndex, String stepLabel, List<String> progressLines) {
+            this.cfg = cfg;
+            this.customSettings = copySettings(customSettings);
+            this.stepIndex = stepIndex;
+            this.stepLabel = stepLabel == null ? "" : stepLabel;
+            this.progressLines = progressLines == null
+                    ? Collections.<String>emptyList()
+                    : new ArrayList<String>(progressLines);
+        }
+    }
+
+    WizardResumeState readWizardResumeState(File binFolder) {
+        ChannelConfig channelConfig = ChannelConfigIO.read(FlashProjectLayout.settingsDir(binFolder));
+        if (channelConfig == null || channelConfig.channels == null || channelConfig.channels.isEmpty()
+                || allPropertiesHaveStatus(channelConfig, ChannelConfig.PropertyStatus.COMMITTED)) {
+            return null;
+        }
+        int stepIndex = readStepIndex(channelConfig);
+        return new WizardResumeState(
+                binUserConfigFromChannelConfig(channelConfig),
+                customSettingsFromExtras(channelConfig.extras),
+                stepIndex,
+                stringExtra(channelConfig.extras, EXTRA_LAST_STEP_LABEL, wizardStepLabel(stepIndex)),
+                buildProgressLines(channelConfig, stepIndex));
+    }
+
+    private void persistIncremental(File binFolder, BinUserConfig user, boolean[][] customSettings,
+                                    int stepIndex, String stepLabel,
+                                    int channelIndex, String propertyKey) {
+        persistIncrementalProperties(binFolder, user, customSettings,
+                stepIndex, stepLabel, channelIndex, propertyKey);
+    }
+
+    private void persistIncrementalProperties(File binFolder, BinUserConfig user, boolean[][] customSettings,
+                                              int stepIndex, String stepLabel,
+                                              int channelIndex, String... propertyKeys) {
+        try {
+            ChannelConfig cc = mergeIntoExisting(
+                    binFolder, user, customSettings, stepIndex, stepLabel,
+                    -1, null, ChannelConfig.PropertyStatus.CONFIGURED);
+            if (channelIndex >= 0 && channelIndex < cc.channels.size() && propertyKeys != null) {
+                ChannelConfig.Channel channel = cc.channels.get(channelIndex);
+                for (int i = 0; i < propertyKeys.length; i++) {
+                    markPropertyCommit(channel, propertyKeys[i], ChannelConfig.PropertyStatus.CONFIGURED);
+                }
+            }
+            ChannelConfigIO.write(FlashProjectLayout.settingsDir(binFolder), cc);
+        } catch (IOException e) {
+            IJ.log("FLASH: incremental config write failed: " + e.getMessage());
+        }
+    }
+
+    private void persistCommit(File binFolder, BinUserConfig user, boolean[][] customSettings) {
+        ChannelConfig cc = mergeIntoExisting(
+                binFolder, user, customSettings, 6, wizardStepLabel(6),
+                -1, null, ChannelConfig.PropertyStatus.COMMITTED);
+        for (ChannelConfig.Channel channel : cc.channels) {
+            markAllKnown(channel, ChannelConfig.PropertyStatus.COMMITTED);
+        }
+        try {
+            ChannelConfigIO.write(FlashProjectLayout.settingsDir(binFolder), cc);
+        } catch (IOException e) {
+            IJ.log("FLASH: final config write failed: " + e.getMessage());
+            throw new RuntimeException(e);
+        }
+    }
+
+    private ChannelConfig mergeIntoExisting(File binFolder, BinUserConfig user, boolean[][] customSettings,
+                                            int stepIndex, String stepLabel,
+                                            int channelIndex, String propertyKey,
+                                            ChannelConfig.PropertyStatus status) {
+        File settingsDir = FlashProjectLayout.settingsDir(binFolder);
+        ChannelConfig existing = ChannelConfigIO.read(settingsDir);
+        ChannelConfig next = ChannelConfigIO.fromBinUserConfig(user);
+        next.writerId = "FLASH";
+        next.writtenAtMillis = System.currentTimeMillis();
+        if (existing != null) {
+            next.extras.putAll(existing.extras);
+        }
+        next.extras.put(EXTRA_LAST_STEP_INDEX, Integer.valueOf(stepIndex));
+        next.extras.put(EXTRA_LAST_STEP_LABEL, stepLabel == null ? "" : stepLabel);
+        if (customSettings != null) {
+            next.extras.put(EXTRA_CUSTOM_SETTINGS, customSettingsToJson(customSettings));
+        }
+
+        for (int i = 0; i < next.channels.size(); i++) {
+            ChannelConfig.Channel channel = next.channels.get(i);
+            ChannelConfig.Channel old = channelAt(existing, i);
+            channel.status.clear();
+            if (old != null) {
+                channel.extras.putAll(old.extras);
+                channel.status.putAll(old.status);
+            }
+            seedMissingStatuses(channel);
+        }
+
+        if (stepIndex >= 1) {
+            for (ChannelConfig.Channel channel : next.channels) {
+                setStatus(channel, ChannelConfig.P_NAME, ChannelConfig.PropertyStatus.CONFIGURED);
+                setStatus(channel, ChannelConfig.P_COLOR, ChannelConfig.PropertyStatus.CONFIGURED);
+                setStatus(channel, ChannelConfig.P_MARKER, ChannelConfig.PropertyStatus.CONFIGURED);
+            }
+        }
+        if (channelIndex >= 0 && channelIndex < next.channels.size() && propertyKey != null) {
+            markPropertyCommit(next.channels.get(channelIndex), propertyKey, status);
+        }
+        return next;
+    }
+
+    private static void markPropertyCommit(ChannelConfig.Channel channel, String propertyKey,
+                                           ChannelConfig.PropertyStatus status) {
+        setStatus(channel, propertyKey, status);
+    }
+
+    private static void markAllKnown(ChannelConfig.Channel channel, ChannelConfig.PropertyStatus status) {
+        for (String key : CHANNEL_CONFIG_PROPERTIES) {
+            setStatus(channel, key, status);
+        }
+    }
+
+    private static void seedMissingStatuses(ChannelConfig.Channel channel) {
+        for (String key : CHANNEL_CONFIG_PROPERTIES) {
+            if (!channel.status.containsKey(key)) {
+                channel.status.put(key, ChannelConfig.PropertyStatus.PENDING);
+            }
+        }
+    }
+
+    private static void setStatus(ChannelConfig.Channel channel, String propertyKey,
+                                  ChannelConfig.PropertyStatus status) {
+        if (channel != null && propertyKey != null && status != null) {
+            channel.status.put(propertyKey, status);
+        }
+    }
+
+    private static ChannelConfig.Channel channelAt(ChannelConfig cfg, int index) {
+        if (cfg == null || cfg.channels == null || index < 0 || index >= cfg.channels.size()) {
+            return null;
+        }
+        return cfg.channels.get(index);
+    }
+
+    private static BinUserConfig binUserConfigFromChannelConfig(ChannelConfig cfg) {
+        List<String> names = new ArrayList<String>();
+        List<String> colors = new ArrayList<String>();
+        List<String> thresholds = new ArrayList<String>();
+        List<String> sizes = new ArrayList<String>();
+        List<String> minmax = new ArrayList<String>();
+        List<String> filters = new ArrayList<String>();
+        List<String> intensity = new ArrayList<String>();
+        List<String> segmentation = new ArrayList<String>();
+        List<String> markerIds = new ArrayList<String>();
+        List<String> markerShapes = new ArrayList<String>();
+        List<Boolean> crowding = new ArrayList<Boolean>();
+        for (int i = 0; cfg != null && cfg.channels != null && i < cfg.channels.size(); i++) {
+            ChannelConfig.Channel ch = cfg.channels.get(i);
+            names.add(value(ch == null ? null : ch.name, "Channel" + (i + 1)));
+            colors.add(value(ch == null ? null : ch.color, "Grays"));
+            thresholds.add(value(ch == null ? null : ch.threshold, "default"));
+            sizes.add(value(ch == null ? null : ch.size, "100-Infinity"));
+            minmax.add(value(ch == null ? null : ch.minmax, "None"));
+            filters.add(value(ch == null ? null : ch.filterPreset, "Default"));
+            intensity.add(value(ch == null ? null : ch.intensityThreshold, "default"));
+            segmentation.add(value(ch == null ? null : ch.segmentationMethod, "classical"));
+            markerIds.add(ch == null ? "" : value(ch.markerId, ""));
+            markerShapes.add(ch == null ? "" : value(ch.markerShape, ""));
+            crowding.add(Boolean.valueOf(ch != null && ch.markerCrowdingSensitive));
+        }
+        BinUserConfig out = new BinUserConfig(names, colors, thresholds, sizes, minmax, filters, intensity);
+        out.segmentationMethods.clear();
+        out.segmentationMethods.addAll(segmentation);
+        out.markerIds.clear();
+        out.markerIds.addAll(markerIds);
+        out.markerShapes.clear();
+        out.markerShapes.addAll(markerShapes);
+        out.markerCrowdingSensitive.clear();
+        out.markerCrowdingSensitive.addAll(crowding);
+        out.zSliceMode = cfg == null || cfg.zSliceMode == null ? ZSliceMode.FULL : cfg.zSliceMode;
+        if (cfg != null && cfg.zSliceSelections != null) {
+            for (Map.Entry<String, ZSliceRange> entry : cfg.zSliceSelections.entrySet()) {
+                Integer seriesIndex = parseInteger(entry.getKey());
+                ZSliceRange range = entry.getValue();
+                if (seriesIndex != null && range != null) {
+                    out.zSliceSelections.put(seriesIndex,
+                            new ZSliceSelection(seriesIndex.intValue(), "", range.endSlice, range));
+                }
+            }
+        }
+        return out;
+    }
+
+    private static boolean allPropertiesHaveStatus(ChannelConfig cfg, ChannelConfig.PropertyStatus status) {
+        if (cfg == null || cfg.channels == null || cfg.channels.isEmpty()) return false;
+        for (ChannelConfig.Channel channel : cfg.channels) {
+            if (channel == null) return false;
+            for (String key : CHANNEL_CONFIG_PROPERTIES) {
+                if (channel.statusOf(key) != status) return false;
+            }
+        }
+        return true;
+    }
+
+    private static int readStepIndex(ChannelConfig cfg) {
+        return Math.max(1, Math.min(6, intExtra(cfg == null ? null : cfg.extras, EXTRA_LAST_STEP_INDEX, 1)));
+    }
+
+    private static List<Object> customSettingsToJson(boolean[][] settings) {
+        List<Object> rows = new ArrayList<Object>();
+        for (int r = 0; settings != null && r < settings.length; r++) {
+            List<Object> row = new ArrayList<Object>();
+            for (int c = 0; settings[r] != null && c < settings[r].length; c++) {
+                row.add(Boolean.valueOf(settings[r][c]));
+            }
+            rows.add(row);
+        }
+        return rows;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static boolean[][] customSettingsFromExtras(Map<String, Object> extras) {
+        Object raw = extras == null ? null : extras.get(EXTRA_CUSTOM_SETTINGS);
+        if (!(raw instanceof List)) return null;
+        List<Object> rows = (List<Object>) raw;
+        boolean[][] out = new boolean[rows.size()][];
+        for (int r = 0; r < rows.size(); r++) {
+            Object rowRaw = rows.get(r);
+            if (!(rowRaw instanceof List)) {
+                out[r] = new boolean[0];
+                continue;
+            }
+            List<Object> row = (List<Object>) rowRaw;
+            out[r] = new boolean[row.size()];
+            for (int c = 0; c < row.size(); c++) {
+                Object value = row.get(c);
+                out[r][c] = value instanceof Boolean
+                        ? ((Boolean) value).booleanValue()
+                        : Boolean.parseBoolean(String.valueOf(value));
+            }
+        }
+        return out;
+    }
+
+    private static int intExtra(Map<String, Object> extras, String key, int fallback) {
+        Object value = extras == null ? null : extras.get(key);
+        if (value instanceof Number) return ((Number) value).intValue();
+        if (value == null) return fallback;
+        try {
+            return Integer.parseInt(String.valueOf(value).trim());
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
+    private static String stringExtra(Map<String, Object> extras, String key, String fallback) {
+        Object value = extras == null ? null : extras.get(key);
+        String text = value == null ? null : String.valueOf(value);
+        return hasText(text) ? text : fallback;
+    }
+
+    private static Integer parseInteger(String raw) {
+        if (raw == null || raw.trim().isEmpty()) return null;
+        try {
+            return Integer.valueOf(raw.trim());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private static String value(String value, String fallback) {
+        return value == null || value.trim().isEmpty() ? fallback : value;
+    }
+
+    private static boolean[][] copySettings(boolean[][] source) {
+        if (source == null) return null;
+        boolean[][] copy = new boolean[source.length][];
+        for (int i = 0; i < source.length; i++) {
+            copy[i] = source[i] == null ? null : source[i].clone();
+        }
+        return copy;
     }
 
     private List<String> buildProgressLines(BinUserConfig cfg, boolean[][] customSettings, int step) {
@@ -1306,6 +1622,44 @@ public class CreateBinFileAnalysis implements Analysis {
         lines.add(progressLine(step, 5, "Quality check", countFilledQcValues(cfg), Math.max(0, cfg == null ? 0 : cfg.names.size())));
         lines.add(progressLine(step, 6, "Save configuration", 0, 0));
         return lines;
+    }
+
+    private static List<String> buildProgressLines(ChannelConfig cfg, int step) {
+        List<String> lines = new ArrayList<String>();
+        int channels = cfg == null || cfg.channels == null ? 0 : cfg.channels.size();
+        lines.add(progressLine(step, 1, "Channel names and markers",
+                countConfigured(cfg, ChannelConfig.P_NAME)
+                        + countConfigured(cfg, ChannelConfig.P_COLOR)
+                        + countConfigured(cfg, ChannelConfig.P_MARKER),
+                channels * 3));
+        lines.add(progressLine(step, 2, "Analysis scope", 0, 0));
+        lines.add(progressLine(step, 3, "Settings mode", 0, 0));
+        int zDone = cfg == null || cfg.zSliceSelections == null ? 0 : cfg.zSliceSelections.size();
+        lines.add(progressLine(step, 4, "Z-slice ranges", zDone, 0));
+        int qcDone = countConfigured(cfg, ChannelConfig.P_FILTER)
+                + countConfigured(cfg, ChannelConfig.P_MINMAX)
+                + countConfigured(cfg, ChannelConfig.P_THRESHOLD)
+                + countConfigured(cfg, ChannelConfig.P_INTENSITY)
+                + countConfigured(cfg, ChannelConfig.P_SIZE)
+                + countConfigured(cfg, ChannelConfig.P_SEGMENTATION);
+        lines.add(progressLine(step, 5, "Quality check", qcDone, channels * 6));
+        lines.add(progressLine(step, 6, "Save configuration", 0, 0));
+        return lines;
+    }
+
+    private static int countConfigured(ChannelConfig cfg, String propertyKey) {
+        if (cfg == null || cfg.channels == null) return 0;
+        int count = 0;
+        for (ChannelConfig.Channel channel : cfg.channels) {
+            ChannelConfig.PropertyStatus status = channel == null
+                    ? ChannelConfig.PropertyStatus.PENDING
+                    : channel.statusOf(propertyKey);
+            if (status == ChannelConfig.PropertyStatus.CONFIGURED
+                    || status == ChannelConfig.PropertyStatus.COMMITTED) {
+                count++;
+            }
+        }
+        return count;
     }
 
     private static String progressLine(int currentStep, int lineStep, String label, int done, int total) {
@@ -2331,7 +2685,7 @@ public class CreateBinFileAnalysis implements Analysis {
                 trimConfigToChannelCount(draftConfig, n);
             }
             final BinUserConfig dialogDefaults = normalizedConfigForChannelCount(existing, draftConfig, n);
-            activeWizardDraftCfg = dialogDefaults;
+            activeWizardCfg = dialogDefaults;
             PipelineDialog pd = setupAnalysisDialog("Set Up Configuration - Channel Identity");
             installWizardCancelHook(pd);
             pd.setModal(false);
@@ -2348,7 +2702,7 @@ public class CreateBinFileAnalysis implements Analysis {
                 if (pd.wasBackPressed() && existing == null) {
                     draftConfig = buildBinUserConfigFromDialog(channelCount, existing,
                             dialogDefaults, binBindings);
-                    activeWizardDraftCfg = draftConfig;
+                    activeWizardCfg = draftConfig;
                     // Go back to channel count
                     PipelineDialog gdCount2 = new PipelineDialog("Set Up Configuration");
                     installWizardCancelHook(gdCount2);
@@ -5567,9 +5921,53 @@ public class CreateBinFileAnalysis implements Analysis {
                 stepIndex--;
                 continue;
             }
+            persistInteractiveQcStep(binFolder, cfg, customSettings, step);
             stepIndex++;
         }
         return "done";
+    }
+
+    private void persistInteractiveQcStep(File binFolder, BinUserConfig cfg,
+                                          boolean[][] customSettings, InteractiveQcStep step) {
+        if (step == null) return;
+        switch (step.stage) {
+            case FILTER_PARAMETERS:
+                persistIncremental(binFolder, cfg, customSettings,
+                        5, wizardStepLabel(5), step.channelIndex, ChannelConfig.P_FILTER);
+                break;
+            case DISPLAY_RANGE:
+                persistIncremental(binFolder, cfg, customSettings,
+                        5, wizardStepLabel(5), step.channelIndex, ChannelConfig.P_MINMAX);
+                break;
+            case CHANNEL_THRESHOLD:
+                persistIncrementalProperties(binFolder, cfg, customSettings,
+                        5, wizardStepLabel(5), step.channelIndex,
+                        ChannelConfig.P_THRESHOLD, ChannelConfig.P_INTENSITY);
+                break;
+            case PARTICLE_SIZE:
+                persistIncremental(binFolder, cfg, customSettings,
+                        5, wizardStepLabel(5), step.channelIndex, ChannelConfig.P_SIZE);
+                break;
+            case SEGMENTATION_OBJECT:
+            case STARDIST_PARAMETERS:
+            case CELLPOSE_PARAMETERS:
+                if (!isStarDistSegmentation(cfg, step.channelIndex)
+                        && !isCellposeSegmentation(cfg, step.channelIndex)
+                        || step.includeAiChannelThreshold) {
+                    persistIncrementalProperties(binFolder, cfg, customSettings,
+                            5, wizardStepLabel(5), step.channelIndex,
+                            ChannelConfig.P_SEGMENTATION, ChannelConfig.P_THRESHOLD,
+                            ChannelConfig.P_SIZE, ChannelConfig.P_INTENSITY);
+                } else {
+                    persistIncrementalProperties(binFolder, cfg, customSettings,
+                            5, wizardStepLabel(5), step.channelIndex,
+                            ChannelConfig.P_SEGMENTATION, ChannelConfig.P_THRESHOLD,
+                            ChannelConfig.P_SIZE);
+                }
+                break;
+            default:
+                break;
+        }
     }
 
     private List<InteractiveQcStep> buildInteractiveQcSteps(BinUserConfig cfg,

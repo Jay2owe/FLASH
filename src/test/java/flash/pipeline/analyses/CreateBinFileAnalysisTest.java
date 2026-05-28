@@ -3,9 +3,11 @@ package flash.pipeline.analyses;
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinField;
 import flash.pipeline.bin.BinMacroIndex;
-import flash.pipeline.bin.WizardDraft;
+import flash.pipeline.bin.ChannelConfig;
+import flash.pipeline.bin.ChannelConfigIO;
 import flash.pipeline.cli.CLIConfig;
 import flash.pipeline.image.NamedFilterLoader;
+import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.SeriesMeta;
 import flash.pipeline.runtime.DependencyService;
 import flash.pipeline.runtime.FeatureDependencyGate;
@@ -118,46 +120,57 @@ public class CreateBinFileAnalysisTest {
     }
 
     @Test
-    public void cancelSaveAndExitWritesDraft() throws Exception {
+    public void cancelSaveAndExitLeavesChannelConfig() throws Exception {
         File binFolder = temp.newFolder("cancel-save-draft");
         CreateBinFileAnalysis.BinUserConfig cfg = oneChannelConfig("Default");
         boolean[][] customSettings = new boolean[][]{{true}, {false}};
+        ChannelConfig seeded = ChannelConfigIO.fromBinUserConfig(cfg);
+        seeded.extras.put("lastStepIndex", Integer.valueOf(3));
+        seeded.extras.put("lastStepLabel", "Settings Mode");
+        ChannelConfigIO.write(FlashProjectLayout.settingsDir(binFolder), seeded);
         CancelChoiceAnalysis analysis = new CancelChoiceAnalysis(
                 CancelConfirmationDialog.Choice.SAVE_AND_EXIT);
 
         assertTrue(invokeHandleCancelRequest(analysis, binFolder, cfg, customSettings, 3, "Settings Mode"));
 
-        WizardDraft.Snapshot draft = WizardDraft.read(binFolder);
-        assertEquals(3, draft.stepIndex);
-        assertEquals("Settings Mode", draft.stepLabel);
-        assertEquals(cfg.names, draft.cfg.names);
-        assertArrayEquals(customSettings[0], draft.customSettings[0]);
+        ChannelConfig draft = ChannelConfigIO.read(FlashProjectLayout.settingsDir(binFolder));
+        assertEquals(3, ((Number) draft.extras.get("lastStepIndex")).intValue());
+        assertEquals("Settings Mode", draft.extras.get("lastStepLabel"));
+        assertEquals(cfg.names.get(0), draft.channels.get(0).name);
     }
 
     @Test
-    public void cancelDiscardAndExitDeletesDraft() throws Exception {
+    public void cancelDiscardAndExitDeletesChannelConfig() throws Exception {
         File binFolder = temp.newFolder("cancel-discard-draft");
-        WizardDraft.write(binFolder, new WizardDraft.Snapshot(
-                oneChannelConfig("Default"), null, 2, "Analysis Scope", 1L));
+        ChannelConfigIO.write(FlashProjectLayout.settingsDir(binFolder),
+                ChannelConfigIO.fromBinUserConfig(oneChannelConfig("Default")));
         CancelChoiceAnalysis analysis = new CancelChoiceAnalysis(
                 CancelConfirmationDialog.Choice.DISCARD_AND_EXIT);
 
         assertTrue(invokeHandleCancelRequest(analysis, binFolder,
                 oneChannelConfig("Default"), null, 2, "Analysis Scope"));
 
-        assertFalse(WizardDraft.exists(binFolder));
+        assertFalse(ChannelConfigIO.exists(FlashProjectLayout.settingsDir(binFolder)));
     }
 
     @Test
-    public void resumeFromDraftRestoresCfg() throws Exception {
+    public void resumeFromChannelConfigRestoresCfg() throws Exception {
         File binFolder = temp.newFolder("resume-draft");
         CreateBinFileAnalysis.BinUserConfig cfg = oneChannelConfig("Custom");
         cfg.names.set(0, "GFAP");
         boolean[][] customSettings = new boolean[][]{{false}, {true}};
-        WizardDraft.write(binFolder, new WizardDraft.Snapshot(
-                cfg, customSettings, 5, "Quality Check", 1L));
+        ChannelConfig channelConfig = ChannelConfigIO.fromBinUserConfig(cfg);
+        channelConfig.channels.get(0).status.put(ChannelConfig.P_THRESHOLD, ChannelConfig.PropertyStatus.PENDING);
+        channelConfig.extras.put("lastStepIndex", Integer.valueOf(5));
+        channelConfig.extras.put("lastStepLabel", "Quality Check");
+        List<Object> rows = new ArrayList<Object>();
+        rows.add(Arrays.<Object>asList(Boolean.FALSE));
+        rows.add(Arrays.<Object>asList(Boolean.TRUE));
+        channelConfig.extras.put("customSettings", rows);
+        ChannelConfigIO.write(FlashProjectLayout.settingsDir(binFolder), channelConfig);
 
-        WizardDraft.Snapshot draft = WizardDraft.read(binFolder);
+        CreateBinFileAnalysis.WizardResumeState draft =
+                new CreateBinFileAnalysis().readWizardResumeState(binFolder);
 
         assertEquals(5, draft.stepIndex);
         assertEquals("GFAP", draft.cfg.names.get(0));
