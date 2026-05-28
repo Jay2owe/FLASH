@@ -51,6 +51,13 @@ public class BinConfigIO {
      */
     public static BinConfig readFromDirectory(String Directory) throws IOException {
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(Directory);
+        File settingsDir = layout.configurationWriteDir();
+        if (ChannelConfigIO.exists(settingsDir)) {
+            ChannelConfig channelConfig = ChannelConfigIO.read(settingsDir);
+            if (ChannelConfigIO.allChannelsCommitted(channelConfig)) {
+                return ChannelConfigIO.toBinConfig(channelConfig);
+            }
+        }
         File channelData = layout.channelDataReadFile();
         File binFolder = channelData.getParentFile();
         if (!channelData.exists()) {
@@ -133,6 +140,13 @@ public class BinConfigIO {
     public static BinConfig readPartialFromDirectory(String directory) {
         BinConfig cfg = new BinConfig();
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
+        File settingsDir = layout.configurationWriteDir();
+        if (ChannelConfigIO.exists(settingsDir)) {
+            ChannelConfig channelConfig = ChannelConfigIO.read(settingsDir);
+            if (channelConfig != null) {
+                return ChannelConfigIO.toBinConfig(channelConfig);
+            }
+        }
         File channelData = layout.channelDataReadFile();
         File binFolder = channelData.getParentFile();
         if (!channelData.exists()) {
