@@ -70,10 +70,16 @@ public class ImageNameParserTest {
     }
 
     @Test
-    public void parse_extraTrailingToken_fallback() {
+    public void parse_fifthTokenBecomesCondition() {
+        // The convention is Experiment-Animal_Hemisphere_Region[_Condition].
+        // A 5th underscore-separated token is parsed as the condition, not
+        // treated as noise that breaks the strict match.
         NameParts np = ImageNameParser.parse("MyExp-Mouse5_LH_Cortex_Extra");
-        assertFalse(np.strictMatch);
-        assertEquals("", np.region);
+        assertTrue(np.strictMatch);
+        assertEquals("Mouse5", np.animal);
+        assertEquals("LH", np.hemisphere);
+        assertEquals("Cortex", np.region);
+        assertEquals("Extra", np.condition);
     }
 
     @Test

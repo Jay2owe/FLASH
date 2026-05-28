@@ -5,7 +5,7 @@ import java.util.Objects;
 
 /**
  * Parsed components of Jamie macro naming convention:
- * "Experiment - Animal_Hemisphere_Region"
+ * "Experiment - Animal_Hemisphere_Region[_Condition]"
  * <p>
  * When the filename does not follow the convention, {@link #strictMatch}
  * is {@code false} and {@link #animal} holds the full filename (minus
@@ -17,25 +17,37 @@ public final class NameParts {
     /** Expected "LH" or "RH"; empty string when naming convention was not matched. */
     public final String hemisphere;
     public final String region;
+    /**
+     * Optional 5th token after region (Experiment-Animal_Hemisphere_Region_Condition).
+     * Empty string when absent. Used as an auto-guess by the project builder; the
+     * authoritative per-item condition lives in the project file.
+     */
+    public final String condition;
     /** {@code true} when the filename matched the expected naming convention. */
     public final boolean strictMatch;
     /** The raw input passed to the parser; used as a deterministic seed for empty-suffix fallback. */
     private final String originalInput;
 
     public NameParts(String experiment, String animal, String hemisphere, String region) {
-        this(experiment, animal, hemisphere, region, true, null);
+        this(experiment, animal, hemisphere, region, "", true, null);
     }
 
     public NameParts(String experiment, String animal, String hemisphere, String region, boolean strictMatch) {
-        this(experiment, animal, hemisphere, region, strictMatch, null);
+        this(experiment, animal, hemisphere, region, "", strictMatch, null);
     }
 
     public NameParts(String experiment, String animal, String hemisphere, String region,
                      boolean strictMatch, String originalInput) {
+        this(experiment, animal, hemisphere, region, "", strictMatch, originalInput);
+    }
+
+    public NameParts(String experiment, String animal, String hemisphere, String region,
+                     String condition, boolean strictMatch, String originalInput) {
         this.experiment = experiment;
         this.animal = animal;
         this.hemisphere = hemisphere;
         this.region = region;
+        this.condition = condition == null ? "" : condition;
         this.strictMatch = strictMatch;
         this.originalInput = originalInput;
     }

@@ -2,6 +2,7 @@ package flash.pipeline.naming;
 
 import ij.IJ;
 
+import java.io.File;
 import java.util.regex.Pattern;
 
 /**
@@ -143,6 +144,7 @@ public final class ImageNameParser {
         String animal = "";
         String hemi = "";
         String region = "";
+        String condition = "";
 
         if (toks.length >= 2 && isKnownHemisphere(toks[toks.length - 1])) {
             animal = joinTokens(toks, 0, toks.length - 1);
@@ -151,9 +153,31 @@ public final class ImageNameParser {
             animal = joinTokens(toks, 0, toks.length - 2);
             hemi = toks[toks.length - 2].trim();
             region = toks[toks.length - 1].trim();
+        } else if (toks.length >= 4 && isKnownHemisphere(toks[toks.length - 3])) {
+            animal = joinTokens(toks, 0, toks.length - 3);
+            hemi = toks[toks.length - 3].trim();
+            region = toks[toks.length - 2].trim();
+            condition = toks[toks.length - 1].trim();
         }
 
-        return new NameParts(exp, animal, hemi, region, true, imageTitleOrFilename);
+        return new NameParts(exp, animal, hemi, region, condition, true, imageTitleOrFilename);
+    }
+
+    /**
+     * Best-effort condition guess from a source file's immediate parent folder.
+     * Returns the parent folder name trimmed; empty string when the file is null,
+     * has no parent, or sits directly at a drive/root.
+     *
+     * <p>Common lab pattern this catches: {@code .../WT/animal-03.lif},
+     * {@code .../KO/animal-04.lif}. Used by the project builder dialog when the
+     * filename convention itself does not embed a condition token.
+     */
+    public static String guessConditionFromParentFolder(File source) {
+        if (source == null) return "";
+        File parent = source.getParentFile();
+        if (parent == null) return "";
+        String name = parent.getName();
+        return name == null ? "" : name.trim();
     }
 
     /**
