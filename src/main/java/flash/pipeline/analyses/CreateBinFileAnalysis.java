@@ -1082,24 +1082,24 @@ public class CreateBinFileAnalysis implements Analysis {
         boolean[][] customSettings = null;
 
         int step = 1; // 1=collectConfig, 2=analysisScope, 3=granularFork, 4=zSliceQC, 5=channelQC, 6=save
-        WizardResumeState draft = readWizardResumeState(directory, binFolder);
-        if (draft != null) {
-            int choice = showResumePrompt(draft);
+        WizardResumeState resume = readWizardResumeState(directory, binFolder);
+        if (resume != null) {
+            int choice = showResumePrompt(resume);
             if (choice == 2) return;
             if (choice == 1) {
                 File settingsDir = channelConfigSettingsDir(binFolder);
                 ChannelConfigIO.delete(settingsDir);
                 deleteRecursively(new File(settingsDir, ".draft"));
             } else {
-                cfg = draft.cfg;
-                customSettings = draft.customSettings;
-                step = Math.max(1, Math.min(6, draft.stepIndex));
+                cfg = resume.cfg;
+                customSettings = resume.customSettings;
+                step = Math.max(1, Math.min(6, resume.stepIndex));
             }
         }
 
         try {
         while (step >= 1 && step <= 6) {
-            setWizardDraftContext(binFolder, cfg, customSettings, step, wizardStepLabel(step));
+            setWizardCancelContext(binFolder, cfg, customSettings, step, wizardStepLabel(step));
             switch (step) {
                 case 1: {
                     cfg = collectBinConfigFromUser(directory, binFolder, existing, cfg);
@@ -1135,7 +1135,7 @@ public class CreateBinFileAnalysis implements Analysis {
                 }
                 case 3: {
                     customSettings = settingsMatrixForChannelCount(customSettings, cfg.names.size());
-                    setWizardDraftContext(binFolder, cfg, customSettings, step, wizardStepLabel(step));
+                    setWizardCancelContext(binFolder, cfg, customSettings, step, wizardStepLabel(step));
                     BinConfig previousStatusReference = settingsStatusReference;
                     settingsStatusReference = existing;
                     boolean[][] selectedSettings;
@@ -1222,7 +1222,7 @@ public class CreateBinFileAnalysis implements Analysis {
             }
         }
         } finally {
-            clearWizardDraftContext();
+            clearWizardCancelContext();
         }
     }
 
@@ -1244,7 +1244,7 @@ public class CreateBinFileAnalysis implements Analysis {
         return CancelConfirmationDialog.show(owner, stepLabel, progressLines, draftPath);
     }
 
-    private void setWizardDraftContext(File binFolder, BinUserConfig cfg,
+    private void setWizardCancelContext(File binFolder, BinUserConfig cfg,
                                        boolean[][] customSettings, int step, String label) {
         activeWizardBinFolder = binFolder;
         activeWizardCfg = cfg;
@@ -1254,7 +1254,7 @@ public class CreateBinFileAnalysis implements Analysis {
         lastWizardCancelChoice = null;
     }
 
-    private void clearWizardDraftContext() {
+    private void clearWizardCancelContext() {
         activeWizardBinFolder = null;
         activeWizardCfg = null;
         activeWizardCustomSettings = null;
@@ -1296,7 +1296,7 @@ public class CreateBinFileAnalysis implements Analysis {
     private boolean handleCancelRequest(Window owner, File binFolder, BinUserConfig cfg,
                                         boolean[][] customSettings, int step, String label) {
         File settingsDir = channelConfigSettingsDir(binFolder);
-        File draftFile = new File(settingsDir, ChannelConfigIO.FILE_NAME);
+        File configFile = new File(settingsDir, ChannelConfigIO.FILE_NAME);
         ChannelConfig current = ChannelConfigIO.read(settingsDir);
         CancelConfirmationDialog.Choice choice = showCancelConfirmation(
                 owner,
@@ -1304,7 +1304,7 @@ public class CreateBinFileAnalysis implements Analysis {
                 current == null
                         ? buildProgressLines(cfg, customSettings, step)
                         : buildProgressLines(current, step),
-                draftFile.getAbsolutePath());
+                configFile.getAbsolutePath());
         lastWizardCancelChoice = choice;
         if (choice == CancelConfirmationDialog.Choice.SAVE_AND_EXIT) {
             return true;
