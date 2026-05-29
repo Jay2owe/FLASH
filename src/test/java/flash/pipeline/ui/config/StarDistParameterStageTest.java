@@ -9,6 +9,7 @@ import ij.ImagePlus;
 import ij.ImageStack;
 import ij.measure.ResultsTable;
 import ij.process.ByteProcessor;
+import ij.process.ImageProcessor;
 import org.junit.Test;
 
 import javax.swing.AbstractButton;
@@ -19,7 +20,6 @@ import javax.swing.SwingUtilities;
 import javax.swing.text.JTextComponent;
 import java.awt.Component;
 import java.awt.Container;
-import java.awt.image.IndexColorModel;
 import java.util.Arrays;
 
 import static org.junit.Assert.assertEquals;
@@ -207,11 +207,12 @@ public class StarDistParameterStageTest {
         RecordingStore store = new RecordingStore(
                 "stardist:0.5:0.4:area=5.0-30.0:quality=0.5:intensity=50.0");
         RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
-        RecordingActions actions = new RecordingActions();
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
+        RecordingActions actions = new RecordingActions(pair);
         StarDistParameterStage stage = new StarDistParameterStage(store, adapter);
 
         stage.buildControls(context(), actions);
-        stage.onEnter(context(), new PreviewPairPanel("Original", "Adjusted"));
+        stage.onEnter(context(), pair);
         stage.runPreviewNowForTest();
 
         assertEquals(1, adapter.previewRuns);
@@ -222,17 +223,19 @@ public class StarDistParameterStageTest {
         assertEquals(0.0, adapter.lastPreviewParameters.intensityMin, 0.001);
         assertEquals("Objects: 1 kept; removed 1 by StarDist filters",
                 actions.status);
-        assertRemovedLabelUsesCutoffColor(actions.adjustedPreview, 1, 0xe53935);
+        assertLabelOnlyRenderHides(pair, 1);
+        assertLabelOnlyRenderKeeps(pair, 2);
 
         adapter.previewRuns = 0;
         stage.setAreaMaxForTest("10");
+        waitForStatus(actions, "Objects: 0 kept; removed 2 by StarDist filters");
 
         assertFalse(stage.isPreviewStaleForTest());
         assertEquals("StarDist filter edits must reuse cached object metrics",
                 0, adapter.previewRuns);
         assertEquals("Objects: 0 kept; removed 2 by StarDist filters",
                 actions.status);
-        assertRemovedLabelUsesCutoffColor(actions.adjustedPreview, 2, 0xf9a825);
+        assertLabelOnlyRenderHides(pair, 2);
 
         assertTrue(stage.lockIn(context()));
         assertEquals("stardist:0.5:0.4:area=5.0-10.0:quality=0.5:intensity=50.0:"
@@ -549,17 +552,39 @@ public class StarDistParameterStageTest {
         }
     }
 
-    private static void assertRemovedLabelUsesCutoffColor(ImagePlus labelImage,
-                                                          int label,
-                                                          int expectedRgb) {
-        assertNotNull(labelImage);
-        assertTrue(labelImage.getProcessor().getColorModel() instanceof IndexColorModel);
-        IndexColorModel model = (IndexColorModel) labelImage.getProcessor().getColorModel();
-        int index = ((Math.max(1, label) - 1) % 255) + 1;
-        int actual = (model.getRed(index) << 16)
-                | (model.getGreen(index) << 8)
-                | model.getBlue(index);
-        assertEquals(expectedRgb, actual);
+    private static void assertLabelOnlyRenderHides(PreviewPairPanel pair, int label) {
+        assertLabelOnlyRenderPixel(pair, label, true);
+    }
+
+    private static void assertLabelOnlyRenderKeeps(PreviewPairPanel pair, int label) {
+        assertLabelOnlyRenderPixel(pair, label, false);
+    }
+
+    private static void assertLabelOnlyRenderPixel(PreviewPairPanel pair, int label, boolean hidden) {
+        ImagePlus rendered = pair.duplicateCurrentObjectPreviewForComparison("rendered");
+        assertNotNull(rendered);
+        ImageProcessor processor = rendered.getProcessor();
+        int x = label == 1 ? 0 : 1;
+        int rgb = processor.getPixel(x, 0) & 0xffffff;
+        if (hidden) {
+            assertEquals(0, rgb);
+        } else {
+            assertTrue("Expected kept label " + label + " to render with a visible color.",
+                    rgb != 0);
+        }
+    }
+
+    private static void waitForStatus(final RecordingActions actions,
+                                      final String expectedStatus) throws Exception {
+        TestWait.until("status did not become " + expectedStatus, new TestWait.Condition() {
+            @Override public boolean isMet() {
+                return expectedStatus.equals(actions.status);
+            }
+        }, 3000L);
+        SwingUtilities.invokeAndWait(new Runnable() {
+            @Override public void run() {
+            }
+        });
     }
 
     private static void waitForPreviewRuns(RecordingPreviewAdapter adapter,

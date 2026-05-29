@@ -14,10 +14,12 @@ import flash.pipeline.segmentation.catalog.ModelCatalog;
 import flash.pipeline.segmentation.catalog.ModelCatalogIO;
 import flash.pipeline.segmentation.catalog.ModelEntry;
 import flash.pipeline.stardist.StarDist3DRunner;
+import flash.pipeline.ui.Debouncer;
 import flash.pipeline.ui.FlashTheme;
 import flash.pipeline.ui.HelpButton;
 import flash.pipeline.ui.ModelEntryListCellRenderer;
 import flash.pipeline.ui.SegmentationModelManagerDialog;
+import flash.pipeline.ui.ToggleSwitch;
 import flash.pipeline.ui.preview.ObjectSizeFilterPreview;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import flash.pipeline.ui.variations.MontageDisplayActionDelegate;
@@ -44,17 +46,22 @@ import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import java.awt.Color;
 import java.awt.Container;
+import java.awt.Cursor;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 public final class StarDistParameterStage implements ConfigQcStage {
 
@@ -190,6 +197,8 @@ public final class StarDistParameterStage implements ConfigQcStage {
     private JButton previewButton;
     private JButton resetButton;
     private JButton variationsButton;
+    private ToggleSwitch showRemovedObjectsSwitch;
+    private Debouncer filterDebouncer;
     private ObjectFilterSummary objectFilterSummary;
 
     public StarDistParameterStage(ParameterStore parameterStore, PreviewAdapter previewAdapter) {
@@ -234,6 +243,11 @@ public final class StarDistParameterStage implements ConfigQcStage {
         panel.setOpaque(false);
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
         panel.setBorder(FlashTheme.pad(2, 0, 0, 0));
+        filterDebouncer = new Debouncer(250, new Runnable() {
+            @Override public void run() {
+                postDetectionFilterFieldChanged();
+            }
+        });
         createParameterFields();
         missingNoticeContainer = buildMissingModelNoticeContainer();
         panel.add(missingNoticeContainer);
@@ -263,6 +277,8 @@ public final class StarDistParameterStage implements ConfigQcStage {
         showRawSource = false;
         if (preview != null) {
             preview.clearLargePreviewImages();
+            preview.setShowRemovedObjects(showRemovedObjectsSwitch != null
+                    && showRemovedObjectsSwitch.isSelected());
             preview.setSourceToggleVisible(true);
             preview.setSourceMode(PreviewPairPanel.SourceMode.FILTERED);
             preview.setSourceModeEnabled(true);
@@ -328,6 +344,9 @@ public final class StarDistParameterStage implements ConfigQcStage {
     @Override
     public void onLeave(ConfigQcContext context) {
         closePreviewWorker();
+        if (filterDebouncer != null) {
+            filterDebouncer.cancel();
+        }
         if (preview != null) {
             preview.setSourceModeChangeListener(null);
             preview.setDisplaySettingsChangeListener(null);
@@ -715,6 +734,30 @@ public final class StarDistParameterStage implements ConfigQcStage {
         gbc.fill = GridBagConstraints.HORIZONTAL;
         row.add(Box.createHorizontalGlue(), gbc);
 
+        showRemovedObjectsSwitch = new ToggleSwitch(false);
+        showRemovedObjectsSwitch.addChangeListener(new Runnable() {
+            @Override public void run() {
+                if (preview != null) {
+                    preview.setShowRemovedObjects(showRemovedObjectsSwitch.isSelected());
+                }
+            }
+        });
+        JLabel showRemovedLabel = new JLabel("Show removed objects");
+        showRemovedLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        showRemovedLabel.addMouseListener(new MouseAdapter() {
+            @Override public void mouseClicked(MouseEvent e) {
+                if (showRemovedObjectsSwitch != null && showRemovedObjectsSwitch.isEnabled()) {
+                    showRemovedObjectsSwitch.setSelected(!showRemovedObjectsSwitch.isSelected());
+                }
+            }
+        });
+        gbc.gridx++;
+        gbc.weightx = 0.0;
+        gbc.fill = GridBagConstraints.NONE;
+        row.add(showRemovedObjectsSwitch, gbc);
+        gbc.gridx++;
+        row.add(showRemovedLabel, gbc);
+
         previewButton = new JButton("Run Preview");
         flash.pipeline.ui.FlashIcons.apply(previewButton, flash.pipeline.ui.FlashIcons.play());
         previewButton.addActionListener(e -> runPreviewOnWorker());
@@ -757,17 +800,26 @@ public final class StarDistParameterStage implements ConfigQcStage {
     private void installPostDetectionFilterListener(JTextField field) {
         field.getDocument().addDocumentListener(new DocumentListener() {
             @Override public void insertUpdate(DocumentEvent e) {
-                postDetectionFilterFieldChanged();
+                schedulePostDetectionFilterRefresh();
             }
 
             @Override public void removeUpdate(DocumentEvent e) {
-                postDetectionFilterFieldChanged();
+                schedulePostDetectionFilterRefresh();
             }
 
             @Override public void changedUpdate(DocumentEvent e) {
-                postDetectionFilterFieldChanged();
+                schedulePostDetectionFilterRefresh();
             }
         });
+    }
+
+    private void schedulePostDetectionFilterRefresh() {
+        if (updatingFields) return;
+        if (filterDebouncer != null) {
+            filterDebouncer.trigger();
+        } else {
+            postDetectionFilterFieldChanged();
+        }
     }
 
     private void loadFields(Parameters parameters) {
@@ -997,7 +1049,6 @@ public final class StarDistParameterStage implements ConfigQcStage {
 
     private void postDetectionFilterFieldChanged() {
         if (updatingFields) return;
-        captureCurrentPreviewForComparison();
         if (!refreshObjectFilterPreview()) {
             markPreviewStale(STALE_TEXT);
         }
@@ -1005,7 +1056,6 @@ public final class StarDistParameterStage implements ConfigQcStage {
 
     private void resetToSaved() {
         loadFields(savedParameters);
-        captureCurrentPreviewForComparison();
         if (!refreshObjectFilterPreview()) {
             markPreviewStale(STALE_TEXT);
         }
@@ -1126,8 +1176,9 @@ public final class StarDistParameterStage implements ConfigQcStage {
 
     private void captureCurrentPreviewForComparison() {
         if (labelPreview == null) return;
-        ImagePlus snapshot = PreviewPairPanel.duplicateForComparison(
-                labelPreview, "Previous StarDist preview");
+        ImagePlus snapshot = preview == null
+                ? PreviewPairPanel.duplicateForComparison(labelPreview, "Previous StarDist preview")
+                : preview.duplicateCurrentObjectPreviewForComparison("Previous StarDist preview");
         if (snapshot == null) return;
         ImagePlus old = previousLabelPreview;
         previousLabelPreview = snapshot;
@@ -1265,7 +1316,11 @@ public final class StarDistParameterStage implements ConfigQcStage {
             ObjectSizeFilterPreview.Summary allObjectsSummary = ObjectSizeFilterPreview.summarize(
                     objectStats, filteredSource, 0, 0, false);
             objectFilterSummary = summarizeObjectFilters(objectStats, starDistClasses);
-            ObjectSizeFilterPreview.applyClassifiedLut(labelPreview, allObjectsSummary, starDistClasses);
+            Set<Integer> removedLabels = new HashSet<Integer>(starDistClasses.keySet());
+            if (preview != null) {
+                preview.setObjectFilterPreview(labelPreview, removedLabels,
+                        allObjectsSummary, lastObjectCount);
+            }
             previewStale = false;
             displayedSettings = copyParameters(parameters);
             refreshSourceAndOutputPreview();
@@ -1560,6 +1615,7 @@ public final class StarDistParameterStage implements ConfigQcStage {
         if (areaMaxField != null) areaMaxField.setEnabled(enabled);
         if (qualityMinField != null) qualityMinField.setEnabled(enabled);
         if (intensityMinField != null) intensityMinField.setEnabled(enabled);
+        if (showRemovedObjectsSwitch != null) showRemovedObjectsSwitch.setEnabled(enabled);
         if (preview != null) {
             preview.setSourceModeEnabled(enabled);
             preview.setObjectOverlayEnabled(enabled);
