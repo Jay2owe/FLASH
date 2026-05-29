@@ -65,6 +65,8 @@ public final class ComparisonPreviewDialog extends JDialog {
     private PreviewDisplaySettings rawDisplaySettings = PreviewDisplaySettings.defaultFor("Grays");
     private PreviewDisplaySettings filteredDisplaySettings = PreviewDisplaySettings.defaultFor("Grays");
     private PreviewPairPanel.SourceMode sourceMode = PreviewPairPanel.SourceMode.FILTERED;
+    private ImagePlus currentDisplayImage;
+    private ImagePlus previousDisplayImage;
     private ImagePlus currentLabelImage;
     private ImagePlus previousLabelImage;
     private ImagePlus generatedCurrentOverlayImage;
@@ -145,8 +147,16 @@ public final class ComparisonPreviewDialog extends JDialog {
     }
 
     void setImages(ImagePlus currentImage, ImagePlus previousImage, int zSlice) {
-        currentLabelImage = currentImage;
-        previousLabelImage = previousImage;
+        setImages(currentImage, currentImage, previousImage, previousImage, zSlice);
+    }
+
+    void setImages(ImagePlus currentDisplayImage, ImagePlus currentLabelImage,
+                   ImagePlus previousDisplayImage, ImagePlus previousLabelImage,
+                   int zSlice) {
+        this.currentDisplayImage = currentDisplayImage;
+        this.previousDisplayImage = previousDisplayImage;
+        this.currentLabelImage = currentLabelImage;
+        this.previousLabelImage = previousLabelImage;
         refreshPreviewImages();
         updateOverlayControls();
         setCurrentZ(zSlice);
@@ -394,15 +404,17 @@ public final class ComparisonPreviewDialog extends JDialog {
         generatedCurrentOverlayImage = null;
         generatedPreviousOverlayImage = null;
 
-        ImagePlus currentDisplay = currentLabelImage;
-        ImagePlus previousDisplay = previousLabelImage;
+        ImagePlus currentDisplay = currentDisplayImage;
+        ImagePlus previousDisplay = previousDisplayImage;
         if (overlayCheck.isSelected()) {
             ImagePlus source = selectedSourceImage();
             PreviewDisplaySettings settings = selectedSourceDisplaySettings();
-            ImagePlus currentOverlay = ObjectOverlayRenderer.renderOverlay(
-                    source, currentLabelImage, settings);
-            ImagePlus previousOverlay = ObjectOverlayRenderer.renderOverlay(
-                    source, previousLabelImage, settings);
+            ImagePlus currentOverlay = currentDisplayReady()
+                    ? null
+                    : ObjectOverlayRenderer.renderOverlay(source, currentLabelImage, settings);
+            ImagePlus previousOverlay = previousDisplayReady()
+                    ? null
+                    : ObjectOverlayRenderer.renderOverlay(source, previousLabelImage, settings);
             if (currentOverlay != null) {
                 currentDisplay = currentOverlay;
                 generatedCurrentOverlayImage = currentOverlay;
@@ -445,10 +457,20 @@ public final class ComparisonPreviewDialog extends JDialog {
     }
 
     private void updateOverlayControls() {
-        boolean hasLabels = currentLabelImage != null && previousLabelImage != null;
+        boolean hasLabels = currentDisplayImage != null && previousDisplayImage != null
+                && currentLabelImage != null && previousLabelImage != null;
         boolean hasSource = rawSourceImage != null || filteredSourceImage != null;
-        overlayCheck.setEnabled(hasLabels && hasSource);
+        overlayCheck.setEnabled(hasLabels && hasSource
+                && !currentDisplayReady() && !previousDisplayReady());
         repaint();
+    }
+
+    private boolean currentDisplayReady() {
+        return currentDisplayImage != null && currentDisplayImage != currentLabelImage;
+    }
+
+    private boolean previousDisplayReady() {
+        return previousDisplayImage != null && previousDisplayImage != previousLabelImage;
     }
 
     private ImagePlus selectedSourceImage() {

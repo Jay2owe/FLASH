@@ -17,7 +17,9 @@ import java.awt.GridLayout;
 import java.awt.event.MouseEvent;
 import java.awt.image.IndexColorModel;
 import java.io.File;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.JPanel;
 import javax.swing.JSlider;
@@ -432,6 +434,126 @@ public class PreviewPairPanelTest {
         assertEquals(blend(0x000000, LabelMapStyler.rgbForLabel(1), 0.35),
                 rendered.getPixel(0, 0) & 0xffffff);
         assertEquals(0x000000, rendered.getPixel(1, 0) & 0xffffff);
+    }
+
+    @Test
+    public void objectFilterPreviewHidesRemovedLabelsAndColorsKeptLabels() {
+        PreviewPairPanel pair = new PreviewPairPanel("Filtered", "Objects");
+        ImagePlus labels = objectFilterLabels("Object labels");
+
+        pair.setLargePreviewImages(singleSlice("raw", 0, 100),
+                singleSlice("filtered", 0, 100), labels);
+        pair.setObjectFilterPreview(labels, removedLabels(2), null, 3);
+
+        ImagePlus renderedImage = pair.renderObjectPreviewNowForTest();
+        ImageProcessor rendered = renderedImage.getProcessor();
+
+        assertEquals(LabelMapStyler.rgbForLabel(1), rendered.getPixel(0, 0) & 0xffffff);
+        assertEquals(0x000000, rendered.getPixel(1, 0) & 0xffffff);
+        assertEquals(LabelMapStyler.rgbForLabel(3), rendered.getPixel(2, 0) & 0xffffff);
+    }
+
+    @Test
+    public void objectFilterPreviewShowsRemovedLabelsAsGreyGhosts() {
+        PreviewPairPanel pair = new PreviewPairPanel("Filtered", "Objects");
+        ImagePlus labels = objectFilterLabels("Object labels");
+
+        pair.setLargePreviewImages(singleSlice("raw", 0, 100),
+                singleSlice("filtered", 0, 100), labels);
+        pair.setObjectFilterPreview(labels, removedLabels(2), null, 3);
+        pair.setShowRemovedObjects(true);
+
+        ImageProcessor rendered = pair.renderObjectPreviewNowForTest().getProcessor();
+
+        assertTrue(pair.showRemovedObjects());
+        assertEquals(0x808080, rendered.getPixel(1, 0) & 0xffffff);
+    }
+
+    @Test
+    public void objectFilterPreviewHidesRemovedLabelsAsSourceBackgroundWhenOverlayed() {
+        PreviewPairPanel pair = new PreviewPairPanel("Filtered", "Objects");
+        ByteProcessor sourceProcessor = new ByteProcessor(3, 1);
+        sourceProcessor.set(0, 0, 0);
+        sourceProcessor.set(1, 0, 200);
+        sourceProcessor.set(2, 0, 0);
+        ImagePlus raw = new ImagePlus("raw", sourceProcessor.duplicate());
+        ImagePlus filtered = new ImagePlus("filtered", sourceProcessor);
+        ImagePlus labels = objectFilterLabels("Object labels");
+
+        pair.setLargePreviewImages(raw, filtered, labels);
+        pair.setOriginal(filtered);
+        pair.setObjectOverlaySelectedForTest(true);
+        pair.setDisplayRangeForTest(0.0, 200.0);
+        pair.setObjectFilterPreview(labels, removedLabels(2), null, 3);
+
+        ImageProcessor rendered = pair.renderObjectPreviewNowForTest().getProcessor();
+
+        assertEquals(0xffffff, rendered.getPixel(1, 0) & 0xffffff);
+    }
+
+    @Test
+    public void objectFilterInlineClicksUseTrueLabelMapAfterRgbRender() throws Exception {
+        ClickStore store = new ClickStore();
+        PreviewPairPanel pair = new PreviewPairPanel("Filtered", "Objects");
+        ImagePlus labels = objectFilterLabels("Object labels");
+
+        pair.setClickCapture(newClickBinFolder(), store, "Mouse1_LH_SCN", 2);
+        pair.setLargePreviewImages(singleSlice("raw", 0, 100),
+                singleSlice("filtered", 0, 100), labels);
+        pair.setObjectFilterPreview(labels, removedLabels(2), null, 3);
+        pair.renderObjectPreviewNowForTest();
+
+        pair.adjustedPreviewForTest().firePixelClickForTest(
+                2.0, 0.0, 1, MouseEvent.BUTTON1, 0);
+
+        List<ClickStore.Click> clicks = store.all();
+        assertEquals(1, clicks.size());
+        assertEquals(3, clicks.get(0).label);
+    }
+
+    @Test
+    public void objectFilterLargeViewClicksUseTrueLabelMapAfterRgbRender() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless());
+
+        ClickStore store = new ClickStore();
+        PreviewPairPanel pair = new PreviewPairPanel("Filtered", "Objects");
+        LargePreviewDialog dialog = new LargePreviewDialog(null);
+        try {
+            ImagePlus labels = objectFilterLabels("Object labels");
+            pair.setClickCapture(newClickBinFolder(), store, "Mouse1_LH_SCN", 2);
+            pair.setLargePreviewImages(singleSlice("raw", 0, 100),
+                    singleSlice("filtered", 0, 100), labels);
+            pair.setLargePreviewDialogForTest(dialog);
+            pair.setObjectFilterPreview(labels, removedLabels(2), null, 3);
+            pair.renderObjectPreviewNowForTest();
+
+            dialog.fireExtraPreviewClickForTest(2.0, 0.0, 1, MouseEvent.BUTTON1, 0);
+
+            List<ClickStore.Click> clicks = store.all();
+            assertEquals(1, clicks.size());
+            assertEquals(3, clicks.get(0).label);
+        } finally {
+            dialog.dispose();
+        }
+    }
+
+    @Test
+    public void duplicateCurrentObjectPreviewForComparisonUsesRenderedDisplay() {
+        PreviewPairPanel pair = new PreviewPairPanel("Filtered", "Objects");
+        ImagePlus labels = objectFilterLabels("Object labels");
+
+        pair.setLargePreviewImages(singleSlice("raw", 0, 100),
+                singleSlice("filtered", 0, 100), labels);
+        pair.setObjectFilterPreview(labels, removedLabels(2), null, 3);
+        pair.renderObjectPreviewNowForTest();
+
+        ImagePlus snapshot = pair.duplicateCurrentObjectPreviewForComparison("snapshot");
+
+        assertNotNull(snapshot);
+        assertEquals("snapshot", snapshot.getTitle());
+        assertEquals(0x000000, snapshot.getProcessor().getPixel(1, 0) & 0xffffff);
+        assertEquals(LabelMapStyler.rgbForLabel(3),
+                snapshot.getProcessor().getPixel(2, 0) & 0xffffff);
     }
 
     @Test
@@ -887,6 +1009,20 @@ public class PreviewPairPanelTest {
         ImagePlus image = new ImagePlus(title, processor);
         LabelMapStyler.apply(image, 1);
         return image;
+    }
+
+    private static ImagePlus objectFilterLabels(String title) {
+        ByteProcessor processor = new ByteProcessor(3, 1);
+        processor.set(0, 0, 1);
+        processor.set(1, 0, 2);
+        processor.set(2, 0, 3);
+        return new ImagePlus(title, processor);
+    }
+
+    private static Set<Integer> removedLabels(int label) {
+        Set<Integer> removed = new HashSet<Integer>();
+        removed.add(Integer.valueOf(label));
+        return removed;
     }
 
     private static ImagePlus shortSingleSlice(String title, int lowValue, int highValue) {

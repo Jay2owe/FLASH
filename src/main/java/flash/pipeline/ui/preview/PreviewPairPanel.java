@@ -20,6 +20,7 @@ import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JRadioButton;
 import javax.swing.JSlider;
+import javax.swing.SwingWorker;
 import javax.swing.SwingUtilities;
 import java.awt.Color;
 import java.awt.BorderLayout;
@@ -34,9 +35,12 @@ import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.io.File;
 import java.io.IOException;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
@@ -118,6 +122,10 @@ public final class PreviewPairPanel extends JPanel {
     private String comparisonPreviousStatus = "";
     private Runnable comparisonRestoreAction;
     private ImagePlus generatedObjectOverlayImage;
+    private ImagePlus objectTrueLabelMap;
+    private Set<Integer> objectRemovedLabels = Collections.emptySet();
+    private boolean showRemovedObjects;
+    private int objectFilterObjectCount;
     private String channelLutName = "Grays";
     private PreviewDisplaySettings displaySettings = PreviewDisplaySettings.defaultFor(channelLutName);
     private ObjectSizeFilterPreview.Summary objectSizeGuide;
@@ -218,6 +226,9 @@ public final class PreviewPairPanel extends JPanel {
                 setAdjusted(image);
             }
         })) return;
+        if (objectTrueLabelMap != null && image != objectTrueLabelMap) {
+            clearObjectFilterPreviewState();
+        }
         this.adjustedImage = image;
         updateObjectOverlayControls();
         updateAdjustedPreviewImage();
@@ -238,6 +249,7 @@ public final class PreviewPairPanel extends JPanel {
             }
         })) return;
         closeGeneratedObjectOverlayImage();
+        clearObjectFilterPreviewFields();
         originalImage = null;
         adjustedImage = null;
         usingCustomLargePreviewImages = false;
@@ -386,6 +398,62 @@ public final class PreviewPairPanel extends JPanel {
         }
     }
 
+    public void setObjectFilterPreview(final ImagePlus trueLabelMap,
+                                       final Set<Integer> removedLabels,
+                                       final ObjectSizeFilterPreview.Summary summary,
+                                       final int objectCount) {
+        if (invokeOnEdtIfNeeded(new Runnable() {
+            @Override public void run() {
+                setObjectFilterPreview(trueLabelMap, removedLabels, summary, objectCount);
+            }
+        })) return;
+        closeGeneratedObjectOverlayImage();
+        objectTrueLabelMap = trueLabelMap;
+        objectRemovedLabels = defensiveRemovedLabels(removedLabels, summary);
+        objectFilterObjectCount = Math.max(0, objectCount);
+        adjustedImage = trueLabelMap;
+        if (usingCustomLargePreviewImages) {
+            largePreviewThirdImage = trueLabelMap;
+        }
+        setObjectSizeGuide(summary);
+        updateObjectOverlayControls();
+        if (trueLabelMap == null) {
+            updateAdjustedPreviewImageLegacy();
+        } else {
+            requestObjectPreviewRender();
+        }
+        applyCurrentZ(currentZ);
+        updateLargeImages();
+        updateComparisonImages();
+        updateComparisonButtonState();
+    }
+
+    public void setShowRemovedObjects(final boolean show) {
+        if (invokeOnEdtIfNeeded(new Runnable() {
+            @Override public void run() {
+                setShowRemovedObjects(show);
+            }
+        })) return;
+        if (showRemovedObjects == show) return;
+        showRemovedObjects = show;
+        requestObjectPreviewRender();
+    }
+
+    public boolean showRemovedObjects() {
+        return showRemovedObjects;
+    }
+
+    public ImagePlus duplicateCurrentObjectPreviewForComparison(String title) {
+        if (objectTrueLabelMap != null) {
+            ImagePlus rendered = generatedObjectOverlayImage;
+            if (rendered == null) {
+                rendered = renderObjectPreviewNowForTest();
+            }
+            return duplicateForComparison(rendered, title);
+        }
+        return duplicateForComparison(adjustedImage, title);
+    }
+
     public void setComparisonPreviewVisible(final boolean visible) {
         if (invokeOnEdtIfNeeded(new Runnable() {
             @Override public void run() {
@@ -450,6 +518,9 @@ public final class PreviewPairPanel extends JPanel {
             }
         })) return;
         rememberCurrentDisplaySettings();
+        if (objectTrueLabelMap != null && objectTrueLabelMap != thirdImage) {
+            clearObjectFilterPreviewState();
+        }
         usingCustomLargePreviewImages = true;
         largePreviewFirstImage = firstImage;
         largePreviewSecondImage = secondImage;
@@ -521,6 +592,7 @@ public final class PreviewPairPanel extends JPanel {
                 clearLargePreviewImages();
             }
         })) return;
+        clearObjectFilterPreviewState();
         forgetDisplaySettings(largePreviewFirstImage);
         forgetDisplaySettings(largePreviewSecondImage);
         forgetDisplaySettings(largePreviewThirdImage);
@@ -943,6 +1015,10 @@ public final class PreviewPairPanel extends JPanel {
         return adjustedPreview.titleTextForTest();
     }
 
+    ImagePlus renderObjectPreviewNowForTest() {
+        return renderObjectPreviewSynchronously();
+    }
+
     void disposeLargePreviewForTest() {
         if (largePreviewDialog != null) {
             largePreviewDialog.dispose();
@@ -1349,6 +1425,7 @@ public final class PreviewPairPanel extends JPanel {
     }
 
     private ImagePlus inlineObjectLabelImage(ImagePreviewPanel source) {
+        if (objectTrueLabelMap != null) return objectTrueLabelMap;
         if (largePreviewThirdImage != null) return largePreviewThirdImage;
         if (source == adjustedPreview && isLikelyObjectLabelImage(adjustedImage)) {
             return adjustedImage;
@@ -1500,10 +1577,17 @@ public final class PreviewPairPanel extends JPanel {
             } else {
                 largePreviewDialog.clearSourceChoices();
             }
+            ImagePlus extraDisplayImage = objectTrueLabelMap != null
+                    ? generatedObjectOverlayImage
+                    : largePreviewThirdImage;
+            ImagePlus objectClickLabelImage = objectTrueLabelMap != null
+                    ? objectTrueLabelMap
+                    : largePreviewThirdImage;
             largePreviewDialog.setImages(
                     effectiveLargePreviewFirstImage(),
                     largePreviewSecondImage,
-                    largePreviewThirdImage,
+                    extraDisplayImage,
+                    objectClickLabelImage,
                     currentZ);
         } else {
             largePreviewDialog.clearSourceChoices();
@@ -1529,7 +1613,14 @@ public final class PreviewPairPanel extends JPanel {
         } else {
             comparisonPreviewDialog.clearSourceChoices();
         }
-        comparisonPreviewDialog.setImages(largePreviewThirdImage, comparisonPreviousImage, currentZ);
+        ImagePlus currentDisplayImage = objectTrueLabelMap != null
+                ? generatedObjectOverlayImage
+                : largePreviewThirdImage;
+        ImagePlus currentClickLabelImage = objectTrueLabelMap != null
+                ? objectTrueLabelMap
+                : largePreviewThirdImage;
+        comparisonPreviewDialog.setImages(currentDisplayImage, currentClickLabelImage,
+                comparisonPreviousImage, comparisonPreviousImage, currentZ);
         comparisonPreviewDialog.setObjectSizeGuide(objectSizeGuide);
         comparisonPreviewDialog.setPreviewStatus(
                 adjustedPreview.statusTextForTest(),
@@ -1562,6 +1653,14 @@ public final class PreviewPairPanel extends JPanel {
     }
 
     private void updateAdjustedPreviewImage() {
+        if (objectTrueLabelMap != null) {
+            requestObjectPreviewRender();
+            return;
+        }
+        updateAdjustedPreviewImageLegacy();
+    }
+
+    private void updateAdjustedPreviewImageLegacy() {
         ImagePlus displayImage = adjustedImage;
         ImagePlus oldOverlay = generatedObjectOverlayImage;
         generatedObjectOverlayImage = null;
@@ -1579,6 +1678,119 @@ public final class PreviewPairPanel extends JPanel {
             oldOverlay.flush();
         }
         applyClickOverlayMarkers();
+    }
+
+    private void requestObjectPreviewRender() {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    requestObjectPreviewRender();
+                }
+            });
+            return;
+        }
+        if (objectTrueLabelMap == null) {
+            updateAdjustedPreviewImageLegacy();
+            return;
+        }
+        final ImagePlus labelMap = objectTrueLabelMap;
+        final Set<Integer> removed = objectRemovedLabels;
+        final boolean show = showRemovedObjects;
+        final ImagePlus source = isObjectOverlaySelected()
+                ? selectedObjectOverlaySourceImage()
+                : null;
+        final PreviewDisplaySettings settings = displaySettingsForImage(source);
+        final long generation = beginAdjustedPreviewRequest(adjustedMessage);
+
+        new SwingWorker<ImagePlus, Void>() {
+            @Override protected ImagePlus doInBackground() {
+                ImagePlus rendered = ObjectOverlayRenderer.renderFiltered(
+                        source, labelMap, removed, show, settings);
+                applyObjectPreviewTitle(rendered, source != null);
+                return rendered;
+            }
+
+            @Override protected void done() {
+                ImagePlus rendered = null;
+                try {
+                    rendered = get();
+                    if (!applyObjectPreviewRenderResult(generation, rendered)
+                            && rendered != null) {
+                        rendered.flush();
+                    }
+                } catch (Exception e) {
+                    if (rendered != null) {
+                        rendered.flush();
+                    }
+                    if (generation == adjustedPreviewGeneration) {
+                        setAdjustedStateOnEdt(PreviewState.ERROR, e.getMessage());
+                    }
+                }
+            }
+        }.execute();
+    }
+
+    private ImagePlus renderObjectPreviewSynchronously() {
+        final long generation = beginAdjustedPreviewRequest(adjustedMessage);
+        final ImagePlus labelMap = objectTrueLabelMap;
+        if (labelMap == null) {
+            return null;
+        }
+        final Set<Integer> removed = objectRemovedLabels;
+        final boolean show = showRemovedObjects;
+        final ImagePlus source = isObjectOverlaySelected()
+                ? selectedObjectOverlaySourceImage()
+                : null;
+        final PreviewDisplaySettings settings = displaySettingsForImage(source);
+        final ImagePlus rendered = ObjectOverlayRenderer.renderFiltered(
+                source, labelMap, removed, show, settings);
+        applyObjectPreviewTitle(rendered, source != null);
+        final boolean[] applied = new boolean[] {false};
+        if (SwingUtilities.isEventDispatchThread()) {
+            applied[0] = applyObjectPreviewRenderResult(generation, rendered);
+        } else {
+            invokeOnEdtIfNeeded(new Runnable() {
+                @Override public void run() {
+                    applied[0] = applyObjectPreviewRenderResult(generation, rendered);
+                }
+            });
+        }
+        if (!applied[0] && rendered != null) {
+            rendered.flush();
+            return null;
+        }
+        return rendered;
+    }
+
+    private boolean applyObjectPreviewRenderResult(long generation, ImagePlus rendered) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            throw new IllegalStateException("Object render result must be applied on EDT.");
+        }
+        if (generation != adjustedPreviewGeneration) {
+            return false;
+        }
+        ImagePlus old = generatedObjectOverlayImage;
+        generatedObjectOverlayImage = rendered;
+        adjustedPreview.setImage(rendered);
+        if (old != null && old != rendered) {
+            old.flush();
+        }
+        if (adjustedState == PreviewState.RUNNING) {
+            setAdjustedStateOnEdt(PreviewState.READY, adjustedMessage);
+        }
+        applyCurrentZ(currentZ);
+        updateLargeImages();
+        updateComparisonImages();
+        applyClickOverlayMarkers();
+        return true;
+    }
+
+    private void applyObjectPreviewTitle(ImagePlus rendered, boolean overlay) {
+        if (rendered == null) return;
+        if (overlay) return;
+        rendered.setTitle(objectFilterObjectCount > 0
+                ? "Object label preview"
+                : "Object label preview (no objects)");
     }
 
     private void handleLargeObjectClick(int label, int z, double x, double y,
@@ -1775,7 +1987,7 @@ public final class PreviewPairPanel extends JPanel {
         objectOverlayCheck.setEnabled(available && hasSource && objectOverlayEnabled);
         objectOverlaySourceChoice.setEnabled(available && hasSource && objectOverlayEnabled
                 && objectOverlayCheck.isSelected());
-        if (!available) {
+        if (!available && objectTrueLabelMap == null) {
             closeGeneratedObjectOverlayImage();
         }
         objectOverlayControls.revalidate();
@@ -1785,7 +1997,8 @@ public final class PreviewPairPanel extends JPanel {
     private boolean objectOverlayAvailable() {
         return usingCustomLargePreviewImages
                 && largePreviewThirdImage != null
-                && adjustedImage == largePreviewThirdImage;
+                && (adjustedImage == largePreviewThirdImage
+                    || (objectTrueLabelMap != null && objectTrueLabelMap == largePreviewThirdImage));
     }
 
     private boolean isObjectOverlaySelected() {
@@ -2100,6 +2313,39 @@ public final class PreviewPairPanel extends JPanel {
             throw new IllegalStateException("Could not update preview on the Swing event thread.", cause);
         }
         return true;
+    }
+
+    private static Set<Integer> defensiveRemovedLabels(Set<Integer> removedLabels,
+                                                       ObjectSizeFilterPreview.Summary summary) {
+        Set<Integer> source = removedLabels;
+        if (source == null && summary != null) {
+            source = summary.removedLabels();
+        }
+        if (source == null || source.isEmpty()) {
+            return Collections.emptySet();
+        }
+        Set<Integer> copy = new HashSet<Integer>();
+        for (Integer label : source) {
+            if (label != null && label.intValue() > 0) {
+                copy.add(label);
+            }
+        }
+        if (copy.isEmpty()) {
+            return Collections.emptySet();
+        }
+        return Collections.unmodifiableSet(copy);
+    }
+
+    private void clearObjectFilterPreviewState() {
+        closeGeneratedObjectOverlayImage();
+        clearObjectFilterPreviewFields();
+    }
+
+    private void clearObjectFilterPreviewFields() {
+        objectTrueLabelMap = null;
+        objectRemovedLabels = Collections.emptySet();
+        showRemovedObjects = false;
+        objectFilterObjectCount = 0;
     }
 
     private void closeGeneratedObjectOverlayImage() {

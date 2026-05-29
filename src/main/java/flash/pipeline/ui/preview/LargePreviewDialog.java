@@ -68,6 +68,7 @@ public final class LargePreviewDialog extends JDialog {
     private PreviewPairPanel.SourceMode sourceChoiceMode = PreviewPairPanel.SourceMode.RAW;
     private ImagePlus originalImage;
     private ImagePlus adjustedImage;
+    private ImagePlus extraDisplayImage;
     private ImagePlus objectLabelImage;
     private ImagePlus sourceChoiceOriginalImage;
     private ImagePlus sourceChoiceFilteredImage;
@@ -149,10 +150,18 @@ public final class LargePreviewDialog extends JDialog {
 
     public void setImages(ImagePlus originalImage, ImagePlus adjustedImage,
                           ImagePlus extraImage, int zSlice) {
+        setImages(originalImage, adjustedImage, extraImage, extraImage, zSlice);
+    }
+
+    public void setImages(ImagePlus originalImage, ImagePlus adjustedImage,
+                          ImagePlus extraDisplayImage,
+                          ImagePlus objectClickLabelImage,
+                          int zSlice) {
         this.originalImage = originalImage;
         this.adjustedImage = adjustedImage;
-        this.objectLabelImage = extraImage;
-        configurePreviewPanel(extraImage != null);
+        this.extraDisplayImage = extraDisplayImage;
+        this.objectLabelImage = objectClickLabelImage;
+        configurePreviewPanel(extraDisplayImage != null);
         originalPreview.setImage(originalImage);
         adjustedPreview.setImage(adjustedImage);
         refreshObjectPreviewImage();
@@ -263,6 +272,10 @@ public final class LargePreviewDialog extends JDialog {
 
     ij.process.ImageProcessor extraPreviewRenderedProcessorForTest() {
         return extraPreview.renderedProcessorForTest();
+    }
+
+    void fireExtraPreviewClickForTest(double x, double y, int z, int button, int modifiers) {
+        extraPreview.firePixelClickForTest(x, y, z, button, modifiers);
     }
 
     void raiseForUser() {
@@ -423,16 +436,16 @@ public final class LargePreviewDialog extends JDialog {
     }
 
     private void refreshObjectPreviewImage() {
-        if (!extraPreviewVisible || objectLabelImage == null) {
+        if (!extraPreviewVisible || extraDisplayImage == null) {
             extraPreview.setImage(null);
             closeGeneratedOverlayImage();
             return;
         }
 
-        ImagePlus displayImage = objectLabelImage;
+        ImagePlus displayImage = extraDisplayImage;
         ImagePlus oldOverlay = generatedOverlayImage;
         generatedOverlayImage = null;
-        if (overlayCheck.isSelected()) {
+        if (overlayCheck.isSelected() && !extraDisplayReady()) {
             ImagePlus source = selectedOverlaySourceImage();
             ImagePlus overlay = ObjectOverlayRenderer.renderOverlay(source, objectLabelImage,
                     selectedOverlaySourceDisplaySettings());
@@ -523,14 +536,19 @@ public final class LargePreviewDialog extends JDialog {
     }
 
     private void updateOverlayControls() {
-        boolean hasObjectMap = extraPreviewVisible && objectLabelImage != null;
+        boolean hasObjectMap = extraPreviewVisible && extraDisplayImage != null;
         boolean hasSource = originalImage != null || adjustedImage != null
                 || hasSourceChoiceImages();
         overlayControls.setVisible(hasObjectMap);
-        overlayCheck.setEnabled(hasObjectMap && hasSource);
-        overlaySourceChoice.setEnabled(hasObjectMap && hasSource && overlayCheck.isSelected());
+        overlayCheck.setEnabled(hasObjectMap && hasSource && !extraDisplayReady());
+        overlaySourceChoice.setEnabled(hasObjectMap && hasSource && overlayCheck.isSelected()
+                && !extraDisplayReady());
         overlayControls.revalidate();
         overlayControls.repaint();
+    }
+
+    private boolean extraDisplayReady() {
+        return extraDisplayImage != null && extraDisplayImage != objectLabelImage;
     }
 
     private void sizeNearDesktop() {
