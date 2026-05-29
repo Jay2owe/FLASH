@@ -193,12 +193,10 @@ public final class ObjectSizeFilterPreview {
         return stats;
     }
 
-    @Deprecated
     public static void applyClassifiedLut(ImagePlus labelImage, Summary summary) {
         applyClassifiedLut(labelImage, summary, null);
     }
 
-    @Deprecated
     public static void applyClassifiedLut(ImagePlus labelImage,
                                           Summary summary,
                                           Map<Integer, Classification> extraClassesByLabel) {
