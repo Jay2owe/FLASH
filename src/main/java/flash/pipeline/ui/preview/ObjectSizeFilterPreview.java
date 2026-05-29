@@ -10,8 +10,10 @@ import ij.process.LUT;
 import java.awt.Color;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 
 public final class ObjectSizeFilterPreview {
@@ -73,6 +75,17 @@ public final class ObjectSizeFilterPreview {
         public Classification classificationForLabel(int label) {
             Classification classification = classesByLabel.get(Integer.valueOf(label));
             return classification == null ? Classification.KEPT : classification;
+        }
+
+        public Set<Integer> removedLabels() {
+            Set<Integer> removed = new HashSet<Integer>();
+            for (Map.Entry<Integer, Classification> entry : classesByLabel.entrySet()) {
+                Classification classification = entry.getValue();
+                if (classification != null && classification != Classification.KEPT) {
+                    removed.add(entry.getKey());
+                }
+            }
+            return removed;
         }
 
         public String statusText() {
@@ -180,10 +193,12 @@ public final class ObjectSizeFilterPreview {
         return stats;
     }
 
+    @Deprecated
     public static void applyClassifiedLut(ImagePlus labelImage, Summary summary) {
         applyClassifiedLut(labelImage, summary, null);
     }
 
+    @Deprecated
     public static void applyClassifiedLut(ImagePlus labelImage,
                                           Summary summary,
                                           Map<Integer, Classification> extraClassesByLabel) {

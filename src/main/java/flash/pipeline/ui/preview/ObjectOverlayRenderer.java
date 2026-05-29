@@ -11,6 +11,7 @@ import java.awt.image.IndexColorModel;
 public final class ObjectOverlayRenderer {
 
     private static final double OVERLAY_ALPHA = 0.35;
+    private static final int GHOST_RGB = 0x808080;
 
     private ObjectOverlayRenderer() {
     }
@@ -21,79 +22,85 @@ public final class ObjectOverlayRenderer {
 
     public static ImagePlus renderOverlay(ImagePlus source, ImagePlus labelMap,
                                           PreviewDisplaySettings displaySettings) {
-        if (source == null || labelMap == null) return null;
-        ImageStack sourceStack = source.getStack();
-        ImageStack labelStack = labelMap.getStack();
-        if (sourceStack == null || labelStack == null
-                || sourceStack.getSize() < 1 || labelStack.getSize() < 1) {
-            return null;
-        }
-
-        ImageStack out = new ImageStack(source.getWidth(), source.getHeight());
-        ColorModel labelColorModel = colorModelForLabelMap(labelMap);
-        for (int i = 1; i <= sourceStack.getSize(); i++) {
-            ImageProcessor sourceProcessor = sourceStack.getProcessor(i);
-            ImageProcessor labelProcessor = labelStack.getProcessor(
-                    Math.min(i, labelStack.getSize()));
-            out.addSlice(sourceStack.getSliceLabel(i),
-                    renderOverlaySlice(source, sourceProcessor, labelProcessor,
-                            labelColorModel, displaySettings));
-        }
-
-        ImagePlus result = new ImagePlus("Object overlay | " + safeTitle(source), out);
-        copyDimensions(source, result);
-        copyOverlay(labelMap, result);
-        return result;
+        return renderFiltered(source, labelMap, null, true, displaySettings);
     }
 
     public static ImagePlus renderLabelMap(ImagePlus labelMap, int objectCount) {
-        if (labelMap == null || labelMap.getStack() == null || labelMap.getStackSize() < 1) {
+        ImagePlus result = renderFiltered(null, labelMap, null, true, null);
+        if (result != null) {
+            result.setTitle(objectCount > 0
+                    ? "Object label preview"
+                    : "Object label preview (no objects)");
+        }
+        return result;
+    }
+
+    public static ImagePlus renderFiltered(ImagePlus source,
+                                           ImagePlus labelMap,
+                                           java.util.Set<Integer> removedLabels,
+                                           boolean showRemoved,
+                                           PreviewDisplaySettings displaySettings) {
+        if (labelMap == null || labelMap.getStack() == null
+                || labelMap.getStackSize() < 1) {
             return null;
         }
-        ImageStack in = labelMap.getStack();
+        boolean overlay = source != null && source.getStack() != null
+                && source.getStackSize() > 0;
+        ImageStack labelStack = labelMap.getStack();
+        ImageStack sourceStack = overlay ? source.getStack() : null;
         ImageStack out = new ImageStack(labelMap.getWidth(), labelMap.getHeight());
-        for (int i = 1; i <= in.getSize(); i++) {
-            ImageProcessor labels = in.getProcessor(i);
-            int width = labels.getWidth();
-            int height = labels.getHeight();
-            int[] pixels = new int[width * height];
-            int p = 0;
-            for (int y = 0; y < height; y++) {
-                for (int x = 0; x < width; x++) {
-                    pixels[p++] = LabelMapStyler.rgbForLabel(labelAt(labels, x, y));
-                }
-            }
-            ColorProcessor cp = new ColorProcessor(width, height);
-            cp.setPixels(pixels);
-            out.addSlice(in.getSliceLabel(i), cp);
+
+        for (int i = 1; i <= labelStack.getSize(); i++) {
+            ImageProcessor labels = labelStack.getProcessor(i);
+            ImageProcessor src = overlay
+                    ? sourceStack.getProcessor(Math.min(i, sourceStack.getSize()))
+                    : null;
+            out.addSlice(labelStack.getSliceLabel(i),
+                    renderFilteredSlice(source, src, labels, removedLabels,
+                            showRemoved, displaySettings));
         }
-        ImagePlus result = new ImagePlus(objectCount > 0
-                ? "Object label preview"
-                : "Object label preview (no objects)", out);
-        copyDimensions(labelMap, result);
+
+        ImagePlus result = new ImagePlus(overlay
+                ? "Object overlay | " + safeTitle(source)
+                : "Object preview", out);
+        copyDimensions(overlay ? source : labelMap, result);
         copyOverlay(labelMap, result);
         return result;
     }
 
-    private static ColorProcessor renderOverlaySlice(ImagePlus sourceImage,
-                                                     ImageProcessor source,
-                                                     ImageProcessor labels,
-                                                     ColorModel labelColorModel,
-                                                     PreviewDisplaySettings displaySettings) {
-        int width = source.getWidth();
-        int height = source.getHeight();
+    private static ColorProcessor renderFilteredSlice(ImagePlus sourceImage,
+                                                      ImageProcessor source,
+                                                      ImageProcessor labels,
+                                                      java.util.Set<Integer> removed,
+                                                      boolean showRemoved,
+                                                      PreviewDisplaySettings settings) {
+        int width = labels.getWidth();
+        int height = labels.getHeight();
         int[] pixels = new int[width * height];
-        double[] range = displayRange(sourceImage, source, displaySettings);
-        ColorModel model = colorModel(source, displaySettings);
+        boolean overlay = source != null;
+        double[] range = overlay ? displayRange(sourceImage, source, settings) : null;
+        ColorModel model = overlay ? colorModel(source, settings) : null;
 
         int p = 0;
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
-                int base = baseRgb(source, x, y, range[0], range[1], model);
+                int base = overlay && x < source.getWidth() && y < source.getHeight()
+                        ? baseRgb(source, x, y, range[0], range[1], model)
+                        : 0x000000;
                 int label = labelAt(labels, x, y);
-                pixels[p++] = label > 0
-                        ? blend(base, labelRgb(labelColorModel, labels, label), OVERLAY_ALPHA)
-                        : base;
+                if (label <= 0) {
+                    pixels[p++] = base;
+                    continue;
+                }
+                boolean isRemoved = removed != null && removed.contains(Integer.valueOf(label));
+                if (isRemoved && !showRemoved) {
+                    pixels[p++] = base;
+                } else if (isRemoved) {
+                    pixels[p++] = overlay ? blend(base, GHOST_RGB, OVERLAY_ALPHA) : GHOST_RGB;
+                } else {
+                    int color = LabelMapStyler.rgbForLabel(label);
+                    pixels[p++] = overlay ? blend(base, color, OVERLAY_ALPHA) : color;
+                }
             }
         }
         ColorProcessor cp = new ColorProcessor(width, height);
