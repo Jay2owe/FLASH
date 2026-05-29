@@ -56,7 +56,6 @@ import ij.gui.Roi;
 import ij.io.Opener;
 
 
-import javax.swing.JTextField;
 import java.awt.Frame;
 import java.awt.GraphicsEnvironment;
 import java.io.File;

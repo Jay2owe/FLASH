@@ -15,13 +15,11 @@ import flash.pipeline.segmentation.catalog.ModelCatalogIO;
 import flash.pipeline.ui.wizard.JsonIO;
 import ij.IJ;
 import ij.ImagePlus;
-import ij.ImageStack;
 import ij.Prefs;
 import ij.io.FileSaver;
 import ij.process.ImageProcessor;
 import ij.process.ShortProcessor;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;

@@ -31,7 +31,6 @@ import ij.IJ;
 import ij.ImagePlus;
 import ij.measure.ResultsTable;
 
-import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;

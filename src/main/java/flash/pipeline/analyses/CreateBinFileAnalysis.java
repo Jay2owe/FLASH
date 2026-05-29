@@ -10,7 +10,6 @@ import flash.pipeline.bin.ChannelConfigIO;
 import flash.pipeline.cellpose.Cellpose3DRunner;
 import flash.pipeline.cellpose.CellposeModel;
 import flash.pipeline.cellpose.CellposeRuntime;
-import flash.pipeline.click.ClickStore;
 import flash.pipeline.click.training.ImagePlusProvider;
 import flash.pipeline.analyses.wizard.BinPreset;
 import flash.pipeline.analyses.wizard.BinPresetIO;

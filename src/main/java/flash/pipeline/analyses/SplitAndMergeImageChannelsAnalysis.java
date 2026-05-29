@@ -14,7 +14,6 @@ import flash.pipeline.image.ImageCalcOps;
 import flash.pipeline.image.ImageOps;
 import flash.pipeline.image.OrientationOps;
 import flash.pipeline.image.ParallelContext;
-import flash.pipeline.image.ProcessingNotes;
 import flash.pipeline.io.AsyncImageSaver;
 import flash.pipeline.io.BoundedImageLoader;
 import flash.pipeline.io.ConditionManifestIO;
