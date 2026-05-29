@@ -33,7 +33,6 @@ public class AnalysisStatusScannerTest {
         AnalysisStatusScanner scanner = new AnalysisStatusScanner();
         Map<Integer, AnalysisStatus> statuses = scanner.scan(dir);
 
-        assertFalse(statuses.containsKey(Integer.valueOf(FLASH_Pipeline.IDX_ORIENTATION_SETUP)));
         assertEquals(AnalysisStatus.NOT_STARTED,
                 statuses.get(Integer.valueOf(FLASH_Pipeline.IDX_DRAW_ROIS)));
         assertTrue(scanner.tooltipFor(FLASH_Pipeline.IDX_DRAW_ROIS).contains("orientation transforms"));
@@ -45,7 +44,6 @@ public class AnalysisStatusScannerTest {
 
         Map<Integer, AnalysisStatus> statuses = new AnalysisStatusScanner().scan(dir);
 
-        assertFalse(statuses.containsKey(Integer.valueOf(FLASH_Pipeline.IDX_ORIENTATION_SETUP)));
         assertEquals(AnalysisStatus.NOT_STARTED,
                 statuses.get(Integer.valueOf(FLASH_Pipeline.IDX_DRAW_ROIS)));
     }

@@ -58,7 +58,6 @@ public final class FlashProjectLayout {
     public static final String STATISTICS_FILENAME = "Statistics.csv";
     public static final String SUMMARY_WORKBOOK_FILENAME = "Summary.xlsx";
     public static final String ORIENTATION_MANIFEST_FILENAME = "Image Orientation.csv";
-    public static final String ORIENTATION_ALIASES_FILENAME = "Image Orientation Aliases.csv";
 
     private final File projectRoot;
 

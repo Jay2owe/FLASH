@@ -47,8 +47,6 @@ public final class PipelineRecipe {
         keys.put("Statistics", Integer.valueOf(IDX_STATISTICS));
         keys.put("Excel", Integer.valueOf(IDX_EXCEL_EXPORT));
         keys.put("Spectral", Integer.valueOf(IDX_SPECTRAL_DECONTAMINATION));
-        // Legacy recipes used OrientationSetup before orientation moved into Draw ROIs.
-        keys.put("OrientationSetup", Integer.valueOf(IDX_DRAW_ROIS));
         KEY_TO_IDX = Collections.unmodifiableMap(keys);
 
         Map<Integer, String> indexes = new HashMap<Integer, String>();

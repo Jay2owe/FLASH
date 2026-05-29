@@ -4,7 +4,6 @@ import flash.pipeline.analyses.Analysis;
 import flash.pipeline.analyses.CreateBinFileAnalysis;
 import flash.pipeline.analyses.DeconvolutionAnalysis;
 import flash.pipeline.analyses.DrawAndSaveROIsAnalysis;
-import flash.pipeline.analyses.ImageOrientationSetupAnalysis;
 import flash.pipeline.analyses.IntensityAnalysisV2;
 import flash.pipeline.analyses.LineDistanceAnalysis;
 import flash.pipeline.analyses.MasterAggregationAnalysis;
@@ -32,7 +31,7 @@ public class FLASH_PipelineIndexShiftTest {
         invokeInitAnalyses(pipeline);
         Map<Integer, Analysis> analysisMap = analysisMap(pipeline);
 
-        assertEquals(13, analysisMap.size());
+        assertEquals(12, analysisMap.size());
         assertTrue(analysisMap.get(FLASH_Pipeline.IDX_CREATE_BIN) instanceof CreateBinFileAnalysis);
         assertTrue(analysisMap.get(FLASH_Pipeline.IDX_DRAW_ROIS) instanceof DrawAndSaveROIsAnalysis);
         assertTrue(analysisMap.get(FLASH_Pipeline.IDX_DECONVOLUTION) instanceof DeconvolutionAnalysis);
@@ -45,7 +44,6 @@ public class FLASH_PipelineIndexShiftTest {
         assertTrue(analysisMap.get(FLASH_Pipeline.IDX_STATISTICS) instanceof StatisticalAnalysis);
         assertNotNull(analysisMap.get(FLASH_Pipeline.IDX_EXCEL_EXPORT));
         assertTrue(analysisMap.get(FLASH_Pipeline.IDX_SPECTRAL_DECONTAMINATION) instanceof SpectralDecontaminationAnalysis);
-        assertTrue(analysisMap.get(FLASH_Pipeline.IDX_ORIENTATION_SETUP) instanceof ImageOrientationSetupAnalysis);
     }
 
     @Test
@@ -54,24 +52,22 @@ public class FLASH_PipelineIndexShiftTest {
         analysesField.setAccessible(true);
         String[] analyses = (String[]) analysesField.get(new FLASH_Pipeline());
 
-        assertEquals(13, analyses.length);
+        assertEquals(12, analyses.length);
         assertEquals("Set Up Configuration", analyses[FLASH_Pipeline.IDX_CREATE_BIN]);
         assertEquals("Draw and Save ROIs", analyses[FLASH_Pipeline.IDX_DRAW_ROIS]);
         assertEquals("3D Deconvolution", analyses[FLASH_Pipeline.IDX_DECONVOLUTION]);
         assertEquals("Make Presentation Images", analyses[FLASH_Pipeline.IDX_SPLIT_MERGE]);
         assertEquals("Spectral Decontamination (Experimental)", analyses[FLASH_Pipeline.IDX_SPECTRAL_DECONTAMINATION]);
-        assertEquals("Image Orientation Setup", analyses[FLASH_Pipeline.IDX_ORIENTATION_SETUP]);
     }
 
     @Test
-    public void visibleAnalysisOrderGroupsMainDialogAndHidesStandaloneOrientation() throws Exception {
+    public void visibleAnalysisOrderGroupsMainDialogAndHidesLineDistance() throws Exception {
         Field orderField = FLASH_Pipeline.class.getDeclaredField("VISIBLE_ANALYSIS_ORDER");
         orderField.setAccessible(true);
         int[] visibleOrder = (int[]) orderField.get(null);
 
         assertEquals(11, visibleOrder.length);
         assertFalse(contains(visibleOrder, FLASH_Pipeline.IDX_LINE_DISTANCE));
-        assertFalse(contains(visibleOrder, FLASH_Pipeline.IDX_ORIENTATION_SETUP));
         assertTrue(indexOf(visibleOrder, FLASH_Pipeline.IDX_CREATE_BIN)
                 < indexOf(visibleOrder, FLASH_Pipeline.IDX_DRAW_ROIS));
         assertTrue(indexOf(visibleOrder, FLASH_Pipeline.IDX_DECONVOLUTION)

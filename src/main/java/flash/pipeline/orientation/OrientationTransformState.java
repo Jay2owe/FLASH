@@ -4,7 +4,7 @@ import flash.pipeline.naming.OrientationManifestRow;
 import flash.pipeline.naming.ResolvedImageMetadata;
 
 /**
- * Non-UI orientation transform state shared by orientation setup and ROI drawing.
+ * Non-UI orientation transform state used by ROI drawing.
  */
 public final class OrientationTransformState {
     public final OrientationManifestRow.RotationDegrees rotateDegrees;

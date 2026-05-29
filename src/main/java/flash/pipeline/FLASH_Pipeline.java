@@ -4,7 +4,6 @@ import flash.pipeline.analyses.Analysis;
 import flash.pipeline.analyses.CreateBinFileAnalysis;
 import flash.pipeline.analyses.DeconvolutionAnalysis;
 import flash.pipeline.analyses.DrawAndSaveROIsAnalysis;
-import flash.pipeline.analyses.ImageOrientationSetupAnalysis;
 import flash.pipeline.analyses.IntensityAnalysisV2;
 import flash.pipeline.analyses.LineDistanceAnalysis;
 import flash.pipeline.analyses.MasterAggregationAnalysis;
@@ -131,8 +130,7 @@ public class FLASH_Pipeline implements PlugIn {
             "Combine results per condition / animal",
             "Statistical Analysis",
             "Excel Summary Export",
-            "Spectral Decontamination (Experimental)",
-            "Image Orientation Setup"
+            "Spectral Decontamination (Experimental)"
     };
 
     private static final String[] DESCRIPTIONS = {
@@ -147,8 +145,7 @@ public class FLASH_Pipeline implements PlugIn {
             "Aggregates all per-image CSVs into master summary tables (Master Data Aggregation).",
             "Group comparisons - t-tests, ANOVA, Tukey / Dunn's post-hoc.",
             "Make a publication-ready .xlsx workbook from the master CSVs.",
-            "Remove channel bleed-through / autofluorescence (placeholder).",
-            "Legacy standalone orientation manifest editor retained for backward compatibility."
+            "Remove channel bleed-through / autofluorescence (placeholder)."
     };
 
     /** Analysis indices. Keep in sync with {@link #analyses}. */
@@ -164,7 +161,6 @@ public class FLASH_Pipeline implements PlugIn {
     public static final int IDX_STATISTICS = 9;
     public static final int IDX_EXCEL_EXPORT = 10;
     public static final int IDX_SPECTRAL_DECONTAMINATION = 11;
-    public static final int IDX_ORIENTATION_SETUP = 12;
 
     private static final int[] VISIBLE_ANALYSIS_ORDER = {
             IDX_CREATE_BIN,
@@ -1921,7 +1917,6 @@ public class FLASH_Pipeline implements PlugIn {
         analysisMap.put(IDX_STATISTICS, new StatisticalAnalysis());
         analysisMap.put(IDX_EXCEL_EXPORT, createExcelExportAnalysis());
         analysisMap.put(IDX_SPECTRAL_DECONTAMINATION, new SpectralDecontaminationAnalysis());
-        analysisMap.put(IDX_ORIENTATION_SETUP, new ImageOrientationSetupAnalysis());
     }
 
     private Analysis createExcelExportAnalysis() {

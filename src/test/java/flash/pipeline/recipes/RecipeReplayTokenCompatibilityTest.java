@@ -1,31 +1,28 @@
 package flash.pipeline.recipes;
 
-import flash.pipeline.FLASH_Pipeline;
 import flash.pipeline.segmentation.SegmentationTokenParser;
 import org.junit.Test;
 
 import java.util.Collections;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 public class RecipeReplayTokenCompatibilityTest {
 
     @Test
-    public void legacyRecipeJsonLoadsWithCurrentAnalysisKeyParser() throws Exception {
-        String legacyJson = "{"
-                + "\"name\":\"Pre-training recipe\","
-                + "\"description\":\"Saved before custom model support\","
+    public void recipeJsonReportsUnknownAnalysisKeys() throws Exception {
+        String json = "{"
+                + "\"name\":\"Recipe with unknown key\","
+                + "\"description\":\"Saved before cleanup\","
                 + "\"flashVersion\":\"0.x\","
-                + "\"analyses\":[\"OrientationSetup\",\"ThreeDObject\",\"Intensity\"],"
+                + "\"analyses\":[\"UnknownAnalysis\",\"ThreeDObject\",\"Intensity\"],"
                 + "\"modulePresets\":{\"ThreeDObject\":\"count_coloc_standard\"}"
                 + "}";
 
-        PipelineRecipe recipe = PipelineRecipe.fromJson(legacyJson);
+        PipelineRecipe recipe = PipelineRecipe.fromJson(json);
 
-        assertFalse(recipe.unknownAnalysisKeys().contains("OrientationSetup"));
-        assertEquals(Integer.valueOf(FLASH_Pipeline.IDX_DRAW_ROIS),
-                PipelineRecipe.KEY_TO_IDX.get("OrientationSetup"));
+        assertTrue(recipe.unknownAnalysisKeys().contains("UnknownAnalysis"));
         assertEquals("count_coloc_standard", recipe.getModulePresets().get("ThreeDObject"));
     }
 

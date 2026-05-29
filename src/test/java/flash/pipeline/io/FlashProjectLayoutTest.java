@@ -136,8 +136,6 @@ public class FlashProjectLayoutTest {
                 layout.projectSummaryWriteFile(FlashProjectLayout.MASTER_INTENSITIES_FILENAME));
         assertPath(new File(project, "FLASH/Results/Tables/Project Summary/Image Orientation.csv"),
                 layout.projectSummaryWriteFile(FlashProjectLayout.ORIENTATION_MANIFEST_FILENAME));
-        assertPath(new File(project, "FLASH/Results/Tables/Project Summary/Image Orientation Aliases.csv"),
-                layout.projectSummaryWriteFile(FlashProjectLayout.ORIENTATION_ALIASES_FILENAME));
     }
 
     @Test

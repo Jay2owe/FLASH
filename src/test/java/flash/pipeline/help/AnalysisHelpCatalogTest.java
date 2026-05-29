@@ -60,8 +60,6 @@ public class AnalysisHelpCatalogTest {
         assertFalse(contains(visibleOrder, FLASH_Pipeline.IDX_LINE_DISTANCE));
         assertFalse(AnalysisHelpCatalog.hasTopic(FLASH_Pipeline.IDX_LINE_DISTANCE));
 
-        assertFalse(contains(visibleOrder, FLASH_Pipeline.IDX_ORIENTATION_SETUP));
-        assertFalse(AnalysisHelpCatalog.hasTopic(FLASH_Pipeline.IDX_ORIENTATION_SETUP));
     }
 
     @Test
@@ -93,9 +91,7 @@ public class AnalysisHelpCatalogTest {
         }
 
         assertFalse(contains(visibleOrder, FLASH_Pipeline.IDX_LINE_DISTANCE));
-        assertFalse(contains(visibleOrder, FLASH_Pipeline.IDX_ORIENTATION_SETUP));
         assertTrue(FLASH_Pipeline.analysisHelpTopicForTests(FLASH_Pipeline.IDX_LINE_DISTANCE) == null);
-        assertTrue(FLASH_Pipeline.analysisHelpTopicForTests(FLASH_Pipeline.IDX_ORIENTATION_SETUP) == null);
     }
 
     @Test(expected = UnsupportedOperationException.class)
@@ -341,7 +337,7 @@ public class AnalysisHelpCatalogTest {
     private static String[] analysisLabels() throws Exception {
         FLASH_Pipeline pipeline = new FLASH_Pipeline();
         int[] visibleOrder = FLASH_Pipeline.visibleAnalysisOrderForTests();
-        String[] labels = new String[FLASH_Pipeline.IDX_ORIENTATION_SETUP + 1];
+        String[] labels = new String[FLASH_Pipeline.IDX_SPECTRAL_DECONTAMINATION + 1];
         for (int i = 0; i < visibleOrder.length; i++) {
             labels[visibleOrder[i]] = pipeline.analysisLabelForTests(visibleOrder[i]);
         }
