@@ -1,5 +1,6 @@
 package flash.pipeline.analyses;
 
+import flash.pipeline.TestConfigFiles;
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinField;
 import flash.pipeline.bin.BinSetupChooser;
@@ -25,8 +26,6 @@ import java.awt.Rectangle;
 import java.io.File;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -116,7 +115,7 @@ public class DrawAndSaveROIsAnalysisTest {
     @Test
     public void channelNamesAndZSliceBinCompletesWithoutChooser() throws Exception {
         File dir = temp.newFolder("partial");
-        writeChannelData(dir, "DAPI GFAP", "", "", "", "", "", "", "", "zslice:full");
+        TestConfigFiles.writeChannelConfig(dir, TestConfigFiles.basicBinConfig("DAPI", "GFAP"));
         AtomicInteger chooserCalls = new AtomicInteger(0);
         installDispatcherChoice(BinSetupChooser.Choice.CANCELLED, chooserCalls);
 
@@ -404,17 +403,6 @@ public class DrawAndSaveROIsAnalysisTest {
         Method reset = BinSetupDispatcher.class.getDeclaredMethod("resetForTest");
         reset.setAccessible(true);
         reset.invoke(null);
-    }
-
-    private static void writeChannelData(File dir, String... lines) throws Exception {
-        File bin = new File(dir, ".bin");
-        assertTrue(bin.mkdirs());
-        StringBuilder content = new StringBuilder();
-        for (int i = 0; i < lines.length; i++) {
-            content.append(lines[i]).append("\n");
-        }
-        Files.write(new File(bin, "Channel_Data.txt").toPath(),
-                content.toString().getBytes(StandardCharsets.UTF_8));
     }
 
     private interface InvocationResult {

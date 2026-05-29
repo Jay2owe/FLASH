@@ -1,5 +1,7 @@
 package flash.pipeline.intelligence;
 
+import flash.pipeline.TestConfigFiles;
+import flash.pipeline.bin.BinConfig;
 import flash.pipeline.io.FlashProjectLayout;
 import org.junit.Rule;
 import org.junit.Test;
@@ -24,9 +26,7 @@ public class PostRunSummaryTest {
     public void writeIfPossible_persistsSnapshotAndReportsRerunDiff() throws Exception {
         File root = temp.newFolder("post-run-summary");
         File exportDir = FlashProjectLayout.forDirectory(root.getAbsolutePath()).tablesProjectSummaryWriteDir();
-        File binDir = new File(root, ".bin");
         assertTrue(exportDir.mkdirs());
-        assertTrue(binDir.mkdirs());
 
         writeBin(root, "default");
         writeObjectsMaster(root, 10);
@@ -58,9 +58,7 @@ public class PostRunSummaryTest {
     @Test
     public void writeIfPossible_persistsPerImageMetricsForOddImageOut() throws Exception {
         File root = temp.newFolder("post-run-image-metrics");
-        File binDir = new File(root, ".bin");
         File objectsDir = FlashProjectLayout.forDirectory(root.getAbsolutePath()).tablesObjectsWriteDir();
-        assertTrue(binDir.mkdirs());
         assertTrue(objectsDir.mkdirs());
 
         writeBin(root, "default");
@@ -93,11 +91,9 @@ public class PostRunSummaryTest {
     @Test
     public void writeIfPossible_readsIntensityUnfilteredMetrics() throws Exception {
         File root = temp.newFolder("post-run-intensity-metrics");
-        File binDir = new File(root, ".bin");
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(root.getAbsolutePath());
         File intensitiesDir = layout.tablesIntensityWriteDir();
         File aggregationDir = layout.tablesProjectSummaryWriteDir();
-        assertTrue(binDir.mkdirs());
         assertTrue(intensitiesDir.mkdirs());
         assertTrue(aggregationDir.mkdirs());
 
@@ -141,9 +137,7 @@ public class PostRunSummaryTest {
     @Test
     public void writeIfPossible_readsProjectSummaryMasters() throws Exception {
         File root = temp.newFolder("post-run-new-aggregation");
-        File binDir = new File(root, ".bin");
         File aggregationDir = FlashProjectLayout.forDirectory(root.getAbsolutePath()).tablesProjectSummaryWriteDir();
-        assertTrue(binDir.mkdirs());
         assertTrue(aggregationDir.mkdirs());
 
         writeBin(root, "default");
@@ -163,9 +157,7 @@ public class PostRunSummaryTest {
     @Test
     public void writeIfPossible_handlesIntensityOnlyAggregation() throws Exception {
         File root = temp.newFolder("post-run-intensity-only");
-        File binDir = new File(root, ".bin");
         File aggregationDir = FlashProjectLayout.forDirectory(root.getAbsolutePath()).tablesProjectSummaryWriteDir();
-        assertTrue(binDir.mkdirs());
         assertTrue(aggregationDir.mkdirs());
 
         writeBin(root, "default");
@@ -183,12 +175,10 @@ public class PostRunSummaryTest {
     }
 
     private void writeBin(File root, String threshold) throws Exception {
-        File channelData = new File(new File(root, ".bin"), "Channel_Data.txt");
-        String content = "DAPI\n"
-                + "Blue\n"
-                + threshold + "\n"
-                + "100-Infinity\n";
-        Files.write(channelData.toPath(), content.getBytes(StandardCharsets.UTF_8));
+        BinConfig cfg = TestConfigFiles.basicBinConfig("DAPI");
+        cfg.channelThresholds.clear();
+        cfg.channelThresholds.add(threshold);
+        TestConfigFiles.writeChannelConfig(root, cfg);
     }
 
     private void writeObjectsMaster(File root, int count) throws Exception {

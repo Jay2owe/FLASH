@@ -1,8 +1,8 @@
 package flash.pipeline.decontamination.wizard;
 
 import flash.pipeline.bin.BinConfig;
+import flash.pipeline.bin.ChannelConfigIO;
 import flash.pipeline.bin.ChannelIdentities;
-import flash.pipeline.bin.ChannelIdentitiesIO;
 import flash.pipeline.decontamination.CorrectionFeatureRegistry;
 import flash.pipeline.decontamination.CorrectionPipeline;
 import flash.pipeline.decontamination.SpectralDecontaminationConfig;
@@ -128,8 +128,9 @@ public class SpectralDecontaminationWizard {
         if (binConfig == null) {
             return detection;
         }
-        ChannelIdentities identities = ChannelIdentitiesIO.read(
-                projectRoot == null ? null : new File(projectRoot, ".bin"));
+        ChannelIdentities identities = ChannelConfigIO.readChannelIdentities(
+                projectRoot == null ? null
+                        : FlashProjectLayout.forDirectory(projectRoot.getAbsolutePath()).configurationWriteDir());
         for (int i = 0; i < binConfig.numChannels(); i++) {
             String markerId = markerId(identities, i);
             String name = channelName(binConfig, i);

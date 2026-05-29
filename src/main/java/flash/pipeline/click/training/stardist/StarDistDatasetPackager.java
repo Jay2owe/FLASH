@@ -685,56 +685,7 @@ public final class StarDistDatasetPackager {
             // Fall through to stage-plan configuration paths.
         }
 
-        String direct = channelNameFromCandidate(projectRoot.resolve(CONFIGURATION_DIR)
-                .resolve(".bin")
-                .resolve("Channel_Data.txt"), channelOneBased);
-        if (direct != null) {
-            return direct;
-        }
-        direct = channelNameFromCandidate(projectRoot.resolve(CONFIGURATION_DIR)
-                .resolve("Channel_Data.txt"), channelOneBased);
-        if (direct != null) {
-            return direct;
-        }
         return "C" + channelOneBased;
-    }
-
-    private static String channelNameFromCandidate(Path channelData,
-                                                   int channelOneBased) {
-        if (channelData == null || !Files.isRegularFile(channelData)) {
-            return null;
-        }
-        try {
-            List<String> lines = Files.readAllLines(channelData, StandardCharsets.UTF_8);
-            if (lines.isEmpty()) {
-                return null;
-            }
-            String[] names = splitTokens(lines.get(0));
-            if (names.length >= channelOneBased) {
-                String name = names[channelOneBased - 1];
-                if (name != null && !name.trim().isEmpty()) {
-                    return name.trim();
-                }
-            }
-        } catch (IOException ignored) {
-            return null;
-        }
-        return null;
-    }
-
-    private static String[] splitTokens(String line) {
-        if (line == null) {
-            return new String[0];
-        }
-        if (line.indexOf('\t') >= 0) {
-            String[] tokens = line.split("\t", -1);
-            for (int i = 0; i < tokens.length; i++) {
-                tokens[i] = tokens[i] == null ? "" : tokens[i].trim();
-            }
-            return tokens;
-        }
-        String trimmed = line.trim();
-        return trimmed.isEmpty() ? new String[0] : trimmed.split("\\s+");
     }
 
     private static String outputFileName(String imageName, int channelOneBased, int z) {

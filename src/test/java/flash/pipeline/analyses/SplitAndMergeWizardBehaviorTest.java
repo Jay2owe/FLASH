@@ -1,7 +1,8 @@
 package flash.pipeline.analyses;
 
+import flash.pipeline.TestConfigFiles;
+import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.ChannelIdentities;
-import flash.pipeline.bin.ChannelIdentitiesIO;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -30,8 +31,7 @@ public class SplitAndMergeWizardBehaviorTest {
     @Test
     public void readsAutofluorescenceHintFromProjectBinDirectory() throws Exception {
         File root = temp.newFolder("project");
-        File binDir = new File(root, ".bin");
-        ChannelIdentitiesIO.write(binDir, new ChannelIdentities(Arrays.asList(
+        TestConfigFiles.writeChannelConfig(root, twoChannelConfig(), new ChannelIdentities(Arrays.asList(
                 new ChannelIdentities.Entry(0, "nuclei_dapi", "round", false),
                 new ChannelIdentities.Entry(1, "my_autofluorescence_control", "", false))));
 
@@ -51,5 +51,26 @@ public class SplitAndMergeWizardBehaviorTest {
         assertFalse(new File("src/main/resources/split_merge_presets").exists());
         assertFalse(new File("src/main/java/flash/pipeline/analyses/wizard/SplitMergePreset.java").exists());
         assertFalse(new File("src/main/java/flash/pipeline/analyses/wizard/SplitMergePresetIO.java").exists());
+    }
+
+    private static BinConfig twoChannelConfig() {
+        BinConfig cfg = new BinConfig();
+        cfg.channelNames.add("DAPI");
+        cfg.channelNames.add("405");
+        cfg.channelColors.add("Blue");
+        cfg.channelColors.add("Cyan");
+        cfg.channelThresholds.add("default");
+        cfg.channelThresholds.add("default");
+        cfg.channelSizes.add("100-Infinity");
+        cfg.channelSizes.add("100-Infinity");
+        cfg.channelMinMax.add("None");
+        cfg.channelMinMax.add("None");
+        cfg.channelIntensityThresholds.add("default");
+        cfg.channelIntensityThresholds.add("default");
+        cfg.segmentationMethods.add("classical");
+        cfg.segmentationMethods.add("classical");
+        cfg.channelFilterPresets.add("Default");
+        cfg.channelFilterPresets.add("Default");
+        return cfg;
     }
 }

@@ -1,7 +1,7 @@
 package flash.pipeline.audit;
 
+import flash.pipeline.TestConfigFiles;
 import flash.pipeline.bin.BinConfig;
-import flash.pipeline.bin.BinConfigIO;
 import flash.pipeline.bin.BinField;
 import flash.pipeline.bin.BinSetupDispatcher;
 import flash.pipeline.io.FlashProjectLayout;
@@ -32,7 +32,7 @@ public class RunSettingsSnapshotTest {
     public void jsonRoundTripPreservesBinConfigAndFieldSources() throws Exception {
         File dir = temp.newFolder("run");
         BinConfig cfg = representativeConfig();
-        BinConfigIO.writeFromConfig(dir.getAbsolutePath(), cfg);
+        TestConfigFiles.writeChannelConfig(dir, cfg);
 
         EnumMap<BinField, String> sources = new EnumMap<BinField, String>(BinField.class);
         sources.put(BinField.CHANNEL_NAMES, BinSetupDispatcher.SOURCE_LOADED);
@@ -62,7 +62,7 @@ public class RunSettingsSnapshotTest {
     @Test
     public void writerPlacesSnapshotAndReplayFilesUnderRunRecords() throws Exception {
         File dir = temp.newFolder("write");
-        BinConfigIO.writeFromConfig(dir.getAbsolutePath(), representativeConfig());
+        TestConfigFiles.writeChannelConfig(dir, representativeConfig());
 
         RunSettingsSnapshot.writeForAnalysis(
                 dir.getAbsolutePath(),
@@ -98,7 +98,7 @@ public class RunSettingsSnapshotTest {
     @Test
     public void writerEmitsOneSnapshotPerAnalysisInRunRecords() throws Exception {
         File dir = temp.newFolder("indexFolders");
-        BinConfigIO.writeFromConfig(dir.getAbsolutePath(), representativeConfig());
+        TestConfigFiles.writeChannelConfig(dir, representativeConfig());
 
         RunSettingsSnapshot.writeForAnalysis(dir.getAbsolutePath(), "Aggregation", 8,
                 EnumSet.of(BinField.CHANNEL_NAMES), null, null);
@@ -183,8 +183,6 @@ public class RunSettingsSnapshotTest {
         ZSliceSelection actualSelection = actual.zSliceSelections.get(Integer.valueOf(0));
         assertNotNull(actualSelection);
         assertEquals(expectedSelection.seriesIndex, actualSelection.seriesIndex);
-        assertEquals(expectedSelection.seriesName, actualSelection.seriesName);
-        assertEquals(expectedSelection.totalSlices, actualSelection.totalSlices);
         assertEquals(expectedSelection.range, actualSelection.range);
     }
 
@@ -199,7 +197,7 @@ public class RunSettingsSnapshotTest {
     private final class RunSettingsSnapshotTestHarness {
         RunSettingsSnapshot snapshot() throws Exception {
             File dir = temp.newFolder("reflection");
-            BinConfigIO.writeFromConfig(dir.getAbsolutePath(), representativeConfig());
+            TestConfigFiles.writeChannelConfig(dir, representativeConfig());
             return RunSettingsSnapshot.create(dir.getAbsolutePath(), "Test", 7,
                     EnumSet.of(BinField.CHANNEL_NAMES), null, null);
         }

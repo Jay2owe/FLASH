@@ -1,5 +1,7 @@
 package flash.pipeline.click.training.cellpose;
 
+import flash.pipeline.TestConfigFiles;
+import flash.pipeline.bin.BinConfig;
 import flash.pipeline.click.ClickStore;
 import flash.pipeline.click.training.ImagePlusProvider;
 import ij.IJ;
@@ -14,10 +16,8 @@ import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Arrays;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
@@ -45,7 +45,7 @@ public class CellposeDatasetPackagerIntegrationTest {
     @Test
     public void tinySyntheticTwoImageDatasetLoadsMasks() throws Exception {
         Path root = temp.newFolder("project").toPath();
-        writeChannelData(root);
+        writeChannelConfig(root);
 
         ClickStore store = new ClickStore();
         store.add(click("ImageA", 2, 1, ClickStore.Verdict.POSITIVE));
@@ -104,22 +104,13 @@ public class CellposeDatasetPackagerIntegrationTest {
                 0.0, 0.0, verdict, System.currentTimeMillis());
     }
 
-    private static void writeChannelData(Path root) throws IOException {
-        Path bin = root.resolve(".bin");
-        Files.createDirectories(bin);
-        Files.write(bin.resolve("Channel_Data.txt"),
-                Arrays.asList(
-                        "DAPI\tIba1",
-                        "Blue\tGreen",
-                        "default\tdefault",
-                        "100-Infinity\t100-Infinity",
-                        "None\tNone",
-                        "default\tdefault",
-                        "classical\tcellpose:30:0.4:0.0:gpu=false:model=cellpose_cyto3",
-                        "default\tdefault",
-                        "zslice:full",
-                        "clicks:per_channel"),
-                StandardCharsets.UTF_8);
+    private static void writeChannelConfig(Path root) throws IOException {
+        BinConfig cfg = TestConfigFiles.basicBinConfig("DAPI", "Iba1");
+        cfg.segmentationMethods.clear();
+        cfg.addSegmentationMethodToken("classical");
+        cfg.addSegmentationMethodToken("cellpose:30:0.4:0.0:gpu=false:model=cellpose_cyto3");
+        cfg.clickConfigPresent = true;
+        TestConfigFiles.writeChannelConfig(root, cfg);
     }
 
     private static ImagePlus rawStack(int width, int height, int slices) {

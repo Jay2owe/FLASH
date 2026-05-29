@@ -3,8 +3,8 @@ package flash.pipeline.analyses;
 import flash.pipeline.FLASH_Pipeline;
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinConfigIO;
+import flash.pipeline.bin.ChannelConfigIO;
 import flash.pipeline.bin.ChannelIdentities;
-import flash.pipeline.bin.ChannelIdentitiesIO;
 import flash.pipeline.analyses.wizard.IntensityPreset;
 import flash.pipeline.analyses.wizard.IntensityPresetIO;
 import flash.pipeline.analyses.wizard.IntensitySpatialConfig;
@@ -244,8 +244,8 @@ public class IntensityAnalysisV2 implements Analysis {
             IJ.log("  - " + roiZipNames[i]);
         }
         List<String> roiSetNameList = Arrays.asList(roiZipNames);
-        File binDir = activeConfigurationDir(directory);
-        ChannelIdentities channelIdentities = ChannelIdentitiesIO.read(binDir);
+        File binDir = FlashProjectLayout.forDirectory(directory).configurationWriteDir();
+        ChannelIdentities channelIdentities = ChannelConfigIO.readChannelIdentities(binDir);
 
         // --- Dialogs with Back navigation ---
         boolean roiAnalysis = false;
@@ -2886,12 +2886,6 @@ public class IntensityAnalysisV2 implements Analysis {
     static File intensityOutputCsv(File saveRoot, String channelName,
                                    IntensitySpatialOutputMode mode) {
         return new IntensitySpatialOutputKey(channelName, mode, null).csvFile(saveRoot);
-    }
-
-    private static File activeConfigurationDir(String directory) {
-        FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
-        File existing = layout.existingConfigurationDir();
-        return existing == null ? layout.configurationWriteDir() : existing;
     }
 
     private static int likelyStackDepthForSpatialWizard(String directory, BinConfig cfg) {

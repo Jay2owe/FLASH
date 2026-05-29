@@ -1,7 +1,8 @@
 package flash.pipeline.segmentation.catalog;
 
-import flash.pipeline.bin.BinConfigIO;
-import flash.pipeline.io.FlashProjectLayout;
+import flash.pipeline.TestConfigFiles;
+import flash.pipeline.bin.BinConfig;
+import flash.pipeline.bin.ChannelConfigIO;
 import flash.pipeline.segmentation.SegmentationMethod;
 import flash.pipeline.segmentation.SegmentationTokenCodec;
 import flash.pipeline.segmentation.SegmentationTokenParser;
@@ -13,7 +14,6 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -31,11 +31,11 @@ public class ModelKeyRewriterTest {
     public void renamesReferencesAcrossTouchedBinsOnly() throws Exception {
         Path root = temp.newFolder("rename").toPath();
         createCatalogEntry(root, "old_model");
-        Path bin1 = writeBin(root.resolve("A/Configuration/.bin/Channel_Data.txt"),
-                "stardist:0.5:0.4:model=old_model\tclassical");
-        Path bin2 = writeBin(root.resolve("B/Configuration/.bin/Channel_Data.txt"),
+        Path bin1 = writeBin(root.resolve("A"),
+                "stardist:0.5:0.4:model=old_model", "classical");
+        Path bin2 = writeBin(root.resolve("B"),
                 "cellpose:30:0.4:0.0:model=old_model");
-        Path bin3 = writeBin(root.resolve("C/Configuration/.bin/Channel_Data.txt"),
+        Path bin3 = writeBin(root.resolve("C"),
                 "stardist:0.5:0.4:model=other_model");
 
         ModelKeyRewriter.RenameResult result =
@@ -44,10 +44,10 @@ public class ModelKeyRewriterTest {
         assertEquals(2, result.binsTouched);
         assertEquals(2, result.channelsTouched);
         assertTrue(result.filesRenamed);
-        assertLine7Contains(bin1, "model=new_model");
-        assertLine7Contains(bin2, "model=new_model");
-        assertLine7Contains(bin3, "model=other_model");
-        assertFalse(line7(bin1).contains("old_model"));
+        assertSegmentationContains(bin1, 0, "model=new_model");
+        assertSegmentationContains(bin2, 0, "model=new_model");
+        assertSegmentationContains(bin3, 0, "model=other_model");
+        assertFalse(segmentation(bin1, 0).contains("old_model"));
         assertFalse(ModelCatalogIO.read(root).get("old_model").isPresent());
         assertTrue(ModelCatalogIO.read(root).get("new_model").isPresent());
         assertTrue(Files.isRegularFile(ModelCatalogIO.catalogDirectory(root)
@@ -60,12 +60,12 @@ public class ModelKeyRewriterTest {
         createCatalogEntry(root, "rf_old");
         String base = SegmentationTokenCodec.percentEncodeToken(
                 "stardist:0.5:0.4:model=rf_old");
-        Path bin = writeBin(root.resolve("A/Configuration/.bin/Channel_Data.txt"),
+        Path bin = writeBin(root.resolve("A"),
                 "trained_rf:rf_old:base=" + base);
 
         ModelKeyRewriter.rename("rf_old", "rf_new", root);
 
-        SegmentationMethod method = SegmentationTokenParser.parse(line7(bin));
+        SegmentationMethod method = SegmentationTokenParser.parse(segmentation(bin, 0));
         assertEquals("rf_new", SegmentationMethod.trainedRfModelKey(method));
         assertEquals("rf_new", SegmentationMethod.starDistModelKey(
                 SegmentationMethod.trainedRfBase(method)));
@@ -89,9 +89,9 @@ public class ModelKeyRewriterTest {
     public void writeFailureRollsBackPreviouslyRewrittenBins() throws Exception {
         Path root = temp.newFolder("rollback").toPath();
         createCatalogEntry(root, "old_model");
-        Path bin1 = writeBin(root.resolve("A/Configuration/.bin/Channel_Data.txt"),
+        Path bin1 = writeBin(root.resolve("A"),
                 "stardist:0.5:0.4:model=old_model");
-        Path bin2 = writeBin(root.resolve("B/Configuration/.bin/Channel_Data.txt"),
+        Path bin2 = writeBin(root.resolve("B"),
                 "cellpose:30:0.4:0.0:model=old_model");
 
         ModelKeyRewriter rewriter = new ModelKeyRewriter(new ModelKeyRewriter.WriteHook() {
@@ -113,10 +113,10 @@ public class ModelKeyRewriterTest {
             assertTrue(expected.getMessage().contains("Injected"));
         }
 
-        assertLine7Contains(bin1, "old_model");
-        assertLine7Contains(bin2, "old_model");
-        assertFalse(line7(bin1).contains("new_model"));
-        assertFalse(line7(bin2).contains("new_model"));
+        assertSegmentationContains(bin1, 0, "old_model");
+        assertSegmentationContains(bin2, 0, "old_model");
+        assertFalse(segmentation(bin1, 0).contains("new_model"));
+        assertFalse(segmentation(bin2, 0).contains("new_model"));
         assertTrue(ModelCatalogIO.read(root).get("old_model").isPresent());
         assertFalse(ModelCatalogIO.read(root).get("new_model").isPresent());
     }
@@ -137,25 +137,26 @@ public class ModelKeyRewriterTest {
         ModelCatalogIO.writeProject(root, new ModelCatalog(root, updated));
     }
 
-    private static Path writeBin(Path path, String line7) throws Exception {
-        Files.createDirectories(path.getParent());
-        BinConfigIO.writeAtomic(path, Arrays.asList(
-                "C1",
-                "Red",
-                "default",
-                "100-Infinity",
-                "None",
-                "default",
-                line7));
-        return path;
+    private static Path writeBin(Path projectRoot, String... segmentationMethods) throws Exception {
+        String[] names = new String[segmentationMethods.length];
+        for (int i = 0; i < names.length; i++) {
+            names[i] = "C" + (i + 1);
+        }
+        BinConfig cfg = TestConfigFiles.basicBinConfig(names);
+        cfg.segmentationMethods.clear();
+        for (String token : segmentationMethods) {
+            cfg.addSegmentationMethodToken(token);
+        }
+        TestConfigFiles.writeChannelConfig(projectRoot, cfg);
+        return TestConfigFiles.settingsDir(projectRoot).toPath().resolve(ChannelConfigIO.FILE_NAME);
     }
 
-    private static String line7(Path path) throws Exception {
-        return Files.readAllLines(path, StandardCharsets.UTF_8).get(6);
+    private static String segmentation(Path path, int index) {
+        return ChannelConfigIO.read(path.getParent().toFile()).channels.get(index).segmentationMethod;
     }
 
-    private static void assertLine7Contains(Path path, String text) throws Exception {
-        assertTrue(line7(path).contains(text));
+    private static void assertSegmentationContains(Path path, int index, String text) {
+        assertTrue(segmentation(path, index).contains(text));
     }
 
     private static Map<String, Object> defaults() {

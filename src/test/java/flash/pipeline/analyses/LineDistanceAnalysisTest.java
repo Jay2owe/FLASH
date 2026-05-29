@@ -1,5 +1,7 @@
 package flash.pipeline.analyses;
 
+import flash.pipeline.TestConfigFiles;
+import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinField;
 import flash.pipeline.bin.BinSetupChooser;
 import flash.pipeline.bin.BinSetupDispatcher;
@@ -77,7 +79,9 @@ public class LineDistanceAnalysisTest {
     @Test
     public void zSliceOnlyBinCompletesWithoutChooser() throws Exception {
         File dir = temp.newFolder("zsliceOnly");
-        writeChannelData(dir, "", "", "", "", "", "", "", "", "zslice:full");
+        BinConfig cfg = new BinConfig();
+        cfg.zSliceConfigPresent = true;
+        TestConfigFiles.writeChannelConfig(dir, cfg);
         AtomicInteger chooserCalls = new AtomicInteger(0);
         installDispatcherChoice(BinSetupChooser.Choice.CANCELLED, chooserCalls);
 
@@ -205,17 +209,6 @@ public class LineDistanceAnalysisTest {
         Method reset = BinSetupDispatcher.class.getDeclaredMethod("resetForTest");
         reset.setAccessible(true);
         reset.invoke(null);
-    }
-
-    private static void writeChannelData(File dir, String... lines) throws Exception {
-        File bin = new File(dir, ".bin");
-        assertTrue(bin.mkdirs());
-        StringBuilder content = new StringBuilder();
-        for (int i = 0; i < lines.length; i++) {
-            content.append(lines[i]).append("\n");
-        }
-        Files.write(new File(bin, "Channel_Data.txt").toPath(),
-                content.toString().getBytes(StandardCharsets.UTF_8));
     }
 
     private static void writeCsv(File file, String content) throws Exception {

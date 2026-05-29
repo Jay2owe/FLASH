@@ -1,6 +1,7 @@
 package flash.pipeline.click;
 
-import flash.pipeline.bin.BinConfigIO;
+import flash.pipeline.bin.ChannelConfig;
+import flash.pipeline.bin.ChannelConfigIO;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -8,8 +9,6 @@ import org.junit.rules.TemporaryFolder;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.util.Arrays;
-import java.util.List;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -21,9 +20,9 @@ public class ClicksConfigIOTest {
     public TemporaryFolder tempFolder = new TemporaryFolder();
 
     @Test
-    public void roundTripWritesJsonAndMarksChannelDataPresence() throws Exception {
+    public void roundTripWritesJsonAndMarksChannelConfigPresence() throws Exception {
         File bin = tempFolder.newFolder("bin");
-        writeChannelData(bin);
+        ChannelConfigIO.write(bin, oneChannelConfig());
         ClickStore store = new ClickStore();
         store.add(new ClickStore.Click(
                 "WT-Slide12_LH_CA1.lif - Series 3",
@@ -48,9 +47,7 @@ public class ClicksConfigIOTest {
         assertEquals(421.5, click.x, 0.0001);
         assertEquals(ClickStore.Verdict.NEGATIVE, click.verdict);
 
-        List<String> lines = Files.readAllLines(new File(bin, "Channel_Data.txt").toPath(),
-                StandardCharsets.UTF_8);
-        assertEquals(BinConfigIO.clicksModeLine(true), lines.get(9));
+        assertTrue(ChannelConfigIO.read(bin).clickCaptureUsed);
     }
 
     @Test
@@ -74,18 +71,28 @@ public class ClicksConfigIOTest {
         assertEquals(0, store.all().size());
     }
 
-    private static void writeChannelData(File bin) throws Exception {
-        Files.write(new File(bin, "Channel_Data.txt").toPath(),
-                Arrays.asList(
-                        "DAPI\tIBA1",
-                        "Blue\tGreen",
-                        "default\tdefault",
-                        "100-Infinity\t100-Infinity",
-                        "None\tNone",
-                        "default\tdefault",
-                        "classical\tstardist:0.5:0.4",
-                        "default\tdefault",
-                        "zslice:full"),
-                StandardCharsets.UTF_8);
+    private static ChannelConfig oneChannelConfig() {
+        ChannelConfig cfg = new ChannelConfig();
+        ChannelConfig.Channel channel = new ChannelConfig.Channel();
+        channel.index = 0;
+        channel.name = "DAPI";
+        channel.color = "Blue";
+        channel.threshold = "default";
+        channel.size = "100-Infinity";
+        channel.minmax = "None";
+        channel.intensityThreshold = "default";
+        channel.segmentationMethod = "classical";
+        channel.filterPreset = "Default";
+        channel.status.put(ChannelConfig.P_NAME, ChannelConfig.PropertyStatus.COMMITTED);
+        channel.status.put(ChannelConfig.P_COLOR, ChannelConfig.PropertyStatus.COMMITTED);
+        channel.status.put(ChannelConfig.P_MARKER, ChannelConfig.PropertyStatus.COMMITTED);
+        channel.status.put(ChannelConfig.P_THRESHOLD, ChannelConfig.PropertyStatus.COMMITTED);
+        channel.status.put(ChannelConfig.P_SIZE, ChannelConfig.PropertyStatus.COMMITTED);
+        channel.status.put(ChannelConfig.P_MINMAX, ChannelConfig.PropertyStatus.COMMITTED);
+        channel.status.put(ChannelConfig.P_INTENSITY, ChannelConfig.PropertyStatus.COMMITTED);
+        channel.status.put(ChannelConfig.P_SEGMENTATION, ChannelConfig.PropertyStatus.COMMITTED);
+        channel.status.put(ChannelConfig.P_FILTER, ChannelConfig.PropertyStatus.COMMITTED);
+        cfg.channels.add(channel);
+        return cfg;
     }
 }

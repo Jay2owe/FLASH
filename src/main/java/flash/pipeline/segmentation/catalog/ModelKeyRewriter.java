@@ -1,6 +1,8 @@
 package flash.pipeline.segmentation.catalog;
 
-import flash.pipeline.bin.BinConfigIO;
+import flash.pipeline.bin.ChannelConfig;
+import flash.pipeline.bin.ChannelConfigCodec;
+import flash.pipeline.bin.ChannelConfigIO;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.segmentation.SegmentationMethod;
 import flash.pipeline.segmentation.SegmentationTokenParser;
@@ -68,7 +70,7 @@ public final class ModelKeyRewriter {
                 if (writeHook != null) {
                     writeHook.beforeWrite(plan.path);
                 }
-                BinConfigIO.writeAtomic(plan.path, plan.updatedLines);
+                ChannelConfigIO.write(plan.path.getParent().toFile(), plan.updatedConfig);
                 applied.add(plan);
             }
             filesRenamed = catalog.rename(oldKey, newKey);
@@ -95,33 +97,33 @@ public final class ModelKeyRewriter {
     private static List<RewritePlan> planBinRewrites(Path projectRoot,
                                                      String oldKey,
                                                      String newKey) throws IOException {
-        List<Path> channelDataFiles = findChannelDataFiles(projectRoot);
+        List<Path> channelConfigFiles = findChannelConfigFiles(projectRoot);
         List<RewritePlan> plans = new ArrayList<RewritePlan>();
-        for (Path file : channelDataFiles) {
-            List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
-            if (lines.size() < 7) {
+        for (Path file : channelConfigFiles) {
+            String originalJson = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+            ChannelConfig cfg = ChannelConfigCodec.decode(originalJson);
+            if (cfg.channels == null || cfg.channels.isEmpty()) {
                 continue;
             }
-            String[] tokens = splitTokens(lines.get(6));
-            List<String> rewritten = new ArrayList<String>();
             int changed = 0;
-            for (String token : tokens) {
-                TokenRewrite rewrite = rewriteToken(token, oldKey, newKey);
-                rewritten.add(rewrite.token);
+            for (ChannelConfig.Channel channel : cfg.channels) {
+                if (channel == null) {
+                    continue;
+                }
+                TokenRewrite rewrite = rewriteToken(channel.segmentationMethod, oldKey, newKey);
                 if (rewrite.changed) {
+                    channel.segmentationMethod = rewrite.token;
                     changed++;
                 }
             }
             if (changed > 0) {
-                List<String> updatedLines = new ArrayList<String>(lines);
-                updatedLines.set(6, joinTokens(rewritten));
-                plans.add(new RewritePlan(file, lines, updatedLines, changed));
+                plans.add(new RewritePlan(file, originalJson, cfg, changed));
             }
         }
         return plans;
     }
 
-    private static List<Path> findChannelDataFiles(Path projectRoot) throws IOException {
+    private static List<Path> findChannelConfigFiles(Path projectRoot) throws IOException {
         List<Path> out = new ArrayList<Path>();
         if (!Files.exists(projectRoot)) {
             return out;
@@ -129,8 +131,8 @@ public final class ModelKeyRewriter {
         try (Stream<Path> stream = Files.walk(projectRoot)) {
             stream.forEach(path -> {
                 if (Files.isRegularFile(path)
-                        && FlashProjectLayout.CHANNEL_DATA_FILENAME.equals(path.getFileName().toString())
-                        && looksLikeBinPath(path)) {
+                        && ChannelConfigIO.FILE_NAME.equals(path.getFileName().toString())
+                        && looksLikeConfigPath(path)) {
                     out.add(path.toAbsolutePath().normalize());
                 }
             });
@@ -139,11 +141,11 @@ public final class ModelKeyRewriter {
         return out;
     }
 
-    private static boolean looksLikeBinPath(Path path) {
+    private static boolean looksLikeConfigPath(Path path) {
         String normalized = path.toString().replace('\\', '/');
-        return normalized.contains("/Configuration/")
-                || normalized.contains("/" + FlashProjectLayout.LEGACY_BIN_DIR + "/")
-                || normalized.contains("/" + FlashProjectLayout.LEGACY_CONFIGURATION_DIR + "/");
+        return normalized.contains("/" + FlashProjectLayout.FLASH_DIR
+                + "/" + FlashProjectLayout.CONFIGURATION_DIR
+                + "/" + FlashProjectLayout.SETTINGS_DIR + "/");
     }
 
     private static TokenRewrite rewriteToken(String token, String oldKey, String newKey) {
@@ -252,7 +254,7 @@ public final class ModelKeyRewriter {
         for (int i = applied.size() - 1; i >= 0; i--) {
             RewritePlan plan = applied.get(i);
             try {
-                BinConfigIO.writeAtomic(plan.path, plan.originalLines);
+                Files.write(plan.path, plan.originalJson.getBytes(StandardCharsets.UTF_8));
             } catch (IOException ignored) {
             }
         }
@@ -264,32 +266,6 @@ public final class ModelKeyRewriter {
             count += plan.changedChannels;
         }
         return count;
-    }
-
-    private static String[] splitTokens(String line) {
-        if (line == null) {
-            return new String[0];
-        }
-        if (line.indexOf('\t') >= 0) {
-            String[] tabs = line.split("\t", -1);
-            for (int i = 0; i < tabs.length; i++) {
-                tabs[i] = tabs[i] == null ? "" : tabs[i].trim();
-            }
-            return tabs;
-        }
-        String trimmed = line.trim();
-        return trimmed.isEmpty() ? new String[0] : trimmed.split("\\s+");
-    }
-
-    private static String joinTokens(List<String> tokens) {
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < tokens.size(); i++) {
-            if (i > 0) {
-                sb.append('\t');
-            }
-            sb.append(tokens.get(i) == null ? "" : tokens.get(i));
-        }
-        return sb.toString();
     }
 
     private static void validateKey(String label, String key) throws IOException {
@@ -321,17 +297,17 @@ public final class ModelKeyRewriter {
 
     private static final class RewritePlan {
         final Path path;
-        final List<String> originalLines;
-        final List<String> updatedLines;
+        final String originalJson;
+        final ChannelConfig updatedConfig;
         final int changedChannels;
 
         RewritePlan(Path path,
-                    List<String> originalLines,
-                    List<String> updatedLines,
+                    String originalJson,
+                    ChannelConfig updatedConfig,
                     int changedChannels) {
             this.path = path;
-            this.originalLines = originalLines;
-            this.updatedLines = updatedLines;
+            this.originalJson = originalJson;
+            this.updatedConfig = updatedConfig;
             this.changedChannels = changedChannels;
         }
     }

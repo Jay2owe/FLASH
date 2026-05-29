@@ -3,11 +3,13 @@ package flash.pipeline.bin;
 import flash.pipeline.analyses.CreateBinFileAnalysis;
 import flash.pipeline.cli.CLIArgumentParser;
 import flash.pipeline.cli.CLIConfig;
+import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.zslice.ZSliceMode;
 import ij.IJ;
 import ij.Macro;
 
 import java.awt.GraphicsEnvironment;
+import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -186,10 +188,12 @@ public final class BinSetupDispatcher {
             applyCliValue(analysisDisplayName, cfg, field, resolved.getBinFieldValue(field));
         }
         try {
-            BinConfigIO.writeFromConfig(directory, cfg);
+            File settingsDir = FlashProjectLayout.forDirectory(directory).configurationWriteDir();
+            ChannelConfigIO.write(settingsDir, ChannelConfigIO.fromBinConfig(cfg));
+            BinConfigIO.writeFilterMacrosFromConfig(settingsDir, cfg);
         } catch (IOException e) {
             throw new IllegalStateException("Cannot run " + cleanAnalysisName(analysisDisplayName)
-                    + ": failed to write Configuration folder/Channel_Data.txt: " + e.getMessage(), e);
+                    + ": failed to write channel_config.json: " + e.getMessage(), e);
         }
     }
 

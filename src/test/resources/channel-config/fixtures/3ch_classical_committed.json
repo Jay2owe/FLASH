@@ -1,5 +1,5 @@
 {
-  "_comment": "3-channel all-committed classical configuration paired with a derived Channel_Data.txt golden file.",
+  "_comment": "3-channel all-committed classical configuration.",
   "schemaVersion": 1,
   "writerId": "FLASH stage 08 fixture",
   "writtenAtMillis": 1700000000000,

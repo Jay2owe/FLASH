@@ -1,5 +1,7 @@
 package flash.pipeline.click.training.cellpose;
 
+import flash.pipeline.TestConfigFiles;
+import flash.pipeline.bin.BinConfig;
 import flash.pipeline.click.ClickStore;
 import flash.pipeline.click.ClicksConfigIO;
 import flash.pipeline.click.training.ImagePlusProvider;
@@ -79,7 +81,7 @@ public class CellposeDatasetPackagerTest {
     @Test
     public void metadataJsonAndTrainCommandWritten() throws Exception {
         Path root = projectRoot();
-        writeChannelData(root);
+        writeChannelConfig(root);
         Path clicksJson = modernClicksJson(root);
         writeClicksJson(clicksJson);
         ClickStore store = new ClickStore();
@@ -279,24 +281,13 @@ public class CellposeDatasetPackagerTest {
         return temp.newFolder("project").toPath();
     }
 
-    private static void writeChannelData(Path root) throws IOException {
-        Path bin = FlashProjectLayout.forDirectory(root.toString())
-                .configurationWriteDir()
-                .toPath();
-        Files.createDirectories(bin);
-        Files.write(bin.resolve("Channel_Data.txt"),
-                Arrays.asList(
-                        "DAPI\tIba1",
-                        "Blue\tGreen",
-                        "default\tdefault",
-                        "100-Infinity\t100-Infinity",
-                        "None\tNone",
-                        "default\tdefault",
-                        "classical\tcellpose:30:0.4:0.0:gpu=false:model=cellpose_cyto3",
-                        "default\tdefault",
-                        "zslice:full",
-                "clicks:per_channel"),
-                StandardCharsets.UTF_8);
+    private static void writeChannelConfig(Path root) throws IOException {
+        BinConfig cfg = TestConfigFiles.basicBinConfig("DAPI", "Iba1");
+        cfg.segmentationMethods.clear();
+        cfg.addSegmentationMethodToken("classical");
+        cfg.addSegmentationMethodToken("cellpose:30:0.4:0.0:gpu=false:model=cellpose_cyto3");
+        cfg.clickConfigPresent = true;
+        TestConfigFiles.writeChannelConfig(root, cfg);
     }
 
     private static Path modernClicksJson(Path root) {

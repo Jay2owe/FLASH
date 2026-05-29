@@ -2,13 +2,7 @@ package flash.pipeline.bin;
 
 import flash.pipeline.image.NamedFilterLoader;
 import flash.pipeline.io.FlashProjectLayout;
-import flash.pipeline.segmentation.SegmentationMethod;
 import flash.pipeline.segmentation.SegmentationTokenCodec;
-import flash.pipeline.segmentation.SegmentationTokenParser;
-import flash.pipeline.zslice.ZSliceConfig;
-import flash.pipeline.zslice.ZSliceConfigIO;
-import flash.pipeline.zslice.ZSliceMode;
-import ij.IJ;
 
 import java.io.File;
 import java.io.IOException;
@@ -18,265 +12,34 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Base64;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
 public class BinConfigIO {
-    private static final String CUSTOM_FILTER_PRESET_DIR = FlashProjectLayout.CUSTOM_FILTER_PRESET_DIR;
     private static final String CUSTOM_FILTER_TOKEN_PREFIX = "custom_filter:";
-    private static final String CLICKS_FILE_NAME = "Clicks.json";
-    private static final String CLICKS_PER_CHANNEL_TOKEN = "clicks:per_channel";
-    private static final String CLICKS_NONE_TOKEN = "clicks:none";
-    private static final String TOKEN_DELIMITER = "\t";
-    /** UTF-8 BOM as a Java char (U+FEFF). */
-    static final char UTF8_BOM = '﻿';
 
-    /**
-     * Reads the active Set Up Configuration file:
-     *   Directory/FLASH/Config/.settings/Channel_Data.txt
-     * falling back to legacy configuration locations for older projects.
-     *
-     * Expected lines:
-     * 1) name_info              (space-separated)
-     * 2) color_info             (space-separated)
-     * 3) object_threshold_info  (space-separated)
-     * 4) size_info              (space-separated)
-     * 5) minmax_info            (space-separated; optional)
-     * 6) intensity_threshold    (space-separated; optional, defaults to "default")
-     * 7) segmentation_methods   (space-separated; optional, defaults to "classical")
-     * 8) filter_presets         (space-separated; optional, inferred from C*_Filters.ijm for legacy bins)
-     * 9) z-slice mode           (optional; e.g. zslice:full, zslice:per_image)
-     * 10) click capture         (optional; e.g. clicks:none, clicks:per_channel)
-     */
-    public static BinConfig readFromDirectory(String Directory) throws IOException {
-        FlashProjectLayout layout = FlashProjectLayout.forDirectory(Directory);
+    public static BinConfig readFromDirectory(String directory) throws IOException {
+        FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
         File settingsDir = layout.configurationWriteDir();
-        if (ChannelConfigIO.exists(settingsDir)) {
-            ChannelConfig channelConfig = ChannelConfigIO.read(settingsDir);
-            if (ChannelConfigIO.allChannelsCommitted(channelConfig)) {
-                return ChannelConfigIO.toBinConfig(channelConfig, settingsDir);
-            }
+        ChannelConfig channelConfig = ChannelConfigIO.read(settingsDir);
+        if (channelConfig == null) {
+            throw new IOException("Missing " + new File(settingsDir, ChannelConfigIO.FILE_NAME).getAbsolutePath()
+                    + ". Run Set Up Configuration first.");
         }
-        File channelData = layout.channelDataReadFile();
-        File binFolder = channelData.getParentFile();
-        if (!channelData.exists()) {
-            throw new IOException("Missing " + channelData.getAbsolutePath() + ". Run Set Up Configuration first.");
+        if (!ChannelConfigIO.allChannelsCommitted(channelConfig)) {
+            throw new IOException("Incomplete " + new File(settingsDir, ChannelConfigIO.FILE_NAME).getAbsolutePath()
+                    + ". Finish Set Up Configuration first.");
         }
-
-        List<String> lines = Files.readAllLines(channelData.toPath(), StandardCharsets.UTF_8);
-        stripLeadingBom(lines);
-        if (lines.size() < 4) {
-            throw new IOException("Channel_Data.txt has too few lines: " + lines.size());
-        }
-        String[] names = splitTokens(lines.get(0));
-        String[] colors = (lines.size() > 1) ? splitTokens(lines.get(1)) : new String[0];
-        String[] thresholds = (lines.size() > 2) ? splitTokens(lines.get(2)) : new String[0];
-        String[] sizes = (lines.size() > 3) ? splitTokens(lines.get(3)) : new String[0];
-        String[] minmax = (lines.size() > 4) ? splitTokens(lines.get(4)) : new String[0];
-        String[] intensityThresholds = (lines.size() > 5) ? splitTokens(lines.get(5)) : new String[0];
-        String[] segmentationMethods = (lines.size() > 6) ? splitTokens(lines.get(6)) : new String[0];
-        String[] storedFilterPresets = (lines.size() > 7) ? splitTokens(lines.get(7)) : new String[0];
-        ZSliceMode zSliceMode = (lines.size() > 8) ? ZSliceConfigIO.parseModeLine(lines.get(8)) : ZSliceMode.FULL;
-        boolean clickConfigPresent = (lines.size() > 9 && parseClickPresenceLine(lines.get(9)))
-                || clicksFileExists(binFolder);
-        // Skip up-front inference when every channel has a stored preset token; resolveFilterPresetForChannel
-        // will lazy-call inferFilterPreset only for channels whose stored token resolves to "Custom".
-        String[] inferredFilterPresets = (storedFilterPresets.length >= names.length)
-                ? new String[names.length]
-                : inferFilterPresets(binFolder, names.length);
-
-        BinConfig cfg = new BinConfig();
-
-        for (int i = 0; i < names.length; i++) {
-            cfg.channelNames.add(names[i]);
-            cfg.channelColors.add(i < colors.length ? colors[i] : "Grays");
-            cfg.channelThresholds.add(i < thresholds.length ? thresholds[i] : "default");
-            cfg.channelSizes.add(i < sizes.length ? sizes[i] : "100-Infinity");
-            cfg.channelMinMax.add(i < minmax.length ? minmax[i] : "None");
-            cfg.channelIntensityThresholds.add(i < intensityThresholds.length ? intensityThresholds[i] : "default");
-            String preset = resolveFilterPresetForChannel(binFolder, i, storedFilterPresets, inferredFilterPresets);
-            cfg.channelFilterPresets.add(preset);
-        }
-
-        // Line 7: segmentation methods (optional, defaults to "classical")
-        for (String m : segmentationMethods) {
-            cfg.addSegmentationMethodToken(m);
-        }
-        // Pad to match channel count with defaults
-        while (cfg.segmentationMethods.size() < cfg.numChannels()) {
-            cfg.addSegmentationMethodToken("classical");
-        }
-
-        cfg.zSliceMode = zSliceMode;
-        cfg.zSliceConfigPresent = lines.size() > 8;
-        cfg.clickConfigPresent = clickConfigPresent;
-        try {
-            cfg.zSliceSelections.putAll(ZSliceConfigIO.readSelections(binFolder));
-            if (!cfg.zSliceSelections.isEmpty()) {
-                cfg.zSliceConfigPresent = true;
-            }
-            if (cfg.zSliceMode == ZSliceMode.FULL && !cfg.zSliceSelections.isEmpty()) {
-                cfg.zSliceMode = ZSliceMode.PER_IMAGE;
-            }
-        } catch (IOException e) {
-            IJ.log("Warning: could not read z-slice selections from " + binFolder.getAbsolutePath()
-                    + ": " + e.getMessage() + ". Falling back to full-stack analysis.");
-            cfg.zSliceMode = ZSliceMode.FULL;
-            cfg.zSliceConfigPresent = false;
-            cfg.zSliceSelections.clear();
-        }
-
-        IJ.log("Loaded BinConfig: " + cfg.numChannels() + " channels from " + channelData.getAbsolutePath());
-
-        return cfg;
+        return ChannelConfigIO.toBinConfig(channelConfig, settingsDir);
     }
 
-    /**
-     * Reads whatever configuration is present without requiring a complete
-     * Channel_Data.txt. Missing parameters remain empty so callers can ask what
-     * still needs to be collected.
-     */
     public static BinConfig readPartialFromDirectory(String directory) {
-        BinConfig cfg = new BinConfig();
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
         File settingsDir = layout.configurationWriteDir();
-        if (ChannelConfigIO.exists(settingsDir)) {
-            ChannelConfig channelConfig = ChannelConfigIO.read(settingsDir);
-            if (channelConfig != null) {
-                return ChannelConfigIO.toBinConfig(channelConfig, settingsDir);
-            }
-        }
-        File channelData = layout.channelDataReadFile();
-        File binFolder = channelData.getParentFile();
-        if (!channelData.exists()) {
-            return cfg;
-        }
-
-        try {
-            List<String> lines = Files.readAllLines(channelData.toPath(), StandardCharsets.UTF_8);
-            stripLeadingBom(lines);
-            String[] names = (lines.size() > 0) ? splitTokens(lines.get(0)) : new String[0];
-            String[] colors = (lines.size() > 1) ? splitTokens(lines.get(1)) : new String[0];
-            String[] thresholds = (lines.size() > 2) ? splitTokens(lines.get(2)) : new String[0];
-            String[] sizes = (lines.size() > 3) ? splitTokens(lines.get(3)) : new String[0];
-            String[] minmax = (lines.size() > 4) ? splitTokens(lines.get(4)) : new String[0];
-            String[] intensityThresholds = (lines.size() > 5) ? splitTokens(lines.get(5)) : new String[0];
-            boolean hasSegmentationMethodLine = lines.size() > 6;
-            String[] segmentationMethods = hasSegmentationMethodLine ? splitTokens(lines.get(6)) : new String[0];
-            boolean hasFilterPresetLine = lines.size() > 7;
-            String[] storedFilterPresets = hasFilterPresetLine ? splitTokens(lines.get(7)) : new String[0];
-            boolean clickConfigPresent = (lines.size() > 9 && parseClickPresenceLine(lines.get(9)))
-                    || clicksFileExists(binFolder);
-            // Skip up-front inference only when every channel already has a stored preset token; in that
-            // case resolveFilterPresetForChannel lazy-calls inferFilterPreset for the channels that need it.
-            String[] inferredFilterPresets = (hasFilterPresetLine && storedFilterPresets.length >= names.length)
-                    ? new String[names.length]
-                    : inferFilterPresets(binFolder, names.length);
-
-            addTokens(cfg.channelNames, names);
-            addTokens(cfg.channelColors, colors);
-            addTokens(cfg.channelThresholds, thresholds);
-            addTokens(cfg.channelSizes, sizes);
-            addTokens(cfg.channelMinMax, minmax);
-            addTokens(cfg.channelIntensityThresholds, intensityThresholds);
-            for (int i = 0; i < segmentationMethods.length; i++) {
-                cfg.addSegmentationMethodToken(segmentationMethods[i]);
-            }
-            while (!hasSegmentationMethodLine && cfg.segmentationMethods.size() < cfg.numChannels()) {
-                cfg.addSegmentationMethodToken("classical");
-            }
-            if (hasFilterPresetLine) {
-                for (int i = 0; i < storedFilterPresets.length; i++) {
-                    cfg.channelFilterPresets.add(resolveFilterPresetForChannel(
-                            binFolder, i, storedFilterPresets, inferredFilterPresets));
-                }
-            } else {
-                for (int i = 0; i < inferredFilterPresets.length; i++) {
-                    cfg.channelFilterPresets.add(inferredFilterPresets[i]);
-                }
-            }
-
-            if (lines.size() > 8) {
-                cfg.zSliceMode = ZSliceConfigIO.parseModeLine(lines.get(8));
-                cfg.zSliceConfigPresent = true;
-            }
-            cfg.clickConfigPresent = clickConfigPresent;
-            try {
-                cfg.zSliceSelections.putAll(ZSliceConfigIO.readSelections(binFolder));
-                if (!cfg.zSliceSelections.isEmpty()) {
-                    if (cfg.zSliceMode == ZSliceMode.FULL) {
-                        cfg.zSliceMode = ZSliceMode.PER_IMAGE;
-                    }
-                    cfg.zSliceConfigPresent = true;
-                }
-            } catch (IOException e) {
-                IJ.log("Warning: could not read z-slice selections from " + binFolder.getAbsolutePath()
-                        + ": " + e.getMessage() + ". Falling back to full-stack analysis.");
-                cfg.zSliceMode = ZSliceMode.FULL;
-                cfg.zSliceConfigPresent = false;
-                cfg.zSliceSelections.clear();
-            }
-        } catch (IOException e) {
-            IJ.log("[FLASH] Could not read partial bin: " + e.getMessage());
-        }
-        return cfg;
+        ChannelConfig channelConfig = ChannelConfigIO.read(settingsDir);
+        return channelConfig == null ? new BinConfig() : ChannelConfigIO.toPartialBinConfig(channelConfig, settingsDir);
     }
 
-    /**
-     * Writes the standard Set Up Configuration Channel_Data.txt format from a BinConfig.
-     * Empty lists are preserved as blank lines so partial configurations can
-     * keep later-stage parameters genuinely missing for the soft reader.
-     */
-    public static void writeFromConfig(String directory, BinConfig cfg) throws IOException {
-        if (directory == null || directory.trim().isEmpty()) {
-            throw new IOException("Cannot write configuration without a directory.");
-        }
-        BinConfig safe = cfg == null ? new BinConfig() : cfg;
-        FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
-        File binFolder = layout.configurationWriteDir();
-        if (!binFolder.isDirectory() && !binFolder.mkdirs() && !binFolder.isDirectory()) {
-            throw new IOException("Failed to create " + binFolder.getAbsolutePath());
-        }
-
-        List<String> lines = toLines(safe, safe.clickConfigPresent || clicksFileExists(binFolder));
-
-        writeAtomic(layout.channelDataWriteFile().toPath(), lines);
-        ZSliceConfigIO.writeSelections(binFolder, new ZSliceConfig(safe.zSliceMode, safe.zSliceSelections));
-        writeFilterMacrosFromConfig(binFolder, safe);
-    }
-
-    public static List<String> toLines(BinConfig cfg) {
-        BinConfig safe = cfg == null ? new BinConfig() : cfg;
-        return toLines(safe, safe.clickConfigPresent);
-    }
-
-    private static List<String> toLines(BinConfig safe, boolean clicksPresent) {
-        List<String> lines = new ArrayList<String>(10);
-        lines.add(joinTokens(safe.channelNames));
-        lines.add(joinTokens(safe.channelColors));
-        lines.add(joinTokens(safe.channelThresholds));
-        lines.add(joinTokens(safe.channelSizes));
-        lines.add(joinTokens(safe.channelMinMax));
-        lines.add(joinTokens(safe.channelIntensityThresholds));
-        lines.add(joinTokens(segmentationTokensForWrite(safe)));
-
-        List<String> filterPresetTokens = new ArrayList<String>();
-        for (int i = 0; i < safe.channelFilterPresets.size(); i++) {
-            filterPresetTokens.add(encodeFilterPresetToken(safe.channelFilterPresets.get(i)));
-        }
-        lines.add(joinTokens(filterPresetTokens));
-        lines.add(ZSliceConfigIO.modeLine(safe.zSliceMode));
-        lines.add(clicksModeLine(clicksPresent));
-        return lines;
-    }
-
-    /**
-     * Writes per-channel filter macros matching the filter preset list in a
-     * {@link BinConfig}. Direct-entry and headless CLI setup both route through
-     * {@link #writeFromConfig}, so this keeps their FILTER_PRESETS side effects
-     * equivalent to the preview wizard.
-     */
     public static void writeFilterMacrosFromConfig(File binFolder, BinConfig cfg) throws IOException {
         if (binFolder == null || cfg == null || cfg.channelFilterPresets.isEmpty()) return;
         if (!binFolder.isDirectory() && !binFolder.mkdirs() && !binFolder.isDirectory()) {
@@ -305,130 +68,24 @@ public class BinConfigIO {
         }
     }
 
-    /**
-     * Updates line 5 (minmax_info) of Channel_Data.txt with new per-channel display range values.
-     * Preserves all other lines.
-     */
     public static void updateMinMax(String directory, String[] minMaxPerCh) throws IOException {
+        if (minMaxPerCh == null) return;
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
-        File channelData = layout.channelDataReadFile();
-        if (!channelData.exists()) return;
+        File settingsDir = layout.configurationWriteDir();
+        ChannelConfig cfg = ChannelConfigIO.read(settingsDir);
+        if (cfg == null || cfg.channels == null) return;
 
-        List<String> lines = Files.readAllLines(channelData.toPath(), StandardCharsets.UTF_8);
-        stripLeadingBom(lines);
-        // Ensure at least 5 lines exist
-        while (lines.size() < 5) {
-            lines.add("");
+        for (int i = 0; i < minMaxPerCh.length && i < cfg.channels.size(); i++) {
+            ChannelConfig.Channel channel = cfg.channels.get(i);
+            if (channel != null) {
+                channel.minmax = minMaxPerCh[i] == null ? "None" : minMaxPerCh[i];
+                channel.status.put(ChannelConfig.P_MINMAX, ChannelConfig.PropertyStatus.COMMITTED);
+            }
         }
-
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < minMaxPerCh.length; i++) {
-            if (i > 0) sb.append(TOKEN_DELIMITER);
-            sb.append(minMaxPerCh[i] == null ? "None" : minMaxPerCh[i]);
-        }
-        lines.set(4, sb.toString()); // line 5 (0-indexed = 4)
-
-        writeAtomic(layout.channelDataWriteFile().toPath(), lines);
+        cfg.writtenAtMillis = System.currentTimeMillis();
+        ChannelConfigIO.write(settingsDir, cfg);
     }
 
-    /**
-     * Updates line 8 (filter_presets) of Channel_Data.txt with the resolved
-     * per-channel filter preset names. Used after loading older bins where the
-     * macro file proves that a saved custom filter is present.
-     */
-    public static void updateFilterPresets(String directory, List<String> filterPresets) throws IOException {
-        FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
-        File channelData = layout.channelDataReadFile();
-        if (!channelData.exists() || filterPresets == null) return;
-
-        List<String> lines = Files.readAllLines(channelData.toPath(), StandardCharsets.UTF_8);
-        stripLeadingBom(lines);
-        while (lines.size() < 8) {
-            lines.add("");
-        }
-
-        List<String> tokens = new ArrayList<String>();
-        for (int i = 0; i < filterPresets.size(); i++) {
-            tokens.add(encodeFilterPresetToken(filterPresets.get(i)));
-        }
-        lines.set(7, joinTokens(tokens));
-
-        writeAtomic(layout.channelDataWriteFile().toPath(), lines);
-    }
-
-    public static void updateClickPresence(File binFolder, boolean present) throws IOException {
-        if (binFolder == null) return;
-        File channelData = new File(binFolder, FlashProjectLayout.CHANNEL_DATA_FILENAME);
-        if (!channelData.isFile()) return;
-
-        List<String> lines = Files.readAllLines(channelData.toPath(), StandardCharsets.UTF_8);
-        stripLeadingBom(lines);
-        while (lines.size() < 9) {
-            lines.add(lines.size() == 8 ? ZSliceConfigIO.modeLine(ZSliceMode.FULL) : "");
-        }
-        while (lines.size() < 10) {
-            lines.add("");
-        }
-        lines.set(9, clicksModeLine(present));
-
-        writeAtomic(channelData.toPath(), lines);
-    }
-
-    public static String clicksModeLine(boolean present) {
-        return present ? CLICKS_PER_CHANNEL_TOKEN : CLICKS_NONE_TOKEN;
-    }
-
-    public static boolean parseClickPresenceLine(String line) {
-        if (line == null) return false;
-        String token = line.trim().toLowerCase(Locale.ROOT);
-        if (CLICKS_PER_CHANNEL_TOKEN.equals(token)) return true;
-        if (CLICKS_NONE_TOKEN.equals(token)) return false;
-        return false;
-    }
-
-    static String[] splitTokens(String line) {
-        if (line == null) return new String[0];
-        // Primary: tab. Falls back to any whitespace for legacy files written
-        // before the tab-delimiter migration.
-        if (line.indexOf('\t') >= 0) {
-            String[] tabs = line.split("\t", -1);
-            return trimAll(tabs);
-        }
-        String s = line.trim();
-        if (s.isEmpty()) return new String[0];
-        return s.split("\\s+");
-    }
-
-    private static String[] trimAll(String[] tokens) {
-        String[] out = new String[tokens.length];
-        for (int i = 0; i < tokens.length; i++) {
-            out[i] = tokens[i] == null ? "" : tokens[i].trim();
-        }
-        return out;
-    }
-
-    static void stripLeadingBom(List<String> lines) {
-        if (lines == null || lines.isEmpty()) return;
-        String first = lines.get(0);
-        if (first != null && !first.isEmpty() && first.charAt(0) == UTF8_BOM) {
-            lines.set(0, first.substring(1));
-        }
-    }
-
-    static boolean anyLineContainsTab(List<String> lines) {
-        if (lines == null) return false;
-        for (int i = 0; i < lines.size(); i++) {
-            String line = lines.get(i);
-            if (line != null && line.indexOf('\t') >= 0) return true;
-        }
-        return false;
-    }
-
-    /**
-     * Writes lines to {@code target} atomically: write to a sibling .tmp file
-     * then move it into place. Falls back to a non-atomic replace on filesystems
-     * that don't support {@link StandardCopyOption#ATOMIC_MOVE} (older NFS, etc.).
-     */
     public static void writeAtomic(Path target, List<String> lines) throws IOException {
         if (target == null) throw new IOException("writeAtomic: target path is null");
         StringBuilder content = new StringBuilder();
@@ -451,142 +108,6 @@ public class BinConfigIO {
         } catch (AtomicMoveNotSupportedException ame) {
             Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
         }
-    }
-
-    private static void addTokens(List<String> target, String[] tokens) {
-        for (int i = 0; i < tokens.length; i++) {
-            target.add(tokens[i]);
-        }
-    }
-
-    private static boolean clicksFileExists(File binFolder) {
-        return binFolder != null && new File(binFolder, CLICKS_FILE_NAME).isFile();
-    }
-
-    private static List<String> segmentationTokensForWrite(BinConfig cfg) {
-        List<String> out = new ArrayList<String>();
-        if (cfg == null) return out;
-        for (int i = 0; i < cfg.segmentationMethods.size(); i++) {
-            String raw = cfg.segmentationMethods.get(i);
-            SegmentationMethod parsed = cfg.parsedSegmentationMethodForWrite(i);
-            if (parsed != null && sameToken(raw, parsed.rawToken)) {
-                out.add(parsed.shouldPreserveRawTokenOnWrite()
-                        ? safeToken(raw)
-                        : preserveReadTokenUnlessCanonical(raw, parsed));
-            } else {
-                out.add(safeToken(raw));
-            }
-        }
-        return out;
-    }
-
-    private static String preserveReadTokenUnlessCanonical(String raw, SegmentationMethod parsed) {
-        String canonical = SegmentationTokenParser.format(parsed);
-        if (parsed != null && parsed.isCellpose()) {
-            return canonical;
-        }
-        String safeRaw = safeToken(raw);
-        return sameToken(safeRaw, canonical) ? canonical : safeRaw;
-    }
-
-    private static String safeToken(String token) {
-        return token == null ? "" : token;
-    }
-
-    private static boolean sameToken(String a, String b) {
-        String left = a == null ? "" : a.trim();
-        String right = b == null ? "" : b.trim();
-        return left.equals(right);
-    }
-
-    private static String[] inferFilterPresets(File binFolder, int channelCount) {
-        String[] presets = new String[channelCount];
-        for (int i = 0; i < channelCount; i++) {
-            File macroFile = new File(binFolder, "C" + (i + 1) + "_Filters.ijm");
-            presets[i] = inferFilterPreset(macroFile);
-        }
-        return presets;
-    }
-
-    private static String inferFilterPreset(File macroFile) {
-        if (macroFile == null || !macroFile.exists()) return "Default";
-        try {
-            String actual = normalizeMacroContent(new String(Files.readAllBytes(macroFile.toPath()), StandardCharsets.UTF_8));
-            for (String presetName : NamedFilterLoader.FILTER_NAMES) {
-                String bundled = NamedFilterLoader.loadFilterContent(presetName);
-                if (bundled != null && actual.equals(normalizeMacroContent(bundled))) {
-                    return presetName;
-                }
-            }
-            File[] savedCustomPresets = savedCustomPresetFiles(macroFile.getParentFile());
-            for (int i = 0; i < savedCustomPresets.length; i++) {
-                File saved = savedCustomPresets[i];
-                String custom = normalizeMacroContent(new String(Files.readAllBytes(saved.toPath()), StandardCharsets.UTF_8));
-                if (actual.equals(custom)) {
-                    String fileName = saved.getName();
-                    return fileName.substring(0, fileName.length() - 4);
-                }
-            }
-            return "Custom";
-        } catch (IOException e) {
-            return "Default";
-        }
-    }
-
-    private static String resolveFilterPresetForChannel(File binFolder,
-                                                        int channelIndex,
-                                                        String[] storedFilterPresets,
-                                                        String[] inferredFilterPresets) {
-        if (channelIndex >= storedFilterPresets.length) {
-            return lazyInferred(binFolder, channelIndex, inferredFilterPresets);
-        }
-
-        String stored = decodeFilterPresetToken(storedFilterPresets[channelIndex]);
-        File macroFile = new File(binFolder, "C" + (channelIndex + 1) + "_Filters.ijm");
-        if (!macroFile.exists()) return stored;
-
-        if ("Custom".equals(stored)) {
-            String inferred = lazyInferred(binFolder, channelIndex, inferredFilterPresets);
-            return "Default".equals(inferred) ? stored : inferred;
-        }
-
-        String storedMacro = NamedFilterLoader.loadFilterContent(stored);
-        if (storedMacro == null) {
-            return stored;
-        }
-
-        try {
-            String actual = normalizeMacroContent(new String(Files.readAllBytes(macroFile.toPath()), StandardCharsets.UTF_8));
-            if (!actual.equals(normalizeMacroContent(storedMacro))) {
-                return lazyInferred(binFolder, channelIndex, inferredFilterPresets);
-            }
-        } catch (IOException e) {
-            return stored;
-        }
-        return stored;
-    }
-
-    /**
-     * Returns inferredFilterPresets[channelIndex] if it has been populated, otherwise infers
-     * just that channel's preset from its C{n}_Filters.ijm and caches the result back into
-     * the array. Pairs with the readFromDirectory / readPartialFromDirectory early-skip:
-     * when every channel has a stored token the array is created empty and only the channels
-     * whose stored token resolves to "Custom" (or fails the macro round-trip) trigger inference.
-     */
-    private static String lazyInferred(File binFolder, int channelIndex, String[] inferredFilterPresets) {
-        if (channelIndex < inferredFilterPresets.length && inferredFilterPresets[channelIndex] != null) {
-            return inferredFilterPresets[channelIndex];
-        }
-        File macroFile = new File(binFolder, "C" + (channelIndex + 1) + "_Filters.ijm");
-        String result = inferFilterPreset(macroFile);
-        if (channelIndex < inferredFilterPresets.length) {
-            inferredFilterPresets[channelIndex] = result;
-        }
-        return result;
-    }
-
-    private static File[] savedCustomPresetFiles(File binFolder) {
-        return BinMacroIndex.listSavedCustomFilterPresetFiles(binFolder);
     }
 
     private static String loadSavedCustomFilterPreset(File binFolder, String presetName) {
@@ -636,9 +157,6 @@ public class BinConfigIO {
     private static File projectRootForBinFolder(File binFolder) {
         if (binFolder == null) return new File(".");
         File parent = binFolder.getParentFile();
-        if (FlashProjectLayout.LEGACY_BIN_DIR.equals(binFolder.getName()) && parent != null) {
-            return parent;
-        }
         String folderName = binFolder.getName();
         if (FlashProjectLayout.SETTINGS_DIR.equals(folderName)
                 && parent != null
@@ -648,8 +166,7 @@ public class BinConfigIO {
                 && parent.getParentFile().getParentFile() != null) {
             return parent.getParentFile().getParentFile();
         }
-        if ((FlashProjectLayout.CONFIGURATION_DIR.equals(folderName)
-                || FlashProjectLayout.LEGACY_CONFIGURATION_DIR.equals(folderName))
+        if (FlashProjectLayout.CONFIGURATION_DIR.equals(folderName)
                 && parent != null
                 && FlashProjectLayout.FLASH_DIR.equals(parent.getName())
                 && parent.getParentFile() != null) {
@@ -695,7 +212,6 @@ public class BinConfigIO {
                 String value = new String(decoded, StandardCharsets.UTF_8).trim();
                 if (!value.isEmpty()) return value;
             } catch (IllegalArgumentException ignored) {
-                // Fall through to legacy decoding.
             }
         }
         for (String candidate : NamedFilterLoader.FILTER_NAMES) {
@@ -709,19 +225,5 @@ public class BinConfigIO {
         if ("Clustered Large Particle Filter".equalsIgnoreCase(normalized)) return "Clustered Large";
         if ("Overlapping Cellular Marker Filter".equalsIgnoreCase(normalized)) return "Overlapping Cellular Marker";
         return normalized;
-    }
-
-    private static String joinTokens(List<String> tokens) {
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < tokens.size(); i++) {
-            if (i > 0) sb.append(TOKEN_DELIMITER);
-            sb.append(tokens.get(i));
-        }
-        return sb.toString();
-    }
-
-    private static String normalizeMacroContent(String content) {
-        if (content == null) return "";
-        return content.replace("\r\n", "\n").replace('\r', '\n').trim();
     }
 }

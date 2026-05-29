@@ -16,8 +16,8 @@ import flash.pipeline.analyses.spatial.SubAnalysis;
 import flash.pipeline.analyses.wizard.SpatialAnalysisWizard;
 import flash.pipeline.analyses.wizard.SpatialPreset;
 import flash.pipeline.analyses.wizard.SpatialPresetIO;
+import flash.pipeline.bin.ChannelConfigIO;
 import flash.pipeline.bin.ChannelIdentities;
-import flash.pipeline.bin.ChannelIdentitiesIO;
 import flash.pipeline.cli.CLIConfig;
 import flash.pipeline.intelligence.JunkFileFilter;
 import flash.pipeline.intelligence.MetadataDiagnostics;
@@ -4909,7 +4909,8 @@ public class SpatialAnalysis implements Analysis {
             this.channelNames = channelNames == null
                     ? new ArrayList<String>()
                     : new ArrayList<String>(channelNames);
-            this.identities = ChannelIdentitiesIO.read(new File(directory, ".bin"));
+            this.identities = ChannelConfigIO.readChannelIdentities(
+                    FlashProjectLayout.forDirectory(directory).configurationWriteDir());
         }
 
         ImagePlus open(String channelName, ChannelData cd, List<Integer> rowIndices) throws Exception {
@@ -6071,7 +6072,8 @@ public class SpatialAnalysis implements Analysis {
 
     private SpatialAnalysisWizard.DerivedConfig runSpatialSetupHelper(String directory) {
         try {
-            ChannelIdentities identities = ChannelIdentitiesIO.read(new File(directory, ".bin"));
+            ChannelIdentities identities = ChannelConfigIO.readChannelIdentities(
+                    FlashProjectLayout.forDirectory(directory).configurationWriteDir());
             MetadataDiagnostics.SeriesInfo info = firstSeriesInfoOrNull(directory);
             SpatialAnalysisWizard wizard = new SpatialAnalysisWizard(
                     flash.pipeline.ui.wizard.WizardFlow.MainPanelBinding.NULL,

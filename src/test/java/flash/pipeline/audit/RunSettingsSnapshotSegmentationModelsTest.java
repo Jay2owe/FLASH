@@ -1,7 +1,7 @@
 package flash.pipeline.audit;
 
+import flash.pipeline.TestConfigFiles;
 import flash.pipeline.bin.BinConfig;
-import flash.pipeline.bin.BinConfigIO;
 import flash.pipeline.bin.BinField;
 import flash.pipeline.segmentation.catalog.ModelCatalog;
 import flash.pipeline.segmentation.catalog.ModelCatalogIO;
@@ -46,7 +46,7 @@ public class RunSettingsSnapshotSegmentationModelsTest {
                 false);
         ModelCatalogIO.writeProject(dir.toPath(),
                 new ModelCatalog(dir.toPath(), Collections.singletonList(rf)));
-        BinConfigIO.writeFromConfig(dir.getAbsolutePath(), config(
+        TestConfigFiles.writeChannelConfig(dir, config(
                 "stardist:0.5:0.3:model=stardist_dsb2018_paper",
                 "cellpose:30.0:0.4:0.0:gpu=false:model=cellpose_nuclei",
                 "trained_rf:trained_rf_microglia_v1:base=classical",
@@ -102,7 +102,7 @@ public class RunSettingsSnapshotSegmentationModelsTest {
     @Test
     public void unresolvedModelKeyIsRecordedWithoutThrowing() throws Exception {
         File dir = temp.newFolder("snapshot-missing-model");
-        BinConfigIO.writeFromConfig(dir.getAbsolutePath(), config(
+        TestConfigFiles.writeChannelConfig(dir, config(
                 "stardist:0.5:0.3:model=missing_stardist"));
 
         RunSettingsSnapshot snapshot = RunSettingsSnapshot.create(

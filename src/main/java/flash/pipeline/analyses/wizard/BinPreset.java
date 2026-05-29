@@ -13,7 +13,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Persisted channel configuration preset. The payload mirrors Channel_Data.txt plus
+ * Persisted channel configuration preset. The payload mirrors channel_config.json plus
  * filter presets, segmentation methods, z-slice mode, and marker identities.
  */
 public final class BinPreset implements Preset<BinConfig> {

@@ -1,6 +1,8 @@
 package flash.pipeline.ui;
 
-import flash.pipeline.bin.BinConfigIO;
+import flash.pipeline.TestConfigFiles;
+import flash.pipeline.bin.BinConfig;
+import flash.pipeline.bin.ChannelConfigIO;
 import flash.pipeline.segmentation.catalog.ModelCatalog;
 import flash.pipeline.segmentation.catalog.ModelCatalogIO;
 import flash.pipeline.segmentation.catalog.ModelEntry;
@@ -28,7 +30,7 @@ public class ModelKeyRewriterControllerTest {
     public void cancellationSurfacesWarningAndAbortsWithoutChanges() throws Exception {
         Path root = temp.newFolder("cancel").toPath();
         createCatalogEntry(root, "old_model");
-        Path bin = writeBin(root.resolve("A/Configuration/.bin/Channel_Data.txt"),
+        Path bin = writeBin(root.resolve("A"),
                 "stardist:0.5:0.4:model=old_model");
         final String[] warning = new String[1];
 
@@ -48,8 +50,7 @@ public class ModelKeyRewriterControllerTest {
         assertTrue(warning[0].contains("rewrites every bin"));
         assertTrue(ModelCatalogIO.read(root).get("old_model").isPresent());
         assertFalse(ModelCatalogIO.read(root).get("new_model").isPresent());
-        assertTrue(Files.readAllLines(bin, StandardCharsets.UTF_8).get(6)
-                .contains("old_model"));
+        assertTrue(segmentation(bin).contains("old_model"));
     }
 
     private static void createCatalogEntry(Path root, String key) throws Exception {
@@ -64,17 +65,16 @@ public class ModelKeyRewriterControllerTest {
         ModelCatalogIO.writeProject(root, new ModelCatalog(root, Arrays.asList(entry)));
     }
 
-    private static Path writeBin(Path path, String line7) throws Exception {
-        Files.createDirectories(path.getParent());
-        BinConfigIO.writeAtomic(path, Arrays.asList(
-                "C1",
-                "Red",
-                "default",
-                "100-Infinity",
-                "None",
-                "default",
-                line7));
-        return path;
+    private static Path writeBin(Path projectRoot, String segmentationMethod) throws Exception {
+        BinConfig cfg = TestConfigFiles.basicBinConfig("C1");
+        cfg.segmentationMethods.clear();
+        cfg.addSegmentationMethodToken(segmentationMethod);
+        TestConfigFiles.writeChannelConfig(projectRoot, cfg);
+        return TestConfigFiles.settingsDir(projectRoot).toPath().resolve(ChannelConfigIO.FILE_NAME);
+    }
+
+    private static String segmentation(Path path) {
+        return ChannelConfigIO.read(path.getParent().toFile()).channels.get(0).segmentationMethod;
     }
 
     private static Map<String, Object> defaults() {

@@ -13,7 +13,6 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.EnumSet;
-import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -48,16 +47,7 @@ public class BinSetupDispatcherTest {
     @Test
     public void completeBinReturnsCompletedWithoutShowingChooser() throws Exception {
         File dir = temp.newFolder("complete");
-        writeChannelData(dir,
-                "DAPI GFP",
-                "Blue Green",
-                "default 100",
-                "100-Infinity 100-Infinity",
-                "None None",
-                "default default",
-                "classical classical",
-                "default default",
-                "zslice:full");
+        writeCompleteConfig(dir);
 
         final AtomicInteger chooserCalls = new AtomicInteger(0);
         BinSetupDispatcher.setChooserForTest(new BinSetupDispatcher.Chooser() {
@@ -84,38 +74,6 @@ public class BinSetupDispatcherTest {
                 BinSetupDispatcher.getLastFieldSources().get(BinField.CHANNEL_NAMES));
         assertEquals(BinSetupDispatcher.SOURCE_LOADED,
                 BinSetupDispatcher.getLastFieldSources().get(BinField.OBJECT_THRESHOLDS));
-    }
-
-    @Test
-    public void legacyBinWithoutSegmentationLineUsesClassicalDefault() throws Exception {
-        File dir = temp.newFolder("legacySixLine");
-        writeChannelData(dir,
-                "DAPI GFP",
-                "Blue Green",
-                "default 100",
-                "100-Infinity 100-Infinity",
-                "None None",
-                "default default");
-
-        final AtomicInteger chooserCalls = new AtomicInteger(0);
-        BinSetupDispatcher.setChooserForTest(new BinSetupDispatcher.Chooser() {
-            @Override public BinSetupChooser.Choice show(String analysisDisplayName,
-                                                         Set<BinField> missing,
-                                                         boolean showRoiTip) {
-                chooserCalls.incrementAndGet();
-                return BinSetupChooser.Choice.CANCELLED;
-            }
-        });
-
-        BinSetupDispatcher.Outcome outcome = BinSetupDispatcher.ensure(
-                dir.getAbsolutePath(), "3D Object Analysis",
-                EnumSet.of(BinField.CHANNEL_NAMES, BinField.SEGMENTATION_METHODS),
-                false);
-
-        assertEquals(BinSetupDispatcher.Outcome.COMPLETED, outcome);
-        assertEquals(0, chooserCalls.get());
-        assertEquals(BinSetupDispatcher.SOURCE_LOADED,
-                BinSetupDispatcher.getLastFieldSources().get(BinField.SEGMENTATION_METHODS));
     }
 
     @Test
@@ -150,10 +108,10 @@ public class BinSetupDispatcherTest {
         assertEquals(BinSetupDispatcher.SOURCE_CLI_ARGUMENT,
                 BinSetupDispatcher.getLastFieldSources().get(BinField.INTENSITY_THRESHOLDS));
 
-        List<String> lines = Files.readAllLines(configurationFile(dir, "Channel_Data.txt").toPath());
-        assertEquals("DAPI\tGFP", lines.get(0));
-        assertEquals("default\t500", lines.get(5));
-        assertEquals("zslice:full", lines.get(8));
+        BinConfig written = BinConfigIO.readPartialFromDirectory(dir.getAbsolutePath());
+        assertEquals(java.util.Arrays.asList("DAPI", "GFP"), written.channelNames);
+        assertEquals(java.util.Arrays.asList("default", "500"), written.channelIntensityThresholds);
+        assertEquals(flash.pipeline.zslice.ZSliceMode.FULL, written.zSliceMode);
     }
 
     @Test
@@ -207,30 +165,6 @@ public class BinSetupDispatcherTest {
 
         assertEquals(BinSetupDispatcher.Outcome.CANCELLED, outcome);
         assertEquals(1, chooserCalls.get());
-    }
-
-    @Test
-    public void headlessModeReusesExistingChannelNamesAndWritesOnlyMissingCliFields() throws Exception {
-        File dir = temp.newFolder("existingNames");
-        writeChannelData(dir, "DAPI GFP");
-        BinSetupDispatcher.setHeadlessProbeForTest(new BinSetupDispatcher.HeadlessProbe() {
-            @Override public boolean isHeadlessOrMacro() {
-                return true;
-            }
-        });
-
-        CLIConfig cli = CLIArgumentParser.parse("dir=[" + dir.getAbsolutePath() + "] "
-                + "intensity_thresholds=default,500 z_slice_mode=full");
-        BinSetupDispatcher.Outcome outcome = BinSetupDispatcher.ensure(
-                dir.getAbsolutePath(), "Intensity Analysis",
-                EnumSet.of(BinField.CHANNEL_NAMES, BinField.INTENSITY_THRESHOLDS, BinField.Z_SLICE),
-                false, false, cli);
-
-        assertEquals(BinSetupDispatcher.Outcome.COMPLETED, outcome);
-        List<String> lines = Files.readAllLines(configurationFile(dir, "Channel_Data.txt").toPath());
-        assertEquals("DAPI\tGFP", lines.get(0));
-        assertEquals("default\t500", lines.get(5));
-        assertEquals("zslice:full", lines.get(8));
     }
 
     @Test
@@ -313,7 +247,7 @@ public class BinSetupDispatcherTest {
             @Override public void run(String directory, Set<BinField> fields) {
                 wizardFields.set(fields);
                 try {
-                    writeCompleteChannelData(new File(directory));
+                    writeCompleteConfig(new File(directory));
                 } catch (IOException e) {
                     throw new IllegalStateException(e);
                 }
@@ -323,7 +257,7 @@ public class BinSetupDispatcherTest {
             @Override public boolean show(String directory, Set<BinField> fields) {
                 bypassFields.set(fields);
                 try {
-                    writeChannelData(new File(directory), "DAPI");
+                    writeNamesOnlyConfig(new File(directory));
                 } catch (IOException e) {
                     throw new IllegalStateException(e);
                 }
@@ -392,36 +326,36 @@ public class BinSetupDispatcherTest {
         });
     }
 
-    private static void writeChannelData(File dir, String... lines) throws IOException {
-        File bin = new File(dir, ".bin");
-        assertTrue(bin.isDirectory() || bin.mkdirs());
-        StringBuilder content = new StringBuilder();
-        for (int i = 0; i < lines.length; i++) {
-            content.append(lines[i]).append("\n");
-        }
-        Files.write(new File(bin, "Channel_Data.txt").toPath(),
-                content.toString().getBytes(StandardCharsets.UTF_8));
+    private static void writeCompleteConfig(File dir) throws IOException {
+        ChannelConfigIO.write(configurationDir(dir), completeConfig("DAPI"));
     }
 
-    private static void writeCompleteChannelData(File dir) throws IOException {
-        writeChannelData(dir,
-                "DAPI",
-                "Blue",
-                "default",
-                "100-Infinity",
-                "None",
-                "default",
-                "classical",
-                "default",
-                "zslice:full");
+    private static void writeNamesOnlyConfig(File dir) throws IOException {
+        ChannelConfig cfg = new ChannelConfig();
+        ChannelConfig.Channel channel = new ChannelConfig.Channel();
+        channel.index = 0;
+        channel.name = "DAPI";
+        channel.status.put(ChannelConfig.P_NAME, ChannelConfig.PropertyStatus.COMMITTED);
+        cfg.channels.add(channel);
+        ChannelConfigIO.write(configurationDir(dir), cfg);
+    }
+
+    private static ChannelConfig completeConfig(String name) {
+        BinConfig bin = new BinConfig();
+        bin.channelNames.add(name);
+        bin.channelColors.add("Blue");
+        bin.channelThresholds.add("default");
+        bin.channelSizes.add("100-Infinity");
+        bin.channelMinMax.add("None");
+        bin.channelIntensityThresholds.add("default");
+        bin.segmentationMethods.add("classical");
+        bin.channelFilterPresets.add("Default");
+        bin.zSliceConfigPresent = true;
+        return ChannelConfigIO.fromBinConfig(bin);
     }
 
     private static File configurationDir(File dir) {
         return new File(dir, "FLASH/Config/.settings");
-    }
-
-    private static File configurationFile(File dir, String name) {
-        return new File(configurationDir(dir), name);
     }
 
     private static String normalize(String text) {

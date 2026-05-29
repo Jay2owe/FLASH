@@ -86,8 +86,7 @@ public class CreateBinFileAnalysisTest {
 
         analysis.execute(dir.getAbsolutePath());
 
-        assertFalse(new File(dir, ".bin/Channel_Data.txt").exists());
-        assertFalse(new File(dir, "FLASH/Config/.settings/Channel_Data.txt").exists());
+        assertFalse(new File(dir, "FLASH/Config/.settings/channel_config.json").exists());
     }
 
     @Test(expected = IllegalStateException.class)
@@ -417,39 +416,25 @@ public class CreateBinFileAnalysisTest {
     }
 
     @Test
-    public void executeFiltered_visitsOnlyRequestedPagesAndPreservesExistingLines() throws Exception {
+    public void executeFiltered_visitsOnlyRequestedPagesAndPreservesExistingConfig() throws Exception {
         File dir = temp.newFolder("filtered-existing");
-        File bin = new File(dir, ".bin");
-        assertTrue(bin.mkdirs());
-        File channelData = new File(bin, "Channel_Data.txt");
-        Files.write(channelData.toPath(), Arrays.asList(
-                "IBA1 GFAP",
-                "Green Red",
-                "100 200",
-                "50-Infinity 25-500",
-                "10-100 20-200",
-                "30 40",
-                "classical stardist:0.5:0.4",
-                "default puncta_resolve",
-                "zslice:per_image"
-        ), StandardCharsets.UTF_8);
+        ChannelConfigIO.write(configurationDir(dir), existingFilteredConfig());
         RecordingFilteredAnalysis analysis = new RecordingFilteredAnalysis();
 
         analysis.executeFiltered(dir.getAbsolutePath(),
                 EnumSet.of(BinField.CHANNEL_NAMES, BinField.Z_SLICE));
 
         assertEquals(Arrays.asList("names", "zslice"), analysis.visited);
-        List<String> lines = Files.readAllLines(configurationFile(dir, "Channel_Data.txt").toPath(), StandardCharsets.UTF_8);
-        assertEquals("NeuN\tDAPI", lines.get(0));
-        assertEquals("Green\tRed", lines.get(1));
-        assertEquals("100\t200", lines.get(2));
-        assertEquals("50-Infinity\t25-500", lines.get(3));
-        assertEquals("10-100\t20-200", lines.get(4));
-        assertEquals("30\t40", lines.get(5));
-        assertEquals("classical\tstardist:0.5:0.4", lines.get(6));
-        assertEquals("default\tpuncta_resolve", lines.get(7));
-        assertEquals("zslice:full", lines.get(8));
-        assertEquals("IBA1 GFAP", Files.readAllLines(channelData.toPath(), StandardCharsets.UTF_8).get(0));
+        BinConfig updated = ChannelConfigIO.toBinConfig(ChannelConfigIO.read(configurationDir(dir)));
+        assertEquals(Arrays.asList("NeuN", "DAPI"), updated.channelNames);
+        assertEquals(Arrays.asList("Green", "Red"), updated.channelColors);
+        assertEquals(Arrays.asList("100", "200"), updated.channelThresholds);
+        assertEquals(Arrays.asList("50-Infinity", "25-500"), updated.channelSizes);
+        assertEquals(Arrays.asList("10-100", "20-200"), updated.channelMinMax);
+        assertEquals(Arrays.asList("30", "40"), updated.channelIntensityThresholds);
+        assertEquals(Arrays.asList("classical", "stardist:0.5:0.4"), updated.segmentationMethods);
+        assertEquals(Arrays.asList("Default", "Puncta Resolve"), updated.channelFilterPresets);
+        assertEquals(ZSliceMode.FULL, updated.zSliceMode);
         assertFalse(new File(configurationDir(dir), "C1_Filters.ijm").exists());
     }
 
@@ -461,38 +446,24 @@ public class CreateBinFileAnalysisTest {
         analysis.executeFiltered(dir.getAbsolutePath(), EnumSet.of(BinField.CHANNEL_NAMES));
 
         File bin = configurationDir(dir);
-        File channelData = configurationFile(dir, "Channel_Data.txt");
-        assertTrue(channelData.isFile());
+        assertTrue(new File(bin, ChannelConfigIO.FILE_NAME).isFile());
         assertEquals(Collections.singletonList("names"), analysis.visited);
-        List<String> lines = Files.readAllLines(channelData.toPath(), StandardCharsets.UTF_8);
-        assertEquals("NeuN\tDAPI", lines.get(0));
-        assertEquals("Grays\tGrays", lines.get(1));
-        assertEquals("default\tdefault", lines.get(2));
-        assertEquals("100-Infinity\t100-Infinity", lines.get(3));
-        assertEquals("None\tNone", lines.get(4));
-        assertEquals("default\tdefault", lines.get(5));
-        assertEquals("classical\tclassical", lines.get(6));
-        assertEquals("default\tdefault", lines.get(7));
-        assertEquals("zslice:full", lines.get(8));
+        BinConfig updated = ChannelConfigIO.toBinConfig(ChannelConfigIO.read(bin));
+        assertEquals(Arrays.asList("NeuN", "DAPI"), updated.channelNames);
+        assertEquals(Arrays.asList("Grays", "Grays"), updated.channelColors);
+        assertEquals(Arrays.asList("default", "default"), updated.channelThresholds);
+        assertEquals(Arrays.asList("100-Infinity", "100-Infinity"), updated.channelSizes);
+        assertEquals(Arrays.asList("None", "None"), updated.channelMinMax);
+        assertEquals(Arrays.asList("default", "default"), updated.channelIntensityThresholds);
+        assertEquals(Arrays.asList("classical", "classical"), updated.segmentationMethods);
+        assertEquals(Arrays.asList("Default", "Default"), updated.channelFilterPresets);
         assertFalse(new File(bin, "C1_Filters.ijm").exists());
     }
 
     @Test
     public void executeFiltered_segmentationMethodRoutesThroughObjectQcNotStandalonePage() throws Exception {
         File dir = temp.newFolder("filtered-segmentation-method");
-        File bin = new File(dir, ".bin");
-        assertTrue(bin.mkdirs());
-        Files.write(new File(bin, "Channel_Data.txt").toPath(), Arrays.asList(
-                "IBA1",
-                "Green",
-                "100",
-                "50-Infinity",
-                "10-100",
-                "30",
-                "classical",
-                "default",
-                "zslice:full"
-        ), StandardCharsets.UTF_8);
+        ChannelConfigIO.write(configurationDir(dir), existingFilteredConfig("IBA1"));
         RecordingFilteredAnalysis analysis = new RecordingFilteredAnalysis();
 
         analysis.executeFiltered(dir.getAbsolutePath(),
@@ -1047,10 +1018,6 @@ public class CreateBinFileAnalysisTest {
         return new File(dir, "FLASH/Config/.settings");
     }
 
-    private static File configurationFile(File dir, String name) {
-        return new File(configurationDir(dir), name);
-    }
-
     @Test
     public void analysisDefaultsDeclareNoBinRequirementsOrRoiBenefit() {
         Analysis analysis = new Analysis() {
@@ -1077,6 +1044,36 @@ public class CreateBinFileAnalysisTest {
         List<String> intensity = new ArrayList<String>();
         intensity.add("default");
         return new CreateBinFileAnalysis.BinUserConfig(names, colors, thresholds, sizes, minmax, filters, intensity);
+    }
+
+    private static ChannelConfig existingFilteredConfig() {
+        BinConfig cfg = new BinConfig();
+        cfg.channelNames.addAll(Arrays.asList("IBA1", "GFAP"));
+        cfg.channelColors.addAll(Arrays.asList("Green", "Red"));
+        cfg.channelThresholds.addAll(Arrays.asList("100", "200"));
+        cfg.channelSizes.addAll(Arrays.asList("50-Infinity", "25-500"));
+        cfg.channelMinMax.addAll(Arrays.asList("10-100", "20-200"));
+        cfg.channelIntensityThresholds.addAll(Arrays.asList("30", "40"));
+        cfg.segmentationMethods.addAll(Arrays.asList("classical", "stardist:0.5:0.4"));
+        cfg.channelFilterPresets.addAll(Arrays.asList("Default", "Puncta Resolve"));
+        cfg.zSliceMode = ZSliceMode.PER_IMAGE;
+        cfg.zSliceConfigPresent = true;
+        return ChannelConfigIO.fromBinConfig(cfg);
+    }
+
+    private static ChannelConfig existingFilteredConfig(String name) {
+        BinConfig cfg = new BinConfig();
+        cfg.channelNames.add(name);
+        cfg.channelColors.add("Green");
+        cfg.channelThresholds.add("100");
+        cfg.channelSizes.add("50-Infinity");
+        cfg.channelMinMax.add("10-100");
+        cfg.channelIntensityThresholds.add("30");
+        cfg.segmentationMethods.add("classical");
+        cfg.channelFilterPresets.add("Default");
+        cfg.zSliceMode = ZSliceMode.FULL;
+        cfg.zSliceConfigPresent = true;
+        return ChannelConfigIO.fromBinConfig(cfg);
     }
 
     private static CreateBinFileAnalysis.BinUserConfig twoChannelConfig() {

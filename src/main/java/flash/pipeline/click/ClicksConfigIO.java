@@ -1,6 +1,6 @@
 package flash.pipeline.click;
 
-import flash.pipeline.bin.BinConfigIO;
+import flash.pipeline.bin.ChannelConfigIO;
 import flash.pipeline.ui.wizard.JsonIO;
 import ij.IJ;
 
@@ -58,8 +58,8 @@ public final class ClicksConfigIO {
         String json = JsonIO.write(toJsonObject(store)) + "\n";
         List<String> lines = new ArrayList<String>();
         lines.add(json.trim());
-        BinConfigIO.writeAtomic(file.toPath(), lines);
-        BinConfigIO.updateClickPresence(binFolder, true);
+        flash.pipeline.bin.BinConfigIO.writeAtomic(file.toPath(), lines);
+        ChannelConfigIO.updateClickCaptureUsed(binFolder, true);
     }
 
     private static Map<String, Object> toJsonObject(ClickStore store) {

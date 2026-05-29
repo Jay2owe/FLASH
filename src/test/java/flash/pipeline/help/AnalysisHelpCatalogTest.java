@@ -257,7 +257,7 @@ public class AnalysisHelpCatalogTest {
     @Test
     public void setupAndPrepOutputPathsMatchCurrentLayout() {
         assertContains(AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_CREATE_BIN).outputs,
-                "FLASH/Config/.settings/Channel_Data.txt");
+                "FLASH/Config/.settings/channel_config.json");
         assertContains(AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_DRAW_ROIS).outputs,
                 "FLASH/Results/Analysis Images/ROIs/");
         assertContains(AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_DRAW_ROIS).outputs,

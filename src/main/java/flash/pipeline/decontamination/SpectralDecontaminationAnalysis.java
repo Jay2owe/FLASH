@@ -151,7 +151,7 @@ public class SpectralDecontaminationAnalysis implements Analysis {
         try {
             binConfig = loadBinConfig(directory);
         } catch (IOException e) {
-            String message = "Could not read channel names from Configuration folder/Channel_Data.txt. "
+            String message = "Could not read channel names from channel_config.json. "
                     + "Run Set Up Configuration before Spectral Decontamination. " + e.getMessage();
             IJ.log("Spectral Decontamination: " + message);
             if (!headless && !suppressDialogs) {

@@ -1,9 +1,12 @@
 package flash.pipeline.analyses;
 
+import flash.pipeline.TestConfigFiles;
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinField;
 import flash.pipeline.bin.BinSetupChooser;
 import flash.pipeline.bin.BinSetupDispatcher;
+import flash.pipeline.bin.ChannelConfig;
+import flash.pipeline.bin.ChannelConfigIO;
 import flash.pipeline.analyses.wizard.IntensitySpatialConfig;
 import flash.pipeline.intensity.spatial.IntensitySpatialOutputKey;
 import flash.pipeline.intensity.spatial.IntensitySpatialOutputMode;
@@ -314,7 +317,11 @@ public class IntensityAnalysisV2Test {
     @Test
     public void completeRequiredBinCompletesWithoutChooser() throws Exception {
         File dir = temp.newFolder("complete");
-        writeChannelData(dir, "DAPI GFAP", "", "", "", "", "10 20", "", "", "zslice:full");
+        BinConfig cfg = TestConfigFiles.basicBinConfig("DAPI", "GFAP");
+        cfg.channelIntensityThresholds.clear();
+        cfg.channelIntensityThresholds.add("10");
+        cfg.channelIntensityThresholds.add("20");
+        TestConfigFiles.writeChannelConfig(dir, cfg);
         AtomicInteger chooserCalls = new AtomicInteger(0);
         installDispatcherChoice(BinSetupChooser.Choice.CANCELLED, chooserCalls);
 
@@ -330,7 +337,7 @@ public class IntensityAnalysisV2Test {
     @Test
     public void channelNamesOnlyBinPromptsOnlyForIntensityThresholdsAndZSlice() throws Exception {
         File dir = temp.newFolder("partial");
-        writeChannelData(dir, "DAPI GFAP");
+        writeChannelNamesOnlyConfig(dir, "DAPI", "GFAP");
         final AtomicReference<Set<BinField>> missingFields = new AtomicReference<Set<BinField>>();
         installDispatcherChoice(BinSetupChooser.Choice.CANCELLED, new AtomicInteger(0),
                 missingFields);
@@ -341,7 +348,7 @@ public class IntensityAnalysisV2Test {
                 analysis.requiredBinFields(), analysis.benefitsFromRois());
 
         assertEquals(BinSetupDispatcher.Outcome.CANCELLED, outcome);
-        assertEquals(EnumSet.of(BinField.INTENSITY_THRESHOLDS, BinField.Z_SLICE),
+        assertEquals(EnumSet.of(BinField.INTENSITY_THRESHOLDS),
                 missingFields.get());
     }
 
@@ -770,15 +777,16 @@ public class IntensityAnalysisV2Test {
                 cfg, filterSources, binDir, basicFilterMacro, roi);
     }
 
-    private static void writeChannelData(File dir, String... lines) throws Exception {
-        File bin = new File(dir, ".bin");
-        assertTrue(bin.mkdirs());
-        StringBuilder content = new StringBuilder();
-        for (int i = 0; i < lines.length; i++) {
-            content.append(lines[i]).append("\n");
+    private static void writeChannelNamesOnlyConfig(File dir, String... names) throws Exception {
+        ChannelConfig cfg = new ChannelConfig();
+        for (int i = 0; i < names.length; i++) {
+            ChannelConfig.Channel channel = new ChannelConfig.Channel();
+            channel.index = i;
+            channel.name = names[i];
+            channel.status.put(ChannelConfig.P_NAME, ChannelConfig.PropertyStatus.COMMITTED);
+            cfg.channels.add(channel);
         }
-        Files.write(new File(bin, "Channel_Data.txt").toPath(),
-                content.toString().getBytes(StandardCharsets.UTF_8));
+        ChannelConfigIO.write(TestConfigFiles.settingsDir(dir), cfg);
     }
 
     private interface InvocationResult {

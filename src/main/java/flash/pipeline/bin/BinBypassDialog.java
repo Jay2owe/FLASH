@@ -1,11 +1,13 @@
 package flash.pipeline.bin;
 
 import flash.pipeline.ui.PipelineDialog;
+import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.zslice.ZSliceMode;
 import ij.IJ;
 
 import javax.swing.JComboBox;
 import javax.swing.JTextField;
+import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.EnumSet;
@@ -35,7 +37,9 @@ public final class BinBypassDialog {
             BinConfig cfg = copyConfig(existing);
             try {
                 applyDialogValues(state, cfg);
-                BinConfigIO.writeFromConfig(directory, cfg);
+                File settingsDir = FlashProjectLayout.forDirectory(directory).configurationWriteDir();
+                ChannelConfigIO.write(settingsDir, ChannelConfigIO.fromBinConfig(cfg));
+                BinConfigIO.writeFilterMacrosFromConfig(settingsDir, cfg);
                 return true;
             } catch (IllegalArgumentException e) {
                 IJ.showMessage("Direct Entry", e.getMessage());

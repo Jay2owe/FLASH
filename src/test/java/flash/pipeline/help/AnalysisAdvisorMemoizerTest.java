@@ -1,15 +1,13 @@
 package flash.pipeline.help;
 
-import flash.pipeline.bin.BinConfigIO;
+import flash.pipeline.TestConfigFiles;
 import ij.IJ;
 import ij.ImagePlus;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
-import java.io.File;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -23,11 +21,6 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
-/**
- * Regression test for §14p: AnalysisAdvisor must not write Bio-Formats
- * .bfmemo cache files into the user's data folder when the Help dialog
- * sniffs image dimensions.
- */
 public class AnalysisAdvisorMemoizerTest {
 
     private Path tmp;
@@ -50,9 +43,8 @@ public class AnalysisAdvisorMemoizerTest {
         Path tiff = input.resolve("Sample-Mouse1_LH_CA1.tif");
         createTinyTiff(tiff);
 
-        File binDir = new File(tmp.toFile(), ".bin");
-        assertTrue("created .bin dir", binDir.mkdirs());
-        writeMinimalChannelData(new File(binDir, "Channel_Data.txt"));
+        TestConfigFiles.writeChannelConfig(tmp.toFile(),
+                TestConfigFiles.basicBinConfig("Channel1", "Channel2"));
 
         AnalysisAdvisor advisor = new AnalysisAdvisor();
         AdvisorResult result = advisor.recommend(tmp.toFile());
@@ -76,24 +68,6 @@ public class AnalysisAdvisorMemoizerTest {
                     Files.isRegularFile(target) && Files.size(target) > 0);
         } finally {
             imp.close();
-        }
-    }
-
-    private static void writeMinimalChannelData(File channelData) throws IOException {
-        StringBuilder sb = new StringBuilder();
-        sb.append("Channel1\tChannel2\n");
-        sb.append("Red\tGreen\n");
-        sb.append("100\t100\n");
-        sb.append("10-1000\t10-1000\n");
-        sb.append("0-65535\t0-65535\n");
-        sb.append("100\t100\n");
-        Files.write(channelData.toPath(), sb.toString().getBytes(StandardCharsets.UTF_8));
-        // Sanity: BinConfigIO must still parse what we wrote (headless).
-        try {
-            BinConfigIO.readFromDirectory(channelData.getParentFile().getParent());
-        } catch (Throwable ignored) {
-            // Test only cares about side-effects of the dimension sniff;
-            // BinConfigIO formatting variance is fine — sniff still runs.
         }
     }
 

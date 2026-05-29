@@ -205,15 +205,14 @@ public final class AnalysisHelpCatalog {
                         "Pick threshold and filter values for objects you want to count, and choose intensity thresholds for signal measurements.",
                         "Confirm whether the full Z-stack or a saved Z-slice range should be used before saving the configuration."),
                 list(
-                        "FLASH writes the configuration to FLASH/Config/.settings/Channel_Data.txt.",
+                        "FLASH writes the configuration to FLASH/Config/.settings/channel_config.json.",
                         "Per-channel filter macros are saved as FLASH/Config/.settings/C1_Filters.ijm, C2_Filters.ijm, and so on.",
-                        "Channel identities are saved in FLASH/Config/.settings/channel_identities.json, and Z-slice choices are saved in FLASH/Config/.settings/ZSlice_Selections.csv when used.",
-                        "Later analyses read these files automatically; they do not ask for the same channel setup again."),
+                        "Channel identities and Z-slice choices are stored inside channel_config.json.",
+                        "Later analyses read this file automatically; they do not ask for the same channel setup again."),
                 list(
-                        "FLASH/Config/.settings/Channel_Data.txt with channel names, lookup-table colours, thresholds, particle-size filters, display ranges, intensity thresholds, filter presets, segmentation methods, and Z-slice mode.",
-                        "FLASH/Config/.settings/channel_identities.json when marker identities were recorded.",
+                        "FLASH/Config/.settings/channel_config.json with channel names, lookup-table colours, thresholds, particle-size filters, display ranges, intensity thresholds, marker identities, filter presets, segmentation methods, and Z-slice mode.",
                         "FLASH/Config/.settings/C1_Filters.ijm and matching filter macro files for channels that need object filtering.",
-                        "FLASH/Config/.settings/ZSlice_Selections.csv when analysis is limited to selected Z slices."),
+                        "FLASH/Config/.settings/Clicks.json when click-capture training data is recorded."),
                 list(
                         "A wrong channel identity can make every later output hard to interpret, even if the analysis runs successfully.",
                         "Thresholds copied from a different experiment can miss dim signal or include background; check representative images before batch runs.",

@@ -1,9 +1,12 @@
 package flash.pipeline.analyses;
 
+import flash.pipeline.TestConfigFiles;
 import flash.pipeline.bin.BinField;
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinSetupChooser;
 import flash.pipeline.bin.BinSetupDispatcher;
+import flash.pipeline.bin.ChannelConfig;
+import flash.pipeline.bin.ChannelConfigIO;
 import flash.pipeline.bin.ChannelIdentities;
 import flash.pipeline.analyses.wizard.SpatialAnalysisWizard;
 import flash.pipeline.analyses.wizard.ThreeDObjectPreset;
@@ -102,16 +105,7 @@ public class ThreeDObjectAnalysisTest {
     @Test
     public void intensityPopulatedBinPartialSetupSkipsExistingNamesAndZSliceButIncludesFilterPresets() throws Exception {
         File dir = temp.newFolder("partial");
-        writeChannelData(dir,
-                "DAPI GFAP",
-                "",
-                "",
-                "",
-                "",
-                "10 20",
-                "",
-                "",
-                "zslice:full");
+        writeNamesAndIntensityConfig(dir, "DAPI", "GFAP");
         installDispatcherChoice(BinSetupChooser.Choice.PARTIAL, new AtomicInteger(0));
         final AtomicReference<Set<BinField>> wizardFields = new AtomicReference<Set<BinField>>();
         installWizardRunner(wizardFields, true);
@@ -129,8 +123,9 @@ public class ThreeDObjectAnalysisTest {
                 BinField.SEGMENTATION_METHODS,
                 BinField.FILTER_PRESETS),
                 wizardFields.get());
-        assertTrue(new File(new File(dir, ".bin"), "C1_Filters.ijm").isFile());
-        assertTrue(new File(new File(dir, ".bin"), "C2_Filters.ijm").isFile());
+        File settingsDir = TestConfigFiles.settingsDir(dir);
+        assertTrue(new File(settingsDir, "C1_Filters.ijm").isFile());
+        assertTrue(new File(settingsDir, "C2_Filters.ijm").isFile());
     }
 
     @Test
@@ -384,18 +379,11 @@ public class ThreeDObjectAnalysisTest {
                     @Override public Object invoke(Method method, Object[] args) throws Exception {
                         Set<BinField> fields = (Set<BinField>) args[1];
                         wizardFields.set(fields);
-                        writeChannelData(new File((String) args[0]),
-                                "DAPI GFAP",
-                                "Blue Green",
-                                "100 200",
-                                "50-Infinity 25-500",
-                                "None None",
-                                "default default",
-                                "classical classical",
-                                "default default",
-                                "zslice:full");
+                        File projectRoot = new File((String) args[0]);
+                        TestConfigFiles.writeChannelConfig(projectRoot,
+                                TestConfigFiles.basicBinConfig("DAPI", "GFAP"));
                         if (writeFilterMacros && fields.contains(BinField.FILTER_PRESETS)) {
-                            File bin = new File((String) args[0], ".bin");
+                            File bin = TestConfigFiles.settingsDir(projectRoot);
                             assertTrue(bin.isDirectory() || bin.mkdirs());
                             Files.write(new File(bin, "C1_Filters.ijm").toPath(),
                                     "run(\"Median...\", \"radius=2 stack\");\n".getBytes(StandardCharsets.UTF_8));
@@ -553,15 +541,18 @@ public class ThreeDObjectAnalysisTest {
                 new ChannelIdentities.Entry(2, "amyloid_abeta_pan", "puncta_like", false)));
     }
 
-    private static void writeChannelData(File dir, String... lines) throws Exception {
-        File bin = new File(dir, ".bin");
-        assertTrue(bin.isDirectory() || bin.mkdirs());
-        StringBuilder content = new StringBuilder();
-        for (int i = 0; i < lines.length; i++) {
-            content.append(lines[i]).append("\n");
+    private static void writeNamesAndIntensityConfig(File dir, String... names) throws Exception {
+        ChannelConfig cfg = new ChannelConfig();
+        for (int i = 0; i < names.length; i++) {
+            ChannelConfig.Channel channel = new ChannelConfig.Channel();
+            channel.index = i;
+            channel.name = names[i];
+            channel.intensityThreshold = i == 0 ? "10" : "20";
+            channel.status.put(ChannelConfig.P_NAME, ChannelConfig.PropertyStatus.COMMITTED);
+            channel.status.put(ChannelConfig.P_INTENSITY, ChannelConfig.PropertyStatus.COMMITTED);
+            cfg.channels.add(channel);
         }
-        Files.write(new File(bin, "Channel_Data.txt").toPath(),
-                content.toString().getBytes(StandardCharsets.UTF_8));
+        ChannelConfigIO.write(TestConfigFiles.settingsDir(dir), cfg);
     }
 
     private interface InvocationResult {

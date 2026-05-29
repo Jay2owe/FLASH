@@ -1,10 +1,13 @@
 package flash.pipeline.analyses;
 
+import flash.pipeline.TestConfigFiles;
 import flash.pipeline.bin.BinConfigIO;
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinField;
 import flash.pipeline.bin.BinSetupChooser;
 import flash.pipeline.bin.BinSetupDispatcher;
+import flash.pipeline.bin.ChannelConfig;
+import flash.pipeline.bin.ChannelConfigIO;
 import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.DependencyService;
 import flash.pipeline.runtime.DependencyStatus;
@@ -236,16 +239,14 @@ public class SplitAndMergeImageChannelsAnalysisTest {
     @Test
     public void completeRequiredBinCompletesWithoutChooser() throws Exception {
         File dir = temp.newFolder("complete");
-        writeChannelData(dir,
-                "DAPI GFAP",
-                "Blue Green",
-                "",
-                "",
-                "None 0-4095",
-                "",
-                "",
-                "",
-                "zslice:full");
+        BinConfig cfg = TestConfigFiles.basicBinConfig("DAPI", "GFAP");
+        cfg.channelColors.clear();
+        cfg.channelColors.add("Blue");
+        cfg.channelColors.add("Green");
+        cfg.channelMinMax.clear();
+        cfg.channelMinMax.add("None");
+        cfg.channelMinMax.add("0-4095");
+        TestConfigFiles.writeChannelConfig(dir, cfg);
         AtomicInteger chooserCalls = new AtomicInteger(0);
         installDispatcherChoice(BinSetupChooser.Choice.CANCELLED, chooserCalls);
 
@@ -259,56 +260,28 @@ public class SplitAndMergeImageChannelsAnalysisTest {
     }
 
     @Test
-    public void splitMergeMinMaxWritebackPreservesPartialSetupLines() throws Exception {
+    public void splitMergeMinMaxWritebackUpdatesChannelConfigJson() throws Exception {
         File dir = temp.newFolder("partialOrigin");
-        writeChannelData(dir,
-                "DAPI GFAP",
-                "Blue Green",
-                "default default",
-                "100-Infinity 100-Infinity",
-                "None None",
-                "default default",
-                "classical classical",
-                "default default",
-                "zslice:full");
+        TestConfigFiles.writeChannelConfig(dir, TestConfigFiles.basicBinConfig("DAPI", "GFAP"));
 
         invokeUpdateBinMinMax(new SplitAndMergeImageChannelsAnalysis(), dir,
                 new String[]{"Custom Min-Max Display Ranges", "None"},
                 new String[]{"10-200", "50-4000"},
                 2);
 
-        File activeChannelData = new File(
-                new File(new File(new File(dir, "FLASH"), "Config"), ".settings"), "Channel_Data.txt");
-        List<String> lines = Files.readAllLines(activeChannelData.toPath());
-        assertEquals("DAPI GFAP", lines.get(0));
-        assertEquals("Blue Green", lines.get(1));
-        assertEquals("default default", lines.get(2));
-        assertEquals("100-Infinity 100-Infinity", lines.get(3));
-        // updateMinMax overwrites only line 5 with the new tab delimiter; other
-        // lines stay in whatever delimiter they had on disk.
-        assertEquals("10-200\tNone", lines.get(4));
-        assertEquals("default default", lines.get(5));
-        assertEquals("classical classical", lines.get(6));
-        assertEquals("default default", lines.get(7));
-        assertEquals("zslice:full", lines.get(8));
+        BinConfig updated = BinConfigIO.readPartialFromDirectory(dir.getAbsolutePath());
+        assertEquals(Arrays.asList("10-200", "None"), updated.channelMinMax);
     }
 
     @Test
-    public void minMaxWritebackPadsShortPartialSetupFileToLineFive() throws Exception {
+    public void minMaxWritebackCompletesPendingDisplayRangeInChannelConfig() throws Exception {
         File dir = temp.newFolder("shortPartial");
-        writeChannelData(dir, "DAPI GFAP", "Blue Green");
+        writePartialNamesAndColorsConfig(dir, "DAPI", "GFAP");
 
         BinConfigIO.updateMinMax(dir.getAbsolutePath(), new String[]{"10-200", "50-4000"});
 
-        File activeChannelData = new File(
-                new File(new File(new File(dir, "FLASH"), "Config"), ".settings"), "Channel_Data.txt");
-        List<String> lines = Files.readAllLines(activeChannelData.toPath());
-        assertEquals(5, lines.size());
-        assertEquals("DAPI GFAP", lines.get(0));
-        assertEquals("Blue Green", lines.get(1));
-        assertEquals("", lines.get(2));
-        assertEquals("", lines.get(3));
-        assertEquals("10-200\t50-4000", lines.get(4));
+        BinConfig updated = BinConfigIO.readPartialFromDirectory(dir.getAbsolutePath());
+        assertEquals(Arrays.asList("10-200", "50-4000"), updated.channelMinMax);
     }
 
     @Test
@@ -804,15 +777,18 @@ public class SplitAndMergeImageChannelsAnalysisTest {
         FeatureDependencyGate.setUiMode(false);
     }
 
-    private static void writeChannelData(File dir, String... lines) throws Exception {
-        File bin = new File(dir, ".bin");
-        assertTrue(bin.mkdirs());
-        StringBuilder content = new StringBuilder();
-        for (int i = 0; i < lines.length; i++) {
-            content.append(lines[i]).append("\n");
+    private static void writePartialNamesAndColorsConfig(File dir, String... names) throws Exception {
+        ChannelConfig cfg = new ChannelConfig();
+        for (int i = 0; i < names.length; i++) {
+            ChannelConfig.Channel channel = new ChannelConfig.Channel();
+            channel.index = i;
+            channel.name = names[i];
+            channel.color = i == 0 ? "Blue" : "Green";
+            channel.status.put(ChannelConfig.P_NAME, ChannelConfig.PropertyStatus.COMMITTED);
+            channel.status.put(ChannelConfig.P_COLOR, ChannelConfig.PropertyStatus.COMMITTED);
+            cfg.channels.add(channel);
         }
-        Files.write(new File(bin, "Channel_Data.txt").toPath(),
-                content.toString().getBytes(StandardCharsets.UTF_8));
+        ChannelConfigIO.write(TestConfigFiles.settingsDir(dir), cfg);
     }
 
     private interface InvocationResult {

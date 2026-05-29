@@ -5,8 +5,8 @@ import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinConfigIO;
 import flash.pipeline.bin.BinField;
 import flash.pipeline.bin.BinSetupDispatcher;
+import flash.pipeline.bin.ChannelConfigIO;
 import flash.pipeline.bin.ChannelIdentities;
-import flash.pipeline.bin.ChannelIdentitiesIO;
 import flash.pipeline.cli.CLIConfig;
 import flash.pipeline.deconv.DeconvolvedInputResolver;
 import flash.pipeline.image.AdaptiveParallelism;
@@ -432,9 +432,9 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
         saveSaturations(directory, channelNames, mdr.processMethodPerCh, mdr.saturationsPerCh);
         IJ.log("  - Saturations saved to FLASH/Config/.settings/Saturations.txt");
 
-        // Sync min-max values back to Channel_Data.txt line 5
+        // Sync min-max values back to channel_config.json.
         updateBinMinMax(directory, mdr.processMethodPerCh, mdr.customMinMaxPerCh, nCh);
-        IJ.log("  - Min-max display ranges synced to Channel_Data.txt");
+        IJ.log("  - Min-max display ranges synced to channel_config.json");
 
         try {
             AnalysisDetailsWriter.write(
@@ -1729,7 +1729,8 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
         if (projectRoot == null || channelCount <= 0) {
             return -1;
         }
-        ChannelIdentities identities = ChannelIdentitiesIO.read(new File(projectRoot, ".bin"));
+        ChannelIdentities identities = ChannelConfigIO.readChannelIdentities(
+                FlashProjectLayout.forDirectory(projectRoot.getAbsolutePath()).configurationWriteDir());
         return detectAutofluorescenceChannel(identities, channelCount);
     }
 
@@ -2498,7 +2499,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
         try {
             BinConfigIO.updateMinMax(directory, minMaxValues);
         } catch (IOException e) {
-            IJ.log("Warning: failed to sync min-max to Channel_Data.txt: " + e.getMessage());
+            IJ.log("Warning: failed to sync min-max to channel_config.json: " + e.getMessage());
         }
     }
 

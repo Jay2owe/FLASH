@@ -1,6 +1,7 @@
 package flash.pipeline.intelligence;
 
 import flash.pipeline.FLASH_Pipeline;
+import flash.pipeline.bin.ChannelConfigIO;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.ImageSourceDispatcher;
 import flash.pipeline.io.OrientationManifestIO;
@@ -30,19 +31,17 @@ public class AnalysisStatusScanner {
     public static final String CREATE_BIN_ID = "createBin";
     public static final String AGGREGATION_ID = "aggregation";
 
-    private static final String BIN_CONFIG = ".bin" + File.separator + "Channel_Data.txt";
-
     private final Map<Integer, String> tooltips = new HashMap<Integer, String>();
 
     public Map<Integer, AnalysisStatus> scan(File directory) {
         Map<Integer, AnalysisStatus> out = new HashMap<Integer, AnalysisStatus>();
         tooltips.clear();
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory.getAbsolutePath());
-        String currentBinHash = sha256(firstExistingFile(layout.channelDataReadFiles()));
+        File channelConfig = new File(layout.configurationWriteDir(), ChannelConfigIO.FILE_NAME);
+        String currentBinHash = sha256(channelConfig);
 
         put(out, FLASH_Pipeline.IDX_CREATE_BIN,
-                sidecarStatus(directory, CREATE_BIN_ID, currentBinHash,
-                        firstExistingFile(layout.channelDataReadFiles()) != null),
+                sidecarStatus(directory, CREATE_BIN_ID, currentBinHash, channelConfig.isFile()),
                 "Set Up Configuration");
         boolean roiOutputs = hasRoiOutputs(layout);
         boolean orientationManifest = OrientationManifestIO.getExistingFile(directory.getAbsolutePath()) != null;
@@ -115,7 +114,7 @@ public class AnalysisStatusScanner {
         }
 
         Map<String, Object> json = new HashMap<String, Object>();
-        json.put("binHash", sha256(firstExistingFile(layout.channelDataReadFiles())));
+        json.put("binHash", sha256(new File(layout.configurationWriteDir(), ChannelConfigIO.FILE_NAME)));
         json.put("ranAt", isoNow());
         json.put("imageCount", Integer.valueOf(Math.max(0, imageCount)));
         Files.write(new File(statusDir, analysisId + ".json").toPath(),

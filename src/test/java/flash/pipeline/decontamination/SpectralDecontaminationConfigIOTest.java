@@ -1,5 +1,7 @@
 package flash.pipeline.decontamination;
 
+import flash.pipeline.TestConfigFiles;
+import flash.pipeline.bin.ChannelConfigIO;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -22,7 +24,6 @@ public class SpectralDecontaminationConfigIOTest {
     @Test
     public void roundTripPersistsChannelRolesAndGoal() throws Exception {
         File dir = tempFolder.newFolder("data");
-        writeChannelData(dir);
 
         SpectralDecontaminationConfig config = new SpectralDecontaminationConfig();
         config.setTargetChannelIndex(2);
@@ -73,17 +74,18 @@ public class SpectralDecontaminationConfigIOTest {
     }
 
     @Test
-    public void writeDoesNotModifyChannelData() throws Exception {
+    public void writeDoesNotModifyChannelConfig() throws Exception {
         File dir = tempFolder.newFolder("data");
-        File channelData = writeChannelData(dir);
-        String before = new String(Files.readAllBytes(channelData.toPath()), StandardCharsets.UTF_8);
+        TestConfigFiles.writeChannelConfig(dir, TestConfigFiles.basicBinConfig("DAPI", "GFP", "RFP", "AF"));
+        File channelConfig = new File(TestConfigFiles.settingsDir(dir), ChannelConfigIO.FILE_NAME);
+        String before = new String(Files.readAllBytes(channelConfig.toPath()), StandardCharsets.UTF_8);
 
         SpectralDecontaminationConfig config = new SpectralDecontaminationConfig();
         config.setTargetChannelIndex(0);
         config.setGoal(SpectralDecontaminationConfig.Goal.SCORE_EXISTING_OBJECTS);
         SpectralDecontaminationConfigIO.writeToDirectory(dir.getAbsolutePath(), config);
 
-        String after = new String(Files.readAllBytes(channelData.toPath()), StandardCharsets.UTF_8);
+        String after = new String(Files.readAllBytes(channelConfig.toPath()), StandardCharsets.UTF_8);
         assertEquals(before, after);
     }
 
@@ -159,18 +161,6 @@ public class SpectralDecontaminationConfigIOTest {
         assertEquals(SpectralDecontaminationConfig.Goal.SCORE_EXISTING_OBJECTS, config.getGoal());
         assertEquals(1, config.getTargetChannelIndex());
         assertEquals(indexes(2), config.getExcludedChannelIndexes());
-    }
-
-    private File writeChannelData(File dir) throws Exception {
-        File bin = new File(dir, ".bin");
-        assertTrue(bin.mkdirs());
-        File channelData = new File(bin, "Channel_Data.txt");
-        String content = "DAPI GFP RFP AF\n"
-                + "Blue Green Red Cyan\n"
-                + "default default default default\n"
-                + "100-Infinity 100-Infinity 100-Infinity 100-Infinity\n";
-        Files.write(channelData.toPath(), content.getBytes(StandardCharsets.UTF_8));
-        return channelData;
     }
 
     private static List<Integer> indexes(int... values) {

@@ -5,8 +5,8 @@ import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinConfigIO;
 import flash.pipeline.bin.BinField;
 import flash.pipeline.bin.BinSetupDispatcher;
+import flash.pipeline.bin.ChannelConfigIO;
 import flash.pipeline.bin.ChannelIdentities;
-import flash.pipeline.bin.ChannelIdentitiesIO;
 import flash.pipeline.analyses.wizard.ThreeDObjectPreset;
 import flash.pipeline.analyses.wizard.ThreeDObjectPresetIO;
 import flash.pipeline.analyses.wizard.ThreeDObjectWizard;
@@ -762,7 +762,8 @@ public class ThreeDObjectAnalysis implements Analysis {
             IJ.log("[FLASH] No ROI sets found. 3D Object Analysis will analyse each full image stack.");
         }
 
-        ChannelIdentities channelIdentities = ChannelIdentitiesIO.read(new File(directory, ".bin"));
+        ChannelIdentities channelIdentities = ChannelConfigIO.readChannelIdentities(
+                FlashProjectLayout.forDirectory(directory).configurationWriteDir());
         applyCliObjectConfiguration(directory, cfg, channelIdentities);
 
         // --- Options dialogs with Back navigation ---

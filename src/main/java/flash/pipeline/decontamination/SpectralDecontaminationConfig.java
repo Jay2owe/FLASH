@@ -272,7 +272,7 @@ public class SpectralDecontaminationConfig {
         }
 
         if (!isInRange(targetChannelIndex, channelCount)) {
-            errors.add("Target channel must be one of the channels in Channel_Data.txt.");
+            errors.add("Target channel must be one of the channels in channel_config.json.");
         }
 
         validateIndexes("Bleed-through channel", bleedThroughChannelIndexes, channelCount, errors);

@@ -1,8 +1,8 @@
 package flash.pipeline.decontamination.wizard;
 
+import flash.pipeline.TestConfigFiles;
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.ChannelIdentities;
-import flash.pipeline.bin.ChannelIdentitiesIO;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -21,9 +21,7 @@ public class SpectralDecontamAutoDetectTest {
     @Test
     public void iba1Abeta405DatasetDetectsRoles() throws Exception {
         File root = temp.newFolder("project");
-        File bin = new File(root, ".bin");
-        assertTrue(bin.mkdirs());
-        ChannelIdentitiesIO.write(bin, new ChannelIdentities(Arrays.asList(
+        TestConfigFiles.writeChannelConfig(root, binConfig(), new ChannelIdentities(Arrays.asList(
                 new ChannelIdentities.Entry(1, "microglia_iba1", "complex", true),
                 new ChannelIdentities.Entry(2, "amyloid_abeta", "plaque", false),
                 new ChannelIdentities.Entry(3, "autofluorescence_channel", "", false)

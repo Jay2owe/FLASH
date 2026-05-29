@@ -1,5 +1,7 @@
 package flash.pipeline.click.training.stardist;
 
+import flash.pipeline.TestConfigFiles;
+import flash.pipeline.bin.BinConfig;
 import flash.pipeline.click.ClickStore;
 import flash.pipeline.click.ClicksConfigIO;
 import flash.pipeline.click.training.ImagePlusProvider;
@@ -73,7 +75,7 @@ public class StarDistDatasetPackagerTest {
     @Test
     public void metadataJsonHasExpectedFields() throws Exception {
         Path root = temp.newFolder("metadata").toPath();
-        writeChannelData(root, "DAPI\tIba1");
+        writeChannelConfig(root, "DAPI", "Iba1");
         Path clicksJson = modernClicksJson(root);
         writeClicksJson(clicksJson);
         Map<String, ImagePlus> raw = map("Image1", constantImage("raw", 4, 3, 2, 100));
@@ -417,13 +419,9 @@ public class StarDistDatasetPackagerTest {
         return count;
     }
 
-    private static void writeChannelData(Path root, String firstLine) throws Exception {
-        Path bin = FlashProjectLayout.forDirectory(root.toString())
-                .configurationWriteDir()
-                .toPath();
-        Files.createDirectories(bin);
-        String text = firstLine + "\nGrays\tGreen\n0\t0\n0-Infinity\t0-Infinity\n";
-        Files.write(bin.resolve("Channel_Data.txt"), text.getBytes(StandardCharsets.UTF_8));
+    private static void writeChannelConfig(Path root, String... channelNames) throws Exception {
+        BinConfig cfg = TestConfigFiles.basicBinConfig(channelNames);
+        TestConfigFiles.writeChannelConfig(root, cfg);
     }
 
     private static Path modernClicksJson(Path root) {

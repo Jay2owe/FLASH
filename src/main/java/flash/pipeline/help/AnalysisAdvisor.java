@@ -2,6 +2,8 @@ package flash.pipeline.help;
 
 import flash.pipeline.FLASH_Pipeline;
 import flash.pipeline.bin.BinConfigIO;
+import flash.pipeline.bin.ChannelConfigIO;
+import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.ImageSourceDispatcher;
 import flash.pipeline.recipes.PipelineRecipe;
 import flash.pipeline.recipes.PipelineRecipeIO;
@@ -54,8 +56,8 @@ public final class AnalysisAdvisor {
                     new int[0]);
         }
 
-        File config = flash.pipeline.io.FlashProjectLayout.forDirectory(
-                directory.getAbsolutePath()).channelDataReadFile();
+        FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory.getAbsolutePath());
+        File config = new File(layout.configurationWriteDir(), ChannelConfigIO.FILE_NAME);
         if (!config.exists()) {
             return new AdvisorResult(
                     "Run Set Up Configuration first.",
@@ -71,7 +73,7 @@ public final class AnalysisAdvisor {
         } catch (IOException e) {
             return new AdvisorResult(
                     "I can't confidently recommend a recipe.",
-                    "I found a Configuration folder, but couldn't read Channel_Data.txt. Re-run Set Up Configuration or pick analyses manually.",
+                    "I found a Configuration folder, but couldn't read channel_config.json. Re-run Set Up Configuration or pick analyses manually.",
                     null,
                     new int[0]);
         }

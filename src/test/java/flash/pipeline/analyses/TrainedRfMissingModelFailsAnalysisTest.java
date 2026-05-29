@@ -1,5 +1,7 @@
 package flash.pipeline.analyses;
 
+import flash.pipeline.TestConfigFiles;
+import flash.pipeline.bin.BinConfig;
 import flash.pipeline.recipes.RecipeReplayModelResolver;
 import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.DependencyService;
@@ -16,7 +18,6 @@ import org.junit.rules.TemporaryFolder;
 import java.io.File;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Proxy;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Collections;
@@ -43,16 +44,16 @@ public class TrainedRfMissingModelFailsAnalysisTest {
     public void missingTrainedRfModelFailsAnalysisBeforeImageProcessing() throws Exception {
         installAllDependenciesPresentForGate();
         File dir = temp.newFolder("missing-rf-analysis");
-        writeChannelData(dir,
-                "IBA1",
-                "Green",
-                "100",
-                "10-Infinity",
-                "None",
-                "default",
-                "trained_rf:missing_model:base=classical",
-                "None",
-                "zslice:full");
+        BinConfig cfg = TestConfigFiles.basicBinConfig("IBA1");
+        cfg.channelColors.clear();
+        cfg.channelColors.add("Green");
+        cfg.channelThresholds.clear();
+        cfg.channelThresholds.add("100");
+        cfg.channelSizes.clear();
+        cfg.channelSizes.add("10-Infinity");
+        cfg.segmentationMethods.clear();
+        cfg.addSegmentationMethodToken("trained_rf:missing_model:base=classical");
+        TestConfigFiles.writeChannelConfig(dir, cfg);
 
         ThreeDObjectAnalysis analysis = new ThreeDObjectAnalysis();
         analysis.setHeadless(true);
@@ -105,17 +106,6 @@ public class TrainedRfMissingModelFailsAnalysisTest {
         assertEquals(RecipeReplayModelResolver.Engine.TRAINED_RF, resolved.get(0).engine);
         assertEquals("rf_ok", resolved.get(0).modelKey);
         assertEquals(modelFile.toAbsolutePath().normalize().toString(), resolved.get(0).runtimeArgument);
-    }
-
-    private static void writeChannelData(File dir, String... lines) throws Exception {
-        File bin = new File(dir, ".bin");
-        assertTrue(bin.isDirectory() || bin.mkdirs());
-        StringBuilder content = new StringBuilder();
-        for (String line : lines) {
-            content.append(line).append('\n');
-        }
-        Files.write(new File(bin, "Channel_Data.txt").toPath(),
-                content.toString().getBytes(StandardCharsets.UTF_8));
     }
 
     private static void installAllDependenciesPresentForGate() throws Exception {

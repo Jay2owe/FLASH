@@ -1,5 +1,6 @@
 package flash.pipeline.bin;
 
+import flash.pipeline.TestConfigFiles;
 import flash.pipeline.segmentation.SegmentationMethod;
 import flash.pipeline.segmentation.SegmentationTokenParser;
 import org.junit.Rule;
@@ -7,8 +8,6 @@ import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
 import java.io.File;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 
 import static org.junit.Assert.*;
 
@@ -17,39 +16,19 @@ public class BinConfigEnhancedClassicalRoundTripTest {
     public TemporaryFolder temp = new TemporaryFolder();
 
     @Test
-    public void tokenRoundTripThroughChannelData() throws Exception {
+    public void tokenRoundTripThroughChannelConfig() throws Exception {
         String token = "enhanced_classical:thresh=120:minSize=200:maxSize=10000:"
                 + "morph=sphericity%3E%3D0.6%2Celongation%3C%3D2.0";
         File dir = temp.newFolder();
         BinConfig cfg = baseConfig();
         cfg.addSegmentationMethod(SegmentationTokenParser.parse(token));
 
-        BinConfigIO.writeFromConfig(dir.getAbsolutePath(), cfg);
+        TestConfigFiles.writeChannelConfig(dir, cfg);
         BinConfig back = BinConfigIO.readFromDirectory(dir.getAbsolutePath());
 
         assertEquals(token, back.segmentationMethods.get(0));
         assertTrue(back.isEnhancedClassical(0));
         assertEquals(2, back.getEnhancedClassicalMorphPredicates(0).size());
-    }
-
-    @Test
-    public void backwardCompatNineLineFileWithoutNewTokenLoadsWithNewMethodAbsent() throws Exception {
-        File dir = writeLegacyBin(
-                "DAPI IBA1",
-                "Blue Green",
-                "default 500",
-                "100-Infinity 50-5000",
-                "None None",
-                "default default",
-                "classical stardist:0.5:0.4",
-                "default default",
-                "zslice:full");
-
-        BinConfig cfg = BinConfigIO.readFromDirectory(dir.getAbsolutePath());
-
-        assertFalse(cfg.isEnhancedClassical(0));
-        assertFalse(cfg.isEnhancedClassical(1));
-        assertEquals("classical", cfg.segmentationMethods.get(0));
     }
 
     @Test
@@ -61,9 +40,9 @@ public class BinConfigEnhancedClassicalRoundTripTest {
         SegmentationMethod method = SegmentationTokenParser.parse(token);
         cfg.addSegmentationMethod(method);
 
-        BinConfigIO.writeFromConfig(dir.getAbsolutePath(), cfg);
+        TestConfigFiles.writeChannelConfig(dir, cfg);
         BinConfig back = BinConfigIO.readFromDirectory(dir.getAbsolutePath());
-        BinConfigIO.writeFromConfig(dir.getAbsolutePath(), back);
+        TestConfigFiles.writeChannelConfig(dir, back);
         BinConfig reread = BinConfigIO.readFromDirectory(dir.getAbsolutePath());
 
         assertEquals(token, reread.segmentationMethods.get(0));
@@ -82,16 +61,4 @@ public class BinConfigEnhancedClassicalRoundTripTest {
         return cfg;
     }
 
-    private File writeLegacyBin(String... lines) throws Exception {
-        File dir = temp.newFolder();
-        File bin = new File(dir, ".bin");
-        assertTrue(bin.mkdirs());
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < lines.length; i++) {
-            sb.append(lines[i]).append('\n');
-        }
-        Files.write(new File(bin, "Channel_Data.txt").toPath(),
-                sb.toString().getBytes(StandardCharsets.UTF_8));
-        return dir;
-    }
 }

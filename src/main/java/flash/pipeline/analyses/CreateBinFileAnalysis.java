@@ -7,8 +7,6 @@ import flash.pipeline.bin.BinField;
 import flash.pipeline.bin.BinMacroIndex;
 import flash.pipeline.bin.ChannelConfig;
 import flash.pipeline.bin.ChannelConfigIO;
-import flash.pipeline.bin.ChannelIdentities;
-import flash.pipeline.bin.ChannelIdentitiesIO;
 import flash.pipeline.cellpose.Cellpose3DRunner;
 import flash.pipeline.cellpose.CellposeModel;
 import flash.pipeline.cellpose.CellposeRuntime;
@@ -83,7 +81,6 @@ import flash.pipeline.ui.wizard.ResumePromptDialog;
 import flash.pipeline.ui.wizard.TrainCustomEngineWizard;
 import flash.pipeline.ui.wizard.TrainCustomEngineWorkflow;
 import flash.pipeline.zslice.ZSliceConfig;
-import flash.pipeline.zslice.ZSliceConfigIO;
 import flash.pipeline.zslice.ZSliceMode;
 import flash.pipeline.zslice.ZSliceOps;
 import flash.pipeline.zslice.ZSliceRange;
@@ -155,7 +152,7 @@ import java.util.Set;
  * Migration of the macro createBinFile().
  *
  * Creates Directory/FLASH/Config/.settings and writes:
- * - Channel_Data.txt (names, colors, object thresholds, sizes, minmax, intensity thresholds)
+ * - channel_config.json (names, colors, object thresholds, sizes, minmax, intensity thresholds)
  * - C1_Filters.ijm ... Cn_Filters.ijm (from preset templates)
  * - defaultFilter.ijm
  *
@@ -891,7 +888,6 @@ public class CreateBinFileAnalysis implements Analysis {
         if (FlashProjectLayout.forDirectory(directory).existingConfigurationDir() != null) {
             try {
                 existingCfg = BinConfigIO.readFromDirectory(directory);
-                BinConfigIO.updateFilterPresets(directory, existingCfg.channelFilterPresets);
             } catch (IOException e) {
                 // .bin exists but is malformed — offer full override
             }
@@ -1407,7 +1403,7 @@ public class CreateBinFileAnalysis implements Analysis {
                     markPropertyCommit(channel, propertyKeys[i], ChannelConfig.PropertyStatus.CONFIGURED);
                 }
             }
-            ChannelConfigIO.writeWithDerivedLegacy(channelConfigSettingsDir(binFolder), cc);
+            ChannelConfigIO.write(channelConfigSettingsDir(binFolder), cc);
         } catch (IOException e) {
             IJ.log("FLASH: incremental config write failed: " + e.getMessage());
         }
@@ -5772,7 +5768,7 @@ public class CreateBinFileAnalysis implements Analysis {
 
             // \u2500\u2500 Step 3: Channel Threshold QC \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
             // Single threshold input per channel; populates both
-            // cfg.objectThresholds (line 3 of Channel_Data.txt) and
+            // cfg.objectThresholds and
             // cfg.intensityThresholds (line 6) so the on-disk 6-line
             // format and downstream analyses see the same value.
             if (doRoiIntensityTh) {
@@ -8426,7 +8422,7 @@ public class CreateBinFileAnalysis implements Analysis {
             }
             markAllKnown(channel, ChannelConfig.PropertyStatus.COMMITTED);
         }
-        ChannelConfigIO.writeWithDerivedLegacy(channelConfigSettingsDir(binFolder), cc);
+        ChannelConfigIO.write(channelConfigSettingsDir(binFolder), cc);
         File projectRoot = projectRootForConfigurationDir(binFolder);
         AnalysisStatusScanner.writeSidecar(projectRoot,
                 AnalysisStatusScanner.CREATE_BIN_ID,
@@ -8443,22 +8439,6 @@ public class CreateBinFileAnalysis implements Analysis {
             return ModelCatalogIO.read(projectRoot.toPath());
         } catch (RuntimeException e) {
             return null;
-        }
-    }
-
-    private void writeChannelIdentities(File binFolder, BinUserConfig cfg) throws IOException {
-        if (cfg == null || cfg.markerIds == null || cfg.markerIds.isEmpty()) return;
-        List<ChannelIdentities.Entry> entries = new ArrayList<ChannelIdentities.Entry>();
-        for (int i = 0; i < cfg.markerIds.size(); i++) {
-            String markerId = cfg.markerIds.get(i);
-            if (markerId == null || markerId.trim().isEmpty()) continue;
-            String shape = i < cfg.markerShapes.size() ? cfg.markerShapes.get(i) : "";
-            boolean crowdingSensitive = i < cfg.markerCrowdingSensitive.size()
-                    && cfg.markerCrowdingSensitive.get(i).booleanValue();
-            entries.add(new ChannelIdentities.Entry(i, markerId, shape, crowdingSensitive));
-        }
-        if (!entries.isEmpty()) {
-            ChannelIdentitiesIO.write(binFolder, new ChannelIdentities(entries));
         }
     }
 
@@ -8862,7 +8842,7 @@ public class CreateBinFileAnalysis implements Analysis {
                 IJ.log("Sandbox filter for C" + (channelIndex + 1)
                         + " matches bundled preset '" + matchedPreset + "'. "
                         + (writeConfigOnDemote
-                        ? "Storing that preset in Channel_Data.txt."
+                        ? "Storing that preset in channel_config.json."
                         : "That preset will be stored when the configuration is saved."));
             }
             if (matchedPreset == null) {
@@ -8880,7 +8860,7 @@ public class CreateBinFileAnalysis implements Analysis {
             IJ.log("Custom filter for C" + (channelIndex + 1)
                     + " matches bundled preset '" + result.demotedPreset
                     + "'. " + (writeConfigOnDemote
-                    ? "Storing that preset in Channel_Data.txt"
+                    ? "Storing that preset in channel_config.json"
                     : "That preset will be stored when the configuration is saved")
                     + " while preserving the " + source + " C" + (channelIndex + 1)
                     + "_Filters.ijm file.");
