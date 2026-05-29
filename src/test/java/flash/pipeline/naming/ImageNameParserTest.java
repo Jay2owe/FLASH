@@ -139,7 +139,7 @@ public class ImageNameParserTest {
     @Test
     public void parse_specialCharacters_sanitised() {
         NameParts np = ImageNameParser.parse("Exp-Mouse:5_LH_Cortex");
-        // parseStrict: animal="Mouse:5", hemi="LH" -> known hemi -> strict match
+        // parse: animal="Mouse:5", hemi="LH" -> known hemi -> strict match
         assertTrue(np.strictMatch);
         assertEquals("Mouse:5", np.animal);
     }

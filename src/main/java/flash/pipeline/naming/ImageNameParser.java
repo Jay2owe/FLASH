@@ -74,24 +74,7 @@ public final class ImageNameParser {
         return container + " :: " + series;
     }
 
-    /**
-     * Parse a structured image title:
-     * - Detect a Bio-Formats series suffix ({@code container.lif - SeriesName}); the
-     *   {@code SeriesName} (after stripping any extension) becomes the animal token.
-     * - Otherwise, split the LHS on the <em>last</em> hyphen into [experiment, animal].
-     * - The animal/series part must end with {@code _Hemisphere} (LH/RH) optionally
-     *   followed by {@code _Region}.
-     *
-     * Returns a {@link NameParts} with {@code strictMatch = true} when the parse
-     * yields at least an animal token; the caller checks {@link NameParts#hasKnownHemisphere()}
-     * to decide whether the convention was satisfied.
-     *
-     * @deprecated Prefer {@link #parse(String)} in production paths so
-     * arbitrary filenames fall back to a safe sample identifier instead of
-     * producing empty animal/hemisphere fields.
-     */
-    @Deprecated
-    public static NameParts parseStrict(String imageTitleOrFilename) {
+    private static NameParts parseStructured(String imageTitleOrFilename) {
         if (imageTitleOrFilename == null) {
             return new NameParts("", "", "", "", false, null);
         }
@@ -193,7 +176,7 @@ public final class ImageNameParser {
             return new NameParts("", "", "", "", false, null);
         }
 
-        NameParts strict = parseStrict(imageTitleOrFilename);
+        NameParts strict = parseStructured(imageTitleOrFilename);
 
         // Accept strict result when we got at least an animal name and a
         // recognised hemisphere — that's the minimum for the convention.

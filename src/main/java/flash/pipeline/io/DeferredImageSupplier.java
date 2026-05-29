@@ -393,23 +393,6 @@ public class DeferredImageSupplier {
         return containerFiles.get(seriesRefs.get(globalSeriesIndex).containerIndex);
     }
 
-    /**
-     * Legacy accessor preserved for backwards compatibility with the three
-     * anonymous {@code DeferredImageSupplier} subclasses and a handful of
-     * call sites that pre-date the dual-mode refactor.
-     *
-     * @return the CONTAINER source file, or in TIFF_FOLDER mode the first
-     *         file in the list (so callers that read only the path's parent
-     *         directory still behave correctly).
-     * @deprecated prefer {@link #getContainerFile()} which returns the
-     *             logical container (file in CONTAINER mode, directory in
-     *             TIFF_FOLDER mode).
-     */
-    @Deprecated
-    public File getLifFile() {
-        return mode == Mode.CONTAINER ? containerFile : tiffFiles.get(0);
-    }
-
     /** Returns the display name used for synthesised series titles. */
     public String getContainerDisplayName() {
         return containerDisplayName;

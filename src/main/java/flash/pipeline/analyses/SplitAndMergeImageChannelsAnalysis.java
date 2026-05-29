@@ -527,12 +527,12 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
 
         // Read metadata names and .lif filename for title reconstruction
         List<String> metaNames = null;
-        String lifFileName = null;
+        String sourceDisplayName = null;
         try {
             List<SeriesMeta> metas = ImageSourceDispatcher.readAllMetadata(directory);
             metaNames = new ArrayList<String>();
             for (SeriesMeta m : metas) metaNames.add(m.name);
-            lifFileName = supplier.getLifFile().getName();
+            sourceDisplayName = supplier.getContainerDisplayName();
         } catch (Exception e) {
             // Can't read metadata — include all series
             for (int i = 0; i < totalImages; i++) work.add(i);
@@ -543,13 +543,15 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
             String metaName = (metaNames != null && i < metaNames.size())
                     ? metaNames.get(i) : null;
 
-            if (metaName == null || lifFileName == null) {
+            if (metaName == null) {
                 work.add(i);
                 continue;
             }
 
             // Reconstruct the Bio-Formats title: "filename.lif - SeriesName"
-            String expectedTitle = lifFileName + " - " + metaName;
+            String expectedTitle = sourceDisplayName == null || sourceDisplayName.isEmpty()
+                    ? metaName
+                    : sourceDisplayName + " - " + metaName;
             ResolvedImageMetadata metadata = ImageOrientationResolver.resolve(
                     directory, expectedTitle, i + 1);
             NameParts parts = metadata.toNameParts();

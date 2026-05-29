@@ -22,15 +22,11 @@ public final class ImageOrientationResolver {
             return ResolvedImageMetadata.fromManifest(manifestRow.get());
         }
 
-        NameParts strict = ImageNameParser.parseStrict(imageTitle);
-        if (!strict.animal.isEmpty() && strict.hasKnownHemisphere()) {
-            return ResolvedImageMetadata.fromNameParts(
-                    strict, ResolvedImageMetadata.Source.STRICT_FILENAME);
-        }
-
-        return ResolvedImageMetadata.fromNameParts(
-                ImageNameParser.parse(imageTitle),
-                ResolvedImageMetadata.Source.FILENAME_FALLBACK);
+        NameParts parts = ImageNameParser.parse(imageTitle);
+        ResolvedImageMetadata.Source source = parts.strictMatch
+                ? ResolvedImageMetadata.Source.STRICT_FILENAME
+                : ResolvedImageMetadata.Source.FILENAME_FALLBACK;
+        return ResolvedImageMetadata.fromNameParts(parts, source);
     }
 
     public static Optional<OrientationManifestRow> findConfirmed(String directory,
