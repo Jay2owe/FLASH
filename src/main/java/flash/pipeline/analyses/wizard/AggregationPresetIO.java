@@ -5,7 +5,6 @@ import flash.pipeline.ui.wizard.PresetIO;
 import java.io.File;
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 
 /**
@@ -26,11 +25,6 @@ public class AggregationPresetIO extends PresetIO<AggregationPreset> {
     @Override
     protected String presetDirectoryName() {
         return "Result Aggregation";
-    }
-
-    @Override
-    protected List<File> legacyPresetDirectories() {
-        return Collections.singletonList(new File(projectRootDirectory(), "Aggregation Presets"));
     }
 
     @Override

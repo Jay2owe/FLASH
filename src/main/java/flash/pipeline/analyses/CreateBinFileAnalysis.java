@@ -862,7 +862,7 @@ public class CreateBinFileAnalysis implements Analysis {
             return;
         }
 
-        // ── Override existing .bin ───────────────────────────────────────
+        // ── Override existing configuration ──────────────────────────────
         if (headless || GraphicsEnvironment.isHeadless()) {
             if (cliConfig != null) {
                 throw new IllegalStateException("Cannot run Set Up Configuration headless "
@@ -889,7 +889,7 @@ public class CreateBinFileAnalysis implements Analysis {
             try {
                 existingCfg = BinConfigIO.readFromDirectory(directory);
             } catch (IOException e) {
-                // .bin exists but is malformed — offer full override
+                // Configuration exists but is malformed — offer full override
             }
 
             PipelineDialog ovr = setupAnalysisDialog("Set Up Configuration");
@@ -3324,9 +3324,6 @@ public class CreateBinFileAnalysis implements Analysis {
     private File projectRootForBinFolder(File binFolder) {
         if (binFolder == null) return new File(".");
         File parent = binFolder.getParentFile();
-        if (FlashProjectLayout.LEGACY_BIN_DIR.equals(binFolder.getName()) && parent != null) {
-            return parent;
-        }
         String folderName = binFolder.getName();
         if (FlashProjectLayout.SETTINGS_DIR.equals(folderName)
                 && parent != null
@@ -3336,8 +3333,7 @@ public class CreateBinFileAnalysis implements Analysis {
                 && parent.getParentFile().getParentFile() != null) {
             return parent.getParentFile().getParentFile();
         }
-        if ((FlashProjectLayout.CONFIGURATION_DIR.equals(folderName)
-                || FlashProjectLayout.LEGACY_CONFIGURATION_DIR.equals(folderName))
+        if (FlashProjectLayout.CONFIGURATION_DIR.equals(folderName)
                 && parent != null
                 && FlashProjectLayout.FLASH_DIR.equals(parent.getName())
                 && parent.getParentFile() != null) {
@@ -8371,7 +8367,7 @@ public class CreateBinFileAnalysis implements Analysis {
     // ── Filter resolution ─────────────────────────────────────────────
 
     /**
-     * Resolves the filter macro content for a channel: first checks .bin/ on disk,
+     * Resolves the filter macro content for a channel: first checks saved configuration macros,
      * then falls back to the bundled preset from JAR resources.
      */
     private String resolveFilterContent(File binFolder, BinUserConfig cfg, int channelIndex) {

@@ -147,9 +147,6 @@ public final class BinMacroIndex {
     private static File projectRootForBinFolder(File binFolder) {
         if (binFolder == null) return new File(".");
         File parent = binFolder.getParentFile();
-        if (FlashProjectLayout.LEGACY_BIN_DIR.equals(binFolder.getName()) && parent != null) {
-            return parent;
-        }
         String folderName = binFolder.getName();
         if (FlashProjectLayout.SETTINGS_DIR.equals(folderName)
                 && parent != null
@@ -159,8 +156,7 @@ public final class BinMacroIndex {
                 && parent.getParentFile().getParentFile() != null) {
             return parent.getParentFile().getParentFile();
         }
-        if ((FlashProjectLayout.CONFIGURATION_DIR.equals(folderName)
-                || FlashProjectLayout.LEGACY_CONFIGURATION_DIR.equals(folderName))
+        if (FlashProjectLayout.CONFIGURATION_DIR.equals(folderName)
                 && parent != null
                 && FlashProjectLayout.FLASH_DIR.equals(parent.getName())
                 && parent.getParentFile() != null) {

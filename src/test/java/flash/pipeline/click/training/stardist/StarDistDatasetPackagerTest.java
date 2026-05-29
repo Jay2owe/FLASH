@@ -113,29 +113,6 @@ public class StarDistDatasetPackagerTest {
     }
 
     @Test
-    public void metadataClicksPathUsesLegacyBinWhenOnlyLegacyClicksJsonExists() throws Exception {
-        Path root = temp.newFolder("legacy-clicks").toPath();
-        Path clicksJson = root.resolve(".bin").resolve(ClicksConfigIO.FILE_NAME);
-        writeClicksJson(clicksJson);
-        Map<String, ImagePlus> raw = map("Image1", constantImage("raw", 4, 3, 1, 100));
-        Map<String, ImagePlus> labels = map("Image1", labelImage("labels", new int[][][] {
-                {{1, 1, 0, 0}, {1, 0, 0, 0}, {0, 0, 0, 0}}
-        }));
-        ClickStore clicks = new ClickStore();
-        clicks.add(click("Image1", 2, 1, ClickStore.Verdict.POSITIVE));
-
-        Path output = new StarDistDatasetPackager()
-                .packageDataset(root, "session", 2, clicks,
-                        provider(raw), provider(labels))
-                .outputDir;
-
-        Map<String, Object> json = JsonIO.parseObject(new String(
-                Files.readAllBytes(output.resolve("metadata.json")), StandardCharsets.UTF_8));
-        assertEquals(relativePath(output, clicksJson),
-                JsonIO.stringValue(json.get("sourceClicksJsonPath")));
-    }
-
-    @Test
     public void imagesWithoutClicksAreSkipped() throws Exception {
         Path root = temp.newFolder("skipped").toPath();
         Map<String, ImagePlus> raw = new HashMap<String, ImagePlus>();

@@ -120,30 +120,6 @@ public class SpectralDecontaminationConfigIOTest {
     }
 
     @Test
-    public void readFromDirectoryFallsBackToLegacyBinConfig() throws Exception {
-        File dir = tempFolder.newFolder("legacyData");
-        File bin = new File(dir, ".bin");
-        assertTrue(bin.mkdirs());
-        File legacy = new File(bin, SpectralDecontaminationConfigIO.CONFIG_FILENAME);
-        String json = "{\n"
-                + "  \"version\": 1,\n"
-                + "  \"goal\": \"create_cleaned_mask\",\n"
-                + "  \"targetChannelIndex\": 2,\n"
-                + "  \"bleedThroughChannelIndexes\": [],\n"
-                + "  \"autofluorescenceChannelIndexes\": [],\n"
-                + "  \"excludedChannelIndexes\": []\n"
-                + "}\n";
-        Files.write(legacy.toPath(), json.getBytes(StandardCharsets.UTF_8));
-
-        assertTrue(SpectralDecontaminationConfigIO.exists(dir.getAbsolutePath()));
-        SpectralDecontaminationConfig config =
-                SpectralDecontaminationConfigIO.readFromDirectory(dir.getAbsolutePath());
-
-        assertEquals(SpectralDecontaminationConfig.Goal.CREATE_CLEANED_MASK, config.getGoal());
-        assertEquals(2, config.getTargetChannelIndex());
-    }
-
-    @Test
     public void readAcceptsGoalLabelForManualEdits() throws Exception {
         File file = tempFolder.newFile("Spectral_Decontamination_Config.json");
         String json = "{\n"

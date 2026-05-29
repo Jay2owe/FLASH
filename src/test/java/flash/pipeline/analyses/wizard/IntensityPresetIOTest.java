@@ -1,14 +1,10 @@
 package flash.pipeline.analyses.wizard;
 
-import flash.pipeline.ui.wizard.JsonIO;
-
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
 import java.io.File;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
@@ -108,21 +104,4 @@ public class IntensityPresetIOTest {
         assertTrue(new File(io.presetDirectory(), "neun_restricted.json").isFile());
     }
 
-    @Test
-    public void loadFindsLegacyProjectRootPresetFolder() throws Exception {
-        File root = temp.newFolder("legacy-intensity");
-        File legacyDir = new File(root, "Intensity Presets");
-        assertTrue(legacyDir.mkdirs());
-        IntensityPreset preset = new IntensityPreset("Legacy Intensity", "test", "1",
-                "custom", IntensityWizard.MODE_WHOLE_ROI_MEAN,
-                new LinkedHashMap<String, String>(), new LinkedHashMap<String, String>(),
-                "", Arrays.asList("LH"));
-        Files.write(new File(legacyDir, "legacy_intensity.json").toPath(),
-                JsonIO.write(preset.toJsonObject()).getBytes(StandardCharsets.UTF_8));
-
-        IntensityPreset loaded = new IntensityPresetIO(root).load("Legacy Intensity");
-
-        assertEquals("Legacy Intensity", loaded.getName());
-        assertFalse(loaded.getSpatial().isEnabled());
-    }
 }

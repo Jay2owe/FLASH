@@ -390,7 +390,7 @@ public class ImageSourceDispatcherTest {
     }
 
     @Test
-    public void maybeWarnUncalibrated_markerSuppressesWarning() throws Exception {
+    public void maybeWarnUncalibrated_projectRootMarkerDoesNotSuppressWarning() throws Exception {
         File dir = createProjectWithInputTiff("uncalibrated-suppressed");
         assertTrue(new File(dir,
                 ImageSourceDispatcher.SUPPRESS_CALIBRATION_WARNING_MARKER).createNewFile());
@@ -402,7 +402,7 @@ public class ImageSourceDispatcherTest {
             }
         });
 
-        assertFalse("marker should suppress calibration warning",
+        assertTrue("project-root marker should not suppress calibration warning",
                 added.contains("no physical calibration"));
     }
 

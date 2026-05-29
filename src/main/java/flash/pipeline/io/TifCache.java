@@ -23,7 +23,6 @@ public class TifCache {
 
     /** Cache directory name, created inside the working directory. */
     public static final String CACHE_DIR = FlashProjectLayout.TIF_CACHE_DIR;
-    public static final String LEGACY_CACHE_DIR = FlashProjectLayout.LEGACY_TIF_CACHE_DIR;
 
     /**
      * Returns the write cache directory for the given working directory.

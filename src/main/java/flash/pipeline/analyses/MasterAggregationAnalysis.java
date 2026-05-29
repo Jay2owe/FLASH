@@ -272,7 +272,7 @@ public class MasterAggregationAnalysis implements Analysis {
     /**
      * Main-panel configuration dialog. Shows:
      * <ul>
-     *   <li>A preset dropdown populated from {@code Aggregation Presets/}.</li>
+     *   <li>A preset dropdown populated from the FLASH preset directory.</li>
      *   <li>The shared condition-assignment review table.</li>
      *   <li>Grouping granularity dropdown.</li>
      *   <li>Output radio group with a per-mm^3 availability explanation.</li>

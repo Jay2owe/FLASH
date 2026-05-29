@@ -45,7 +45,7 @@ public final class IntensityDetailsWriter {
      * measurement.
      *
      * @param analysisDetailsDir  target directory for .txt files
-     * @param binDir              .bin config directory (unused, kept for API consistency)
+     * @param binDir              configuration directory (unused, kept for API consistency)
      * @param channelName         channel name (e.g. "DAPI")
      * @param channelIndex1Based  1-based channel index (unused, kept for API consistency)
      * @param filterEnabled       whether filtering was applied

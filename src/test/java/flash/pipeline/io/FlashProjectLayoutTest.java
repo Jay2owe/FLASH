@@ -30,8 +30,6 @@ public class FlashProjectLayoutTest {
         assertPath(new File(project, "FLASH"), layout.flashRoot());
         assertPath(new File(project, "FLASH/Config"), layout.visibleConfigurationDir());
         assertPath(new File(project, "FLASH/Config/.settings"), layout.configurationWriteDir());
-        assertPath(new File(project, "FLASH/Config/.settings/Channel_Data.txt"),
-                layout.channelDataWriteFile());
         assertPath(new File(project, "FLASH/Results/Tables/Project Summary/Conditions.csv"),
                 layout.projectSummaryWriteFile(FlashProjectLayout.CONDITIONS_FILENAME));
         assertPath(new File(project, "FLASH/Results/Tables/Project Summary/Statistics.csv"),
@@ -113,39 +111,18 @@ public class FlashProjectLayoutTest {
     }
 
     @Test
-    public void configurationReadPaths_preferNewThenLegacyAndDoNotCreateDirectories() throws Exception {
+    public void configurationReadPathsUseOnlyCanonicalSettingsDirAndDoNotCreateDirectories() throws Exception {
         File project = temp.newFolder("project");
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(project.getAbsolutePath());
 
         assertPaths(layout.configurationReadDirs(),
-                new File(project, "FLASH/Config/.settings"),
-                new File(project, "FLASH/Config"),
-                new File(project, "FLASH/00 - Configuration"),
-                new File(project, ".bin"));
-        assertPaths(layout.channelDataReadFiles(),
-                new File(project, "FLASH/Config/.settings/Channel_Data.txt"),
-                new File(project, "FLASH/Config/Channel_Data.txt"),
-                new File(project, "FLASH/00 - Configuration/Channel_Data.txt"),
-                new File(project, ".bin/Channel_Data.txt"));
+                new File(project, "FLASH/Config/.settings"));
         assertNull(layout.existingConfigurationDir());
-        assertPath(new File(project, "FLASH/Config/.settings/Channel_Data.txt"),
-                layout.channelDataReadFile());
         assertFalse(new File(project, "FLASH").exists());
-        assertFalse(new File(project, ".bin").exists());
 
-        File legacyBin = new File(project, ".bin");
-        assertTrue(legacyBin.mkdirs());
-        File legacyChannelData = new File(legacyBin, "Channel_Data.txt");
-        assertTrue(legacyChannelData.createNewFile());
-        assertPath(legacyBin, layout.existingConfigurationDir());
-        assertPath(legacyChannelData, layout.channelDataReadFile());
-
-        File newConfig = new File(project, "FLASH/Config/.settings");
-        assertTrue(newConfig.mkdirs());
-        File newChannelData = new File(newConfig, "Channel_Data.txt");
-        assertTrue(newChannelData.createNewFile());
-        assertPath(newConfig, layout.existingConfigurationDir());
-        assertPath(newChannelData, layout.channelDataReadFile());
+        File settings = new File(project, "FLASH/Config/.settings");
+        assertTrue(settings.mkdirs());
+        assertPath(settings, layout.existingConfigurationDir());
     }
 
     @Test
@@ -164,35 +141,24 @@ public class FlashProjectLayoutTest {
     }
 
     @Test
-    public void rootReadDirs_includeNewPathThenLegacyFallbacks() throws Exception {
+    public void rootReadDirsUseOnlyCanonicalPaths() throws Exception {
         File project = temp.newFolder("project");
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(project.getAbsolutePath());
 
         assertPaths(layout.presetsReadDirs(),
-                new File(project, "FLASH/.settings/Presets"),
-                new File(project, "FLASH/Presets"),
-                new File(project, ".bin/Custom Filter Presets"));
+                new File(project, "FLASH/.settings/Presets"));
         assertPath(new File(project, "FLASH/.settings/Presets/Custom Filter Presets"),
                 layout.customFilterPresetWriteDir());
         assertPaths(layout.customFilterPresetReadDirs(),
-                new File(project, "FLASH/.settings/Presets/Custom Filter Presets"),
-                new File(project, "FLASH/Presets/Custom Filter Presets"),
-                new File(project, ".bin/Custom Filter Presets"));
+                new File(project, "FLASH/.settings/Presets/Custom Filter Presets"));
         assertPaths(layout.tifCacheReadDirs(),
-                new File(project, "FLASH/Cache/TIF"),
-                new File(project, ".tif_cache"));
+                new File(project, "FLASH/Cache/TIF"));
         assertPaths(layout.statusReadDirs(),
-                new File(project, "FLASH/Status/.settings"),
-                new File(project, "FLASH/Status"),
-                new File(project, ".flash-status"));
+                new File(project, "FLASH/Status/.settings"));
         assertPaths(layout.analysisStatusReadDirs(),
-                new File(project, "FLASH/Status/.settings/Analysis"),
-                new File(project, "FLASH/Status/Analysis"),
-                new File(project, ".flash-status"));
+                new File(project, "FLASH/Status/.settings/Analysis"));
         assertPaths(layout.statusReadFiles(".ihf-no-input-folder"),
-                new File(project, "FLASH/Status/.settings/.ihf-no-input-folder"),
-                new File(project, "FLASH/Status/.ihf-no-input-folder"),
-                new File(project, ".ihf-no-input-folder"));
+                new File(project, "FLASH/Status/.settings/.ihf-no-input-folder"));
     }
 
     private static void assertPaths(List<File> actual, File... expected) {

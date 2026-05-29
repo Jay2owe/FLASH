@@ -88,11 +88,6 @@ public class SpectralDecontaminationConfigIO {
     }
 
     private static File configReadFile(String directory) {
-        FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
-        for (File dir : layout.configurationReadDirs()) {
-            File candidate = new File(dir, CONFIG_FILENAME);
-            if (candidate.isFile()) return candidate;
-        }
         return configWriteFile(directory);
     }
 

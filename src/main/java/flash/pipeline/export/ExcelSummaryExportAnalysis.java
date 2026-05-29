@@ -297,7 +297,7 @@ public class ExcelSummaryExportAnalysis implements Analysis {
     /**
      * Main-panel configuration dialog. Shows only:
      * <ul>
-     *   <li>Preset dropdown (populated from {@code Excel Presets/}).</li>
+     *   <li>Preset dropdown populated from the FLASH preset directory.</li>
      *   <li>{@code [Save as preset...]} button.</li>
      *   <li>Read-only preview label listing which sheets the preset will emit.</li>
      * </ul>

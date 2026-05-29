@@ -27,7 +27,7 @@ public class BinMacroIndexTest {
     }
 
     @Test
-    public void savedCustomFilterPresetNamesUseAllReadDirsDedupeAndSort() throws Exception {
+    public void savedCustomFilterPresetNamesUseCanonicalPresetDirDedupeAndSort() throws Exception {
         File project = temp.newFolder("project");
         File binFolder = configurationDir(project);
         assertTrue(binFolder.mkdirs());
@@ -40,10 +40,9 @@ public class BinMacroIndexTest {
 
         List<String> names = BinMacroIndex.listSavedCustomFilterPresetNames(binFolder);
 
-        assertEquals(3, names.size());
+        assertEquals(2, names.size());
         assertEquals("Alpha cleanup", names.get(0));
-        assertEquals("legacy setup cleanup", names.get(1));
-        assertEquals("zeta cleanup", names.get(2));
+        assertEquals("zeta cleanup", names.get(1));
     }
 
     @Test

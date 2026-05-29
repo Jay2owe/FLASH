@@ -662,13 +662,6 @@ public final class StarDistDatasetPackager {
         if (Files.isRegularFile(writePath)) {
             return writePath;
         }
-        for (File dir : layout.configurationReadDirs()) {
-            Path candidate = dir.toPath().resolve(ClicksConfigIO.FILE_NAME)
-                    .toAbsolutePath().normalize();
-            if (Files.isRegularFile(candidate)) {
-                return candidate;
-            }
-        }
         return writePath;
     }
 

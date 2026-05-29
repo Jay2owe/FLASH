@@ -2982,7 +2982,7 @@ public class ThreeDObjectAnalysis implements Analysis {
                     if (!compactLog) {
                         IJ.log("    - Threshold: " + fr.threshold);
                         if (verboseLogging) {
-                            IJ.log("    [DEBUG] Threshold token from .bin: '" + thresholdTokens[c] + "' -> resolved: " + fr.threshold);
+                            IJ.log("    [DEBUG] Threshold token from configuration: '" + thresholdTokens[c] + "' -> resolved: " + fr.threshold);
                         }
                         IJ.log("    - Size range: " + fr.minSizeVox + "-" + (fr.maxSizeVox == Integer.MAX_VALUE ? "Infinity" : fr.maxSizeVox));
                     }
@@ -3963,7 +3963,7 @@ public class ThreeDObjectAnalysis implements Analysis {
                     FilterExecutor.runThreadSafe(filtered, defaultMacro);
                     if (!compactLog) IJ.log("    - [Ch " + (c + 1) + "] Filter applied: bundled default filter (no " + filterFilename + " found)");
                 } else {
-                    IJ.log("    - [Ch " + (c + 1) + "] WARNING: No filter applied (missing .bin filter and bundled default)"); // always log warnings
+                    IJ.log("    - [Ch " + (c + 1) + "] WARNING: No filter applied (missing saved filter and bundled default)"); // always log warnings
                 }
             }
 

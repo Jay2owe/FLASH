@@ -1,15 +1,14 @@
 package flash.pipeline.io;
 
 import java.io.File;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
 /**
  * Central path policy for files written under a FLASH project directory.
  * User-facing output helpers point at the single {@code FLASH/Results/}
- * tree. Configuration, cache, and status helpers keep their own compatibility
- * rules because they are outside the results-layout migration.
+ * tree. Configuration, cache, and status helpers use their canonical runtime
+ * locations only.
  */
 public final class FlashProjectLayout {
     public static final String FLASH_DIR = "FLASH";
@@ -52,13 +51,7 @@ public final class FlashProjectLayout {
     public static final String TIF_CACHE_DIR = "TIF";
     public static final String ANALYSIS_STATUS_DIR = "Analysis";
 
-    public static final String LEGACY_BIN_DIR = ".bin";
-    public static final String LEGACY_CONFIGURATION_DIR = "00 - Configuration";
-    public static final String LEGACY_STATUS_DIR = ".flash-status";
-    public static final String LEGACY_TIF_CACHE_DIR = ".tif_cache";
-    public static final String LEGACY_CUSTOM_FILTER_PRESET_DIR = "Custom Filter Presets";
     public static final String CUSTOM_FILTER_PRESET_DIR = "Custom Filter Presets";
-    public static final String CHANNEL_DATA_FILENAME = "Channel_Data.txt";
     public static final String CONDITIONS_FILENAME = "Conditions.csv";
     public static final String MASTER_OBJECTS_FILENAME = "3D Objects.csv";
     public static final String MASTER_INTENSITIES_FILENAME = "Image Intensities.csv";
@@ -255,9 +248,6 @@ public final class FlashProjectLayout {
         if (configDir == null) return null;
 
         File parent = configDir.getParentFile();
-        if (parent != null && LEGACY_BIN_DIR.equals(configDir.getName())) {
-            return parent;
-        }
 
         if (parent != null && CONFIGURATION_DIR.equals(parent.getName())) {
             File flashDir = parent.getParentFile();
@@ -275,49 +265,17 @@ public final class FlashProjectLayout {
         return parent;
     }
 
-    public File legacyBinDir() {
-        return new File(projectRoot, LEGACY_BIN_DIR);
-    }
-
-    public File legacyConfigurationDir() {
-        return new File(flashRoot(), LEGACY_CONFIGURATION_DIR);
-    }
-
     public List<File> configurationReadDirs() {
-        return immutableList(configurationWriteDir(),
-                visibleConfigurationDir(),
-                legacyConfigurationDir(),
-                legacyBinDir());
+        return Collections.singletonList(configurationWriteDir());
     }
 
     public File existingConfigurationDir() {
-        File channelData = firstExistingFile(channelDataReadFiles());
-        if (channelData != null) return channelData.getParentFile();
-        return firstExistingDirectory(configurationReadDirs());
-    }
-
-    public File channelDataWriteFile() {
-        return new File(configurationWriteDir(), CHANNEL_DATA_FILENAME);
-    }
-
-    public List<File> channelDataReadFiles() {
-        return immutableList(channelDataWriteFile(),
-                new File(visibleConfigurationDir(), CHANNEL_DATA_FILENAME),
-                new File(legacyConfigurationDir(), CHANNEL_DATA_FILENAME),
-                new File(legacyBinDir(), CHANNEL_DATA_FILENAME));
-    }
-
-    public File channelDataReadFile() {
-        File existing = firstExistingFile(channelDataReadFiles());
-        return existing == null ? channelDataWriteFile() : existing;
+        File dir = configurationWriteDir();
+        return dir.isDirectory() ? dir : null;
     }
 
     public File presetsRoot() {
         return new File(settingsRoot(), PRESETS_DIR);
-    }
-
-    public File legacyPresetsRoot() {
-        return new File(flashRoot(), PRESETS_DIR);
     }
 
     public File presetWriteDir(String categoryName) {
@@ -331,14 +289,11 @@ public final class FlashProjectLayout {
         if (categoryName == null || categoryName.trim().isEmpty()) {
             return Collections.emptyList();
         }
-        return immutableList(presetWriteDir(categoryName),
-                new File(legacyPresetsRoot(), categoryName));
+        return Collections.singletonList(presetWriteDir(categoryName));
     }
 
     public List<File> presetsReadDirs() {
-        return immutableList(presetsRoot(),
-                legacyPresetsRoot(),
-                new File(legacyBinDir(), LEGACY_CUSTOM_FILTER_PRESET_DIR));
+        return Collections.singletonList(presetsRoot());
     }
 
     public File customFilterPresetWriteDir() {
@@ -346,9 +301,7 @@ public final class FlashProjectLayout {
     }
 
     public List<File> customFilterPresetReadDirs() {
-        return immutableList(customFilterPresetWriteDir(),
-                new File(legacyPresetsRoot(), CUSTOM_FILTER_PRESET_DIR),
-                new File(legacyBinDir(), LEGACY_CUSTOM_FILTER_PRESET_DIR));
+        return Collections.singletonList(customFilterPresetWriteDir());
     }
 
     public File cacheRoot() {
@@ -360,8 +313,7 @@ public final class FlashProjectLayout {
     }
 
     public List<File> tifCacheReadDirs() {
-        return immutableList(tifCacheWriteDir(),
-                new File(projectRoot, LEGACY_TIF_CACHE_DIR));
+        return Collections.singletonList(tifCacheWriteDir());
     }
 
     public File statusRoot() {
@@ -373,7 +325,7 @@ public final class FlashProjectLayout {
     }
 
     public List<File> statusReadDirs() {
-        return immutableList(statusSettingsRoot(), statusRoot(), new File(projectRoot, LEGACY_STATUS_DIR));
+        return Collections.singletonList(statusSettingsRoot());
     }
 
     public File analysisStatusWriteDir() {
@@ -381,9 +333,7 @@ public final class FlashProjectLayout {
     }
 
     public List<File> analysisStatusReadDirs() {
-        return immutableList(analysisStatusWriteDir(),
-                new File(statusRoot(), ANALYSIS_STATUS_DIR),
-                new File(projectRoot, LEGACY_STATUS_DIR));
+        return Collections.singletonList(analysisStatusWriteDir());
     }
 
     public File statusWriteFile(String fileName) {
@@ -391,50 +341,7 @@ public final class FlashProjectLayout {
     }
 
     public List<File> statusReadFiles(String fileName) {
-        return immutableList(statusWriteFile(fileName),
-                new File(statusRoot(), fileName),
-                new File(projectRoot, fileName));
-    }
-
-    private static File firstExistingDirectory(List<File> dirs) {
-        for (int i = 0; i < dirs.size(); i++) {
-            File dir = dirs.get(i);
-            if (dir.isDirectory()) return dir;
-        }
-        return null;
-    }
-
-    private static File firstExistingFile(List<File> files) {
-        for (int i = 0; i < files.size(); i++) {
-            File file = files.get(i);
-            if (file.isFile()) return file;
-        }
-        return null;
-    }
-
-    private static List<File> immutableList(File first, File second) {
-        List<File> out = new ArrayList<File>();
-        out.add(first);
-        out.add(second);
-        return Collections.unmodifiableList(out);
-    }
-
-    private static List<File> immutableList(File first, File second, File third) {
-        List<File> out = new ArrayList<File>();
-        out.add(first);
-        out.add(second);
-        out.add(third);
-        return Collections.unmodifiableList(out);
-    }
-
-    private static List<File> immutableList(File... files) {
-        List<File> out = new ArrayList<File>();
-        if (files != null) {
-            for (int i = 0; i < files.length; i++) {
-                out.add(files[i]);
-            }
-        }
-        return Collections.unmodifiableList(out);
+        return Collections.singletonList(statusWriteFile(fileName));
     }
 
 }

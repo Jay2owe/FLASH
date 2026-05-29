@@ -1,7 +1,5 @@
 package flash.pipeline.analyses.wizard;
 
-import flash.pipeline.ui.wizard.JsonIO;
-
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -90,24 +88,6 @@ public class SpatialPresetIOTest {
 
         assertTrue(loaded.isDoHeatmaps());
         assertTrue(loaded.isDoPhenotyping());
-    }
-
-    @Test
-    public void loadFindsLegacyProjectRootPresetFolder() throws Exception {
-        File root = temp.newFolder("legacy-spatial");
-        File legacyDir = new File(root, "Spatial Morphometry Presets");
-        assertTrue(legacyDir.mkdirs());
-        SpatialPreset preset = new SpatialPreset("Legacy Spatial", "test", "1",
-                true, false, true, true, false, true, false,
-                false, true, true, false, false,
-                4.5, "Cyan", 3, 30.0);
-        Files.write(new File(legacyDir, "legacy_spatial.json").toPath(),
-                JsonIO.write(preset.toJsonObject()).getBytes(StandardCharsets.UTF_8));
-
-        SpatialPreset loaded = new SpatialPresetIO(root).load("Legacy Spatial");
-
-        assertTrue(loaded.isDoDistances());
-        assertEquals("Legacy Spatial", loaded.getName());
     }
 
     private static List<String> presetNames(List<SpatialPreset> presets) {

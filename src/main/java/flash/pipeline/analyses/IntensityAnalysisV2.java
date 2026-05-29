@@ -266,7 +266,7 @@ public class IntensityAnalysisV2 implements Analysis {
         boolean[] roiZipSelected = new boolean[roiZips.size()];
         Arrays.fill(roiZipSelected, true);
 
-        // Per-channel filter source: "Bin filter" (loads Cn_Filters.ijm from .bin)
+        // Per-channel filter source: "Bin filter" (loads saved Cn_Filters.ijm)
         // or "Basic background and noise removal" (intensity-filter macro). Default Bin.
         String[] filterSources = new String[channelNames.length];
         Arrays.fill(filterSources, "Bin filter");
@@ -1446,7 +1446,7 @@ public class IntensityAnalysisV2 implements Analysis {
         filteredMeasurement = filtered;
 
         // Per-channel filter dispatch:
-        //   "Bin filter"  → load Cn_Filters.ijm from .bin/, fall back to basic if missing
+        //   "Bin filter"  -> load saved Cn_Filters.ijm, fall back to basic if missing
         //   "Basic ..."   → run basic intensity filter macro
         boolean useBinFilter = filterSources != null
                 && c < filterSources.length

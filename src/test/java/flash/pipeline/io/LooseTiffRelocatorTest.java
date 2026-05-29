@@ -19,7 +19,7 @@ public class LooseTiffRelocatorTest {
     public TemporaryFolder temp = new TemporaryFolder();
 
     @Test
-    public void shouldPrompt_returnsFalseWhenMarkerExists() throws Exception {
+    public void shouldPrompt_ignoresProjectRootMarker() throws Exception {
         File dir = temp.newFolder("marker");
 
         assertTrue(LooseTiffRelocator.shouldPrompt(dir.getAbsolutePath()));
@@ -27,7 +27,7 @@ public class LooseTiffRelocatorTest {
         File marker = new File(dir, LooseTiffRelocator.NO_PROMPT_MARKER);
         assertTrue(marker.createNewFile());
 
-        assertFalse(LooseTiffRelocator.shouldPrompt(dir.getAbsolutePath()));
+        assertTrue(LooseTiffRelocator.shouldPrompt(dir.getAbsolutePath()));
     }
 
     @Test

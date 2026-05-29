@@ -1,7 +1,5 @@
 package flash.pipeline.analyses.wizard;
 
-import flash.pipeline.ui.wizard.JsonIO;
-
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -114,20 +112,6 @@ public class ThreeDObjectPresetIOTest {
         String persisted = new String(Files.readAllBytes(new File(io.presetDirectory(), "crash_test.json").toPath()),
                 StandardCharsets.UTF_8);
         assertTrue(persisted.contains("\"colocThresholdPercent\":10.0"));
-    }
-
-    @Test
-    public void loadFindsLegacyProjectRootPresetFolder() throws Exception {
-        File root = temp.newFolder("legacy-object");
-        File legacyDir = new File(root, "3D Object Presets");
-        assertTrue(legacyDir.mkdirs());
-        Files.write(new File(legacyDir, "legacy_object.json").toPath(),
-                JsonIO.write(preset("Legacy Object", 12.0).toJsonObject()).getBytes(StandardCharsets.UTF_8));
-        ThreeDObjectPresetIO io = new ThreeDObjectPresetIO(root);
-
-        ThreeDObjectPreset loaded = io.load("Legacy Object");
-
-        assertEquals(12.0, loaded.getColocThresholdPercent(), 0.0001);
     }
 
     private static ThreeDObjectPreset preset(String name, double threshold) {

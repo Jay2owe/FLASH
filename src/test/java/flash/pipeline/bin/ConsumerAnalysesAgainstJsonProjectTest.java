@@ -126,7 +126,6 @@ public class ConsumerAnalysesAgainstJsonProjectTest {
 
     private static BinConfig expectedConfig(File projectRoot) {
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(projectRoot.getAbsolutePath());
-        assertFalse(layout.channelDataWriteFile().exists());
         ChannelConfig channelConfig = ChannelConfigIO.read(layout.configurationWriteDir());
         return ChannelConfigIO.toBinConfig(channelConfig, layout.configurationWriteDir());
     }

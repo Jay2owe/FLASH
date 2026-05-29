@@ -18,7 +18,6 @@ import java.util.List;
  */
 public class SpatialPresetIO extends PresetIO<SpatialPreset> {
 
-    static final String PRESET_DIR_NAME = "Spatial Morphometry Presets";
     static final String PRESET_CATEGORY_NAME = "Spatial Analysis";
 
     private static final List<String> STOCK_RESOURCE_FILES = Collections.unmodifiableList(
@@ -51,11 +50,6 @@ public class SpatialPresetIO extends PresetIO<SpatialPreset> {
 
     protected String presetDirectoryName() {
         return PRESET_CATEGORY_NAME;
-    }
-
-    @Override
-    protected List<File> legacyPresetDirectories() {
-        return Collections.singletonList(new File(projectRootDirectory(), PRESET_DIR_NAME));
     }
 
     protected SpatialPreset parsePreset(String json) throws IOException {

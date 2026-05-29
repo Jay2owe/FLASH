@@ -15,7 +15,6 @@ import java.util.List;
  */
 public class ThreeDObjectPresetIO extends PresetIO<ThreeDObjectPreset> {
 
-    static final String PRESET_DIR_NAME = "3D Object Presets";
     static final String PRESET_CATEGORY_NAME = "3D Object Analysis";
 
     private static final List<String> STOCK_RESOURCE_FILES = Collections.unmodifiableList(
@@ -48,11 +47,6 @@ public class ThreeDObjectPresetIO extends PresetIO<ThreeDObjectPreset> {
 
     protected String presetDirectoryName() {
         return PRESET_CATEGORY_NAME;
-    }
-
-    @Override
-    protected List<File> legacyPresetDirectories() {
-        return Collections.singletonList(new File(projectRootDirectory(), PRESET_DIR_NAME));
     }
 
     protected ThreeDObjectPreset parsePreset(String json) throws IOException {

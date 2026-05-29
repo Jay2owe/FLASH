@@ -5,14 +5,13 @@ import flash.pipeline.ui.wizard.PresetIO;
 import java.io.File;
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 
 /**
  * Preset storage for {@link ExcelExportPreset}.
  * <p>
  * Stock presets live under {@code src/main/resources/excel_presets/} and are
- * bootstrapped into {@code <project>/Excel Presets/} on first use.
+ * bootstrapped into the project's FLASH preset directory on first use.
  */
 public class ExcelExportPresetIO extends PresetIO<ExcelExportPreset> {
 
@@ -27,11 +26,6 @@ public class ExcelExportPresetIO extends PresetIO<ExcelExportPreset> {
     @Override
     protected String presetDirectoryName() {
         return "Excel Export";
-    }
-
-    @Override
-    protected List<File> legacyPresetDirectories() {
-        return Collections.singletonList(new File(projectRootDirectory(), "Excel Presets"));
     }
 
     @Override

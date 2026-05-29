@@ -5,7 +5,7 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * Persisted marker identities for channels in a .bin directory.
+ * Marker identities for configured channels.
  */
 public final class ChannelIdentities {
 

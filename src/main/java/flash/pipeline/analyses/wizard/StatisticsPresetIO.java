@@ -12,12 +12,11 @@ import java.util.List;
  * Reads and writes Statistics Wizard presets from the project root.
  * <p>
  * Stock presets ship in {@code src/main/resources/stats_presets/} and are
- * bootstrapped into the project's {@code Statistics Presets/} directory on
+ * bootstrapped into the project's FLASH preset directory on
  * first use.
  */
 public class StatisticsPresetIO extends PresetIO<StatisticsPreset> {
 
-    static final String PRESET_DIR_NAME = "Statistics Presets";
     static final String PRESET_CATEGORY_NAME = "Statistics";
 
     private static final List<String> STOCK_RESOURCE_FILES = Collections.unmodifiableList(
@@ -42,11 +41,6 @@ public class StatisticsPresetIO extends PresetIO<StatisticsPreset> {
     @Override
     protected String presetDirectoryName() {
         return PRESET_CATEGORY_NAME;
-    }
-
-    @Override
-    protected List<File> legacyPresetDirectories() {
-        return Collections.singletonList(new File(projectRootDirectory(), PRESET_DIR_NAME));
     }
 
     @Override

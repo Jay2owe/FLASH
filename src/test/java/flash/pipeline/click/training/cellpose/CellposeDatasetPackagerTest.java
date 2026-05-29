@@ -120,23 +120,6 @@ public class CellposeDatasetPackagerTest {
     }
 
     @Test
-    public void metadataClicksPathUsesLegacyBinWhenOnlyLegacyClicksJsonExists() throws Exception {
-        Path root = projectRoot();
-        Path clicksJson = root.resolve(".bin").resolve(ClicksConfigIO.FILE_NAME);
-        writeClicksJson(clicksJson);
-        ClickStore store = new ClickStore();
-        store.add(click("Image1", 2, 1, ClickStore.Verdict.POSITIVE));
-
-        CellposeDatasetPackager.PackagingResult result =
-                packageOneImage(root, "legacy-clicks", store);
-
-        Map<String, Object> metadata = JsonIO.parseObject(
-                text(result.outputDir.resolve("metadata.json")));
-        assertEquals(relativePath(result.outputDir, clicksJson),
-                JsonIO.stringValue(metadata.get("sourceClicksJsonPath")));
-    }
-
-    @Test
     public void trainCommandUsesProjectPythonPath() throws Exception {
         Prefs.set(PYTHON_PREF, "C:\\Cellpose Env\\python.exe");
         Path root = projectRoot();

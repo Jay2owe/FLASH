@@ -9,7 +9,6 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -37,20 +36,6 @@ public class PresetIOTest {
                 "roundtrip/FLASH/.settings/Presets/Test Presets/my_preset.json").isFile());
         io.delete("My Preset");
         assertFalse(new File(io.presetDirectory(), "my_preset.json").exists());
-    }
-
-    @Test
-    public void loadFindsLegacyProjectRootPresetFolder() throws Exception {
-        File root = temp.newFolder("legacy");
-        File legacyDir = new File(root, "Test Presets");
-        assertTrue(legacyDir.mkdirs());
-        Files.write(new File(legacyDir, "legacy.json").toPath(),
-                "{\"name\":\"Legacy\",\"payload\":\"old\",\"libraryVersion\":\"1\"}"
-                        .getBytes(StandardCharsets.UTF_8));
-        TestPresetIO io = new TestPresetIO(root);
-
-        assertEquals("old", io.load("Legacy").getPayload());
-        assertTrue(containsPresetNamed(io.listAll(), "Legacy"));
     }
 
     @Test
@@ -165,12 +150,4 @@ public class PresetIOTest {
         }
     }
 
-    private static boolean containsPresetNamed(List<TestPreset> presets, String name) {
-        for (TestPreset preset : presets) {
-            if (name.equals(preset.getName())) {
-                return true;
-            }
-        }
-        return false;
-    }
 }

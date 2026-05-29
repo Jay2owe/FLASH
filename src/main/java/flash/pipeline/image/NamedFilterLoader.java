@@ -38,7 +38,7 @@ public final class NamedFilterLoader {
             case "Overlapping Cellular Marker":          return "Overlapping Cellular Marker Filter.ijm";
             case "Puncta Resolve":                       return "Puncta Resolve Filter.ijm";
             case "Diffuse Object":                       return "diffuse_object_filter.ijm";
-            // Legacy names (for existing .bin configs)
+            // Historical names accepted by saved configurations.
             case "Default Filter":                       return "defaultFilter.ijm";
             case "High Signal-Noise Particle Filter":    return "High Signal-Noise Particle Filter.ijm";
             case "Microglia Filter":                     return "Microglia Filter.ijm";

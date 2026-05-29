@@ -13,7 +13,6 @@ import java.util.List;
  */
 public class SpectralDecontamPresetIO extends PresetIO<SpectralDecontamPreset> {
 
-    static final String PRESET_DIR_NAME = "Spectral Decontamination Presets";
     static final String PRESET_CATEGORY_NAME = "Spectral Decontamination";
 
     private static final List<String> STOCK_RESOURCE_FILES = Collections.unmodifiableList(
@@ -37,11 +36,6 @@ public class SpectralDecontamPresetIO extends PresetIO<SpectralDecontamPreset> {
 
     protected String presetDirectoryName() {
         return PRESET_CATEGORY_NAME;
-    }
-
-    @Override
-    protected List<File> legacyPresetDirectories() {
-        return Collections.singletonList(new File(projectRootDirectory(), PRESET_DIR_NAME));
     }
 
     protected SpectralDecontamPreset parsePreset(String json) throws IOException {

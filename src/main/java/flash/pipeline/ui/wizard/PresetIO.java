@@ -136,10 +136,6 @@ public abstract class PresetIO<T extends Preset<?>> {
         return projectRoot;
     }
 
-    protected List<File> legacyPresetDirectories() {
-        return Collections.singletonList(new File(projectRoot, presetDirectoryName()));
-    }
-
     protected abstract T parsePreset(String json) throws IOException;
 
     protected List<String> stockResourceFiles() {
@@ -248,9 +244,6 @@ public abstract class PresetIO<T extends Preset<?>> {
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(projectRoot.getPath());
         for (File dir : layout.presetReadDirs(presetDirectoryName())) {
             addUniqueDirectory(dirs, dir);
-        }
-        for (File legacy : legacyPresetDirectories()) {
-            addUniqueDirectory(dirs, legacy);
         }
         return dirs;
     }

@@ -4579,26 +4579,16 @@ public class SpatialAnalysis implements Analysis {
     }
 
     private static List<File> textureCentroidReadFiles(String directory, String channelName) {
-        FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
         List<File> out = new ArrayList<File>();
         Set<String> seen = new LinkedHashSet<String>();
         addUniqueFile(out, seen, textureCentroidsFile(directory, channelName));
-        for (File dir : layout.configurationReadDirs()) {
-            addUniqueFile(out, seen, new File(dir, textureCentroidsFileName(channelName, ".txt")));
-            addUniqueFile(out, seen, new File(dir, textureCentroidsFileName(channelName, ".bin")));
-        }
         return out;
     }
 
     private static List<File> textureCentroid3DReadFiles(String directory, String channelName) {
-        FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
         List<File> out = new ArrayList<File>();
         Set<String> seen = new LinkedHashSet<String>();
         addUniqueFile(out, seen, textureCentroids3DFile(directory, channelName));
-        for (File dir : layout.configurationReadDirs()) {
-            addUniqueFile(out, seen, new File(dir, textureCentroids3DFileName(channelName, ".txt")));
-            addUniqueFile(out, seen, new File(dir, textureCentroids3DFileName(channelName, ".bin")));
-        }
         return out;
     }
 

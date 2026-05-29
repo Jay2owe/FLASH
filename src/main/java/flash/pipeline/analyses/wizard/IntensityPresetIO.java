@@ -13,7 +13,6 @@ import java.util.List;
  */
 public class IntensityPresetIO extends PresetIO<IntensityPreset> {
 
-    static final String PRESET_DIR_NAME = "Intensity Presets";
     static final String PRESET_CATEGORY_NAME = "Fluorescence Intensity";
 
     private static final List<String> STOCK_RESOURCE_FILES = Collections.unmodifiableList(
@@ -35,11 +34,6 @@ public class IntensityPresetIO extends PresetIO<IntensityPreset> {
 
     protected String presetDirectoryName() {
         return PRESET_CATEGORY_NAME;
-    }
-
-    @Override
-    protected List<File> legacyPresetDirectories() {
-        return Collections.singletonList(new File(projectRootDirectory(), PRESET_DIR_NAME));
     }
 
     protected IntensityPreset parsePreset(String json) throws IOException {

@@ -1,7 +1,6 @@
 package flash.pipeline.analyses.wizard;
 
 import flash.pipeline.bin.BinConfig;
-import flash.pipeline.ui.wizard.JsonIO;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -32,7 +31,6 @@ public class BinPresetIOTest {
 
         assertTrue(new File(root,
                 "FLASH/.settings/Presets/Channel Configuration/my_bin_preset.json").isFile());
-        assertFalse(new File(root, "Bin Presets/my_bin_preset.json").exists());
         BinPreset loaded = io.load("my_bin_preset");
         assertEquals("My Bin Preset", loaded.getName());
         assertEquals("12", loaded.getPayload().channelThresholds.get(0));
@@ -73,21 +71,6 @@ public class BinPresetIOTest {
         String persisted = new String(Files.readAllBytes(new File(io.presetDirectory(), "crash_test.json").toPath()),
                 StandardCharsets.UTF_8);
         assertTrue(persisted.contains("\"objectThreshold\":\"10\""));
-    }
-
-    @Test
-    public void loadFindsLegacyProjectRootPresetFolder() throws Exception {
-        File root = temp.newFolder("legacy-bin-preset");
-        File legacyDir = new File(root, "Bin Presets");
-        assertTrue(legacyDir.mkdirs());
-        Files.write(new File(legacyDir, "legacy_setup.json").toPath(),
-                JsonIO.write(preset("Legacy Setup", "33").toJsonObject()).getBytes(StandardCharsets.UTF_8));
-        BinPresetIO io = new BinPresetIO(root);
-
-        BinPreset loaded = io.load("Legacy Setup");
-
-        assertEquals("Legacy Setup", loaded.getName());
-        assertEquals("33", loaded.getPayload().channelThresholds.get(0));
     }
 
     private static BinPreset preset(String name, String threshold) {

@@ -13,7 +13,6 @@ import java.util.List;
  */
 public class BinPresetIO extends PresetIO<BinPreset> {
 
-    static final String PRESET_DIR_NAME = "Bin Presets";
     static final String PRESET_CATEGORY_NAME = "Channel Configuration";
 
     private static final List<String> STOCK_RESOURCE_FILES = Collections.unmodifiableList(
@@ -34,11 +33,6 @@ public class BinPresetIO extends PresetIO<BinPreset> {
 
     protected String presetDirectoryName() {
         return PRESET_CATEGORY_NAME;
-    }
-
-    @Override
-    protected List<File> legacyPresetDirectories() {
-        return Collections.singletonList(new File(projectRootDirectory(), PRESET_DIR_NAME));
     }
 
     protected BinPreset parsePreset(String json) throws IOException {

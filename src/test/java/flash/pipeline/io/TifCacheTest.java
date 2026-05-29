@@ -26,17 +26,6 @@ public class TifCacheTest {
     }
 
     @Test
-    public void cacheExists_readsLegacyCacheFallback() throws Exception {
-        File dir = temp.newFolder("legacy-cache");
-        File legacy = new File(dir, ".tif_cache");
-        assertTrue(legacy.mkdirs());
-        assertTrue(new File(legacy, "0001_image.tif").createNewFile());
-
-        assertTrue(TifCache.cacheExists(dir.getAbsolutePath()));
-        assertEquals(1, TifCache.cacheSize(dir.getAbsolutePath()));
-    }
-
-    @Test
     public void hasAllSeriesRequiresMatchingSeriesPrefixes() throws Exception {
         File dir = temp.newFolder("sparse-cache");
         File cache = TifCache.getCacheDir(dir.getAbsolutePath());
