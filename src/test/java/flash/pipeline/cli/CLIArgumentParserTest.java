@@ -187,11 +187,20 @@ public class CLIArgumentParserTest {
         CLIConfig cfg = CLIArgumentParser.parse("dir=[/tmp] analyses=0,2,6,11");
         assertNotNull(cfg);
         boolean[] sel = cfg.getSelectedAnalyses();
+        assertEquals("analysis selection length", 12, sel.length);
         assertTrue(sel[0]);
         assertTrue(sel[2]);
         assertTrue(sel[6]);
         assertTrue("index 11 -> spectral decontamination", sel[11]);
         assertFalse(sel[1]);
+    }
+
+    @Test
+    public void parse_rejectsRemovedOrientationSetupIndex() {
+        assertNull("analysisIndex=12 used to select hidden orientation setup and must now be invalid",
+                CLIArgumentParser.parse("dir=[/tmp] analysisIndex=12"));
+        assertNull("analyses=12 used to select hidden orientation setup and must now be invalid",
+                CLIArgumentParser.parse("dir=[/tmp] analyses=12"));
     }
 
     @Test
