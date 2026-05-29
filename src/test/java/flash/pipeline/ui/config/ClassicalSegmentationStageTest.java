@@ -3,6 +3,7 @@ package flash.pipeline.ui.config;
 import flash.pipeline.help.SetupHelpCatalog;
 import flash.pipeline.objects.ObjectsCounter3DWrapper;
 import flash.pipeline.testutil.TestWait;
+import flash.pipeline.ui.preview.LabelMapStyler;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import flash.pipeline.ui.variations.ParameterCombo;
 import flash.pipeline.ui.variations.ParameterId;
@@ -19,7 +20,6 @@ import javax.swing.JComponent;
 import javax.swing.SwingUtilities;
 import java.awt.Component;
 import java.awt.Container;
-import java.awt.image.IndexColorModel;
 import java.util.Arrays;
 
 import static org.junit.Assert.assertEquals;
@@ -202,9 +202,10 @@ public class ClassicalSegmentationStageTest {
                 new RecordingThresholdStore("20"),
                 new RecordingSizeStore("1-Infinity"),
                 adapter);
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Objects");
 
         stage.buildControls(context(), actions);
-        stage.onEnter(context(), new PreviewPairPanel("Original", "Objects"));
+        stage.onEnter(context(), pair);
         stage.runPreviewNowForTest();
 
         assertFalse(stage.isObjectPreviewStaleForTest());
@@ -218,6 +219,7 @@ public class ClassicalSegmentationStageTest {
         assertFalse(stage.isObjectPreviewStaleForTest());
 
         stage.setMinSizeForTest("3");
+        waitForStatus(actions, "Objects: 1 kept; removed 1 small, 0 large. Threshold 60.");
 
         assertFalse(stage.isObjectPreviewStaleForTest());
         assertEquals("Size edits must not execute the object preview",
@@ -227,7 +229,9 @@ public class ClassicalSegmentationStageTest {
                 actions.status);
         assertEquals("Objects: 1 kept; removed 1 small, 0 large",
                 stage.sizeCutoffSummaryForTest());
-        assertRemovedLabelUsesCutoffColor(actions.adjustedPreview, 1, 0xe53935);
+        ImagePlus rendered = pair.duplicateCurrentObjectPreviewForComparison("Rendered object preview");
+        assertRgbPixel(rendered, 0, 0, 0x000000);
+        assertRgbPixel(rendered, 1, 0, LabelMapStyler.rgbForLabel(2));
     }
 
     @Test
@@ -285,6 +289,7 @@ public class ClassicalSegmentationStageTest {
         adapter.previewRuns = 0;
 
         stage.setMinSizeForTest("1");
+        waitForStatusContains(actions, "out of date");
 
         assertTrue(stage.isObjectPreviewStaleForTest());
         assertEquals("Loosening the range must not silently miss newly included objects",
@@ -294,7 +299,7 @@ public class ClassicalSegmentationStageTest {
     }
 
     @Test
-    public void restorePreviousComparisonSettingsReloadsCapturedClassicalValues() throws Exception {
+    public void sizeEditsDoNotCapturePreviousComparisonSettings() throws Exception {
         RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
         ClassicalSegmentationStage stage = stage(
                 new RecordingThresholdStore("20"),
@@ -311,7 +316,7 @@ public class ClassicalSegmentationStageTest {
 
         stage.restorePreviousComparisonSettingsForTest();
 
-        assertEquals("1-Infinity", stage.currentSizeTokenForTest());
+        assertEquals("3-Infinity", stage.currentSizeTokenForTest());
         assertEquals("20", stage.currentThresholdTokenForTest());
     }
 
@@ -571,22 +576,40 @@ public class ClassicalSegmentationStageTest {
         }
     }
 
-    private static void assertRemovedLabelUsesCutoffColor(ImagePlus labelImage,
-                                                          int label,
-                                                          int expectedRgb) {
-        assertNotNull(labelImage);
-        assertTrue(labelImage.getProcessor().getColorModel() instanceof IndexColorModel);
-        IndexColorModel model = (IndexColorModel) labelImage.getProcessor().getColorModel();
-        int index = ((Math.max(1, label) - 1) % 255) + 1;
-        int actual = (model.getRed(index) << 16)
-                | (model.getGreen(index) << 8)
-                | model.getBlue(index);
-        assertEquals(expectedRgb, actual);
+    private static void assertRgbPixel(ImagePlus image, int x, int y, int expectedRgb) {
+        assertNotNull(image);
+        assertEquals(expectedRgb, image.getProcessor().getPixel(x, y) & 0xffffff);
     }
 
     private static void assertLabelPixel(ImagePlus labelImage, int x, int y, int expectedLabel) {
         assertNotNull(labelImage);
         assertEquals(expectedLabel, labelImage.getProcessor().get(x, y));
+    }
+
+    private static void waitForStatus(final RecordingActions actions,
+                                      final String expected) throws Exception {
+        TestWait.until("status did not become " + expected, new TestWait.Condition() {
+            @Override public boolean isMet() {
+                return expected.equals(actions.status);
+            }
+        }, 3000L);
+        SwingUtilities.invokeAndWait(new Runnable() {
+            @Override public void run() {
+            }
+        });
+    }
+
+    private static void waitForStatusContains(final RecordingActions actions,
+                                              final String expected) throws Exception {
+        TestWait.until("status did not contain " + expected, new TestWait.Condition() {
+            @Override public boolean isMet() {
+                return actions.status != null && actions.status.contains(expected);
+            }
+        }, 3000L);
+        SwingUtilities.invokeAndWait(new Runnable() {
+            @Override public void run() {
+            }
+        });
     }
 
     private static void waitForPreviewRuns(RecordingPreviewAdapter adapter,

@@ -32,7 +32,7 @@ public class EnhancedClassicalSegmentationStageTest {
         assertTrue(containsLabel(controls, "Rule"));
         assertTrue(containsLabel(controls, "Value"));
         assertNotNull(findComboWithSelectedItem(controls, "sphericity"));
-        ToggleSwitch toggle = findFirst(controls, ToggleSwitch.class);
+        ToggleSwitch toggle = findMorphologyToggle(controls);
         assertNotNull(toggle);
         assertFalse(toggle.isSelected());
     }
@@ -48,7 +48,7 @@ public class EnhancedClassicalSegmentationStageTest {
         assertFalse(containsComponent(controls, CollapsibleSection.class));
         assertNotNull(findComboWithSelectedItem(controls, "compactness"));
         assertNotNull(findComboWithSelectedItem(controls, "<="));
-        ToggleSwitch toggle = findFirst(controls, ToggleSwitch.class);
+        ToggleSwitch toggle = findMorphologyToggle(controls);
         assertNotNull(toggle);
         assertTrue(toggle.isSelected());
     }
@@ -115,6 +115,11 @@ public class EnhancedClassicalSegmentationStageTest {
 
     private static boolean containsComponent(Component component, Class<?> type) {
         return findFirst(component, type) != null;
+    }
+
+    private static ToggleSwitch findMorphologyToggle(Component component) {
+        JPanel morphPanel = findTitledPanel(component, "Morphology filters");
+        return morphPanel == null ? null : findFirst(morphPanel, ToggleSwitch.class);
     }
 
     private static <T> T findFirst(Component component, Class<T> type) {

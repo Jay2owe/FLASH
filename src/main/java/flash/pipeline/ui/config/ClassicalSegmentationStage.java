@@ -3,7 +3,9 @@ package flash.pipeline.ui.config;
 import flash.pipeline.help.SetupHelpCatalog;
 import flash.pipeline.help.SetupHelpTopic;
 import flash.pipeline.objects.ObjectsCounter3DWrapper;
+import flash.pipeline.ui.Debouncer;
 import flash.pipeline.ui.FlashTheme;
+import flash.pipeline.ui.ToggleSwitch;
 import flash.pipeline.ui.preview.ObjectSizeFilterPreview;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import flash.pipeline.ui.preview.ThresholdControlPanel;
@@ -30,10 +32,13 @@ import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
+import java.awt.Cursor;
 import java.awt.Font;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.Set;
@@ -99,6 +104,8 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
     private JButton previewButton;
     private JButton resetButton;
     private JButton variationsButton;
+    private ToggleSwitch showRemovedObjectsSwitch;
+    private Debouncer sizeDebouncer;
     private JLabel feedbackLabel;
     private ObjectSizeCutoffPanel sizeCutoffPanel;
     private ObjectSizeFilterPreview.Summary sizeSummary;
@@ -147,6 +154,15 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
         panel.setOpaque(false);
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
         panel.setBorder(FlashTheme.pad(2, 0, 0, 0));
+
+        if (sizeDebouncer != null) {
+            sizeDebouncer.cancel();
+        }
+        sizeDebouncer = new Debouncer(250, new Runnable() {
+            @Override public void run() {
+                sizeFieldChanged();
+            }
+        });
 
         thresholdControl = new ThresholdControlPanel();
         thresholdControl.setMethod("Default");
@@ -203,6 +219,8 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
             preview.setSourceToggleVisible(false);
             preview.setSourceMode(PreviewPairPanel.SourceMode.FILTERED);
             preview.setSourceModeEnabled(true);
+            preview.setShowRemovedObjects(showRemovedObjectsSwitch != null
+                    && showRemovedObjectsSwitch.isSelected());
             preview.setObjectOverlaySelected(false);
             preview.setObjectOverlayEnabled(true);
             preview.setComparisonPreviewVisible(true);
@@ -289,6 +307,9 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
     @Override
     public void onLeave(ConfigQcContext context) {
         closePreviewWorker();
+        if (sizeDebouncer != null) {
+            sizeDebouncer.cancel();
+        }
         if (preview != null) {
             preview.setSourceModeChangeListener(null);
             preview.setDisplaySettingsChangeListener(null);
@@ -371,6 +392,14 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
         previewButton = new JButton("Run Object Preview");
         flash.pipeline.ui.FlashIcons.apply(previewButton, flash.pipeline.ui.FlashIcons.play());
         previewButton.addActionListener(e -> runPreviewOnWorker());
+        showRemovedObjectsSwitch = new ToggleSwitch(false);
+        showRemovedObjectsSwitch.addChangeListener(new Runnable() {
+            @Override public void run() {
+                if (preview != null) {
+                    preview.setShowRemovedObjects(showRemovedObjectsSwitch.isSelected());
+                }
+            }
+        });
         resetButton = new JButton("Reset sizes");
         flash.pipeline.ui.FlashIcons.apply(resetButton, flash.pipeline.ui.FlashIcons.refresh());
         resetButton.addActionListener(e -> resetSizesToSaved());
@@ -404,6 +433,19 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
         gbc.fill = GridBagConstraints.NONE;
         row.add(previewButton, gbc);
         gbc.gridx++;
+        row.add(showRemovedObjectsSwitch, gbc);
+        JLabel showRemovedLabel = new JLabel("Show removed objects");
+        showRemovedLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        showRemovedLabel.addMouseListener(new MouseAdapter() {
+            @Override public void mouseClicked(MouseEvent e) {
+                if (showRemovedObjectsSwitch != null && showRemovedObjectsSwitch.isEnabled()) {
+                    showRemovedObjectsSwitch.setSelected(!showRemovedObjectsSwitch.isSelected());
+                }
+            }
+        });
+        gbc.gridx++;
+        row.add(showRemovedLabel, gbc);
+        gbc.gridx++;
         gbc.insets = new Insets(0, 2, 0, 0);
         row.add(resetButton, gbc);
         variationsButton = new JButton("Parameter Variations...");
@@ -418,17 +460,26 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
     private void installFieldListener(JTextField field) {
         field.getDocument().addDocumentListener(new DocumentListener() {
             @Override public void insertUpdate(DocumentEvent e) {
-                sizeFieldChanged();
+                scheduleSizeFilterRefresh();
             }
 
             @Override public void removeUpdate(DocumentEvent e) {
-                sizeFieldChanged();
+                scheduleSizeFilterRefresh();
             }
 
             @Override public void changedUpdate(DocumentEvent e) {
-                sizeFieldChanged();
+                scheduleSizeFilterRefresh();
             }
         });
+    }
+
+    private void scheduleSizeFilterRefresh() {
+        if (updatingFields) return;
+        if (sizeDebouncer != null) {
+            sizeDebouncer.trigger();
+        } else {
+            sizeFieldChanged();
+        }
     }
 
     private void loadSizeFields(ParticleSizeStage.SizeToken token) {
@@ -446,7 +497,6 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
 
     private void sizeFieldChanged() {
         if (updatingFields) return;
-        captureCurrentPreviewForComparison();
         if (!refreshSizeFilterPreview()) {
             markObjectPreviewStale(STALE_TEXT);
         }
@@ -454,7 +504,6 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
 
     private void resetSizesToSaved() {
         loadSizeFields(savedSize);
-        captureCurrentPreviewForComparison();
         if (!refreshSizeFilterPreview()) {
             markObjectPreviewStale(STALE_TEXT);
         }
@@ -677,8 +726,9 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
 
     private void captureCurrentPreviewForComparison() {
         if (labelPreview == null) return;
-        ImagePlus snapshot = PreviewPairPanel.duplicateForComparison(
-                labelPreview, "Previous object preview");
+        ImagePlus snapshot = preview == null
+                ? PreviewPairPanel.duplicateForComparison(labelPreview, "Previous object preview")
+                : preview.duplicateCurrentObjectPreviewForComparison("Previous object preview");
         if (snapshot == null) return;
         ImagePlus old = previousLabelPreview;
         previousLabelPreview = snapshot;
@@ -840,11 +890,14 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
             boolean maxFinite = isFiniteMaxToken(token.maxText);
             sizeSummary = ObjectSizeFilterPreview.summarize(
                     objectStats, filteredSource, minSize, maxSize, maxFinite);
-            ObjectSizeFilterPreview.applyClassifiedLut(labelPreview, sizeSummary);
             if (sizeCutoffPanel != null) sizeCutoffPanel.setSummary(sizeSummary);
             applySizeGuideOverlay();
             if (!canRelabelFromCurrentPreview(minSize, maxSize)) {
                 return false;
+            }
+            if (preview != null) {
+                preview.setObjectFilterPreview(labelPreview, sizeSummary.removedLabels(),
+                        sizeSummary, lastObjectCount);
             }
             objectPreviewStale = false;
             displayedSize = normalizedSizeToken(token);
@@ -935,6 +988,7 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
         if (previewButton != null) previewButton.setEnabled(enabled);
         if (resetButton != null) resetButton.setEnabled(enabled);
         if (variationsButton != null) variationsButton.setEnabled(enabled && filteredSource != null);
+        if (showRemovedObjectsSwitch != null) showRemovedObjectsSwitch.setEnabled(enabled);
         if (minField != null) minField.setEnabled(enabled);
         if (maxField != null) maxField.setEnabled(enabled);
         if (thresholdControl != null) thresholdControl.setEnabled(enabled);
