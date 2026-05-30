@@ -20,6 +20,8 @@ import flash.pipeline.naming.NameParts;
 import flash.pipeline.naming.ResolvedImageMetadata;
 import flash.pipeline.results.ObjectCsvColumnOrder;
 import flash.pipeline.roi.RoiIO;
+import flash.pipeline.runrecord.AnalysisRunContext;
+import flash.pipeline.runrecord.RunRecordAware;
 import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.FeatureDependencyGate;
 import flash.pipeline.ui.PipelineDialog;
@@ -62,13 +64,16 @@ import java.util.Set;
  * are written as updated per-channel CSV copies in
  * {@code FLASH/Results/Tables/Line Distance/}.
  */
-public class LineDistanceAnalysis implements Analysis {
+public class LineDistanceAnalysis implements Analysis, RunRecordAware {
 
     private boolean headless = false;
     private boolean verboseLogging = false;
     private boolean skipExisting = false;
     private boolean suppressDialogs = false;
     private CLIConfig cliConfig = null;
+    private boolean commandMode = false;
+    private List<String> commandLineSets = Collections.emptyList();
+    private AnalysisRunContext runRecordContext = null;
 
     @Override
     public Set<BinField> requiredBinFields() {
@@ -110,11 +115,64 @@ public class LineDistanceAnalysis implements Analysis {
         this.cliConfig = config;
     }
 
+    public void setCommandMode(boolean commandMode) {
+        this.commandMode = commandMode;
+    }
+
+    void setCommandLineSets(List<String> lineSets) {
+        this.commandLineSets = normaliseLineSetSelection(lineSets);
+    }
+
+    @Override
+    public void setRunRecordContext(AnalysisRunContext context) {
+        this.runRecordContext = context;
+    }
+
+    private AnalysisRunContext.InputHandle recordInputStart(File file, int seriesIndex) {
+        if (runRecordContext == null) {
+            return null;
+        }
+        return runRecordContext.recordInputStart(file, seriesIndex, null);
+    }
+
+    private void recordInputEnd(AnalysisRunContext.InputHandle inputHandle,
+                                String status,
+                                long startedMillis) {
+        if (runRecordContext != null && inputHandle != null) {
+            runRecordContext.recordInputEnd(inputHandle, status,
+                    Math.max(0L, System.currentTimeMillis() - startedMillis));
+        }
+    }
+
+    private void recordOutput(File file, String kind) {
+        if (runRecordContext != null && file != null) {
+            runRecordContext.recordOutput(file, kind);
+        }
+    }
+
+    private void recordWarn(String message) {
+        if (runRecordContext != null) {
+            runRecordContext.warn(message);
+        }
+    }
+
+    private void recordError(String message, Throwable t) {
+        if (runRecordContext != null) {
+            runRecordContext.error(message, t);
+        }
+    }
+
     @Override
     public void execute(String directory) {
+        if (commandMode) {
+            executeCommandMode(directory);
+            return;
+        }
         if (GraphicsEnvironment.isHeadless()) {
-            IJ.log("[" + getClass().getSimpleName() + "] is interactive only "
-                    + "and cannot run headless. Skipping.");
+            String message = "[" + getClass().getSimpleName() + "] is interactive only "
+                    + "and cannot run headless. Skipping.";
+            IJ.log(message);
+            recordWarn("Line Distance Analysis is headed-only unless existing line-set zips are reused.");
             return;
         }
         if (headless) {
@@ -131,7 +189,9 @@ public class LineDistanceAnalysis implements Analysis {
                 directory, "Line Distance Analysis", requiredBinFields(),
                 benefitsFromRois(), suppressDialogs, cliConfig);
         if (outcome == BinSetupDispatcher.Outcome.CANCELLED) {
-            IJ.log("[FLASH] Line Distance Analysis cancelled by user.");
+            String message = "[FLASH] Line Distance Analysis cancelled by user.";
+            IJ.log(message);
+            recordWarn(message);
             return;
         }
 
@@ -214,6 +274,7 @@ public class LineDistanceAnalysis implements Analysis {
 
         if (!pd.showDialog()) {
             IJ.log("  Cancelled by user.");
+            recordWarn("Line Distance Analysis cancelled by user.");
             return;
         }
 
@@ -239,7 +300,9 @@ public class LineDistanceAnalysis implements Analysis {
             IJ.log("--- Drawing New Line Set ---");
             String newLineName = resolvedName;
             if (newLineName == null || newLineName.trim().isEmpty()) {
-                IJ.log("  Line set name is blank. Aborting draw.");
+                String message = "Line set name is blank. Aborting draw.";
+                IJ.log("  " + message);
+                recordWarn(message);
                 if (selectedSets.isEmpty()) return;
             } else {
                 newLineName = newLineName.trim();
@@ -251,14 +314,18 @@ public class LineDistanceAnalysis implements Analysis {
                     }
                     IJ.log("  New line set '" + newLineName + "' saved.");
                 } else {
-                    IJ.log("  Line drawing was cancelled or failed.");
+                    String message = "Line drawing was cancelled or failed.";
+                    IJ.log("  " + message);
+                    recordWarn(message);
                     if (selectedSets.isEmpty()) return;
                 }
             }
         }
 
         if (selectedSets.isEmpty()) {
-            IJ.log("  No line sets selected. Nothing to compute.");
+            String message = "No line sets selected. Nothing to compute.";
+            IJ.log("  " + message);
+            recordWarn(message);
             return;
         }
 
@@ -270,6 +337,22 @@ public class LineDistanceAnalysis implements Analysis {
         IJ.log("╔══════════════════════════════════════════════════════════╗");
         IJ.log("║         LINE DISTANCE ANALYSIS COMPLETE                ║");
         IJ.log("╚══════════════════════════════════════════════════════════╝");
+    }
+
+    private void executeCommandMode(String directory) {
+        File linesDir = lineSetWriteDir(directory);
+        List<String> selectedSets = commandLineSets == null || commandLineSets.isEmpty()
+                ? lineSetNames(directory)
+                : new ArrayList<String>(commandLineSets);
+        if (selectedSets.isEmpty()) {
+            String message = "Line Distance Analysis command mode cannot draw new lines; "
+                    + "no existing line-set zips were found to recompute.";
+            IJ.log("[LineDistanceAnalysis] " + message);
+            recordWarn(message);
+            return;
+        }
+        IJ.log("--- Computing Line Distances from existing line sets ---");
+        computeDistances(directory, linesDir, selectedSets);
     }
 
     // ================================================================
@@ -384,18 +467,23 @@ public class LineDistanceAnalysis implements Analysis {
                                 BinConfig configuredBinConfig,
                                 boolean drawOnSubset) {
         if (directory == null || directory.trim().isEmpty()) {
-            IJ.log("[FLASH] Cannot draw line set: directory is empty.");
+            String message = "Cannot draw line set: directory is empty.";
+            IJ.log("[FLASH] " + message);
+            recordWarn(message);
             return false;
         }
         String safeLineName = lineName == null ? "" : lineName.trim();
         if (safeLineName.isEmpty()) {
-            IJ.log("[FLASH] Cannot draw line set: line set name is empty.");
+            String message = "Cannot draw line set: line set name is empty.";
+            IJ.log("[FLASH] " + message);
+            recordWarn(message);
             return false;
         }
         File targetLinesDir = linesDir == null ? lineSetWriteDir(directory) : linesDir;
 
         if (!FeatureDependencyGate.gate(DependencyId.BIO_FORMATS_RUNTIME,
                 "Line Distance Analysis", "Bio-Formats image loading for drawing a new line set")) {
+            recordWarn("Line Distance Analysis line drawing blocked by missing Bio-Formats runtime dependency.");
             return false;
         }
 
@@ -403,7 +491,9 @@ public class LineDistanceAnalysis implements Analysis {
         try {
             IoUtils.mustMkdirs(targetLinesDir);
         } catch (IOException e) {
-            IJ.log("[FLASH] Could not create line set directory: " + e.getMessage());
+            String message = "[FLASH] Could not create line set directory: " + e.getMessage();
+            IJ.log(message);
+            recordError(message, e);
             return false;
         }
 
@@ -413,12 +503,15 @@ public class LineDistanceAnalysis implements Analysis {
             supplier = ImageSourceDispatcher.createSupplier(directory);
             totalImages = supplier.getTotalSeries();
         } catch (Exception e) {
+            recordError("Line Distance Analysis could not create image supplier", e);
             IJ.showMessage("Line Distance Analysis", e.getMessage());
             return false;
         }
 
         if (totalImages == 0) {
-            IJ.log("  No images found.");
+            String message = "No images found for line drawing.";
+            IJ.log("  " + message);
+            recordWarn(message);
             return false;
         }
 
@@ -432,10 +525,16 @@ public class LineDistanceAnalysis implements Analysis {
         for (int i = 0; i < totalImages; i++) {
             IJ.log("Loading image " + (i + 1) + "/" + totalImages + "...");
             ImagePlus imp;
+            AnalysisRunContext.InputHandle input = recordInputStart(supplier.getContainerFileForSeries(i), i + 1);
+            long started = System.currentTimeMillis();
             try {
                 imp = supplier.openSeries(i);
+                recordInputEnd(input, imp == null ? "skipped" : "processed", started);
             } catch (Exception e) {
-                IJ.log("ERROR: Failed to open image " + (i + 1) + ": " + e.getMessage());
+                recordInputEnd(input, "failed", started);
+                String message = "ERROR: Failed to open image " + (i + 1) + ": " + e.getMessage();
+                IJ.log(message);
+                recordError(message, e);
                 continue;
             }
             if (imp == null) continue;
@@ -482,7 +581,9 @@ public class LineDistanceAnalysis implements Analysis {
 
             Roi roi = maxProj.getRoi();
             if (roi == null) {
-                IJ.log("  Warning: no line drawn for " + imgTitle + "; skipping.");
+                String message = "No line drawn for " + imgTitle + "; skipping.";
+                IJ.log("  Warning: " + message);
+                recordWarn(message);
             } else {
                 rm.addRoi(roi);
                 drawn++;
@@ -499,7 +600,9 @@ public class LineDistanceAnalysis implements Analysis {
         }
 
         if (drawn == 0) {
-            IJ.log("  No lines were drawn.");
+            String message = "No lines were drawn.";
+            IJ.log("  " + message);
+            recordWarn(message);
             rm.close();
             return false;
         }
@@ -507,6 +610,7 @@ public class LineDistanceAnalysis implements Analysis {
         // Save ROI zip
         File zipFile = new File(targetLinesDir, safeLineName + ".zip");
         rm.runCommand("Save", zipFile.getAbsolutePath());
+        recordOutput(zipFile, "zip");
         rm.close();
 
         IJ.log("  Saved " + drawn + " line(s) to: " + zipFile.getName());
@@ -532,14 +636,18 @@ public class LineDistanceAnalysis implements Analysis {
                                  List<String> selectedSets) {
         List<String> safeSelectedSets = normaliseLineSetSelection(selectedSets);
         if (safeSelectedSets.isEmpty()) {
-            IJ.log("  No line sets selected.");
+            String message = "No line sets selected.";
+            IJ.log("  " + message);
+            recordWarn(message);
             return;
         }
 
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
         File objectsDir = layout.tablesObjectsWriteDir();
         if (!objectsDir.isDirectory()) {
-            IJ.log("  Objects directory not found: " + objectsDir.getAbsolutePath());
+            String message = "Objects directory not found: " + objectsDir.getAbsolutePath();
+            IJ.log("  " + message);
+            recordWarn(message);
             return;
         }
 
@@ -551,6 +659,7 @@ public class LineDistanceAnalysis implements Analysis {
             IJ.log("  Using calibration: " + pixelSize + " " + cal.unit + "/pixel");
         } else {
             pixelSize = 1.0;
+            recordWarn("No calibration found; line distances will be in pixels.");
             IJ.log("  Warning: no calibration found — distances will be in pixels.");
         }
 
@@ -567,7 +676,9 @@ public class LineDistanceAnalysis implements Analysis {
         });
 
         if (csvFiles == null || csvFiles.length == 0) {
-            IJ.log("  No object CSV files found in: " + objectsDir.getAbsolutePath());
+            String message = "No object CSV files found in: " + objectsDir.getAbsolutePath();
+            IJ.log("  " + message);
+            recordWarn(message);
             return;
         }
 
@@ -582,7 +693,7 @@ public class LineDistanceAnalysis implements Analysis {
                 safeChannelName = safeChannelName.substring(0, safeChannelName.length() - 4);
             }
             String channelName = ChannelFilenameCodec.toRaw(safeChannelName);
-            ChannelData cd = CsvTableIO.loadChannelCsv(csvFile, channelName);
+            ChannelData cd = loadChannelCsvRecorded(csvFile, channelName);
             if (cd != null) {
                 channels.put(channelName, cd);
                 IJ.log("  Loaded channel: " + channelName
@@ -591,7 +702,9 @@ public class LineDistanceAnalysis implements Analysis {
         }
 
         if (channels.isEmpty()) {
-            IJ.log("  No valid channel data loaded.");
+            String message = "No valid channel data loaded.";
+            IJ.log("  " + message);
+            recordWarn(message);
             return;
         }
 
@@ -599,7 +712,9 @@ public class LineDistanceAnalysis implements Analysis {
         try {
             IoUtils.mustMkdirs(outputDir);
         } catch (IOException e) {
-            IJ.log("[FLASH] Could not create line distance output directory: " + e.getMessage());
+            String message = "[FLASH] Could not create line distance output directory: " + e.getMessage();
+            IJ.log(message);
+            recordError(message, e);
             return;
         }
 
@@ -607,7 +722,9 @@ public class LineDistanceAnalysis implements Analysis {
         for (String lineName : safeSelectedSets) {
             File zipFile = resolveLineSetZip(directory, linesDir, lineName);
             if (!zipFile.exists()) {
-                IJ.log("  Line set zip not found: " + lineName + ".zip");
+                String message = "Line set zip not found: " + lineName + ".zip";
+                IJ.log("  " + message);
+                recordWarn(message);
                 continue;
             }
 
@@ -615,11 +732,17 @@ public class LineDistanceAnalysis implements Analysis {
 
             // Load line ROIs from zip
             // Each ROI index = SCN number (index 0 -> SCN "1", etc.)
+            AnalysisRunContext.InputHandle lineInput = recordInputStart(zipFile, 0);
+            long lineStarted = System.currentTimeMillis();
             List<Roi> loadedRois = RoiIO.loadRoisFromZip(zipFile);
+            recordInputEnd(lineInput, loadedRois == null || loadedRois.isEmpty()
+                    ? "skipped" : "processed", lineStarted);
             Roi[] lineRois = loadedRois.toArray(new Roi[loadedRois.size()]);
 
             if (lineRois == null || lineRois.length == 0) {
-                IJ.log("    No ROIs found in: " + zipFile.getName());
+                String message = "No ROIs found in: " + zipFile.getName();
+                IJ.log("    " + message);
+                recordWarn(message);
                 continue;
             }
 
@@ -635,8 +758,10 @@ public class LineDistanceAnalysis implements Analysis {
 
                 if (!cd.colIdx.containsKey("XM")
                         || !cd.colIdx.containsKey("YM")) {
-                    IJ.log("    Channel " + channelName
-                            + " missing Region/XM/YM columns, skipping.");
+                    String message = "Channel " + channelName
+                            + " missing Region/XM/YM columns, skipping.";
+                    IJ.log("    " + message);
+                    recordWarn(message);
                     continue;
                 }
 
@@ -706,7 +831,23 @@ public class LineDistanceAnalysis implements Analysis {
             ObjectCsvColumnOrder.reorder(cd, channelNames);
             File outFile = new File(outputDir, ChannelFilenameCodec.toSafe(channelName) + ".csv");
             CsvTableIO.writeChannelCsv(outFile, cd);
+            recordOutput(outFile, "csv");
             IJ.log("  Updated: " + outFile.getName());
+        }
+    }
+
+    private ChannelData loadChannelCsvRecorded(File csvFile, String channelName) {
+        AnalysisRunContext.InputHandle input = recordInputStart(csvFile, 0);
+        long started = System.currentTimeMillis();
+        try {
+            ChannelData data = CsvTableIO.loadChannelCsv(csvFile, channelName);
+            recordInputEnd(input, data == null ? "skipped" : "processed", started);
+            return data;
+        } catch (RuntimeException e) {
+            recordInputEnd(input, "failed", started);
+            recordError("Failed to load object CSV "
+                    + (csvFile == null ? "" : csvFile.getAbsolutePath()), e);
+            throw e;
         }
     }
 

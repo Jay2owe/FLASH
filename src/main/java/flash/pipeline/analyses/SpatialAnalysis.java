@@ -16,6 +16,7 @@ import flash.pipeline.analyses.spatial.SubAnalysis;
 import flash.pipeline.analyses.wizard.SpatialAnalysisWizard;
 import flash.pipeline.analyses.wizard.SpatialPreset;
 import flash.pipeline.analyses.wizard.SpatialPresetIO;
+import flash.pipeline.atlas.AtlasRegionColumns;
 import flash.pipeline.bin.ChannelConfigIO;
 import flash.pipeline.bin.ChannelIdentities;
 import flash.pipeline.cli.CLIConfig;
@@ -34,6 +35,7 @@ import flash.pipeline.io.ImageSourceDispatcher;
 import flash.pipeline.io.IoUtils;
 import flash.pipeline.io.CsvSupport;
 import flash.pipeline.io.CsvTableIO.ChannelData;
+import flash.pipeline.morphometry.ObjectArborization;
 import flash.pipeline.morphometry.ObjectFractal;
 import flash.pipeline.morphometry.ObjectPatch;
 import flash.pipeline.morphometry.ObjectPatch3D;
@@ -44,6 +46,8 @@ import flash.pipeline.morphometry.ObjectTextureGLCM;
 import flash.pipeline.morphometry.ObjectTextureGLCM3D;
 import flash.pipeline.results.MorphometryDetailsWriter;
 import flash.pipeline.results.ObjectCsvColumnOrder;
+import flash.pipeline.runrecord.AnalysisRunContext;
+import flash.pipeline.runrecord.RunRecordAware;
 import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.FeatureDependencyGate;
 import flash.pipeline.spatial.CellClustering;
@@ -91,7 +95,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * are preserved, while calibrated centroid columns ({@code XM_um/YM_um/ZM_um})
  * are appended when calibration is available.
  */
-public class SpatialAnalysis implements Analysis {
+public class SpatialAnalysis implements Analysis, RunRecordAware {
 
     private static final double DEFAULT_COLOC_THRESHOLD = 30.0;
     private static final int DEFAULT_STATS_BINS = 10;
@@ -140,6 +144,15 @@ public class SpatialAnalysis implements Analysis {
             "Morph_PB",
             "Morph_MP",
             "Morph_VSD"
+    };
+    private static final String[] MORPH_ARBORIZATION_COLUMNS = {
+            "Morph_ShollCriticalRadius_um",
+            "Morph_ShollCriticalIntersections",
+            "Morph_ShollSchoenenIndex",
+            "Morph_ShollPrimaryBranches",
+            "Morph_SkeletonBranches",
+            "Morph_SkeletonJunctions",
+            "Morph_SkeletonEndpoints"
     };
     private static final String[] MORPH_POPULATION_COLUMNS = {
             "Morph_CMS",
@@ -213,6 +226,7 @@ public class SpatialAnalysis implements Analysis {
     private SpatialAnalysisWizard.DerivedConfig configuredOptions = null;
     private SpatialArtifactStatus spatialArtifactStatus = null;
     private boolean forceRerun = false;
+    private AnalysisRunContext runRecordContext = null;
 
     private enum RuntimeDependencyAction {
         PROCEED,
@@ -263,6 +277,7 @@ public class SpatialAnalysis implements Analysis {
         private final Set<String> morph2DChannels = new LinkedHashSet<String>();
         private final Set<String> morph3DChannels = new LinkedHashSet<String>();
         private final Set<String> morphCompositeChannels = new LinkedHashSet<String>();
+        private final Set<String> morphArborizationChannels = new LinkedHashSet<String>();
         private final Set<String> morphPopulationChannels = new LinkedHashSet<String>();
         private final Set<String> morphSpatialChannels = new LinkedHashSet<String>();
         private final Set<String> morphTextureGlcmChannels = new LinkedHashSet<String>();
@@ -302,6 +317,7 @@ public class SpatialAnalysis implements Analysis {
                 if (hasUsableColumns(cd, MORPH_2D_COLUMNS)) morph2DChannels.add(channelName);
                 if (hasUsableColumns(cd, MORPH_3D_COLUMNS)) morph3DChannels.add(channelName);
                 if (hasUsableColumns(cd, MORPH_COMPOSITE_COLUMNS)) morphCompositeChannels.add(channelName);
+                if (hasUsableColumns(cd, MORPH_ARBORIZATION_COLUMNS)) morphArborizationChannels.add(channelName);
                 if (hasUsableColumns(cd, MORPH_POPULATION_COLUMNS)) morphPopulationChannels.add(channelName);
                 if (hasUsableColumns(cd, MORPH_SPATIAL_COLUMNS)) morphSpatialChannels.add(channelName);
                 if (hasUsableColumns(cd, MORPH_TEXTURE_GLCM_COLUMNS)) morphTextureGlcmChannels.add(channelName);
@@ -367,6 +383,7 @@ public class SpatialAnalysis implements Analysis {
             if (!morph2DChannels.isEmpty()) parts.add("2D morphology columns");
             if (!morph3DChannels.isEmpty()) parts.add("3D shape columns");
             if (!morphCompositeChannels.isEmpty()) parts.add("complex shape columns");
+            if (!morphArborizationChannels.isEmpty()) parts.add("Sholl/skeleton arborization columns");
             if (!morphPopulationChannels.isEmpty()) parts.add("population morphometric columns");
             if (!morphSpatialChannels.isEmpty()) parts.add("spatial-morphometric columns");
             if (!morphTextureGlcmChannels.isEmpty()) parts.add("object GLCM texture columns");
@@ -431,7 +448,8 @@ public class SpatialAnalysis implements Analysis {
         }
 
         boolean hasCompositeMorphologyForAllChannels(List<String> names) {
-            return allChannelsHave(morphCompositeChannels, names);
+            return allChannelsHave(morphCompositeChannels, names)
+                    && allChannelsHave(morphArborizationChannels, names);
         }
 
         boolean hasPopulationMorphometricsForAllChannels(List<String> names) {
@@ -536,6 +554,7 @@ public class SpatialAnalysis implements Analysis {
             if (!morph2DChannels.isEmpty()) parts.add("2D morphology");
             if (!morph3DChannels.isEmpty()) parts.add("3D shape");
             if (!morphCompositeChannels.isEmpty()) parts.add("complex shape");
+            if (!morphArborizationChannels.isEmpty()) parts.add("Sholl/skeleton arborization");
             if (!morphPopulationChannels.isEmpty()) parts.add("population morphometrics");
             if (!morphSpatialChannels.isEmpty()) parts.add("spatial morphometrics");
             if (!morphTextureGlcmChannels.isEmpty()) parts.add("object GLCM texture");
@@ -606,6 +625,11 @@ public class SpatialAnalysis implements Analysis {
     @Override
     public void setCliConfig(CLIConfig config) {
         this.cliConfig = config;
+    }
+
+    @Override
+    public void setRunRecordContext(AnalysisRunContext context) {
+        this.runRecordContext = context;
     }
 
     public void setWizardConfig(SpatialAnalysisWizard.DerivedConfig config) {
@@ -685,8 +709,10 @@ public class SpatialAnalysis implements Analysis {
             IJ.log("Using calibration: " + cal.pixelWidth + " x " + cal.pixelHeight
                     + " x " + cal.pixelDepth + " " + cal.unit + "/pixel");
         } else {
-            IJ.log("Warning: no calibrated spatial metadata found. Distances will fall back to pixel units "
-                    + "unless " + XM_UM + "/" + YM_UM + "/" + ZM_UM + " are already present.");
+            String message = "Warning: no calibrated spatial metadata found. Distances will fall back to pixel units "
+                    + "unless " + XM_UM + "/" + YM_UM + "/" + ZM_UM + " are already present.";
+            IJ.log(message);
+            recordWarn(message);
         }
 
         File[] csvFiles = objectsDir.listFiles(new java.io.FilenameFilter() {
@@ -716,7 +742,7 @@ public class SpatialAnalysis implements Analysis {
                 safeChannelName = safeChannelName.substring(0, safeChannelName.length() - 4);
             }
             String channelName = ChannelFilenameCodec.toRaw(safeChannelName);
-            ChannelData cd = CsvTableIO.loadChannelCsv(csvFile, channelName);
+            ChannelData cd = loadChannelCsvRecorded(csvFile, channelName);
             if (cd != null) {
                 channels.put(channelName, cd);
                 IJ.log("Loaded channel: " + channelName + " (" + cd.rows.size() + " objects)");
@@ -850,7 +876,8 @@ public class SpatialAnalysis implements Analysis {
         if (!forceRerun && do3DShapeFeatures
                 && existingObjectData.has3DMorphologyForAllChannels(channelNames)
                 && (!doCompositeIndices
-                || existingObjectData.hasCompositeMorphologyForAllChannels(channelNames))) {
+                || (existingObjectData.hasCompositeMorphologyForAllChannels(channelNames)
+                && hasShollProfilesForAllChannels(directory, channelNames)))) {
             IJ.log("--- Reusing existing 3D morphometry columns; skipping 3D shape extraction ---");
             if (doCompositeIndices) {
                 IJ.log("--- Reusing existing complex shape columns; skipping composite shape derivation ---");
@@ -1065,7 +1092,9 @@ public class SpatialAnalysis implements Analysis {
 
         if (context.doPopMorphometrics) {
             if (!context.do3DShapeFeatures && !hasColumn(context.channels, "Morph_RI")) {
-                IJ.log("WARNING: Population morphometric scoring requires 3D shape features. Skipping.");
+                String message = "WARNING: Population morphometric scoring requires 3D shape features. Skipping.";
+                IJ.log(message);
+                recordWarn(message);
             } else {
                 IJ.log("--- Population Morphometric Scoring ---");
                 runPopulationMorphometrics(directory, context.channels);
@@ -1074,7 +1103,9 @@ public class SpatialAnalysis implements Analysis {
 
         if (context.doSpatialMorphometrics) {
             if (!context.do3DShapeFeatures && !hasColumn(context.channels, "Morph_Feret3D_um")) {
-                IJ.log("WARNING: Spatial-morphometric analysis requires 3D shape features. Skipping.");
+                String message = "WARNING: Spatial-morphometric analysis requires 3D shape features. Skipping.";
+                IJ.log(message);
+                recordWarn(message);
             } else {
                 IJ.log("--- Spatial-Morphometric Analysis ---");
                 runSpatialMorphometrics(directory, context.channels, context.calibration);
@@ -1088,6 +1119,7 @@ public class SpatialAnalysis implements Analysis {
             File morphDir = spatialMorphometryOutputDir(directory);
             MorphometryDetailsWriter.write(morphDir, context.do3DShapeFeatures, context.doCompositeIndices,
                     context.doPopMorphometrics, context.doSpatialMorphometrics);
+            recordOutputIfExists(new File(morphDir, "Morphometry_Details.txt"), "txt");
         }
 
         // Write updated CSVs again if new columns were added
@@ -1220,6 +1252,7 @@ public class SpatialAnalysis implements Analysis {
             ChannelData cd = entry.getValue();
             File outFile = new File(objectsDir, ChannelFilenameCodec.toSafe(channelName) + ".csv");
             CsvTableIO.writeChannelCsv(outFile, cd);
+            recordOutput(outFile, "csv");
             IJ.log("  [" + (writeCount++) + "/" + totalToWrite + "] Updated: " + outFile.getName());
         }
     }
@@ -1616,7 +1649,7 @@ public class SpatialAnalysis implements Analysis {
             if (!csvFile.isFile()) {
                 continue;
             }
-            ChannelData cd = CsvTableIO.loadChannelCsv(csvFile, channelName);
+            ChannelData cd = loadChannelCsvRecorded(csvFile, channelName);
             if (cd != null) {
                 channels.put(channelName, cd);
             }
@@ -2227,6 +2260,7 @@ public class SpatialAnalysis implements Analysis {
                 row.add(key.animal);
                 row.add(key.hemisphere);
                 row.add(key.region);
+                addAtlasRegionValues(row, key.region, key.roi);
                 row.add(key.roi);
                 row.add(String.valueOf(points.length));
                 row.add(WINDOW_SOURCE_DERIVED);
@@ -2287,6 +2321,34 @@ public class SpatialAnalysis implements Analysis {
         if (!cd.colIdx.containsKey(column)) return "";
         String value = cd.get(row, column);
         return value == null ? "" : value.trim();
+    }
+
+    private void addAtlasRegionValues(List<String> row, String region, String roi) {
+        if (row == null) return;
+        AtlasRegionColumns.Metadata metadata = AtlasRegionColumns.metadataFor(region, roi);
+        addAtlasRegionValues(row, metadata);
+    }
+
+    private void addAtlasRegionValues(List<String> row, ChannelData cd, int sourceRow) {
+        if (row == null || cd == null) return;
+        AtlasRegionColumns.Metadata metadata = AtlasRegionColumns.metadataForExistingOrResolved(
+                safeValue(cd, sourceRow, AtlasRegionColumns.ATLAS_KEY),
+                safeValue(cd, sourceRow, AtlasRegionColumns.REGION_ID),
+                safeValue(cd, sourceRow, AtlasRegionColumns.REGION_ACRONYM),
+                safeValue(cd, sourceRow, AtlasRegionColumns.REGION_NAME),
+                safeValue(cd, sourceRow, "Region"),
+                safeValue(cd, sourceRow, "ROI"));
+        addAtlasRegionValues(row, metadata);
+    }
+
+    private void addAtlasRegionValues(List<String> row, AtlasRegionColumns.Metadata metadata) {
+        if (metadata == null) {
+            metadata = AtlasRegionColumns.metadataFor(null, null);
+        }
+        row.add(metadata.getAtlasKey());
+        row.add(metadata.getRegionId());
+        row.add(metadata.getRegionAcronym());
+        row.add(metadata.getRegionName());
     }
 
     private String spatialStatsRoiLabel(ChannelData cd, int row) {
@@ -2391,6 +2453,10 @@ public class SpatialAnalysis implements Analysis {
                 "Animal Name",
                 "Hemisphere",
                 "Region",
+                AtlasRegionColumns.ATLAS_KEY,
+                AtlasRegionColumns.REGION_ID,
+                AtlasRegionColumns.REGION_ACRONYM,
+                AtlasRegionColumns.REGION_NAME,
                 "ROI",
                 "NumPoints",
                 "WindowSource",
@@ -2418,8 +2484,11 @@ public class SpatialAnalysis implements Analysis {
                 }
                 }
             });
+            recordOutput(outFile, "csv");
         } catch (IOException e) {
-            IJ.log("Warning: could not write spatial statistics file " + outFile.getName() + ": " + e.getMessage());
+            String message = "Warning: could not write spatial statistics file " + outFile.getName() + ": " + e.getMessage();
+            IJ.log(message);
+            recordError(message, e);
         }
     }
 
@@ -2465,8 +2534,60 @@ public class SpatialAnalysis implements Analysis {
         return String.format(Locale.US, "%.6f", value);
     }
 
+    private ChannelData loadChannelCsvRecorded(File csvFile, String channelName) {
+        AnalysisRunContext.InputHandle input = recordInputStart(csvFile, 0);
+        long started = System.currentTimeMillis();
+        try {
+            ChannelData data = CsvTableIO.loadChannelCsv(csvFile, channelName);
+            recordInputEnd(input, data == null ? "skipped" : "processed", started);
+            return data;
+        } catch (RuntimeException e) {
+            recordInputEnd(input, "failed", started);
+            recordError("Failed to load object CSV " + (csvFile == null ? "" : csvFile.getAbsolutePath()), e);
+            throw e;
+        }
+    }
+
+    private AnalysisRunContext.InputHandle recordInputStart(File file, int seriesIndex) {
+        return runRecordContext == null ? null : runRecordContext.recordInputStart(file, seriesIndex, null);
+    }
+
+    private void recordInputEnd(AnalysisRunContext.InputHandle inputHandle,
+                                String status,
+                                long startedMillis) {
+        if (runRecordContext != null && inputHandle != null) {
+            runRecordContext.recordInputEnd(inputHandle, status,
+                    System.currentTimeMillis() - startedMillis);
+        }
+    }
+
+    private void recordOutput(File file, String kind) {
+        if (runRecordContext != null && file != null) {
+            runRecordContext.recordOutput(file, kind);
+        }
+    }
+
+    private void recordOutputIfExists(File file, String kind) {
+        if (file != null && file.isFile()) {
+            recordOutput(file, kind);
+        }
+    }
+
+    private void recordWarn(String message) {
+        if (runRecordContext != null) {
+            runRecordContext.warn(message);
+        }
+    }
+
+    private void recordError(String message, Throwable t) {
+        if (runRecordContext != null) {
+            runRecordContext.error(message, t);
+        }
+    }
+
     private void warnUser(String title, String message) {
         IJ.log(message.replace('\n', ' '));
+        recordWarn(message.replace('\n', ' '));
         if (canShowGuiDecisionDialog(suppressDialogs, cliConfig, GraphicsEnvironment.isHeadless())) {
             IJ.showMessage(title, message);
         }
@@ -3171,8 +3292,11 @@ public class SpatialAnalysis implements Analysis {
             return -1;
         }
 
+        AnalysisRunContext.InputHandle input = recordInputStart(file, 0);
+        long started = System.currentTimeMillis();
         ImagePlus imp = IJ.openImage(file.getAbsolutePath());
         if (imp == null) {
+            recordInputEnd(input, "skipped", started);
             return -1;
         }
 
@@ -3189,6 +3313,7 @@ public class SpatialAnalysis implements Analysis {
                     }
                 }
             }
+            recordInputEnd(input, "processed", started);
             return labels.size();
         } finally {
             imp.close();
@@ -3274,11 +3399,14 @@ public class SpatialAnalysis implements Analysis {
             return 0L;
         }
 
+        AnalysisRunContext.InputHandle input = recordInputStart(file, 0);
+        long started = System.currentTimeMillis();
         ImagePlus imp = ij.IJ.openImage(file.getAbsolutePath());
         if (imp == null) {
             if (verboseLogging) {
                 IJ.log("    [DEBUG] Unable to open CPC label image for memory estimate: " + file.getAbsolutePath());
             }
+            recordInputEnd(input, "skipped", started);
             return 0L;
         }
 
@@ -3291,6 +3419,7 @@ public class SpatialAnalysis implements Analysis {
                     Math.max(1, imp.getNChannels()),
                     bytesPerPixel);
         } finally {
+            recordInputEnd(input, "processed", started);
             imp.close();
             imp.flush();
         }
@@ -3447,7 +3576,10 @@ public class SpatialAnalysis implements Analysis {
 
             // Per-channel Voronoi output
             List<String> voronoiHeader = Arrays.asList(
-                    "Animal Name", "Hemisphere", "Region", "ROI", "Label",
+                    "Animal Name", "Hemisphere", "Region",
+                    AtlasRegionColumns.ATLAS_KEY, AtlasRegionColumns.REGION_ID,
+                    AtlasRegionColumns.REGION_ACRONYM, AtlasRegionColumns.REGION_NAME,
+                    "ROI", "Label",
                     "TerritoryArea_um2", "NumNeighbors", "Channel");
             List<List<String>> voronoiRows = new ArrayList<List<String>>();
 
@@ -3469,6 +3601,7 @@ public class SpatialAnalysis implements Analysis {
                     row.add(key.animal);
                     row.add(key.hemisphere);
                     row.add(key.region);
+                    addAtlasRegionValues(row, cd, rowIdx);
                     row.add(key.roi);
                     row.add(safeValue(cd, rowIdx, "Label"));
                     row.add(formatStat(results[i].territoryArea));
@@ -3506,6 +3639,7 @@ public class SpatialAnalysis implements Analysis {
         header.add("Animal Name");
         header.add("Hemisphere");
         header.add("Region");
+        AtlasRegionColumns.addHeaders(header);
         header.add("ROI");
         header.add("TypeA");
         header.add("TypeB");
@@ -3553,6 +3687,7 @@ public class SpatialAnalysis implements Analysis {
                     row.add(key.animal);
                     row.add(key.hemisphere);
                     row.add(key.region);
+                    addAtlasRegionValues(row, key.region, key.roi);
                     row.add(key.roi);
                     row.add(im.types[a]);
                     row.add(im.types[b]);
@@ -3762,6 +3897,8 @@ public class SpatialAnalysis implements Analysis {
                 String baseName = "Density_" + ChannelFilenameCodec.toSafe(channelName) + suffix;
 
                 DensityHeatmapGenerator.saveHeatmap(heatmap, heatmapDir, baseName);
+                recordOutputIfExists(new File(heatmapDir, baseName + ".tif"), "tiff");
+                recordOutputIfExists(new File(heatmapDir, baseName + ".png"), "png");
                 IJ.log("  Heatmap: " + baseName + " (" + points.length + " objects)");
 
                 heatmap.close();
@@ -3842,7 +3979,10 @@ public class SpatialAnalysis implements Analysis {
 
             // Per-channel morphology CSV
             List<String> morphHeader = Arrays.asList(
-                    "Animal Name", "Hemisphere", "Region", "ROI", "Label",
+                    "Animal Name", "Hemisphere", "Region",
+                    AtlasRegionColumns.ATLAS_KEY, AtlasRegionColumns.REGION_ID,
+                    AtlasRegionColumns.REGION_ACRONYM, AtlasRegionColumns.REGION_NAME,
+                    "ROI", "Label",
                     "Area_um2", "Perimeter_um", "Circularity", "Solidity",
                     "AspectRatio", "Feret_um", "Extent", "ConvexHullArea_um2");
             List<List<String>> morphRows = new ArrayList<List<String>>();
@@ -3903,6 +4043,7 @@ public class SpatialAnalysis implements Analysis {
                         row.add(animalName);
                         row.add(hemisphere);
                         row.add(region);
+                        addAtlasRegionValues(row, cd, rowIdx);
                         row.add(roi);
                         row.add(String.valueOf(label));
                         row.add(formatStat(m.areaUm2));
@@ -3962,6 +4103,24 @@ public class SpatialAnalysis implements Analysis {
         return false;
     }
 
+    private boolean hasShollProfilesForAllChannels(String directory, List<String> channelNames) {
+        if (channelNames == null || channelNames.isEmpty()) return false;
+        File morphometryDir = spatialMorphometryOutputDir(directory);
+        for (String channelName : channelNames) {
+            if (!hasShollProfileForChannel(morphometryDir, channelName)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean hasShollProfileForChannel(File morphometryDir, String channelName) {
+        if (morphometryDir == null || channelName == null) return false;
+        File profile = new File(morphometryDir,
+                ChannelFilenameCodec.toSafe(channelName) + "_ShollProfile.csv");
+        return profile.isFile();
+    }
+
     /**
      * Extracts 3D morphometric features from saved label images using mcib3d.
      * Follows the same label-image-loading pattern as {@link #runMorphologyExtraction}.
@@ -3992,7 +4151,9 @@ public class SpatialAnalysis implements Analysis {
             IJ.log("  [" + (channelCounter++) + "/" + totalChannels + "] 3D Morphometry: " + channelName);
             ChannelData cd = entry.getValue();
             boolean hasRequired3DData = hasUsableColumns(cd, MORPH_3D_COLUMNS)
-                    && (!doComposites || hasUsableColumns(cd, MORPH_COMPOSITE_COLUMNS));
+                    && (!doComposites || (hasUsableColumns(cd, MORPH_COMPOSITE_COLUMNS)
+                    && hasUsableColumns(cd, MORPH_ARBORIZATION_COLUMNS)
+                    && hasShollProfileForChannel(morphometryDir, channelName)));
             if (!isForceRerunActive()
                     && !hasPairArtifactStatus()
                     && hasRequired3DData) {
@@ -4005,11 +4166,15 @@ public class SpatialAnalysis implements Analysis {
 
             if (doComposites) {
                 for (String column : MORPH_COMPOSITE_COLUMNS) cd.addColumn(column);
+                for (String column : MORPH_ARBORIZATION_COLUMNS) cd.addColumn(column);
             }
 
             // Group by section (same as CPC/2D morphology) to match label images
             Map<SectionKey, List<Integer>> sections = groupByCpcSection(directory, channelName, cd);
+            List<List<String>> shollRows = new ArrayList<List<String>>();
             int totalMeasured = 0;
+            int totalArborizationMeasured = 0;
+            Map<String, Integer> skeletonSources = new LinkedHashMap<String, Integer>();
 
             for (Map.Entry<SectionKey, List<Integer>> se : sections.entrySet()) {
                 SectionKey section = se.getKey();
@@ -4134,6 +4299,20 @@ public class SpatialAnalysis implements Analysis {
                                 vsd = Math.log10(feret3D * feret3D * feret3D / vol);
                             }
                             cd.set(rowIdx, "Morph_VSD", formatStat(vsd));
+
+                            ObjectArborization.Result arborization =
+                                    ObjectArborization.compute(obj, labelImg);
+                            writeArborization(cd, rowIdx, arborization);
+                            appendShollProfileRows(shollRows, channelName, cd, rowIdx, label,
+                                    arborization);
+                            if (arborization != null && arborization.valid) {
+                                totalArborizationMeasured++;
+                                Integer sourceCount = skeletonSources.get(arborization.skeletonSource);
+                                skeletonSources.put(arborization.skeletonSource,
+                                        Integer.valueOf(sourceCount == null
+                                                ? 1
+                                                : sourceCount.intValue() + 1));
+                            }
                         }
 
                         totalMeasured++;
@@ -4150,7 +4329,92 @@ public class SpatialAnalysis implements Analysis {
             }
 
             IJ.log("  " + channelName + ": " + totalMeasured + " objects with 3D morphometry");
+            if (doComposites) {
+                IJ.log("  " + channelName + ": " + totalArborizationMeasured
+                        + " objects with Sholl/skeleton arborization"
+                        + skeletonSourceSummary(skeletonSources));
+                File outFile = new File(morphometryDir,
+                        ChannelFilenameCodec.toSafe(channelName) + "_ShollProfile.csv");
+                writeCsv(outFile, shollProfileHeader(), shollRows);
+                IJ.log("  Sholl profiles written: " + outFile.getName()
+                        + " (" + shollRows.size() + " radius rows)");
+            }
         }
+    }
+
+    private void writeArborization(ChannelData cd, int rowIdx, ObjectArborization.Result result) {
+        if (result == null || !result.valid) {
+            for (String column : MORPH_ARBORIZATION_COLUMNS) {
+                cd.set(rowIdx, column, formatStat(Double.NaN));
+            }
+            return;
+        }
+        cd.set(rowIdx, "Morph_ShollCriticalRadius_um",
+                formatStat(result.shollCriticalRadiusUm));
+        cd.set(rowIdx, "Morph_ShollCriticalIntersections",
+                formatStat(result.shollCriticalIntersections));
+        cd.set(rowIdx, "Morph_ShollSchoenenIndex",
+                formatStat(result.shollSchoenenIndex));
+        cd.set(rowIdx, "Morph_ShollPrimaryBranches",
+                formatStat(result.shollPrimaryBranches));
+        cd.set(rowIdx, "Morph_SkeletonBranches",
+                formatStat(result.skeletonBranches));
+        cd.set(rowIdx, "Morph_SkeletonJunctions",
+                formatStat(result.skeletonJunctions));
+        cd.set(rowIdx, "Morph_SkeletonEndpoints",
+                formatStat(result.skeletonEndpoints));
+    }
+
+    private void appendShollProfileRows(List<List<String>> rows,
+                                        String channelName,
+                                        ChannelData cd,
+                                        int rowIdx,
+                                        int label,
+                                        ObjectArborization.Result result) {
+        if (rows == null || result == null || result.shollProfile == null
+                || result.shollProfile.isEmpty()) {
+            return;
+        }
+        for (ObjectArborization.ShollPoint point : result.shollProfile) {
+            List<String> row = new ArrayList<String>();
+            row.add(channelName);
+            row.add(safeValue(cd, rowIdx, "Animal Name"));
+            row.add(safeValue(cd, rowIdx, "Region"));
+            addAtlasRegionValues(row, cd, rowIdx);
+            row.add(safeValue(cd, rowIdx, "Hemisphere"));
+            row.add(safeValue(cd, rowIdx, "ROI"));
+            row.add(safeValue(cd, rowIdx, "SCN"));
+            row.add(String.valueOf(label));
+            row.add(formatStat(point.radiusUm));
+            row.add(String.valueOf(point.intersections));
+            rows.add(row);
+        }
+    }
+
+    private static List<String> shollProfileHeader() {
+        return Arrays.asList("Channel", "Animal Name", "Region",
+                AtlasRegionColumns.ATLAS_KEY, AtlasRegionColumns.REGION_ID,
+                AtlasRegionColumns.REGION_ACRONYM, AtlasRegionColumns.REGION_NAME,
+                "Hemisphere", "ROI",
+                "SCN", "Label", "Radius_um", "Intersections");
+    }
+
+    private static String skeletonSourceSummary(Map<String, Integer> sources) {
+        if (sources == null || sources.isEmpty()) {
+            return "";
+        }
+        List<String> parts = new ArrayList<String>();
+        for (Map.Entry<String, Integer> entry : sources.entrySet()) {
+            String source = entry.getKey() == null || entry.getKey().trim().isEmpty()
+                    ? "unknown" : entry.getKey();
+            parts.add(source + "=" + entry.getValue());
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < parts.size(); i++) {
+            if (i > 0) sb.append(", ");
+            sb.append(parts.get(i));
+        }
+        return " (" + sb.toString() + ")";
     }
 
     private void runObjectTexture(String directory,
@@ -4170,10 +4434,12 @@ public class SpatialAnalysis implements Analysis {
 
         RawTextureImageResolver rawResolver;
         try {
-            rawResolver = new RawTextureImageResolver(directory, context.channelNames);
+            rawResolver = new RawTextureImageResolver(directory, context.channelNames, runRecordContext);
         } catch (Exception e) {
-            IJ.log("  Raw intensity images could not be opened for object texture: "
-                    + e.getClass().getSimpleName() + " - " + e.getMessage());
+            String message = "  Raw intensity images could not be opened for object texture: "
+                    + e.getClass().getSimpleName() + " - " + e.getMessage();
+            IJ.log(message);
+            recordError(message, e);
             return;
         }
 
@@ -4502,9 +4768,12 @@ public class SpatialAnalysis implements Analysis {
         }
         try {
             ObjectTextureFeatures.CentroidsIO.save(writeFile, fitted);
+            recordOutput(writeFile, "csv");
             IJ.log("    Fitted object texture centroids: " + writeFile.getName());
         } catch (IOException e) {
-            IJ.log("    Could not save texture centroids for " + channelName + ": " + e.getMessage());
+            String message = "    Could not save texture centroids for " + channelName + ": " + e.getMessage();
+            IJ.log(message);
+            recordError(message, e);
         }
         return fitted;
     }
@@ -4528,10 +4797,13 @@ public class SpatialAnalysis implements Analysis {
         }
         try {
             ObjectTextureFeatures3D.CentroidsIO.save(writeFile, fitted);
+            recordOutput(writeFile, "csv");
             IJ.log("    Fitted native-3D object texture centroids: " + writeFile.getName());
         } catch (IOException e) {
-            IJ.log("    Could not save native-3D texture centroids for "
-                    + channelName + ": " + e.getMessage());
+            String message = "    Could not save native-3D texture centroids for "
+                    + channelName + ": " + e.getMessage();
+            IJ.log(message);
+            recordError(message, e);
         }
         return fitted;
     }
@@ -4893,20 +5165,42 @@ public class SpatialAnalysis implements Analysis {
         private final DeferredImageSupplier supplier;
         private final List<String> channelNames;
         private final ChannelIdentities identities;
+        private final AnalysisRunContext runRecordContext;
 
-        private RawTextureImageResolver(String directory, List<String> channelNames) throws Exception {
+        private RawTextureImageResolver(String directory, List<String> channelNames,
+                                        AnalysisRunContext runRecordContext) throws Exception {
             this.supplier = ImageSourceDispatcher.createSupplier(directory);
             this.channelNames = channelNames == null
                     ? new ArrayList<String>()
                     : new ArrayList<String>(channelNames);
             this.identities = ChannelConfigIO.readChannelIdentities(
                     FlashProjectLayout.forDirectory(directory).configurationWriteDir());
+            this.runRecordContext = runRecordContext;
         }
 
         ImagePlus open(String channelName, ChannelData cd, List<Integer> rowIndices) throws Exception {
             int seriesIndex = seriesIndex(cd, rowIndices);
             int channelIndex = channelIndex(channelName);
-            return supplier.openSeriesMaterializedChannel(seriesIndex, channelIndex);
+            AnalysisRunContext.InputHandle input = runRecordContext == null
+                    ? null
+                    : runRecordContext.recordInputStart(
+                            supplier.getContainerFileForSeries(seriesIndex), seriesIndex + 1, null);
+            long started = System.currentTimeMillis();
+            try {
+                ImagePlus image = supplier.openSeriesMaterializedChannel(seriesIndex, channelIndex);
+                if (runRecordContext != null && input != null) {
+                    runRecordContext.recordInputEnd(input, image == null ? "skipped" : "processed",
+                            System.currentTimeMillis() - started);
+                }
+                return image;
+            } catch (Exception e) {
+                if (runRecordContext != null && input != null) {
+                    runRecordContext.recordInputEnd(input, "failed",
+                            System.currentTimeMillis() - started);
+                    runRecordContext.error("Failed to open raw texture image", e);
+                }
+                throw e;
+            }
         }
 
         private int seriesIndex(ChannelData cd, List<Integer> rowIndices) {
@@ -5362,8 +5656,11 @@ public class SpatialAnalysis implements Analysis {
                                              double mdsEntropy) {
         String[] features = {"Morph_Sphericity", "Morph_Compactness", "Morph_Elongation",
                 "Morph_Flatness", "Morph_Spareness", "Morph_Feret3D_um", "Morph_RI",
-                "Morph_SRI", "Morph_PB", "Morph_MP", "Morph_VSD", "Morph_CMS",
-                "Morph_SMSD", "Morph_IMDI"};
+                "Morph_SRI", "Morph_PB", "Morph_MP", "Morph_VSD",
+                "Morph_ShollCriticalRadius_um", "Morph_ShollCriticalIntersections",
+                "Morph_ShollSchoenenIndex", "Morph_ShollPrimaryBranches",
+                "Morph_SkeletonBranches", "Morph_SkeletonJunctions",
+                "Morph_SkeletonEndpoints", "Morph_CMS", "Morph_SMSD", "Morph_IMDI"};
 
         List<String> header = Arrays.asList("Feature", "Mean", "SD", "Min", "Max", "N");
         List<List<String>> rows = new ArrayList<List<String>>();
@@ -5425,6 +5722,8 @@ public class SpatialAnalysis implements Analysis {
         File outFile = new File(dir, safeName);
 
         List<String> header = Arrays.asList("Animal Name", "Hemisphere", "Region",
+                AtlasRegionColumns.ATLAS_KEY, AtlasRegionColumns.REGION_ID,
+                AtlasRegionColumns.REGION_ACRONYM, AtlasRegionColumns.REGION_NAME,
                 "PPRP_Gradient", "PPRP_R2", "N_Objects");
         List<List<String>> rows = new ArrayList<List<String>>();
 
@@ -5434,6 +5733,7 @@ public class SpatialAnalysis implements Analysis {
             row.add(safeValue(cd, 0, "Animal Name"));
             row.add(safeValue(cd, 0, "Hemisphere"));
             row.add(safeValue(cd, 0, "Region"));
+            addAtlasRegionValues(row, cd, 0);
             row.add(formatStat(gradient));
             row.add(formatStat(rSquared));
             row.add(String.valueOf(nObjects));
@@ -5466,7 +5766,10 @@ public class SpatialAnalysis implements Analysis {
 
         // Pairwise summary
         List<String> pairHeader = Arrays.asList(
-                "Animal Name", "Hemisphere", "Region", "ROI", "Source", "vs",
+                "Animal Name", "Hemisphere", "Region",
+                AtlasRegionColumns.ATLAS_KEY, AtlasRegionColumns.REGION_ID,
+                AtlasRegionColumns.REGION_ACRONYM, AtlasRegionColumns.REGION_NAME,
+                "ROI", "Source", "vs",
                 "Objects", "CPC Colocalized", "CPC %", "CPC Contains", "CPC Contains %");
         List<List<String>> pairRows = new ArrayList<List<String>>();
 
@@ -5501,6 +5804,7 @@ public class SpatialAnalysis implements Analysis {
                     row.add(safeValue(cd, firstRow, "Animal Name"));
                     row.add(safeValue(cd, firstRow, "Hemisphere"));
                     row.add(safeValue(cd, firstRow, "Region"));
+                    addAtlasRegionValues(row, cd, firstRow);
                     row.add(safeValue(cd, firstRow, "ROI"));
                     row.add(nameA);
                     row.add(nameB);
@@ -5521,7 +5825,10 @@ public class SpatialAnalysis implements Analysis {
 
         // Multi-target summary
         List<String> multiHeader = Arrays.asList(
-                "Animal Name", "Hemisphere", "Region", "ROI", "Source", "Pattern", "Count", "%");
+                "Animal Name", "Hemisphere", "Region",
+                AtlasRegionColumns.ATLAS_KEY, AtlasRegionColumns.REGION_ID,
+                AtlasRegionColumns.REGION_ACRONYM, AtlasRegionColumns.REGION_NAME,
+                "ROI", "Source", "Pattern", "Count", "%");
         List<List<String>> multiRows = new ArrayList<List<String>>();
 
         for (String ch : channelNames) {
@@ -5550,6 +5857,7 @@ public class SpatialAnalysis implements Analysis {
                     row.add(safeValue(cd, firstRow, "Animal Name"));
                     row.add(safeValue(cd, firstRow, "Hemisphere"));
                     row.add(safeValue(cd, firstRow, "Region"));
+                    addAtlasRegionValues(row, cd, firstRow);
                     row.add(safeValue(cd, firstRow, "ROI"));
                     row.add(ch);
                     row.add(pe.getKey());
@@ -5714,7 +6022,8 @@ public class SpatialAnalysis implements Analysis {
         opts.addHelpText("Derives composite indices from 3D features: "
                 + "Ramification Index (RI), Surface Roughness (SRI), "
                 + "Process Burden (PB), Morphological Polarity (MP), "
-                + "Volume-Span Discrepancy (VSD). Requires 3D shape features.");
+                + "Volume-Span Discrepancy (VSD), centroid-based 3D Sholl critical radius/Schoenen index, "
+                + "and skeleton branch/junction/endpoint counts. Requires 3D shape features.");
         opts.beginAdvancedSection("spatial");
         final ToggleSwitch popToggle = opts.addToggle(
                 decorateArtifactLabel("Population morphometric scoring", artifactStatus,

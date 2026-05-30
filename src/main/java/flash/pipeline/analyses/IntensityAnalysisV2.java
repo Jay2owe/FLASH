@@ -13,6 +13,7 @@ import flash.pipeline.analyses.wizard.IntensityWizard;
 import flash.pipeline.bin.BinField;
 import flash.pipeline.bin.BinSetupDispatcher;
 import flash.pipeline.cli.CLIConfig;
+import flash.pipeline.atlas.AtlasRegionColumns;
 import flash.pipeline.deconv.DeconvolvedInputResolver;
 import flash.pipeline.image.AdaptiveParallelism;
 import flash.pipeline.image.FilterExecutor;
@@ -40,6 +41,8 @@ import flash.pipeline.naming.ImageNameParser;
 import flash.pipeline.naming.NameParts;
 import flash.pipeline.naming.ResolvedImageMetadata;
 import flash.pipeline.results.IntensityDetailsWriter;
+import flash.pipeline.runrecord.AnalysisRunContext;
+import flash.pipeline.runrecord.RunRecordAware;
 import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.FeatureDependencyGate;
 import flash.pipeline.runtime.PluginInstallGuard;
@@ -86,7 +89,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  *
  * Output: FLASH/Results/Tables/Intensity/&lt;channel&gt;.csv and intensity-analysis details.
  */
-public class IntensityAnalysisV2 implements Analysis {
+public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
 
     private boolean headless = false;
     private boolean suppressDialogs = false;
@@ -104,6 +107,8 @@ public class IntensityAnalysisV2 implements Analysis {
     private CLIConfig cliConfig = null;
     private int cliConfiguredMaskIndex1Based = -1;
     private IntensitySpatialConfig intensitySpatialConfig = IntensitySpatialConfig.disabled();
+    private IntensityWizard.DerivedConfig configuredOptions = null;
+    private AnalysisRunContext runRecordContext = null;
     private final AtomicBoolean stalePluginWarningShown = new AtomicBoolean(false);
 
     @Override
@@ -181,10 +186,35 @@ public class IntensityAnalysisV2 implements Analysis {
         }
     }
 
+    void setWizardConfig(IntensityWizard.DerivedConfig config) {
+        this.configuredOptions = config;
+    }
+
+    void applyPreset(String directory, IntensityPreset preset) {
+        BinConfig cfg = loadBinConfig(directory);
+        List<File> roiZips = RoiIO.listRoiZipFiles(new File(directory));
+        List<String> roiSetNames = new ArrayList<String>();
+        for (File roiZip : roiZips) {
+            if (roiZip == null) continue;
+            String name = roiZip.getName();
+            name = name.replace(" ROIs.zip", "").replace("ROIs.zip", "").trim();
+            roiSetNames.add(name);
+        }
+        File binDir = FlashProjectLayout.forDirectory(directory).configurationWriteDir();
+        ChannelIdentities identities = ChannelConfigIO.readChannelIdentities(binDir);
+        setWizardConfig(IntensityWizard.fromPreset(cfg, identities, preset, roiSetNames));
+    }
+
+    @Override
+    public void setRunRecordContext(AnalysisRunContext context) {
+        this.runRecordContext = context;
+    }
+
     @Override
     public void execute(String directory) {
         if (!FeatureDependencyGate.gate(DependencyId.BIO_FORMATS_RUNTIME,
                 "Fluorescence Intensity Analysis", "Bio-Formats image loading")) {
+            recordWarn("Fluorescence Intensity Analysis blocked by missing Bio-Formats runtime dependency.");
             return;
         }
 
@@ -192,7 +222,9 @@ public class IntensityAnalysisV2 implements Analysis {
                 directory, "Intensity Analysis", requiredBinFields(),
                 benefitsFromRois(), suppressDialogs, cliConfig);
         if (outcome == BinSetupDispatcher.Outcome.CANCELLED) {
-            IJ.log("[FLASH] Intensity Analysis cancelled by user.");
+            String message = "[FLASH] Intensity Analysis cancelled by user.";
+            IJ.log(message);
+            recordWarn(message);
             return;
         }
 
@@ -204,6 +236,7 @@ public class IntensityAnalysisV2 implements Analysis {
             if (canShowGuiDialog(suppressDialogs, cliConfig, GraphicsEnvironment.isHeadless())) {
                 IJ.error("Intensity Analysis", message);
             }
+            recordWarn(message);
             return;
         }
         IJ.log("==========================================================");
@@ -216,8 +249,10 @@ public class IntensityAnalysisV2 implements Analysis {
         // This is distinct from the 3D Object Analysis default filter
         String basicFilterMacro = NamedFilterLoader.loadIntensityFilter();
         if (basicFilterMacro == null) {
-            IJ.log("ERROR: Intensity filter resource not found in JAR.");
+            String message = "Intensity filter resource not found in JAR.";
+            IJ.log("ERROR: " + message);
             IJ.error("Intensity Analysis", "Intensity filter resource missing from plugin JAR.");
+            recordWarn(message);
             return;
         }
         IJ.log("Intensity filter: loaded from plugin resources (intensityFilter.ijm)");
@@ -264,6 +299,16 @@ public class IntensityAnalysisV2 implements Analysis {
 
         boolean[] roiZipSelected = new boolean[roiZips.size()];
         Arrays.fill(roiZipSelected, true);
+        cliConfiguredMaskIndex1Based = -1;
+        intensitySpatialConfig = IntensitySpatialConfig.disabled();
+        if (configuredOptions != null) {
+            applyIntensityDerivedConfig(configuredOptions, binarization,
+                    thresholds, roiZipSelected, channelNames);
+            intensitySpatialConfig = configuredOptions.spatialConfig == null
+                    ? IntensitySpatialConfig.disabled()
+                    : configuredOptions.spatialConfig;
+            cliConfiguredMaskIndex1Based = configuredOptions.maskChannelIndex + 1;
+        }
 
         // Per-channel filter source: "Bin filter" (loads saved Cn_Filters.ijm)
         // or "Basic background and noise removal" (intensity-filter macro). Default Bin.
@@ -565,13 +610,17 @@ public class IntensityAnalysisV2 implements Analysis {
         try {
             IoUtils.mustMkdirs(saveRoot);
         } catch (IOException e) {
-            IJ.log("[FLASH] Could not create intensity tables output directory: " + e.getMessage());
+            String message = "[FLASH] Could not create intensity tables output directory: " + e.getMessage();
+            IJ.log(message);
+            recordError(message, e);
             return;
         }
         try {
             IoUtils.mustMkdirs(overlayRoot);
         } catch (IOException e) {
-            IJ.log("[FLASH] Could not create intensity overlays output directory: " + e.getMessage());
+            String message = "[FLASH] Could not create intensity overlays output directory: " + e.getMessage();
+            IJ.log(message);
+            recordError(message, e);
             return;
         }
         IJ.log("Tables output directory: " + saveRoot.getAbsolutePath());
@@ -582,7 +631,9 @@ public class IntensityAnalysisV2 implements Analysis {
         try {
             IoUtils.mustMkdirs(analysisDetailsDir);
         } catch (IOException e) {
-            IJ.log("[FLASH] Could not create Analysis Details directory: " + e.getMessage());
+            String message = "[FLASH] Could not create Analysis Details directory: " + e.getMessage();
+            IJ.log(message);
+            recordError(message, e);
             return;
         }
 
@@ -600,8 +651,12 @@ public class IntensityAnalysisV2 implements Analysis {
                         "Optional intensity-spatial dependencies are checked per family at run time.",
                         "Failures are logged with image/channel/ROI/analysis context and written as NaN columns.");
                 IJ.log("  Analysis details written for: " + channelNames[c]);
+                recordOutput(new File(analysisDetailsDir,
+                        IntensityDetailsWriter.detailsFileName(channelNames[c])), "txt");
             } catch (Exception e) {
-                IJ.log("  WARNING: failed writing intensity details for " + channelNames[c] + ": " + e.getMessage());
+                String message = "Failed writing intensity details for " + channelNames[c];
+                IJ.log("  WARNING: " + message + ": " + e.getMessage());
+                recordError(message, e);
             }
         }
 
@@ -630,10 +685,19 @@ public class IntensityAnalysisV2 implements Analysis {
             for (int rSet = 0; rSet < roiZips.size(); rSet++) {
                 if (!roiZipSelected[rSet]) continue;
                 java.util.List<Roi> rois;
+                AnalysisRunContext.InputHandle roiInput = recordInputStart(roiZips.get(rSet), 0);
+                long roiStarted = System.currentTimeMillis();
                 try {
                     rois = RoiIO.loadRoisFromZip(roiZips.get(rSet));
+                    recordInputEnd(roiInput, rois == null || rois.isEmpty() ? "skipped" : "processed", roiStarted);
                 } catch (NoClassDefFoundError e) {
+                    recordInputEnd(roiInput, "failed", roiStarted);
+                    recordError("Failed to load ROI zip " + roiZips.get(rSet).getAbsolutePath(), e);
                     if (PluginInstallGuard.reportMissingInternalClass("Intensity Analysis", e)) return;
+                    throw e;
+                } catch (RuntimeException e) {
+                    recordInputEnd(roiInput, "failed", roiStarted);
+                    recordError("Failed to load ROI zip " + roiZips.get(rSet).getAbsolutePath(), e);
                     throw e;
                 }
                 preloadedRoiSets[rSet] = rois.toArray(new Roi[0]);
@@ -658,6 +722,7 @@ public class IntensityAnalysisV2 implements Analysis {
             supplier = wrapInputSupplier(directory, supplier);
         } catch (Exception e) {
             IJ.log("Intensity Analysis: " + e.getMessage());
+            recordError("Intensity Analysis could not create image supplier", e);
             if (canShowGuiDialog(suppressDialogs, cliConfig, GraphicsEnvironment.isHeadless())) {
                 IJ.showMessage("Intensity Analysis", e.getMessage());
             }
@@ -677,10 +742,11 @@ public class IntensityAnalysisV2 implements Analysis {
                 int count = preloadedRoiSets[rSet].length;
                 IJ.log("  ROI set '" + roiZipNames[rSet] + "': " + count + " ROIs (expected " + expected + ")");
                 if (count != expected) {
-                    IJ.error("Intensity Analysis",
-                            "ROI set '" + roiZipNames[rSet] + "' has " + count
-                                    + " ROIs but expected " + expected + " (2 per image).\n"
-                                    + "Strict mode requires exactly 2 ROIs per image.");
+                    String message = "ROI set '" + roiZipNames[rSet] + "' has " + count
+                            + " ROIs but expected " + expected + " (2 per image). "
+                            + "Strict mode requires exactly 2 ROIs per image.";
+                    IJ.error("Intensity Analysis", message);
+                    recordWarn(message);
                     return;
                 }
             }
@@ -693,7 +759,9 @@ public class IntensityAnalysisV2 implements Analysis {
                 outputStackDepth, skipExisting);
         logOutputPlan(outputPlan);
         if (skipExisting && outputPlan.allSelectedOutputsSkipped()) {
-            IJ.log("All selected intensity output CSVs already exist - skipping entire Intensity Analysis.");
+            String message = "All selected intensity output CSVs already exist - skipping entire Intensity Analysis.";
+            IJ.log(message);
+            recordWarn(message);
             IJ.showProgress(1.0);
             IJ.showStatus("");
             return;
@@ -726,8 +794,10 @@ public class IntensityAnalysisV2 implements Analysis {
                 for (SeriesMeta m : metas) names.add(m.name);
                 loader.setSeriesNames(names);
             } catch (Exception e) {
-                IJ.log("    - WARNING: Could not read series names for intensity loader progress in "
-                        + directory + ": " + e.getMessage());
+                String message = "Could not read series names for intensity loader progress in "
+                        + directory + ": " + e.getMessage();
+                IJ.log("    - WARNING: " + message);
+                recordWarn(message);
             }
             loader.start();
             IJ.log("Thread split: " + effectiveLoaders + " loaders, " + safeThreads + " workers");
@@ -762,11 +832,14 @@ public class IntensityAnalysisV2 implements Analysis {
                 if (!merged) {
                     CsvTableIO.writeResultsTableCsv(outCsv, table, orderedColumns);
                 }
+                recordOutput(outCsv, "csv");
                 IJ.log("  " + (merged ? "Updated existing: " : "Saved: ")
                         + outCsv.getName() + " (" + table.size() + " rows)");
             } catch (Exception e) {
-                IJ.log("  WARNING: failed saving intensity CSV for "
-                        + key.channelName() + " " + key.mode() + ": " + e.getMessage());
+                String message = "Failed saving intensity CSV for "
+                        + key.channelName() + " " + key.mode();
+                IJ.log("  WARNING: " + message + ": " + e.getMessage());
+                recordError(message, e);
             }
         }
 
@@ -817,7 +890,9 @@ public class IntensityAnalysisV2 implements Analysis {
                 try {
                     imp = nextImage.get();
                 } catch (Exception e) {
-                    IJ.log("ERROR: Failed to load prefetched image " + (idx + 1) + ": " + e.getMessage());
+                    String message = "Failed to load prefetched image " + (idx + 1);
+                    IJ.log("ERROR: " + message + ": " + e.getMessage());
+                    recordError(message, e);
                     nextImage = null;
                     continue;
                 }
@@ -827,7 +902,9 @@ public class IntensityAnalysisV2 implements Analysis {
                 try {
                     imp = supplier.openSeries(idx);
                 } catch (Exception e) {
-                    IJ.log("ERROR: Failed to open image " + (idx + 1) + ": " + e.getMessage());
+                    String message = "Failed to open image " + (idx + 1);
+                    IJ.log("ERROR: " + message + ": " + e.getMessage());
+                    recordError(message, e);
                     continue;
                 }
             }
@@ -876,7 +953,9 @@ public class IntensityAnalysisV2 implements Analysis {
                 int n = resolveProcessableChannelCount(imp, chans, channelNames, idx);
                 IJ.log("  Channels split: " + n);
                 if (n <= 0) {
-                    IJ.log("  WARNING: no processable channels for " + imp.getTitle() + "; skipping image.");
+                    String message = "No processable channels for " + imp.getTitle() + "; skipping image.";
+                    IJ.log("  WARNING: " + message);
+                    recordWarn(message);
                     continue;
                 }
 
@@ -1015,9 +1094,10 @@ public class IntensityAnalysisV2 implements Analysis {
                                 chans = ChannelSplitter.split(imp);
                                 int n = resolveProcessableChannelCount(imp, chans, channelNames, idx);
                                 if (n <= 0) {
-                                    IJ.log("[" + (idx + 1) + "/" + total
-                                            + "] WARNING: no processable channels for " + imp.getTitle()
-                                            + "; skipping image.");
+                                    String message = "No processable channels for " + imp.getTitle()
+                                            + "; skipping image.";
+                                    IJ.log("[" + (idx + 1) + "/" + total + "] WARNING: " + message);
+                                    recordWarn(message);
                                     int done = completed.incrementAndGet();
                                     IJ.showProgress(done, total);
                                     continue;
@@ -1034,8 +1114,10 @@ public class IntensityAnalysisV2 implements Analysis {
                                         int roiIndex = idx * 2;
                                         Roi activeRoi;
                                         if (preloadedRois[rSet] == null || roiIndex >= preloadedRois[rSet].length) {
-                                            IJ.log("[" + (idx + 1) + "/" + total + "] ERROR: ROI set '"
-                                                    + roiZipNames[rSet] + "' missing ROI index " + roiIndex);
+                                            String message = "ROI set '" + roiZipNames[rSet]
+                                                    + "' missing ROI index " + roiIndex;
+                                            IJ.log("[" + (idx + 1) + "/" + total + "] ERROR: " + message);
+                                            recordWarn(message);
                                             break;
                                         }
                                         activeRoi = (Roi) preloadedRois[rSet][roiIndex].clone();
@@ -1114,8 +1196,10 @@ public class IntensityAnalysisV2 implements Analysis {
             } catch (Exception e) {
                 Throwable cause = e.getCause() == null ? e : e.getCause();
                 rethrowIfFatal(cause);
-                IJ.log("[FLASH] Parallel worker failed outside image scope: "
-                        + describeThrowable(cause));
+                String message = "Parallel worker failed outside image scope: "
+                        + describeThrowable(cause);
+                IJ.log("[FLASH] " + message);
+                recordError(message, cause);
             }
         }
         pool.shutdown();
@@ -1128,9 +1212,12 @@ public class IntensityAnalysisV2 implements Analysis {
                 && PluginInstallGuard.reportMissingInternalClass(
                 "Fluorescence Intensity Analysis", (NoClassDefFoundError) t)) {
             IJ.log(prefix + "stale or partial FLASH plugin JAR; see message above.");
+            recordError("Stale or partial FLASH plugin JAR while processing intensity image "
+                    + (zeroBasedIndex + 1), t);
             return;
         }
         IJ.log(prefix + describeThrowable(t));
+        recordError("Intensity Analysis failed while processing image " + (zeroBasedIndex + 1), t);
     }
 
     private static String describeThrowable(Throwable t) {
@@ -1163,9 +1250,11 @@ public class IntensityAnalysisV2 implements Analysis {
         int n = Math.min(actual, configured);
         if (actual != configured) {
             String title = imp == null ? "image " + (zeroBasedImageIndex + 1) : imp.getTitle();
-            IJ.log("  WARNING: channel count mismatch for " + title
+            String message = "Channel count mismatch for " + title
                     + ": image has " + actual + ", configuration has " + configured
-                    + "; processing " + n + ".");
+                    + "; processing " + n + ".";
+            IJ.log("  WARNING: " + message);
+            recordWarn(message);
         }
         return n;
     }
@@ -2188,10 +2277,12 @@ public class IntensityAnalysisV2 implements Analysis {
     private static void writeMetadataColumns(ResultsTable table, int row,
                                              NameParts parts, String roiLabel) {
         if (table == null) return;
-        table.setValue("Region", row, parts == null ? "" : parts.csvRegion());
+        String region = parts == null ? "" : parts.csvRegion();
+        table.setValue("Region", row, region);
         table.setValue("Hemisphere", row, parts == null ? "" : parts.hemisphere);
         table.setValue("ROI", row, roiLabel == null ? "" : roiLabel);
         table.setValue("Animal Name", row, parts == null ? "" : parts.animal);
+        AtlasRegionColumns.writeTo(table, row, region, roiLabel);
     }
 
     private void appendSpatialModeRow(IntensityOutputPlan outputPlan,
@@ -2346,6 +2437,7 @@ public class IntensityAnalysisV2 implements Analysis {
 
         LinkedHashSet<String> ordered = new LinkedHashSet<String>();
         ordered.add("Region");
+        ordered.addAll(AtlasRegionColumns.COLUMNS);
         ordered.add("Hemisphere");
         ordered.add("ROI");
         ordered.add("Animal Name");
@@ -2938,11 +3030,11 @@ public class IntensityAnalysisV2 implements Analysis {
                                                 String[] thresholds,
                                                 boolean[] roiZipSelected,
                                                 String[] channelNames) {
-        cliConfiguredMaskIndex1Based = -1;
-        intensitySpatialConfig = IntensitySpatialConfig.disabled();
         if (cliConfig == null || cliConfig.getIntensity() == null || !cliConfig.getIntensity().hasConfiguration()) {
             return;
         }
+        cliConfiguredMaskIndex1Based = -1;
+        intensitySpatialConfig = IntensitySpatialConfig.disabled();
         CLIConfig.IntensityConfig intensity = cliConfig.getIntensity();
         IntensityWizard.DerivedConfig derived = null;
         if (intensity.getPresetName() != null && !intensity.getPresetName().trim().isEmpty()) {
@@ -3143,22 +3235,81 @@ public class IntensityAnalysisV2 implements Analysis {
             private ImagePlus openResolved(int seriesIndex, boolean materialized) throws Exception {
                 // TIFF-folder mode has no sibling deconvolution layout — pass through to parent.
                 if (rawSupplier.getMode() == DeferredImageSupplier.Mode.TIFF_FOLDER) {
-                    return materialized ? rawSupplier.openSeriesMaterialized(seriesIndex) : rawSupplier.openSeries(seriesIndex);
+                    return openRawSeriesRecorded(rawSupplier, seriesIndex, materialized);
                 }
                 File container = rawSupplier.getContainerFile();
                 String seriesName = rawSupplier.getSeriesName(seriesIndex);
                 String baseName = baseNameForSeries(seriesName, seriesIndex);
                 File inputFile = DeconvolvedInputResolver.resolveInput(rootDir, container, baseName, useDeconv);
                 if (inputFile != null && !inputFile.equals(container)) {
-                    ImagePlus imp = new Opener().openImage(inputFile.getAbsolutePath());
-                    if (imp != null) {
-                        imp.setTitle(expectedSeriesTitle(container, seriesName, seriesIndex));
+                    AnalysisRunContext.InputHandle input = recordInputStart(inputFile, seriesIndex + 1);
+                    long started = System.currentTimeMillis();
+                    try {
+                        ImagePlus imp = new Opener().openImage(inputFile.getAbsolutePath());
+                        if (imp != null) {
+                            imp.setTitle(expectedSeriesTitle(container, seriesName, seriesIndex));
+                        }
+                        recordInputEnd(input, imp == null ? "skipped" : "processed", started);
+                        return imp;
+                    } catch (RuntimeException e) {
+                        recordInputEnd(input, "failed", started);
+                        recordError("Failed to open deconvolved input series " + (seriesIndex + 1), e);
+                        throw e;
                     }
-                    return imp;
                 }
-                return materialized ? rawSupplier.openSeriesMaterialized(seriesIndex) : rawSupplier.openSeries(seriesIndex);
+                return openRawSeriesRecorded(rawSupplier, seriesIndex, materialized);
             }
         };
+    }
+
+    private ImagePlus openRawSeriesRecorded(DeferredImageSupplier supplier,
+                                            int seriesIndex,
+                                            boolean materialized) throws Exception {
+        File source = supplier.getContainerFileForSeries(seriesIndex);
+        AnalysisRunContext.InputHandle input = recordInputStart(source, seriesIndex + 1);
+        long started = System.currentTimeMillis();
+        try {
+            ImagePlus imp = materialized
+                    ? supplier.openSeriesMaterialized(seriesIndex)
+                    : supplier.openSeries(seriesIndex);
+            recordInputEnd(input, imp == null ? "skipped" : "processed", started);
+            return imp;
+        } catch (Exception e) {
+            recordInputEnd(input, "failed", started);
+            recordError("Failed to open input series " + (seriesIndex + 1), e);
+            throw e;
+        }
+    }
+
+    private AnalysisRunContext.InputHandle recordInputStart(File file, int seriesIndex) {
+        return runRecordContext == null ? null : runRecordContext.recordInputStart(file, seriesIndex, null);
+    }
+
+    private void recordInputEnd(AnalysisRunContext.InputHandle inputHandle,
+                                String status,
+                                long startedMillis) {
+        if (runRecordContext != null && inputHandle != null) {
+            runRecordContext.recordInputEnd(inputHandle, status,
+                    Math.max(0L, System.currentTimeMillis() - startedMillis));
+        }
+    }
+
+    private void recordOutput(File file, String kind) {
+        if (runRecordContext != null && file != null) {
+            runRecordContext.recordOutput(file, kind);
+        }
+    }
+
+    private void recordWarn(String message) {
+        if (runRecordContext != null) {
+            runRecordContext.warn(message);
+        }
+    }
+
+    private void recordError(String message, Throwable t) {
+        if (runRecordContext != null) {
+            runRecordContext.error(message, t);
+        }
     }
 
     private static String baseNameForSeries(String seriesName, int seriesIndex) {

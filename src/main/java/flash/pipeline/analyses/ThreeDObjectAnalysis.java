@@ -15,6 +15,7 @@ import flash.pipeline.analyses.spatial.DiskLabelImageProvider;
 import flash.pipeline.analyses.spatial.InMemoryLabelImageProvider;
 import flash.pipeline.analyses.spatial.LabelImageProvider;
 import flash.pipeline.analyses.spatial.SectionKey;
+import flash.pipeline.atlas.AtlasRegionColumns;
 import flash.pipeline.cli.CLIConfig;
 import flash.pipeline.deconv.DeconvolvedInputResolver;
 import flash.pipeline.cellpose.Cellpose3DRunner;
@@ -49,6 +50,8 @@ import flash.pipeline.results.ObjectAnalysisDetailsWriter;
 import flash.pipeline.results.ObjectCsvColumnOrder;
 import flash.pipeline.stardist.StarDist3DRunner;
 import flash.pipeline.results.ResultsTableCleaner;
+import flash.pipeline.runrecord.AnalysisRunContext;
+import flash.pipeline.runrecord.RunRecordAware;
 import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.FeatureDependencyGate;
 import flash.pipeline.runtime.PluginInstallGuard;
@@ -121,7 +124,7 @@ import java.util.concurrent.locks.ReentrantLock;
  * Reads channel config from the active FLASH configuration folder.
  * Applies per-channel filter macro if present in that configuration folder.
  */
-public class ThreeDObjectAnalysis implements Analysis {
+public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
     private static final String FULL_IMAGE_ROI_SET_NAME = "Full image";
     private static final Pattern MULTICOLOC_INTERACTION_COUNT_PATTERN =
             Pattern.compile("(\\d+)\\s+(convergent|interaction)");
@@ -247,6 +250,7 @@ public class ThreeDObjectAnalysis implements Analysis {
     private final AtomicBoolean calibrationWritten = new AtomicBoolean(false);
     private boolean useDeconvolvedInput = true;
     private CLIConfig cliConfig = null;
+    private AnalysisRunContext runRecordContext = null;
 
     /** Shared lock for all legacy ImageJ1/plugin paths that touch WindowManager or Prefs. */
     private static final ReentrantLock COUNTER3D_LOCK = WindowManagerLock.LOCK;
@@ -426,6 +430,21 @@ public class ThreeDObjectAnalysis implements Analysis {
         if (config != null) {
             this.useDeconvolvedInput = config.isThreeDUseDeconv();
         }
+    }
+
+    @Override
+    public void setRunRecordContext(AnalysisRunContext context) {
+        this.runRecordContext = context;
+    }
+
+    void applyPreset(String directory, ThreeDObjectPreset preset) {
+        if (preset == null) return;
+        BinConfig cfg = loadBinConfig(directory);
+        ChannelIdentities identities = ChannelConfigIO.readChannelIdentities(
+                FlashProjectLayout.forDirectory(directory).configurationWriteDir());
+        ThreeDObjectWizard.DerivedConfig derived =
+                ThreeDObjectWizard.fromPreset(cfg, identities, preset);
+        applyThreeDObjectDerivedConfig(cfg, derived);
     }
 
     void setSpatialOptionsDialogLauncherForTest(SpatialOptionsDialogLauncher launcher) {
@@ -688,6 +707,7 @@ public class ThreeDObjectAnalysis implements Analysis {
 
         if (!FeatureDependencyGate.gate(DependencyId.BIO_FORMATS_RUNTIME,
                 "3D Object Analysis", "Bio-Formats image loading")) {
+            recordWarn("3D Object Analysis blocked by missing Bio-Formats runtime dependency.");
             return;
         }
 
@@ -695,7 +715,9 @@ public class ThreeDObjectAnalysis implements Analysis {
                 directory, "3D Object Analysis", requiredBinFields(),
                 benefitsFromRois(), suppressDialogs, cliConfig);
         if (outcome == BinSetupDispatcher.Outcome.CANCELLED) {
-            IJ.log("[FLASH] 3D Object Analysis cancelled by user.");
+            String message = "[FLASH] 3D Object Analysis cancelled by user.";
+            IJ.log(message);
+            recordWarn(message);
             return;
         }
 
@@ -704,22 +726,27 @@ public class ThreeDObjectAnalysis implements Analysis {
         if (usesClassicalSegmentation(cfg)
                 && !FeatureDependencyGate.gate(DependencyId.OBJECTS_COUNTER_3D,
                 "3D Object Analysis", "classical 3D object counting")) {
+            recordWarn("3D Object Analysis blocked by missing 3D Objects Counter dependency.");
             return;
         }
         if (usesEnhancedClassicalSegmentation(cfg)
                 && !gateObjectsCounterPlusFeature("Enhanced Classical / 3D Objects Counter+ segmentation")) {
+            recordWarn("3D Object Analysis blocked by missing enhanced-classical 3D object dependency.");
             return;
         }
         if (usesStarDistSegmentation(cfg) && !gateStarDistFeature("StarDist 3D segmentation")) {
+            recordWarn("3D Object Analysis blocked by missing StarDist 3D dependency.");
             return;
         }
         if (usesCellposeSegmentation(cfg) && !gateCellposeFeature("Cellpose segmentation")) {
+            recordWarn("3D Object Analysis blocked by missing Cellpose dependency.");
             return;
         }
         if (requiresMcib3dMorphometry(cfg)
                 && !FeatureDependencyGate.gate(DependencyId.MCIB3D_CORE,
                 "3D Object Analysis",
                 "mcib3d-backed 3D morphometry / shape analysis")) {
+            recordWarn("3D Object Analysis blocked by missing mcib3d dependency.");
             return;
         }
         IJ.log("Channels: " + String.join(", ", cfg.channelNames));
@@ -753,7 +780,9 @@ public class ThreeDObjectAnalysis implements Analysis {
                 return;
             }
             if (decision == NoRoiDecision.CANCEL) {
-                IJ.log("[FLASH] 3D Object Analysis cancelled because no ROI sets were found.");
+                String message = "[FLASH] 3D Object Analysis cancelled because no ROI sets were found.";
+                IJ.log(message);
+                recordWarn(message);
                 return;
             }
             analyseFullImagesWithoutRois = true;
@@ -947,7 +976,9 @@ public class ThreeDObjectAnalysis implements Analysis {
         ExistingObjectDataMode existingObjectDataMode =
                 resolveExistingObjectDataMode(directory, cfg.channelNames);
         if (existingObjectDataMode == ExistingObjectDataMode.CANCEL) {
-            IJ.log("[FLASH] 3D Object Analysis cancelled because existing output handling was cancelled.");
+            String message = "[FLASH] 3D Object Analysis cancelled because existing output handling was cancelled.";
+            IJ.log(message);
+            recordWarn(message);
             return;
         }
         if (existingObjectDataMode == ExistingObjectDataMode.SKIP) {
@@ -974,9 +1005,14 @@ public class ThreeDObjectAnalysis implements Analysis {
                 IJ.log("  ROI set '" + roiSetNames[r] + "': " + (selectedRoiSets[r] ? "selected" : "skipped"));
                 if (!selectedRoiSets[r]) continue;
                 List<ij.gui.Roi> rois;
+                AnalysisRunContext.InputHandle roiInput = recordInputStart(roiZips.get(r), 0);
+                long roiStarted = System.currentTimeMillis();
                 try {
                     rois = RoiIO.loadRoisFromZip(roiZips.get(r));
+                    recordInputEnd(roiInput, "processed", roiStarted);
                 } catch (NoClassDefFoundError e) {
+                    recordInputEnd(roiInput, "failed", roiStarted);
+                    recordError("Failed to load ROI zip " + roiZips.get(r).getAbsolutePath(), e);
                     if (PluginInstallGuard.reportMissingInternalClass("3D Object Analysis", e)) return;
                     throw e;
                 }
@@ -986,7 +1022,9 @@ public class ThreeDObjectAnalysis implements Analysis {
         RoiSetData[] roiSets = selectedRoiSetData.toArray(new RoiSetData[0]);
 
         if (roiSets.length == 0) {
-            IJ.error("3D Object Analysis", "No ROIs loaded. Run 'Draw and Save ROIs' first (must create 2 ROIs per image).");
+            String message = "No ROIs loaded. Run 'Draw and Save ROIs' first (must create 2 ROIs per image).";
+            IJ.error("3D Object Analysis", message);
+            recordWarn(message);
             return;
         }
 
@@ -1012,8 +1050,14 @@ public class ThreeDObjectAnalysis implements Analysis {
                     modelCatalog,
                     cfg.channelNames,
                     cfg.segmentationMethods);
+            File report = ObjectAnalysisDetailsWriter.segmentationModelsReportFile(objectAnalysisDetailsDir);
+            if (report.isFile()) {
+                recordOutput(report, "txt");
+            }
         } catch (Exception e) {
-            IJ.log("Warning: failed writing segmentation model audit details: " + e.getMessage());
+            String message = "Warning: failed writing segmentation model audit details: " + e.getMessage();
+            IJ.log(message);
+            recordWarn(message);
         }
 
         ObjectImageRoots imageRoots = ObjectImageRoots.forDirectory(directory);
@@ -1051,7 +1095,9 @@ public class ThreeDObjectAnalysis implements Analysis {
             totalImages = supplier.getTotalSeries();
             supplier = wrapInputSupplier(directory, supplier);
         } catch (Exception e) {
-            IJ.log("3D Object Analysis: " + e.getMessage());
+            String message = "3D Object Analysis: " + e.getMessage();
+            IJ.log(message);
+            recordWarn(message);
             if (canShowGuiDecisionDialog(suppressDialogs, cliConfig, GraphicsEnvironment.isHeadless())) {
                 IJ.showMessage("3D Object Analysis", e.getMessage());
             }
@@ -1084,8 +1130,10 @@ public class ThreeDObjectAnalysis implements Analysis {
                 for (SeriesMeta m : metas) names.add(m.name);
                 loader.setSeriesNames(names);
             } catch (Exception e) {
-                IJ.log("    - WARNING: Could not read series names for 3D object loader progress in "
-                        + directory + ": " + e.getMessage());
+                String message = "    - WARNING: Could not read series names for 3D object loader progress in "
+                        + directory + ": " + e.getMessage();
+                IJ.log(message);
+                recordWarn(message);
             }
             loader.start();
             IJ.log("Thread split: " + effectiveLoaders + " loaders, " + safeWorkers + " workers");
@@ -1120,6 +1168,7 @@ public class ThreeDObjectAnalysis implements Analysis {
                 File out = objectOutputCsv(outDir, channelName);
                 writeObjectResultsCsv(directory, out, channelName, e.getValue(), keep,
                         extendExistingObjectData);
+                recordOutput(out, "csv");
 
                 // Write macro-style Analysis Details per channel
                 int cIndex = cfg.channelNames.indexOf(channelName);
@@ -1191,9 +1240,13 @@ public class ThreeDObjectAnalysis implements Analysis {
                                 cfg.segmentationMethod(cIndex)
                         );
                     }
+                    recordOutput(new File(objectAnalysisDetailsDir,
+                            ObjectAnalysisDetailsWriter.detailsFileName(channelName)), "txt");
                 }
             } catch (Exception ex) {
-                IJ.log("Warning: failed saving " + e.getKey() + ": " + ex.getMessage());
+                String message = "Warning: failed saving " + e.getKey() + ": " + ex.getMessage();
+                IJ.log(message);
+                recordError(message, ex);
             }
         }
 
@@ -1876,7 +1929,9 @@ public class ThreeDObjectAnalysis implements Analysis {
                 try {
                     imp = nextImage.get();
                 } catch (Exception e) {
-                    IJ.log("ERROR: Failed to load prefetched image " + (i + 1) + ": " + e.getMessage());
+                    String message = "ERROR: Failed to load prefetched image " + (i + 1) + ": " + e.getMessage();
+                    IJ.log(message);
+                    recordError(message, e);
                     nextImage = null;
                     continue;
                 }
@@ -1886,7 +1941,9 @@ public class ThreeDObjectAnalysis implements Analysis {
                 try {
                     imp = supplier.openSeries(i);
                 } catch (Exception e) {
-                    IJ.log("ERROR: Failed to open image " + (i + 1) + ": " + e.getMessage());
+                    String message = "ERROR: Failed to open image " + (i + 1) + ": " + e.getMessage();
+                    IJ.log(message);
+                    recordError(message, e);
                     continue;
                 }
             }
@@ -1896,6 +1953,7 @@ public class ThreeDObjectAnalysis implements Analysis {
             // Write calibration from the first successfully-loaded image
             if (calibrationWritten.compareAndSet(false, true)) {
                 CalibrationIO.writeFromImage(outDir, imp);
+                recordOutputIfExists(new File(outDir, "calibration.properties"), "properties");
             }
 
             // Start loading next image while processing this one
@@ -1982,6 +2040,7 @@ public class ThreeDObjectAnalysis implements Analysis {
 
             } catch (Exception ex) {
                 IJ.handleException(ex);
+                recordError("3D Object Analysis failed while processing image " + (i + 1), ex);
             } finally {
                 imp.changes = false;
                 imp.close();
@@ -2052,6 +2111,7 @@ public class ThreeDObjectAnalysis implements Analysis {
                         // Write calibration from the first image (thread-safe)
                         if (calibrationWritten.compareAndSet(false, true)) {
                             CalibrationIO.writeFromImage(outDir, imp);
+                            recordOutputIfExists(new File(outDir, "calibration.properties"), "properties");
                         }
 
                         ParallelContext.enterParallel();
@@ -2174,6 +2234,7 @@ public class ThreeDObjectAnalysis implements Analysis {
                                     e);
                             failures.add(contextual);
                             IJ.log("[" + scnIndex + "/" + total + "] ERROR: " + contextual.getMessage());
+                            recordError(contextual.getMessage(), contextual);
                             int done = completed.incrementAndGet();
                             IJ.showProgress(done, total);
                             IJ.showStatus("Processing " + done + "/" + total + " (failed)");
@@ -2217,6 +2278,7 @@ public class ThreeDObjectAnalysis implements Analysis {
                 String msg = cause.getMessage() != null
                         ? cause.getMessage() : cause.getClass().getSimpleName();
                 IJ.log("Parallel processing error: " + msg);
+                recordError("Parallel processing error: " + msg, cause);
             }
         }
         pool.shutdown();
@@ -2415,7 +2477,9 @@ public class ThreeDObjectAnalysis implements Analysis {
             if (objImg != null) {
                 String safeChName = ChannelFilenameCodec.toSafe(chName);
                 String objFileName = safeChName + "_objects" + (hemiRegion.isEmpty() ? "" : "_" + hemiRegion) + ".tif";
-                AsyncImageSaver.saveAsTiffAsync(objImg, new File(perAnimal, objFileName).getAbsolutePath());
+                File labelOutput = new File(perAnimal, objFileName);
+                AsyncImageSaver.saveAsTiffAsync(objImg, labelOutput.getAbsolutePath());
+                recordOutput(labelOutput, "tiff");
                 retainSpatialLabelIfNeeded(chName, SectionKey.of(animalName, hemiRegion), objImg);
             }
         }
@@ -2515,6 +2579,7 @@ public class ThreeDObjectAnalysis implements Analysis {
         }
 
         keep.add("Region");
+        keep.addAll(AtlasRegionColumns.COLUMNS);
         keep.add("Hemisphere");
         keep.add("ROI");
         keep.add("Animal Name");
@@ -3148,15 +3213,20 @@ public class ThreeDObjectAnalysis implements Analysis {
                 String maskedSuffix = buildFileSuffix(hemisphere, roiLabel, animalName);
                 String safeChannelName = ChannelFilenameCodec.toSafe(channelName);
                 if (res.getMaskedImage() != null) {
+                    File maskedOutput = new File(maskedAnimalDir, safeChannelName + "_Masked"
+                            + (maskedSuffix.isEmpty() ? "" : "_" + maskedSuffix) + ".tif");
                     AsyncImageSaver.saveAsTiffAsync(res.getMaskedImage(),
-                            new File(maskedAnimalDir, safeChannelName + "_Masked" + (maskedSuffix.isEmpty() ? "" : "_" + maskedSuffix) + ".tif").getAbsolutePath());
+                            maskedOutput.getAbsolutePath());
+                    recordOutput(maskedOutput, "tiff");
                 }
 
                 // Save the pre-detection filtered image into Filtered Inputs/<animal>/
                 if (fr.preDetectionFiltered != null) {
+                    File filteredOutput = new File(filteredAnimalDir, safeChannelName + "_Filtered"
+                            + (maskedSuffix.isEmpty() ? "" : "_" + maskedSuffix) + ".tif");
                     AsyncImageSaver.saveAsTiffAsync(fr.preDetectionFiltered,
-                            new File(filteredAnimalDir, safeChannelName + "_Filtered"
-                                    + (maskedSuffix.isEmpty() ? "" : "_" + maskedSuffix) + ".tif").getAbsolutePath());
+                            filteredOutput.getAbsolutePath());
+                    recordOutput(filteredOutput, "tiff");
                 }
 
                 // Objects image saving is deferred until after colocalization.
@@ -3548,18 +3618,22 @@ public class ThreeDObjectAnalysis implements Analysis {
                 String maskedSuffix = buildFileSuffix(hemisphere, roiLabel, animalName);
                 String safeChannelName = ChannelFilenameCodec.toSafe(channelName);
                 if (roiRes.getMaskedImage() != null) {
+                    File maskedOutput = new File(maskedAnimalDir, safeChannelName + "_Masked"
+                            + (maskedSuffix.isEmpty() ? "" : "_" + maskedSuffix) + ".tif");
                     AsyncImageSaver.saveAsTiffAsync(roiRes.getMaskedImage(),
-                            new File(maskedAnimalDir, safeChannelName + "_Masked"
-                                    + (maskedSuffix.isEmpty() ? "" : "_" + maskedSuffix) + ".tif").getAbsolutePath());
+                            maskedOutput.getAbsolutePath());
+                    recordOutput(maskedOutput, "tiff");
                 }
 
                 // Save pre-detection filtered image per-ROI (clone + crop from full) under Filtered Inputs/<animal>/.
                 if (fr.preDetectionFiltered != null) {
                     ImagePlus roiPreDetection = ImageOps.duplicateThreadSafe(fr.preDetectionFiltered);
                     RoiOps.removeNonRoiThreadSafe(roiPreDetection, localCropRoi, localClearRoi);
+                    File filteredOutput = new File(filteredAnimalDir, safeChannelName + "_Filtered"
+                            + (maskedSuffix.isEmpty() ? "" : "_" + maskedSuffix) + ".tif");
                     AsyncImageSaver.saveAsTiffAsync(roiPreDetection,
-                            new File(filteredAnimalDir, safeChannelName + "_Filtered"
-                                    + (maskedSuffix.isEmpty() ? "" : "_" + maskedSuffix) + ".tif").getAbsolutePath());
+                            filteredOutput.getAbsolutePath());
+                    recordOutput(filteredOutput, "tiff");
                 }
 
                 // Create skeletons per-ROI (from cropped filtered image, matching current behaviour)
@@ -4142,6 +4216,7 @@ public class ThreeDObjectAnalysis implements Analysis {
             channelTable.setValue("SCN", destRow, scnIndex);
             channelTable.setValue("ROI", destRow, roiLabel == null ? "" : roiLabel);
             channelTable.setValue("Animal Name", destRow, animalName);
+            AtlasRegionColumns.writeTo(channelTable, destRow, region, roiLabel);
             channelTable.setValue("Volume (micron^3)", destRow, 0);
             channelTable.setValue("Surface (micron^2)", destRow, 0);
             channelTable.setValue("IntDen", destRow, 0);
@@ -4157,6 +4232,9 @@ public class ThreeDObjectAnalysis implements Analysis {
         ensureStringColumn(channelTable, "Hemisphere");
         ensureStringColumn(channelTable, "Region");
         ensureStringColumn(channelTable, "ROI");
+        for (String column : AtlasRegionColumns.COLUMNS) {
+            ensureStringColumn(channelTable, column);
+        }
 
         // Copy each row into channelTable, and add macro-style metadata columns
         int rows = rt.size();
@@ -4170,11 +4248,13 @@ public class ThreeDObjectAnalysis implements Analysis {
             channelTable.setValue("SCN", destRow, scnIndex);
             channelTable.setValue("ROI", destRow, roiLabel == null ? "" : roiLabel);
             channelTable.setValue("Animal Name", destRow, animalName);
+            AtlasRegionColumns.writeTo(channelTable, destRow, region, roiLabel);
 
             for (String h : headings) {
                 if (h == null) continue;
                 if (h.equals("SCN") || h.equals("ROI") || h.equals("Animal Name")
-                        || h.equals("Hemisphere") || h.equals("Region")) continue;
+                        || h.equals("Hemisphere") || h.equals("Region")
+                        || AtlasRegionColumns.isAtlasColumn(h)) continue;
                 try {
                     double v = rt.getValue(h, r);
                     channelTable.setValue(h, destRow, v);
@@ -4205,7 +4285,9 @@ public class ThreeDObjectAnalysis implements Analysis {
             //  - <channel>_Masked_<hemi><region>.tif
             //  - later: <channel>_objects.tif
             if (t.contains("masked image")) {
-                AsyncImageSaver.saveAsTiffAsync(img, new File(outDir, ChannelFilenameCodec.toSafe(channelName) + "_Masked_" + hemiRegion + ".tif").getAbsolutePath());
+                File maskedOutput = new File(outDir, ChannelFilenameCodec.toSafe(channelName) + "_Masked_" + hemiRegion + ".tif");
+                AsyncImageSaver.saveAsTiffAsync(img, maskedOutput.getAbsolutePath());
+                recordOutput(maskedOutput, "tiff");
             }
             // Macro does not save the objects map here (it saves <channel>_objects.tif later).
 
@@ -5314,6 +5396,46 @@ public class ThreeDObjectAnalysis implements Analysis {
                 && Character.isDigit(value.charAt(value.length() - 1));
     }
 
+    private AnalysisRunContext.InputHandle recordInputStart(File source, int seriesIndex) {
+        if (runRecordContext == null) {
+            return null;
+        }
+        return runRecordContext.recordInputStart(source, seriesIndex, null);
+    }
+
+    private void recordInputEnd(AnalysisRunContext.InputHandle inputHandle,
+                                String status,
+                                long startedMillis) {
+        if (runRecordContext != null && inputHandle != null) {
+            runRecordContext.recordInputEnd(inputHandle, status,
+                    Math.max(0L, System.currentTimeMillis() - startedMillis));
+        }
+    }
+
+    private void recordOutput(File file, String kind) {
+        if (runRecordContext != null && file != null) {
+            runRecordContext.recordOutput(file, kind);
+        }
+    }
+
+    private void recordOutputIfExists(File file, String kind) {
+        if (file != null && file.isFile()) {
+            recordOutput(file, kind);
+        }
+    }
+
+    private void recordWarn(String message) {
+        if (runRecordContext != null) {
+            runRecordContext.warn(message);
+        }
+    }
+
+    private void recordError(String message, Throwable t) {
+        if (runRecordContext != null) {
+            runRecordContext.error(message, t);
+        }
+    }
+
     private DeferredImageSupplier wrapInputSupplier(String directory, final DeferredImageSupplier rawSupplier) throws Exception {
         if (rawSupplier == null) return null;
 
@@ -5331,9 +5453,20 @@ public class ThreeDObjectAnalysis implements Analysis {
             }
 
             private ImagePlus openResolved(int seriesIndex, boolean materialized) throws Exception {
+                File source = null;
+                try {
+                    source = rawSupplier.getContainerFileForSeries(seriesIndex);
+                } catch (Exception ignored) {
+                    source = rawSupplier.getContainerFile();
+                }
+                AnalysisRunContext.InputHandle input = recordInputStart(source, seriesIndex + 1);
+                long started = System.currentTimeMillis();
+                try {
                 // TIFF-folder mode has no sibling deconvolution layout — pass through to parent.
                 if (rawSupplier.getMode() == DeferredImageSupplier.Mode.TIFF_FOLDER) {
-                    return materialized ? rawSupplier.openSeriesMaterialized(seriesIndex) : rawSupplier.openSeries(seriesIndex);
+                    ImagePlus imp = materialized ? rawSupplier.openSeriesMaterialized(seriesIndex) : rawSupplier.openSeries(seriesIndex);
+                    recordInputEnd(input, imp == null ? "skipped" : "processed", started);
+                    return imp;
                 }
                 File container = rawSupplier.getContainerFile();
                 String seriesName = rawSupplier.getSeriesName(seriesIndex);
@@ -5344,9 +5477,17 @@ public class ThreeDObjectAnalysis implements Analysis {
                     if (imp != null) {
                         imp.setTitle(expectedSeriesTitle(container, seriesName, seriesIndex));
                     }
+                    recordInputEnd(input, imp == null ? "skipped" : "processed", started);
                     return imp;
                 }
-                return materialized ? rawSupplier.openSeriesMaterialized(seriesIndex) : rawSupplier.openSeries(seriesIndex);
+                ImagePlus imp = materialized ? rawSupplier.openSeriesMaterialized(seriesIndex) : rawSupplier.openSeries(seriesIndex);
+                recordInputEnd(input, imp == null ? "skipped" : "processed", started);
+                return imp;
+                } catch (Exception e) {
+                    recordInputEnd(input, "failed", started);
+                    recordError("Failed to open input series " + (seriesIndex + 1), e);
+                    throw e;
+                }
             }
         };
     }
