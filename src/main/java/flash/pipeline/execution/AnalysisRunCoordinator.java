@@ -51,8 +51,9 @@ public class AnalysisRunCoordinator extends AbstractService {
 
     /**
      * Run {@code body} (typically {@code analysis.execute(directory)}) inside a
-     * run-record context. Records cancellation as {@code warn}, thrown failures
-     * as {@code failed}, then rethrows so existing GUI/CLI handling is unchanged.
+     * run-record context. Records cancellation and missing setup parameters as
+     * {@code warn}, thrown failures as {@code failed}, then rethrows ordinary
+     * failures so existing GUI/CLI handling is unchanged.
      */
     public RunResult run(Analysis analysis,
                          int analysisIndex,
@@ -84,8 +85,12 @@ public class AnalysisRunCoordinator extends AbstractService {
                 context.warn("Bin setup was cancelled; analysis did not run to completion.");
             }
         } catch (Exception e) {
-            context.error("Analysis failed", e);
-            runtimeFailure = (e instanceof RuntimeException) ? (RuntimeException) e : new RuntimeException(e);
+            if (isMissingSetupParameter(e)) {
+                context.warn(e.getMessage());
+            } else {
+                context.error("Analysis failed", e);
+                runtimeFailure = (e instanceof RuntimeException) ? (RuntimeException) e : new RuntimeException(e);
+            }
         } catch (Error e) {
             context.error("Analysis failed", e);
             errorFailure = e;
@@ -107,6 +112,16 @@ public class AnalysisRunCoordinator extends AbstractService {
             throw runtimeFailure;
         }
         return new RunResult(context.runId(), context.status(), context.recordFile());
+    }
+
+    private static boolean isMissingSetupParameter(Exception e) {
+        if (!(e instanceof IllegalArgumentException)) {
+            return false;
+        }
+        String message = e.getMessage();
+        return message != null
+                && message.startsWith("Cannot run ")
+                && message.contains("missing parameter `");
     }
 
     private static Map<String, Object> resolveParameters(Map<String, Object> commandParameters,
