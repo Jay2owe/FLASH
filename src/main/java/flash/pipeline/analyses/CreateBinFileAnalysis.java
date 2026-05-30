@@ -30,6 +30,8 @@ import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.LifIO;
 import flash.pipeline.io.OrientationManifestIO;
 import flash.pipeline.io.SeriesMeta;
+import flash.pipeline.runrecord.AnalysisRunContext;
+import flash.pipeline.runrecord.RunRecordAware;
 import flash.pipeline.help.SetupHelpCatalog;
 import flash.pipeline.help.SetupHelpTopic;
 import flash.pipeline.naming.ConditionNameParser;
@@ -166,7 +168,7 @@ import java.util.Set;
  * Values persist between images (threshold, display range, particle size),
  * including across restarts (circular persistence).
  */
-public class CreateBinFileAnalysis implements Analysis {
+public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
 
     private static final String[] FILTER_PRESETS;
     private static final String[] BRIGHTNESS_CONTRAST_WINDOW_TITLES =
@@ -263,6 +265,8 @@ public class CreateBinFileAnalysis implements Analysis {
     private boolean headless = false;
     private boolean suppressDialogs = false;
     private CLIConfig cliConfig = null;
+    private BinPreset commandPreset = null;
+    private AnalysisRunContext runRecordContext = null;
     private int parallelThreads = Math.max(1, Runtime.getRuntime().availableProcessors() / 2);
     private int loaderThreads = 1;
     private int loaderPercent = 0;
@@ -327,6 +331,15 @@ public class CreateBinFileAnalysis implements Analysis {
     @Override
     public void setCliConfig(CLIConfig config) {
         this.cliConfig = config;
+    }
+
+    public void setCommandPreset(BinPreset preset) {
+        this.commandPreset = preset;
+    }
+
+    @Override
+    public void setRunRecordContext(AnalysisRunContext context) {
+        this.runRecordContext = context;
     }
 
     @Override
@@ -435,6 +448,7 @@ public class CreateBinFileAnalysis implements Analysis {
             restoreExcludedFields(cfg, original, fields);
             writeBinConfigFiles(binFolder, cfg);
         } catch (Exception e) {
+            recordError("Set Up Configuration filtered update failed", e);
             IJ.handleException(e);
         }
     }
@@ -856,6 +870,7 @@ public class CreateBinFileAnalysis implements Analysis {
             try {
                 runHeadlessCreateBin(directory, binFolder);
             } catch (Exception e) {
+                recordError("Set Up Configuration headless preset failed", e);
                 IJ.handleException(e);
             }
             return;
@@ -868,8 +883,12 @@ public class CreateBinFileAnalysis implements Analysis {
                         + "without bin.* CLI parameters. Pass bin.preset=... or bin.channelN_* "
                         + "options, or run setup interactively first.");
             }
-            IJ.log("[FLASH] Set Up Configuration is interactive and cannot run headless "
-                    + "without bin.* CLI parameters. Skipping.");
+            String message = "Set Up Configuration is headed-only without CLI/preset "
+                    + "parameters; command/headless invocation cannot drive the interactive "
+                    + "wizard. Provide presetJson, bin.preset, or bin.channelN_* options, "
+                    + "or run setup in the FLASH GUI.";
+            IJ.log("[FLASH] " + message + " Skipping.");
+            recordWarn(message);
             return;
         }
 
@@ -992,6 +1011,7 @@ public class CreateBinFileAnalysis implements Analysis {
                 handleFullCreation(directory, binFolder, overrideAll ? existingCfg : null);
             }
         } catch (Exception e) {
+            recordError("Set Up Configuration failed", e);
             IJ.handleException(e);
         }
     }
@@ -1004,9 +1024,10 @@ public class CreateBinFileAnalysis implements Analysis {
 
     private boolean shouldRunHeadlessPreset() {
         return (headless || GraphicsEnvironment.isHeadless())
-                && cliConfig != null
+                && (commandPreset != null
+                || (cliConfig != null
                 && cliConfig.getBin() != null
-                && cliConfig.getBin().hasConfiguration();
+                && cliConfig.getBin().hasConfiguration()));
     }
 
     private File configurationWriteDir(String directory) {
@@ -1019,14 +1040,17 @@ public class CreateBinFileAnalysis implements Analysis {
         }
         writeDefaultFilter(binFolder);
 
-        BinPreset preset = null;
-        CLIConfig.CreateBinConfig binCli = cliConfig.getBin();
-        if (binCli.getPresetName() != null && !binCli.getPresetName().trim().isEmpty()) {
+        BinPreset preset = commandPreset;
+        CLIConfig.CreateBinConfig binCli = cliConfig == null ? null : cliConfig.getBin();
+        if (preset == null && binCli != null
+                && binCli.getPresetName() != null && !binCli.getPresetName().trim().isEmpty()) {
             preset = new BinPresetIO(new File(directory)).load(binCli.getPresetName());
         }
 
         BinConfig source = preset == null ? new BinConfig() : preset.getPayload();
-        applyCliBinOverrides(source, binCli);
+        if (binCli != null) {
+            applyCliBinOverrides(source, binCli);
+        }
         BinUserConfig cfg = fromBinConfig(source);
         if (preset != null) {
             cfg.markerIds.clear();
@@ -1041,7 +1065,7 @@ public class CreateBinFileAnalysis implements Analysis {
         writeChannelFilters(binFolder, cfg);
         writeBinConfigFiles(binFolder, cfg);
         IJ.log("[CLI] Set Up Configuration wrote the Configuration folder using "
-                + (preset == null ? "explicit bin.* flags" : "bin.preset=" + preset.getName()));
+                + (preset == null ? "explicit bin.* flags" : "preset=" + preset.getName()));
     }
 
     private static void applyCliBinOverrides(BinConfig config, CLIConfig.CreateBinConfig binCli) {
@@ -8398,6 +8422,7 @@ public class CreateBinFileAnalysis implements Analysis {
         String content = NamedFilterLoader.loadDefaultFilter();
         if (content != null) {
             Files.write(p, content.getBytes(StandardCharsets.UTF_8));
+            recordOutput(p.toFile(), "ijm");
         }
     }
 
@@ -8418,6 +8443,7 @@ public class CreateBinFileAnalysis implements Analysis {
             markAllKnown(channel, ChannelConfig.PropertyStatus.COMMITTED);
         }
         ChannelConfigIO.write(channelConfigSettingsDir(binFolder), cc);
+        recordOutput(new File(channelConfigSettingsDir(binFolder), ChannelConfigIO.FILE_NAME), "json");
         File projectRoot = projectRootForConfigurationDir(binFolder);
         AnalysisStatusScanner.writeSidecar(projectRoot,
                 AnalysisStatusScanner.CREATE_BIN_ID,
@@ -8450,7 +8476,26 @@ public class CreateBinFileAnalysis implements Analysis {
             }
             if (content != null) {
                 Files.write(p, content.getBytes(StandardCharsets.UTF_8));
+                recordOutput(p.toFile(), "ijm");
             }
+        }
+    }
+
+    private void recordOutput(File file, String kind) {
+        if (runRecordContext != null && file != null) {
+            runRecordContext.recordOutput(file, kind);
+        }
+    }
+
+    private void recordWarn(String message) {
+        if (runRecordContext != null) {
+            runRecordContext.warn(message);
+        }
+    }
+
+    private void recordError(String message, Throwable t) {
+        if (runRecordContext != null) {
+            runRecordContext.error(message, t);
         }
     }
 

@@ -11,12 +11,12 @@ import flash.pipeline.analyses.SpatialAnalysis;
 import flash.pipeline.analyses.SplitAndMergeImageChannelsAnalysis;
 import flash.pipeline.analyses.StatisticalAnalysis;
 import flash.pipeline.analyses.ThreeDObjectAnalysis;
-import flash.pipeline.audit.RunSettingsSnapshot;
 import flash.pipeline.bin.BinSetupDispatcher;
 import flash.pipeline.cellpose.CellposeRuntime;
 import flash.pipeline.cli.CLIArgumentParser;
 import flash.pipeline.cli.CLIConfig;
 import flash.pipeline.decontamination.SpectralDecontaminationAnalysis;
+import flash.pipeline.execution.AnalysisRunCoordinator;
 import flash.pipeline.help.AnalysisHelpCatalog;
 import flash.pipeline.help.AnalysisHelpDialog;
 import flash.pipeline.help.AnalysisHelpTopic;
@@ -89,6 +89,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Callable;
 
 
 public class FLASH_Pipeline implements PlugIn {
@@ -265,7 +266,6 @@ public class FLASH_Pipeline implements PlugIn {
                     boolean completed = executeAnalysisSafelyForGui(analysis, i, directory);
                     completedAnalyses[i] = completed;
                     runHadFailure |= !completed;
-                    writeRunAudit(analysis, i);
                 } else {
                     runHadFailure = true;
                     IJ.showMessage("Analysis not implemented");
@@ -286,7 +286,6 @@ public class FLASH_Pipeline implements PlugIn {
                     boolean aggregationCompleted = executeAnalysisSafelyForGui(
                             aggAnalysis, IDX_AGGREGATION, directory);
                     runHadFailure |= !aggregationCompleted;
-                    writeRunAudit(aggAnalysis, IDX_AGGREGATION);
                 } else {
                     runHadFailure = true;
                     IJ.log("[FLASH] Auto aggregation skipped: analysis not implemented.");
@@ -409,7 +408,15 @@ public class FLASH_Pipeline implements PlugIn {
                 configureAnalysis(analysis, i, true, qualityReport);
                 BinSetupDispatcher.clearLastFieldSources();
                 try {
-                    analysis.execute(directory);
+                    final Analysis selectedAnalysis = analysis;
+                    final String runDirectory = directory;
+                    new AnalysisRunCoordinator().run(selectedAnalysis, i, analyses[i],
+                            runDirectory, cliConfig, null, "", new Callable<Void>() {
+                                @Override public Void call() {
+                                    selectedAnalysis.execute(runDirectory);
+                                    return null;
+                                }
+                            });
                     if (BinSetupDispatcher.getLastOutcome() == BinSetupDispatcher.Outcome.CANCELLED) {
                         IJ.log("[CLI] " + analyses[i] + " cancelled during setup.");
                         failedAnalyses.add(analyses[i]);
@@ -420,9 +427,9 @@ public class FLASH_Pipeline implements PlugIn {
                     IJ.handleException(t);
                     IJ.log("[CLI] " + analyses[i] + " FAILED: " + t.getMessage());
                     failedAnalyses.add(analyses[i]);
+                } finally {
+                    resetBioFormatsWindowless();
                 }
-                resetBioFormatsWindowless();
-                writeRunAudit(analysis, i);
             } else {
                 IJ.log("[CLI] Warning: Analysis not implemented for index " + i);
                 failedAnalyses.add("index " + i);
@@ -441,7 +448,16 @@ public class FLASH_Pipeline implements PlugIn {
                 configureAnalysis(aggAnalysis, IDX_AGGREGATION, true, qualityReport);
                 BinSetupDispatcher.clearLastFieldSources();
                 try {
-                    aggAnalysis.execute(directory);
+                    final Analysis aggregationAnalysis = aggAnalysis;
+                    final String runDirectory = directory;
+                    new AnalysisRunCoordinator().run(aggregationAnalysis, IDX_AGGREGATION,
+                            analyses[IDX_AGGREGATION], runDirectory, cliConfig, null, "",
+                            new Callable<Void>() {
+                                @Override public Void call() {
+                                    aggregationAnalysis.execute(runDirectory);
+                                    return null;
+                                }
+                            });
                     if (BinSetupDispatcher.getLastOutcome() == BinSetupDispatcher.Outcome.CANCELLED) {
                         IJ.log("[CLI] " + analyses[IDX_AGGREGATION] + " (auto) cancelled during setup.");
                         failedAnalyses.add(analyses[IDX_AGGREGATION] + " (auto)");
@@ -451,7 +467,6 @@ public class FLASH_Pipeline implements PlugIn {
                     IJ.log("[CLI] " + analyses[IDX_AGGREGATION] + " (auto) FAILED: " + t.getMessage());
                     failedAnalyses.add(analyses[IDX_AGGREGATION] + " (auto)");
                 }
-                writeRunAudit(aggAnalysis, IDX_AGGREGATION);
             } else {
                 IJ.log("[CLI] Auto aggregation skipped: analysis not implemented.");
                 failedAnalyses.add(analyses[IDX_AGGREGATION] + " (auto)");
@@ -1080,7 +1095,15 @@ public class FLASH_Pipeline implements PlugIn {
         if (analysis == null) return false;
         String label = analysisLabel(index);
         try {
-            analysis.execute(runDirectory);
+            final Analysis selectedAnalysis = analysis;
+            final String selectedDirectory = runDirectory;
+            new AnalysisRunCoordinator().run(selectedAnalysis, index, label,
+                    selectedDirectory, cliConfig, null, "", new Callable<Void>() {
+                        @Override public Void call() {
+                            selectedAnalysis.execute(selectedDirectory);
+                            return null;
+                        }
+                    });
             return BinSetupDispatcher.getLastOutcome() != BinSetupDispatcher.Outcome.CANCELLED;
         } catch (Throwable t) {
             rethrowControlThrowable(t);
@@ -1830,6 +1853,10 @@ public class FLASH_Pipeline implements PlugIn {
         if (oldHtml.exists() && !oldHtml.delete()) {
             IJ.log("QC Report: could not remove stale QC_Report.html");
         }
+        File oldStudyYaml = layout.qcStudyMetadataWriteFile();
+        if (oldStudyYaml.exists() && !oldStudyYaml.delete()) {
+            IJ.log("QC Report: could not remove stale study.yaml");
+        }
     }
 
     /**
@@ -1868,22 +1895,6 @@ public class FLASH_Pipeline implements PlugIn {
 
     void setCliInvocation(boolean cliInvocation) {
         this.cliInvocation = cliInvocation;
-    }
-
-    private void writeRunAudit(Analysis analysis, int index) {
-        if (analysis == null || index < 0 || index >= analyses.length) return;
-        if (BinSetupDispatcher.getLastOutcome() == BinSetupDispatcher.Outcome.CANCELLED) {
-            return;
-        }
-        try {
-            RunSettingsSnapshot.writeForAnalysis(directory, analyses[index], index,
-                    analysis.requiredBinFields(),
-                    BinSetupDispatcher.getLastFieldSources(),
-                    cliConfig);
-        } catch (IOException e) {
-            IJ.log("[FLASH] Warning: could not write run settings snapshot for "
-                    + analyses[index] + ": " + e.getMessage());
-        }
     }
 
     private ImageCache getImageCacheOrReport() {

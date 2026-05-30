@@ -16,6 +16,8 @@ import flash.pipeline.orientation.OrientationImageIdentity;
 import flash.pipeline.orientation.OrientationTransformState;
 import flash.pipeline.orientation.RoiOrientationManifestService;
 import flash.pipeline.results.CsvAppend;
+import flash.pipeline.runrecord.AnalysisRunContext;
+import flash.pipeline.runrecord.RunRecordAware;
 import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.FeatureDependencyGate;
 import flash.pipeline.roi.RoiIO;
@@ -30,6 +32,7 @@ import flash.pipeline.zslice.ZSliceMode;
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.RoiOrientationPanel;
 import flash.pipeline.ui.ToggleSwitch;
+import flash.pipeline.ui.wizard.RegionTextFieldSupport;
 
 import ij.IJ;
 import ij.ImagePlus;
@@ -82,13 +85,15 @@ import javax.swing.UIManager;
  * - Saves the ROI set through the central ROI analysis-image layout.
  * - Saves ROI property tables through the central ROI table layout.
  */
-public class DrawAndSaveROIsAnalysis implements Analysis {
+public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
 
     static final String FULL_IMAGE_SOURCE = "Full image";
     static final String CONFIGURED_SUBSET_SOURCE = "Configured analysis subset";
     private boolean suppressDialogs = false;
     private boolean headless = false;
+    private boolean commandMode = false;
     private CLIConfig cliConfig = null;
+    private AnalysisRunContext runRecordContext = null;
 
     @Override
     public Set<BinField> requiredBinFields() {
@@ -110,16 +115,28 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
         this.headless = headless;
     }
 
+    public void setCommandMode(boolean commandMode) {
+        this.commandMode = commandMode;
+    }
+
     @Override
     public void setCliConfig(CLIConfig config) {
         this.cliConfig = config;
     }
 
     @Override
+    public void setRunRecordContext(AnalysisRunContext context) {
+        this.runRecordContext = context;
+    }
+
+    @Override
     public void execute(String directory) {
-        if (GraphicsEnvironment.isHeadless()) {
-            IJ.log("[" + getClass().getSimpleName() + "] is interactive only "
-                    + "and cannot run headless. Skipping.");
+        if (GraphicsEnvironment.isHeadless() || (commandMode && headless)) {
+            String message = "Draw and Save ROIs is headed-only; command/headless "
+                    + "invocation cannot drive interactive ROI drawing. Run this workflow "
+                    + "in the FLASH GUI, then reuse the saved ROI artifacts in downstream analyses.";
+            IJ.log("[" + getClass().getSimpleName() + "] " + message + " Skipping.");
+            recordWarn(message);
             return;
         }
         if (headless) {
@@ -196,6 +213,8 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
             pd.addHelpText("Use the full stack for ROI drawing, or match the z-slice subset configured in the Configuration folder.");
         }
         JTextField newNameField = pd.addStringField("New ROI Set Name", "SCN", 15);
+        RegionTextFieldSupport.Handle newNameRegionSupport =
+                RegionTextFieldSupport.install(newNameField, null);
 
         if (hasExisting && createNewToggle != null && appendChoice != null) {
             ToggleSwitch finalCreateNewToggle = createNewToggle;
@@ -229,7 +248,8 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
         String imageProcessing = pd.getNextChoice();
         boolean drawOnSubset = showZSliceSourceChoice
                 && CONFIGURED_SUBSET_SOURCE.equals(pd.getNextChoice());
-        String newName = pd.getNextString().trim();
+        String ignoredRawNewName = pd.getNextString();
+        String newName = newNameRegionSupport.canonicalText().trim();
         String chosen = createNew ? newName : existingSelection;
         if (chosen == null || chosen.trim().isEmpty()) {
             IJ.error("ROI Analysis", "ROI set name is blank.");
@@ -312,8 +332,10 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
                 }
             } catch (Exception e) {
                 Throwable cause = e instanceof ExecutionException ? e.getCause() : e;
-                IJ.log("ERROR: Failed to open image " + (i + 1) + ": "
-                        + (cause != null ? cause.getMessage() : e.getMessage()));
+                String message = "Failed to open image " + (i + 1) + ": "
+                        + (cause != null ? cause.getMessage() : e.getMessage());
+                IJ.log("ERROR: " + message);
+                recordWarn(message);
                 continue;
             }
             if (prep == null) continue;
@@ -372,7 +394,9 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
                 int width = max.getWidth();
                 int height = max.getHeight();
 
-                IJ.log("Warning: no ROI drawn for " + imgTitle + " in ROI set \"" + chosen + "\"");
+                String message = "No ROI drawn for " + imgTitle + " in ROI set \"" + chosen + "\"";
+                IJ.log("Warning: " + message);
+                recordWarn(message);
 
                 closePreparedImages(prep);
 
@@ -490,7 +514,9 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
                 String croppedName = suffix.isEmpty()
                         ? "Cropped.PNG"
                         : "Cropped_" + suffix + ".PNG";
-                IJ.saveAs(cropped, "PNG", new File(imgAnalysisDir, croppedName).getAbsolutePath());
+                File croppedOutput = new File(imgAnalysisDir, croppedName);
+                IJ.saveAs(cropped, "PNG", croppedOutput.getAbsolutePath());
+                recordOutput(croppedOutput, "png");
             }
 
             saveOrientationDecision(orientationManifestService, prep,
@@ -526,7 +552,9 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
             try {
                 CsvAppend.append(roiPropsOut, tmp);
             } catch (Exception e) {
-                IJ.log("Warning appending ROI properties: " + e.getMessage());
+                String message = "Warning appending ROI properties: " + e.getMessage();
+                IJ.log(message);
+                recordWarn(message);
             } finally {
                 //noinspection ResultOfMethodCallIgnored
                 tmp.delete();
@@ -534,11 +562,15 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
         } else {
             roiProps.save(roiPropsOut.getAbsolutePath());
         }
+        recordOutput(roiPropsOut, "csv");
 
         // ── Save partial-state zip BEFORE validation ────────────────────
         // Guarantees the user can recover in-flight work even if the
         // strict validator rejects the set.
         String partialZipPath = savePartialZip(directory, rm);
+        if (partialZipPath != null) {
+            recordOutput(new File(partialZipPath), "zip");
+        }
 
         // ── Validate ROI ordering ───────────────────────────────────────
         if (!RoiSetValidator.validateStrictWithDialog(rm, startOffset, range.imageCountToProcess,
@@ -549,6 +581,7 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
 
         // ── Save ROI zip ────────────────────────────────────────────────
         rm.runCommand("Save", roiZip.getAbsolutePath());
+        recordOutput(roiZip, "zip");
 
         rm.close();
 
@@ -824,6 +857,9 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
     private void savePartialAndExit(String directory, RoiManager rm, String reason) {
         String path = savePartialZip(directory, rm);
         if (path != null) {
+            recordOutput(new File(path), "zip");
+        }
+        if (path != null) {
             showOrLog("Draw and Save ROIs",
                     "Run aborted (" + reason + ").\n\n"
                     + "Partial ROI set saved to:\n" + path + "\n\n"
@@ -835,6 +871,18 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
         }
         rm.close();
         closeAllNoPrompt();
+    }
+
+    private void recordOutput(File file, String kind) {
+        if (runRecordContext != null && file != null) {
+            runRecordContext.recordOutput(file, kind);
+        }
+    }
+
+    private void recordWarn(String message) {
+        if (runRecordContext != null) {
+            runRecordContext.warn(message);
+        }
     }
 
     /**
@@ -962,47 +1010,78 @@ public class DrawAndSaveROIsAnalysis implements Analysis {
     private PreparedImage prepareImage(String directory, DeferredImageSupplier supplier, int seriesIndex,
                                        int roiChannel, String imageProcessing,
                                        boolean drawOnSubset, BinConfig roiBinCfg) throws Exception {
-        // Load only the specific channel requested for the ROI (0-indexed for Bio-Formats)
-        ImagePlus imp = supplier.openSeriesMaterializedChannel(seriesIndex, roiChannel - 1);
-        if (imp == null) return null;
-
-        if (drawOnSubset && roiBinCfg != null) {
-            ImagePlus subset = ZSliceOps.applyConfiguredRange(imp, roiBinCfg, seriesIndex, "ROI drawing");
-            if (subset != null && subset != imp) {
-                imp.changes = false;
-                imp.close();
-                imp.flush();
-                imp = subset;
+        AnalysisRunContext.InputHandle inputHandle = null;
+        long started = System.currentTimeMillis();
+        if (runRecordContext != null && supplier != null) {
+            try {
+                inputHandle = runRecordContext.recordInputStart(
+                        supplier.getContainerFileForSeries(seriesIndex), seriesIndex + 1, null);
+            } catch (Exception ignored) {
+                inputHandle = runRecordContext.recordInputStart(null, seriesIndex + 1, null);
             }
         }
 
-        ResolvedImageMetadata metadata = ImageOrientationResolver.resolve(
-                directory, imp.getTitle(), seriesIndex + 1);
-        NameParts parts = metadata.toNameParts();
-        logOrientationResolution(metadata);
-        OrientationTransformState transformState =
-                OrientationTransformState.fromMetadata(metadata);
+        ImagePlus imp = null;
+        try {
+            // Load only the specific channel requested for the ROI (0-indexed for Bio-Formats)
+            imp = supplier.openSeriesMaterializedChannel(seriesIndex, roiChannel - 1);
+            if (imp == null) {
+                recordInputEnd(inputHandle, "skipped", started);
+                return null;
+            }
 
-        // Since we only loaded one channel, we duplicate from channel 1
-        ImagePlus roiStack = ImageOps.duplicateThreadSafe(imp, 1, 1,
-                1, imp.getNSlices(), 1, imp.getNFrames());
-        roiStack.setTitle("delete");
-        OrientationOps.applyTransform(
-                roiStack,
-                transformState.rotateDegrees.degrees(),
-                transformState.flipHorizontal,
-                transformState.flipVertical,
-                metadata.hemisphere,
-                OrientationManifestRow.ViewPolicy.MANUAL_ONLY);
-        ImagePlus max = ZProjector.run(roiStack, "max");
-        max.setTitle("MAX_delete");
+            if (drawOnSubset && roiBinCfg != null) {
+                ImagePlus subset = ZSliceOps.applyConfiguredRange(imp, roiBinCfg, seriesIndex, "ROI drawing");
+                if (subset != null && subset != imp) {
+                    imp.changes = false;
+                    imp.close();
+                    imp.flush();
+                    imp = subset;
+                }
+            }
 
-        if ("Automatic".equals(imageProcessing)) {
-            IJ.run(max, "Enhance Contrast", "saturated=1");
+            ResolvedImageMetadata metadata = ImageOrientationResolver.resolve(
+                    directory, imp.getTitle(), seriesIndex + 1);
+            NameParts parts = metadata.toNameParts();
+            logOrientationResolution(metadata);
+            OrientationTransformState transformState =
+                    OrientationTransformState.fromMetadata(metadata);
+
+            // Since we only loaded one channel, we duplicate from channel 1
+            ImagePlus roiStack = ImageOps.duplicateThreadSafe(imp, 1, 1,
+                    1, imp.getNSlices(), 1, imp.getNFrames());
+            roiStack.setTitle("delete");
+            OrientationOps.applyTransform(
+                    roiStack,
+                    transformState.rotateDegrees.degrees(),
+                    transformState.flipHorizontal,
+                    transformState.flipVertical,
+                    metadata.hemisphere,
+                    OrientationManifestRow.ViewPolicy.MANUAL_ONLY);
+            ImagePlus max = ZProjector.run(roiStack, "max");
+            max.setTitle("MAX_delete");
+
+            if ("Automatic".equals(imageProcessing)) {
+                IJ.run(max, "Enhance Contrast", "saturated=1");
+            }
+
+            PreparedImage prepared = buildPreparedImage(directory, seriesIndex, imp, max, roiStack, parts, metadata,
+                    imageProcessing);
+            recordInputEnd(inputHandle, "processed", started);
+            return prepared;
+        } catch (Exception e) {
+            recordInputEnd(inputHandle, "failed", started);
+            throw e;
         }
+    }
 
-        return buildPreparedImage(directory, seriesIndex, imp, max, roiStack, parts, metadata,
-                imageProcessing);
+    private void recordInputEnd(AnalysisRunContext.InputHandle inputHandle,
+                                String status,
+                                long startedMillis) {
+        if (runRecordContext != null && inputHandle != null) {
+            runRecordContext.recordInputEnd(inputHandle, status,
+                    System.currentTimeMillis() - startedMillis);
+        }
     }
 
     private static void logOrientationResolution(ResolvedImageMetadata metadata) {
