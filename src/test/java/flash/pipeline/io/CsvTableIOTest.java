@@ -94,6 +94,10 @@ public class CsvTableIOTest {
         table.setValue("Animal Name", 0, "Mouse1");
         table.setValue("Volume (micron^3)", 0, 101);
         table.setValue("Region", 0, "SCN");
+        table.setValue("Atlas Key", 0, "allen_mouse_25um");
+        table.setValue("Region ID", 0, "286");
+        table.setValue("Region Acronym", 0, "SCH");
+        table.setValue("Region Name", 0, "Suprachiasmatic nucleus");
         table.setValue("Hemisphere", 0, "RH");
         table.setValue("ROI", 0, "SCN1");
         table.setValue("XM", 0, 1);
@@ -111,6 +115,10 @@ public class CsvTableIOTest {
         assertNotNull(loaded);
         assertEquals(Arrays.asList(
                 "Region",
+                "Atlas Key",
+                "Region ID",
+                "Region Acronym",
+                "Region Name",
                 "Hemisphere",
                 "ROI",
                 "Animal Name",
@@ -128,7 +136,8 @@ public class CsvTableIOTest {
                 "A_Costes_Ta_B",
                 "A_Costes_Tb_B",
                 "A_Pearson_t_B",
-                "A_Costes_p_B"
+                "A_Costes_p_B",
+                "run_id"
         ), loaded.header);
         assertEquals("Mouse1", loaded.get(0, "Animal Name"));
         assertEquals("7", loaded.get(0, "Label"));
@@ -198,7 +207,7 @@ public class CsvTableIOTest {
 
         CsvTableIO.ChannelData loaded = CsvTableIO.loadChannelCsv(csv, "DAPI");
         assertNotNull(loaded);
-        assertEquals(Arrays.asList("Region", "IntDen", "ManualNote", "Intensity_PatchinessCV50"),
+        assertEquals(Arrays.asList("Region", "IntDen", "ManualNote", "Intensity_PatchinessCV50", "run_id"),
                 loaded.header);
         assertEquals("keep", loaded.get(0, "ManualNote"));
         assertEquals("12", loaded.get(0, "IntDen"));

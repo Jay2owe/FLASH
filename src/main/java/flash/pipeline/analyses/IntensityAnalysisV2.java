@@ -41,6 +41,7 @@ import flash.pipeline.naming.ImageNameParser;
 import flash.pipeline.naming.NameParts;
 import flash.pipeline.naming.ResolvedImageMetadata;
 import flash.pipeline.results.IntensityDetailsWriter;
+import flash.pipeline.results.RunIdCsv;
 import flash.pipeline.runrecord.AnalysisRunContext;
 import flash.pipeline.runrecord.RunRecordAware;
 import flash.pipeline.runtime.DependencyId;
@@ -828,9 +829,10 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                 ResultsTable table = totalTables.table(key);
                 List<String> orderedColumns = buildOrderedIntensityColumns(key, table,
                         channelNames, intensitySpatialConfig, binarization);
-                boolean merged = CsvTableIO.mergeResultsTableCsv(outCsv, table, orderedColumns);
+                boolean merged = CsvTableIO.mergeResultsTableCsv(outCsv, table, orderedColumns,
+                        currentRunId());
                 if (!merged) {
-                    CsvTableIO.writeResultsTableCsv(outCsv, table, orderedColumns);
+                    CsvTableIO.writeResultsTableCsv(outCsv, table, orderedColumns, currentRunId());
                 }
                 recordOutput(outCsv, "csv");
                 IJ.log("  " + (merged ? "Updated existing: " : "Saved: ")
@@ -3298,6 +3300,10 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         if (runRecordContext != null && file != null) {
             runRecordContext.recordOutput(file, kind);
         }
+    }
+
+    private String currentRunId() {
+        return RunIdCsv.runId(runRecordContext);
     }
 
     private void recordWarn(String message) {

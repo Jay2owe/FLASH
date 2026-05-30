@@ -15,6 +15,7 @@ import flash.pipeline.io.ImageCache;
 import flash.pipeline.io.ImageSourceDispatcher;
 import flash.pipeline.io.SeriesMeta;
 import flash.pipeline.report.QualityReport;
+import flash.pipeline.results.RunIdCsv;
 import flash.pipeline.runrecord.AnalysisRunContext;
 import flash.pipeline.runrecord.RunRecordAware;
 import flash.pipeline.runtime.DependencyId;
@@ -1253,14 +1254,14 @@ public class SpectralDecontaminationAnalysis implements Analysis, RunRecordAware
         }
 
         try {
-            SpectralOutputWriter.writePerImageSummary(directory, summaryRows);
+            SpectralOutputWriter.writePerImageSummary(directory, summaryRows, currentRunId());
             batchResult.perImageSummaryFile = SpectralOutputWriter.perImageSummaryFile(directory);
             recordOutput(batchResult.perImageSummaryFile, "csv");
-            SpectralOutputWriter.writeCorrectionCoefficients(directory, coefficientRows);
+            SpectralOutputWriter.writeCorrectionCoefficients(directory, coefficientRows, currentRunId());
             batchResult.correctionCoefficientsFile = SpectralOutputWriter.correctionCoefficientsFile(directory);
             recordOutput(batchResult.correctionCoefficientsFile, "csv");
             if (objectScoringGoal) {
-                ObjectScoreWriter.writePerObjectScores(directory, objectScoreRows);
+                ObjectScoreWriter.writePerObjectScores(directory, objectScoreRows, currentRunId());
                 batchResult.perObjectScoresFile = ObjectScoreWriter.perObjectScoresFile(directory);
                 recordOutput(batchResult.perObjectScoresFile, "csv");
             }
@@ -1825,6 +1826,10 @@ public class SpectralDecontaminationAnalysis implements Analysis, RunRecordAware
         }
     }
 
+    private String currentRunId() {
+        return RunIdCsv.runId(runRecordContext);
+    }
+
     private void recordWarn(String message) {
         if (runRecordContext != null) {
             runRecordContext.warn(message);
@@ -2367,7 +2372,8 @@ public class SpectralDecontaminationAnalysis implements Analysis, RunRecordAware
                             config.getExperimentalConditionNames(),
                             !config.getBleedThroughChannelIndexes().isEmpty());
             File outputFile = SpectralPreviewSelector.previewSelectionFile(directory);
-            SpectralPreviewSelector.writePreviewSelection(outputFile, buildRunMetadata(config), selections);
+            SpectralPreviewSelector.writePreviewSelection(outputFile, buildRunMetadata(config),
+                    selections, currentRunId());
             recordOutput(outputFile, "csv");
             IJ.log("Spectral Decontamination preview selection saved: " + outputFile.getAbsolutePath());
             logPreviewSelection(selections);
@@ -2389,7 +2395,7 @@ public class SpectralDecontaminationAnalysis implements Analysis, RunRecordAware
         try {
             File outputFile = SpectralPreviewSelector.previewSelectionFile(directory);
             SpectralPreviewSelector.writePreviewSelection(outputFile, buildRunMetadata(config),
-                    previewResult.selections);
+                    previewResult.selections, currentRunId());
             recordOutput(outputFile, "csv");
             return PreviewRunResult.success(outputFile, previewResult.selections);
         } catch (IOException e) {

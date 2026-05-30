@@ -5,6 +5,7 @@ import flash.pipeline.io.CsvSupport;
 import flash.pipeline.io.LifIO;
 import flash.pipeline.io.SeriesMeta;
 import flash.pipeline.naming.ConditionNameParser;
+import flash.pipeline.results.RunIdCsv;
 import ij.ImagePlus;
 import ij.process.ImageProcessor;
 
@@ -173,6 +174,13 @@ public class SpectralPreviewSelector {
     public static void writePreviewSelection(File file,
                                              SpectralOutputWriter.RunMetadata runMetadata,
                                              List<PreviewSelection> selections) throws IOException {
+        writePreviewSelection(file, runMetadata, selections, "");
+    }
+
+    public static void writePreviewSelection(File file,
+                                             SpectralOutputWriter.RunMetadata runMetadata,
+                                             List<PreviewSelection> selections,
+                                             String runId) throws IOException {
         if (file == null) {
             throw new IllegalArgumentException("file must not be null");
         }
@@ -184,7 +192,7 @@ public class SpectralPreviewSelector {
         AtomicFileWriter.writeUtf8(file, new AtomicFileWriter.WriterAction() {
             @Override
             public void write(Writer writer) throws IOException {
-                writer.write(CsvSupport.joinRow(Arrays.asList(
+                writer.write(CsvSupport.joinRow(RunIdCsv.appendRunIdHeader(Arrays.asList(
                         "SeriesIndex",
                         "SeriesNumber",
                         "SeriesName",
@@ -200,13 +208,13 @@ public class SpectralPreviewSelector {
                         "AutofluorescenceP99",
                         "BleedThroughP99",
                         "SaturatedFraction",
-                        "ObjectCount")));
+                        "ObjectCount"))));
                 writer.write("\n");
                 if (selections == null) return;
                 for (PreviewSelection selection : selections) {
                     PreviewCandidate c = selection.candidate;
                     ImageScores s = selection.scores;
-                    writer.write(CsvSupport.joinRow(Arrays.asList(
+                    writer.write(CsvSupport.joinRow(RunIdCsv.appendRunIdRow(Arrays.asList(
                             String.valueOf(c.seriesIndex),
                             String.valueOf(c.seriesIndex + 1),
                             c.seriesName,
@@ -222,7 +230,7 @@ public class SpectralPreviewSelector {
                             formatDouble(s.autofluorescenceP99),
                             formatDouble(s.bleedThroughP99),
                             formatDouble(s.saturatedFraction),
-                            s.objectCount < 0 ? "" : String.valueOf(s.objectCount))));
+                            s.objectCount < 0 ? "" : String.valueOf(s.objectCount)), runId)));
                     writer.write("\n");
                 }
             }

@@ -8,6 +8,7 @@ import flash.pipeline.io.CsvSupport;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.IoUtils;
 import flash.pipeline.naming.ChannelFilenameCodec;
+import flash.pipeline.results.RunIdCsv;
 import flash.pipeline.results.StartHereWriter;
 import flash.pipeline.runrecord.AnalysisRunContext;
 import flash.pipeline.runrecord.RunRecordAware;
@@ -261,6 +262,11 @@ public class ExcelSummaryExportAnalysis implements Analysis, RunRecordAware {
     }
 
     private boolean isMetricColumn(String col) {
+        if (col == null) return false;
+        if (RunIdCsv.RUN_ID_COLUMN.equals(col.trim())
+                || RunIdCsv.SOURCE_RUN_ID_COLUMN.equals(col.trim())) {
+            return false;
+        }
         return !col.equals("AnimalName")
                 && !col.equals("numSections")
                 && (ExcelNameMap.convert(col) != null
@@ -620,6 +626,7 @@ public class ExcelSummaryExportAnalysis implements Analysis, RunRecordAware {
                 Map<String, Double> rowData = new LinkedHashMap<String, Double>();
                 for (int c = 0; c < result.columns.size(); c++) {
                     if (c == animalIdx) continue;
+                    if (isRunLineageColumn(result.columns.get(c))) continue;
                     String val = safeGet(row, c).trim();
                     if (!val.isEmpty()) {
                         try {
@@ -942,7 +949,7 @@ public class ExcelSummaryExportAnalysis implements Analysis, RunRecordAware {
         Sheet sheet = wb.createSheet(sheetName);
 
         Row headerRow = sheet.createRow(0);
-        String[] headers = {"Condition", "Animals"};
+        String[] headers = {"Condition", "Animals", RunIdCsv.RUN_ID_COLUMN};
         for (int c = 0; c < headers.length; c++) {
             Cell cell = headerRow.createCell(c);
             cell.setCellValue(headers[c]);
@@ -966,10 +973,15 @@ public class ExcelSummaryExportAnalysis implements Analysis, RunRecordAware {
             Cell animalsCell = row.createCell(1);
             setTextCellValue(animalsCell, join(animalsInCond, ", "));
             animalsCell.setCellStyle(styles.cellStyle);
+
+            Cell runCell = row.createCell(2);
+            setTextCellValue(runCell, currentRunId());
+            runCell.setCellStyle(styles.cellStyle);
         }
 
         sheet.setColumnWidth(0, 20 * 256);
         sheet.setColumnWidth(1, 60 * 256);
+        sheet.setColumnWidth(2, 28 * 256);
     }
 
     private void writeDataSummarySheet(Workbook wb,
@@ -993,11 +1005,12 @@ public class ExcelSummaryExportAnalysis implements Analysis, RunRecordAware {
         Cell tipCell = tipRow.createCell(0);
         tipCell.setCellValue("Tip: Use View → Navigation (Ctrl+F5) to search for specific columns across all sheets.");
         tipCell.setCellStyle(tipStyle);
-        sheet.addMergedRegion(new CellRangeAddress(0, 0, 0, 4));
+        sheet.addMergedRegion(new CellRangeAddress(0, 0, 0, 5));
         tipRow.setHeightInPoints(32);
 
         Row headerRow = sheet.createRow(1);
-        String[] headers = {"Marker", "Analysis", "Data", "Filter Macro", "Analysis Macro"};
+        String[] headers = {"Marker", "Analysis", "Data", "Filter Macro", "Analysis Macro",
+                RunIdCsv.RUN_ID_COLUMN};
         for (int c = 0; c < headers.length; c++) {
             Cell cell = headerRow.createCell(c);
             cell.setCellValue(headers[c]);
@@ -1067,6 +1080,10 @@ public class ExcelSummaryExportAnalysis implements Analysis, RunRecordAware {
             Cell analysisMacroCell = row.createCell(4);
             setTextCellValue(analysisMacroCell, analysisMacro);
             analysisMacroCell.setCellStyle(styles.smallStyle);
+
+            Cell runCell = row.createCell(5);
+            setTextCellValue(runCell, currentRunId());
+            runCell.setCellStyle(styles.cellStyle);
         }
 
         sheet.setColumnWidth(0, 16 * 256);
@@ -1074,6 +1091,7 @@ public class ExcelSummaryExportAnalysis implements Analysis, RunRecordAware {
         sheet.setColumnWidth(2, 40 * 256);
         sheet.setColumnWidth(3, 50 * 256);
         sheet.setColumnWidth(4, 50 * 256);
+        sheet.setColumnWidth(5, 28 * 256);
     }
 
     private void writePerMetricSheet(Workbook wb,
@@ -1347,7 +1365,8 @@ public class ExcelSummaryExportAnalysis implements Analysis, RunRecordAware {
         Sheet sheet = wb.createSheet(sheetName);
 
         Row headerRow = sheet.createRow(0);
-        String[] headers = {"Marker", "Analysis Type", "Source File", "Section", "Content"};
+        String[] headers = {"Marker", "Analysis Type", "Source File", "Section", "Content",
+                RunIdCsv.RUN_ID_COLUMN};
         for (int c = 0; c < headers.length; c++) {
             Cell cell = headerRow.createCell(c);
             cell.setCellValue(headers[c]);
@@ -1360,6 +1379,9 @@ public class ExcelSummaryExportAnalysis implements Analysis, RunRecordAware {
             Cell cell = empty.createCell(0);
             setTextCellValue(cell, "No Analysis Details files were found.");
             cell.setCellStyle(styles.descStyle);
+            Cell runCell = empty.createCell(5);
+            setTextCellValue(runCell, currentRunId());
+            runCell.setCellStyle(styles.cellStyle);
         } else {
             for (Map.Entry<String, Map<String, String>> entry : detailsPerMarker.entrySet()) {
                 String[] keyParts = entry.getKey().split("\\|", 2);
@@ -1391,6 +1413,10 @@ public class ExcelSummaryExportAnalysis implements Analysis, RunRecordAware {
                     Cell contentCell = row.createCell(4);
                     setTextCellValue(contentCell, nullSafe(details.get(key)));
                     contentCell.setCellStyle(styles.smallStyle);
+
+                    Cell runCell = row.createCell(5);
+                    setTextCellValue(runCell, currentRunId());
+                    runCell.setCellStyle(styles.cellStyle);
                 }
             }
         }
@@ -1400,6 +1426,7 @@ public class ExcelSummaryExportAnalysis implements Analysis, RunRecordAware {
         sheet.setColumnWidth(2, 32 * 256);
         sheet.setColumnWidth(3, 20 * 256);
         sheet.setColumnWidth(4, 80 * 256);
+        sheet.setColumnWidth(5, 28 * 256);
     }
 
     // ---- Styling helpers --------------------------------------------------
@@ -1485,6 +1512,10 @@ public class ExcelSummaryExportAnalysis implements Analysis, RunRecordAware {
         }
     }
 
+    private String currentRunId() {
+        return RunIdCsv.runId(runRecordContext);
+    }
+
     private void recordWarn(String message) {
         if (runRecordContext != null) {
             runRecordContext.warn(message);
@@ -1500,6 +1531,13 @@ public class ExcelSummaryExportAnalysis implements Analysis, RunRecordAware {
     private static String safeGet(String[] arr, int idx) {
         if (idx < 0 || idx >= arr.length) return "";
         return arr[idx];
+    }
+
+    private static boolean isRunLineageColumn(String column) {
+        if (column == null) return false;
+        String cleaned = column.trim();
+        return RunIdCsv.RUN_ID_COLUMN.equals(cleaned)
+                || RunIdCsv.SOURCE_RUN_ID_COLUMN.equals(cleaned);
     }
 
     private static String join(List<String> parts, String delimiter) {

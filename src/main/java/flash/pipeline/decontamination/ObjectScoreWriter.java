@@ -5,6 +5,7 @@ import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.naming.ChannelFilenameCodec;
 import flash.pipeline.naming.ImageNameParser;
 import flash.pipeline.naming.NameParts;
+import flash.pipeline.results.RunIdCsv;
 import ij.ImagePlus;
 import ij.io.FileSaver;
 
@@ -213,6 +214,12 @@ public final class ObjectScoreWriter {
 
     public static void writePerObjectScores(String directory,
                                             List<Map<String, String>> rows) throws IOException {
+        writePerObjectScores(directory, rows, "");
+    }
+
+    public static void writePerObjectScores(String directory,
+                                            List<Map<String, String>> rows,
+                                            String runId) throws IOException {
         writeCsv(perObjectScoresFile(directory), rows, PER_OBJECT_COLUMNS,
                 new Comparator<Map<String, String>>() {
                     @Override
@@ -228,7 +235,7 @@ public final class ObjectScoreWriter {
                         return Integer.compare(parseInt(left.get("ObjectID"), Integer.MAX_VALUE),
                                 parseInt(right.get("ObjectID"), Integer.MAX_VALUE));
                     }
-                });
+                }, runId);
     }
 
     public static Map<Integer, List<Map<String, String>>> readObjectRowsBySeriesIndex(String directory)
@@ -444,7 +451,8 @@ public final class ObjectScoreWriter {
     private static void writeCsv(File file,
                                  List<Map<String, String>> rows,
                                  List<String> fixedColumns,
-                                 Comparator<Map<String, String>> comparator)
+                                 Comparator<Map<String, String>> comparator,
+                                 String runId)
             throws IOException {
         File parent = file.getParentFile();
         if (parent != null && !parent.isDirectory() && !parent.mkdirs()) {
@@ -459,18 +467,18 @@ public final class ObjectScoreWriter {
             Collections.sort(sortedRows, comparator);
         }
 
-        List<String> columns = orderedColumns(sortedRows, fixedColumns);
+        List<String> columns = RunIdCsv.withoutRunId(orderedColumns(sortedRows, fixedColumns));
         AtomicFileWriter.writeUtf8(file, new AtomicFileWriter.WriterAction() {
             @Override
             public void write(Writer writer) throws IOException {
-                writer.write(CsvSupport.joinRow(columns));
+                writer.write(CsvSupport.joinRow(RunIdCsv.appendRunIdHeader(columns)));
                 writer.write("\n");
                 for (Map<String, String> row : sortedRows) {
                     List<String> values = new ArrayList<String>(columns.size());
                     for (String column : columns) {
                         values.add(row == null ? "" : clean(row.get(column)));
                     }
-                    writer.write(CsvSupport.joinRow(values));
+                    writer.write(CsvSupport.joinRow(RunIdCsv.appendRunIdRow(values, runId)));
                     writer.write("\n");
                 }
             }

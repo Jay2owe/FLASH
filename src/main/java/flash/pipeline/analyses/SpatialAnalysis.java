@@ -46,6 +46,7 @@ import flash.pipeline.morphometry.ObjectTextureGLCM;
 import flash.pipeline.morphometry.ObjectTextureGLCM3D;
 import flash.pipeline.results.MorphometryDetailsWriter;
 import flash.pipeline.results.ObjectCsvColumnOrder;
+import flash.pipeline.results.RunIdCsv;
 import flash.pipeline.runrecord.AnalysisRunContext;
 import flash.pipeline.runrecord.RunRecordAware;
 import flash.pipeline.runtime.DependencyId;
@@ -1251,7 +1252,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
             String channelName = entry.getKey();
             ChannelData cd = entry.getValue();
             File outFile = new File(objectsDir, ChannelFilenameCodec.toSafe(channelName) + ".csv");
-            CsvTableIO.writeChannelCsv(outFile, cd);
+            CsvTableIO.writeChannelCsv(outFile, cd, currentRunId());
             recordOutput(outFile, "csv");
             IJ.log("  [" + (writeCount++) + "/" + totalToWrite + "] Updated: " + outFile.getName());
         }
@@ -2478,9 +2479,9 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
             CsvSupport.writeAtomically(outFile, new CsvSupport.WriterAction() {
                 @Override
                 public void write(PrintWriter pw) {
-                pw.println(CsvTableIO.joinCsv(header));
+                    pw.println(CsvTableIO.joinCsv(RunIdCsv.appendRunIdHeader(header)));
                 for (List<String> row : rows) {
-                    pw.println(CsvTableIO.joinCsv(row));
+                    pw.println(CsvTableIO.joinCsv(RunIdCsv.appendRunIdRow(row, currentRunId())));
                 }
                 }
             });
@@ -2565,6 +2566,10 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         if (runRecordContext != null && file != null) {
             runRecordContext.recordOutput(file, kind);
         }
+    }
+
+    private String currentRunId() {
+        return RunIdCsv.runId(runRecordContext);
     }
 
     private void recordOutputIfExists(File file, String kind) {

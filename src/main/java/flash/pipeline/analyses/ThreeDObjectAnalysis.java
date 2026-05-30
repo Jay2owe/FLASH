@@ -48,6 +48,7 @@ import flash.pipeline.objects.ObjectsCounter3DWrapper;
 import flash.pipeline.recipes.RecipeReplayModelResolver;
 import flash.pipeline.results.ObjectAnalysisDetailsWriter;
 import flash.pipeline.results.ObjectCsvColumnOrder;
+import flash.pipeline.results.RunIdCsv;
 import flash.pipeline.stardist.StarDist3DRunner;
 import flash.pipeline.results.ResultsTableCleaner;
 import flash.pipeline.runrecord.AnalysisRunContext;
@@ -1167,7 +1168,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
 
                 File out = objectOutputCsv(outDir, channelName);
                 writeObjectResultsCsv(directory, out, channelName, e.getValue(), keep,
-                        extendExistingObjectData);
+                        extendExistingObjectData, currentRunId());
                 recordOutput(out, "csv");
 
                 // Write macro-style Analysis Details per channel
@@ -2560,7 +2561,8 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             ResultsTableCleaner.keepOnlyColumns(t, keep.toArray(new String[0]));
 
             try {
-                CsvTableIO.writeResultsTableCsv(objectTempCsv(objectCsvWriteDir(directory), ch, i), t, keep);
+                CsvTableIO.writeResultsTableCsv(objectTempCsv(objectCsvWriteDir(directory), ch, i), t, keep,
+                        currentRunId());
             } catch (Exception ignored) {
             }
         }
@@ -5576,14 +5578,25 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
     static void writeObjectResultsCsv(String directory, File outFile, String channelName,
                                       ResultsTable table, List<String> orderedColumns,
                                       boolean extendExistingData) {
+        writeObjectResultsCsv(directory, outFile, channelName, table, orderedColumns,
+                extendExistingData, "");
+    }
+
+    static void writeObjectResultsCsv(String directory, File outFile, String channelName,
+                                      ResultsTable table, List<String> orderedColumns,
+                                      boolean extendExistingData, String runId) {
         if (extendExistingData) {
             File existing = existingObjectOutputCsv(directory, channelName);
             if (CsvTableIO.appendResultsTableCsv(outFile, existing, channelName,
-                    table, orderedColumns)) {
+                    table, orderedColumns, runId)) {
                 return;
             }
         }
-        CsvTableIO.writeResultsTableCsv(outFile, table, orderedColumns);
+        CsvTableIO.writeResultsTableCsv(outFile, table, orderedColumns, runId);
+    }
+
+    private String currentRunId() {
+        return RunIdCsv.runId(runRecordContext);
     }
 
     static File objectCsvWriteDir(String directory) {

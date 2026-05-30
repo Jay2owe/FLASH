@@ -19,6 +19,7 @@ import flash.pipeline.naming.ImageOrientationResolver;
 import flash.pipeline.naming.NameParts;
 import flash.pipeline.naming.ResolvedImageMetadata;
 import flash.pipeline.results.ObjectCsvColumnOrder;
+import flash.pipeline.results.RunIdCsv;
 import flash.pipeline.roi.RoiIO;
 import flash.pipeline.runrecord.AnalysisRunContext;
 import flash.pipeline.runrecord.RunRecordAware;
@@ -148,6 +149,10 @@ public class LineDistanceAnalysis implements Analysis, RunRecordAware {
         if (runRecordContext != null && file != null) {
             runRecordContext.recordOutput(file, kind);
         }
+    }
+
+    private String currentRunId() {
+        return RunIdCsv.runId(runRecordContext);
     }
 
     private void recordWarn(String message) {
@@ -830,7 +835,7 @@ public class LineDistanceAnalysis implements Analysis, RunRecordAware {
             ChannelData cd = entry.getValue();
             ObjectCsvColumnOrder.reorder(cd, channelNames);
             File outFile = new File(outputDir, ChannelFilenameCodec.toSafe(channelName) + ".csv");
-            CsvTableIO.writeChannelCsv(outFile, cd);
+            CsvTableIO.writeChannelCsv(outFile, cd, currentRunId());
             recordOutput(outFile, "csv");
             IJ.log("  Updated: " + outFile.getName());
         }

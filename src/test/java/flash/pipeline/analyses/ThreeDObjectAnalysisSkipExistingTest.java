@@ -101,7 +101,7 @@ public class ThreeDObjectAnalysisSkipExistingTest {
 
         CsvTableIO.ChannelData loaded = CsvTableIO.loadChannelCsv(out, "DAPI");
         assertNotNull(loaded);
-        assertEquals(Arrays.asList("Region", "SCN", "ManualNote", "Volume"), loaded.header);
+        assertEquals(Arrays.asList("Region", "SCN", "ManualNote", "Volume", "run_id"), loaded.header);
         assertEquals(2, loaded.rows.size());
         assertEquals("keep", loaded.get(0, "ManualNote"));
         assertEquals("CA1", loaded.get(1, "Region"));

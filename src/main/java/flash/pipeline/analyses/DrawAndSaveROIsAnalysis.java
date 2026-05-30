@@ -16,6 +16,7 @@ import flash.pipeline.orientation.OrientationImageIdentity;
 import flash.pipeline.orientation.OrientationTransformState;
 import flash.pipeline.orientation.RoiOrientationManifestService;
 import flash.pipeline.results.CsvAppend;
+import flash.pipeline.results.RunIdCsv;
 import flash.pipeline.runrecord.AnalysisRunContext;
 import flash.pipeline.runrecord.RunRecordAware;
 import flash.pipeline.runtime.DependencyId;
@@ -546,6 +547,7 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
 
         // Use high precision so small Volume (mm^3) values are not truncated to 0.000
         roiProps.setPrecision(9);
+        addRunIdColumn(roiProps, currentRunId());
         if (!createNew && roiPropsOut.exists()) {
             File tmp = new File(attrDir, chosen + " ROI Properties.tmp.csv");
             roiProps.save(tmp.getAbsolutePath());
@@ -876,6 +878,19 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
     private void recordOutput(File file, String kind) {
         if (runRecordContext != null && file != null) {
             runRecordContext.recordOutput(file, kind);
+        }
+    }
+
+    private String currentRunId() {
+        return RunIdCsv.runId(runRecordContext);
+    }
+
+    private static void addRunIdColumn(ResultsTable table, String runId) {
+        if (table == null) {
+            return;
+        }
+        for (int row = 0; row < table.size(); row++) {
+            table.setValue(RunIdCsv.RUN_ID_COLUMN, row, runId == null ? "" : runId);
         }
     }
 

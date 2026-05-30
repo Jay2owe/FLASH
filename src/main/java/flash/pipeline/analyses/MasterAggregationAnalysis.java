@@ -20,6 +20,7 @@ import flash.pipeline.io.ImageSourceDispatcher;
 import flash.pipeline.io.IoUtils;
 import flash.pipeline.io.SeriesMeta;
 import flash.pipeline.naming.ChannelFilenameCodec;
+import flash.pipeline.results.RunIdCsv;
 import flash.pipeline.results.StartHereWriter;
 import flash.pipeline.roi.RoiIO;
 import flash.pipeline.runrecord.AnalysisRunContext;
@@ -748,7 +749,7 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
                     try {
                         PrintWriter pw = CsvSupport.newWriter(roiFile);
                         try {
-                            pw.println(CsvSupport.joinRow(Arrays.asList(
+                            pw.println(CsvSupport.joinRow(RunIdCsv.appendRunIdHeader(Arrays.asList(
                                     "Animal Name",
                                     "Region",
                                     "ROI Set",
@@ -758,9 +759,10 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
                                     "Volume (micron^3)",
                                     "Volume (mm^3)",
                                     "Width",
-                                    "Height")));
+                                    "Height"))));
                             for (String[] row : upgradedRows) {
-                                pw.println(CsvSupport.joinRow(Arrays.asList(row)));
+                                pw.println(CsvSupport.joinRow(
+                                        RunIdCsv.appendRunIdRow(Arrays.asList(row), currentRunId())));
                             }
                         } finally {
                             pw.close();
@@ -961,7 +963,7 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
         try {
             PrintWriter pw = CsvSupport.newWriter(csvOutFile);
             try {
-                pw.println(CsvSupport.joinRow(Arrays.asList(
+                pw.println(CsvSupport.joinRow(RunIdCsv.appendRunIdHeader(Arrays.asList(
                         "Animal Name",
                         "Region",
                         "ROI Set",
@@ -971,9 +973,10 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
                         "Volume (micron^3)",
                         "Volume (mm^3)",
                         "Width",
-                        "Height")));
+                        "Height"))));
                 for (String[] row : csvRows) {
-                    pw.println(CsvSupport.joinRow(Arrays.asList(row)));
+                    pw.println(CsvSupport.joinRow(
+                            RunIdCsv.appendRunIdRow(Arrays.asList(row), currentRunId())));
                 }
             } finally {
                 pw.close();
@@ -1107,6 +1110,8 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
         // channel -> (animal -> metrics map)  — raw values
         LinkedHashMap<String, Map<String, LinkedHashMap<String, Double>>> channelRawData =
                 new LinkedHashMap<String, Map<String, LinkedHashMap<String, Double>>>();
+        LinkedHashMap<String, LinkedHashSet<String>> sourceRunIdsByGroup =
+                new LinkedHashMap<String, LinkedHashSet<String>>();
         // Track which columns are "summable" (totals/counts) vs "mean" for normalization
         Set<String> summableColumns = new LinkedHashSet<String>();
 
@@ -1153,6 +1158,10 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
             Map<String, Integer> colIdx = new HashMap<String, Integer>();
             for (int i = 0; i < header.length; i++) {
                 colIdx.put(header[i].trim(), i);
+            }
+            Integer sourceRunIdCol = colIdx.get(RunIdCsv.RUN_ID_COLUMN);
+            if (sourceRunIdCol == null) {
+                recordMissingSourceRunId(csvFile);
             }
             Set<String> classFractionCapWarnings = new HashSet<String>();
 
@@ -1210,6 +1219,7 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
                 }
                 list.add(row);
                 groupKeyToAnimal.put(groupKey, animal);
+                addSourceRunId(sourceRunIdsByGroup, groupKey, safeGet(row, sourceRunIdCol));
 
                 String sectionKey = resolveSectionKey(row, scnCol, roiCol, regionCol);
                 if (!sectionKey.isEmpty()) {
@@ -1482,7 +1492,7 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
         }
 
         File outFile = new File(exportDir, FlashProjectLayout.MASTER_OBJECTS_FILENAME);
-        writeMasterCsv(outFile, columns, allAnimals, table);
+        writeMasterCsv(outFile, columns, allAnimals, table, sourceRunIdsByGroup);
 
         // Write aggregation analysis details
         if (canNormalize) {
@@ -1941,6 +1951,10 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
             for (int i = 0; i < header.length; i++) {
                 colIdx.put(header[i].trim(), i);
             }
+            Integer sourceRunIdCol = colIdx.get(RunIdCsv.RUN_ID_COLUMN);
+            if (sourceRunIdCol == null) {
+                recordMissingSourceRunId(csvFile);
+            }
             List<DynamicIntensityColumn> dynamicColumns = dynamicIntensityColumns(
                     header, colIdx, channelName, knownChannelNames, classified.channelRoiMask);
 
@@ -1968,6 +1982,8 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
                 }
                 list.add(row);
                 groupKeyToAnimal.put(groupKey, animal);
+                addSourceRunId(buckets.get(classified.mode).sourceRunIdsByGroup,
+                        groupKey, safeGet(row, sourceRunIdCol));
             }
 
             Map<String, LinkedHashMap<String, Double>> animalMetrics =
@@ -2093,7 +2109,7 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
             }
 
             File outFile = new File(exportDir, intensityMasterFilename(entry.getKey()));
-            writeMasterCsv(outFile, columns, bucket.allAnimals, table);
+            writeMasterCsv(outFile, columns, bucket.allAnimals, table, bucket.sourceRunIdsByGroup);
             wroteAny = true;
         }
 
@@ -2409,6 +2425,8 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
         final Set<String> allAnimals = new LinkedHashSet<String>();
         final LinkedHashMap<String, Map<String, LinkedHashMap<String, Double>>> channelData =
                 new LinkedHashMap<String, Map<String, LinkedHashMap<String, Double>>>();
+        final LinkedHashMap<String, LinkedHashSet<String>> sourceRunIdsByGroup =
+                new LinkedHashMap<String, LinkedHashSet<String>>();
     }
 
     private static final class DynamicIntensityColumn {
@@ -2425,7 +2443,8 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
 
     private void writeMasterCsv(File outFile, List<String> columns,
                                 Set<String> allAnimals,
-                                LinkedHashMap<String, LinkedHashMap<String, Double>> table) {
+                                LinkedHashMap<String, LinkedHashMap<String, Double>> table,
+                                Map<String, LinkedHashSet<String>> sourceRunIdsByGroup) {
         File tmpFile = null;
         boolean moved = false;
         try {
@@ -2436,7 +2455,7 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
             tmpFile = File.createTempFile(outFile.getName() + ".", ".tmp", parent);
             PrintWriter pw = CsvSupport.newWriter(tmpFile);
             try {
-                pw.println(CsvSupport.joinRow(csvSafeValues(columns)));
+                pw.println(CsvSupport.joinRow(RunIdCsv.appendSourceAndRunIdHeader(csvSafeValues(columns))));
 
                 for (String animal : allAnimals) {
                     List<String> vals = new ArrayList<String>();
@@ -2448,7 +2467,8 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
                         Double val = (row != null) ? row.get(col) : null;
                         vals.add(val != null ? fmt(val) : "");
                     }
-                    pw.println(CsvSupport.joinRow(vals));
+                    pw.println(CsvSupport.joinRow(RunIdCsv.appendSourceAndRunIdRow(vals,
+                            joinedSourceRunIds(sourceRunIdsByGroup, animal), currentRunId())));
                 }
             } finally {
                 pw.close();
@@ -2500,10 +2520,21 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
         }
     }
 
+    private String currentRunId() {
+        return RunIdCsv.runId(runRecordContext);
+    }
+
     private void recordWarn(String message) {
         if (runRecordContext != null) {
             runRecordContext.warn(message);
         }
+    }
+
+    private void recordMissingSourceRunId(File csvFile) {
+        String message = "Source CSV lacks run_id; source_run_id will be empty for rows from "
+                + (csvFile == null ? "<unknown>" : csvFile.getName());
+        IJ.log("  WARNING: " + message);
+        recordWarn(message);
     }
 
     private void recordError(String message, Throwable t) {
@@ -2528,6 +2559,41 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
             return "'" + value;
         }
         return value;
+    }
+
+    private static void addSourceRunId(Map<String, LinkedHashSet<String>> sourceRunIdsByGroup,
+                                       String groupKey,
+                                       String sourceRunId) {
+        if (sourceRunIdsByGroup == null || groupKey == null || groupKey.trim().isEmpty()) {
+            return;
+        }
+        LinkedHashSet<String> values = sourceRunIdsByGroup.get(groupKey);
+        if (values == null) {
+            values = new LinkedHashSet<String>();
+            sourceRunIdsByGroup.put(groupKey, values);
+        }
+        String cleaned = sourceRunId == null ? "" : sourceRunId.trim();
+        if (!cleaned.isEmpty()) {
+            values.add(cleaned);
+        }
+    }
+
+    private static String joinedSourceRunIds(Map<String, LinkedHashSet<String>> sourceRunIdsByGroup,
+                                             String groupKey) {
+        if (sourceRunIdsByGroup == null || groupKey == null) {
+            return "";
+        }
+        LinkedHashSet<String> values = sourceRunIdsByGroup.get(groupKey);
+        if (values == null || values.isEmpty()) {
+            return "";
+        }
+        StringBuilder out = new StringBuilder();
+        for (String value : values) {
+            if (value == null || value.trim().isEmpty()) continue;
+            if (out.length() > 0) out.append(';');
+            out.append(value.trim());
+        }
+        return out.toString();
     }
 
     private static String safeGet(String[] arr, Integer idx) {

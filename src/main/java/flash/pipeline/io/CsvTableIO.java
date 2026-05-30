@@ -2,6 +2,7 @@ package flash.pipeline.io;
 
 import ij.IJ;
 import ij.measure.ResultsTable;
+import flash.pipeline.results.RunIdCsv;
 
 import java.io.File;
 import java.io.IOException;
@@ -142,6 +143,24 @@ public final class CsvTableIO {
         }
     }
 
+    public static void writeChannelCsv(File outFile, ChannelData cd, String runId) {
+        try {
+            CsvSupport.writeAtomically(outFile, new CsvSupport.WriterAction() {
+                @Override
+                public void write(PrintWriter pw) {
+                    List<String> dataHeader = RunIdCsv.withoutRunId(cd.header);
+                    pw.println(joinCsv(RunIdCsv.appendRunIdHeader(dataHeader)));
+                    for (List<String> row : cd.rows) {
+                        pw.println(joinCsv(RunIdCsv.appendRunIdRow(
+                                rowWithoutRunId(row, cd.header), runId)));
+                    }
+                }
+            });
+        } catch (IOException e) {
+            IJ.log("  Error writing " + outFile.getAbsolutePath() + ": " + e.getMessage());
+        }
+    }
+
     // ============================================================ Helpers
 
     /**
@@ -168,18 +187,24 @@ public final class CsvTableIO {
      * Writes a {@link ResultsTable} to CSV using the provided column order.
      */
     public static void writeResultsTableCsv(File outFile, ResultsTable table, List<String> orderedColumns) {
+        writeResultsTableCsv(outFile, table, orderedColumns, "");
+    }
+
+    public static void writeResultsTableCsv(File outFile, ResultsTable table,
+                                            List<String> orderedColumns, String runId) {
         try {
             CsvSupport.writeAtomically(outFile, new CsvSupport.WriterAction() {
                 @Override
                 public void write(PrintWriter pw) {
-                    pw.println(joinCsv(orderedColumns));
+                    List<String> dataColumns = RunIdCsv.withoutRunId(orderedColumns);
+                    pw.println(joinCsv(RunIdCsv.appendRunIdHeader(dataColumns)));
                     if (table == null) return;
                     for (int row = 0; row < table.size(); row++) {
-                        List<String> values = new ArrayList<String>(orderedColumns.size());
-                        for (String col : orderedColumns) {
+                        List<String> values = new ArrayList<String>(dataColumns.size());
+                        for (String col : dataColumns) {
                             values.add(resultsTableValue(table, col, row));
                         }
-                        pw.println(joinCsv(values));
+                        pw.println(joinCsv(RunIdCsv.appendRunIdRow(values, runId)));
                     }
                 }
             });
@@ -196,6 +221,11 @@ public final class CsvTableIO {
      * should fall back to a normal overwrite.
      */
     public static boolean mergeResultsTableCsv(File outFile, ResultsTable table, List<String> orderedColumns) {
+        return mergeResultsTableCsv(outFile, table, orderedColumns, "");
+    }
+
+    public static boolean mergeResultsTableCsv(File outFile, ResultsTable table,
+                                               List<String> orderedColumns, String runId) {
         if (outFile == null || table == null || orderedColumns == null || !outFile.exists()) {
             return false;
         }
@@ -203,18 +233,20 @@ public final class CsvTableIO {
         if (existing == null || existing.rows.size() != table.size()) {
             return false;
         }
-        for (String column : orderedColumns) {
+        stripRunIdColumn(existing);
+        List<String> dataColumns = RunIdCsv.withoutRunId(orderedColumns);
+        for (String column : dataColumns) {
             if (column != null && !column.trim().isEmpty()) {
                 existing.addColumn(column);
             }
         }
         for (int row = 0; row < table.size(); row++) {
-            for (String column : orderedColumns) {
+            for (String column : dataColumns) {
                 if (column == null || column.trim().isEmpty()) continue;
                 existing.set(row, column, resultsTableValue(table, column, row));
             }
         }
-        writeChannelCsv(outFile, existing);
+        writeChannelCsv(outFile, existing, runId);
         return true;
     }
 
@@ -227,6 +259,12 @@ public final class CsvTableIO {
      */
     public static boolean appendResultsTableCsv(File outFile, File existingFile, String channelName,
                                                 ResultsTable table, List<String> orderedColumns) {
+        return appendResultsTableCsv(outFile, existingFile, channelName, table, orderedColumns, "");
+    }
+
+    public static boolean appendResultsTableCsv(File outFile, File existingFile, String channelName,
+                                                ResultsTable table, List<String> orderedColumns,
+                                                String runId) {
         if (outFile == null || table == null || orderedColumns == null
                 || existingFile == null || !existingFile.isFile()) {
             return false;
@@ -235,7 +273,9 @@ public final class CsvTableIO {
         if (existing == null) {
             return false;
         }
-        for (String column : orderedColumns) {
+        stripRunIdColumn(existing);
+        List<String> dataColumns = RunIdCsv.withoutRunId(orderedColumns);
+        for (String column : dataColumns) {
             if (column != null && !column.trim().isEmpty()) {
                 existing.addColumn(column);
             }
@@ -243,7 +283,7 @@ public final class CsvTableIO {
         for (int row = 0; row < table.size(); row++) {
             List<String> values = new ArrayList<String>(existing.header.size());
             for (String column : existing.header) {
-                if (orderedColumns.contains(column)) {
+                if (dataColumns.contains(column)) {
                     values.add(resultsTableValue(table, column, row));
                 } else {
                     values.add("");
@@ -251,7 +291,7 @@ public final class CsvTableIO {
             }
             existing.rows.add(values);
         }
-        writeChannelCsv(outFile, existing);
+        writeChannelCsv(outFile, existing, runId);
         return true;
     }
 
@@ -307,5 +347,48 @@ public final class CsvTableIO {
         } catch (Exception ignored) {
         }
         return "";
+    }
+
+    private static List<String> rowWithoutRunId(List<String> row, List<String> header) {
+        List<String> out = new ArrayList<String>();
+        if (header == null) {
+            if (row != null) out.addAll(row);
+            return out;
+        }
+        for (int i = 0; i < header.size(); i++) {
+            String column = header.get(i) == null ? "" : header.get(i).trim();
+            if (RunIdCsv.RUN_ID_COLUMN.equals(column)) {
+                continue;
+            }
+            out.add(row != null && i < row.size() ? row.get(i) : "");
+        }
+        return out;
+    }
+
+    private static void stripRunIdColumn(ChannelData data) {
+        if (data == null || data.header == null) {
+            return;
+        }
+        int runIdIndex = -1;
+        for (int i = 0; i < data.header.size(); i++) {
+            String column = data.header.get(i) == null ? "" : data.header.get(i).trim();
+            if (RunIdCsv.RUN_ID_COLUMN.equals(column)) {
+                runIdIndex = i;
+                break;
+            }
+        }
+        if (runIdIndex < 0) {
+            return;
+        }
+        data.header.remove(runIdIndex);
+        for (List<String> row : data.rows) {
+            if (row != null && runIdIndex < row.size()) {
+                row.remove(runIdIndex);
+            }
+        }
+        data.colIdx.clear();
+        for (int i = 0; i < data.header.size(); i++) {
+            data.colIdx.put(data.header.get(i), Integer.valueOf(i));
+        }
     }
 }

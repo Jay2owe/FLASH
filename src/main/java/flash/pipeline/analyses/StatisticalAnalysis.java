@@ -10,6 +10,7 @@ import flash.pipeline.io.ConditionManifestIO;
 import flash.pipeline.io.CsvSupport;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.IoUtils;
+import flash.pipeline.results.RunIdCsv;
 import flash.pipeline.runrecord.AnalysisRunContext;
 import flash.pipeline.runrecord.RunRecordAware;
 import flash.pipeline.stats.MetricStatisticsEngine;
@@ -249,6 +250,10 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
         AnimalMetricTable animalMetricTable =
                 collapseRowsToAnimalMetrics(mergedRows, rowToAnimal, metricColumns);
         mergedData.putAll(animalMetricTable.valuesByAnimal);
+        LinkedHashMap<String, String> objectRunIdsByAnimal =
+                collapseSourceRunIdsToAnimals(objData, rowToAnimal);
+        LinkedHashMap<String, String> intensityRunIdsByAnimal =
+                collapseSourceRunIdsToAnimals(intData, rowToAnimal);
 
         if (statisticsConfig != null
                 && statisticsConfig.metricFilter != null
@@ -265,11 +270,16 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
                 metricColumns = filtered;
             }
         }
+        LinkedHashMap<String, String> metricSourceRunIds =
+                buildMetricSourceRunIds(metricColumns, metricSources,
+                        objectRunIdsByAnimal, intensityRunIdsByAnimal);
 
         // 4. Run statistical tests for each metric
         List<StatisticRow> results = new ArrayList<StatisticRow>();
         LinkedHashMap<String, Boolean> metricIncludedInTest =
                 new LinkedHashMap<String, Boolean>();
+        LinkedHashMap<String, Set<String>> metricIncludedSuperPlotRows =
+                new LinkedHashMap<String, Set<String>>();
         boolean pairedMode = isPairedMode(statisticsConfig);
         int tested = 0;
         int skipped = 0;
@@ -304,6 +314,11 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
                 results.addAll(MetricStatisticsEngine.analyseMetric(
                         metric, conditionOrder, groups, statisticsConfig));
                 metricIncludedInTest.put(metric, Boolean.TRUE);
+                if (pairedMode) {
+                    metricIncludedSuperPlotRows.put(metric,
+                            pairedIncludedSuperPlotRows(metric, conditionOrder, allAnimals,
+                                    animalToCondition, mergedData, statisticsConfig));
+                }
             } catch (IllegalArgumentException pairingMismatch) {
                 tested--;
                 skipped++;
@@ -315,10 +330,27 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
 
         // 5. Write output CSVs
         File outFile = layout.projectSummaryWriteFile(FlashProjectLayout.STATISTICS_FILENAME);
-        writeStatisticsCsv(outFile, results);
+        writeStatisticsCsv(outFile, results, metricSourceRunIds);
         File superPlotFile = layout.projectSummaryWriteFile(SUPERPLOT_FILENAME);
-        writeSuperPlotCsv(superPlotFile, metricColumns, allAnimals, animalToCondition,
-                animalMetricTable, metricSources, metricIncludedInTest);
+        AnimalMetricTable superPlotMetricTable = animalMetricTable;
+        Set<String> superPlotRows = allAnimals;
+        Map<String, String> superPlotConditions = animalToCondition;
+        Map<String, String> superPlotObjectRunIds = objectRunIdsByAnimal;
+        Map<String, String> superPlotIntensityRunIds = intensityRunIdsByAnimal;
+        if (pairedMode) {
+            superPlotMetricTable = buildPairedSuperPlotTable(metricColumns, allAnimals,
+                    animalToCondition, mergedData, statisticsConfig);
+            superPlotRows = superPlotMetricTable.valuesByAnimal.keySet();
+            superPlotConditions = superPlotMetricTable.conditionsByAnimal;
+            superPlotObjectRunIds = buildPairedSourceRunIds(objData, allRowNames,
+                    animalToCondition, statisticsConfig);
+            superPlotIntensityRunIds = buildPairedSourceRunIds(intData, allRowNames,
+                    animalToCondition, statisticsConfig);
+        }
+        writeSuperPlotCsv(superPlotFile, metricColumns, superPlotRows, superPlotConditions,
+                superPlotMetricTable, metricSources, metricIncludedInTest,
+                pairedMode ? metricIncludedSuperPlotRows : null,
+                superPlotObjectRunIds, superPlotIntensityRunIds);
 
         IJ.log("Statistical analysis complete: " + tested + " metrics tested, "
                 + skipped + " skipped (insufficient group size).");
@@ -429,10 +461,65 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
             if (!complete) continue;
 
             for (String cond : conditionOrder) {
-                groups.get(cond).add(byCondition.get(cond).get(subject).value(false));
+                groups.get(cond).add(byCondition.get(cond).get(subject)
+                        .value(isSummedAnimalMetric(metric)));
             }
         }
         return groups;
+    }
+
+    private static Set<String> pairedIncludedSuperPlotRows(
+            String metric,
+            List<String> conditionOrder,
+            Set<String> allRows,
+            Map<String, String> rowToCondition,
+            LinkedHashMap<String, Map<String, Double>> mergedData,
+            StatisticsConfig cfg) {
+        NameSuffixContext suffixContext = buildNameSuffixContext(allRows);
+        LinkedHashMap<String, Set<String>> conditionsBySubject =
+                new LinkedHashMap<String, Set<String>>();
+        List<String> subjectOrder = new ArrayList<String>();
+        Set<String> seenSubjects = new LinkedHashSet<String>();
+
+        for (String rowName : allRows) {
+            String condition = rowToCondition.get(rowName);
+            if (condition == null || !conditionOrder.contains(condition)) continue;
+            Map<String, Double> row = mergedData.get(rowName);
+            if (row == null) continue;
+            Double value = row.get(metric);
+            if (value == null || !Double.isFinite(value.doubleValue())) continue;
+
+            String subject = pairedSubjectId(rowName,
+                    cfg == null ? null : cfg.pairedMode, suffixContext);
+            if (subject.isEmpty()) subject = rowName;
+            if (seenSubjects.add(subject)) {
+                subjectOrder.add(subject);
+            }
+            Set<String> conditions = conditionsBySubject.get(subject);
+            if (conditions == null) {
+                conditions = new LinkedHashSet<String>();
+                conditionsBySubject.put(subject, conditions);
+            }
+            conditions.add(condition);
+        }
+
+        Set<String> included = new LinkedHashSet<String>();
+        for (String subject : subjectOrder) {
+            Set<String> conditions = conditionsBySubject.get(subject);
+            if (conditions == null) continue;
+            boolean complete = true;
+            for (String condition : conditionOrder) {
+                if (!conditions.contains(condition)) {
+                    complete = false;
+                    break;
+                }
+            }
+            if (!complete) continue;
+            for (String condition : conditionOrder) {
+                included.add(superPlotRowKey(subject, condition));
+            }
+        }
+        return included;
     }
 
     private static String pairedSubjectId(String rowName,
@@ -584,13 +671,11 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
         String trimmed = suffix.trim();
         if (trimmed.length() < 2) return false;
         boolean hasLetter = false;
-        boolean hasDigit = false;
         for (int i = 0; i < trimmed.length(); i++) {
             char ch = trimmed.charAt(i);
             if (Character.isLetter(ch)) hasLetter = true;
-            if (Character.isDigit(ch)) hasDigit = true;
         }
-        return hasLetter || hasDigit;
+        return hasLetter;
     }
 
     private static String normalizeSuffix(String suffix) {
@@ -681,8 +766,229 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
             }
             table.valuesByAnimal.put(animal, values);
             table.nestedCountsByAnimal.put(animal, nestedCounts);
+            table.displayNameByAnimal.put(animal, animal);
         }
         return table;
+    }
+
+    private static AnimalMetricTable buildPairedSuperPlotTable(
+            List<String> metricColumns,
+            Set<String> allRows,
+            Map<String, String> rowToCondition,
+            LinkedHashMap<String, Map<String, Double>> mergedData,
+            StatisticsConfig cfg) {
+        NameSuffixContext suffixContext = buildNameSuffixContext(allRows);
+        LinkedHashMap<String, Map<String, MetricAccumulator>> accumulators =
+                new LinkedHashMap<String, Map<String, MetricAccumulator>>();
+        AnimalMetricTable table = new AnimalMetricTable();
+
+        for (String rowName : allRows) {
+            String condition = rowToCondition.get(rowName);
+            if (condition == null || condition.trim().isEmpty()) continue;
+            Map<String, Double> row = mergedData.get(rowName);
+            if (row == null) continue;
+
+            String subject = pairedSubjectId(rowName,
+                    cfg == null ? null : cfg.pairedMode, suffixContext);
+            if (subject.isEmpty()) subject = rowName;
+            String rowKey = superPlotRowKey(subject, condition);
+
+            Map<String, MetricAccumulator> rowAcc = accumulators.get(rowKey);
+            if (rowAcc == null) {
+                rowAcc = new LinkedHashMap<String, MetricAccumulator>();
+                accumulators.put(rowKey, rowAcc);
+                table.displayNameByAnimal.put(rowKey, subject);
+                table.conditionsByAnimal.put(rowKey, condition);
+            }
+
+            for (String metric : metricColumns) {
+                Double value = row.get(metric);
+                if (value == null || !Double.isFinite(value.doubleValue())) continue;
+                MetricAccumulator acc = rowAcc.get(metric);
+                if (acc == null) {
+                    acc = new MetricAccumulator();
+                    rowAcc.put(metric, acc);
+                }
+                acc.add(value.doubleValue());
+            }
+        }
+
+        for (Map.Entry<String, Map<String, MetricAccumulator>> entry : accumulators.entrySet()) {
+            LinkedHashMap<String, Double> values = new LinkedHashMap<String, Double>();
+            LinkedHashMap<String, Integer> nestedCounts = new LinkedHashMap<String, Integer>();
+            for (String metric : metricColumns) {
+                MetricAccumulator acc = entry.getValue().get(metric);
+                if (acc == null || acc.n <= 0) continue;
+                values.put(metric, Double.valueOf(acc.value(isSummedAnimalMetric(metric))));
+                nestedCounts.put(metric, Integer.valueOf(acc.n));
+            }
+            table.valuesByAnimal.put(entry.getKey(), values);
+            table.nestedCountsByAnimal.put(entry.getKey(), nestedCounts);
+        }
+        return table;
+    }
+
+    private static String superPlotRowKey(String subject, String condition) {
+        return (subject == null ? "" : subject) + "\t" + (condition == null ? "" : condition);
+    }
+
+    private static LinkedHashMap<String, String> collapseSourceRunIdsToAnimals(
+            CsvData data,
+            Map<String, String> rowToAnimal) {
+        LinkedHashMap<String, LinkedHashSet<String>> grouped =
+                new LinkedHashMap<String, LinkedHashSet<String>>();
+        if (data == null || data.runIdByAnimal == null) {
+            return new LinkedHashMap<String, String>();
+        }
+        for (Map.Entry<String, String> entry : data.runIdByAnimal.entrySet()) {
+            String rowName = entry.getKey();
+            String animal = rowToAnimal == null ? rowName : rowToAnimal.get(rowName);
+            if (animal == null || animal.trim().isEmpty()) {
+                animal = rowName;
+            }
+            addRunId(grouped, animal, entry.getValue());
+        }
+        return joinRunIds(grouped);
+    }
+
+    private static LinkedHashMap<String, String> buildPairedSourceRunIds(
+            CsvData data,
+            Set<String> allRows,
+            Map<String, String> rowToCondition,
+            StatisticsConfig cfg) {
+        LinkedHashMap<String, LinkedHashSet<String>> grouped =
+                new LinkedHashMap<String, LinkedHashSet<String>>();
+        if (data == null || data.runIdByAnimal == null || allRows == null) {
+            return new LinkedHashMap<String, String>();
+        }
+        NameSuffixContext suffixContext = buildNameSuffixContext(allRows);
+        for (String rowName : allRows) {
+            if (!data.runIdByAnimal.containsKey(rowName)) continue;
+            String condition = rowToCondition == null ? "" : rowToCondition.get(rowName);
+            if (condition == null || condition.trim().isEmpty()) continue;
+            String subject = pairedSubjectId(rowName,
+                    cfg == null ? null : cfg.pairedMode, suffixContext);
+            if (subject.isEmpty()) subject = rowName;
+            addRunId(grouped, superPlotRowKey(subject, condition), data.runIdByAnimal.get(rowName));
+        }
+        return joinRunIds(grouped);
+    }
+
+    private static LinkedHashMap<String, String> buildMetricSourceRunIds(
+            List<String> metricColumns,
+            Map<String, String> metricSources,
+            Map<String, String> objectRunIdsByAnimal,
+            Map<String, String> intensityRunIdsByAnimal) {
+        LinkedHashMap<String, String> out = new LinkedHashMap<String, String>();
+        if (metricColumns == null) {
+            return out;
+        }
+        for (String metric : metricColumns) {
+            LinkedHashSet<String> values = new LinkedHashSet<String>();
+            String source = metricSources == null ? "" : metricSources.get(metric);
+            if (sourceUsesObjects(source)) {
+                collectRunIds(values, objectRunIdsByAnimal);
+            }
+            if (sourceUsesIntensities(source)) {
+                collectRunIds(values, intensityRunIdsByAnimal);
+            }
+            out.put(metric, joinRunIds(values));
+        }
+        return out;
+    }
+
+    private static String sourceRunIdForMetric(Map<String, String> metricSourceRunIds, String metric) {
+        if (metricSourceRunIds == null || metric == null) {
+            return "";
+        }
+        String value = metricSourceRunIds.get(metric);
+        return value == null ? "" : value;
+    }
+
+    private static String sourceRunIdForMetricAnimal(
+            String metric,
+            String animal,
+            Map<String, String> metricSources,
+            Map<String, String> objectRunIdsByAnimal,
+            Map<String, String> intensityRunIdsByAnimal) {
+        LinkedHashSet<String> values = new LinkedHashSet<String>();
+        String source = metricSources == null ? "" : metricSources.get(metric);
+        if (sourceUsesObjects(source)) {
+            addRunId(values, objectRunIdsByAnimal == null ? "" : objectRunIdsByAnimal.get(animal));
+        }
+        if (sourceUsesIntensities(source)) {
+            addRunId(values, intensityRunIdsByAnimal == null ? "" : intensityRunIdsByAnimal.get(animal));
+        }
+        return joinRunIds(values);
+    }
+
+    private static boolean sourceUsesObjects(String source) {
+        return SOURCE_OBJECTS.equals(source) || "Multiple".equals(source);
+    }
+
+    private static boolean sourceUsesIntensities(String source) {
+        return SOURCE_INTENSITIES.equals(source) || "Multiple".equals(source);
+    }
+
+    private static void collectRunIds(LinkedHashSet<String> out, Map<String, String> idsByRow) {
+        if (out == null || idsByRow == null) {
+            return;
+        }
+        for (String value : idsByRow.values()) {
+            addRunId(out, value);
+        }
+    }
+
+    private static void addRunId(Map<String, LinkedHashSet<String>> grouped,
+                                 String key,
+                                 String runId) {
+        if (grouped == null || key == null || key.trim().isEmpty()) {
+            return;
+        }
+        LinkedHashSet<String> values = grouped.get(key);
+        if (values == null) {
+            values = new LinkedHashSet<String>();
+            grouped.put(key, values);
+        }
+        addRunId(values, runId);
+    }
+
+    private static void addRunId(LinkedHashSet<String> values, String runId) {
+        if (values == null || runId == null || runId.trim().isEmpty()) {
+            return;
+        }
+        String[] parts = runId.split(";");
+        for (String part : parts) {
+            String cleaned = part == null ? "" : part.trim();
+            if (!cleaned.isEmpty()) {
+                values.add(cleaned);
+            }
+        }
+    }
+
+    private static LinkedHashMap<String, String> joinRunIds(
+            LinkedHashMap<String, LinkedHashSet<String>> grouped) {
+        LinkedHashMap<String, String> out = new LinkedHashMap<String, String>();
+        if (grouped == null) {
+            return out;
+        }
+        for (Map.Entry<String, LinkedHashSet<String>> entry : grouped.entrySet()) {
+            out.put(entry.getKey(), joinRunIds(entry.getValue()));
+        }
+        return out;
+    }
+
+    private static String joinRunIds(LinkedHashSet<String> values) {
+        if (values == null || values.isEmpty()) {
+            return "";
+        }
+        StringBuilder out = new StringBuilder();
+        for (String value : values) {
+            if (value == null || value.trim().isEmpty()) continue;
+            if (out.length() > 0) out.append(';');
+            out.append(value.trim());
+        }
+        return out.toString();
     }
 
     private static boolean isSummedAnimalMetric(String metric) {
@@ -730,6 +1036,10 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
                 new LinkedHashMap<String, Map<String, Double>>();
         final LinkedHashMap<String, Map<String, Integer>> nestedCountsByAnimal =
                 new LinkedHashMap<String, Map<String, Integer>>();
+        final LinkedHashMap<String, String> displayNameByAnimal =
+                new LinkedHashMap<String, String>();
+        final LinkedHashMap<String, String> conditionsByAnimal =
+                new LinkedHashMap<String, String>();
     }
 
     private static final class NameSuffixContext {
@@ -1040,7 +1350,8 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
     //  CSV output
     // ================================================================
 
-    private void writeStatisticsCsv(File outFile, List<StatisticRow> results) {
+    private void writeStatisticsCsv(File outFile, List<StatisticRow> results,
+                                    Map<String, String> metricSourceRunIds) {
         try {
             File parent = outFile.getParentFile();
             if (parent != null) {
@@ -1048,7 +1359,7 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
             }
             PrintWriter pw = CsvSupport.newWriter(outFile);
             try {
-                pw.println(CsvSupport.joinRow(Arrays.asList(
+                pw.println(CsvSupport.joinRow(RunIdCsv.appendSourceAndRunIdHeader(Arrays.asList(
                         "Metric",
                         "Test",
                         "Statistic",
@@ -1074,7 +1385,7 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
                         "EffectSizeType",
                         "EffectSize",
                         "EffectCI95Low",
-                        "EffectCI95High")));
+                        "EffectCI95High"))));
 
                 for (StatisticRow r : results) {
                     List<String> row = new ArrayList<String>();
@@ -1104,7 +1415,8 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
                     row.add(Double.isNaN(r.effectSize) ? "" : fmtStat(r.effectSize));
                     row.add(Double.isNaN(r.effectCI95Low) ? "" : fmtStat(r.effectCI95Low));
                     row.add(Double.isNaN(r.effectCI95High) ? "" : fmtStat(r.effectCI95High));
-                    pw.println(CsvSupport.joinRow(row));
+                    pw.println(CsvSupport.joinRow(RunIdCsv.appendSourceAndRunIdRow(row,
+                            sourceRunIdForMetric(metricSourceRunIds, r.metric), currentRunId())));
                 }
             } finally {
                 pw.close();
@@ -1123,7 +1435,10 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
                                    Map<String, String> animalToCondition,
                                    AnimalMetricTable animalMetricTable,
                                    Map<String, String> metricSources,
-                                   Map<String, Boolean> metricIncludedInTest) {
+                                   Map<String, Boolean> metricIncludedInTest,
+                                   Map<String, Set<String>> metricIncludedRows,
+                                   Map<String, String> objectRunIdsByAnimal,
+                                   Map<String, String> intensityRunIdsByAnimal) {
         try {
             File parent = outFile.getParentFile();
             if (parent != null) {
@@ -1131,7 +1446,7 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
             }
             PrintWriter pw = CsvSupport.newWriter(outFile);
             try {
-                pw.println(CsvSupport.joinRow(Arrays.asList(
+                pw.println(CsvSupport.joinRow(RunIdCsv.appendSourceAndRunIdHeader(Arrays.asList(
                         "Metric",
                         "SourceTable",
                         "AnimalName",
@@ -1143,7 +1458,7 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
                         "GroupNAnimals",
                         "GroupMean",
                         "GroupSD",
-                        "GroupSEM")));
+                        "GroupSEM"))));
 
                 Map<String, Map<String, GroupSummary>> summaries =
                         buildSuperPlotSummaries(metricColumns, allAnimals,
@@ -1153,6 +1468,8 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
                     String source = metricSources == null ? "" : metricSources.get(metric);
                     Boolean included = metricIncludedInTest == null
                             ? Boolean.FALSE : metricIncludedInTest.get(metric);
+                    Set<String> includedRows = metricIncludedRows == null
+                            ? null : metricIncludedRows.get(metric);
                     for (String animal : allAnimals) {
                         Map<String, Double> values = animalMetricTable.valuesByAnimal.get(animal);
                         if (values == null) continue;
@@ -1163,6 +1480,10 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
                         Map<String, Integer> counts =
                                 animalMetricTable.nestedCountsByAnimal.get(animal);
                         Integer nested = counts == null ? null : counts.get(metric);
+                        String displayName = animalMetricTable.displayNameByAnimal.get(animal);
+                        if (displayName == null || displayName.trim().isEmpty()) {
+                            displayName = animal;
+                        }
                         GroupSummary summary = null;
                         Map<String, GroupSummary> metricSummaries = summaries.get(metric);
                         if (metricSummaries != null) {
@@ -1172,17 +1493,23 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
                         List<String> row = new ArrayList<String>();
                         row.add(metric);
                         row.add(source == null ? "" : source);
-                        row.add(animal);
+                        row.add(displayName);
                         row.add(condition == null ? "" : condition);
                         row.add(fmtStat(value.doubleValue()));
                         row.add("Animal");
                         row.add(nested == null ? "" : String.valueOf(nested.intValue()));
-                        row.add(Boolean.TRUE.equals(included) ? "Yes" : "No");
+                        boolean includedInTest = includedRows == null
+                                ? Boolean.TRUE.equals(included)
+                                : includedRows.contains(animal);
+                        row.add(includedInTest ? "Yes" : "No");
                         row.add(summary == null ? "" : String.valueOf(summary.n));
                         row.add(summary == null || Double.isNaN(summary.mean) ? "" : fmtStat(summary.mean));
                         row.add(summary == null || Double.isNaN(summary.sd) ? "" : fmtStat(summary.sd));
                         row.add(summary == null || Double.isNaN(summary.sem) ? "" : fmtStat(summary.sem));
-                        pw.println(CsvSupport.joinRow(row));
+                        pw.println(CsvSupport.joinRow(RunIdCsv.appendSourceAndRunIdRow(row,
+                                sourceRunIdForMetricAnimal(metric, animal, metricSources,
+                                        objectRunIdsByAnimal, intensityRunIdsByAnimal),
+                                currentRunId())));
                     }
                 }
             } finally {
@@ -1276,6 +1603,8 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
         List<String> animals = new ArrayList<String>();
         LinkedHashMap<String, Map<String, Double>> data =
                 new LinkedHashMap<String, Map<String, Double>>();
+        LinkedHashMap<String, String> runIdByAnimal =
+                new LinkedHashMap<String, String>();
     }
 
     private CsvData parseMasterCsv(File csvFile) {
@@ -1303,6 +1632,11 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
                     inputStatus = "skipped";
                     return result;
                 }
+                int runIdIdx = result.columns.indexOf(RunIdCsv.RUN_ID_COLUMN);
+                if (runIdIdx < 0) {
+                    recordWarn("Source CSV lacks run_id; source_run_id will be empty for rows from "
+                            + csvFile.getName());
+                }
 
                 CsvSupport.Record record;
                 while ((record = csv.readRecord()) != null) {
@@ -1312,10 +1646,12 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
                     String animal = safeGet(row, animalIdx).trim();
                     if (animal.isEmpty()) continue;
                     result.animals.add(animal);
+                    result.runIdByAnimal.put(animal, runIdIdx >= 0 ? safeGet(row, runIdIdx).trim() : "");
 
                     Map<String, Double> rowData = new LinkedHashMap<String, Double>();
                     for (int c = 0; c < result.columns.size(); c++) {
                         if (c == animalIdx) continue;
+                        if (isRunLineageColumn(result.columns.get(c))) continue;
                         String val = safeGet(row, c).trim();
                         if (!val.isEmpty()) {
                             try {
@@ -1368,6 +1704,10 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
         }
     }
 
+    private String currentRunId() {
+        return RunIdCsv.runId(runRecordContext);
+    }
+
     private void recordWarn(String message) {
         if (runRecordContext != null) {
             runRecordContext.warn(message);
@@ -1382,10 +1722,18 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
 
     private static boolean isMetricColumn(String col) {
         if (col == null) return false;
+        if (isRunLineageColumn(col)) return false;
         if (col.equals("AnimalName")) return false;
         if (col.equals("numSections")) return false;
         if (col.contains("numSections")) return false;
         return true;
+    }
+
+    private static boolean isRunLineageColumn(String col) {
+        if (col == null) return false;
+        String cleaned = col.trim();
+        return RunIdCsv.RUN_ID_COLUMN.equals(cleaned)
+                || RunIdCsv.SOURCE_RUN_ID_COLUMN.equals(cleaned);
     }
 
     private static String safeGet(String[] arr, int idx) {
