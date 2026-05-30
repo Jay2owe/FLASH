@@ -22,6 +22,8 @@ import flash.pipeline.io.SeriesMeta;
 import flash.pipeline.naming.ChannelFilenameCodec;
 import flash.pipeline.results.StartHereWriter;
 import flash.pipeline.roi.RoiIO;
+import flash.pipeline.runrecord.AnalysisRunContext;
+import flash.pipeline.runrecord.RunRecordAware;
 import flash.pipeline.runtime.PluginInstallGuard;
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.wizard.ConditionManifestPanel;
@@ -72,10 +74,11 @@ import java.util.TreeMap;
  *   <li>{@code Image Intensities.csv} - intensity per-animal means</li>
  * </ul>
  */
-public class MasterAggregationAnalysis implements Analysis {
+public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
 
     private boolean headless = false;
     private boolean suppressDialogs = false;
+    private AnalysisRunContext runRecordContext = null;
     private static final double COLOC_THRESHOLD = 30.0;
     private static final int MAX_TEXTURE_CLASS_FRACTION_COLUMNS = 16;
     private static final String MASTER_INTENSITIES_MIP_FILENAME = "Image Intensities_MIP.csv";
@@ -125,6 +128,13 @@ public class MasterAggregationAnalysis implements Analysis {
         cols.add("Morph_PB");
         cols.add("Morph_MP");
         cols.add("Morph_VSD");
+        cols.add("Morph_ShollCriticalRadius_um");
+        cols.add("Morph_ShollCriticalIntersections");
+        cols.add("Morph_ShollSchoenenIndex");
+        cols.add("Morph_ShollPrimaryBranches");
+        cols.add("Morph_SkeletonBranches");
+        cols.add("Morph_SkeletonJunctions");
+        cols.add("Morph_SkeletonEndpoints");
         // Tier 3 — composite indices (SpatialAnalysis lines 3029-3031)
         cols.add("Morph_CMS");
         cols.add("Morph_SMSD");
@@ -183,6 +193,11 @@ public class MasterAggregationAnalysis implements Analysis {
     @Override
     public void setSuppressDialogs(boolean suppress) {
         this.suppressDialogs = suppress;
+    }
+
+    @Override
+    public void setRunRecordContext(AnalysisRunContext context) {
+        this.runRecordContext = context;
     }
 
     public AggregationConfig getAggregationConfig() {
@@ -525,6 +540,7 @@ public class MasterAggregationAnalysis implements Analysis {
             calibrationLoaded = false;
             calibrationUnit = "pixel";
             IJ.log("Warning: no calibration found — XM/YM will be in pixels, volume fallback disabled.");
+            recordWarn("No calibration found; XM/YM will be in pixels and volume fallback is disabled.");
         }
 
         // Create output directory
@@ -625,6 +641,9 @@ public class MasterAggregationAnalysis implements Analysis {
         // animal -> list of volume (mm³) values
         Map<String, List<Double>> volAccum = new LinkedHashMap<String, List<Double>>();
 
+        AnalysisRunContext.InputHandle inputHandle = recordInputStart(roiFile);
+        long inputStarted = System.currentTimeMillis();
+        String inputStatus = "processed";
         try {
             // Read all rows into memory so we can detect legacy format and upgrade
             CsvSupport.RecordReader csv = CsvSupport.openRecordReader(roiFile);
@@ -746,9 +765,11 @@ public class MasterAggregationAnalysis implements Analysis {
                         } finally {
                             pw.close();
                         }
+                        recordOutput(roiFile, "csv");
                         IJ.log("  Upgraded legacy CSV: " + upgradedRows.size() + " rows rewritten to " + roiFile.getName());
                     } catch (IOException e2) {
                         IJ.log("  Warning: could not rewrite legacy CSV: " + e2.getMessage());
+                        recordWarn("Could not rewrite legacy ROI Properties CSV: " + e2.getMessage());
                     }
                     logSkippedVolumeRows(rowsMissingPhysicalArea, rowsMissingStackDepth);
                 } else if (areaUmCol != null || areaPixCol != null) {
@@ -778,7 +799,11 @@ public class MasterAggregationAnalysis implements Analysis {
             }
         } catch (IOException e) {
             IJ.log("  Error reading ROI Properties: " + e.getMessage());
+            inputStatus = "failed";
+            recordError("Error reading ROI Properties", e);
             volAccum = null;
+        } finally {
+            recordInputEnd(inputHandle, inputStatus, inputStarted);
         }
 
         // If CSV was empty/invalid, try regenerating from ROI zip files
@@ -953,9 +978,11 @@ public class MasterAggregationAnalysis implements Analysis {
             } finally {
                 pw.close();
             }
+            recordOutput(csvOutFile, "csv");
             IJ.log("  Regenerated ROI Properties: " + csvRows.size() + " entries saved to " + csvOutFile.getName());
         } catch (IOException e) {
             IJ.log("  Error writing regenerated ROI Properties: " + e.getMessage());
+            recordError("Error writing regenerated ROI Properties", e);
         }
 
         return volAccum;
@@ -1000,11 +1027,17 @@ public class MasterAggregationAnalysis implements Analysis {
 
     private Map<String, Integer> countUniqueSCNs(File csvFile) {
         Map<String, Set<String>> sectionSets = new LinkedHashMap<String, Set<String>>();
+        AnalysisRunContext.InputHandle inputHandle = recordInputStart(csvFile);
+        long inputStarted = System.currentTimeMillis();
+        String inputStatus = "processed";
         try {
             CsvSupport.RecordReader csv = CsvSupport.openRecordReader(csvFile);
             try {
                 CsvSupport.Record headerRecord = csv.readRecord();
-                if (headerRecord == null) return new LinkedHashMap<String, Integer>();
+                if (headerRecord == null) {
+                    inputStatus = "skipped";
+                    return new LinkedHashMap<String, Integer>();
+                }
                 String[] header = CsvSupport.parseRecord(headerRecord.text);
 
                 Map<String, Integer> colIdx = new HashMap<String, Integer>();
@@ -1016,8 +1049,14 @@ public class MasterAggregationAnalysis implements Analysis {
                 Integer roiCol = colIdx.get("ROI");
                 Integer regionCol = colIdx.get("Region");
                 Integer scnCol = colIdx.get("SCN");
-                if (animalCol == null) return new LinkedHashMap<String, Integer>();
-                if (scnCol == null && roiCol == null && regionCol == null) return new LinkedHashMap<String, Integer>();
+                if (animalCol == null) {
+                    inputStatus = "skipped";
+                    return new LinkedHashMap<String, Integer>();
+                }
+                if (scnCol == null && roiCol == null && regionCol == null) {
+                    inputStatus = "skipped";
+                    return new LinkedHashMap<String, Integer>();
+                }
 
                 CsvSupport.Record record;
                 while ((record = csv.readRecord()) != null) {
@@ -1038,7 +1077,11 @@ public class MasterAggregationAnalysis implements Analysis {
                 csv.close();
             }
         } catch (IOException e) {
+            inputStatus = "failed";
+            recordError("Error reading " + csvFile.getName(), e);
             return new LinkedHashMap<String, Integer>();
+        } finally {
+            recordInputEnd(inputHandle, inputStatus, inputStarted);
         }
 
         Map<String, Integer> result = new LinkedHashMap<String, Integer>();
@@ -1073,12 +1116,15 @@ public class MasterAggregationAnalysis implements Analysis {
 
             List<String[]> rows = new ArrayList<String[]>();
             String[] header;
+            AnalysisRunContext.InputHandle inputHandle = recordInputStart(csvFile);
+            long inputStarted = System.currentTimeMillis();
             try {
                 CsvSupport.RecordReader csv = CsvSupport.openRecordReader(csvFile);
                 try {
                     CsvSupport.Record headerRecord = csv.readRecord();
                     if (headerRecord == null) {
                         IJ.log("  Empty CSV, skipping: " + csvFile.getName());
+                        recordInputEnd(inputHandle, "skipped", inputStarted);
                         continue;
                     }
                     header = CsvSupport.parseRecord(headerRecord.text);
@@ -1091,8 +1137,11 @@ public class MasterAggregationAnalysis implements Analysis {
                 } finally {
                     csv.close();
                 }
+                recordInputEnd(inputHandle, "processed", inputStarted);
             } catch (IOException e) {
                 IJ.log("  Error reading " + csvFile.getName() + ": " + e.getMessage());
+                recordInputEnd(inputHandle, "failed", inputStarted);
+                recordError("Error reading " + csvFile.getName(), e);
                 continue;
             }
 
@@ -1808,9 +1857,11 @@ public class MasterAggregationAnalysis implements Analysis {
             } finally {
                 pw.close();
             }
+            recordOutput(detailsFile, "txt");
             IJ.log("  Aggregation details written: " + detailsFile.getName());
         } catch (IOException e) {
             IJ.log("  WARNING: Failed to write aggregation details: " + e.getMessage());
+            recordWarn("Failed to write aggregation details: " + e.getMessage());
         }
     }
 
@@ -1852,12 +1903,15 @@ public class MasterAggregationAnalysis implements Analysis {
 
             List<String[]> rows = new ArrayList<String[]>();
             String[] header;
+            AnalysisRunContext.InputHandle inputHandle = recordInputStart(csvFile);
+            long inputStarted = System.currentTimeMillis();
             try {
                 CsvSupport.RecordReader csv = CsvSupport.openRecordReader(csvFile);
                 try {
                     CsvSupport.Record headerRecord = csv.readRecord();
                     if (headerRecord == null) {
                         IJ.log("  Empty CSV, skipping: " + csvFile.getName());
+                        recordInputEnd(inputHandle, "skipped", inputStarted);
                         continue;
                     }
                     header = CsvSupport.parseRecord(headerRecord.text);
@@ -1870,8 +1924,11 @@ public class MasterAggregationAnalysis implements Analysis {
                 } finally {
                     csv.close();
                 }
+                recordInputEnd(inputHandle, "processed", inputStarted);
             } catch (IOException e) {
                 IJ.log("  Error reading " + csvFile.getName() + ": " + e.getMessage());
+                recordInputEnd(inputHandle, "failed", inputStarted);
+                recordError("Error reading " + csvFile.getName(), e);
                 continue;
             }
 
@@ -2405,8 +2462,10 @@ public class MasterAggregationAnalysis implements Analysis {
             }
             moved = true;
             IJ.log("Saved: " + outFile.getAbsolutePath());
+            recordOutput(outFile, "csv");
         } catch (IOException e) {
             IJ.log("Error writing " + outFile.getName() + ": " + e.getMessage());
+            recordError("Error writing " + outFile.getName(), e);
         } finally {
             if (!moved && tmpFile != null) {
                 try {
@@ -2418,6 +2477,40 @@ public class MasterAggregationAnalysis implements Analysis {
     }
 
     // ----------------------------------------------------------------- Helpers
+
+    private AnalysisRunContext.InputHandle recordInputStart(File file) {
+        if (runRecordContext == null || file == null) {
+            return null;
+        }
+        return runRecordContext.recordInputStart(file, -1, null);
+    }
+
+    private void recordInputEnd(AnalysisRunContext.InputHandle inputHandle,
+                                String status,
+                                long startedAtMillis) {
+        if (runRecordContext != null && inputHandle != null) {
+            runRecordContext.recordInputEnd(inputHandle, status,
+                    Math.max(0L, System.currentTimeMillis() - startedAtMillis));
+        }
+    }
+
+    private void recordOutput(File file, String kind) {
+        if (runRecordContext != null && file != null) {
+            runRecordContext.recordOutput(file, kind);
+        }
+    }
+
+    private void recordWarn(String message) {
+        if (runRecordContext != null) {
+            runRecordContext.warn(message);
+        }
+    }
+
+    private void recordError(String message, Throwable t) {
+        if (runRecordContext != null) {
+            runRecordContext.error(message, t);
+        }
+    }
 
     private static List<String> csvSafeValues(List<String> values) {
         List<String> safe = new ArrayList<String>();
@@ -2612,11 +2705,17 @@ public class MasterAggregationAnalysis implements Analysis {
         Set<String> animals = new LinkedHashSet<String>();
         if (csvFile == null) return animals;
 
+        AnalysisRunContext.InputHandle inputHandle = recordInputStart(csvFile);
+        long inputStarted = System.currentTimeMillis();
+        String inputStatus = "processed";
         try {
             CsvSupport.RecordReader csv = CsvSupport.openRecordReader(csvFile);
             try {
                 CsvSupport.Record headerRecord = csv.readRecord();
-                if (headerRecord == null) return animals;
+                if (headerRecord == null) {
+                    inputStatus = "skipped";
+                    return animals;
+                }
 
                 String[] header = CsvSupport.parseRecord(headerRecord.text);
                 Integer animalCol = null;
@@ -2626,7 +2725,10 @@ public class MasterAggregationAnalysis implements Analysis {
                         break;
                     }
                 }
-                if (animalCol == null) return animals;
+                if (animalCol == null) {
+                    inputStatus = "skipped";
+                    return animals;
+                }
 
                 CsvSupport.Record record;
                 while ((record = csv.readRecord()) != null) {
@@ -2638,6 +2740,10 @@ public class MasterAggregationAnalysis implements Analysis {
                 csv.close();
             }
         } catch (IOException ignored) {
+            inputStatus = "failed";
+            recordError("Error reading " + csvFile.getName(), ignored);
+        } finally {
+            recordInputEnd(inputHandle, inputStatus, inputStarted);
         }
 
         return animals;

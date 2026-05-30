@@ -9,6 +9,8 @@ import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.IoUtils;
 import flash.pipeline.naming.ChannelFilenameCodec;
 import flash.pipeline.results.StartHereWriter;
+import flash.pipeline.runrecord.AnalysisRunContext;
+import flash.pipeline.runrecord.RunRecordAware;
 
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.ToggleSwitch;
@@ -65,10 +67,11 @@ import org.apache.poi.xssf.usermodel.XSSFWorkbook;
  * render, how the statistics sheet highlights significant rows, header style,
  * and the optional methods appendix.
  */
-public class ExcelSummaryExportAnalysis implements Analysis {
+public class ExcelSummaryExportAnalysis implements Analysis, RunRecordAware {
 
     private boolean headless = false;
     private boolean suppressDialogs = false;
+    private AnalysisRunContext runRecordContext = null;
 
     private ExcelExportPreset preset = ExcelExportPreset.exploratoryDefault();
     private boolean configFromCli = false;
@@ -87,6 +90,11 @@ public class ExcelSummaryExportAnalysis implements Analysis {
     @Override
     public void setSuppressDialogs(boolean suppress) {
         this.suppressDialogs = suppress;
+    }
+
+    @Override
+    public void setRunRecordContext(AnalysisRunContext context) {
+        this.runRecordContext = context;
     }
 
     @Override
@@ -226,6 +234,7 @@ public class ExcelSummaryExportAnalysis implements Analysis {
             IJ.log("Excel saved: " + outFile.getAbsolutePath());
         } catch (Exception e) {
             IJ.log("Error writing Excel: " + e.getMessage());
+            recordError("Error writing Excel", e);
             if (canShowGuiDialog(suppressDialogs, configFromCli, GraphicsEnvironment.isHeadless())) {
                 IJ.showMessage("Excel Summary Export", "Error: " + e.getMessage());
             }
@@ -234,6 +243,7 @@ public class ExcelSummaryExportAnalysis implements Analysis {
 
     private void notifyUser(String title, String message) {
         IJ.log(message.replace('\n', ' '));
+        recordWarn(message.replace('\n', ' '));
         if (canShowGuiDialog(suppressDialogs, configFromCli, GraphicsEnvironment.isHeadless())) {
             IJ.showMessage(title, message);
         }
@@ -576,9 +586,15 @@ public class ExcelSummaryExportAnalysis implements Analysis {
     private CsvData parseMasterCsv(File csvFile) {
         CsvData result = new CsvData();
         int unparseable = 0;
+        AnalysisRunContext.InputHandle inputHandle = recordInputStart(csvFile);
+        long inputStarted = System.currentTimeMillis();
+        String inputStatus = "processed";
         try (CsvSupport.RecordReader csv = CsvSupport.openRecordReader(csvFile)) {
             CsvSupport.Record headerRecord = csv.readRecord();
-            if (headerRecord == null) return result;
+            if (headerRecord == null) {
+                inputStatus = "skipped";
+                return result;
+            }
             String[] header = CsvSupport.parseRecord(headerRecord.text);
             for (String h : header) {
                 result.columns.add(h.trim());
@@ -587,6 +603,8 @@ public class ExcelSummaryExportAnalysis implements Analysis {
             int animalIdx = result.columns.indexOf("AnimalName");
             if (animalIdx < 0) {
                 IJ.log("  'AnimalName' column not found in " + csvFile.getName());
+                recordWarn("'AnimalName' column not found in " + csvFile.getName());
+                inputStatus = "skipped";
                 return result;
             }
 
@@ -615,9 +633,15 @@ public class ExcelSummaryExportAnalysis implements Analysis {
             }
         } catch (IOException e) {
             IJ.log("Error reading " + csvFile.getName() + ": " + e.getMessage());
+            inputStatus = "failed";
+            recordError("Error reading " + csvFile.getName(), e);
+        } finally {
+            recordInputEnd(inputHandle, inputStatus, inputStarted);
         }
         if (unparseable > 0) {
             IJ.log("[Excel] Skipped " + unparseable
+                    + " unparseable cells in " + csvFile.getName());
+            recordWarn("[Excel] Skipped " + unparseable
                     + " unparseable cells in " + csvFile.getName());
         }
         return result;
@@ -679,6 +703,8 @@ public class ExcelSummaryExportAnalysis implements Analysis {
             if (out.containsKey(key)) {
                 continue;
             }
+            AnalysisRunContext.InputHandle inputHandle = recordInputStart(txt);
+            long inputStarted = System.currentTimeMillis();
             try {
                 List<String> lines = Files.readAllLines(txt.toPath(), StandardCharsets.UTF_8);
                 String text = join(lines, "\n");
@@ -691,8 +717,11 @@ public class ExcelSummaryExportAnalysis implements Analysis {
                 blocks.put("_analysisType", analysisType);
                 blocks.put("_sourceFile", txt.getName());
                 out.put(key, blocks);
+                recordInputEnd(inputHandle, "processed", inputStarted);
             } catch (IOException e) {
                 IJ.log("  Error reading details: " + txt.getName());
+                recordInputEnd(inputHandle, "failed", inputStarted);
+                recordError("Error reading details: " + txt.getName(), e);
             }
         }
     }
@@ -754,6 +783,7 @@ public class ExcelSummaryExportAnalysis implements Analysis {
                 }
                 moveAtomically(temp.toPath(), outFile.toPath());
                 moved = true;
+                recordOutput(outFile, "xlsx");
             } finally {
                 if (!moved) {
                     Files.deleteIfExists(temp.toPath());
@@ -1167,9 +1197,15 @@ public class ExcelSummaryExportAnalysis implements Analysis {
         List<String[]> rows = new ArrayList<String[]>();
         String[] csvHeaders = null;
 
+        AnalysisRunContext.InputHandle inputHandle = recordInputStart(statisticsCsv);
+        long inputStarted = System.currentTimeMillis();
+        String inputStatus = "processed";
         try (CsvSupport.RecordReader csv = CsvSupport.openRecordReader(statisticsCsv)) {
             CsvSupport.Record headerRecord = csv.readRecord();
-            if (headerRecord == null) return;
+            if (headerRecord == null) {
+                inputStatus = "skipped";
+                return;
+            }
             csvHeaders = CsvSupport.parseRecord(headerRecord.text);
 
             CsvSupport.Record record;
@@ -1179,7 +1215,11 @@ public class ExcelSummaryExportAnalysis implements Analysis {
             }
         } catch (IOException e) {
             IJ.log("Error reading statistics CSV: " + e.getMessage());
+            inputStatus = "failed";
+            recordError("Error reading statistics CSV", e);
             return;
+        } finally {
+            recordInputEnd(inputHandle, inputStatus, inputStarted);
         }
 
         if (csvHeaders == null || rows.isEmpty()) return;
@@ -1293,6 +1333,8 @@ public class ExcelSummaryExportAnalysis implements Analysis {
 
         if (unparseable > 0) {
             IJ.log("[Excel] Skipped " + unparseable
+                    + " unparseable cells in " + statisticsCsv.getName());
+            recordWarn("[Excel] Skipped " + unparseable
                     + " unparseable cells in " + statisticsCsv.getName());
         }
     }
@@ -1420,6 +1462,40 @@ public class ExcelSummaryExportAnalysis implements Analysis {
     }
 
     // ---- Helpers ----------------------------------------------------------
+
+    private AnalysisRunContext.InputHandle recordInputStart(File file) {
+        if (runRecordContext == null || file == null) {
+            return null;
+        }
+        return runRecordContext.recordInputStart(file, -1, null);
+    }
+
+    private void recordInputEnd(AnalysisRunContext.InputHandle inputHandle,
+                                String status,
+                                long startedAtMillis) {
+        if (runRecordContext != null && inputHandle != null) {
+            runRecordContext.recordInputEnd(inputHandle, status,
+                    Math.max(0L, System.currentTimeMillis() - startedAtMillis));
+        }
+    }
+
+    private void recordOutput(File file, String kind) {
+        if (runRecordContext != null && file != null) {
+            runRecordContext.recordOutput(file, kind);
+        }
+    }
+
+    private void recordWarn(String message) {
+        if (runRecordContext != null) {
+            runRecordContext.warn(message);
+        }
+    }
+
+    private void recordError(String message, Throwable t) {
+        if (runRecordContext != null) {
+            runRecordContext.error(message, t);
+        }
+    }
 
     private static String safeGet(String[] arr, int idx) {
         if (idx < 0 || idx >= arr.length) return "";
