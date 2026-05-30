@@ -14,6 +14,7 @@ import flash.pipeline.segmentation.SegmentationTokenParser;
 import flash.pipeline.segmentation.catalog.ModelCatalog;
 import flash.pipeline.segmentation.catalog.ModelCatalogIO;
 import flash.pipeline.segmentation.catalog.ModelEntry;
+import flash.pipeline.ui.Debouncer;
 import flash.pipeline.ui.FlashTheme;
 import flash.pipeline.ui.HelpButton;
 import flash.pipeline.ui.ModelEntryListCellRenderer;
@@ -224,6 +225,8 @@ public final class CellposeParameterStage implements ConfigQcStage {
     private JLabel companionHelpLabel;
     private JLabel runtimeLabel;
     private ObjectSizeCutoffPanel sizeCutoffPanel;
+    private ToggleSwitch showRemovedObjectsSwitch;
+    private Debouncer sizeFilterDebouncer;
     private ObjectSizeFilterPreview.Summary sizeSummary;
 
     public CellposeParameterStage(ParameterStore parameterStore,
@@ -305,6 +308,14 @@ public final class CellposeParameterStage implements ConfigQcStage {
         this.missingModelKey = containsModelKey(modelOptions, savedParameters.modelToken)
                 ? null
                 : savedParameters.modelToken;
+        if (sizeFilterDebouncer != null) {
+            sizeFilterDebouncer.cancel();
+        }
+        sizeFilterDebouncer = new Debouncer(250, new Runnable() {
+            @Override public void run() {
+                sizeFieldChanged();
+            }
+        });
 
         JPanel panel = new JPanel();
         panel.setOpaque(false);
@@ -344,6 +355,8 @@ public final class CellposeParameterStage implements ConfigQcStage {
         showRawSource = false;
         if (preview != null) {
             preview.clearLargePreviewImages();
+            preview.setShowRemovedObjects(showRemovedObjectsSwitch != null
+                    && showRemovedObjectsSwitch.isSelected());
             preview.setSourceToggleVisible(true);
             preview.setSourceMode(PreviewPairPanel.SourceMode.FILTERED);
             preview.setSourceModeEnabled(true);
@@ -428,6 +441,9 @@ public final class CellposeParameterStage implements ConfigQcStage {
         runtimeProbeRequestId++;
         closePreviewWorker();
         closeInstallWorker();
+        if (sizeFilterDebouncer != null) {
+            sizeFilterDebouncer.cancel();
+        }
         if (preview != null) {
             preview.setSourceModeChangeListener(null);
             preview.setDisplaySettingsChangeListener(null);
@@ -857,6 +873,23 @@ public final class CellposeParameterStage implements ConfigQcStage {
         previewButton = new JButton("Run Preview");
         flash.pipeline.ui.FlashIcons.apply(previewButton, flash.pipeline.ui.FlashIcons.play());
         previewButton.addActionListener(e -> runPreviewOnWorker());
+        showRemovedObjectsSwitch = new ToggleSwitch(false);
+        showRemovedObjectsSwitch.addChangeListener(new Runnable() {
+            @Override public void run() {
+                if (preview != null) {
+                    preview.setShowRemovedObjects(showRemovedObjectsSwitch.isSelected());
+                }
+            }
+        });
+        JLabel showRemovedLabel = new JLabel("Show removed objects");
+        showRemovedLabel.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+        showRemovedLabel.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override public void mouseClicked(java.awt.event.MouseEvent e) {
+                if (showRemovedObjectsSwitch != null && showRemovedObjectsSwitch.isEnabled()) {
+                    showRemovedObjectsSwitch.setSelected(!showRemovedObjectsSwitch.isSelected());
+                }
+            }
+        });
         resetButton = new JButton("Reset to saved");
         flash.pipeline.ui.FlashIcons.apply(resetButton, flash.pipeline.ui.FlashIcons.refresh());
         resetButton.addActionListener(e -> resetToSaved());
@@ -868,6 +901,10 @@ public final class CellposeParameterStage implements ConfigQcStage {
         gbc.gridx++;
         gbc.weightx = 0.0;
         gbc.fill = GridBagConstraints.NONE;
+        row.add(showRemovedObjectsSwitch, gbc);
+        gbc.gridx++;
+        row.add(showRemovedLabel, gbc);
+        gbc.gridx++;
         row.add(previewButton, gbc);
         gbc.gridx++;
         gbc.insets = new Insets(0, 2, 0, 0);
@@ -929,17 +966,26 @@ public final class CellposeParameterStage implements ConfigQcStage {
     private void installSizeFieldListener(JTextField field) {
         field.getDocument().addDocumentListener(new DocumentListener() {
             @Override public void insertUpdate(DocumentEvent e) {
-                sizeFieldChanged();
+                scheduleSizeFilterRefresh();
             }
 
             @Override public void removeUpdate(DocumentEvent e) {
-                sizeFieldChanged();
+                scheduleSizeFilterRefresh();
             }
 
             @Override public void changedUpdate(DocumentEvent e) {
-                sizeFieldChanged();
+                scheduleSizeFilterRefresh();
             }
         });
+    }
+
+    private void scheduleSizeFilterRefresh() {
+        if (updatingControls) return;
+        if (sizeFilterDebouncer != null) {
+            sizeFilterDebouncer.trigger();
+        } else {
+            sizeFieldChanged();
+        }
     }
 
     private void loadFields(Parameters parameters) {
@@ -1197,7 +1243,6 @@ public final class CellposeParameterStage implements ConfigQcStage {
 
     private void sizeFieldChanged() {
         if (updatingControls) return;
-        captureCurrentPreviewForComparison();
         if (!sizeFieldsReadyForLivePreview()) {
             markPreviewStale(STALE_TEXT);
             return;
@@ -1211,7 +1256,6 @@ public final class CellposeParameterStage implements ConfigQcStage {
         loadFields(savedParameters);
         loadSizeFields(savedSize);
         refreshCompanionState();
-        captureCurrentPreviewForComparison();
         if (!refreshSizeFilterPreview()) {
             markPreviewStale(STALE_TEXT);
         }
@@ -1342,8 +1386,9 @@ public final class CellposeParameterStage implements ConfigQcStage {
 
     private void captureCurrentPreviewForComparison() {
         if (labelPreview == null) return;
-        ImagePlus snapshot = PreviewPairPanel.duplicateForComparison(
-                labelPreview, "Previous Cellpose preview");
+        ImagePlus snapshot = preview == null
+                ? PreviewPairPanel.duplicateForComparison(labelPreview, "Previous Cellpose preview")
+                : preview.duplicateCurrentObjectPreviewForComparison("Previous Cellpose preview");
         if (snapshot == null) return;
         ImagePlus old = previousLabelPreview;
         previousLabelPreview = snapshot;
@@ -1491,9 +1536,15 @@ public final class CellposeParameterStage implements ConfigQcStage {
             boolean maxFinite = isFiniteMaxToken(token.maxText);
             sizeSummary = ObjectSizeFilterPreview.summarize(
                     objectStats, filteredSource, minSize, maxSize, maxFinite);
-            ObjectSizeFilterPreview.applyClassifiedLut(labelPreview, sizeSummary);
             if (sizeCutoffPanel != null) sizeCutoffPanel.setSummary(sizeSummary);
             applySizeGuideOverlay();
+            if (preview != null) {
+                preview.setObjectFilterPreview(
+                        labelPreview,
+                        sizeSummary.removedLabels(),
+                        sizeSummary,
+                        lastObjectCount);
+            }
             previewStale = false;
             displayedSize = normalizedSizeToken(token);
             refreshSourceAndOutputPreview();
@@ -1754,6 +1805,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
         if (sizeMinField != null) sizeMinField.setEnabled(enabled);
         if (sizeMaxField != null) sizeMaxField.setEnabled(enabled);
         if (gpuSwitch != null) gpuSwitch.setEnabled(enabled);
+        if (showRemovedObjectsSwitch != null) showRemovedObjectsSwitch.setEnabled(enabled);
         if (preview != null) {
             preview.setSourceModeEnabled(enabled);
             preview.setObjectOverlayEnabled(enabled);
