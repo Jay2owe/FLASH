@@ -32,7 +32,10 @@ import flash.pipeline.io.SeriesMeta;
 import flash.pipeline.naming.ImageNameParser;
 import flash.pipeline.report.QualityReport;
 import flash.pipeline.runrecord.AnalysisRunContext;
+import flash.pipeline.runrecord.LoadedRunParameterApplier;
+import flash.pipeline.runrecord.LoadedRunParameters;
 import flash.pipeline.runrecord.RunRecordAware;
+import flash.pipeline.runrecord.ui.LoadFromRunButton;
 import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.FeatureDependencyGate;
 import flash.pipeline.ui.PipelineDialog;
@@ -303,7 +306,6 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
                 showDeconvolutionHelpDialog();
             }
         }));
-        dialog.setNorthSlot(topHelpRow(helpButton));
 
         dialog.addHeader("Guided Setup");
         JButton consultantButton = new JButton("Image Consultant");
@@ -471,6 +473,37 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
             }
         };
 
+        JButton loadRunButton = LoadFromRunButton.create("DeconvolutionAnalysis", new File(directory),
+                new LoadedRunParameterApplier() {
+                    @Override public LoadedRunParameters.Result applyLoadedParameters(
+                            Map<String, Object> parameters) {
+                        LoadedRunParameters.PresetLoad<DeconvPreset> load =
+                                LoadedRunParameters.deconvPreset(parameters);
+                        DeconvPreset preset = load.payload;
+                        applySourceValues(bindings,
+                                preset.getEngineKey(),
+                                preset.getAlgorithm(),
+                                preset.getPsfModel(),
+                                preset.getScopeModality(),
+                                preset.getPinholeAU(),
+                                preset.getSampleRI(),
+                                null,
+                                preset.getIterations(),
+                                preset.getRegularization(),
+                                "From previous run",
+                                refreshAlgorithms,
+                                refreshEnablement);
+                        bindings.programmaticChange = true;
+                        try {
+                            presetChoice.setSelectedItem(CUSTOM_PRESET_LABEL);
+                        } finally {
+                            bindings.programmaticChange = false;
+                        }
+                        return load.result;
+                    }
+                });
+        dialog.setNorthSlot(topHelpRow(helpButton, loadRunButton));
+
         populatePresetChoice(presetChoice, loadPresets(presetIO), CUSTOM_PRESET_LABEL);
 
         consultantButton.addActionListener(e -> {
@@ -617,6 +650,13 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
         settings.zStepOverrideUm = parseNullableDouble(zStepRow.field.getText());
         settings.emissionOverridesNm = parseWavelengths(emissionRow.field.getText(), channelNames.length);
         return settings;
+    }
+
+    public LoadedRunParameters.Result applyLoadedParameters(Map<String, Object> parameters) {
+        LoadedRunParameters.PresetLoad<DeconvPreset> load =
+                LoadedRunParameters.deconvPreset(parameters);
+        LoadedRunParameters.rememberLastResult(load.result);
+        return load.result;
     }
 
     private void showDeconvolutionHelpDialog() {
@@ -2253,11 +2293,14 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
         return row;
     }
 
-    private static JPanel topHelpRow(JButton helpButton) {
+    private static JPanel topHelpRow(JButton helpButton, JButton loadRunButton) {
         JPanel row = new JPanel();
         row.setOpaque(false);
         row.setLayout(new BoxLayout(row, BoxLayout.X_AXIS));
         row.setBorder(BorderFactory.createEmptyBorder(0, 4, 2, 4));
+        if (loadRunButton != null) {
+            row.add(loadRunButton);
+        }
         row.add(Box.createHorizontalGlue());
         row.add(helpButton);
         return row;

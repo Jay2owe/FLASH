@@ -5,6 +5,7 @@ import flash.pipeline.help.AnalysisHelpDialog;
 import flash.pipeline.help.SetupHelpCatalog;
 import flash.pipeline.help.SetupHelpTopic;
 import flash.pipeline.objects.ObjectsCounter3DWrapper;
+import flash.pipeline.runrecord.LoadedRunParameters;
 import flash.pipeline.segmentation.EnhancedClassicalParameters;
 import flash.pipeline.segmentation.EnhancedClassicalRunner;
 import flash.pipeline.segmentation.MorphPredicate;
@@ -71,6 +72,7 @@ public final class EnhancedClassicalSegmentationStage implements ConfigQcStage {
     private JPanel rowsPanel;
     private JLabel predicateSummary;
     private ConfigQcActions actions;
+    private ConfigQcContext activeContext;
     private ImagePlus rawPreviewSource;
 
     public EnhancedClassicalSegmentationStage(ParameterStore parameterStore,
@@ -159,6 +161,7 @@ public final class EnhancedClassicalSegmentationStage implements ConfigQcStage {
 
     @Override public JComponent buildControls(ConfigQcContext context, ConfigQcActions actions) {
         this.actions = actions;
+        this.activeContext = context;
         rows.clear();
 
         JPanel panel = new JPanel();
@@ -178,7 +181,30 @@ public final class EnhancedClassicalSegmentationStage implements ConfigQcStage {
         return panel;
     }
 
+    @Override public boolean supportsLoadedParameters() {
+        return true;
+    }
+
+    @Override public LoadedRunParameters.Result applyLoadedParameters(Map<String, Object> parameters) {
+        LoadedRunParameters.Result classical = classicalDelegate.applyLoadedParameters(parameters);
+        int channel = activeContext == null ? 0 : activeContext.getChannelIndex();
+        // The delegate already uses the active ConfigQcContext for channel-scoped
+        // threshold/size values. Enhanced-only morphology lives in the method token.
+        LoadedRunParameters.ValueLoad<String> method =
+                LoadedRunParameters.segmentationMethod(parameters, channel);
+        if (method.value != null
+                && SegmentationTokenParser.parseLenient(method.value).isEnhancedClassical()) {
+            parameterStore.save(method.value);
+            rows.clear();
+            loadPredicatesFromStoredToken();
+            refreshRows();
+            markPreviewStale();
+        }
+        return LoadedRunParameters.Result.merge(classical, method.result);
+    }
+
     @Override public void onEnter(ConfigQcContext context, flash.pipeline.ui.preview.PreviewPairPanel preview) {
+        this.activeContext = context;
         classicalDelegate.onEnter(context, preview);
     }
 
@@ -204,6 +230,7 @@ public final class EnhancedClassicalSegmentationStage implements ConfigQcStage {
     @Override public void onLeave(ConfigQcContext context) {
         classicalDelegate.onLeave(context);
         rawPreviewSource = null;
+        activeContext = null;
     }
 
     private JComponent buildMorphSection() {

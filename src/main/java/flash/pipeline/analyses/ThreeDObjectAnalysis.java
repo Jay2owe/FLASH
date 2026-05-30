@@ -52,7 +52,10 @@ import flash.pipeline.results.RunIdCsv;
 import flash.pipeline.stardist.StarDist3DRunner;
 import flash.pipeline.results.ResultsTableCleaner;
 import flash.pipeline.runrecord.AnalysisRunContext;
+import flash.pipeline.runrecord.LoadedRunParameterApplier;
+import flash.pipeline.runrecord.LoadedRunParameters;
 import flash.pipeline.runrecord.RunRecordAware;
+import flash.pipeline.runrecord.ui.LoadFromRunButton;
 import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.FeatureDependencyGate;
 import flash.pipeline.runtime.PluginInstallGuard;
@@ -890,6 +893,16 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
 
                 gdOpts.endAdvancedSection();
 
+                LoadFromRunButton.install(gdOpts, "ThreeDObjectAnalysis", new File(directory),
+                        new LoadedRunParameterApplier() {
+                            @Override public LoadedRunParameters.Result applyLoadedParameters(
+                                    Map<String, Object> parameters) {
+                                return ThreeDObjectAnalysis.this.applyLoadedParameters(
+                                        parameters, cfg, channelIdentities,
+                                        objectBindings);
+                            }
+                        });
+
                 if (!gdOpts.showDialog()) {
                     return; // Cancel
                 }
@@ -1507,6 +1520,28 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         } finally {
             bindings.programmaticChange = false;
         }
+    }
+
+    public LoadedRunParameters.Result applyLoadedParameters(Map<String, Object> parameters) {
+        LoadedRunParameters.PresetLoad<ThreeDObjectPreset> load =
+                LoadedRunParameters.threeDObjectPreset(parameters);
+        applyThreeDObjectDerivedConfig(new BinConfig(), ThreeDObjectWizard.fromPreset(
+                new BinConfig(), new ChannelIdentities(Collections.<ChannelIdentities.Entry>emptyList()),
+                load.payload));
+        LoadedRunParameters.rememberLastResult(load.result);
+        return load.result;
+    }
+
+    private LoadedRunParameters.Result applyLoadedParameters(Map<String, Object> parameters,
+                                                            BinConfig cfg,
+                                                            ChannelIdentities identities,
+                                                            ThreeDObjectDialogBindings bindings) {
+        LoadedRunParameters.PresetLoad<ThreeDObjectPreset> load =
+                LoadedRunParameters.threeDObjectPreset(parameters);
+        ThreeDObjectWizard.DerivedConfig derived =
+                ThreeDObjectWizard.fromPreset(cfg, identities, load.payload);
+        applyThreeDObjectConfigToDialog(cfg, derived, bindings, null);
+        return load.result;
     }
 
     private void handleSaveThreeDObjectPreset(String directory,

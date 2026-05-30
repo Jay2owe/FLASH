@@ -34,7 +34,10 @@ import flash.pipeline.presentation.PresentationTileWriter;
 import flash.pipeline.results.AnalysisDetailsWriter;
 import flash.pipeline.results.SplitAndMergeDetailsWriter;
 import flash.pipeline.runrecord.AnalysisRunContext;
+import flash.pipeline.runrecord.LoadedRunParameterApplier;
+import flash.pipeline.runrecord.LoadedRunParameters;
 import flash.pipeline.runrecord.RunRecordAware;
+import flash.pipeline.runrecord.ui.LoadFromRunButton;
 import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.FeatureDependencyGate;
 import flash.pipeline.ui.FlashIcons;
@@ -968,6 +971,15 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis, RunRecordAw
             }
         });
 
+        LoadFromRunButton.install(pd, "SplitAndMergeImageChannelsAnalysis", projectRoot,
+                new LoadedRunParameterApplier() {
+                    @Override public LoadedRunParameters.Result applyLoadedParameters(
+                            Map<String, Object> parameters) {
+                        return SplitAndMergeImageChannelsAnalysis.this.applyLoadedParameters(
+                                parameters, channelGrid, useDeconvToggle);
+                    }
+                });
+
         boolean ok = pd.showDialog();
         if (!ok) return null;
 
@@ -991,6 +1003,72 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis, RunRecordAw
         if (result.backgroundIndex < 0) result.subtractBackground = false;
         result.subtractFromChannels = backgroundOptions.subtractFromChannels();
         return result;
+    }
+
+    public LoadedRunParameters.Result applyLoadedParameters(Map<String, Object> parameters) {
+        LoadedRunParameters.Result result = LoadedRunParameters.resultForKnownKeys(parameters,
+                LoadedRunParameters.keys("split_merge_use_deconv"));
+        if (parameters != null && parameters.containsKey("split_merge_use_deconv")) {
+            useDeconvolvedInput = booleanValue(parameters.get("split_merge_use_deconv"), useDeconvolvedInput);
+        }
+        LoadedRunParameters.rememberLastResult(result);
+        return result;
+    }
+
+    private LoadedRunParameters.Result applyLoadedParameters(Map<String, Object> parameters,
+                                                            ChannelSettingsGrid grid,
+                                                            ToggleSwitch useDeconvToggle) {
+        LoadedRunParameters.PresetLoad<BinConfig> binLoad = LoadedRunParameters.binConfig(parameters);
+        BinConfig cfg = binLoad.payload;
+        if (parameters != null && parameters.containsKey("split_merge_use_deconv")) {
+            useDeconvolvedInput = booleanValue(parameters.get("split_merge_use_deconv"), useDeconvolvedInput);
+            if (useDeconvToggle != null) {
+                useDeconvToggle.setSelected(useDeconvolvedInput);
+            }
+        }
+        if (grid != null && cfg != null) {
+            int count = grid.methodBoxes == null ? 0 : grid.methodBoxes.length;
+            for (int i = 0; i < count; i++) {
+                String range = valueAt(cfg.channelMinMax, i, NONE_OPTION);
+                if (grid.displayRangeFields != null && i < grid.displayRangeFields.length) {
+                    grid.displayRangeFields[i].setText(hasCustomDisplayRange(range) ? range : "");
+                }
+                if (grid.methodBoxes != null && i < grid.methodBoxes.length) {
+                    grid.methodBoxes[i].setSelectedItem(hasCustomDisplayRange(range)
+                            ? METHOD_CUSTOM : METHOD_AUTOMATIC);
+                    updateChannelGridEnabledState(grid.methodBoxes[i],
+                            grid.displayRangeFields[i], grid.saturationFields[i]);
+                }
+            }
+        }
+        LoadedRunParameters.Result deconv = LoadedRunParameters.resultForKnownKeys(parameters,
+                LoadedRunParameters.keys("split_merge_use_deconv"));
+        return LoadedRunParameters.Result.merge(binLoad.result, deconv);
+    }
+
+    private static boolean booleanValue(Object value, boolean fallback) {
+        if (value instanceof Boolean) {
+            return ((Boolean) value).booleanValue();
+        }
+        if (value == null) {
+            return fallback;
+        }
+        String text = String.valueOf(value).trim();
+        if ("true".equalsIgnoreCase(text) || "yes".equalsIgnoreCase(text) || "1".equals(text)) {
+            return true;
+        }
+        if ("false".equalsIgnoreCase(text) || "no".equalsIgnoreCase(text) || "0".equals(text)) {
+            return false;
+        }
+        return fallback;
+    }
+
+    private static String valueAt(List<String> values, int index, String fallback) {
+        if (values == null || index < 0 || index >= values.size()) {
+            return fallback;
+        }
+        String value = values.get(index);
+        return value == null ? fallback : value;
     }
 
     private static String[] positionChoices() {

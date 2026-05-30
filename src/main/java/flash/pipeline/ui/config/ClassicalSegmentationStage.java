@@ -3,6 +3,7 @@ package flash.pipeline.ui.config;
 import flash.pipeline.help.SetupHelpCatalog;
 import flash.pipeline.help.SetupHelpTopic;
 import flash.pipeline.objects.ObjectsCounter3DWrapper;
+import flash.pipeline.runrecord.LoadedRunParameters;
 import flash.pipeline.ui.Debouncer;
 import flash.pipeline.ui.FlashTheme;
 import flash.pipeline.ui.ToggleSwitch;
@@ -41,6 +42,7 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.util.Collections;
 import java.util.IdentityHashMap;
+import java.util.Map;
 import java.util.Set;
 
 public final class ClassicalSegmentationStage implements ConfigQcStage {
@@ -203,6 +205,39 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
         refreshSizeCutoffPanelOnly();
         markObjectPreviewStale(EMPTY_TEXT);
         return panel;
+    }
+
+    @Override
+    public boolean supportsLoadedParameters() {
+        return true;
+    }
+
+    @Override
+    public LoadedRunParameters.Result applyLoadedParameters(Map<String, Object> parameters) {
+        int channel = activeContext == null ? 0 : activeContext.getChannelIndex();
+        LoadedRunParameters.ValueLoad<String> threshold =
+                LoadedRunParameters.objectThreshold(parameters, channel);
+        LoadedRunParameters.ValueLoad<ParticleSizeStage.SizeToken> size =
+                LoadedRunParameters.particleSize(parameters, channel);
+        if (threshold.value != null && threshold.value.trim().length() > 0
+                && !"default".equalsIgnoreCase(threshold.value.trim())) {
+            thresholdStore.set(threshold.value.trim());
+            if (thresholdControl != null) {
+                try {
+                    double lower = Double.parseDouble(threshold.value.trim());
+                    thresholdControl.setThreshold(lower, imageMaximum(filteredSource));
+                } catch (NumberFormatException ignored) {
+                    // Keep the stored token; invalid legacy values are skipped by the UI.
+                }
+            }
+        }
+        if (size.value != null) {
+            sizeStore.set(size.value.toToken());
+            loadSizeFields(size.value);
+            refreshSizeCutoffPanelOnly();
+        }
+        markObjectPreviewStale("Loaded Classical segmentation settings. Press Run Object Preview.");
+        return LoadedRunParameters.Result.merge(threshold.result, size.result);
     }
 
     @Override

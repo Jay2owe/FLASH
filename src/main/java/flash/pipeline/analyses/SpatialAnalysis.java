@@ -48,7 +48,10 @@ import flash.pipeline.results.MorphometryDetailsWriter;
 import flash.pipeline.results.ObjectCsvColumnOrder;
 import flash.pipeline.results.RunIdCsv;
 import flash.pipeline.runrecord.AnalysisRunContext;
+import flash.pipeline.runrecord.LoadedRunParameterApplier;
+import flash.pipeline.runrecord.LoadedRunParameters;
 import flash.pipeline.runrecord.RunRecordAware;
+import flash.pipeline.runrecord.ui.LoadFromRunButton;
 import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.FeatureDependencyGate;
 import flash.pipeline.spatial.CellClustering;
@@ -1458,6 +1461,23 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
 
             updateVolumetricThresholdEnablement(spatialBindings);
             updateMorphometricDependencyControls(spatialBindings);
+
+            LoadFromRunButton.install(opts, "SpatialAnalysis", new File(directory),
+                    new LoadedRunParameterApplier() {
+                        @Override public LoadedRunParameters.Result applyLoadedParameters(
+                                Map<String, Object> parameters) {
+                            LoadedRunParameters.PresetLoad<SpatialPreset> load =
+                                    LoadedRunParameters.spatialPreset(parameters);
+                            SpatialAnalysisWizard.DerivedConfig derived =
+                                    SpatialAnalysisWizard.fromPreset(load.payload);
+                            SpatialAnalysisWizard.enforceDependencies(derived,
+                                    firstSeriesInfoOrNull(directory),
+                                    calibrationIsAvailable(directory));
+                            applySpatialConfigToDialog(derived, channelNames,
+                                    spatialBindings, null);
+                            return load.result;
+                        }
+                    });
 
             if (!opts.showDialog()) {
                 return null;
@@ -5949,6 +5969,14 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         applyLockedColocalizationControls(bindings);
         updateVolumetricThresholdEnablement(bindings);
         updateMorphometricDependencyControls(bindings);
+    }
+
+    public LoadedRunParameters.Result applyLoadedParameters(Map<String, Object> parameters) {
+        LoadedRunParameters.PresetLoad<SpatialPreset> load =
+                LoadedRunParameters.spatialPreset(parameters);
+        this.configuredOptions = SpatialAnalysisWizard.fromPreset(load.payload);
+        LoadedRunParameters.rememberLastResult(load.result);
+        return load.result;
     }
 
     private static void setToggle(ToggleSwitch toggle, boolean selected) {

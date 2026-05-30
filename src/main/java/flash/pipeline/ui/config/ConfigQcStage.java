@@ -1,9 +1,11 @@
 package flash.pipeline.ui.config;
 
 import flash.pipeline.help.SetupHelpTopic;
+import flash.pipeline.runrecord.LoadedRunParameters;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 
 import javax.swing.JComponent;
+import java.util.Map;
 
 public interface ConfigQcStage {
 
@@ -33,6 +35,14 @@ public interface ConfigQcStage {
     }
 
     JComponent buildControls(ConfigQcContext context, ConfigQcActions actions);
+
+    default boolean supportsLoadedParameters() {
+        return false;
+    }
+
+    default LoadedRunParameters.Result applyLoadedParameters(Map<String, Object> parameters) {
+        return LoadedRunParameters.Result.empty();
+    }
 
     boolean lockIn(ConfigQcContext context);
 

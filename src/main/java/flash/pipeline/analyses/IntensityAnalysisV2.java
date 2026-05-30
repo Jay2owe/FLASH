@@ -43,12 +43,16 @@ import flash.pipeline.naming.ResolvedImageMetadata;
 import flash.pipeline.results.IntensityDetailsWriter;
 import flash.pipeline.results.RunIdCsv;
 import flash.pipeline.runrecord.AnalysisRunContext;
+import flash.pipeline.runrecord.LoadedRunParameterApplier;
+import flash.pipeline.runrecord.LoadedRunParameters;
 import flash.pipeline.runrecord.RunRecordAware;
+import flash.pipeline.runrecord.ui.LoadFromRunButton;
 import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.FeatureDependencyGate;
 import flash.pipeline.runtime.PluginInstallGuard;
 import flash.pipeline.roi.RoiIO;
 import flash.pipeline.ui.PipelineDialog;
+import flash.pipeline.ui.ToggleSwitch;
 import flash.pipeline.zslice.ZSliceOps;
 
 import ij.IJ;
@@ -83,6 +87,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
+import javax.swing.JComboBox;
+import javax.swing.JTextField;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -342,21 +348,25 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                         + "applies a generic Median r=2 + Subtract Background rolling=50.");
 
                 gd.addSubHeader("Analysis Options");
-                gd.addToggle("Use deconvolved stacks if available", useDeconvolvedInput);
-                gd.addToggle("ROI Analysis", anyRois);
-                gd.addToggle("Intensity-spatial analysis", runIntensitySpatial);
+                final ToggleSwitch useDeconvToggle =
+                        gd.addToggle("Use deconvolved stacks if available", useDeconvolvedInput);
+                final ToggleSwitch roiAnalysisToggle = gd.addToggle("ROI Analysis", anyRois);
+                final ToggleSwitch intensitySpatialToggle =
+                        gd.addToggle("Intensity-spatial analysis", runIntensitySpatial);
 
                 gd.addHeader("Filter Source (per channel)");
+                final List<JComboBox<String>> filterSourceChoices = new ArrayList<JComboBox<String>>();
                 for (int i = 0; i < channelNames.length; i++) {
                     String savedFilterLabel = savedFilterChoiceLabel(i, cfg);
                     String[] filterSourceOptions = new String[]{
                             savedFilterLabel, "Basic background and noise removal"
                     };
-                    gd.addChoice(channelNames[i] + " filter source",
+                    JComboBox<String> filterChoice = gd.addChoice(channelNames[i] + " filter source",
                             filterSourceOptions,
                             "Bin filter".equals(filterSources[i])
                                     ? savedFilterLabel
                                     : "Basic background and noise removal");
+                    filterSourceChoices.add(filterChoice);
                     gd.addHelpText(buildFilterSummaryLine(i, cfg, channelNames, filterSources,
                             binarization));
                 }
@@ -365,9 +375,43 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                 gd.addHelpText("Creates a binary mask from the filtered image at a given threshold, "
                         + "then ANDs it with the raw image.");
 
+                final List<ToggleSwitch> binarizeToggles = new ArrayList<ToggleSwitch>();
                 for (int i = 0; i < channelNames.length; i++) {
-                    gd.addToggle("Binarise " + channelNames[i], binarization[i]);
+                    binarizeToggles.add(gd.addToggle("Binarise " + channelNames[i], binarization[i]));
                 }
+
+                LoadFromRunButton.install(gd, "IntensityAnalysisV2", new File(directory),
+                        new LoadedRunParameterApplier() {
+                            @Override public LoadedRunParameters.Result applyLoadedParameters(
+                                    Map<String, Object> parameters) {
+                                LoadedRunParameters.PresetLoad<IntensityPreset> load =
+                                        LoadedRunParameters.intensityPreset(parameters);
+                                IntensityWizard.DerivedConfig derived = IntensityWizard.fromPreset(
+                                        cfg, channelIdentities, load.payload, roiSetNameList);
+                                applyIntensityDerivedConfig(derived, binarization, thresholds,
+                                        roiZipSelected, channelNames);
+                                intensitySpatialConfig = derived.spatialConfig == null
+                                        ? IntensitySpatialConfig.disabled()
+                                        : derived.spatialConfig;
+                                cliConfiguredMaskIndex1Based = derived.maskChannelIndex + 1;
+                                setToggle(useDeconvToggle, useDeconvolvedInput);
+                                setToggle(roiAnalysisToggle, anyRois && anySelected(roiZipSelected));
+                                setToggle(intensitySpatialToggle,
+                                        intensitySpatialConfig.hasConfiguration());
+                                for (int i = 0; i < binarizeToggles.size()
+                                        && i < binarization.length; i++) {
+                                    setToggle(binarizeToggles.get(i), binarization[i]);
+                                }
+                                for (int i = 0; i < filterSourceChoices.size()
+                                        && i < filterSources.length; i++) {
+                                    filterSourceChoices.get(i).setSelectedItem(
+                                            "Basic background and noise removal".equals(filterSources[i])
+                                                    ? "Basic background and noise removal"
+                                                    : savedFilterChoiceLabel(i, cfg));
+                                }
+                                return load.result;
+                            }
+                        });
 
                 if (!gd.showDialog()) {
                     return;
@@ -424,6 +468,8 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                     needsThresholdInput[i] = !"Bin filter".equals(filterSources[i]) || !haveBinThr;
                 }
 
+                final Map<Integer, JTextField> thresholdFieldsByChannel =
+                        new LinkedHashMap<Integer, JTextField>();
                 if (anyBinarize) {
                     gd2.addHeader("Channel Thresholds");
                     gd2.addHelpText("Only binarised channels need a threshold. "
@@ -435,7 +481,8 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                             String hint = "Bin filter".equals(filterSources[i])
                                     ? " (" + savedChannelFilterName(i, cfg) + " - no threshold stored in the configuration)"
                                     : " (Basic filter - set threshold for filtered image)";
-                            gd2.addStringField(channelNames[i] + " threshold" + hint, thresholds[i], 8);
+                            thresholdFieldsByChannel.put(Integer.valueOf(i),
+                                    gd2.addStringField(channelNames[i] + " threshold" + hint, thresholds[i], 8));
                         } else {
                             gd2.addMessage(channelNames[i] + " threshold: "
                                     + thresholds[i] + " (from configuration)");
@@ -445,9 +492,10 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
 
                 if (roiAnalysis) {
                     gd2.addHeader("Select ROIs to Analyse");
+                    final List<ToggleSwitch> roiToggles = new ArrayList<ToggleSwitch>();
                     if (!roiZips.isEmpty()) {
                         for (int r = 0; r < roiZipNames.length; r++) {
-                            gd2.addToggle(roiZipNames[r], roiZipSelected[r]);
+                            roiToggles.add(gd2.addToggle(roiZipNames[r], roiZipSelected[r]));
                         }
                     }
                     gd2.addHeader("Channel ROI Mask");
@@ -457,7 +505,37 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                     String[] roiChannels = new String[channelNames.length + 1];
                     roiChannels[0] = "None";
                     System.arraycopy(channelNames, 0, roiChannels, 1, channelNames.length);
-                    gd2.addChoice("Channel ROI", roiChannels, roiChannelChoice);
+                    final JComboBox<String> roiChannelCombo =
+                            gd2.addChoice("Channel ROI", roiChannels, roiChannelChoice);
+                    LoadFromRunButton.install(gd2, "IntensityAnalysisV2", new File(directory),
+                            new LoadedRunParameterApplier() {
+                                @Override public LoadedRunParameters.Result applyLoadedParameters(
+                                        Map<String, Object> parameters) {
+                                    LoadedRunParameters.PresetLoad<IntensityPreset> load =
+                                            LoadedRunParameters.intensityPreset(parameters);
+                                    IntensityWizard.DerivedConfig derived = IntensityWizard.fromPreset(
+                                            cfg, channelIdentities, load.payload, roiSetNameList);
+                                    applyIntensityDerivedConfig(derived, binarization, thresholds,
+                                            roiZipSelected, channelNames);
+                                    intensitySpatialConfig = derived.spatialConfig == null
+                                            ? IntensitySpatialConfig.disabled()
+                                            : derived.spatialConfig;
+                                    cliConfiguredMaskIndex1Based = derived.maskChannelIndex + 1;
+                                    for (Map.Entry<Integer, JTextField> entry
+                                            : thresholdFieldsByChannel.entrySet()) {
+                                        int channel = entry.getKey().intValue();
+                                        if (channel >= 0 && channel < thresholds.length) {
+                                            entry.getValue().setText(thresholds[channel]);
+                                        }
+                                    }
+                                    for (int i = 0; i < roiToggles.size()
+                                            && i < roiZipSelected.length; i++) {
+                                        setToggle(roiToggles.get(i), roiZipSelected[i]);
+                                    }
+                                    roiChannelCombo.setSelectedItem(derived.maskChannelChoice);
+                                    return load.result;
+                                }
+                            });
                 }
 
                 if (!gd2.showDialog()) {
@@ -3087,6 +3165,32 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         for (int r = 0; r < roiZipSelected.length && r < derived.roiSetSelected.length; r++) {
             roiZipSelected[r] = derived.roiSetSelected[r];
         }
+    }
+
+    public LoadedRunParameters.Result applyLoadedParameters(Map<String, Object> parameters) {
+        LoadedRunParameters.PresetLoad<IntensityPreset> load =
+                LoadedRunParameters.intensityPreset(parameters);
+        configuredOptions = IntensityWizard.fromPreset(
+                new BinConfig(),
+                new ChannelIdentities(null),
+                load.payload,
+                Collections.<String>emptyList());
+        LoadedRunParameters.rememberLastResult(load.result);
+        return load.result;
+    }
+
+    private static void setToggle(ToggleSwitch toggle, boolean selected) {
+        if (toggle != null) {
+            toggle.setSelected(selected);
+        }
+    }
+
+    private static boolean anySelected(boolean[] values) {
+        if (values == null) return false;
+        for (boolean value : values) {
+            if (value) return true;
+        }
+        return false;
     }
 
     /**

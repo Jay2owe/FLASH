@@ -5,6 +5,7 @@ import flash.pipeline.help.AnalysisHelpCatalog;
 import flash.pipeline.help.AnalysisHelpDialog;
 import flash.pipeline.help.SetupHelpCatalog;
 import flash.pipeline.help.SetupHelpTopic;
+import flash.pipeline.runrecord.LoadedRunParameters;
 import flash.pipeline.segmentation.SegmentationMethod;
 import flash.pipeline.segmentation.SegmentationRunFailureException;
 import flash.pipeline.segmentation.StarDistLinkingParams;
@@ -265,6 +266,29 @@ public final class StarDistParameterStage implements ConfigQcStage {
         loadFields(savedParameters);
         markPreviewStale(EMPTY_TEXT);
         return panel;
+    }
+
+    @Override
+    public boolean supportsLoadedParameters() {
+        return true;
+    }
+
+    @Override
+    public LoadedRunParameters.Result applyLoadedParameters(Map<String, Object> parameters) {
+        int channel = activeContext == null ? 0 : activeContext.getChannelIndex();
+        LoadedRunParameters.ValueLoad<String> method =
+                LoadedRunParameters.segmentationMethod(parameters, channel);
+        if (method.value != null
+                && SegmentationTokenParser.parseLenient(method.value).isStarDist()) {
+            Parameters loaded = parseMethod(method.value);
+            savedParameters = loaded;
+            restartParameters = loaded;
+            if (probabilityField != null) {
+                loadFields(loaded);
+            }
+            markPreviewStale("Loaded StarDist parameters. Press Run Preview.");
+        }
+        return method.result;
     }
 
     @Override

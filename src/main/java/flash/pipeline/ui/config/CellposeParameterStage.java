@@ -8,6 +8,7 @@ import flash.pipeline.help.AnalysisHelpDialog;
 import flash.pipeline.help.SetupHelpCatalog;
 import flash.pipeline.help.SetupHelpTopic;
 import flash.pipeline.objects.ObjectsCounter3DWrapper;
+import flash.pipeline.runrecord.LoadedRunParameters;
 import flash.pipeline.segmentation.SegmentationMethod;
 import flash.pipeline.segmentation.SegmentationRunFailureException;
 import flash.pipeline.segmentation.SegmentationTokenParser;
@@ -344,6 +345,39 @@ public final class CellposeParameterStage implements ConfigQcStage {
         refreshCompanionState();
         markPreviewStale(EMPTY_TEXT);
         return panel;
+    }
+
+    @Override
+    public boolean supportsLoadedParameters() {
+        return true;
+    }
+
+    @Override
+    public LoadedRunParameters.Result applyLoadedParameters(Map<String, Object> parameters) {
+        int channel = activeContext == null ? primaryChannelIndex : activeContext.getChannelIndex();
+        LoadedRunParameters.ValueLoad<String> method =
+                LoadedRunParameters.segmentationMethod(parameters, channel);
+        LoadedRunParameters.ValueLoad<ParticleSizeStage.SizeToken> size =
+                LoadedRunParameters.particleSize(parameters, channel);
+        if (method.value != null
+                && SegmentationTokenParser.parseLenient(method.value).isCellpose()) {
+            Parameters loaded = parseMethod(method.value, defaultUseGpu, channelCount, primaryChannelIndex);
+            savedParameters = loaded;
+            restartParameters = loaded;
+            if (modelCombo != null) {
+                loadFields(loaded);
+                refreshCompanionState();
+            }
+        }
+        if (size.value != null) {
+            savedSize = size.value;
+            restartSize = size.value;
+            sizeStore.set(size.value.toToken());
+            loadSizeFields(size.value);
+            refreshSizeCutoffPanelOnly();
+        }
+        markPreviewStale("Loaded Cellpose parameters. Press Run Preview.");
+        return LoadedRunParameters.Result.merge(method.result, size.result);
     }
 
     @Override

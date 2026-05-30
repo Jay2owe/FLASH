@@ -22,7 +22,10 @@ import flash.pipeline.results.ObjectCsvColumnOrder;
 import flash.pipeline.results.RunIdCsv;
 import flash.pipeline.roi.RoiIO;
 import flash.pipeline.runrecord.AnalysisRunContext;
+import flash.pipeline.runrecord.LoadedRunParameterApplier;
+import flash.pipeline.runrecord.LoadedRunParameters;
 import flash.pipeline.runrecord.RunRecordAware;
+import flash.pipeline.runrecord.ui.LoadFromRunButton;
 import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.FeatureDependencyGate;
 import flash.pipeline.ui.PipelineDialog;
@@ -277,6 +280,14 @@ public class LineDistanceAnalysis implements Analysis, RunRecordAware {
             });
         }
 
+        LoadFromRunButton.install(pd, "LineDistanceAnalysis", new File(directory),
+                new LoadedRunParameterApplier() {
+                    @Override public LoadedRunParameters.Result applyLoadedParameters(
+                            Map<String, Object> parameters) {
+                        return applyLoadedParameters(parameters);
+                    }
+                });
+
         if (!pd.showDialog()) {
             IJ.log("  Cancelled by user.");
             recordWarn("Line Distance Analysis cancelled by user.");
@@ -374,6 +385,13 @@ public class LineDistanceAnalysis implements Analysis, RunRecordAware {
             fallback.add(new LineVocab.Entry(LineVocab.CUSTOM_LABEL, new ArrayList<String>()));
             return new LineVocab(0, fallback);
         }
+    }
+
+    public LoadedRunParameters.Result applyLoadedParameters(Map<String, Object> parameters) {
+        LoadedRunParameters.Result result = LoadedRunParameters.resultForKnownKeys(
+                parameters, Collections.<String>emptySet());
+        LoadedRunParameters.rememberLastResult(result);
+        return result;
     }
 
     /**

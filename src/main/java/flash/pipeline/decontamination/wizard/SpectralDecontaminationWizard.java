@@ -18,6 +18,7 @@ import flash.pipeline.decontamination.features.ThresholdCorrectedTargetFeature;
 import flash.pipeline.decontamination.features.VetoMasksFeature;
 import flash.pipeline.io.ConditionManifestIO;
 import flash.pipeline.io.FlashProjectLayout;
+import flash.pipeline.runrecord.LoadedRunParameters;
 import flash.pipeline.ui.PipelineDialog;
 import ij.IJ;
 
@@ -29,6 +30,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * Intent-based setup helper for Spectral Decontamination.
@@ -236,6 +238,21 @@ public class SpectralDecontaminationWizard {
             out.setAutofluorescenceChannelIndexes(autofluorescence);
         }
         return out;
+    }
+
+    public LoadedRunParameters.Result applyLoadedParameters(Map<String, Object> parameters) {
+        LoadedRunParameters.PresetLoad<SpectralDecontamPreset> loaded =
+                LoadedRunParameters.spectralPreset(parameters);
+        LoadedRunParameters.rememberLastResult(loaded.result);
+        return loaded.result;
+    }
+
+    public static LoadedRunParameters.PresetLoad<SpectralDecontaminationConfig> configFromLoadedParameters(
+            Map<String, Object> parameters) {
+        LoadedRunParameters.PresetLoad<SpectralDecontamPreset> loaded =
+                LoadedRunParameters.spectralPreset(parameters);
+        return new LoadedRunParameters.PresetLoad<SpectralDecontaminationConfig>(
+                loaded.payload.getPayload(), loaded.result);
     }
 
     private ContaminationType askContaminationType(boolean hasExistingObjects) {

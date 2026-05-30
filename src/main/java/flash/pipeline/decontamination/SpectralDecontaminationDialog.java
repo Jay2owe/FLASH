@@ -4,6 +4,9 @@ import flash.pipeline.bin.BinConfig;
 import flash.pipeline.decontamination.wizard.SpectralDecontamPreset;
 import flash.pipeline.decontamination.wizard.SpectralDecontamPresetIO;
 import flash.pipeline.decontamination.wizard.SpectralDecontaminationWizard;
+import flash.pipeline.runrecord.LoadedRunParameterApplier;
+import flash.pipeline.runrecord.LoadedRunParameters;
+import flash.pipeline.runrecord.ui.LoadFromRunButton;
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.wizard.SetupHelperButton;
 import ij.IJ;
@@ -15,6 +18,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * First Spectral Decontamination screen: goal and channel-role selection.
@@ -88,6 +92,20 @@ public class SpectralDecontaminationDialog {
     private DialogState showOnce(SpectralDecontaminationConfig config) {
         PipelineDialog dialog = new PipelineDialog(TITLE);
         String[] channelChoices = channelChoices();
+        final SpectralDecontaminationConfig[] loadedFromRun =
+                new SpectralDecontaminationConfig[1];
+        LoadFromRunButton.install(dialog, "SpectralDecontaminationAnalysis", projectRootOrUserDir(),
+                new LoadedRunParameterApplier() {
+                    @Override public LoadedRunParameters.Result applyLoadedParameters(
+                            Map<String, Object> parameters) {
+                        LoadedRunParameters.PresetLoad<SpectralDecontaminationConfig> loaded =
+                                SpectralDecontaminationWizard.configFromLoadedParameters(parameters);
+                        loadedFromRun[0] = loaded.payload;
+                        LoadedRunParameters.rememberLastResult(loaded.result);
+                        dialog.closeWithAction("loaded_run");
+                        return loaded.result;
+                    }
+                });
         JComboBox<String> presetDropdown = new JComboBox<String>(presetLabels());
         JButton saveAsPreset = new JButton("[Save as preset...]");
         JPanel helperRow = SetupHelperButton.createHeaderRow(
@@ -130,6 +148,9 @@ public class SpectralDecontaminationDialog {
         }
 
         if (!dialog.showDialog()) {
+            if ("loaded_run".equals(dialog.getActionCommand()) && loadedFromRun[0] != null) {
+                return new DialogState(loadedFromRun[0]);
+            }
             if ("wizard".equals(dialog.getActionCommand())) {
                 SpectralDecontaminationConfig wizardConfig =
                         new SpectralDecontaminationWizard(projectRoot, binConfig, config).showDialog();

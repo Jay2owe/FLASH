@@ -8,6 +8,7 @@ import flash.pipeline.image.dag.DagIR;
 import flash.pipeline.image.dag.DagLine;
 import flash.pipeline.image.dag.DagNode;
 import flash.pipeline.image.dag.IjmToDagLoader;
+import flash.pipeline.runrecord.LoadedRunParameters;
 import flash.pipeline.ui.FlashTheme;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import flash.pipeline.ui.sandbox.FilterBuilderPanel;
@@ -286,6 +287,33 @@ public final class FilterParameterStage implements ConfigQcStage {
         updateBranchedBannerVisibility();
         markPreviewStale(STALE_TEXT);
         return panel;
+    }
+
+    @Override
+    public boolean supportsLoadedParameters() {
+        return true;
+    }
+
+    @Override
+    public LoadedRunParameters.Result applyLoadedParameters(Map<String, Object> parameters) {
+        int channel = activeContext == null ? 0 : activeContext.getChannelIndex();
+        LoadedRunParameters.ValueLoad<String> preset =
+                LoadedRunParameters.filterPreset(parameters, channel);
+        if (preset.value != null && preset.value.trim().length() > 0) {
+            String name = safePresetSelection(preset.value, savedPreset);
+            try {
+                String macro = safe(macroStore.loadPresetMacro(name));
+                addPresetOption(name);
+                if (presetCombo != null) {
+                    presetCombo.setSelectedItem(name);
+                }
+                loadPreset(name, macro);
+                setStatus("Loaded filter preset from previous run.");
+            } catch (Exception e) {
+                setError("Could not load filter preset '" + name + "': " + e.getMessage());
+            }
+        }
+        return preset.result;
     }
 
     @Override

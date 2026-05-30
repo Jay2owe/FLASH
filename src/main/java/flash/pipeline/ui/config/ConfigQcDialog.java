@@ -2,6 +2,9 @@ package flash.pipeline.ui.config;
 
 import flash.pipeline.help.SetupHelpDialog;
 import flash.pipeline.help.SetupHelpTopic;
+import flash.pipeline.runrecord.LoadedRunParameterApplier;
+import flash.pipeline.runrecord.LoadedRunParameters;
+import flash.pipeline.runrecord.ui.LoadFromRunButton;
 import flash.pipeline.ui.FlashTheme;
 import flash.pipeline.ui.HelpButton;
 import flash.pipeline.ui.preview.PreviewPairPanel;
@@ -48,6 +51,7 @@ import java.awt.event.WindowEvent;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 
 public final class ConfigQcDialog {
@@ -92,6 +96,7 @@ public final class ConfigQcDialog {
     private final JLabel progressLabel = new JLabel(" ");
     private final JLabel statusLabel = new JLabel(" ");
     private final JButton stageHelpButton = HelpButton.question("Stage help is not available yet.");
+    private final JButton loadRunButton;
     private final JButton backButton = new JButton("Back");
     private final JButton previousImageButton = new JButton("Previous image");
     private final JButton restartButton = new JButton("Restart");
@@ -132,6 +137,22 @@ public final class ConfigQcDialog {
         this.previewPair = new PreviewPairPanel(owner, "Original Image", "Adjusted / output preview",
                 PreviewPairPanel.PreviewLayout.HORIZONTAL_SLIM);
         this.dialog = GraphicsEnvironment.isHeadless() ? null : createDialog(owner, modal);
+        this.loadRunButton = LoadFromRunButton.create(
+                "CreateBinFileAnalysis",
+                context == null ? null : context.getProjectDirectory(),
+                new LoadedRunParameterApplier() {
+                    @Override public LoadedRunParameters.Result applyLoadedParameters(
+                            Map<String, Object> parameters) {
+                        ConfigQcStage stage = currentStage();
+                        if (stage == null || !stage.supportsLoadedParameters()) {
+                            return LoadedRunParameters.Result.empty();
+                        }
+                        LoadedRunParameters.Result loaded = stage.applyLoadedParameters(parameters);
+                        setStatus("Loaded settings from previous run.");
+                        refreshStageLayout();
+                        return loaded;
+                    }
+                });
         if (context != null) {
             context.setWindowOwner(dialog == null ? owner : dialog);
         }
@@ -234,7 +255,10 @@ public final class ConfigQcDialog {
         left.setOpaque(false);
         left.setLayout(new BoxLayout(left, BoxLayout.Y_AXIS));
         stageBreadcrumbPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        loadRunButton.setAlignmentX(Component.LEFT_ALIGNMENT);
+        loadRunButton.setVisible(false);
         left.add(stageBreadcrumbPanel);
+        left.add(loadRunButton);
 
         JPanel right = new JPanel();
         right.setOpaque(false);
@@ -419,6 +443,12 @@ public final class ConfigQcDialog {
                 : "Lock in & Next");
         previewPair.setDisplayControlsAvailable(currentStage() == null
                 || currentStage().showPreviewDisplayControls());
+        if (loadRunButton != null) {
+            ConfigQcStage stage = currentStage();
+            boolean canLoad = stage != null && stage.supportsLoadedParameters();
+            loadRunButton.setVisible(canLoad);
+            loadRunButton.setEnabled(canLoad);
+        }
     }
 
     private void refreshStageLayout() {

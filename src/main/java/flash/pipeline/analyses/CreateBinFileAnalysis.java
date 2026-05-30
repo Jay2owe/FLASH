@@ -31,7 +31,10 @@ import flash.pipeline.io.LifIO;
 import flash.pipeline.io.OrientationManifestIO;
 import flash.pipeline.io.SeriesMeta;
 import flash.pipeline.runrecord.AnalysisRunContext;
+import flash.pipeline.runrecord.LoadedRunParameterApplier;
+import flash.pipeline.runrecord.LoadedRunParameters;
 import flash.pipeline.runrecord.RunRecordAware;
+import flash.pipeline.runrecord.ui.LoadFromRunButton;
 import flash.pipeline.help.SetupHelpCatalog;
 import flash.pipeline.help.SetupHelpTopic;
 import flash.pipeline.naming.ConditionNameParser;
@@ -2720,11 +2723,25 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
             gdCount.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
             gdCount.addSetupHelpSubHeader("Channel Setup", SetupHelpCatalog.CHANNEL_IDENTITY);
             gdCount.addNumericField("Number of channels", 3, 0);
-            if (!gdCount.showDialog()) return null;
-            n = (int) gdCount.getNextNumber();
-            if (n <= 0) {
-                IJ.error("Set Up Configuration", "Must have at least 1 channel.");
-                return null;
+            final BinUserConfig[] loadedFromRun = new BinUserConfig[1];
+            installLoadFromRunButton(gdCount, directory, loadedFromRun, new Runnable() {
+                @Override public void run() {
+                    gdCount.closeWithAction("loaded_run");
+                }
+            });
+            if (!gdCount.showDialog()) {
+                if ("loaded_run".equals(gdCount.getActionCommand()) && loadedFromRun[0] != null) {
+                    draftConfig = loadedFromRun[0];
+                    n = Math.max(1, draftConfig.names.size());
+                } else {
+                    return null;
+                }
+            } else {
+                n = (int) gdCount.getNextNumber();
+                if (n <= 0) {
+                    IJ.error("Set Up Configuration", "Must have at least 1 channel.");
+                    return null;
+                }
             }
         }
 
@@ -2748,7 +2765,19 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                     false, false, null);
             bindChannelIdentityGrid(binBindings, identityGrid);
             pd.addComponent(identityGrid.panel);
+            final BinUserConfig[] loadedFromRun = new BinUserConfig[1];
+            installLoadFromRunButton(pd, directory, loadedFromRun, new Runnable() {
+                @Override public void run() {
+                    if (loadedFromRun[0] != null) {
+                        applyLoadedConfigToIdentityBindings(loadedFromRun[0], binBindings);
+                    }
+                    pd.closeWithAction("loaded_run");
+                }
+            });
             if (!pd.showDialog()) {
+                if ("loaded_run".equals(pd.getActionCommand()) && loadedFromRun[0] != null) {
+                    return loadedFromRun[0];
+                }
                 if (pd.wasBackPressed() && existing == null) {
                     draftConfig = buildBinUserConfigFromDialog(channelCount, existing,
                             dialogDefaults, binBindings);
@@ -2777,6 +2806,66 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
             applyHandledCustomDemotions(binFolder, userCfg);
             return userCfg;
         }
+    }
+
+    public LoadedRunParameters.Result applyLoadedParameters(Map<String, Object> parameters) {
+        LoadedRunParameters.PresetLoad<BinConfig> loaded = LoadedRunParameters.binConfig(parameters);
+        activeWizardCfg = fromBinConfig(loaded.payload);
+        LoadedRunParameters.rememberLastResult(loaded.result);
+        return loaded.result;
+    }
+
+    private LoadedRunParameters.Result applyLoadedParameters(Map<String, Object> parameters,
+                                                            BinUserConfig[] target) {
+        LoadedRunParameters.PresetLoad<BinConfig> loaded = LoadedRunParameters.binConfig(parameters);
+        BinUserConfig cfg = fromBinConfig(loaded.payload);
+        if (target != null && target.length > 0) {
+            target[0] = cfg;
+        }
+        activeWizardCfg = copyBinUserConfig(cfg);
+        LoadedRunParameters.rememberLastResult(loaded.result);
+        return loaded.result;
+    }
+
+    private void installLoadFromRunButton(PipelineDialog dialog,
+                                          String directory,
+                                          final BinUserConfig[] target) {
+        installLoadFromRunButton(dialog, directory, target, null);
+    }
+
+    private void installLoadFromRunButton(PipelineDialog dialog,
+                                          String directory,
+                                          final BinUserConfig[] target,
+                                          final Runnable afterApply) {
+        LoadFromRunButton.install(dialog, "CreateBinFileAnalysis", new File(directory),
+                new LoadedRunParameterApplier() {
+                    @Override public LoadedRunParameters.Result applyLoadedParameters(
+                            Map<String, Object> parameters) {
+                        LoadedRunParameters.Result result =
+                                CreateBinFileAnalysis.this.applyLoadedParameters(parameters, target);
+                        if (afterApply != null) {
+                            afterApply.run();
+                        }
+                        return result;
+                    }
+                });
+    }
+
+    private static void applyLoadedConfigToIdentityBindings(BinUserConfig cfg,
+                                                           BinSetupBindings bindings) {
+        if (cfg == null || bindings == null) {
+            return;
+        }
+        int count = Math.min(bindings.nameFields.length, cfg.names.size());
+        for (int i = 0; i < count; i++) {
+            if (bindings.nameFields[i] != null) {
+                bindings.nameFields[i].setText(valueAt(cfg.names, i, "Channel" + (i + 1)));
+            }
+            if (bindings.colorCombos[i] != null) {
+                selectComboItem(bindings.colorCombos[i], toLutName(valueAt(cfg.colors, i, "Grays")));
+            }
+        }
+        bindings.appliedConfig = cfg;
     }
 
     // ── Image loading for QC ────────────────────────────────────────────
