@@ -33,6 +33,8 @@ import flash.pipeline.presentation.PresentationTileRecord;
 import flash.pipeline.presentation.PresentationTileWriter;
 import flash.pipeline.results.AnalysisDetailsWriter;
 import flash.pipeline.results.SplitAndMergeDetailsWriter;
+import flash.pipeline.runrecord.AnalysisRunContext;
+import flash.pipeline.runrecord.RunRecordAware;
 import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.FeatureDependencyGate;
 import flash.pipeline.ui.FlashIcons;
@@ -80,7 +82,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
 
-public class SplitAndMergeImageChannelsAnalysis implements Analysis {
+public class SplitAndMergeImageChannelsAnalysis implements Analysis, RunRecordAware {
 
     private boolean headless = false;
     private boolean suppressDialogs = false;
@@ -97,6 +99,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
     private final long startTimeMillis = System.currentTimeMillis();
     private boolean useDeconvolvedInput = true;
     private CLIConfig cliConfig = null;
+    private AnalysisRunContext runRecordContext = null;
     private final List<PresentationTileRecord> presentationTileRecords =
             Collections.synchronizedList(new ArrayList<PresentationTileRecord>());
 
@@ -175,6 +178,11 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
         }
     }
 
+    @Override
+    public void setRunRecordContext(AnalysisRunContext context) {
+        this.runRecordContext = context;
+    }
+
     private static final String METHOD_NONE = "None";
     private static final String METHOD_AUTOMATIC = "Automatic";
     private static final String METHOD_MANUAL = "Manual";
@@ -249,6 +257,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
     public void execute(String directory) {
         if (!FeatureDependencyGate.gate(DependencyId.BIO_FORMATS_RUNTIME,
                 "Split and Merge Image Channels", "Bio-Formats image loading and OME-TIFF writing")) {
+            recordWarn("Split and Merge Image Channels requires Bio-Formats image loading and OME-TIFF writing.");
             return;
         }
 
@@ -257,6 +266,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                 benefitsFromRois(), suppressDialogs, cliConfig);
         if (outcome == BinSetupDispatcher.Outcome.CANCELLED) {
             IJ.log("[FLASH] Split & Merge cancelled by user.");
+            recordWarn("Split & Merge cancelled by user.");
             return;
         }
 
@@ -267,11 +277,23 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                 ? null : binCfg.channelMinMax.toArray(new String[0]);
 
         if (channelNames == null || channelNames.length == 0) {
+            if (headless || suppressDialogs || GraphicsEnvironment.isHeadless()) {
+                recordWarn("Split and Merge Image Channels needs channel names from channel_config.json. "
+                        + "Run Set Up Configuration before this command.");
+                IJ.log("[FLASH] Split & Merge: no channel names found in channel_config.json.");
+                return;
+            }
             channelNames = promptChannelNames();
         }
         if (channelNames == null) return;
 
         if (channelColors == null || channelColors.length < channelNames.length) {
+            if (headless || suppressDialogs || GraphicsEnvironment.isHeadless()) {
+                recordWarn("Split and Merge Image Channels needs channel colors from channel_config.json. "
+                        + "Run Set Up Configuration before this command.");
+                IJ.log("[FLASH] Split & Merge: no channel colors found in channel_config.json.");
+                return;
+            }
             channelColors = promptChannelColors(channelNames.length);
         }
         if (channelColors == null) return;
@@ -302,7 +324,9 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
             IoUtils.mustMkdirs(tifDir);
             IoUtils.mustMkdirs(detailsRoot);
         } catch (IOException e) {
-            IJ.log("[FLASH] Could not create Split and Merge output directory: " + e.getMessage());
+            String message = "Could not create Split and Merge output directory: " + e.getMessage();
+            IJ.log("[FLASH] " + message);
+            recordWarn(message);
             return;
         }
 
@@ -317,8 +341,11 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
             supplier = ImageSourceDispatcher.createSupplier(directory);
             totalImages = supplier.getTotalSeries();
             supplier = wrapInputSupplier(directory, supplier);
+            supplier = wrapRunRecordSupplier(supplier);
         } catch (Exception e) {
-            IJ.log("Split and Merge Image Channels: " + e.getMessage());
+            String message = "Split and Merge Image Channels: " + e.getMessage();
+            IJ.log(message);
+            recordWarn(message);
             if (!suppressDialogs) {
                 showOrLog("Split and Merge Image Channels", e.getMessage());
             }
@@ -393,6 +420,8 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
             seriesNames = new ArrayList<String>();
             for (SeriesMeta m : metas) seriesNames.add(m.name);
         } catch (Exception e) {
+            recordWarn("Could not read series names for split/merge loader progress in "
+                    + directory + ": " + e.getMessage());
             IJ.log("    - WARNING: Could not read series names for split/merge loader progress in "
                     + directory + ": " + e.getMessage());
         }
@@ -436,7 +465,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
         IJ.log("  - Min-max display ranges synced to channel_config.json");
 
         try {
-            AnalysisDetailsWriter.write(
+            File detailsFile = AnalysisDetailsWriter.write(
                     detailsRoot,
                     "Process Images",
                     channelNames,
@@ -446,13 +475,15 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                     new String[] {"N/A"},
                     startTimeMillis
             );
+            recordOutput(detailsFile, "txt");
             IJ.log("  - Analysis Details written");
         } catch (Exception e) {
+            recordWarn("Failed to write Split & Merge Analysis Details: " + e.getMessage());
             IJ.log("  - WARNING: failed to write Analysis Details: " + e.getMessage());
         }
 
         try {
-            SplitAndMergeDetailsWriter.write(
+            File detailsFile = SplitAndMergeDetailsWriter.write(
                     detailsRoot,
                     channelNames,
                     channelColors,
@@ -467,8 +498,10 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                     totalImages,
                     startTimeMillis
             );
+            recordOutput(detailsFile, "txt");
             IJ.log("  - SplitAndMerge Details written");
         } catch (Exception e) {
+            recordWarn("Failed to write SplitAndMerge Details: " + e.getMessage());
             IJ.log("  - WARNING: failed to write SplitAndMerge Details: " + e.getMessage());
         }
 
@@ -589,7 +622,10 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                 try {
                     imp = nextImage.get();
                 } catch (Exception e) {
-                    IJ.log("ERROR: Failed to load prefetched series " + (seriesIdx + 1) + ": " + e.getMessage());
+                    String message = "Failed to load prefetched series "
+                            + (seriesIdx + 1) + ": " + e.getMessage();
+                    IJ.log("ERROR: " + message);
+                    recordError(message, e);
                     nextImage = null;
                     continue;
                 }
@@ -600,7 +636,10 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                 try {
                     imp = supplier.openSeries(seriesIdx);
                 } catch (Exception e) {
-                    IJ.log("ERROR: Failed to open series " + (seriesIdx + 1) + ": " + e.getMessage());
+                    String message = "Failed to open series "
+                            + (seriesIdx + 1) + ": " + e.getMessage();
+                    IJ.log("ERROR: " + message);
+                    recordError(message, e);
                     continue;
                 }
             }
@@ -879,7 +918,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                                             String[] defaultMinMax, File projectRoot) {
         final int nCh = channelNames.length;
         final int autoBackgroundIndex = detectAutofluorescenceChannel(projectRoot, nCh);
-        if (java.awt.GraphicsEnvironment.isHeadless()) {
+        if (headless || suppressDialogs || java.awt.GraphicsEnvironment.isHeadless()) {
             return buildHeadlessDefaults(channelNames, defaultMinMax, autoBackgroundIndex);
         }
         final String[] bgChoices = new String[nCh + 1];
@@ -1891,7 +1930,9 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                 ImagePlus rawPng = ImageOps.duplicateThreadSafe(rawMax);
                 applyPseudoColor(rawPng, channelColor);
                 String rawSaveName = safeChannel + "_Raw" + (hemiRegion.isEmpty() ? "" : "_" + hemiRegion) + ".png";
-                AsyncImageSaver.saveAsPngAsync(rawPng, new File(outDir, rawSaveName).getAbsolutePath());
+                File rawOut = new File(outDir, rawSaveName);
+                AsyncImageSaver.saveAsPngAsync(rawPng, rawOut.getAbsolutePath());
+                recordOutput(rawOut, "png");
                 if (!compactLog) IJ.log("    - Saved raw (unsubtracted): " + rawSaveName);
                 rawPng.changes = false;
                 rawPng.close();
@@ -1940,8 +1981,10 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                     IoUtils.mustMkdirs(tifDir);
                     File omeOut = new File(tifDir, omeName);
                     OmeTiffIO.saveOmeTiff(composite, omeOut, channelNames, channelColors);
+                    recordOutput(omeOut, "ome-tiff");
                     if (!compactLog) IJ.log("    - Saved OME-TIFF: " + omeOut.getAbsolutePath());
                 } catch (Exception e) {
+                    recordWarn("Failed to write OME-TIFF: " + e.getMessage());
                     IJ.log("    - WARNING: failed to write OME-TIFF: " + e.getMessage());
                 } finally {
                     composite.changes = false;
@@ -1949,6 +1992,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                     composite.flush();
                 }
             } else {
+                recordWarn("Failed to build OME-TIFF composite for " + omeName);
                 IJ.log("    - WARNING: failed to build OME-TIFF composite for " + omeName);
             }
         }
@@ -1996,6 +2040,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                                          double pixelWidthUm,
                                          double pixelHeightUm) {
         if (imageFile == null || parts == null) return;
+        recordOutput(imageFile, "png");
         presentationTileRecords.add(new PresentationTileRecord(
                 imageFile,
                 parts.animal,
@@ -2040,7 +2085,15 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                     layout.presentationTilesDir(),
                     manifestFile,
                     records, conditions, config);
+            recordOutput(manifestFile, "csv");
+            if (config.createOverviewTile()) {
+                String grouped = config.groupRowsBy() == PresentationTileConfig.GroupRowsBy.CONDITION
+                        ? "ByCondition" : "ByAnimal";
+                recordOutput(new File(layout.presentationTilesDir(),
+                        "Presentation_Overview_" + grouped + ".png"), "png");
+            }
         } catch (IOException e) {
+            recordWarn("Failed to write presentation overview tile: " + e.getMessage());
             IJ.log("  - WARNING: failed to write presentation overview tile: " + e.getMessage());
         }
     }
@@ -2181,7 +2234,10 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                 w.write("Background Subtraction: none\n");
             }
             }
+            recordOutput(detailsFile, "txt");
         } catch (IOException e) {
+            recordWarn("Failed to write per-image details " + detailsFile.getName()
+                    + ": " + e.getMessage());
             IJ.log("WARNING: failed to write per-image details: " + detailsFile.getName() + " — " + e.getMessage());
         }
     }
@@ -2499,7 +2555,10 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
         }
         try {
             BinConfigIO.updateMinMax(directory, minMaxValues);
+            recordOutput(new File(FlashProjectLayout.forDirectory(directory).configurationWriteDir(),
+                    ChannelConfigIO.FILE_NAME), "json");
         } catch (IOException e) {
+            recordWarn("Failed to sync min-max to channel_config.json: " + e.getMessage());
             IJ.log("Warning: failed to sync min-max to channel_config.json: " + e.getMessage());
         }
     }
@@ -2510,6 +2569,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
         try {
             IoUtils.mustMkdirs(binDir);
         } catch (IOException e) {
+            recordWarn("Could not create configuration directory for saturations: " + e.getMessage());
             IJ.log("[FLASH] Could not create configuration directory: " + e.getMessage()
                     + " — saturations will not be saved.");
             return;
@@ -2525,7 +2585,9 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                 w.write(channelNames[i] + " " + satValue);
             }
             w.write("\n");
+            recordOutput(satFile, "txt");
         } catch (IOException e) {
+            recordWarn("Failed to save saturations: " + e.getMessage());
             IJ.log("Warning: failed to save saturations: " + e.getMessage());
         }
     }
@@ -2584,6 +2646,92 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis {
                 if ("Log".equals(title)) continue;
                 frame.dispose();
             }
+        }
+    }
+
+    private DeferredImageSupplier wrapRunRecordSupplier(final DeferredImageSupplier rawSupplier) {
+        if (rawSupplier == null) return null;
+        return new DeferredImageSupplier(rawSupplier) {
+            @Override
+            public ImagePlus openSeries(int seriesIndex) throws Exception {
+                return openRecorded(seriesIndex, false, -1);
+            }
+
+            @Override
+            public ImagePlus openSeriesMaterialized(int seriesIndex) throws Exception {
+                return openRecorded(seriesIndex, true, -1);
+            }
+
+            @Override
+            public ImagePlus openSeriesMaterializedChannel(int seriesIndex, int channelIndex) throws Exception {
+                return openRecorded(seriesIndex, true, channelIndex);
+            }
+
+            private ImagePlus openRecorded(int seriesIndex, boolean materialized, int channelIndex) throws Exception {
+                AnalysisRunContext.InputHandle inputHandle =
+                        recordInputStart(sourceFileForSeries(rawSupplier, seriesIndex), seriesIndex);
+                long startedMillis = System.currentTimeMillis();
+                try {
+                    ImagePlus image = channelIndex >= 0
+                            ? rawSupplier.openSeriesMaterializedChannel(seriesIndex, channelIndex)
+                            : materialized
+                            ? rawSupplier.openSeriesMaterialized(seriesIndex)
+                            : rawSupplier.openSeries(seriesIndex);
+                    recordInputEnd(inputHandle, image == null ? "empty" : "processed", startedMillis);
+                    return image;
+                } catch (Exception e) {
+                    recordInputEnd(inputHandle, "failed", startedMillis);
+                    recordError("Failed to open Split & Merge input series " + (seriesIndex + 1), e);
+                    throw e;
+                } catch (Error e) {
+                    recordInputEnd(inputHandle, "failed", startedMillis);
+                    recordError("Failed to open Split & Merge input series " + (seriesIndex + 1), e);
+                    throw e;
+                }
+            }
+        };
+    }
+
+    private static File sourceFileForSeries(DeferredImageSupplier supplier, int seriesIndex) {
+        if (supplier == null) return null;
+        try {
+            return supplier.getContainerFileForSeries(seriesIndex);
+        } catch (RuntimeException e) {
+            return supplier.getContainerFile();
+        }
+    }
+
+    private AnalysisRunContext.InputHandle recordInputStart(File source, int seriesIndex) {
+        if (runRecordContext == null) {
+            return null;
+        }
+        return runRecordContext.recordInputStart(source, seriesIndex, null);
+    }
+
+    private void recordInputEnd(AnalysisRunContext.InputHandle inputHandle,
+                                String status,
+                                long startedMillis) {
+        if (runRecordContext != null && inputHandle != null) {
+            runRecordContext.recordInputEnd(inputHandle, status,
+                    Math.max(0L, System.currentTimeMillis() - startedMillis));
+        }
+    }
+
+    private void recordOutput(File file, String kind) {
+        if (runRecordContext != null && file != null) {
+            runRecordContext.recordOutput(file, kind);
+        }
+    }
+
+    private void recordWarn(String message) {
+        if (runRecordContext != null) {
+            runRecordContext.warn(message);
+        }
+    }
+
+    private void recordError(String message, Throwable t) {
+        if (runRecordContext != null) {
+            runRecordContext.error(message, t);
         }
     }
 

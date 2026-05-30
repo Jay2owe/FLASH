@@ -25,11 +25,14 @@ import flash.pipeline.deconv.wizard.ImageConsultantWizard;
 import flash.pipeline.image.HeapBudget;
 import flash.pipeline.intelligence.MetadataDiagnostics;
 import flash.pipeline.io.AsyncImageSaver;
+import flash.pipeline.io.DeferredImageSupplier;
 import flash.pipeline.io.IoUtils;
 import flash.pipeline.io.LifIO;
 import flash.pipeline.io.SeriesMeta;
 import flash.pipeline.naming.ImageNameParser;
 import flash.pipeline.report.QualityReport;
+import flash.pipeline.runrecord.AnalysisRunContext;
+import flash.pipeline.runrecord.RunRecordAware;
 import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.FeatureDependencyGate;
 import flash.pipeline.ui.PipelineDialog;
@@ -91,7 +94,7 @@ import java.util.Set;
 /**
  * Standalone 3D deconvolution step that runs before downstream analyses.
  */
-public class DeconvolutionAnalysis implements Analysis {
+public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
 
     private static final String TITLE = "3D Deconvolution";
     private static final String CUSTOM_PRESET_LABEL = "-- Custom --";
@@ -118,6 +121,7 @@ public class DeconvolutionAnalysis implements Analysis {
     private boolean skipExisting = false;
     private QualityReport qualityReport = null;
     private CLIConfig cliConfig = null;
+    private AnalysisRunContext runRecordContext = null;
 
     @Override
     public void setHeadless(boolean headless) {
@@ -155,6 +159,11 @@ public class DeconvolutionAnalysis implements Analysis {
     }
 
     @Override
+    public void setRunRecordContext(AnalysisRunContext context) {
+        this.runRecordContext = context;
+    }
+
+    @Override
     public void execute(String directory) {
         if (headless && !GraphicsEnvironment.isHeadless() && cliConfig == null
                 && !CLIArgumentParser.hasCliOptions(ij.Macro.getOptions())) {
@@ -163,6 +172,7 @@ public class DeconvolutionAnalysis implements Analysis {
             headless = false;
         }
         if (!isBioFormatsAvailable()) {
+            recordWarn("3D Deconvolution requires Bio-Formats metadata and image loading.");
             return;
         }
 
@@ -229,9 +239,11 @@ public class DeconvolutionAnalysis implements Analysis {
         if (config == null) {
             String macroOptions = ij.Macro.getOptions();
             if (!CLIArgumentParser.hasCliOptions(macroOptions)) {
-                IJ.log("[" + TITLE + "] Headless deconvolution needs CLI macro options. "
+                String message = "Headless deconvolution needs CLI macro options. "
                         + "Run from the FLASH UI for interactive setup, or provide "
-                        + "dir=[...] run_deconv deconv.enabled=true ...");
+                        + "dir=[...] run_deconv deconv.enabled=true ...";
+                IJ.log("[" + TITLE + "] " + message);
+                recordWarn(message);
                 return null;
             }
             config = CLIArgumentParser.parse(macroOptions);
@@ -1046,7 +1058,10 @@ public class DeconvolutionAnalysis implements Analysis {
                     false
             );
         } catch (Exception e) {
-            IJ.log("Deconvolution preview failed: " + e.getMessage() + ". Continuing without preview.");
+            String message = "Deconvolution preview failed: " + e.getMessage()
+                    + ". Continuing without preview.";
+            IJ.log(message);
+            recordWarn(message);
             return DeconvPreviewDialog.Decision.RUN_FULL_BATCH;
         } finally {
             closeQuietly(deconvolvedProjection);
@@ -1285,6 +1300,8 @@ public class DeconvolutionAnalysis implements Analysis {
                     warnings.add(channelNames[channelIndex] + " " + message);
                     channelOutcomes.add(channelNames[channelIndex] + ": failed");
                     summaryWarnings.add("staleOutputDeleteFailed");
+                    recordError("Deconvolution stale output delete failed for "
+                            + job.baseName + " " + channelNames[channelIndex], e);
                     selectedChannelFailed = true;
                     appendSummaryRow(summaryReport,
                             job.baseName,
@@ -1303,12 +1320,15 @@ public class DeconvolutionAnalysis implements Analysis {
                     boolean cacheHit = false;
                     try {
                         copyFile(cacheHitFile, outFile);
+                        recordOutput(outFile, "tif");
                         channelOutcomes.add(channelNames[channelIndex] + ": cache hit");
                         deconvolvedChannelsForMerge[channelIndex] = true;
                         cacheHit = true;
                     } catch (IOException e) {
                         warnings.add("Cache copy failed for " + channelNames[channelIndex] + ": " + e.getMessage());
                         summaryWarnings.add("cacheCopyFailed");
+                        recordWarn("Cache copy failed for " + channelNames[channelIndex]
+                                + ": " + e.getMessage());
                     }
                     if (cacheHit) {
                         appendSummaryRow(summaryReport,
@@ -1390,6 +1410,8 @@ public class DeconvolutionAnalysis implements Analysis {
                             copyFile(outFile, cacheFile);
                         } catch (IOException e) {
                             warnings.add("Cache write failed for " + channelNames[channelIndex] + ": " + e.getMessage());
+                            recordWarn("Cache write failed for " + channelNames[channelIndex]
+                                    + ": " + e.getMessage());
                             summaryWarnings.add("cacheWriteFailed");
                         }
                     }
@@ -1398,13 +1420,19 @@ public class DeconvolutionAnalysis implements Analysis {
                     warnings.add(channelNames[channelIndex] + " failed: " + e.getMessage());
                     channelOutcomes.add(channelNames[channelIndex] + ": failed");
                     summaryWarnings.add("failed");
-                    IJ.log("Deconvolution failed [" + job.baseName + ", " + channelNames[channelIndex] + "]: " + e.getMessage());
+                    String message = "Deconvolution failed [" + job.baseName + ", "
+                            + channelNames[channelIndex] + "]: " + e.getMessage();
+                    IJ.log(message);
+                    recordError(message, e);
                 } catch (Exception e) {
                     selectedChannelFailed = true;
                     warnings.add(channelNames[channelIndex] + " failed: " + e.getMessage());
                     channelOutcomes.add(channelNames[channelIndex] + ": failed");
                     summaryWarnings.add("failed");
-                    IJ.log("Deconvolution failed [" + job.baseName + ", " + channelNames[channelIndex] + "]: " + e.getMessage());
+                    String message = "Deconvolution failed [" + job.baseName + ", "
+                            + channelNames[channelIndex] + "]: " + e.getMessage();
+                    IJ.log(message);
+                    recordError(message, e);
                 } finally {
                     closeQuietly(deconvolved);
                     closeQuietly(psf);
@@ -1429,15 +1457,20 @@ public class DeconvolutionAnalysis implements Analysis {
                     deleteFileIfExists(DeconvolutionIO.mergedDeconvFile(rootDir, job.baseName));
                 } catch (IOException e) {
                     warnings.add("Could not remove stale merged deconvolved output: " + e.getMessage());
-                    IJ.log("Could not remove stale merged deconvolved output for "
-                            + job.baseName + ": " + e.getMessage());
+                    String message = "Could not remove stale merged deconvolved output for "
+                            + job.baseName + ": " + e.getMessage();
+                    IJ.log(message);
+                    recordWarn(message);
                 }
             } else {
                 try {
                     writeMergedOutput(directory, rootDir, job, channelNames.length, deconvolvedChannelsForMerge);
                 } catch (Exception e) {
                     warnings.add("Merged deconvolved output failed: " + e.getMessage());
-                    IJ.log("Could not write merged deconvolved output for " + job.baseName + ": " + e.getMessage());
+                    String message = "Could not write merged deconvolved output for "
+                            + job.baseName + ": " + e.getMessage();
+                    IJ.log(message);
+                    recordError(message, e);
                 }
             }
 
@@ -1449,8 +1482,11 @@ public class DeconvolutionAnalysis implements Analysis {
         if (summaryReport != null) {
             try {
                 summaryReport.finish(now() - batchStarted);
+                recordOutput(summaryReport.getReportFile(), "txt");
             } catch (IOException e) {
-                IJ.log("Could not finalize deconvolution summary report: " + e.getMessage());
+                String message = "Could not finalize deconvolution summary report: " + e.getMessage();
+                IJ.log(message);
+                recordWarn(message);
             }
         }
         AsyncImageSaver.waitForAll();
@@ -1523,7 +1559,22 @@ public class DeconvolutionAnalysis implements Analysis {
     }
 
     protected ImagePlus openSeriesChannel(String directory, int seriesIndex, int channelIndex) throws Exception {
-        return LifIO.createDeferredSupplier(directory).openSeriesMaterializedChannel(seriesIndex, channelIndex);
+        DeferredImageSupplier supplier = LifIO.createDeferredSupplier(directory);
+        File source = null;
+        try {
+            source = supplier.getContainerFileForSeries(seriesIndex);
+        } catch (Exception ignored) {
+        }
+        AnalysisRunContext.InputHandle inputHandle = recordInputStart(source, seriesIndex);
+        long started = now();
+        try {
+            ImagePlus image = supplier.openSeriesMaterializedChannel(seriesIndex, channelIndex);
+            recordInputEnd(inputHandle, image == null ? "failed" : "processed", started);
+            return image;
+        } catch (Exception e) {
+            recordInputEnd(inputHandle, "failed", started);
+            throw e;
+        }
     }
 
     protected List<DeconvolutionEngine> allEngines() {
@@ -1578,6 +1629,7 @@ public class DeconvolutionAnalysis implements Analysis {
             }
             moveReplacing(temp, target);
             moved = true;
+            recordOutput(target, "tif");
         } finally {
             if (!moved) {
                 Files.deleteIfExists(temp.toPath());
@@ -1891,8 +1943,56 @@ public class DeconvolutionAnalysis implements Analysis {
 
     private void showOrLogError(String message) {
         IJ.log(TITLE + ": " + message);
+        recordWarn(message);
         if (!headless && !suppressDialogs) {
             JOptionPane.showMessageDialog(null, message, TITLE, JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    private AnalysisRunContext.InputHandle recordInputStart(File source, int seriesIndex) {
+        if (runRecordContext == null) {
+            return null;
+        }
+        return runRecordContext.recordInputStart(source, seriesIndex, null);
+    }
+
+    private void recordInputEnd(AnalysisRunContext.InputHandle inputHandle,
+                                String status,
+                                long startedMillis) {
+        if (runRecordContext != null && inputHandle != null) {
+            runRecordContext.recordInputEnd(inputHandle, status,
+                    Math.max(0L, now() - startedMillis));
+        }
+    }
+
+    private void recordOutput(File file, String kind) {
+        if (runRecordContext != null && file != null) {
+            runRecordContext.recordOutput(file, kind);
+        }
+    }
+
+    private void recordWarn(String message) {
+        if (runRecordContext != null) {
+            runRecordContext.warn(message);
+        }
+    }
+
+    private void recordError(String message, Throwable t) {
+        if (runRecordContext != null) {
+            runRecordContext.error(message, t);
+        }
+    }
+
+    private void recordWarnings(SeriesJob job, List<String> warnings) {
+        if (runRecordContext == null || warnings == null || warnings.isEmpty()) {
+            return;
+        }
+        String prefix = job == null ? "Deconvolution warning" :
+                "Deconvolution warning [" + job.baseName + "]";
+        for (String warning : warnings) {
+            if (warning != null && !warning.trim().isEmpty()) {
+                runRecordContext.warn(prefix + ": " + warning);
+            }
         }
     }
 
@@ -1955,9 +2055,14 @@ public class DeconvolutionAnalysis implements Analysis {
         try {
             ensureDirectory(detailsFile.getParentFile());
             Files.write(detailsFile.toPath(), sb.toString().getBytes(StandardCharsets.UTF_8));
+            recordOutput(detailsFile, "txt");
         } catch (IOException e) {
-            IJ.log("Could not write deconvolution details for " + job.baseName + ": " + e.getMessage());
+            String message = "Could not write deconvolution details for "
+                    + job.baseName + ": " + e.getMessage();
+            IJ.log(message);
+            recordWarn(message);
         }
+        recordWarnings(job, warnings);
     }
 
     private Map<String, String> buildHashParams(RunSettings settings,

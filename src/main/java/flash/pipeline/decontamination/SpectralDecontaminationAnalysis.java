@@ -4,6 +4,7 @@ import flash.pipeline.analyses.Analysis;
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinConfigIO;
 import flash.pipeline.cli.CLIConfig;
+import flash.pipeline.decontamination.wizard.SpectralDecontamPreset;
 import flash.pipeline.decontamination.wizard.SpectralDecontaminationWizard;
 import flash.pipeline.decontamination.features.EnvelopeCorrectionFeature;
 import flash.pipeline.decontamination.features.FullForwardModelFeature;
@@ -14,6 +15,8 @@ import flash.pipeline.io.ImageCache;
 import flash.pipeline.io.ImageSourceDispatcher;
 import flash.pipeline.io.SeriesMeta;
 import flash.pipeline.report.QualityReport;
+import flash.pipeline.runrecord.AnalysisRunContext;
+import flash.pipeline.runrecord.RunRecordAware;
 import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.FeatureDependencyGate;
 import flash.pipeline.ui.PipelineDialog;
@@ -47,7 +50,7 @@ import javax.swing.JLabel;
 /**
  * Placeholder entry point for the planned Spectral Decontamination module.
  */
-public class SpectralDecontaminationAnalysis implements Analysis {
+public class SpectralDecontaminationAnalysis implements Analysis, RunRecordAware {
 
     private static final String TITLE = "Spectral Decontamination";
     private static final String CUSTOM_PRESET_LABEL = "Custom";
@@ -64,6 +67,8 @@ public class SpectralDecontaminationAnalysis implements Analysis {
     private ImageCache imageCache = null;
     private QualityReport qualityReport = null;
     private CLIConfig cliConfig = null;
+    private SpectralDecontamPreset commandPreset = null;
+    private AnalysisRunContext runRecordContext = null;
 
     @Override
     public void setHeadless(boolean headless) {
@@ -125,10 +130,20 @@ public class SpectralDecontaminationAnalysis implements Analysis {
         this.cliConfig = config;
     }
 
+    public void setCommandPreset(SpectralDecontamPreset preset) {
+        this.commandPreset = preset;
+    }
+
+    @Override
+    public void setRunRecordContext(AnalysisRunContext context) {
+        this.runRecordContext = context;
+    }
+
     @Override
     public void execute(String directory) {
         if (!FeatureDependencyGate.gate(DependencyId.BIO_FORMATS_RUNTIME,
                 TITLE, "Bio-Formats image loading")) {
+            recordWarn("Spectral Decontamination requires Bio-Formats image loading.");
             return;
         }
 
@@ -153,6 +168,7 @@ public class SpectralDecontaminationAnalysis implements Analysis {
             String message = "Could not read channel names from channel_config.json. "
                     + "Run Set Up Configuration before Spectral Decontamination. " + e.getMessage();
             IJ.log("Spectral Decontamination: " + message);
+            recordWarn(message);
             if (!headless && !suppressDialogs) {
                 IJ.showMessage("Spectral Decontamination", message);
             }
@@ -163,9 +179,14 @@ public class SpectralDecontaminationAnalysis implements Analysis {
         try {
             config = SpectralDecontaminationConfigIO.readOrDefault(directory, binConfig.numChannels());
         } catch (IOException e) {
-            IJ.log("Spectral Decontamination: could not read existing config. "
-                    + "Starting from defaults. " + e.getMessage());
+            String message = "Could not read existing config. Starting from defaults. "
+                    + e.getMessage();
+            IJ.log("Spectral Decontamination: " + message);
+            recordWarn(message);
             config = SpectralDecontaminationConfig.defaults(binConfig.numChannels());
+        }
+        if (commandPreset != null) {
+            config = commandPreset.getPayload();
         }
 
         if (headless) {
@@ -176,8 +197,11 @@ public class SpectralDecontaminationAnalysis implements Analysis {
                 IJ.log("Spectral Decontamination config is incomplete or invalid:");
                 for (String error : errors) {
                     IJ.log("  - " + error);
+                    recordWarn("Spectral Decontamination config invalid: " + error);
                 }
-                IJ.log("Run Spectral Decontamination interactively to choose a runnable correction stack.");
+                String message = "Run Spectral Decontamination interactively to choose a runnable correction stack.";
+                IJ.log(message);
+                recordWarn(message);
                 return;
             }
 
@@ -187,7 +211,9 @@ public class SpectralDecontaminationAnalysis implements Analysis {
                 metas = readSeriesMetadata(directory);
                 candidates = resolveCandidatesForBatch(directory, headlessConfig, metas);
             } catch (Exception e) {
-                IJ.log("Spectral Decontamination: could not resolve image metadata. " + e.getMessage());
+                String message = "Could not resolve image metadata. " + e.getMessage();
+                IJ.log("Spectral Decontamination: " + message);
+                recordWarn(message);
                 return;
             }
 
@@ -195,6 +221,7 @@ public class SpectralDecontaminationAnalysis implements Analysis {
             IJ.log("Spectral Decontamination config loaded: " + describeConfig(headlessConfig, binConfig));
             PreviewRunResult previewResult = runPreviewSelection(directory, headlessConfig, candidates);
             if (!previewResult.success) {
+                recordWarn("Spectral Decontamination: continuing without preview selection output.");
                 IJ.log("Spectral Decontamination: continuing without preview selection output.");
             }
             if (containsRocThresholdSearch(headlessConfig)) {
@@ -206,6 +233,7 @@ public class SpectralDecontaminationAnalysis implements Analysis {
                         "full_dataset");
                 if (!rocCalibration.success) {
                     IJ.log("Spectral Decontamination: " + rocCalibration.message);
+                    recordWarn(rocCalibration.message);
                     return;
                 }
                 headlessConfig = rocCalibration.config;
@@ -241,6 +269,7 @@ public class SpectralDecontaminationAnalysis implements Analysis {
         } catch (Exception e) {
             String message = "Could not read image metadata for batch processing: " + e.getMessage();
             IJ.log("Spectral Decontamination: " + message);
+            recordWarn(message);
             IJ.showMessage(TITLE, message);
             return;
         }
@@ -252,6 +281,7 @@ public class SpectralDecontaminationAnalysis implements Analysis {
             } catch (Exception e) {
                 String message = "Could not resolve conditions for batch processing: " + e.getMessage();
                 IJ.log("Spectral Decontamination: " + message);
+                recordWarn(message);
                 IJ.showMessage(TITLE, message);
                 return;
             }
@@ -259,9 +289,11 @@ public class SpectralDecontaminationAnalysis implements Analysis {
 
         try {
             SpectralDecontaminationConfigIO.writeToDirectory(directory, selected);
+            recordOutput(SpectralDecontaminationConfigIO.configFile(directory), "json");
         } catch (IOException e) {
             String message = "Could not save Spectral Decontamination config: " + e.getMessage();
             IJ.log("Spectral Decontamination: " + message);
+            recordWarn(message);
             IJ.showMessage(TITLE, message);
             return;
         }
@@ -1032,6 +1064,7 @@ public class SpectralDecontaminationAnalysis implements Analysis {
         if (!pipelineErrors.isEmpty()) {
             batchResult.message = joinLines(pipelineErrors);
             IJ.log("Spectral Decontamination: " + batchResult.message);
+            recordWarn(batchResult.message);
             return batchResult;
         }
 
@@ -1052,8 +1085,10 @@ public class SpectralDecontaminationAnalysis implements Analysis {
                     existingObjectRows = ObjectScoreWriter.readObjectRowsBySeriesIndex(directory);
                 }
             } catch (IOException e) {
-                IJ.log("Spectral Decontamination: could not reuse prior CSV rows for Skip Existing. "
-                        + e.getMessage());
+                String message = "Could not reuse prior CSV rows for Skip Existing. "
+                        + e.getMessage();
+                IJ.log("Spectral Decontamination: " + message);
+                recordWarn(message);
             }
         }
 
@@ -1132,13 +1167,15 @@ public class SpectralDecontaminationAnalysis implements Analysis {
                     }
                 }
                 if (cachedImages == null || cachedImages.size() <= highestSeriesIndex) {
-                    IJ.log("Spectral Decontamination: falling back to deferred loading because the shared cache was unavailable.");
+                    String message = "Falling back to deferred loading because the shared cache was unavailable.";
+                    IJ.log("Spectral Decontamination: " + message);
+                    recordWarn(message);
                     cachedImages = null;
                     useSharedCache = false;
                 }
             }
             if (!seriesToProcess.isEmpty() && !useSharedCache) {
-                supplier = ImageSourceDispatcher.createSupplier(directory);
+                supplier = wrapRunRecordSupplier(ImageSourceDispatcher.createSupplier(directory));
             }
 
             final List<ImagePlus> finalCachedImages = cachedImages;
@@ -1179,7 +1216,9 @@ public class SpectralDecontaminationAnalysis implements Analysis {
                                      future.get());
                         } catch (Exception e) {
                             batchResult.failedCount++;
-                            IJ.log("Spectral Decontamination: worker failure: " + e.getMessage());
+                            String message = "Spectral Decontamination worker failure: " + e.getMessage();
+                            IJ.log(message);
+                            recordError(message, e);
                         }
                     }
                 } finally {
@@ -1206,6 +1245,7 @@ public class SpectralDecontaminationAnalysis implements Analysis {
         } catch (Exception e) {
             batchResult.message = "Batch setup failed: " + e.getMessage();
             IJ.log("Spectral Decontamination: " + batchResult.message);
+            recordError(batchResult.message, e);
         } finally {
             if (supplier != null) {
                 supplier.shutdownPrefetch();
@@ -1214,10 +1254,15 @@ public class SpectralDecontaminationAnalysis implements Analysis {
 
         try {
             SpectralOutputWriter.writePerImageSummary(directory, summaryRows);
+            batchResult.perImageSummaryFile = SpectralOutputWriter.perImageSummaryFile(directory);
+            recordOutput(batchResult.perImageSummaryFile, "csv");
             SpectralOutputWriter.writeCorrectionCoefficients(directory, coefficientRows);
+            batchResult.correctionCoefficientsFile = SpectralOutputWriter.correctionCoefficientsFile(directory);
+            recordOutput(batchResult.correctionCoefficientsFile, "csv");
             if (objectScoringGoal) {
                 ObjectScoreWriter.writePerObjectScores(directory, objectScoreRows);
                 batchResult.perObjectScoresFile = ObjectScoreWriter.perObjectScoresFile(directory);
+                recordOutput(batchResult.perObjectScoresFile, "csv");
             }
 
             SpectralOutputWriter.AnalysisDetails details = new SpectralOutputWriter.AnalysisDetails();
@@ -1260,8 +1305,10 @@ public class SpectralDecontaminationAnalysis implements Analysis {
             details.runtimeMs = System.currentTimeMillis() - startTimeMs;
             batchResult.analysisDetailsFile =
                     SpectralOutputWriter.writeAnalysisDetails(directory, details);
-            batchResult.perImageSummaryFile = SpectralOutputWriter.perImageSummaryFile(directory);
-            batchResult.correctionCoefficientsFile = SpectralOutputWriter.correctionCoefficientsFile(directory);
+            recordOutput(batchResult.analysisDetailsFile, "txt");
+            if (previewSelectionFile != null) {
+                recordOutput(previewSelectionFile, "csv");
+            }
             if (qualityReport != null && qualityReport.isEnabled()) {
                 addSpectralQcReportSection(directory,
                         binConfig,
@@ -1276,6 +1323,7 @@ public class SpectralDecontaminationAnalysis implements Analysis {
             batchResult.message = "Failed writing Spectral Decontamination outputs: " + e.getMessage();
             batchResult.success = false;
             IJ.log("Spectral Decontamination: " + batchResult.message);
+            recordError(batchResult.message, e);
         }
 
         IJ.log("Spectral Decontamination batch summary: processed=" + batchResult.processedCount
@@ -1333,6 +1381,7 @@ public class SpectralDecontaminationAnalysis implements Analysis {
                 correctedImage.setTitle("corrected");
                 SpectralOutputWriter.saveCorrectedImage(correctedImage, expectedOutputs.correctedImageFile);
                 correctedImageFile = expectedOutputs.correctedImageFile;
+                recordOutput(correctedImageFile, "tif");
             }
 
             File maskImageFile = null;
@@ -1344,6 +1393,7 @@ public class SpectralDecontaminationAnalysis implements Analysis {
                 maskImage.setTitle("final_mask");
                 SpectralOutputWriter.saveMaskImage(maskImage, expectedOutputs.maskImageFile);
                 maskImageFile = expectedOutputs.maskImageFile;
+                recordOutput(maskImageFile, "tif");
             }
 
             List<String> parameterMapPaths = new ArrayList<String>();
@@ -1354,6 +1404,7 @@ public class SpectralDecontaminationAnalysis implements Analysis {
                 File parameterMapFile = SpectralOutputWriter.parameterMapFile(expectedOutputs, entry.getKey());
                 entry.getValue().setTitle(entry.getKey());
                 SpectralOutputWriter.saveParameterMap(entry.getValue(), parameterMapFile);
+                recordOutput(parameterMapFile, "tif");
                 parameterMapPaths.add(relativePath(directory, parameterMapFile));
             }
 
@@ -1380,6 +1431,7 @@ public class SpectralDecontaminationAnalysis implements Analysis {
                     ImagePlus labelMap = null;
                     ImagePlus cleanedMap = null;
                     try {
+                        recordInputFile(objectMap.getFile(), meta.index);
                         labelMap = IJ.openImage(objectMap.getFile().getAbsolutePath());
                         if (labelMap == null) {
                             throw new IllegalStateException(
@@ -1399,6 +1451,7 @@ public class SpectralDecontaminationAnalysis implements Analysis {
                                         objectMap);
                         cleanedMap = scoreResult.getCleanedObjectMap();
                         ObjectScoreWriter.saveCleanedObjectMap(cleanedMap, cleanedObjectMapFile);
+                        recordOutput(cleanedObjectMapFile, "tif");
                         cleanedObjectMapCount++;
                         cleanedObjectMapPaths.add(relativePath(directory, cleanedObjectMapFile));
                         objectsKept += scoreResult.getKeptCount();
@@ -1487,7 +1540,10 @@ public class SpectralDecontaminationAnalysis implements Analysis {
                     state == null ? new ArrayList<CorrectionPipeline.FeatureSummary>() : state.getFeatureSummaries(),
                     e.getMessage(),
                     directory);
-            IJ.log("Spectral Decontamination: series " + (meta.index + 1) + " failed: " + e.getMessage());
+            String message = "Spectral Decontamination: series "
+                    + (meta.index + 1) + " failed: " + e.getMessage();
+            IJ.log(message);
+            recordError(message, e);
             return ProcessedSeriesResult.failure(summaryRow);
         } finally {
             closeImages(
@@ -1548,7 +1604,7 @@ public class SpectralDecontaminationAnalysis implements Analysis {
 
         DeferredImageSupplier supplier = null;
         try {
-            supplier = ImageSourceDispatcher.createSupplier(directory);
+            supplier = wrapRunRecordSupplier(ImageSourceDispatcher.createSupplier(directory));
             CorrectionFeatureRegistry registry = CorrectionFeatureRegistry.getDefault();
             for (int i = 0; i < candidates.size(); i++) {
                 SpectralPreviewSelector.PreviewCandidate candidate = candidates.get(i);
@@ -1701,6 +1757,86 @@ public class SpectralDecontaminationAnalysis implements Analysis {
         return supplier.openSeriesMaterialized(seriesIndex);
     }
 
+    private DeferredImageSupplier wrapRunRecordSupplier(final DeferredImageSupplier delegate) {
+        if (delegate == null || runRecordContext == null) {
+            return delegate;
+        }
+        return new DeferredImageSupplier(delegate) {
+            @Override
+            public ImagePlus openSeries(int seriesIndex) throws Exception {
+                return recordOpen(seriesIndex, false);
+            }
+
+            @Override
+            public ImagePlus openSeriesMaterialized(int seriesIndex) throws Exception {
+                return recordOpen(seriesIndex, true);
+            }
+
+            private ImagePlus recordOpen(int seriesIndex, boolean materialized) throws Exception {
+                File source = sourceFileForSeries(delegate, seriesIndex);
+                AnalysisRunContext.InputHandle inputHandle =
+                        runRecordContext.recordInputStart(source, seriesIndex, null);
+                long started = System.currentTimeMillis();
+                try {
+                    ImagePlus image = materialized
+                            ? delegate.openSeriesMaterialized(seriesIndex)
+                            : delegate.openSeries(seriesIndex);
+                    runRecordContext.recordInputEnd(inputHandle,
+                            image == null ? "failed" : "processed",
+                            Math.max(0L, System.currentTimeMillis() - started));
+                    return image;
+                } catch (Exception e) {
+                    runRecordContext.recordInputEnd(inputHandle, "failed",
+                            Math.max(0L, System.currentTimeMillis() - started));
+                    throw e;
+                }
+            }
+        };
+    }
+
+    private static File sourceFileForSeries(DeferredImageSupplier supplier, int seriesIndex) {
+        if (supplier == null) {
+            return null;
+        }
+        try {
+            return supplier.getContainerFileForSeries(seriesIndex);
+        } catch (Exception e) {
+            try {
+                return supplier.getContainerFile();
+            } catch (Exception ignored) {
+                return null;
+            }
+        }
+    }
+
+    private void recordInputFile(File file, int seriesIndex) {
+        if (runRecordContext == null || file == null) {
+            return;
+        }
+        AnalysisRunContext.InputHandle inputHandle =
+                runRecordContext.recordInputStart(file, seriesIndex, null);
+        runRecordContext.recordInputEnd(inputHandle,
+                file.isFile() ? "processed" : "failed", 0L);
+    }
+
+    private void recordOutput(File file, String kind) {
+        if (runRecordContext != null && file != null) {
+            runRecordContext.recordOutput(file, kind);
+        }
+    }
+
+    private void recordWarn(String message) {
+        if (runRecordContext != null) {
+            runRecordContext.warn(message);
+        }
+    }
+
+    private void recordError(String message, Throwable t) {
+        if (runRecordContext != null) {
+            runRecordContext.error(message, t);
+        }
+    }
+
     private ImagePlus applyConfiguredZSliceSubset(BinConfig cfg,
                                                   int seriesIndex,
                                                   ImagePlus source,
@@ -1710,6 +1846,8 @@ public class SpectralDecontaminationAnalysis implements Analysis {
         }
         ZSliceRange range = cfg.getZSliceRange(seriesIndex);
         if (range == null) {
+            recordWarn(contextLabel + ": no saved z-slice range for series "
+                    + (seriesIndex + 1) + ". Using full stack.");
             IJ.log("WARNING: " + contextLabel + ": no saved z-slice range for series " + (seriesIndex + 1)
                     + ". Using full stack.");
             return source;
@@ -2230,12 +2368,14 @@ public class SpectralDecontaminationAnalysis implements Analysis {
                             !config.getBleedThroughChannelIndexes().isEmpty());
             File outputFile = SpectralPreviewSelector.previewSelectionFile(directory);
             SpectralPreviewSelector.writePreviewSelection(outputFile, buildRunMetadata(config), selections);
+            recordOutput(outputFile, "csv");
             IJ.log("Spectral Decontamination preview selection saved: " + outputFile.getAbsolutePath());
             logPreviewSelection(selections);
             return PreviewRunResult.success(outputFile, selections);
         } catch (Exception e) {
             String message = "Preview selection failed: " + e.getMessage();
             IJ.log("Spectral Decontamination: " + message);
+            recordWarn(message);
             return PreviewRunResult.failure(message);
         }
     }
@@ -2250,8 +2390,10 @@ public class SpectralDecontaminationAnalysis implements Analysis {
             File outputFile = SpectralPreviewSelector.previewSelectionFile(directory);
             SpectralPreviewSelector.writePreviewSelection(outputFile, buildRunMetadata(config),
                     previewResult.selections);
+            recordOutput(outputFile, "csv");
             return PreviewRunResult.success(outputFile, previewResult.selections);
         } catch (IOException e) {
+            recordWarn("Could not refresh preview selection metadata. " + e.getMessage());
             IJ.log("Spectral Decontamination: could not refresh preview selection metadata. " + e.getMessage());
             return previewResult;
         }
@@ -2277,6 +2419,7 @@ public class SpectralDecontaminationAnalysis implements Analysis {
                     config,
                     previewResult.selections));
         } catch (Exception e) {
+            recordWarn("Could not render QC preview images. " + e.getMessage());
             IJ.log("Spectral Decontamination: could not render QC preview images. " + e.getMessage());
         }
         return rendered;
@@ -2296,7 +2439,7 @@ public class SpectralDecontaminationAnalysis implements Analysis {
                 new ArrayList<SpectralPreviewSelector.ScoredImage>();
         if (candidates == null || candidates.isEmpty()) return scored;
 
-        DeferredImageSupplier supplier = ImageSourceDispatcher.createSupplier(directory);
+        DeferredImageSupplier supplier = wrapRunRecordSupplier(ImageSourceDispatcher.createSupplier(directory));
         try {
             for (int i = 0; i < candidates.size(); i++) {
                 SpectralPreviewSelector.PreviewCandidate candidate = candidates.get(i);
