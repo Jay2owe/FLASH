@@ -5,6 +5,7 @@ import ij.ImagePlus;
 import ij.measure.ResultsTable;
 import ij.process.ByteProcessor;
 import ij.process.ImageProcessor;
+import ij.process.ShortProcessor;
 import org.junit.Test;
 
 import java.util.HashSet;
@@ -143,7 +144,7 @@ public class ObjectOverlayRendererTest {
     }
 
     @Test
-    public void debouncerCanTriggerCancelAndFlush() {
+    public void debouncerFlushesOnlyPendingTrigger() {
         final AtomicInteger calls = new AtomicInteger();
         Debouncer debouncer = new Debouncer(100, new Runnable() {
             @Override
@@ -156,7 +157,68 @@ public class ObjectOverlayRendererTest {
         debouncer.cancel();
         debouncer.flushNow();
 
+        assertEquals(0, calls.get());
+
+        debouncer.trigger();
+        debouncer.flushNow();
+
         assertEquals(1, calls.get());
+    }
+
+    @Test
+    public void filteredLabelMapDoesNotCollideAboveTwoHundredFiftyFiveLabels() {
+        ImagePlus labels = labelMapOneToTwoThousand();
+        Set<Integer> removed = new HashSet<Integer>();
+        removed.add(Integer.valueOf(260));
+
+        ImagePlus hidden = ObjectOverlayRenderer.renderFiltered(
+                null, labels, removed, false, null);
+        ImageProcessor hiddenProcessor = hidden.getProcessor();
+
+        assertEquals(LabelMapStyler.rgbForLabel(5),
+                hiddenProcessor.getPixel(4, 0) & 0xffffff);
+        assertEquals(0x000000, hiddenProcessor.getPixel(259, 0) & 0xffffff);
+        assertEquals(LabelMapStyler.rgbForLabel(515),
+                hiddenProcessor.getPixel(514, 0) & 0xffffff);
+
+        ImagePlus ghosts = ObjectOverlayRenderer.renderFiltered(
+                null, labels, removed, true, null);
+        ImageProcessor ghostProcessor = ghosts.getProcessor();
+
+        assertEquals(0x808080, ghostProcessor.getPixel(259, 0) & 0xffffff);
+        assertEquals(LabelMapStyler.rgbForLabel(515),
+                ghostProcessor.getPixel(514, 0) & 0xffffff);
+    }
+
+    @Test
+    public void filteredOverlayDoesNotCollideAboveTwoHundredFiftyFiveLabels() {
+        ImagePlus source = new ImagePlus("source", new ByteProcessor(2000, 1));
+        ImagePlus labels = labelMapOneToTwoThousand();
+        Set<Integer> removed = new HashSet<Integer>();
+        removed.add(Integer.valueOf(260));
+
+        ImagePlus hidden = ObjectOverlayRenderer.renderFiltered(
+                source, labels, removed, false,
+                PreviewDisplaySettings.of(0.0, 255.0,
+                        PreviewDisplaySettings.LutMode.GREY, "Grays"));
+        ImageProcessor hiddenProcessor = hidden.getProcessor();
+
+        assertEquals(blend(0x000000, LabelMapStyler.rgbForLabel(5), 0.35),
+                hiddenProcessor.getPixel(4, 0) & 0xffffff);
+        assertEquals(0x000000, hiddenProcessor.getPixel(259, 0) & 0xffffff);
+        assertEquals(blend(0x000000, LabelMapStyler.rgbForLabel(515), 0.35),
+                hiddenProcessor.getPixel(514, 0) & 0xffffff);
+
+        ImagePlus ghosts = ObjectOverlayRenderer.renderFiltered(
+                source, labels, removed, true,
+                PreviewDisplaySettings.of(0.0, 255.0,
+                        PreviewDisplaySettings.LutMode.GREY, "Grays"));
+        ImageProcessor ghostProcessor = ghosts.getProcessor();
+
+        assertEquals(blend(0x000000, 0x808080, 0.35),
+                ghostProcessor.getPixel(259, 0) & 0xffffff);
+        assertEquals(blend(0x000000, LabelMapStyler.rgbForLabel(515), 0.35),
+                ghostProcessor.getPixel(514, 0) & 0xffffff);
     }
 
     @Test
@@ -193,5 +255,13 @@ public class ObjectOverlayRendererTest {
         int g = (int) Math.round(bg * (1.0 - alpha) + og * alpha);
         int b = (int) Math.round(bb * (1.0 - alpha) + ob * alpha);
         return (r << 16) | (g << 8) | b;
+    }
+
+    private static ImagePlus labelMapOneToTwoThousand() {
+        ShortProcessor processor = new ShortProcessor(2000, 1);
+        for (int x = 0; x < 2000; x++) {
+            processor.set(x, 0, x + 1);
+        }
+        return new ImagePlus("labels", processor);
     }
 }

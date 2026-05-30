@@ -3,7 +3,9 @@ package flash.pipeline.ui.config;
 import flash.pipeline.help.SetupHelpCatalog;
 import flash.pipeline.help.SetupHelpTopic;
 import flash.pipeline.objects.ObjectsCounter3DWrapper;
+import flash.pipeline.ui.Debouncer;
 import flash.pipeline.ui.FlashTheme;
+import flash.pipeline.ui.ToggleSwitch;
 import flash.pipeline.ui.preview.ObjectSizeFilterPreview;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import ij.ImagePlus;
@@ -22,7 +24,10 @@ import javax.swing.JTextField;
 import javax.swing.SwingWorker;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
+import java.awt.Cursor;
 import java.awt.Font;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.Set;
@@ -89,10 +94,12 @@ public final class ParticleSizeStage implements ConfigQcStage {
     private JTextField maxField;
     private JButton previewButton;
     private JButton resetButton;
+    private ToggleSwitch showRemovedObjectsSwitch;
     private JLabel thresholdLabel;
     private ObjectSizeCutoffPanel sizeCutoffPanel;
     private ObjectSizeFilterPreview.Summary sizeSummary;
     private boolean showRawSource;
+    private Debouncer sizeDebouncer;
 
     public ParticleSizeStage(SizeStore sizeStore, PreviewAdapter previewAdapter) {
         if (sizeStore == null) {
@@ -130,6 +137,14 @@ public final class ParticleSizeStage implements ConfigQcStage {
         panel.setOpaque(false);
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
         panel.setBorder(FlashTheme.pad(2, 0, 0, 0));
+        if (sizeDebouncer != null) {
+            sizeDebouncer.cancel();
+        }
+        sizeDebouncer = new Debouncer(250, new Runnable() {
+            @Override public void run() {
+                fieldChanged();
+            }
+        });
         panel.add(buildSizeRow());
         panel.add(Box.createVerticalStrut(4));
         sizeCutoffPanel = new ObjectSizeCutoffPanel();
@@ -154,6 +169,8 @@ public final class ParticleSizeStage implements ConfigQcStage {
             preview.setSourceToggleVisible(true);
             preview.setSourceMode(PreviewPairPanel.SourceMode.FILTERED);
             preview.setSourceModeEnabled(true);
+            preview.setShowRemovedObjects(showRemovedObjectsSwitch != null
+                    && showRemovedObjectsSwitch.isSelected());
             preview.setComparisonPreviewVisible(true);
             preview.setComparisonRestoreAction(null);
             preview.setSourceModeChangeListener(mode -> {
@@ -225,6 +242,9 @@ public final class ParticleSizeStage implements ConfigQcStage {
     @Override
     public void onLeave(ConfigQcContext context) {
         closePreviewWorker();
+        if (sizeDebouncer != null) {
+            sizeDebouncer.cancel();
+        }
         if (preview != null) {
             preview.setSourceModeChangeListener(null);
             preview.setDisplaySettingsChangeListener(null);
@@ -251,10 +271,16 @@ public final class ParticleSizeStage implements ConfigQcStage {
 
     void setMinSizeForTest(String value) {
         if (minField != null) minField.setText(value);
+        flushSizeDebounceForTest();
     }
 
     void setMaxSizeForTest(String value) {
         if (maxField != null) maxField.setText(value);
+        flushSizeDebounceForTest();
+    }
+
+    void flushSizeDebounceForTest() {
+        if (sizeDebouncer != null) sizeDebouncer.flushNow();
     }
 
     void runPreviewNowForTest() throws Exception {
@@ -332,6 +358,28 @@ public final class ParticleSizeStage implements ConfigQcStage {
         buttons.add(previewButton);
         buttons.add(Box.createHorizontalStrut(8));
 
+        showRemovedObjectsSwitch = new ToggleSwitch(false);
+        showRemovedObjectsSwitch.addChangeListener(new Runnable() {
+            @Override public void run() {
+                if (preview != null) {
+                    preview.setShowRemovedObjects(showRemovedObjectsSwitch.isSelected());
+                }
+            }
+        });
+        buttons.add(showRemovedObjectsSwitch);
+        buttons.add(Box.createHorizontalStrut(4));
+        JLabel showRemovedLabel = new JLabel("Show removed objects");
+        showRemovedLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        showRemovedLabel.addMouseListener(new MouseAdapter() {
+            @Override public void mouseClicked(MouseEvent e) {
+                if (showRemovedObjectsSwitch != null && showRemovedObjectsSwitch.isEnabled()) {
+                    showRemovedObjectsSwitch.setSelected(!showRemovedObjectsSwitch.isSelected());
+                }
+            }
+        });
+        buttons.add(showRemovedLabel);
+        buttons.add(Box.createHorizontalStrut(8));
+
         resetButton = new JButton("Reset to saved");
         flash.pipeline.ui.FlashIcons.apply(resetButton, flash.pipeline.ui.FlashIcons.refresh());
         resetButton.addActionListener(e -> resetToSaved());
@@ -342,17 +390,26 @@ public final class ParticleSizeStage implements ConfigQcStage {
     private void installFieldListener(JTextField field) {
         field.getDocument().addDocumentListener(new DocumentListener() {
             @Override public void insertUpdate(DocumentEvent e) {
-                fieldChanged();
+                scheduleSizeFilterRefresh();
             }
 
             @Override public void removeUpdate(DocumentEvent e) {
-                fieldChanged();
+                scheduleSizeFilterRefresh();
             }
 
             @Override public void changedUpdate(DocumentEvent e) {
-                fieldChanged();
+                scheduleSizeFilterRefresh();
             }
         });
+    }
+
+    private void scheduleSizeFilterRefresh() {
+        if (updatingFields) return;
+        if (sizeDebouncer != null) {
+            sizeDebouncer.trigger();
+        } else {
+            fieldChanged();
+        }
     }
 
     private void loadFields(SizeToken token) {
@@ -368,7 +425,6 @@ public final class ParticleSizeStage implements ConfigQcStage {
 
     private void fieldChanged() {
         if (updatingFields) return;
-        captureCurrentPreviewForComparison();
         if (!sizeFieldsReadyForLivePreview()) {
             markPreviewStale(STALE_TEXT);
             return;
@@ -380,7 +436,6 @@ public final class ParticleSizeStage implements ConfigQcStage {
 
     private void resetToSaved() {
         loadFields(savedSize);
-        captureCurrentPreviewForComparison();
         if (!refreshSizeFilterPreview()) {
             markPreviewStale(STALE_TEXT);
         }
@@ -506,8 +561,9 @@ public final class ParticleSizeStage implements ConfigQcStage {
 
     private void captureCurrentPreviewForComparison() {
         if (labelPreview == null) return;
-        ImagePlus snapshot = PreviewPairPanel.duplicateForComparison(
-                labelPreview, "Previous object preview");
+        ImagePlus snapshot = preview == null
+                ? PreviewPairPanel.duplicateForComparison(labelPreview, "Previous object preview")
+                : preview.duplicateCurrentObjectPreviewForComparison("Previous object preview");
         if (snapshot == null) return;
         ImagePlus old = previousLabelPreview;
         previousLabelPreview = snapshot;
@@ -612,9 +668,15 @@ public final class ParticleSizeStage implements ConfigQcStage {
             boolean maxFinite = isFiniteMaxToken(token.maxText);
             sizeSummary = ObjectSizeFilterPreview.summarize(
                     objectStats, filteredSource, minSize, maxSize, maxFinite);
-            ObjectSizeFilterPreview.applyClassifiedLut(labelPreview, sizeSummary);
             if (sizeCutoffPanel != null) sizeCutoffPanel.setSummary(sizeSummary);
             applySizeGuideOverlay();
+            if (preview != null) {
+                preview.setObjectFilterPreview(
+                        labelPreview,
+                        sizeSummary.removedLabels(),
+                        sizeSummary,
+                        lastObjectCount);
+            }
             previewStale = false;
             displayedSize = normalizedSizeToken(token);
             refreshSourceAndOutputPreview();
@@ -689,6 +751,7 @@ public final class ParticleSizeStage implements ConfigQcStage {
     private void setButtonsEnabled(boolean enabled) {
         if (previewButton != null) previewButton.setEnabled(enabled);
         if (resetButton != null) resetButton.setEnabled(enabled);
+        if (showRemovedObjectsSwitch != null) showRemovedObjectsSwitch.setEnabled(enabled);
         if (minField != null) minField.setEnabled(enabled);
         if (maxField != null) maxField.setEnabled(enabled);
         if (preview != null) {

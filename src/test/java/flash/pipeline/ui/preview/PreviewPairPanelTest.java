@@ -470,6 +470,29 @@ public class PreviewPairPanelTest {
     }
 
     @Test
+    public void objectFilterPreviewLiveUpdatesRemovedSetAndShowRemovedState() {
+        PreviewPairPanel pair = new PreviewPairPanel("Filtered", "Objects");
+        ImagePlus labels = objectFilterLabels("Object labels");
+
+        pair.setLargePreviewImages(singleSlice("raw", 0, 100),
+                singleSlice("filtered", 0, 100), labels);
+        pair.setObjectFilterPreview(labels, removedLabels(2), null, 3);
+        ImageProcessor first = pair.renderObjectPreviewNowForTest().getProcessor();
+        assertEquals(0x000000, first.getPixel(1, 0) & 0xffffff);
+        assertEquals(LabelMapStyler.rgbForLabel(1), first.getPixel(0, 0) & 0xffffff);
+
+        pair.setObjectFilterPreview(labels, removedLabels(1), null, 3);
+        ImageProcessor second = pair.renderObjectPreviewNowForTest().getProcessor();
+        assertEquals(0x000000, second.getPixel(0, 0) & 0xffffff);
+        assertEquals(LabelMapStyler.rgbForLabel(2), second.getPixel(1, 0) & 0xffffff);
+
+        pair.setShowRemovedObjects(true);
+        ImageProcessor ghosts = pair.renderObjectPreviewNowForTest().getProcessor();
+        assertEquals(0x808080, ghosts.getPixel(0, 0) & 0xffffff);
+        assertEquals(LabelMapStyler.rgbForLabel(2), ghosts.getPixel(1, 0) & 0xffffff);
+    }
+
+    @Test
     public void objectFilterPreviewHidesRemovedLabelsAsSourceBackgroundWhenOverlayed() {
         PreviewPairPanel pair = new PreviewPairPanel("Filtered", "Objects");
         ByteProcessor sourceProcessor = new ByteProcessor(3, 1);

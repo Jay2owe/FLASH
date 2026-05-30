@@ -494,10 +494,16 @@ public final class CellposeParameterStage implements ConfigQcStage {
 
     void setSizeMinForTest(String value) {
         if (sizeMinField != null) sizeMinField.setText(value);
+        flushSizeFilterDebounceForTest();
     }
 
     void setSizeMaxForTest(String value) {
         if (sizeMaxField != null) sizeMaxField.setText(value);
+        flushSizeFilterDebounceForTest();
+    }
+
+    void flushSizeFilterDebounceForTest() {
+        if (sizeFilterDebouncer != null) sizeFilterDebouncer.flushNow();
     }
 
     void runPreviewNowForTest() throws Exception {

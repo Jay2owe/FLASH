@@ -356,10 +356,16 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
 
     void setMinSizeForTest(String value) {
         setTextForTest(minField, value);
+        flushSizeDebounceForTest();
     }
 
     void setMaxSizeForTest(String value) {
         setTextForTest(maxField, value);
+        flushSizeDebounceForTest();
+    }
+
+    void flushSizeDebounceForTest() {
+        if (sizeDebouncer != null) sizeDebouncer.flushNow();
     }
 
     void runPreviewNowForTest() throws Exception {

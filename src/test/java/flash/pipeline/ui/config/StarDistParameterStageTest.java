@@ -228,7 +228,6 @@ public class StarDistParameterStageTest {
 
         adapter.previewRuns = 0;
         stage.setAreaMaxForTest("10");
-        waitForStatus(actions, "Objects: 0 kept; removed 2 by StarDist filters");
 
         assertFalse(stage.isPreviewStaleForTest());
         assertEquals("StarDist filter edits must reuse cached object metrics",

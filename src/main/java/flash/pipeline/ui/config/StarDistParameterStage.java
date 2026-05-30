@@ -388,18 +388,26 @@ public final class StarDistParameterStage implements ConfigQcStage {
 
     void setAreaMinForTest(String value) {
         setTextForTest(areaMinField, value);
+        flushPostDetectionFilterDebounceForTest();
     }
 
     void setAreaMaxForTest(String value) {
         setTextForTest(areaMaxField, value);
+        flushPostDetectionFilterDebounceForTest();
     }
 
     void setQualityMinForTest(String value) {
         setTextForTest(qualityMinField, value);
+        flushPostDetectionFilterDebounceForTest();
     }
 
     void setIntensityMinForTest(String value) {
         setTextForTest(intensityMinField, value);
+        flushPostDetectionFilterDebounceForTest();
+    }
+
+    void flushPostDetectionFilterDebounceForTest() {
+        if (filterDebouncer != null) filterDebouncer.flushNow();
     }
 
     void runPreviewNowForTest() throws Exception {

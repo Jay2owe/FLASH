@@ -2,6 +2,7 @@ package flash.pipeline.ui.config;
 
 import flash.pipeline.cellpose.CellposeRuntime;
 import flash.pipeline.testutil.TestWait;
+import flash.pipeline.ui.preview.LabelMapStyler;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import flash.pipeline.ui.variations.ParameterCombo;
 import flash.pipeline.ui.variations.ParameterId;
@@ -18,7 +19,6 @@ import javax.swing.SwingUtilities;
 import javax.swing.text.JTextComponent;
 import java.awt.Component;
 import java.awt.Container;
-import java.awt.image.IndexColorModel;
 import java.lang.ref.WeakReference;
 import java.lang.reflect.Field;
 import java.util.Arrays;
@@ -221,9 +221,10 @@ public class CellposeParameterStageTest {
         RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
         RecordingActions actions = new RecordingActions();
         CellposeParameterStage stage = stage(store, sizeStore, adapter);
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
 
         stage.buildControls(context(), actions);
-        stage.onEnter(context(), new PreviewPairPanel("Original", "Adjusted"));
+        stage.onEnter(context(), pair);
         stage.runPreviewNowForTest();
         adapter.previewRuns = 0;
 
@@ -236,7 +237,9 @@ public class CellposeParameterStageTest {
         assertEquals("Objects: 1 kept; removed 1 small, 0 large",
                 stage.sizeCutoffSummaryForTest());
         assertFalse(actions.previewButtonStale);
-        assertRemovedLabelUsesCutoffColor(actions.adjustedPreview, 1, 0xe53935);
+        ImagePlus rendered = pair.duplicateCurrentObjectPreviewForComparison("Rendered object preview");
+        assertRgbPixel(rendered, 0, 0, 0x000000);
+        assertRgbPixel(rendered, 1, 0, LabelMapStyler.rgbForLabel(2));
 
         assertTrue(stage.lockIn(context()));
         assertEquals("2-Infinity", sizeStore.token);
@@ -609,16 +612,9 @@ public class CellposeParameterStageTest {
         }
     }
 
-    private static void assertRemovedLabelUsesCutoffColor(ImagePlus labelImage,
-                                                          int label,
-                                                          int expectedRgb) {
-        assertNotNull(labelImage);
-        assertTrue(labelImage.getProcessor().getColorModel() instanceof IndexColorModel);
-        IndexColorModel model = (IndexColorModel) labelImage.getProcessor().getColorModel();
-        int index = ((Math.max(1, label) - 1) % 255) + 1;
-        int actual = (model.getRed(index) << 16)
-                | (model.getGreen(index) << 8)
-                | model.getBlue(index);
+    private static void assertRgbPixel(ImagePlus image, int x, int y, int expectedRgb) {
+        assertNotNull(image);
+        int actual = image.getProcessor().getPixel(x, y) & 0xffffff;
         assertEquals(expectedRgb, actual);
     }
 

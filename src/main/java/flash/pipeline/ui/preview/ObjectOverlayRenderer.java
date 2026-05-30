@@ -157,38 +157,6 @@ public final class ObjectOverlayRenderer {
         return (int) Math.round(value);
     }
 
-    private static int labelRgb(ColorModel labelColorModel, ImageProcessor labels, int label) {
-        ColorModel model = labelColorModel != null
-                ? labelColorModel
-                : labels == null ? null : labels.getColorModel();
-        if (model instanceof IndexColorModel) {
-            IndexColorModel indexed = (IndexColorModel) model;
-            int index = ((Math.max(1, label) - 1) % 255) + 1;
-            int rgb = (indexed.getRed(index) << 16)
-                    | (indexed.getGreen(index) << 8)
-                    | indexed.getBlue(index);
-            int strongestChannel = Math.max(indexed.getRed(index),
-                    Math.max(indexed.getGreen(index), indexed.getBlue(index)));
-            if (strongestChannel > 16) {
-                return rgb;
-            }
-        }
-        return LabelMapStyler.rgbForLabel(label);
-    }
-
-    private static ColorModel colorModelForLabelMap(ImagePlus labelMap) {
-        if (labelMap == null) return null;
-        try {
-            ImageProcessor processor = labelMap.getProcessor();
-            if (processor != null && processor.getColorModel() != null) {
-                return processor.getColorModel();
-            }
-        } catch (RuntimeException ignored) {
-            // Fall through to default label colors.
-        }
-        return null;
-    }
-
     private static int scaledByte(double value, double min, double max) {
         if (!Double.isFinite(value)) return 0;
         double scaled = (value - min) / (max - min);

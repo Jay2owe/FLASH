@@ -5,7 +5,6 @@ import ij.ImageStack;
 import ij.measure.Calibration;
 import ij.measure.ResultsTable;
 import ij.process.ImageProcessor;
-import ij.process.LUT;
 
 import java.awt.Color;
 import java.util.Collections;
@@ -193,59 +192,6 @@ public final class ObjectSizeFilterPreview {
         return stats;
     }
 
-    public static void applyClassifiedLut(ImagePlus labelImage, Summary summary) {
-        applyClassifiedLut(labelImage, summary, null);
-    }
-
-    public static void applyClassifiedLut(ImagePlus labelImage,
-                                          Summary summary,
-                                          Map<Integer, Classification> extraClassesByLabel) {
-        if (labelImage == null) return;
-        Summary safeSummary = summary == null
-                ? summarize(null, labelImage, 0, Integer.MAX_VALUE, false)
-                : summary;
-        Map<Integer, Classification> classes = new HashMap<Integer, Classification>();
-        classes.putAll(safeSummary.classesByLabel);
-        if (extraClassesByLabel != null) {
-            for (Map.Entry<Integer, Classification> entry : extraClassesByLabel.entrySet()) {
-                if (entry.getValue() != null && entry.getValue() != Classification.KEPT) {
-                    classes.put(entry.getKey(), entry.getValue());
-                }
-            }
-        }
-        byte[] red = new byte[256];
-        byte[] green = new byte[256];
-        byte[] blue = new byte[256];
-        red[0] = 0;
-        green[0] = 0;
-        blue[0] = 0;
-        for (int i = 1; i < 256; i++) {
-            int rgb = LabelMapStyler.rgbForLabel(i);
-            red[i] = (byte) ((rgb >> 16) & 0xff);
-            green[i] = (byte) ((rgb >> 8) & 0xff);
-            blue[i] = (byte) (rgb & 0xff);
-        }
-        for (Map.Entry<Integer, Classification> entry : classes.entrySet()) {
-            if (entry.getValue() == Classification.KEPT) continue;
-            int label = entry.getKey().intValue();
-            int index = categoricalIndex(label);
-            int rgb = rgbForClassification(label, entry.getValue());
-            red[index] = (byte) ((rgb >> 16) & 0xff);
-            green[index] = (byte) ((rgb >> 8) & 0xff);
-            blue[index] = (byte) (rgb & 0xff);
-        }
-        labelImage.setDisplayRange(0, Math.max(1, Math.max(safeSummary.totalCount, maxDisplayValue(labelImage))));
-        labelImage.setLut(new LUT(red, green, blue));
-        labelImage.updateAndDraw();
-    }
-
-    public static int rgbForClassification(int label, Classification classification) {
-        if (label <= 0) return 0x000000;
-        if (classification == Classification.BELOW_MIN) return BELOW_MIN_RGB;
-        if (classification == Classification.ABOVE_MAX) return ABOVE_MAX_RGB;
-        return LabelMapStyler.rgbForLabel(label);
-    }
-
     private static int labelForRow(ResultsTable stats, int row) {
         if (stats != null) {
             try {
@@ -379,26 +325,6 @@ public final class ObjectSizeFilterPreview {
         double diameter = sphereEquivalentDiameter(Math.max(0, voxelCount));
         int pixels = (int) Math.round(12.0 + diameter * 5.0);
         return Math.max(14, Math.min(160, pixels));
-    }
-
-    private static int categoricalIndex(int label) {
-        return ((Math.max(1, label) - 1) % 255) + 1;
-    }
-
-    private static int maxDisplayValue(ImagePlus image) {
-        if (image == null || image.getStack() == null || image.getStackSize() < 1) {
-            return 1;
-        }
-        ImageStack stack = image.getStack();
-        double max = 0.0;
-        for (int i = 1; i <= stack.getSize(); i++) {
-            ImageProcessor processor = stack.getProcessor(i);
-            if (processor != null) {
-                max = Math.max(max, processor.getStats().max);
-            }
-        }
-        if (!Double.isFinite(max) || max < 1) return 1;
-        return (int) Math.round(max);
     }
 
     public static Color belowMinColor() {

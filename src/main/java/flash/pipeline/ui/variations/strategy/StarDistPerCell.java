@@ -153,9 +153,6 @@ public final class StarDistPerCell implements VariationStrategy {
         if (classes == null) {
             return fallbackCount;
         }
-        ObjectSizeFilterPreview.Summary allObjectsSummary =
-                ObjectSizeFilterPreview.summarize(stats, reference, 0, 0, false);
-        ObjectSizeFilterPreview.applyClassifiedLut(label, allObjectsSummary, classes);
         int total = stats == null ? fallbackCount : stats.size();
         return Math.max(0, total - classes.size());
     }

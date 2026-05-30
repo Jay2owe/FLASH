@@ -1,6 +1,7 @@
 package flash.pipeline.ui.config;
 
 import flash.pipeline.objects.ObjectsCounter3DWrapper;
+import flash.pipeline.ui.preview.LabelMapStyler;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import ij.ImagePlus;
 import ij.ImageStack;
@@ -9,7 +10,6 @@ import ij.process.ByteProcessor;
 import org.junit.Test;
 
 import javax.swing.JButton;
-import java.awt.image.IndexColorModel;
 import java.util.Arrays;
 
 import static org.junit.Assert.assertEquals;
@@ -37,7 +37,7 @@ public class ParticleSizeStageTest {
     }
 
     @Test
-    public void textFieldEditMarksPreviewStaleWithoutRunningObjectPreview() {
+    public void textFieldEditMarksPreviewStaleWithoutRunningObjectPreview() throws Exception {
         RecordingStore store = new RecordingStore("1-Infinity");
         RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
         RecordingActions actions = new RecordingActions();
@@ -89,9 +89,10 @@ public class ParticleSizeStageTest {
         RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
         RecordingActions actions = new RecordingActions();
         ParticleSizeStage stage = new ParticleSizeStage(store, adapter);
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
 
         stage.buildControls(context(), actions);
-        stage.onEnter(context(), new PreviewPairPanel("Original", "Adjusted"));
+        stage.onEnter(context(), pair);
         stage.runPreviewNowForTest();
         adapter.previewRuns = 0;
 
@@ -104,7 +105,9 @@ public class ParticleSizeStageTest {
         assertEquals("Objects: 1 kept; removed 1 small, 0 large",
                 stage.sizeCutoffSummaryForTest());
         assertFalse(actions.previewButtonStale);
-        assertRemovedLabelUsesCutoffColor(actions.adjustedPreview, 1, 0xe53935);
+        ImagePlus rendered = pair.duplicateCurrentObjectPreviewForComparison("Rendered object preview");
+        assertRgbPixel(rendered, 0, 0, 0x000000);
+        assertRgbPixel(rendered, 1, 0, LabelMapStyler.rgbForLabel(2));
     }
 
     @Test
@@ -352,16 +355,10 @@ public class ParticleSizeStageTest {
         }
     }
 
-    private static void assertRemovedLabelUsesCutoffColor(ImagePlus labelImage,
-                                                          int label,
-                                                          int expectedRgb) {
-        assertNotNull(labelImage);
-        assertTrue(labelImage.getProcessor().getColorModel() instanceof IndexColorModel);
-        IndexColorModel model = (IndexColorModel) labelImage.getProcessor().getColorModel();
-        int index = ((Math.max(1, label) - 1) % 255) + 1;
-        int actual = (model.getRed(index) << 16)
-                | (model.getGreen(index) << 8)
-                | model.getBlue(index);
+    private static void assertRgbPixel(ImagePlus image, int x, int y, int expectedRgb) {
+        assertNotNull(image);
+        int actual = image.getProcessor().getPixel(x, y) & 0xffffff;
         assertEquals(expectedRgb, actual);
     }
+
 }

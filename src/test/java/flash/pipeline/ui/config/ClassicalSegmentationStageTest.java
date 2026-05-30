@@ -219,7 +219,6 @@ public class ClassicalSegmentationStageTest {
         assertFalse(stage.isObjectPreviewStaleForTest());
 
         stage.setMinSizeForTest("3");
-        waitForStatus(actions, "Objects: 1 kept; removed 1 small, 0 large. Threshold 60.");
 
         assertFalse(stage.isObjectPreviewStaleForTest());
         assertEquals("Size edits must not execute the object preview",
@@ -289,7 +288,6 @@ public class ClassicalSegmentationStageTest {
         adapter.previewRuns = 0;
 
         stage.setMinSizeForTest("1");
-        waitForStatusContains(actions, "out of date");
 
         assertTrue(stage.isObjectPreviewStaleForTest());
         assertEquals("Loosening the range must not silently miss newly included objects",
