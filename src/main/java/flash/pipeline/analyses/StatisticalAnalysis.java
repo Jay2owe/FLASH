@@ -1634,7 +1634,7 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
                 }
                 int runIdIdx = result.columns.indexOf(RunIdCsv.RUN_ID_COLUMN);
                 if (runIdIdx < 0) {
-                    recordWarn("Source CSV lacks run_id; source_run_id will be empty for rows from "
+                    IJ.log("  Source CSV lacks run_id; source_run_id will be empty for rows from "
                             + csvFile.getName());
                 }
 
