@@ -101,6 +101,10 @@ public class FlashProjectLayoutTest {
                 layout.replayCommandsWriteDir());
         assertPath(new File(project, "FLASH/Results/Run Records/analysis_details"),
                 layout.analysisDetailsWriteDir());
+        assertPath(new File(project, "FLASH/Results/Run Records/runs"),
+                layout.runJsonlWriteDir());
+        assertPath(new File(project, "FLASH/Results/Run Records/replays"),
+                layout.replayWorkspacesWriteDir());
         assertPath(new File(project, "FLASH/Results/Summary.xlsx"), layout.summaryWorkbookWriteFile());
         assertPath(new File(project, "FLASH/Results/START_HERE.html"), layout.startHereWriteFile());
     }

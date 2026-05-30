@@ -40,9 +40,12 @@ public final class FlashProjectLayout {
     public static final String SETTINGS_SNAPSHOTS_DIR = "settings_snapshots";
     public static final String REPLAY_COMMANDS_DIR = "replay_commands";
     public static final String ANALYSIS_DETAILS_DIR = "analysis_details";
+    public static final String RUNS_DIR = "runs";
+    public static final String REPLAY_WORKSPACES_DIR = "replays";
     public static final String START_HERE_FILENAME = "START_HERE.html";
     public static final String RUN_HISTORY_FILENAME = "run_history.csv";
     public static final String QC_REPORT_FILENAME = "QC_Report.html";
+    public static final String STUDY_METADATA_FILENAME = "study.yaml";
     public static final String SETTINGS_DIR = ".settings";
     public static final String CONFIGURATION_DIR = "Config";
     public static final String PRESETS_DIR = "Presets";
@@ -195,6 +198,10 @@ public final class FlashProjectLayout {
         return new File(qcRoot(), QC_REPORT_FILENAME);
     }
 
+    public File qcStudyMetadataWriteFile() {
+        return new File(qcRoot(), STUDY_METADATA_FILENAME);
+    }
+
     public File qcOverlaysWriteDir() {
         return new File(qcRoot(), QC_OVERLAYS_DIR);
     }
@@ -217,6 +224,16 @@ public final class FlashProjectLayout {
 
     public File analysisDetailsWriteDir() {
         return new File(runRecordsRoot(), ANALYSIS_DETAILS_DIR);
+    }
+
+    /** Directory holding one JSON Lines file per analysis run record. */
+    public File runJsonlWriteDir() {
+        return new File(runRecordsRoot(), RUNS_DIR);
+    }
+
+    /** Directory holding fresh replay project roots produced by reproduce-verbatim. */
+    public File replayWorkspacesWriteDir() {
+        return new File(runRecordsRoot(), REPLAY_WORKSPACES_DIR);
     }
 
     public File summaryWorkbookWriteFile() {

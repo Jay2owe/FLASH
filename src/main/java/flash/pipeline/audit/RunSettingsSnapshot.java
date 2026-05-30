@@ -437,7 +437,8 @@ public final class RunSettingsSnapshot {
         return out;
     }
 
-    private static String flashVersion() {
+    /** Shared FLASH version lookup; reused by {@code flash.pipeline.runrecord.EnvironmentSnapshot}. */
+    public static String flashVersion() {
         Package pkg = RunSettingsSnapshot.class.getPackage();
         String version = pkg == null ? null : pkg.getImplementationVersion();
         if (version != null && !version.trim().isEmpty()) {
