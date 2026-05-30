@@ -1,5 +1,6 @@
 package flash.pipeline.runrecord;
 
+import flash.pipeline.io.FlashProjectLayout;
 import ij.IJ;
 
 import java.io.File;
@@ -107,12 +108,24 @@ public final class RunRecordIO {
      */
     public static List<RunSummary> readIndex(File runJsonlDir) {
         List<RunSummary> summaries = new ArrayList<RunSummary>();
+        collectIndex(runJsonlDir, summaries);
+        collectReplayIndexes(runJsonlDir, summaries);
+        Collections.sort(summaries, new Comparator<RunSummary>() {
+            @Override
+            public int compare(RunSummary a, RunSummary b) {
+                return Long.compare(b.startedAtMillis, a.startedAtMillis);
+            }
+        });
+        return summaries;
+    }
+
+    private static void collectIndex(File runJsonlDir, List<RunSummary> summaries) {
         if (runJsonlDir == null || !runJsonlDir.isDirectory()) {
-            return summaries;
+            return;
         }
         File[] files = runJsonlDir.listFiles();
         if (files == null) {
-            return summaries;
+            return;
         }
         for (File file : files) {
             if (file == null || !file.isFile() || !file.getName().endsWith(EXTENSION)) {
@@ -123,13 +136,34 @@ public final class RunRecordIO {
                 summaries.add(summary);
             }
         }
-        Collections.sort(summaries, new Comparator<RunSummary>() {
-            @Override
-            public int compare(RunSummary a, RunSummary b) {
-                return Long.compare(b.startedAtMillis, a.startedAtMillis);
+    }
+
+    private static void collectReplayIndexes(File runJsonlDir, List<RunSummary> summaries) {
+        if (runJsonlDir == null || summaries == null) {
+            return;
+        }
+        File runRecordsRoot = runJsonlDir.getParentFile();
+        File replaysDir = runRecordsRoot == null ? null
+                : new File(runRecordsRoot, FlashProjectLayout.REPLAY_WORKSPACES_DIR);
+        collectReplayIndexesRecursive(replaysDir, summaries);
+    }
+
+    private static void collectReplayIndexesRecursive(File replaysDir, List<RunSummary> summaries) {
+        if (replaysDir == null || !replaysDir.isDirectory()) {
+            return;
+        }
+        File[] children = replaysDir.listFiles();
+        if (children == null) {
+            return;
+        }
+        for (File child : children) {
+            if (child == null || !child.isDirectory()) {
+                continue;
             }
-        });
-        return summaries;
+            FlashProjectLayout layout = FlashProjectLayout.forDirectory(child.getAbsolutePath());
+            collectIndex(layout.runJsonlWriteDir(), summaries);
+            collectReplayIndexesRecursive(layout.replayWorkspacesWriteDir(), summaries);
+        }
     }
 
     /** True when a record with the given runId exists in the directory. */

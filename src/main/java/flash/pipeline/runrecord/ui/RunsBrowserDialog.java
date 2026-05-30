@@ -3,6 +3,8 @@ package flash.pipeline.runrecord.ui;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.project.ProjectFile;
 import flash.pipeline.project.ProjectFileIO;
+import flash.pipeline.replay.Replay;
+import flash.pipeline.replay.ReplayPlan;
 import flash.pipeline.runrecord.RunRecord;
 import flash.pipeline.runrecord.RunRecordIO;
 import flash.pipeline.runrecord.RunSummary;
@@ -61,6 +63,8 @@ public final class RunsBrowserDialog extends JDialog {
     private final JComboBox<String> statusFilter;
     private final JComboBox<RunsTableModel.DateRange> dateFilter;
     private final JButton viewSettingsButton = new JButton("View settings...");
+    private final JButton reproduceButton = new JButton("Reproduce verbatim");
+    private final JButton diffWithParentButton = new JButton("Diff with parent");
 
     public RunsBrowserDialog(Window owner, File projectRoot) {
         super(owner, "FLASH Runs", ModalityType.APPLICATION_MODAL);
@@ -238,9 +242,13 @@ public final class RunsBrowserDialog extends JDialog {
         viewSettingsButton.addActionListener(e -> showSettingsPopup());
         buttons.add(viewSettingsButton);
 
-        JButton reproduceButton = new JButton("Reproduce verbatim");
         reproduceButton.setEnabled(false);
+        reproduceButton.addActionListener(e -> reproduceSelectedRun());
         buttons.add(reproduceButton);
+
+        diffWithParentButton.setEnabled(false);
+        diffWithParentButton.addActionListener(e -> showDiffWithParent());
+        buttons.add(diffWithParentButton);
 
         JButton loadSettingsButton = new JButton("Load settings into dialog...");
         loadSettingsButton.setEnabled(false);
@@ -266,6 +274,8 @@ public final class RunsBrowserDialog extends JDialog {
         } else {
             detailPanel.showSummary(null);
             viewSettingsButton.setEnabled(false);
+            reproduceButton.setEnabled(false);
+            diffWithParentButton.setEnabled(false);
         }
     }
 
@@ -279,6 +289,10 @@ public final class RunsBrowserDialog extends JDialog {
         RunSummary summary = selectedSummary();
         detailPanel.showSummary(summary);
         viewSettingsButton.setEnabled(summary != null);
+        reproduceButton.setEnabled(summary != null);
+        diffWithParentButton.setEnabled(summary != null
+                && summary.parentRunId != null
+                && !summary.parentRunId.trim().isEmpty());
     }
 
     private RunSummary selectedSummary() {
@@ -341,8 +355,75 @@ public final class RunsBrowserDialog extends JDialog {
         JOptionPane.showMessageDialog(this, scroll, "Run settings", JOptionPane.PLAIN_MESSAGE);
     }
 
+    private void reproduceSelectedRun() {
+        RunRecord record = selectedRecord();
+        if (record == null) {
+            showWarning("No run record is available for replay.", "Reproduce verbatim");
+            return;
+        }
+        ReplayPlan plan = Replay.plan(record);
+        if (plan.status() == ReplayPlan.Status.BLOCKED) {
+            showWarning(joinLines(plan.messages()), "Reproduce verbatim");
+            return;
+        }
+        try {
+            Replay.execute(plan, this);
+            model.setRuns(RunRecordIO.readIndex(layout.runJsonlWriteDir()));
+            applyFilters();
+        } catch (RuntimeException e) {
+            showWarning(e.getMessage(), "Reproduce verbatim");
+        }
+    }
+
+    private void showDiffWithParent() {
+        RunRecord child = selectedRecord();
+        if (child == null || child.parentRunId == null || child.parentRunId.trim().isEmpty()) {
+            showWarning("The selected run has no parent run.", "Diff with parent");
+            return;
+        }
+        RunSummary parentSummary = findSummaryByRunId(child.parentRunId);
+        if (parentSummary == null || parentSummary.recordFile == null) {
+            showWarning("Parent run record was not found: " + child.parentRunId, "Diff with parent");
+            return;
+        }
+        RunRecord parent = RunRecordIO.readLatest(parentSummary.recordFile);
+        if (parent == null) {
+            showWarning("Parent run record could not be decoded.", "Diff with parent");
+            return;
+        }
+        RunDiffPanel panel = new RunDiffPanel(parent, child);
+        panel.setPreferredSize(new Dimension(820, 560));
+        JOptionPane.showMessageDialog(this, panel, "Diff with parent", JOptionPane.PLAIN_MESSAGE);
+    }
+
+    private RunSummary findSummaryByRunId(String runId) {
+        if (runId == null || runId.trim().isEmpty()) {
+            return null;
+        }
+        List<RunSummary> summaries = RunRecordIO.readIndex(layout.runJsonlWriteDir());
+        for (RunSummary summary : summaries) {
+            if (summary != null && runId.equals(summary.runId)) {
+                return summary;
+            }
+        }
+        return null;
+    }
+
     private void showWarning(String message, String title) {
         JOptionPane.showMessageDialog(this, message, title, JOptionPane.WARNING_MESSAGE);
+    }
+
+    private static String joinLines(List<String> lines) {
+        StringBuilder out = new StringBuilder();
+        if (lines != null) {
+            for (String line : lines) {
+                if (out.length() > 0) {
+                    out.append('\n');
+                }
+                out.append(line);
+            }
+        }
+        return out.toString();
     }
 
     private boolean legacySidecarsPresent() {

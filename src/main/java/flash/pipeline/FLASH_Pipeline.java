@@ -16,7 +16,9 @@ import flash.pipeline.cellpose.CellposeRuntime;
 import flash.pipeline.cli.CLIArgumentParser;
 import flash.pipeline.cli.CLIConfig;
 import flash.pipeline.decontamination.SpectralDecontaminationAnalysis;
+import flash.pipeline.execution.AnalysisRegistry;
 import flash.pipeline.execution.AnalysisRunCoordinator;
+import flash.pipeline.execution.RunResult;
 import flash.pipeline.help.AnalysisHelpCatalog;
 import flash.pipeline.help.AnalysisHelpDialog;
 import flash.pipeline.help.AnalysisHelpTopic;
@@ -53,6 +55,7 @@ import flash.pipeline.runtime.PluginInstallGuard;
 
 import flash.pipeline.project.ProjectBuilderDialog;
 import flash.pipeline.project.RecentProjectsStore;
+import flash.pipeline.runrecord.LoadedRunParameters;
 
 import ij.IJ;
 import ij.Macro;
@@ -480,6 +483,98 @@ public class FLASH_Pipeline implements PlugIn {
         writeCliStatus(runDir, failedAnalyses.isEmpty(), failedAnalyses, null);
         releaseImageCache();
         IJ.log("[CLI] Pipeline finished. Open FLASH/Results/START_HERE.html to review outputs.");
+    }
+
+    /**
+     * Replay-only CLI entry. It deliberately executes only the selected
+     * analysis rows from the macro options; auto-aggregation is recorded as its
+     * own run and should be replayed from that run record when needed.
+     */
+    public List<RunResult> runReplayCli(String macroOptions,
+                                        String parentRunId,
+                                        Map<String, Object> replayParameters) {
+        cliInvocation = true;
+        configureFeatureDependencyGate();
+        CLIConfig cfg = CLIArgumentParser.parse(macroOptions);
+        if (cfg == null) {
+            IJ.log("[Replay] Could not parse replay CLI options.");
+            return new ArrayList<RunResult>();
+        }
+        cliConfig = cfg;
+
+        directory = cfg.getDirectory();
+        headlessMode = cfg.isHeadless();
+        parallelProcessing = cfg.isParallel();
+        parallelThreadCount = cfg.getThreads();
+        verboseLogging = cfg.isVerbose();
+        overwriteBehavior = cfg.getOverwriteBehavior();
+        autoAggregate = false;
+        generateQcReport = cfg.isQcReport();
+        useTifCache = cfg.isTifCache();
+        loaderThreadCount = cfg.getLoaderThreads();
+        loaderPercent = cfg.getLoaderPercent();
+        gpuPermits = cfg.getGpuPermits();
+        GpuConcurrency.setUserOverride(gpuPermits);
+
+        File runDir = new File(directory);
+        if (!runDir.isDirectory()) {
+            IJ.log("[Replay] Directory does not exist or is not a directory: " + directory);
+            return new ArrayList<RunResult>();
+        }
+        if (!confirmInputSourceAndWarn(false)) {
+            return new ArrayList<RunResult>();
+        }
+
+        initAnalyses();
+        QualityReport qualityReport = createQualityReportForRun(
+                directory, generateQcReport, headlessMode, parallelProcessing,
+                parallelThreadCount, verboseLogging, overwriteBehavior);
+
+        List<RunResult> results = new ArrayList<RunResult>();
+        boolean[] selections = cfg.getSelectedAnalyses();
+        for (int i = 0; i < selections.length; i++) {
+            if (!selections[i]) {
+                continue;
+            }
+            Analysis analysis = analysisMap.get(i);
+            if (analysis == null) {
+                IJ.log("[Replay] Analysis not implemented for index " + i);
+                continue;
+            }
+            AnalysisRegistry registry = AnalysisRegistry.forIndex(i);
+            if (registry == null) {
+                IJ.log("[Replay] Analysis index is not registered: " + i);
+                continue;
+            }
+            IJ.log("[Replay] Running: " + registry.label());
+            configureAnalysis(analysis, i, true, qualityReport);
+            LoadedRunParameters.Result adapterResult =
+                    registry.applyReplayParameters(analysis, replayParameters);
+            if (adapterResult.hasIgnoredKeys()) {
+                IJ.log("[Replay] Ignored replay parameter keys for "
+                        + registry.analysisKey() + ": " + adapterResult.getIgnoredKeys());
+            }
+            BinSetupDispatcher.clearLastFieldSources();
+            try {
+                final Analysis selectedAnalysis = analysis;
+                final String runDirectory = directory;
+                RunResult result = new AnalysisRunCoordinator().run(selectedAnalysis, i, registry.label(),
+                        runDirectory, cliConfig, replayParameters, parentRunId, new Callable<Void>() {
+                            @Override public Void call() {
+                                selectedAnalysis.execute(runDirectory);
+                                return null;
+                            }
+                        });
+                results.add(result);
+            } finally {
+                resetBioFormatsWindowless();
+            }
+        }
+
+        PostRunSummary.writeIfPossible(directory);
+        writeStartHereIfPossible(directory);
+        releaseImageCache();
+        return results;
     }
 
     private static void writeStartHereIfPossible(String directory) {
