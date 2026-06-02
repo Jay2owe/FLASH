@@ -36,6 +36,20 @@ public final class IoUtils {
         }
     }
 
+    private static final FileMover DEFAULT_FILE_MOVER = new FileMover() {
+        @Override
+        public void move(Path source, Path target, CopyOption... options) throws IOException {
+            Files.move(source, target, options);
+        }
+    };
+
+    private static final Sleeper DEFAULT_SLEEPER = new Sleeper() {
+        @Override
+        public void sleep(long millis) throws InterruptedException {
+            Thread.sleep(millis);
+        }
+    };
+
     /**
      * Move a completed sibling temp file over its target. The first attempt is
      * atomic; if Windows/cloud-sync folders reject that as a generic
@@ -43,17 +57,57 @@ public final class IoUtils {
      * clearer locked-file error.
      */
     public static void moveReplacing(Path source, Path target) throws IOException {
-        moveReplacing(source, target, new FileMover() {
-            @Override
-            public void move(Path source, Path target, CopyOption... options) throws IOException {
-                Files.move(source, target, options);
+        moveReplacing(source, target, DEFAULT_FILE_MOVER, DEFAULT_SLEEPER);
+    }
+
+    /**
+     * Commit a freshly written sibling temp file over {@code target}, robust
+     * against Windows + cloud-sync (Dropbox/OneDrive) locks. First attempts an
+     * atomic move with retry/backoff ({@link #moveReplacing}); if the
+     * destination stays locked against rename/delete, falls back to an in-place
+     * truncating write of the temp file's bytes. An in-place write only needs
+     * write access (not delete/rename of the directory entry), so it succeeds
+     * where the move cannot. The fallback is not atomic and reads the whole temp
+     * file into memory, so use this only for small files (configs, manifests,
+     * presets, CSV/JSON/YAML/HTML). For large binaries (images, zips, datasets)
+     * use {@link #moveReplacing} instead. The temp file is always removed.
+     */
+    public static void commitReplacingSmallFile(Path temp, Path target) throws IOException {
+        commitReplacingSmallFile(temp, target, DEFAULT_FILE_MOVER, DEFAULT_SLEEPER);
+    }
+
+    static void commitReplacingSmallFile(Path temp, Path target,
+                                         FileMover mover, Sleeper sleeper) throws IOException {
+        if (temp == null) throw new IOException("temp path is null");
+        if (target == null) throw new IOException("target path is null");
+        try {
+            moveReplacing(temp, target, mover, sleeper);
+        } catch (IOException moveFailure) {
+            // The atomic move kept failing, usually because Windows or sync
+            // software is holding the directory entry. Back up the current
+            // small text file before the non-atomic truncating fallback.
+            try {
+                if (Files.isRegularFile(target)) {
+                    Files.copy(target,
+                            target.resolveSibling(target.getFileName().toString() + ".bak"),
+                            StandardCopyOption.REPLACE_EXISTING);
+                }
+            } catch (IOException ignored) {
+                // Best effort only. The fallback write is still the recovery path.
             }
-        }, new Sleeper() {
-            @Override
-            public void sleep(long millis) throws InterruptedException {
-                Thread.sleep(millis);
+            try {
+                Files.write(target, Files.readAllBytes(temp));
+            } catch (IOException inPlaceFailure) {
+                inPlaceFailure.addSuppressed(moveFailure);
+                throw inPlaceFailure;
             }
-        });
+        } finally {
+            try {
+                Files.deleteIfExists(temp);
+            } catch (IOException ignored) {
+                // Leftover temp is harmless; the next write overwrites it.
+            }
+        }
     }
 
     static void moveReplacing(Path source, Path target,

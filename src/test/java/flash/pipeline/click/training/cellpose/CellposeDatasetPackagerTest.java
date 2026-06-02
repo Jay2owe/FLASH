@@ -66,6 +66,10 @@ public class CellposeDatasetPackagerTest {
                 })),
                 "cyto3");
 
+        assertEquals(root.resolve("FLASH").resolve("Config").resolve("Training Datasets")
+                        .resolve("Cellpose").resolve("negative").toAbsolutePath().normalize(),
+                result.outputDir.toAbsolutePath().normalize());
+        assertFalse(Files.exists(root.resolve("Configuration")));
         ImagePlus mask = IJ.openImage(result.outputDir.resolve("Image1_C2_z001_masks.tif").toString());
         try {
             assertEquals(1, mask.getProcessor().get(0, 0));
@@ -199,8 +203,7 @@ public class CellposeDatasetPackagerTest {
     @Test
     public void outputDirIsAtomic() throws Exception {
         Path root = projectRoot();
-        Path existing = root.resolve("Configuration")
-                .resolve("Training Datasets")
+        Path existing = FlashProjectLayout.forDirectory(root.toString()).trainingDatasetsRoot().toPath()
                 .resolve("Cellpose")
                 .resolve("atomic");
         Files.createDirectories(existing);

@@ -33,8 +33,9 @@ public final class PluginInstallGuard {
                 "This Fiji install is using a stale or partial FLASH plugin JAR.\n"
                         + "Missing runtime class: " + missingClass + "\n\n"
                         + "Close Fiji, delete every FLASH-*.jar (and any legacy IHF-Analysis-Pipeline-*.jar)\n"
-                        + "from Fiji's plugins folder, copy one fresh plugin JAR into plugins/, and restart Fiji.\n"
-                        + "Do not leave -shaded, -sources, -tests, or original-* copies beside the live jar.";
+                        + "from Fiji's plugins folder, move FLASH backup JARs out of Fiji.app,\n"
+                        + "copy one fresh plugin JAR into plugins/, and restart Fiji.\n"
+                        + "Do not leave -shaded, -sources, -tests, original-*, or backup copies in Fiji.app.";
 
         IJ.log(analysisName + ": " + message.replace('\n', ' '));
         IJ.error(analysisName, message);

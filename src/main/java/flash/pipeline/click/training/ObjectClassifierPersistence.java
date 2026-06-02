@@ -1,6 +1,7 @@
 package flash.pipeline.click.training;
 
 import flash.pipeline.segmentation.catalog.ModelEntry;
+import flash.pipeline.segmentation.catalog.ModelCatalogIO;
 import smile.classification.RandomForest;
 
 import java.io.IOException;
@@ -29,8 +30,25 @@ public final class ObjectClassifierPersistence {
             throw new IllegalArgumentException("projectRoot must not be null");
         }
         requireSafeModelKey(modelKey);
+        return modelPathInCatalogDirectory(ModelCatalogIO.catalogDirectory(projectRoot), modelKey);
+    }
+
+    public static Path legacyModelPath(Path projectRoot, String modelKey) {
+        if (projectRoot == null) {
+            throw new IllegalArgumentException("projectRoot must not be null");
+        }
+        requireSafeModelKey(modelKey);
         return projectRoot.resolve("Configuration")
                 .resolve("Segmentation Models")
+                .resolve("files")
+                .resolve(modelKey)
+                .resolve(MODEL_FILENAME)
+                .toAbsolutePath()
+                .normalize();
+    }
+
+    private static Path modelPathInCatalogDirectory(Path catalogDirectory, String modelKey) {
+        return catalogDirectory
                 .resolve("files")
                 .resolve(modelKey)
                 .resolve(MODEL_FILENAME)

@@ -15,10 +15,8 @@ import flash.pipeline.ui.wizard.JsonIO;
 import java.awt.Rectangle;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -123,13 +121,9 @@ public class VariationStateStore {
             Path temp = stateFile.resolveSibling(stateFile.getFileName().toString() + ".tmp");
             Files.write(temp, (JsonIO.write(toJsonObject(activeState)) + "\n")
                     .getBytes(StandardCharsets.UTF_8));
-            try {
-                Files.move(temp, stateFile,
-                        StandardCopyOption.REPLACE_EXISTING,
-                        StandardCopyOption.ATOMIC_MOVE);
-            } catch (AtomicMoveNotSupportedException e) {
-                Files.move(temp, stateFile, StandardCopyOption.REPLACE_EXISTING);
-            }
+            // Retry/backoff move, then in-place rewrite if the destination stays
+            // locked against rename (Windows + Dropbox/OneDrive). Safe: small JSON.
+            flash.pipeline.io.IoUtils.commitReplacingSmallFile(temp, stateFile);
         } catch (IOException ignored) {
             // Resume state is best-effort and must not break parameter previews.
         }

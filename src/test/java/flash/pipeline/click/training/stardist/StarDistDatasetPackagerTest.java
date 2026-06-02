@@ -42,6 +42,10 @@ public class StarDistDatasetPackagerTest {
                 .packageDataset(root, "session", 2, clicks,
                         provider(raw), provider(labels));
 
+        assertEquals(root.resolve("FLASH").resolve("Config").resolve("Training Datasets")
+                        .resolve("StarDist").resolve("session").toAbsolutePath().normalize(),
+                result.outputDir.toAbsolutePath().normalize());
+        assertFalse(Files.exists(root.resolve("Configuration")));
         assertEquals(1, result.imagesWritten);
         assertEquals(1, result.negativeLabelsRemoved);
         ImagePlus exported = open(result.outputDir.resolve("labels")
@@ -143,8 +147,7 @@ public class StarDistDatasetPackagerTest {
     @Test
     public void outputDirIsAtomic() throws Exception {
         Path root = temp.newFolder("atomic").toPath();
-        Path existing = root.resolve("Configuration")
-                .resolve("Training Datasets")
+        Path existing = FlashProjectLayout.forDirectory(root.toString()).trainingDatasetsRoot().toPath()
                 .resolve("StarDist")
                 .resolve("session");
         Files.createDirectories(existing);

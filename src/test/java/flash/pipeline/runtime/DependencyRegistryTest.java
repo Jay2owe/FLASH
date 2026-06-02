@@ -9,6 +9,7 @@ import org.junit.rules.TemporaryFolder;
 import javax.tools.JavaCompiler;
 import javax.tools.ToolProvider;
 import java.io.File;
+import java.io.FileOutputStream;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -24,6 +25,8 @@ import java.util.Hashtable;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.jar.JarEntry;
+import java.util.jar.JarOutputStream;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -117,7 +120,7 @@ public class DependencyRegistryTest {
 
     @Test
     public void specFlagsMatchDependencyAuditTable() {
-        assertFlags(DependencyId.PLUGIN_JAR_INTEGRITY, false, true, false);
+        assertFlags(DependencyId.PLUGIN_JAR_INTEGRITY, false, true, true);
         assertFlags(DependencyId.IMAGEJ_RUNTIME, false, true, false);
         assertFlags(DependencyId.BIO_FORMATS_RUNTIME, true, true, true);
         assertFlags(DependencyId.OBJECTS_COUNTER_3D, true, true, true);
@@ -137,6 +140,64 @@ public class DependencyRegistryTest {
         assertFlags(DependencyId.JTRANSFORMS_RUNTIME, true, true, true);
         assertFlags(DependencyId.ORIENTATIONJ_RUNTIME, true, true, true);
         assertFlags(DependencyId.JTS_CORE, true, true, true);
+    }
+
+    @Test
+    public void pluginJarIntegrityAcceptsSingleLiveJarInPluginsRoot() throws Exception {
+        File fijiDir = temp.newFolder("single-live-flash-jar");
+        File plugins = new File(fijiDir, "plugins");
+        assertTrue(plugins.mkdirs());
+        writeJar(plugins, "FLASH-4.0.0.jar", requiredFlashPluginEntries());
+
+        DependencyStatus status = DependencyRegistry.get(DependencyId.PLUGIN_JAR_INTEGRITY)
+                .probe(newProbeContext(getClass().getClassLoader(), fijiDir));
+
+        assertTrue(status.getDetailMessage(), status.isPresent());
+        assertTrue(status.getDetailMessage(), status.getDetailMessage().contains("FLASH-4.0.0.jar"));
+    }
+
+    @Test
+    public void pluginJarIntegrityReportsFlashBackupsAnywhereUnderFijiApp() throws Exception {
+        File fijiDir = temp.newFolder("nested-flash-jar-backups");
+        File plugins = new File(fijiDir, "plugins");
+        File backup = new File(fijiDir, "FLASH-deploy-backups/20260507-124855");
+        assertTrue(plugins.mkdirs());
+        assertTrue(backup.mkdirs());
+        writeJar(plugins, "FLASH-4.0.0.jar", requiredFlashPluginEntries());
+        touch(backup, "FLASH-3.0.0.jar");
+
+        DependencyStatus status = DependencyRegistry.get(DependencyId.PLUGIN_JAR_INTEGRITY)
+                .probe(newProbeContext(getClass().getClassLoader(), fijiDir));
+
+        assertTrue(status.getDetailMessage(), status.isError());
+        assertTrue(status.getDetailMessage(), status.getDetailMessage().contains("outside Fiji plugins/ root"));
+        assertTrue(status.getDetailMessage(), status.getDetailMessage()
+                .contains("FLASH-deploy-backups"));
+        assertTrue(status.getDetailMessage(), status.getDetailMessage()
+                .contains("FLASH-3.0.0.jar"));
+    }
+
+    @Test
+    public void pluginJarIntegrityReportsLiveJarMissingNestedPreflightClass() throws Exception {
+        File fijiDir = temp.newFolder("partial-live-flash-jar");
+        File plugins = new File(fijiDir, "plugins");
+        assertTrue(plugins.mkdirs());
+        writeJar(plugins, "FLASH-4.0.0.jar",
+                "flash/pipeline/FLASH_Pipeline.class",
+                "flash/pipeline/intelligence/PreFlightChecks.class",
+                "flash/pipeline/recipes/PipelineRecipeIO.class",
+                "pipeline_recipes/standard-3d-intensity.json",
+                "pipeline_recipes/quick-cell-count.json",
+                "pipeline_recipes/full-pipeline.json");
+
+        DependencyStatus status = DependencyRegistry.get(DependencyId.PLUGIN_JAR_INTEGRITY)
+                .probe(newProbeContext(getClass().getClassLoader(), fijiDir));
+
+        assertTrue(status.getDetailMessage(), status.isError());
+        assertTrue(status.getDetailMessage(), status.getDetailMessage()
+                .contains("PreFlightChecks$DirectoryFileScan.class"));
+        assertTrue(status.getDetailMessage(), status.getDetailMessage()
+                .contains("replace it with a freshly built FLASH JAR"));
     }
 
     @Test
@@ -387,6 +448,33 @@ public class DependencyRegistryTest {
     private static File touch(File dir, String name) throws Exception {
         File file = new File(dir, name);
         assertTrue(file.createNewFile());
+        return file;
+    }
+
+    private static String[] requiredFlashPluginEntries() {
+        return new String[] {
+                "flash/pipeline/FLASH_Pipeline.class",
+                "flash/pipeline/intelligence/PreFlightChecks.class",
+                "flash/pipeline/intelligence/PreFlightChecks$DirectoryFileScan.class",
+                "flash/pipeline/recipes/PipelineRecipeIO.class",
+                "pipeline_recipes/standard-3d-intensity.json",
+                "pipeline_recipes/quick-cell-count.json",
+                "pipeline_recipes/full-pipeline.json"
+        };
+    }
+
+    private static File writeJar(File dir, String name, String... entries) throws Exception {
+        File file = new File(dir, name);
+        JarOutputStream out = new JarOutputStream(new FileOutputStream(file));
+        try {
+            for (String entry : entries) {
+                out.putNextEntry(new JarEntry(entry));
+                out.write(new byte[] {0});
+                out.closeEntry();
+            }
+        } finally {
+            out.close();
+        }
         return file;
     }
 

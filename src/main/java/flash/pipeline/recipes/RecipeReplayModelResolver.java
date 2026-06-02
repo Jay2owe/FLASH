@@ -187,12 +187,16 @@ public final class RecipeReplayModelResolver {
             }
         }
 
-        Path legacyPath = ObjectClassifierPersistence.modelPath(root, key);
+        Path defaultPath = ObjectClassifierPersistence.modelPath(root, key);
+        if (Files.isRegularFile(defaultPath)) {
+            return defaultPath;
+        }
+        Path legacyPath = ObjectClassifierPersistence.legacyModelPath(root, key);
         if (Files.isRegularFile(legacyPath)) {
             return legacyPath;
         }
         throw new IllegalArgumentException("Trained RF model '" + key
-                + "' not found in catalog and expected file does not exist: " + legacyPath
+                + "' not found in catalog and expected file does not exist: " + defaultPath
                 + ". Please retrain/import it via Manage Models or select a different model.");
     }
 

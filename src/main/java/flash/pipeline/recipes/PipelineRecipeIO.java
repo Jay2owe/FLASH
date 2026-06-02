@@ -6,11 +6,9 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
 import java.util.Locale;
 
 /**
@@ -104,12 +102,9 @@ public final class PipelineRecipeIO {
     }
 
     private static void moveAtomically(Path source, Path target) throws IOException {
-        try {
-            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING,
-                    StandardCopyOption.ATOMIC_MOVE);
-        } catch (AtomicMoveNotSupportedException e) {
-            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
-        }
+        // Retry/backoff move, then in-place rewrite if the destination stays
+        // locked against rename (Windows + Dropbox/OneDrive). Safe: small recipe.
+        flash.pipeline.io.IoUtils.commitReplacingSmallFile(source, target);
     }
 
     private static String sanitizeFileToken(String raw) {

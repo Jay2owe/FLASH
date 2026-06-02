@@ -50,9 +50,7 @@ import java.awt.event.ActionListener;
 import java.io.File;
 import java.io.IOException;
 import java.io.PrintWriter;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
-import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -2513,13 +2511,9 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
             } finally {
                 pw.close();
             }
-            try {
-                Files.move(tmpFile.toPath(), outFile.toPath(),
-                        StandardCopyOption.REPLACE_EXISTING,
-                        StandardCopyOption.ATOMIC_MOVE);
-            } catch (AtomicMoveNotSupportedException e) {
-                Files.move(tmpFile.toPath(), outFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
-            }
+            // Retry/backoff move, then in-place rewrite if the destination stays
+            // locked against rename (Windows + Dropbox/OneDrive). Safe: CSV text.
+            flash.pipeline.io.IoUtils.commitReplacingSmallFile(tmpFile.toPath(), outFile.toPath());
             moved = true;
             IJ.log("Saved: " + outFile.getAbsolutePath());
             recordOutput(outFile, "csv");

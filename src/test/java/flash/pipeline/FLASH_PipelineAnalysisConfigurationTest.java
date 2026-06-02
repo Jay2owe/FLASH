@@ -2,6 +2,7 @@ package flash.pipeline;
 
 import flash.pipeline.analyses.Analysis;
 import flash.pipeline.analyses.CreateBinFileAnalysis;
+import flash.pipeline.analyses.SplitAndMergeImageChannelsAnalysis;
 import flash.pipeline.bin.BinSetupDispatcher;
 import flash.pipeline.report.QualityReport;
 import org.junit.Test;
@@ -138,6 +139,23 @@ public class FLASH_PipelineAnalysisConfigurationTest {
         headless.setAccessible(true);
         assertFalse("Set Up Configuration must not be skipped by the GUI hide-windows default",
                 headless.getBoolean(analysis));
+    }
+
+    @Test
+    public void configureAnalysis_opensSplitMergeDialogInSingleGuiRunEvenWhenHideWindowsDefaultIsOn() throws Exception {
+        FLASH_Pipeline pipeline = new FLASH_Pipeline();
+        SplitAndMergeImageChannelsAnalysis analysis = new SplitAndMergeImageChannelsAnalysis();
+
+        pipeline.configureAnalysis(analysis, FLASH_Pipeline.IDX_SPLIT_MERGE, false, new QualityReport());
+
+        Field headless = SplitAndMergeImageChannelsAnalysis.class.getDeclaredField("headless");
+        headless.setAccessible(true);
+        Field suppressDialogs = SplitAndMergeImageChannelsAnalysis.class.getDeclaredField("suppressDialogs");
+        suppressDialogs.setAccessible(true);
+        assertFalse("Single GUI Split/Merge run must open its setup dialog, not headless defaults",
+                headless.getBoolean(analysis));
+        assertFalse("Single GUI Split/Merge run must not suppress its setup dialog",
+                suppressDialogs.getBoolean(analysis));
     }
 
     @Test

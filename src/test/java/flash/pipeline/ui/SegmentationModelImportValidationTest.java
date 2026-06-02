@@ -1,6 +1,7 @@
 package flash.pipeline.ui;
 
 import flash.pipeline.segmentation.catalog.ModelEntry;
+import flash.pipeline.segmentation.catalog.ModelCatalogIO;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -30,8 +31,9 @@ public class SegmentationModelImportValidationTest {
         ModelEntry added = controller.addStarDistModel(source, "SavedModel", null, null);
 
         assertTrue(added.filePath.isPresent());
-        assertTrue(Files.isRegularFile(root.resolve("Configuration")
-                .resolve("Segmentation Models").resolve(added.filePath.get())));
+        assertTrue(Files.isRegularFile(ModelCatalogIO.catalogDirectory(root)
+                .resolve(added.filePath.get())));
+        assertFalse(Files.exists(root.resolve("Configuration")));
     }
 
     @Test
@@ -45,8 +47,8 @@ public class SegmentationModelImportValidationTest {
         ModelEntry added = controller.addStarDistModel(source, "CSBDeep", null, null);
 
         assertTrue(added.filePath.isPresent());
-        assertTrue(Files.isRegularFile(root.resolve("Configuration")
-                .resolve("Segmentation Models").resolve(added.filePath.get())));
+        assertTrue(Files.isRegularFile(ModelCatalogIO.catalogDirectory(root)
+                .resolve(added.filePath.get())));
     }
 
     @Test
@@ -64,8 +66,7 @@ public class SegmentationModelImportValidationTest {
         }
         assertTrue(controller.list(ModelEntry.Engine.STARDIST,
                 ModelEntry.Source.USER_IMPORTED).isEmpty());
-        assertFalse(Files.exists(root.resolve("Configuration")
-                .resolve("Segmentation Models").resolve("files")));
+        assertFalse(Files.exists(ModelCatalogIO.catalogDirectory(root).resolve("files")));
     }
 
     @Test

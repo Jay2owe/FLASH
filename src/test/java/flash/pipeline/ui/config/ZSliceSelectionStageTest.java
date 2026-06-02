@@ -11,6 +11,7 @@ import org.junit.Test;
 
 import java.awt.Component;
 import java.awt.Container;
+import java.awt.GridBagLayout;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -20,6 +21,7 @@ import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
@@ -73,6 +75,68 @@ public class ZSliceSelectionStageTest {
         assertTrue(labels.contains("End"));
         assertTrue(labels.contains("Action"));
         assertFalse(labels.contains("Image 1 / 1: Series 1"));
+    }
+
+    @Test
+    public void rangeControlsUseSeparateGridRows() {
+        RecordingStore store = new RecordingStore();
+        ZSliceSelectionStage stage = stage(metas(30), store, null);
+        ConfigQcContext context = contextFor(metas(30));
+
+        Component controls = stage.buildControls(context, new RecordingActions());
+
+        assertEquals(0, gridYOfLabel(controls, "Start"));
+        assertEquals(1, gridYOfLabel(controls, "End"));
+        assertEquals(2, gridYOfLabel(controls, "Action"));
+    }
+
+    @Test
+    public void actionListOffersLargestRangeThatFitsEveryImage() {
+        RecordingStore store = new RecordingStore();
+        ZSliceSelectionStage stage = stage(metas(30, 19, 24), store, null);
+        ConfigQcContext context = contextFor(metas(30, 19, 24));
+
+        Component controls = stage.buildControls(context, new RecordingActions());
+
+        assertTrue(comboItems(controls).contains(ZSliceSelectionStage.ACTION_APPLY_MAX_COMMON));
+    }
+
+    @Test
+    public void acceptsCombinedRangeTypedInStartField() {
+        RecordingStore store = new RecordingStore();
+        ZSliceSelectionStage stage = stage(metas(10), store, null);
+        ConfigQcContext context = contextFor(metas(10));
+        stage.buildControls(context, new RecordingActions());
+        stage.onEnter(context, new PreviewPairPanel("Original", "Adjusted"));
+
+        stage.setRangeForTest("3-8", "10");
+
+        assertTrue(stage.lockIn(context));
+        assertEquals("3-8", store.selections.get(Integer.valueOf(0)).range.toToken());
+    }
+
+    @Test
+    public void largestCommonRangeActionWritesEveryImageAndFinishes() {
+        List<SeriesMeta> metas = metas(30, 19, 24);
+        RecordingStore store = new RecordingStore();
+        RecordingActions actions = new RecordingActions();
+        ZSliceSelectionStage stage = stage(metas, store, null);
+        ConfigQcContext context = contextFor(metas);
+        stage.buildControls(context, actions);
+        stage.onEnter(context, new PreviewPairPanel("Original", "Adjusted"));
+
+        stage.setRangeForTest("99", "100");
+        stage.setActionForTest(ZSliceSelectionStage.ACTION_APPLY_MAX_COMMON);
+
+        assertTrue(stage.lockIn(context));
+        assertEquals("1-19", store.selections.get(Integer.valueOf(0)).range.toToken());
+        assertEquals("1-19", store.selections.get(Integer.valueOf(1)).range.toToken());
+        assertEquals("1-19", store.selections.get(Integer.valueOf(2)).range.toToken());
+        assertEquals(30, store.selections.get(Integer.valueOf(0)).totalSlices);
+        assertEquals(19, store.selections.get(Integer.valueOf(1)).totalSlices);
+        assertEquals(24, store.selections.get(Integer.valueOf(2)).totalSlices);
+        assertEquals(Integer.valueOf(3), context.consumeRequestedNextImageIndex());
+        assertTrue(actions.status.contains("1-19"));
     }
 
     @Test
@@ -190,6 +254,55 @@ public class ZSliceSelectionStageTest {
                 collectLabels(children[i], labels);
             }
         }
+    }
+
+    private static int gridYOfLabel(Component component, String text) {
+        javax.swing.JLabel label = findLabel(component, text);
+        assertNotNull(label);
+        Container parent = label.getParent();
+        assertNotNull(parent);
+        assertTrue(parent.getLayout() instanceof GridBagLayout);
+        return ((GridBagLayout) parent.getLayout()).getConstraints(label).gridy;
+    }
+
+    private static javax.swing.JLabel findLabel(Component component, String text) {
+        if (component instanceof javax.swing.JLabel
+                && text.equals(((javax.swing.JLabel) component).getText())) {
+            return (javax.swing.JLabel) component;
+        }
+        if (component instanceof Container) {
+            Component[] children = ((Container) component).getComponents();
+            for (int i = 0; i < children.length; i++) {
+                javax.swing.JLabel found = findLabel(children[i], text);
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    private static List<String> comboItems(Component component) {
+        javax.swing.JComboBox<?> combo = findCombo(component);
+        assertNotNull(combo);
+        List<String> items = new ArrayList<String>();
+        for (int i = 0; i < combo.getItemCount(); i++) {
+            Object item = combo.getItemAt(i);
+            items.add(item == null ? "" : item.toString());
+        }
+        return items;
+    }
+
+    private static javax.swing.JComboBox<?> findCombo(Component component) {
+        if (component instanceof javax.swing.JComboBox<?>) {
+            return (javax.swing.JComboBox<?>) component;
+        }
+        if (component instanceof Container) {
+            Component[] children = ((Container) component).getComponents();
+            for (int i = 0; i < children.length; i++) {
+                javax.swing.JComboBox<?> found = findCombo(children[i]);
+                if (found != null) return found;
+            }
+        }
+        return null;
     }
 
     private static final class RecordingStore implements ZSliceSelectionStage.SelectionStore {

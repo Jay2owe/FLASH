@@ -8,9 +8,7 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
-import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -164,13 +162,9 @@ public abstract class PresetIO<T extends Preset<?>> {
     }
 
     protected void moveAtomically(File source, File target) throws IOException {
-        try {
-            Files.move(source.toPath(), target.toPath(),
-                    StandardCopyOption.REPLACE_EXISTING,
-                    StandardCopyOption.ATOMIC_MOVE);
-        } catch (AtomicMoveNotSupportedException e) {
-            Files.move(source.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING);
-        }
+        // Retry/backoff move, then in-place rewrite if the destination stays
+        // locked against rename (Windows + Dropbox/OneDrive). Safe: small preset.
+        flash.pipeline.io.IoUtils.commitReplacingSmallFile(source.toPath(), target.toPath());
     }
 
     private T readPreset(File file) throws IOException {

@@ -48,6 +48,8 @@ public final class FlashProjectLayout {
     public static final String STUDY_METADATA_FILENAME = "study.yaml";
     public static final String SETTINGS_DIR = ".settings";
     public static final String CONFIGURATION_DIR = "Config";
+    public static final String SEGMENTATION_MODELS_DIR = "Segmentation models";
+    public static final String TRAINING_DATASETS_DIR = "Training Datasets";
     public static final String PRESETS_DIR = "Presets";
     public static final String CACHE_DIR = "Cache";
     public static final String STATUS_FILENAME = "status.json";
@@ -253,6 +255,14 @@ public final class FlashProjectLayout {
 
     public File visibleConfigurationDir() {
         return new File(flashRoot(), CONFIGURATION_DIR);
+    }
+
+    public File segmentationModelsRoot() {
+        return new File(visibleConfigurationDir(), SEGMENTATION_MODELS_DIR);
+    }
+
+    public File trainingDatasetsRoot() {
+        return new File(visibleConfigurationDir(), TRAINING_DATASETS_DIR);
     }
 
     public File configurationWriteDir() {

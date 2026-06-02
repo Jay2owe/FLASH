@@ -1,6 +1,10 @@
 package flash.pipeline.intelligence;
 
 import flash.pipeline.FLASH_Pipeline;
+import flash.pipeline.TestConfigFiles;
+import flash.pipeline.bin.BinConfigIO;
+import flash.pipeline.bin.ChannelConfig;
+import flash.pipeline.bin.ChannelConfigIO;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.OrientationManifestIO;
 import flash.pipeline.io.ProjectStatusStore;
@@ -113,6 +117,40 @@ public class AnalysisStatusScannerTest {
                 statuses.get(Integer.valueOf(FLASH_Pipeline.IDX_3D_OBJECT)));
         assertEquals(AnalysisStatus.DONE,
                 statuses.get(Integer.valueOf(FLASH_Pipeline.IDX_EXCEL_EXPORT)));
+    }
+
+    @Test
+    public void scan_keepsSetupDoneWhenSplitMergeOnlyUpdatesDisplayMinMax() throws Exception {
+        File dir = temp.newFolder("split-merge-minmax");
+        TestConfigFiles.writeChannelConfig(dir, TestConfigFiles.basicBinConfig("DAPI", "GFAP"));
+        AnalysisStatusScanner.writeSidecar(dir, AnalysisStatusScanner.CREATE_BIN_ID, 2);
+
+        BinConfigIO.updateMinMax(dir.getAbsolutePath(), new String[]{"10-200", "20-400"});
+
+        AnalysisStatusScanner scanner = new AnalysisStatusScanner();
+        Map<Integer, AnalysisStatus> statuses = scanner.scan(dir);
+
+        assertEquals(AnalysisStatus.DONE,
+                statuses.get(Integer.valueOf(FLASH_Pipeline.IDX_CREATE_BIN)));
+        assertFalse(scanner.tooltipFor(FLASH_Pipeline.IDX_CREATE_BIN)
+                .contains("configuration has changed since"));
+    }
+
+    @Test
+    public void scan_marksSetupStaleWhenAnalysisRelevantConfigChanges() throws Exception {
+        File dir = temp.newFolder("setup-relevant-change");
+        TestConfigFiles.writeChannelConfig(dir, TestConfigFiles.basicBinConfig("DAPI", "GFAP"));
+        AnalysisStatusScanner.writeSidecar(dir, AnalysisStatusScanner.CREATE_BIN_ID, 2);
+
+        File settingsDir = TestConfigFiles.settingsDir(dir);
+        ChannelConfig cfg = ChannelConfigIO.read(settingsDir);
+        cfg.channels.get(1).threshold = "otsu";
+        ChannelConfigIO.write(settingsDir, cfg);
+
+        Map<Integer, AnalysisStatus> statuses = new AnalysisStatusScanner().scan(dir);
+
+        assertEquals(AnalysisStatus.STALE,
+                statuses.get(Integer.valueOf(FLASH_Pipeline.IDX_CREATE_BIN)));
     }
 
     private static void writeRoiZip(File file) throws Exception {

@@ -10,13 +10,21 @@ public final class FilterParameterId implements ParameterKey {
     private final String commandLabel;
     private final String paramKey;
     private final ValueKind valueKind;
+    /**
+     * Optional human branch name ("dens", "edge", "after combine") shown in the
+     * Vary picker and variations grid so the user can tell which image branch a
+     * swept parameter is on. DISPLAY-ONLY: deliberately excluded from
+     * {@link #stableKey()}/{@link #equals}/{@link #hashCode} so VariationCache
+     * disk keys and saved sweeps stay valid. See docs/filter-branch-robustness.
+     */
+    private final String branchLabel;
 
     public FilterParameterId(int sectionIndex,
                              int entryIndex,
                              int parameterIndex,
                              String commandLabel,
                              String paramKey) {
-        this(sectionIndex, entryIndex, parameterIndex, commandLabel, paramKey, ValueKind.NUMBER);
+        this(sectionIndex, entryIndex, parameterIndex, commandLabel, paramKey, ValueKind.NUMBER, "");
     }
 
     public FilterParameterId(int sectionIndex,
@@ -25,6 +33,16 @@ public final class FilterParameterId implements ParameterKey {
                              String commandLabel,
                              String paramKey,
                              ValueKind valueKind) {
+        this(sectionIndex, entryIndex, parameterIndex, commandLabel, paramKey, valueKind, "");
+    }
+
+    public FilterParameterId(int sectionIndex,
+                             int entryIndex,
+                             int parameterIndex,
+                             String commandLabel,
+                             String paramKey,
+                             ValueKind valueKind,
+                             String branchLabel) {
         if (sectionIndex < 0) {
             throw new IllegalArgumentException("sectionIndex must be >= 0");
         }
@@ -44,6 +62,11 @@ public final class FilterParameterId implements ParameterKey {
         this.commandLabel = commandLabel == null ? "" : commandLabel.trim();
         this.paramKey = safeParamKey;
         this.valueKind = valueKind == null ? ValueKind.NUMBER : valueKind;
+        this.branchLabel = branchLabel == null ? "" : branchLabel.trim();
+    }
+
+    public String branchLabel() {
+        return branchLabel;
     }
 
     public int sectionIndex() {
@@ -93,6 +116,13 @@ public final class FilterParameterId implements ParameterKey {
 
     @Override
     public String displayLabel() {
+        if (!branchLabel.isEmpty()) {
+            String arrow = " ▸ ";
+            if (commandLabel.isEmpty()) {
+                return branchLabel + arrow + paramKey;
+            }
+            return branchLabel + arrow + commandLabel + arrow + paramKey;
+        }
         if (commandLabel.isEmpty()) {
             return paramKey;
         }

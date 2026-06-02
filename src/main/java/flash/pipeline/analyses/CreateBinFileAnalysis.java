@@ -415,16 +415,12 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                 fields.add(BinField.CHANNEL_NAMES);
             }
 
-            if (fields.contains(BinField.CHANNEL_NAMES)
-                    && !showFilteredChannelNamesPage(directory, binFolder, cfg)) {
+            if ((fields.contains(BinField.CHANNEL_NAMES) || fields.contains(BinField.CHANNEL_COLORS))
+                    && !collectFilteredChannelIdentity(directory, binFolder, existing, cfg, fields)) {
                 return;
             }
             padConfigToChannelCount(cfg, cfg.names.size());
             ensureConfigHasChannels(cfg);
-            if (fields.contains(BinField.CHANNEL_COLORS)
-                    && !showFilteredChannelColorsPage(directory, binFolder, cfg)) {
-                return;
-            }
             if (fields.contains(BinField.FILTER_PRESETS)) {
                 if (!showFilteredFilterPresetsPage(directory, binFolder, cfg)) {
                     return;
@@ -556,58 +552,34 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         return new IllegalStateException("Could not show configuration QC dialog.", cause);
     }
 
-    protected boolean showFilteredChannelNamesPage(String directory, File binFolder,
-                                                   BinUserConfig cfg) {
-        if (!canShowFilteredDialogs()) return false;
-        int n = cfg.names.isEmpty() ? 3 : cfg.names.size();
-        while (true) {
-            PipelineDialog count = new PipelineDialog("Set Up Configuration - Channel Names");
-            installWizardCancelHook(count);
-            count.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
-            count.addSetupHelpSubHeader("Channel Names", SetupHelpCatalog.CHANNEL_IDENTITY);
-            count.addNumericField("Number of channels", n, 0);
-            if (!count.showDialog()) return false;
-            n = (int) count.getNextNumber();
-            if (n <= 0) {
-                IJ.showMessage("Set Up Configuration", "Must have at least 1 channel.");
-                continue;
-            }
-
-            padConfigToChannelCount(cfg, n);
-            trimConfigToChannelCount(cfg, n);
-            PipelineDialog names = new PipelineDialog("Set Up Configuration - Channel Names");
-            installWizardCancelHook(names);
-            names.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
-            names.addSetupHelpSubHeader("Channel Names", SetupHelpCatalog.CHANNEL_IDENTITY);
-            names.addMessage("Name each image channel.");
-            for (int i = 0; i < n; i++) {
-                names.addStringField("C" + (i + 1), cfg.names.get(i), 20);
-            }
-            if (!names.showDialog()) return false;
-            for (int i = 0; i < n; i++) {
-                String name = names.getNextString().trim();
-                cfg.names.set(i, name.isEmpty() ? "Channel" + (i + 1) : name);
-            }
-            return true;
+    /**
+     * Collects channel names + LUT colours for the partial setup path using the
+     * same combined Channel Identity page as the full Set Up Configuration
+     * wizard, so the partial flow runs the exact same step the user already
+     * knows. The collected identity is folded into {@code cfg}, and
+     * CHANNEL_NAMES + CHANNEL_COLORS are added to {@code fields} so the values
+     * are persisted rather than restored away by {@link #restoreExcludedFields}.
+     *
+     * @return false if the user cancelled the identity page.
+     */
+    protected boolean collectFilteredChannelIdentity(String directory, File binFolder,
+                                                     BinConfig existing, BinUserConfig cfg,
+                                                     EnumSet<BinField> fields) {
+        BinConfig identityExisting = (existing != null && existing.hasChannelNames()) ? existing : null;
+        BinUserConfig draft = cfg.names.isEmpty() ? null : cfg;
+        BinUserConfig identity = collectBinConfigFromUser(directory, binFolder, identityExisting, draft);
+        if (identity == null) {
+            return false;
         }
-    }
-
-    protected boolean showFilteredChannelColorsPage(String directory, File binFolder,
-                                                    BinUserConfig cfg) {
-        if (!canShowFilteredDialogs()) return false;
-        ensureConfigHasChannels(cfg);
-        PipelineDialog dialog = new PipelineDialog("Set Up Configuration - Channel Colours");
-        installWizardCancelHook(dialog);
-        dialog.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
-        dialog.addSetupHelpSubHeader("Channel Colours", SetupHelpCatalog.CHANNEL_IDENTITY);
-        for (int i = 0; i < cfg.names.size(); i++) {
-            String defColor = i < cfg.colors.size() ? toLutName(cfg.colors.get(i)) : "Grays";
-            dialog.addChoice("C" + (i + 1) + " (" + cfg.names.get(i) + ")", COLOR_OPTIONS, defColor);
-        }
-        if (!dialog.showDialog()) return false;
-        for (int i = 0; i < cfg.names.size(); i++) {
-            cfg.colors.set(i, dialog.getNextChoice());
-        }
+        cfg.names.clear();
+        cfg.names.addAll(identity.names);
+        cfg.colors.clear();
+        cfg.colors.addAll(identity.colors);
+        int channelCount = cfg.names.size();
+        padConfigToChannelCount(cfg, channelCount);
+        trimConfigToChannelCount(cfg, channelCount);
+        fields.add(BinField.CHANNEL_NAMES);
+        fields.add(BinField.CHANNEL_COLORS);
         return true;
     }
 
@@ -741,9 +713,10 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                 || fields.contains(BinField.INTENSITY_THRESHOLDS);
         boolean doParticleSize = fields.contains(BinField.PARTICLE_SIZES);
         boolean doSegmentationMethod = fields.contains(BinField.SEGMENTATION_METHODS);
-        boolean[][] customSettings = showGranularCustomFork(cfg,
-                false, doMinMax, doThreshold, doParticleSize, doSegmentationMethod, null);
-        if (customSettings == null) return false;
+        // Partial setup auto-selects the settings this analysis needs for every
+        // channel instead of prompting with the Settings Mode toggle screen.
+        boolean[][] customSettings = autoSelectedFilteredSettings(cfg,
+                doMinMax, doThreshold, doParticleSize, doSegmentationMethod);
 
         boolean[][] qcSettings = qcSelectionSettings(customSettings, cfg);
         if (anyTrue(qcSettings)) {
@@ -770,6 +743,39 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
             if (doParticleSize && !customSettings[SETTINGS_OBJECT_SIZE_FILTER][i]) cfg.sizes.set(i, "100-Infinity");
         }
         return true;
+    }
+
+    /**
+     * Builds the per-channel settings matrix the Settings Mode fork would
+     * produce with every requested setting toggled ON for every channel. The
+     * partial setup path auto-selects the settings the analysis needs instead of
+     * prompting, mirroring {@link #readGranularCustomForkSelections} with each
+     * fork toggle on (filter parameters are handled by the separate filter
+     * preset page, so they are never part of this QC matrix).
+     */
+    boolean[][] autoSelectedFilteredSettings(BinUserConfig cfg,
+                                             boolean doMinMax, boolean doThreshold,
+                                             boolean doParticleSize,
+                                             boolean doSegmentationMethod) {
+        int n = cfg == null ? 0 : cfg.names.size();
+        boolean[][] result = new boolean[SETTINGS_SLOT_COUNT][n];
+        boolean objectAnalysis = doSegmentationMethod || doParticleSize;
+        for (int i = 0; i < n; i++) {
+            String method = cfg != null && i < cfg.segmentationMethods.size()
+                    ? safe(cfg.segmentationMethods.get(i)) : "classical";
+            boolean classical = !method.startsWith("stardist") && !method.startsWith("cellpose");
+            if (doMinMax) result[SETTINGS_MIN_MAX][i] = true;
+            if (doThreshold) {
+                result[SETTINGS_ROI_INTENSITY_THRESHOLD][i] = true;
+                if (classical) result[SETTINGS_OBJECT_THRESHOLD][i] = true;
+            }
+            if (objectAnalysis) {
+                result[SETTINGS_SEGMENTATION_METHOD][i] = doSegmentationMethod;
+                result[SETTINGS_OBJECT_THRESHOLD][i] = true;
+                result[SETTINGS_OBJECT_SIZE_FILTER][i] = true;
+            }
+        }
+        return result;
     }
 
     private static void restoreExcludedFields(BinUserConfig cfg, BinUserConfig original,
@@ -4918,6 +4924,10 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
             cfg.zSliceSelections.clear();
             return "done";
         }
+        if (allSelectionsUseSameRange(cfg)) {
+            cfg.zSliceMode = ZSliceMode.SAME_ABSOLUTE;
+            return "done";
+        }
         if (cfg.zSliceSelections.size() < 2) {
             cfg.zSliceMode = ZSliceMode.PER_IMAGE;
             return "done";
@@ -5022,6 +5032,20 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
             }
         }
         return true;
+    }
+
+    private boolean allSelectionsUseSameRange(BinUserConfig cfg) {
+        if (cfg == null || cfg.zSliceSelections.size() < 2) return false;
+        ZSliceRange firstRange = null;
+        for (ZSliceSelection selection : cfg.zSliceSelections.values()) {
+            if (selection == null || selection.range == null) return false;
+            if (firstRange == null) {
+                firstRange = selection.range;
+            } else if (!firstRange.equals(selection.range)) {
+                return false;
+            }
+        }
+        return firstRange != null;
     }
 
     private int smallestSelectedSliceCount(BinUserConfig cfg) {

@@ -41,11 +41,19 @@ public final class ModelCatalog {
     }
 
     public ModelCatalog(Path projectRoot, List<ModelEntry> entries) {
+        this(projectRoot, entries,
+                projectRoot == null ? null : ModelCatalogIO.catalogDirectory(projectRoot));
+    }
+
+    ModelCatalog(Path projectRoot, List<ModelEntry> entries, Path catalogDir) {
         if (projectRoot == null) {
             throw new IllegalArgumentException("Project root must not be null.");
         }
+        if (catalogDir == null) {
+            throw new IllegalArgumentException("Catalog directory must not be null.");
+        }
         this.projectRoot = projectRoot;
-        this.catalogDir = ModelCatalogIO.catalogDirectory(projectRoot);
+        this.catalogDir = catalogDir;
         this.entries = new LinkedHashMap<String, ModelEntry>();
         if (entries != null) {
             for (ModelEntry entry : entries) {

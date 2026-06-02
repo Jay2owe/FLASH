@@ -27,11 +27,23 @@ public class DagIRTest {
     }
 
     @Test
-    public void isLinear_bundledPresetsAreLinear() {
+    public void isLinear_bundledPresetsClassifiedByBranchStructure() {
+        // Compound, branched presets (multiple Duplicate working copies +
+        // imageCalculator) must seed a NON-linear DAG so the editor routes them
+        // to the branched view instead of flattening + corrupting them. Flat
+        // chains stay linear. See docs/filter-branch-robustness.
+        java.util.Set<String> branched = new java.util.HashSet<String>(
+                Arrays.asList("Puncta Resolve", "Diffuse Object"));
         for (String preset : NamedFilterLoader.FILTER_NAMES) {
             String macro = NamedFilterLoader.loadFilterContent(preset);
             DagIR dag = IjmToDagLoader.load(macro);
-            assertTrue("bundled preset must seed a linear DAG: " + preset, dag.isLinear());
+            if (branched.contains(preset)) {
+                assertFalse("compound preset must seed a branched DAG: " + preset,
+                        dag.isLinear());
+            } else {
+                assertTrue("flat preset must seed a linear DAG: " + preset,
+                        dag.isLinear());
+            }
         }
     }
 

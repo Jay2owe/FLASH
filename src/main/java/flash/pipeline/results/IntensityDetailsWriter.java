@@ -9,10 +9,8 @@ import java.io.FileOutputStream;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 
 /**
  * Writes macro-style per-channel Analysis Details for Intensity Analysis.
@@ -169,11 +167,9 @@ public final class IntensityDetailsWriter {
     }
 
     private static void moveIntoPlace(Path tmp, Path out) throws Exception {
-        try {
-            Files.move(tmp, out, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-        } catch (AtomicMoveNotSupportedException e) {
-            Files.move(tmp, out, StandardCopyOption.REPLACE_EXISTING);
-        }
+        // Retry/backoff move, then in-place rewrite if the destination stays
+        // locked against rename (Windows + Dropbox/OneDrive). Safe: text details.
+        flash.pipeline.io.IoUtils.commitReplacingSmallFile(tmp, out);
     }
 
     private static void writeSpatialDetails(Writer w,

@@ -61,6 +61,56 @@ public class ProjectPathResolverTest {
     }
 
     @Test
+    public void resolveProjectJsonNear_acceptsProjectRootAndFlashFolder() throws Exception {
+        File outputRoot = temp.newFolder("project-root");
+        File settingsDir = FlashProjectLayout.forDirectory(outputRoot.getAbsolutePath())
+                .configurationWriteDir();
+        ProjectFileIO.write(settingsDir, new ProjectFile());
+        File expected = new File(settingsDir, ProjectFileIO.FILE_NAME);
+        File flashFolder = new File(outputRoot, FlashProjectLayout.FLASH_DIR);
+
+        assertEquals(expected.getCanonicalPath(),
+                ProjectPathResolver.resolveProjectJsonNear(outputRoot).getCanonicalPath());
+        assertEquals(expected.getCanonicalPath(),
+                ProjectPathResolver.resolveProjectJsonNear(flashFolder).getCanonicalPath());
+    }
+
+    @Test
+    public void resolveProjectJsonNear_acceptsProjectJsonFileItself() throws Exception {
+        File outputRoot = temp.newFolder("project-root");
+        File settingsDir = FlashProjectLayout.forDirectory(outputRoot.getAbsolutePath())
+                .configurationWriteDir();
+        ProjectFileIO.write(settingsDir, new ProjectFile());
+        File projectJson = new File(settingsDir, ProjectFileIO.FILE_NAME);
+
+        assertEquals(projectJson.getCanonicalPath(),
+                ProjectPathResolver.resolveProjectJsonNear(projectJson).getCanonicalPath());
+    }
+
+    @Test
+    public void resolveProjectJsonNear_climbsFromFolderInsideProject() throws Exception {
+        // The user picked (or the chooser returned) a folder a couple levels
+        // deep inside the project. We still find the enclosing project.json.
+        File outputRoot = temp.newFolder("project-root");
+        File settingsDir = FlashProjectLayout.forDirectory(outputRoot.getAbsolutePath())
+                .configurationWriteDir();
+        ProjectFileIO.write(settingsDir, new ProjectFile());
+        File expected = new File(settingsDir, ProjectFileIO.FILE_NAME);
+        File deepInside = FlashProjectLayout.forDirectory(outputRoot.getAbsolutePath())
+                .tablesObjectsWriteDir();
+        assertTrue(deepInside.mkdirs());
+
+        assertEquals(expected.getCanonicalPath(),
+                ProjectPathResolver.resolveProjectJsonNear(deepInside).getCanonicalPath());
+    }
+
+    @Test
+    public void resolveProjectJsonNear_returnsNullForUnrelatedFolder() throws Exception {
+        assertNull(ProjectPathResolver.resolveProjectJsonNear(temp.newFolder("unrelated")));
+        assertNull(ProjectPathResolver.resolveProjectJsonNear(null));
+    }
+
+    @Test
     public void addRelativePathHints_recordsSourcesUnderOutputRoot() throws Exception {
         File outputRoot = temp.newFolder("output");
         File sourceDir = new File(outputRoot, "WT");

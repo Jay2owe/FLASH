@@ -11,6 +11,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -23,6 +24,71 @@ import static org.junit.Assert.fail;
 public class ModelCatalogIOTest {
     @Rule
     public TemporaryFolder temp = new TemporaryFolder();
+
+    @Test
+    public void projectCatalogUsesFlashConfigSegmentationModelsDir() throws Exception {
+        Path root = temp.newFolder("layout").toPath();
+
+        assertEquals(new File(root.toFile(), "FLASH/Config/Segmentation models").toPath(),
+                ModelCatalogIO.catalogDirectory(root));
+
+        ModelCatalogIO.writeProject(root,
+                new ModelCatalog(root, Arrays.asList(userStarDist("user_layout"))));
+
+        assertTrue(Files.isRegularFile(ModelCatalogIO.catalogFile(root)));
+        assertFalse("new catalog writes must not create top-level Configuration",
+                Files.exists(root.resolve("Configuration")));
+    }
+
+    @Test
+    public void readMigratesLegacyTopLevelCatalogToFlashConfig() throws Exception {
+        Path root = temp.newFolder("legacy").toPath();
+        ModelEntry legacy = userStarDist("legacy_model");
+        Path legacyCatalogDir = ModelCatalogIO.legacyCatalogDirectory(root);
+        Path legacyModelFile = legacyCatalogDir.resolve(legacy.filePath.get());
+        Files.createDirectories(legacyModelFile.getParent());
+        Files.write(legacyModelFile, "legacy-model".getBytes(StandardCharsets.UTF_8));
+
+        Map<String, Object> json = JsonIO.object();
+        json.put("version", Integer.valueOf(ModelCatalogIO.CATALOG_VERSION));
+        json.put("models", Collections.<Object>singletonList(legacy.toJsonObject()));
+        Files.write(legacyCatalogDir.resolve(ModelCatalogIO.CATALOG_FILENAME),
+                Collections.singletonList(JsonIO.write(json)), StandardCharsets.UTF_8);
+
+        ModelCatalog loaded = ModelCatalogIO.read(root);
+        ModelEntry loadedEntry = loaded.get("legacy_model").get();
+
+        Path migratedModelFile = ModelCatalogIO.catalogDirectory(root).resolve(legacy.filePath.get());
+        assertTrue(Files.isRegularFile(migratedModelFile));
+        assertEquals(migratedModelFile.toAbsolutePath().normalize(),
+                loaded.resolve(loadedEntry).toAbsolutePath().normalize());
+    }
+
+    @Test
+    public void readFallsBackToLegacyCatalogWhenMigrationCannotWrite() throws Exception {
+        Path root = temp.newFolder("legacy-blocked").toPath();
+        Files.write(root.resolve("FLASH"), "not-a-directory".getBytes(StandardCharsets.UTF_8));
+        ModelEntry legacy = userStarDist("legacy_unmigrated");
+        Path legacyCatalogDir = ModelCatalogIO.legacyCatalogDirectory(root);
+        Path legacyModelFile = legacyCatalogDir.resolve(legacy.filePath.get());
+        Files.createDirectories(legacyModelFile.getParent());
+        Files.write(legacyModelFile, "legacy-model".getBytes(StandardCharsets.UTF_8));
+
+        Map<String, Object> json = JsonIO.object();
+        json.put("version", Integer.valueOf(ModelCatalogIO.CATALOG_VERSION));
+        json.put("models", Collections.<Object>singletonList(legacy.toJsonObject()));
+        Files.write(legacyCatalogDir.resolve(ModelCatalogIO.CATALOG_FILENAME),
+                Collections.singletonList(JsonIO.write(json)), StandardCharsets.UTF_8);
+
+        ModelCatalog loaded = ModelCatalogIO.read(root);
+        ModelEntry loadedEntry = loaded.get("legacy_unmigrated").get();
+
+        assertEquals(legacyCatalogDir.toAbsolutePath().normalize(),
+                loaded.catalogDirectory().toAbsolutePath().normalize());
+        assertEquals(legacyModelFile.toAbsolutePath().normalize(),
+                loaded.resolve(loadedEntry).toAbsolutePath().normalize());
+        assertFalse(Files.exists(root.resolve("FLASH").resolve("Config")));
+    }
 
     @Test
     public void roundTripProjectCatalogWithStarDistAndSmileRfEntries() throws Exception {

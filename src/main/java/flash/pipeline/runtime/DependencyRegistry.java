@@ -32,6 +32,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.jar.JarFile;
 
 /**
  * Single source of truth for runtime dependency metadata, probes, and jar manifests.
@@ -673,8 +674,8 @@ public final class DependencyRegistry {
                 .approxDownloadSizeBytes(PLUGIN_JAR_INTEGRITY_BYTES)
                 .restartRequired(true)
                 .fixableInApp(false)
-                .nonFixableReason("Manual repair only. Close Fiji, remove stale FLASH plugin jars, copy one fresh plugin jar, and restart.")
-                .visibleInDependenciesDialog(false)
+                .nonFixableReason("Manual repair only. Close Fiji, remove stale FLASH plugin jars, move backup JARs out of Fiji.app, copy one fresh plugin jar, and restart.")
+                .visibleInDependenciesDialog(true)
                 .build());
 
         specs.put(DependencyId.IMAGEJ_RUNTIME, DependencySpec.builder(
@@ -1264,6 +1265,7 @@ public final class DependencyRegistry {
 
                 List<String> liveJars = new ArrayList<String>();
                 List<String> staleJars = new ArrayList<String>();
+                File liveJar = null;
                 for (File file : files) {
                     if (file == null || !file.isFile()) {
                         continue;
@@ -1275,6 +1277,7 @@ public final class DependencyRegistry {
                     if (name.startsWith("FLASH-") && !name.contains("-sources")
                             && !name.contains("-tests") && !name.startsWith("original-")) {
                         liveJars.add(name);
+                        liveJar = file;
                     } else if (name.startsWith("original-FLASH-")
                             || name.contains("FLASH-") && (name.contains("-sources")
                             || name.contains("-tests") || name.contains("-shaded"))
@@ -1292,9 +1295,137 @@ public final class DependencyRegistry {
                 if (!staleJars.isEmpty()) {
                     return DependencyStatus.error("Stale plugin jar copies detected beside the live jar: " + joinComma(staleJars));
                 }
+
+                List<String> missingEntries = findMissingFlashJarEntries(liveJar);
+                if (!missingEntries.isEmpty()) {
+                    return DependencyStatus.error("Live FLASH plugin JAR is incomplete: "
+                            + liveJars.get(0) + " missing " + joinComma(missingEntries)
+                            + ". Close Fiji, replace it with a freshly built FLASH JAR, and restart Fiji.");
+                }
+
+                List<String> nestedJars = findFlashJarsOutsidePluginsRoot(fijiDir, pluginsDir);
+                if (!nestedJars.isEmpty()) {
+                    return DependencyStatus.error("FLASH plugin jar copies detected outside Fiji plugins/ root: "
+                            + joinComma(nestedJars)
+                            + ". Move backup copies outside Fiji.app, then restart Fiji.");
+                }
+
                 return DependencyStatus.present("Detected live plugin jar: " + liveJars.get(0));
             }
         };
+    }
+
+    private static List<String> findMissingFlashJarEntries(File liveJar) {
+        List<String> missing = new ArrayList<String>();
+        if (liveJar == null || !liveJar.isFile()) {
+            missing.add("plugin file");
+            return missing;
+        }
+
+        String[] requiredEntries = {
+                "flash/pipeline/FLASH_Pipeline.class",
+                "flash/pipeline/intelligence/PreFlightChecks.class",
+                "flash/pipeline/intelligence/PreFlightChecks$DirectoryFileScan.class",
+                "flash/pipeline/recipes/PipelineRecipeIO.class",
+                "pipeline_recipes/standard-3d-intensity.json",
+                "pipeline_recipes/quick-cell-count.json",
+                "pipeline_recipes/full-pipeline.json"
+        };
+
+        JarFile jar = null;
+        try {
+            jar = new JarFile(liveJar);
+            for (String entry : requiredEntries) {
+                if (jar.getEntry(entry) == null) {
+                    missing.add(entry);
+                }
+            }
+        } catch (IOException e) {
+            missing.add("readable JAR contents (" + safeMessage(e) + ")");
+        } finally {
+            if (jar != null) {
+                try {
+                    jar.close();
+                } catch (IOException ignored) {
+                }
+            }
+        }
+        return missing;
+    }
+
+    private static List<String> findFlashJarsOutsidePluginsRoot(File fijiDir, File pluginsDir) {
+        List<String> matches = new ArrayList<String>();
+        collectFlashJarsOutsidePluginsRoot(fijiDir, canonicalPath(fijiDir), canonicalPath(pluginsDir), matches);
+        Collections.sort(matches);
+        return matches;
+    }
+
+    private static void collectFlashJarsOutsidePluginsRoot(File file,
+                                                           String fijiRootPath,
+                                                           String pluginsRootPath,
+                                                           List<String> matches) {
+        if (file == null || matches == null || isScheduledForDisable(file)) {
+            return;
+        }
+        String path = canonicalPath(file);
+        if (file.isFile()) {
+            String name = file.getName();
+            if (path.equals(new File(pluginsRootPath, name).getPath())) {
+                return;
+            }
+            if (isFlashPluginJarName(name) && !isDirectChildOf(file, pluginsRootPath)) {
+                matches.add(relativePath(fijiRootPath, path));
+            }
+            return;
+        }
+        if (!file.isDirectory()) {
+            return;
+        }
+        File[] children = file.listFiles();
+        if (children == null) {
+            return;
+        }
+        for (File child : children) {
+            collectFlashJarsOutsidePluginsRoot(child, fijiRootPath, pluginsRootPath, matches);
+        }
+    }
+
+    private static boolean isDirectChildOf(File file, String parentPath) {
+        File parent = file == null ? null : file.getParentFile();
+        return parent != null && canonicalPath(parent).equals(parentPath);
+    }
+
+    private static boolean isFlashPluginJarName(String name) {
+        if (name == null || !name.endsWith(".jar")) {
+            return false;
+        }
+        return name.startsWith("FLASH-")
+                || name.startsWith("original-FLASH-")
+                || name.contains("IHF-Analysis-Pipeline-");
+    }
+
+    private static String canonicalPath(File file) {
+        if (file == null) {
+            return "";
+        }
+        try {
+            return file.getCanonicalPath();
+        } catch (IOException e) {
+            return file.getAbsolutePath();
+        }
+    }
+
+    private static String relativePath(String rootPath, String childPath) {
+        if (rootPath != null && childPath != null
+                && childPath.startsWith(rootPath)
+                && childPath.length() > rootPath.length()) {
+            String relative = childPath.substring(rootPath.length());
+            while (relative.startsWith(File.separator)) {
+                relative = relative.substring(1);
+            }
+            return relative;
+        }
+        return childPath;
     }
 
     private static File findMatchingJar(File dir, String prefix, List<String> ignorePrefixes) {

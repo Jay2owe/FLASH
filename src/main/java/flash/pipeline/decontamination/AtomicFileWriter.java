@@ -4,10 +4,8 @@ import java.io.File;
 import java.io.IOException;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 
 /**
  * Same-directory temp write followed by rename for crash-safe text outputs.
@@ -50,12 +48,8 @@ final class AtomicFileWriter {
     }
 
     private static void moveIntoPlace(Path source, Path target) throws IOException {
-        try {
-            Files.move(source, target,
-                    StandardCopyOption.REPLACE_EXISTING,
-                    StandardCopyOption.ATOMIC_MOVE);
-        } catch (AtomicMoveNotSupportedException e) {
-            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
-        }
+        // Retry/backoff move, then in-place rewrite if the destination stays
+        // locked against rename (Windows + Dropbox/OneDrive). Safe: text output.
+        flash.pipeline.io.IoUtils.commitReplacingSmallFile(source, target);
     }
 }

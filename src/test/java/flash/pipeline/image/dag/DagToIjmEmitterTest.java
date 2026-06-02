@@ -107,24 +107,50 @@ public class DagToIjmEmitterTest {
     }
 
     @Test
-    public void unknownCommand_preservesCommandNameThroughRoundTrip() {
+    public void unknownCommand_preservesCommandNameVerbatimThroughRoundTrip() {
         // "Despeckle" is a real ImageJ command but not enumerated by FilterCatalog /
         // FilterMacroParser, so it serves as the canonical "unknown but legitimate
         // run() target" the loader must preserve through emit -> reload.
+        //
+        // REGRESSION GUARD (docs/filter-branch-robustness): the command name must
+        // round-trip VERBATIM, ellipsis included. Stripping "..." here is what
+        // turned "Duplicate..." into "Duplicate" -> Image5D dispatch crash.
         String userMacro = "run(\"Despeckle...\");\n";
 
         DagIR loaded = IjmToDagLoader.load(userMacro);
-        assertEquals("loader must extract the command name from unknown run() lines",
-                "Despeckle", loaded.lines.get(0).ops.get(0).commandName);
+        assertEquals("loader must preserve the command name verbatim (with ellipsis)",
+                "Despeckle...", loaded.lines.get(0).ops.get(0).commandName);
 
         String emitted = DagToIjmEmitter.emit(loaded);
         DagIR reloaded = IjmToDagLoader.load(emitted);
 
         assertEquals("DAG round-trip must preserve unknown commands",
                 loaded, reloaded);
-        assertEquals("Despeckle", reloaded.lines.get(0).ops.get(0).commandName);
-        assertTrue("emitted macro must include the legacy run() so the IJM body is replayable",
-                emitted.contains("run(\"Despeckle\""));
+        assertEquals("Despeckle...", reloaded.lines.get(0).ops.get(0).commandName);
+        assertTrue("emitted macro must replay the legacy run() with its exact spelling",
+                emitted.contains("run(\"Despeckle...\""));
+    }
+
+    @Test
+    public void legacyDuplicateKeepsEllipsisSoItNeverDispatchesToImage5D() {
+        // A legacy Duplicate node (e.g. recovered from a header-less macro) must
+        // emit "Duplicate...", not "Duplicate". The bare form resolves to the
+        // Image5D plugin and throws "Image is not an Image5D".
+        DagIR dag = new DagIR(
+                1,
+                Arrays.asList(new DagLine("line_A", Arrays.asList(
+                        new DagNode("n1", OpType.UNKNOWN, "title=copy duplicate",
+                                "Duplicate...", "")))),
+                Arrays.<Combiner>asList(),
+                "line_A",
+                "legacy");
+
+        String macro = DagToIjmEmitter.emit(dag);
+
+        assertTrue("legacy Duplicate must keep its ellipsis",
+                macro.contains("run(\"Duplicate...\""));
+        assertFalse("legacy Duplicate must not emit the bare Image5D-dispatching form",
+                macro.matches("(?s).*run\\(\"Duplicate\"\\s*[,)].*"));
     }
 
     @Test

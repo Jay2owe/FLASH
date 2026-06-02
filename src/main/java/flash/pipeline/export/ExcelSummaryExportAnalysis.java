@@ -20,11 +20,9 @@ import java.awt.FlowLayout;
 import java.awt.GraphicsEnvironment;
 import java.io.File;
 import java.io.IOException;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -808,12 +806,9 @@ public class ExcelSummaryExportAnalysis implements Analysis, RunRecordAware {
     }
 
     private static void moveAtomically(Path source, Path target) throws IOException {
-        try {
-            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING,
-                    StandardCopyOption.ATOMIC_MOVE);
-        } catch (AtomicMoveNotSupportedException e) {
-            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
-        }
+        // Atomic move with retry/backoff for transient locks (cloud-sync, AV).
+        // No in-place fallback: workbooks can be large, never read into memory.
+        IoUtils.moveReplacing(source, target);
     }
 
     private static String tempPrefix(File target) {

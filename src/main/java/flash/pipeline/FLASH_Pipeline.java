@@ -241,7 +241,7 @@ public class FLASH_Pipeline implements PlugIn {
             if (selections == null) break;
 
             // Silent pre-flight guards. Fire once per batch invocation.
-            if (!runPreFlightGuards(directory)) continue;
+            if (!runPreFlightGuardsSafely(directory)) continue;
 
             // Fresh QC report for this run — prevents state leaking across runs
             QualityReport qualityReport = createQualityReportForRun(
@@ -2079,6 +2079,17 @@ public class FLASH_Pipeline implements PlugIn {
      * Returns true if the batch should proceed. P-11 write-permission is the
      * only hard block; the rest are warnings the user can override.
      */
+    private boolean runPreFlightGuardsSafely(String dir) {
+        try {
+            return runPreFlightGuards(dir);
+        } catch (NoClassDefFoundError e) {
+            if (PluginInstallGuard.reportMissingInternalClass("FLASH pre-flight checks", e)) {
+                return false;
+            }
+            throw e;
+        }
+    }
+
     private boolean runPreFlightGuards(String dir) {
         // P-11: write-permission is a hard block.
         String writeErr = PreFlightChecks.checkWritePermission(dir);

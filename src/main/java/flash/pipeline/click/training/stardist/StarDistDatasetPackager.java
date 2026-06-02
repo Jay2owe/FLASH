@@ -45,8 +45,7 @@ public final class StarDistDatasetPackager {
                     + "Colab_notebooks/StarDist_2D_ZeroCostDL4Mic.ipynb";
 
     private static final int METADATA_VERSION = 1;
-    private static final String CONFIGURATION_DIR = "Configuration";
-    private static final String TRAINING_DATASETS_DIR = "Training Datasets";
+    private static final String TRAINING_DATASETS_DIR = FlashProjectLayout.TRAINING_DATASETS_DIR;
     private static final String ENGINE_DIR = "StarDist";
     private static final String RAW_DIR = "raw";
     private static final String LABELS_DIR = "labels";
@@ -116,13 +115,18 @@ public final class StarDistDatasetPackager {
 
         Path root = projectRoot.toAbsolutePath().normalize();
         String safeSessionName = safePathSegment(sessionName, "StarDist dataset");
-        Path outputDir = root.resolve(CONFIGURATION_DIR)
+        Path configurationRoot = FlashProjectLayout.forDirectory(root.toString())
+                .visibleConfigurationDir()
+                .toPath()
+                .toAbsolutePath()
+                .normalize();
+        Path outputDir = configurationRoot
                 .resolve(TRAINING_DATASETS_DIR)
                 .resolve(ENGINE_DIR)
                 .resolve(safeSessionName)
                 .toAbsolutePath()
                 .normalize();
-        ensureInside(root.resolve(CONFIGURATION_DIR).toAbsolutePath().normalize(), outputDir);
+        ensureInside(configurationRoot, outputDir);
 
         Map<String, List<ClickStore.Click>> clicksByImage =
                 clicksByImage(clickStore, channelOneBased);
@@ -750,7 +754,7 @@ public final class StarDistDatasetPackager {
 
     private static void ensureInside(Path root, Path candidate) throws IOException {
         if (!candidate.startsWith(root)) {
-            throw new IOException("Output directory escapes the project Configuration folder: " + candidate);
+            throw new IOException("Output directory escapes the project Config folder: " + candidate);
         }
     }
 

@@ -26,6 +26,8 @@ import flash.pipeline.ui.config.FilterParameterStage;
 import flash.pipeline.ui.config.SegmentationMethodStage;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import flash.pipeline.zslice.ZSliceMode;
+import flash.pipeline.zslice.ZSliceRange;
+import flash.pipeline.zslice.ZSliceSelection;
 import ij.ImagePlus;
 import ij.process.ByteProcessor;
 import ij.process.ImageProcessor;
@@ -249,6 +251,25 @@ public class CreateBinFileAnalysisTest {
     }
 
     @Test
+    public void finalizeZSliceSelectionsAutoAcceptsIdenticalAbsoluteRanges() throws Exception {
+        CreateBinFileAnalysis analysis = new CreateBinFileAnalysis();
+        CreateBinFileAnalysis.BinUserConfig cfg = oneChannelConfig("Default");
+        cfg.zSliceMode = ZSliceMode.PER_IMAGE;
+        cfg.zSliceSelections.put(Integer.valueOf(0),
+                new ZSliceSelection(0, "Series 1", 30, new ZSliceRange(1, 19)));
+        cfg.zSliceSelections.put(Integer.valueOf(1),
+                new ZSliceSelection(1, "Series 2", 19, new ZSliceRange(1, 19)));
+        cfg.zSliceSelections.put(Integer.valueOf(2),
+                new ZSliceSelection(2, "Series 3", 24, new ZSliceRange(1, 19)));
+
+        assertEquals("done", invokeFinalizeZSliceSelections(analysis, cfg));
+
+        assertEquals(ZSliceMode.SAME_ABSOLUTE, cfg.zSliceMode);
+        assertEquals(3, cfg.zSliceSelections.size());
+        assertEquals("1-19", cfg.zSliceSelections.get(Integer.valueOf(0)).range.toToken());
+    }
+
+    @Test
     public void prepareQcImageOpen_returnsCancelWhenSelectionDialogWasCanceled() throws Exception {
         File dir = temp.newFolder("cancelled");
         new File(dir, "experiment.lif").createNewFile();
@@ -424,7 +445,7 @@ public class CreateBinFileAnalysisTest {
         analysis.executeFiltered(dir.getAbsolutePath(),
                 EnumSet.of(BinField.CHANNEL_NAMES, BinField.Z_SLICE));
 
-        assertEquals(Arrays.asList("names", "zslice"), analysis.visited);
+        assertEquals(Arrays.asList("identity", "zslice"), analysis.visited);
         BinConfig updated = ChannelConfigIO.toBinConfig(ChannelConfigIO.read(configurationDir(dir)));
         assertEquals(Arrays.asList("NeuN", "DAPI"), updated.channelNames);
         assertEquals(Arrays.asList("Green", "Red"), updated.channelColors);
@@ -447,7 +468,7 @@ public class CreateBinFileAnalysisTest {
 
         File bin = configurationDir(dir);
         assertTrue(new File(bin, ChannelConfigIO.FILE_NAME).isFile());
-        assertEquals(Collections.singletonList("names"), analysis.visited);
+        assertEquals(Collections.singletonList("identity"), analysis.visited);
         BinConfig updated = ChannelConfigIO.toBinConfig(ChannelConfigIO.read(bin));
         assertEquals(Arrays.asList("NeuN", "DAPI"), updated.channelNames);
         assertEquals(Arrays.asList("Grays", "Grays"), updated.channelColors);
@@ -471,6 +492,36 @@ public class CreateBinFileAnalysisTest {
 
         assertEquals(Collections.singletonList("qc"), analysis.visited);
         assertEquals(EnumSet.of(BinField.SEGMENTATION_METHODS), analysis.qcFields);
+    }
+
+    @Test
+    public void autoSelectedFilteredSettings_ticksRequiredSettingsForEveryChannel() {
+        // The partial path skips the Settings Mode toggle screen and auto-selects
+        // the analysis's required settings for every channel. Matrix rows mirror
+        // the private SETTINGS_* constants: 1=min-max, 2=ROI/intensity threshold,
+        // 3=object threshold, 4=object size filter, 5=segmentation method.
+        CreateBinFileAnalysis analysis = new CreateBinFileAnalysis();
+        CreateBinFileAnalysis.BinUserConfig cfg = twoChannelConfig();
+        cfg.segmentationMethods.clear();
+        cfg.segmentationMethods.addAll(Arrays.asList("classical", "stardist:0.5:0.4"));
+
+        // Object analysis (segmentation method + particle size) for both channels.
+        boolean[][] object = analysis.autoSelectedFilteredSettings(cfg, false, false, true, true);
+        for (int ch = 0; ch < 2; ch++) {
+            assertTrue(object[5][ch]);
+            assertTrue(object[3][ch]);
+            assertTrue(object[4][ch]);
+            assertFalse(object[1][ch]);
+        }
+
+        // Threshold only: classical channels mirror into the object-threshold slot,
+        // StarDist/Cellpose channels only take the ROI/intensity threshold.
+        boolean[][] threshold = analysis.autoSelectedFilteredSettings(cfg, false, true, false, false);
+        assertTrue(threshold[2][0]);
+        assertTrue(threshold[3][0]);
+        assertTrue(threshold[2][1]);
+        assertFalse(threshold[3][1]);
+        assertFalse(threshold[5][0]);
     }
 
     @Test
@@ -1269,6 +1320,14 @@ public class CreateBinFileAnalysisTest {
                 analysis, images, cfg, binFolder, Integer.valueOf(channelIndex));
     }
 
+    private static String invokeFinalizeZSliceSelections(CreateBinFileAnalysis analysis,
+                                                         CreateBinFileAnalysis.BinUserConfig cfg) throws Exception {
+        Method method = CreateBinFileAnalysis.class.getDeclaredMethod(
+                "finalizeZSliceSelections", CreateBinFileAnalysis.BinUserConfig.class);
+        method.setAccessible(true);
+        return (String) method.invoke(analysis, cfg);
+    }
+
     private static String invokeInteractiveSegmentationObjectQc(CreateBinFileAnalysis analysis,
                                                                 List<?> images,
                                                                 CreateBinFileAnalysis.BinUserConfig cfg,
@@ -1553,20 +1612,19 @@ public class CreateBinFileAnalysisTest {
         Set<BinField> qcFields = Collections.emptySet();
 
         @Override
-        protected boolean showFilteredChannelNamesPage(String directory, File binFolder,
-                                                       BinUserConfig cfg) {
-            visited.add("names");
-            cfg.names.clear();
-            cfg.names.add("NeuN");
-            cfg.names.add("DAPI");
-            return true;
-        }
-
-        @Override
-        protected boolean showFilteredChannelColorsPage(String directory, File binFolder,
-                                                        BinUserConfig cfg) {
-            visited.add("colors");
-            return true;
+        protected BinUserConfig collectBinConfigFromUser(String directory, File binFolder,
+                                                         BinConfig existing, BinUserConfig draft) {
+            visited.add("identity");
+            BinUserConfig c = twoChannelConfig();
+            c.names.clear();
+            c.names.addAll(Arrays.asList("NeuN", "DAPI"));
+            c.colors.clear();
+            if (existing != null && existing.channelColors.size() >= 2) {
+                c.colors.addAll(existing.channelColors.subList(0, 2));
+            } else {
+                c.colors.addAll(Arrays.asList("Grays", "Grays"));
+            }
+            return c;
         }
 
         @Override

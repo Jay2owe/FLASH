@@ -18,7 +18,8 @@ public class DeconvolutionLab2EngineTest {
 
     @Test
     public void macroFallbackFindsGeneratedImageThroughInjectedRunner() throws Exception {
-        final ImagePlus generated = syntheticVolume("generated", 4, 4, 2, 2.0f);
+        final TrackableImagePlus leaked = trackableVolume("leaked", 4, 4, 2, 1.5f);
+        final TrackableImagePlus generated = trackableVolume("generated", 4, 4, 2, 2.0f);
         DeconvolutionLab2Engine engine = new DeconvolutionLab2Engine(
                 new DeconvolutionLab2Engine.AvailabilityProbe() {
                     @Override
@@ -36,12 +37,14 @@ public class DeconvolutionLab2EngineTest {
 
                     @Override
                     public int[] getWindowIds() {
-                        return runComplete ? new int[]{11, 22} : new int[]{11};
+                        return runComplete ? new int[]{11, 33, 22} : new int[]{11};
                     }
 
                     @Override
                     public ImagePlus getImage(int id) {
-                        return id == 22 ? generated : null;
+                        if (id == 22) return generated;
+                        if (id == 33) return leaked;
+                        return null;
                     }
 
                     @Override
@@ -65,10 +68,16 @@ public class DeconvolutionLab2EngineTest {
             assertEquals(stack.getWidth(), result.getWidth());
             assertEquals(stack.getHeight(), result.getHeight());
             assertEquals(stack.getStackSize(), result.getStackSize());
+            assertTrue("primary DeconvolutionLab2 output window should be closed after detach",
+                    generated.closed);
+            assertTrue("extra DeconvolutionLab2 output window should be closed",
+                    leaked.closed);
         } finally {
             close(result);
             close(stack);
             close(psf);
+            close(generated);
+            close(leaked);
         }
     }
 
@@ -151,6 +160,25 @@ public class DeconvolutionLab2EngineTest {
             stack.addSlice(new FloatProcessor(width, height, pixels, null));
         }
         return new ImagePlus(title, stack);
+    }
+
+    private static TrackableImagePlus trackableVolume(String title, int width, int height, int depth, float value) {
+        ImagePlus image = syntheticVolume(title, width, height, depth, value);
+        return new TrackableImagePlus(title, image.getStack());
+    }
+
+    private static final class TrackableImagePlus extends ImagePlus {
+        private boolean closed;
+
+        private TrackableImagePlus(String title, ImageStack stack) {
+            super(title, stack);
+        }
+
+        @Override
+        public void close() {
+            closed = true;
+            super.close();
+        }
     }
 
     private static ImagePlus blurredPoint(String title,

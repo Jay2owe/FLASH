@@ -7,10 +7,8 @@ import ij.ImagePlus;
 
 import java.io.File;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.LinkedHashMap;
@@ -265,12 +263,10 @@ public final class VariationCache {
     }
 
     private static void moveIntoPlace(Path temp, Path target) throws java.io.IOException {
+        // Atomic move with retry/backoff for transient locks (cloud-sync, AV).
+        // No in-place fallback: cached images can be large, never read into memory.
         try {
-            Files.move(temp, target,
-                    StandardCopyOption.REPLACE_EXISTING,
-                    StandardCopyOption.ATOMIC_MOVE);
-        } catch (AtomicMoveNotSupportedException e) {
-            Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
+            flash.pipeline.io.IoUtils.moveReplacing(temp, target);
         } finally {
             Files.deleteIfExists(temp);
         }

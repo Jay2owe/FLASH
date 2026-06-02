@@ -74,8 +74,7 @@ public class TrainedRfMissingModelFailsAnalysisTest {
     @Test
     public void preflightAcceptsExistingTrainedRfModelFile() throws Exception {
         Path root = temp.newFolder("present-rf").toPath();
-        Path modelFile = root.resolve("Configuration")
-                .resolve("Segmentation Models")
+        Path modelFile = ModelCatalogIO.catalogDirectory(root)
                 .resolve("files")
                 .resolve("rf_ok")
                 .resolve("model.smile");

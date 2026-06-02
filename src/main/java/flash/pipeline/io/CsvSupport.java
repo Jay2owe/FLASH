@@ -8,7 +8,6 @@ import java.io.PrintWriter;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -36,7 +35,7 @@ public final class CsvSupport {
             Files.createDirectories(parent.toPath());
         }
         File temp = File.createTempFile("." + file.getName() + ".", ".tmp", parent);
-        boolean complete = false;
+        boolean written = false;
         try {
             PrintWriter writer = newWriter(temp);
             try {
@@ -47,19 +46,17 @@ public final class CsvSupport {
             } finally {
                 writer.close();
             }
-            try {
-                Files.move(temp.toPath(), file.toPath(),
-                        StandardCopyOption.ATOMIC_MOVE,
-                        StandardCopyOption.REPLACE_EXISTING);
-            } catch (IOException atomicMoveFailed) {
-                Files.move(temp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING);
-            }
-            complete = true;
+            written = true;
         } finally {
-            if (!complete) {
+            if (!written) {
                 Files.deleteIfExists(temp.toPath());
             }
         }
+        // Atomic temp-and-move with retry/backoff, then in-place rewrite if the
+        // destination stays locked against rename (Windows + Dropbox/OneDrive).
+        // Safe here because CSVs are small text. commitReplacingSmallFile always
+        // removes the temp.
+        IoUtils.commitReplacingSmallFile(temp.toPath(), file.toPath());
     }
 
     public interface WriterAction {

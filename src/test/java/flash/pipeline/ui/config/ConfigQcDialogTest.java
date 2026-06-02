@@ -470,6 +470,34 @@ public class ConfigQcDialogTest {
     }
 
     @Test
+    public void backButtonShownOnFirstStageWhenContinuingOuterSequence() {
+        // Segmentation Method is the first internal stage but the second step in the
+        // channel's QC path (Filter > Object Segmentation), so Back must let the user
+        // return to the Filter step.
+        RecordingStage stage = new RecordingStage("Segmentation Method");
+        ConfigQcDialog dialog = ConfigQcDialog.createForTest(
+                contextWithOneImage(), Arrays.asList(stage),
+                Arrays.asList("Filter", "Object Segmentation"), 1);
+
+        assertTrue(dialog.backButtonForTest().isVisible());
+        assertTrue(dialog.backButtonForTest().isEnabled());
+
+        dialog.backForTest();
+
+        assertEquals(ConfigQcResult.BACK, dialog.resultForTest());
+    }
+
+    @Test
+    public void backButtonHiddenOnFirstStageWhenFirstInOuterSequence() {
+        RecordingStage stage = new RecordingStage("Segmentation Method");
+        ConfigQcDialog dialog = ConfigQcDialog.createForTest(
+                contextWithOneImage(), Arrays.asList(stage),
+                Arrays.asList("Object Segmentation"), 0);
+
+        assertFalse(dialog.backButtonForTest().isVisible());
+    }
+
+    @Test
     public void backToPreviousStagePreloadsLockedParameters() {
         StoredStage first = new StoredStage();
         RecordingStage second = new RecordingStage("Second");

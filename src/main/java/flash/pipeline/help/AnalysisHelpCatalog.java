@@ -106,7 +106,7 @@ public final class AnalysisHelpCatalog {
                         "Open the Custom Model Manager from the model row, then use Add StarDist... or Add Cellpose... to save the new catalog entry.",
                         "Apply the recommended segmentation token to the channel or keep the previous method."),
                 list(
-                        "A project model catalog entry under Configuration/Segmentation Models/ in the selected project folder.",
+                        "A project model catalog entry under FLASH/Config/Segmentation models/ in the selected project folder.",
                         "For StarDist and Cellpose, a packaged training dataset plus the imported model reference after external training.",
                         "A stable segmentation token with model=<modelKey> on a deep-learning token."),
                 list(
@@ -175,7 +175,7 @@ public final class AnalysisHelpCatalog {
                         "Filter by engine or source, select an entry, and review its key, source, file/resource path, defaults, and metadata.",
                         "Add or edit user entries, then return to the parameter stage and refresh the model list."),
                 list(
-                        "Catalog JSON and copied files under Configuration/Segmentation Models/ in the selected project folder.",
+                        "Catalog JSON and copied files under FLASH/Config/Segmentation models/ in the selected project folder.",
                         "Project-relative file paths for portable replay and sharing.",
                         "Stable model keys used by StarDist and Cellpose segmentation method tokens."),
                 list(

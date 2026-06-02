@@ -19,6 +19,7 @@ import smile.classification.RandomForest;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
@@ -173,6 +174,12 @@ public final class TrainedRfRunner {
         if (modelPath == null && params.projectRoot != null && params.modelKey != null
                 && !params.modelKey.trim().isEmpty()) {
             modelPath = ObjectClassifierPersistence.modelPath(params.projectRoot, params.modelKey);
+            if (!Files.isRegularFile(modelPath)) {
+                Path legacy = ObjectClassifierPersistence.legacyModelPath(params.projectRoot, params.modelKey);
+                if (Files.isRegularFile(legacy)) {
+                    modelPath = legacy;
+                }
+            }
         }
         if (modelPath == null) {
             throw new IllegalArgumentException("No Smile RF model or model path supplied.");

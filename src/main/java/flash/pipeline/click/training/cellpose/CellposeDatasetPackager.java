@@ -156,8 +156,9 @@ public final class CellposeDatasetPackager {
     }
 
     private static Path datasetRoot(Path projectRoot) {
-        return projectRoot.resolve("Configuration")
-                .resolve("Training Datasets")
+        return FlashProjectLayout.forDirectory(projectRoot.toString())
+                .trainingDatasetsRoot()
+                .toPath()
                 .resolve("Cellpose");
     }
 

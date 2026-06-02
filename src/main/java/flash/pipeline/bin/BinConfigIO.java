@@ -2,15 +2,17 @@ package flash.pipeline.bin;
 
 import flash.pipeline.image.NamedFilterLoader;
 import flash.pipeline.io.FlashProjectLayout;
+import flash.pipeline.io.IoUtils;
 import flash.pipeline.segmentation.SegmentationTokenCodec;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
@@ -99,15 +101,19 @@ public class BinConfigIO {
         if (parent != null) {
             Files.createDirectories(parent);
         }
-        Path tmp = target.resolveSibling(target.getFileName().toString() + ".tmp");
-        Files.write(tmp, content.toString().getBytes(StandardCharsets.UTF_8));
-        try {
-            Files.move(tmp, target,
-                    StandardCopyOption.ATOMIC_MOVE,
-                    StandardCopyOption.REPLACE_EXISTING);
-        } catch (AtomicMoveNotSupportedException ame) {
-            Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
+        Path tempDir = parent == null ? new File(".").toPath() : parent;
+        Path tmp = Files.createTempFile(tempDir, "." + target.getFileName().toString() + ".", ".tmp");
+        byte[] bytes = content.toString().getBytes(StandardCharsets.UTF_8);
+        try (FileChannel channel = FileChannel.open(tmp, StandardOpenOption.WRITE)) {
+            ByteBuffer buffer = ByteBuffer.wrap(bytes);
+            while (buffer.hasRemaining()) {
+                channel.write(buffer);
+            }
+            channel.force(true);
         }
+        // Atomic temp-and-move with retry/backoff, then in-place rewrite if the
+        // destination stays locked against rename (Windows + Dropbox/OneDrive).
+        IoUtils.commitReplacingSmallFile(tmp, target);
     }
 
     private static String loadSavedCustomFilterPreset(File binFolder, String presetName) {

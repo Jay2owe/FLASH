@@ -36,6 +36,7 @@ public final class ZSliceSelectionStage implements ConfigQcStage {
     static final String ACTION_ACCEPT_SELECTION = "Accept selection";
     static final String ACTION_RESTART = "Restart from first image";
     static final String ACTION_APPLY_TO_COMPATIBLE = "Apply current range to all remaining images";
+    static final String ACTION_APPLY_MAX_COMMON = "Use largest range that fits all images";
 
     public enum PartialApplyChoice {
         APPLY_TO_COMPATIBLE,
@@ -191,6 +192,11 @@ public final class ZSliceSelectionStage implements ConfigQcStage {
             return false;
         }
 
+        String action = selectedAction();
+        if (ACTION_APPLY_MAX_COMMON.equals(action)) {
+            return applyMaxCommonRange(context);
+        }
+
         ZSliceRange range = currentRange();
         if (range == null || !range.isValidFor(totalSlices(meta))) {
             setError("Enter a valid contiguous z-slice range within 1-" + totalSlices(meta) + ".");
@@ -201,7 +207,6 @@ public final class ZSliceSelectionStage implements ConfigQcStage {
                 meta.index, meta.name, totalSlices(meta), range));
         lastAcceptedRange = range;
 
-        String action = selectedAction();
         if (ACTION_RESTART.equals(action)) {
             context.requestNextImageIndex(0);
             setStatus("Restarting z-slice selection from the first image.");
@@ -290,7 +295,7 @@ public final class ZSliceSelectionStage implements ConfigQcStage {
         JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
         panel.setOpaque(false);
         totalSlicesLabel = new JLabel("Total z-slices: ");
-        JLabel help = new JLabel("Choose a contiguous inclusive range (e.g. 11-30).");
+        JLabel help = new JLabel("Enter start and end slices, or type a range like 11-30 in Start.");
         help.setForeground(FlashTheme.TEXT_HELP);
         panel.add(totalSlicesLabel);
         panel.add(help);
@@ -319,6 +324,7 @@ public final class ZSliceSelectionStage implements ConfigQcStage {
         addRow(panel, gbc, "End", endField, useEnd);
 
         actionChoice = new JComboBox<String>();
+        gbc.gridx = 0;
         gbc.weightx = 0.0;
         gbc.fill = GridBagConstraints.NONE;
         panel.add(new JLabel("Action"), gbc);
@@ -347,6 +353,7 @@ public final class ZSliceSelectionStage implements ConfigQcStage {
         gbc.fill = GridBagConstraints.NONE;
         panel.add(button, gbc);
         gbc.gridx++;
+        gbc.gridy++;
     }
 
     private JComponent buildFeedbackPanel() {
@@ -415,6 +422,9 @@ public final class ZSliceSelectionStage implements ConfigQcStage {
             actionChoice.addItem(ACTION_NEXT_IMAGE);
             actionChoice.addItem(ACTION_RESTART);
             actionChoice.addItem(ACTION_APPLY_TO_COMPATIBLE);
+        }
+        if (metas.size() > 1) {
+            actionChoice.addItem(ACTION_APPLY_MAX_COMMON);
         }
         if (previous != null) {
             if (hasActionChoice(previous)) {
@@ -505,6 +515,35 @@ public final class ZSliceSelectionStage implements ConfigQcStage {
         return true;
     }
 
+    private boolean applyMaxCommonRange(ConfigQcContext context) {
+        ZSliceRange range = maxCommonRange();
+        if (range == null) {
+            setError("No image series is available.");
+            return false;
+        }
+        for (SeriesMeta meta : metas) {
+            if (meta == null) continue;
+            selectionStore.put(new ZSliceSelection(
+                    meta.index, meta.name, totalSlices(meta), range));
+        }
+        lastAcceptedRange = range;
+        setRangeFields(range);
+        if (context != null) {
+            context.requestNextImageIndex(context.getImageCount());
+        }
+        setStatus("Applied largest shared z-slice range " + range.toToken() + " to every image.");
+        return true;
+    }
+
+    private ZSliceRange maxCommonRange() {
+        if (metas.isEmpty()) return null;
+        int minTotal = Integer.MAX_VALUE;
+        for (SeriesMeta meta : metas) {
+            minTotal = Math.min(minTotal, totalSlices(meta));
+        }
+        return ZSliceRange.fullStack(Math.max(1, minTotal));
+    }
+
     private void applyRangeToPositions(List<Integer> positions, ZSliceRange range) {
         if (positions == null || range == null) return;
         for (Integer position : positions) {
@@ -537,7 +576,12 @@ public final class ZSliceSelectionStage implements ConfigQcStage {
     private ZSliceRange currentRange() {
         if (startField == null || endField == null) return null;
         try {
-            int start = Integer.parseInt(startField.getText().trim());
+            String startText = startField.getText().trim();
+            ZSliceRange combined = ZSliceRange.parse(startText);
+            if (combined != null) {
+                return combined;
+            }
+            int start = Integer.parseInt(startText);
             int end = Integer.parseInt(endField.getText().trim());
             return new ZSliceRange(start, end);
         } catch (Exception e) {

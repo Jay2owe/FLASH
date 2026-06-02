@@ -188,8 +188,9 @@ public final class DeconvolutionLab2Engine implements DeconvolutionEngine {
             imageJRunner.saveTiffStack(psf, psfFile);
 
             WindowManagerLock.LOCK.lock();
+            int[] beforeIds = null;
             try {
-                int[] beforeIds = imageJRunner.getWindowIds();
+                beforeIds = imageJRunner.getWindowIds();
                 imageJRunner.run(COMMAND_NAME, buildMacroOptions(stackFile, psfFile, params));
                 ImagePlus generated = findGeneratedImage(beforeIds, imageJRunner.getWindowIds(), imageJRunner);
                 if (generated == null) {
@@ -200,6 +201,7 @@ public final class DeconvolutionLab2Engine implements DeconvolutionEngine {
                 disposeImage(generated);
                 return detached;
             } finally {
+                closeNewImages(beforeIds, imageJRunner);
                 WindowManagerLock.LOCK.unlock();
             }
         } catch (IOException e) {
@@ -297,6 +299,20 @@ public final class DeconvolutionLab2Engine implements DeconvolutionEngine {
             if (image != null) return image;
         }
         return null;
+    }
+
+    private static void closeNewImages(int[] beforeIds, ImageJRunner imageJRunner) {
+        if (beforeIds == null || imageJRunner == null) return;
+        Set<Integer> seen = new HashSet<Integer>();
+        for (int id : beforeIds) {
+            seen.add(Integer.valueOf(id));
+        }
+        int[] afterIds = imageJRunner.getWindowIds();
+        if (afterIds == null) return;
+        for (int id : afterIds) {
+            if (seen.contains(Integer.valueOf(id))) continue;
+            disposeImage(imageJRunner.getImage(id));
+        }
     }
 
     private static void disposeImage(ImagePlus image) {
@@ -402,6 +418,7 @@ public final class DeconvolutionLab2Engine implements DeconvolutionEngine {
             ImagePlus psfCopy = psf.duplicate();
             Object raw = null;
             ImagePlus rawImage = null;
+            int[] beforeIds = snapshotWindowIds();
             try {
                 raw = method.invoke(null, stackCopy, psfCopy, buildAlgorithmSpec(params));
                 rawImage = coerceImagePlus(raw);
@@ -419,6 +436,7 @@ public final class DeconvolutionLab2Engine implements DeconvolutionEngine {
                 if (psfCopy != rawImage) {
                     disposeImage(psfCopy);
                 }
+                closeNewImages(beforeIds);
             }
         }
     }
@@ -438,12 +456,14 @@ public final class DeconvolutionLab2Engine implements DeconvolutionEngine {
             );
             File stackFile = new File(tempDir, "stack.tif");
             File psfFile = new File(tempDir, "psf.tif");
+            int[] beforeIds = null;
             try {
                 if (!tempDir.mkdirs() && !tempDir.isDirectory()) {
                     throw new IOException("Could not create temporary directory " + tempDir.getAbsolutePath());
                 }
                 saveTiff(stack, stackFile, "stack");
                 saveTiff(psf, psfFile, "PSF");
+                beforeIds = snapshotWindowIds();
                 Object raw = method.invoke(
                         null,
                         stackFile.getAbsolutePath(),
@@ -459,6 +479,7 @@ public final class DeconvolutionLab2Engine implements DeconvolutionEngine {
                 }
                 return detached;
             } finally {
+                closeNewImages(beforeIds);
                 deleteRecursively(tempDir.toPath());
             }
         }
@@ -496,6 +517,25 @@ public final class DeconvolutionLab2Engine implements DeconvolutionEngine {
             }
         } catch (Throwable ignored) {}
         return null;
+    }
+
+    private static int[] snapshotWindowIds() {
+        int[] ids = WindowManager.getIDList();
+        return ids == null ? new int[0] : ids;
+    }
+
+    private static void closeNewImages(int[] beforeIds) {
+        if (beforeIds == null) return;
+        Set<Integer> seen = new HashSet<Integer>();
+        for (int id : beforeIds) {
+            seen.add(Integer.valueOf(id));
+        }
+        int[] afterIds = WindowManager.getIDList();
+        if (afterIds == null) return;
+        for (int id : afterIds) {
+            if (seen.contains(Integer.valueOf(id))) continue;
+            disposeImage(WindowManager.getImage(id));
+        }
     }
 
     private static ClassLoader lookupClassLoader() {

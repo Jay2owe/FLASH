@@ -8,7 +8,6 @@ import ij.io.FileSaver;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
-import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Future;
@@ -172,13 +171,9 @@ public class AsyncImageSaver {
     }
 
     private static void moveIntoPlace(File temp, File target) throws IOException {
-        try {
-            Files.move(temp.toPath(), target.toPath(),
-                    StandardCopyOption.ATOMIC_MOVE,
-                    StandardCopyOption.REPLACE_EXISTING);
-        } catch (IOException atomicMoveFailed) {
-            Files.move(temp.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING);
-        }
+        // Atomic move with retry/backoff for transient locks (cloud-sync, AV).
+        // No in-place fallback: images can be large, so we never read them into memory.
+        IoUtils.moveReplacing(temp.toPath(), target.toPath());
     }
 
     /**

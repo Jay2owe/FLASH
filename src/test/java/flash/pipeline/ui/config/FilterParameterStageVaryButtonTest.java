@@ -1,6 +1,7 @@
 package flash.pipeline.ui.config;
 
 import flash.pipeline.image.FilterMacroParser.OpType;
+import flash.pipeline.image.NamedFilterLoader;
 import flash.pipeline.image.dag.Combiner;
 import flash.pipeline.image.dag.CombinerOp;
 import flash.pipeline.image.dag.DagIR;
@@ -52,6 +53,28 @@ public class FilterParameterStageVaryButtonTest {
         assertFalse(stage.isVaryButtonEnabledForTest());
         assertEquals("Use Custom macro... to vary branched pipelines",
                 stage.varyButtonTooltipForTest());
+    }
+
+    /**
+     * Integration guard (docs/filter-branch-robustness): the ACTUAL bundled
+     * compound presets — loaded as raw text WITHOUT an {@code @ihf-dag} header,
+     * i.e. through the legacy classifier rather than {@code loadEmbeddedDag} —
+     * must classify as branched and disable Vary. This exercises the exact path
+     * the user hit when the crash occurred; {@link #branchedMacro()} above goes
+     * through the embedded-DAG path instead.
+     */
+    @Test
+    public void bundledCompoundPresetsClassifyBranchedAndDisableVary() {
+        for (String preset : new String[]{"Puncta Resolve", "Diffuse Object"}) {
+            String macro = NamedFilterLoader.loadFilterContent(preset);
+            FilterParameterStage stage = stage(macro);
+
+            stage.buildControls(context(), new RecordingActions());
+            stage.onEnter(context(), new PreviewPairPanel("Original", "Adjusted"));
+
+            assertFalse(preset + " must classify as branched", stage.isLinearForTest());
+            assertFalse(preset + " must disable Vary", stage.isVaryButtonEnabledForTest());
+        }
     }
 
     @Test

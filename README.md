@@ -99,7 +99,7 @@ The normal setup UI no longer collects preview clicks or offers click-based para
 
 FLASH pins Cellpose `3.1.1.2`; Cellpose 4, Cellpose-SAM, and `cpsam` models are not supported. StarDist custom models must be Fiji-compatible TensorFlow SavedModel `.zip` exports. FLASH runs StarDist per slice as 2D detections with Z-linking; full 3D StarDist is not built in.
 
-The project model catalog lives under `<projectRoot>/Configuration/Segmentation Models/`, with entries in `catalog.json` and copied model files under `files/<modelKey>/...`. For training and import steps, see [docs/training_segmentation_models.md](docs/training_segmentation_models.md).
+The project model catalog lives under `<projectRoot>/FLASH/Config/Segmentation models/`, with entries in `catalog.json` and copied model files under `files/<modelKey>/...`. For training and import steps, see [docs/training_segmentation_models.md](docs/training_segmentation_models.md).
 
 ## Supported Inputs
 

@@ -1,12 +1,14 @@
 package flash.pipeline.intelligence;
 
 import flash.pipeline.FLASH_Pipeline;
+import flash.pipeline.bin.ChannelConfig;
 import flash.pipeline.bin.ChannelConfigIO;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.ImageSourceDispatcher;
 import flash.pipeline.io.OrientationManifestIO;
 import flash.pipeline.io.ProjectStatusStore;
 import flash.pipeline.roi.RoiIO;
+import flash.pipeline.zslice.ZSliceRange;
 
 import java.io.File;
 import java.io.FilenameFilter;
@@ -15,6 +17,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.security.MessageDigest;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
@@ -31,6 +34,18 @@ public class AnalysisStatusScanner {
             + FlashProjectLayout.STATUS_FILENAME;
     public static final String CREATE_BIN_ID = "createBin";
     public static final String AGGREGATION_ID = "aggregation";
+    // Display min/max is presentation-owned by Split/Merge, so it must not stale
+    // the setup or aggregation status badges when presentation ranges are saved.
+    private static final String[] STATUS_HASH_CHANNEL_PROPERTIES = {
+            ChannelConfig.P_NAME,
+            ChannelConfig.P_COLOR,
+            ChannelConfig.P_MARKER,
+            ChannelConfig.P_THRESHOLD,
+            ChannelConfig.P_SIZE,
+            ChannelConfig.P_INTENSITY,
+            ChannelConfig.P_SEGMENTATION,
+            ChannelConfig.P_FILTER
+    };
 
     private final Map<Integer, String> tooltips = new HashMap<Integer, String>();
 
@@ -39,7 +54,7 @@ public class AnalysisStatusScanner {
         tooltips.clear();
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory.getAbsolutePath());
         File channelConfig = new File(layout.configurationWriteDir(), ChannelConfigIO.FILE_NAME);
-        String currentBinHash = sha256(channelConfig);
+        String currentBinHash = statusRelevantBinHash(channelConfig);
 
         put(out, FLASH_Pipeline.IDX_CREATE_BIN,
                 sidecarStatus(directory, CREATE_BIN_ID, currentBinHash, channelConfig.isFile()),
@@ -111,7 +126,8 @@ public class AnalysisStatusScanner {
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory.getAbsolutePath());
 
         Map<String, Object> json = new HashMap<String, Object>();
-        json.put("binHash", sha256(new File(layout.configurationWriteDir(), ChannelConfigIO.FILE_NAME)));
+        json.put("binHash", statusRelevantBinHash(
+                new File(layout.configurationWriteDir(), ChannelConfigIO.FILE_NAME)));
         json.put("ranAt", isoNow());
         json.put("imageCount", Integer.valueOf(Math.max(0, imageCount)));
         ProjectStatusStore.writeAnalysisStatus(directory, analysisId, json);
@@ -314,11 +330,96 @@ public class AnalysisStatusScanner {
                 || !RoiIO.listRoiPropertiesCsvFiles(layout.projectRoot()).isEmpty();
     }
 
+    private static String statusRelevantBinHash(File channelConfigFile) {
+        if (channelConfigFile == null || !channelConfigFile.isFile()) return "";
+        ChannelConfig cfg = ChannelConfigIO.read(channelConfigFile.getParentFile());
+        if (cfg == null) return sha256(channelConfigFile);
+        return sha256Text(canonicalStatusConfig(cfg));
+    }
+
+    private static String canonicalStatusConfig(ChannelConfig cfg) {
+        StringBuilder sb = new StringBuilder();
+        appendField(sb, "schemaVersion", Integer.valueOf(cfg.schemaVersion));
+        appendField(sb, "zSliceMode", cfg.zSliceMode == null ? "" : cfg.zSliceMode.name());
+        appendField(sb, "clickCaptureUsed", Boolean.valueOf(cfg.clickCaptureUsed));
+        appendZSliceSelections(sb, cfg);
+        if (cfg.channels != null) {
+            for (int i = 0; i < cfg.channels.size(); i++) {
+                ChannelConfig.Channel channel = cfg.channels.get(i);
+                if (channel == null) continue;
+                appendField(sb, "channel", Integer.valueOf(i));
+                appendField(sb, "index", Integer.valueOf(channel.index));
+                appendField(sb, "name", channel.name);
+                appendField(sb, "color", channel.color);
+                appendField(sb, "markerId", channel.markerId);
+                appendField(sb, "markerShape", channel.markerShape);
+                appendField(sb, "markerCrowdingSensitive",
+                        Boolean.valueOf(channel.markerCrowdingSensitive));
+                appendField(sb, "threshold", channel.threshold);
+                appendField(sb, "size", channel.size);
+                appendField(sb, "intensityThreshold", channel.intensityThreshold);
+                appendField(sb, "segmentationMethod", channel.segmentationMethod);
+                appendField(sb, "filterPreset", channel.filterPreset);
+                appendStatusFields(sb, channel);
+            }
+        }
+        return sb.toString();
+    }
+
+    private static void appendZSliceSelections(StringBuilder sb, ChannelConfig cfg) {
+        if (cfg.zSliceSelections == null || cfg.zSliceSelections.isEmpty()) return;
+        List<String> keys = new ArrayList<String>(cfg.zSliceSelections.keySet());
+        Collections.sort(keys);
+        for (int i = 0; i < keys.size(); i++) {
+            String key = keys.get(i);
+            ZSliceRange range = cfg.zSliceSelections.get(key);
+            appendField(sb, "zSliceSelection", key);
+            appendField(sb, "zStart", range == null ? "" : Integer.valueOf(range.startSlice));
+            appendField(sb, "zEnd", range == null ? "" : Integer.valueOf(range.endSlice));
+        }
+    }
+
+    private static void appendStatusFields(StringBuilder sb, ChannelConfig.Channel channel) {
+        for (int i = 0; i < STATUS_HASH_CHANNEL_PROPERTIES.length; i++) {
+            String property = STATUS_HASH_CHANNEL_PROPERTIES[i];
+            appendField(sb, "status." + property, statusOf(channel, property));
+        }
+    }
+
+    private static ChannelConfig.PropertyStatus statusOf(ChannelConfig.Channel channel, String prop) {
+        if (channel == null || channel.status == null) {
+            return ChannelConfig.PropertyStatus.PENDING;
+        }
+        ChannelConfig.PropertyStatus value = channel.status.get(prop);
+        return value == null ? ChannelConfig.PropertyStatus.PENDING : value;
+    }
+
+    private static void appendField(StringBuilder sb, String name, Object value) {
+        sb.append(name).append('=').append(value == null ? "" : String.valueOf(value)).append('\n');
+    }
+
     private static String sha256(File file) {
         if (file == null || !file.isFile()) return "";
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] bytes = Files.readAllBytes(file.toPath());
+            byte[] hash = digest.digest(bytes);
+            StringBuilder sb = new StringBuilder(hash.length * 2);
+            for (int i = 0; i < hash.length; i++) {
+                String hex = Integer.toHexString(hash[i] & 0xff);
+                if (hex.length() == 1) sb.append('0');
+                sb.append(hex);
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private static String sha256Text(String text) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] bytes = (text == null ? "" : text).getBytes(StandardCharsets.UTF_8);
             byte[] hash = digest.digest(bytes);
             StringBuilder sb = new StringBuilder(hash.length * 2);
             for (int i = 0; i < hash.length; i++) {

@@ -2,6 +2,7 @@ package flash.pipeline.segmentation.catalog;
 
 import flash.pipeline.bin.BinConfigIO;
 import flash.pipeline.cellpose.CellposeRegisteredModels;
+import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.ui.wizard.JsonIO;
 import ij.IJ;
 
@@ -9,9 +10,13 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -28,8 +33,10 @@ import java.util.logging.Logger;
 public final class ModelCatalogIO {
     private static final Logger LOGGER = Logger.getLogger(ModelCatalogIO.class.getName());
     public static final int CATALOG_VERSION = 1;
-    static final String CONFIGURATION_DIR = "Configuration";
-    static final String CATALOG_DIR = "Segmentation Models";
+    static final String CONFIGURATION_DIR = FlashProjectLayout.CONFIGURATION_DIR;
+    static final String CATALOG_DIR = FlashProjectLayout.SEGMENTATION_MODELS_DIR;
+    static final String LEGACY_CONFIGURATION_DIR = "Configuration";
+    static final String LEGACY_CATALOG_DIR = "Segmentation Models";
     static final String FILES_DIR = "files";
     public static final String CATALOG_FILENAME = "catalog.json";
     static final String STOCK_CATALOG_RESOURCE = "segmentation_models/stock_catalog.json";
@@ -64,11 +71,13 @@ public final class ModelCatalogIO {
         for (ModelEntry stock : readStockResources()) {
             putMerged(merged, stock, false);
         }
-        for (ModelEntry project : readProjectEntries(projectRoot)) {
+        ProjectEntries projectEntries = readProjectEntries(projectRoot);
+        for (ModelEntry project : projectEntries.entries) {
             putMerged(merged, project, true);
         }
         mergeDiscoveredEntries(merged);
-        return new ModelCatalog(projectRoot, new ArrayList<ModelEntry>(merged.values()));
+        return new ModelCatalog(projectRoot, new ArrayList<ModelEntry>(merged.values()),
+                projectEntries.catalogDir);
     }
 
     public static void writeProject(Path projectRoot, ModelCatalog catalog) throws IOException {
@@ -123,7 +132,13 @@ public final class ModelCatalogIO {
     }
 
     public static Path catalogDirectory(Path projectRoot) {
-        return projectRoot.resolve(CONFIGURATION_DIR).resolve(CATALOG_DIR);
+        return FlashProjectLayout.forDirectory(projectRoot.toString())
+                .segmentationModelsRoot()
+                .toPath();
+    }
+
+    static Path legacyCatalogDirectory(Path projectRoot) {
+        return projectRoot.resolve(LEGACY_CONFIGURATION_DIR).resolve(LEGACY_CATALOG_DIR);
     }
 
     static Path catalogFile(Path projectRoot) {
@@ -198,8 +213,21 @@ public final class ModelCatalogIO {
         return marker != null && !String.valueOf(marker).trim().isEmpty();
     }
 
-    private static List<ModelEntry> readProjectEntries(Path projectRoot) {
-        Path file = catalogFile(projectRoot);
+    private static ProjectEntries readProjectEntries(Path projectRoot) {
+        Path canonicalDir = catalogDirectory(projectRoot);
+        migrateLegacyCatalogIfNeeded(projectRoot);
+        Path file = canonicalDir.resolve(CATALOG_FILENAME);
+        if (!Files.isRegularFile(file)) {
+            Path legacyDir = legacyCatalogDirectory(projectRoot);
+            Path legacyFile = legacyDir.resolve(CATALOG_FILENAME);
+            if (Files.isRegularFile(legacyFile)) {
+                return new ProjectEntries(legacyDir, readProjectEntriesFile(legacyFile));
+            }
+        }
+        return new ProjectEntries(canonicalDir, readProjectEntriesFile(file));
+    }
+
+    private static List<ModelEntry> readProjectEntriesFile(Path file) {
         if (!Files.isRegularFile(file)) {
             return Collections.emptyList();
         }
@@ -209,6 +237,67 @@ public final class ModelCatalogIO {
         } catch (IOException e) {
             warn("Could not read segmentation project catalog " + file + ": " + e.getMessage());
             return Collections.emptyList();
+        }
+    }
+
+    private static void migrateLegacyCatalogIfNeeded(Path projectRoot) {
+        Path targetDir = catalogDirectory(projectRoot);
+        Path targetFile = targetDir.resolve(CATALOG_FILENAME);
+        if (Files.isRegularFile(targetFile)) {
+            return;
+        }
+        Path legacyDir = legacyCatalogDirectory(projectRoot);
+        Path legacyFile = legacyDir.resolve(CATALOG_FILENAME);
+        if (!Files.isRegularFile(legacyFile)) {
+            return;
+        }
+        try {
+            copyDirectory(legacyDir, targetDir);
+        } catch (IOException e) {
+            warn("Could not migrate legacy segmentation model catalog from "
+                    + legacyDir + " to " + targetDir + ": " + e.getMessage());
+        }
+    }
+
+    private static void copyDirectory(Path sourceDir, Path targetDir) throws IOException {
+        final Path sourceRoot = sourceDir.toAbsolutePath().normalize();
+        final Path targetRoot = targetDir.toAbsolutePath().normalize();
+        Files.walkFileTree(sourceRoot, new SimpleFileVisitor<Path>() {
+            @Override
+            public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs)
+                    throws IOException {
+                Path target = targetRoot.resolve(sourceRoot.relativize(dir)).normalize();
+                if (!target.startsWith(targetRoot)) {
+                    throw new IOException("Legacy catalog directory escapes target: " + dir);
+                }
+                Files.createDirectories(target);
+                return FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs)
+                    throws IOException {
+                Path target = targetRoot.resolve(sourceRoot.relativize(file)).normalize();
+                if (!target.startsWith(targetRoot)) {
+                    throw new IOException("Legacy catalog file escapes target: " + file);
+                }
+                Path parent = target.getParent();
+                if (parent != null) {
+                    Files.createDirectories(parent);
+                }
+                Files.copy(file, target, StandardCopyOption.REPLACE_EXISTING);
+                return FileVisitResult.CONTINUE;
+            }
+        });
+    }
+
+    private static final class ProjectEntries {
+        final Path catalogDir;
+        final List<ModelEntry> entries;
+
+        ProjectEntries(Path catalogDir, List<ModelEntry> entries) {
+            this.catalogDir = catalogDir;
+            this.entries = entries == null ? Collections.<ModelEntry>emptyList() : entries;
         }
     }
 

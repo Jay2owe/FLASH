@@ -78,7 +78,6 @@ import java.awt.GraphicsEnvironment;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.SimpleFileVisitor;
@@ -2537,13 +2536,9 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
     }
 
     private static void moveReplacing(File source, File target) throws IOException {
-        try {
-            Files.move(source.toPath(), target.toPath(),
-                    StandardCopyOption.REPLACE_EXISTING,
-                    StandardCopyOption.ATOMIC_MOVE);
-        } catch (AtomicMoveNotSupportedException e) {
-            Files.move(source.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING);
-        }
+        // Atomic move with retry/backoff for transient locks (cloud-sync, AV).
+        // No in-place fallback: deconvolution outputs can be large, never read into memory.
+        IoUtils.moveReplacing(source.toPath(), target.toPath());
     }
 
     private static void deleteRecursively(java.nio.file.Path root) throws IOException {

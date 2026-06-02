@@ -30,9 +30,7 @@ import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
-import java.nio.file.StandardCopyOption;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -100,14 +98,9 @@ public final class PipelineFigureExporter {
         boolean moved = false;
         try {
             writePNGWithDpi(img, temp, EXPORT_DPI);
-            try {
-                Files.move(temp.toPath(), out.toPath(),
-                        StandardCopyOption.REPLACE_EXISTING,
-                        StandardCopyOption.ATOMIC_MOVE);
-            } catch (AtomicMoveNotSupportedException e) {
-                Files.move(temp.toPath(), out.toPath(),
-                        StandardCopyOption.REPLACE_EXISTING);
-            }
+            // Atomic move with retry/backoff for transient locks (cloud-sync, AV).
+            // No in-place fallback: figure PNGs can be large, never read into memory.
+            flash.pipeline.io.IoUtils.moveReplacing(temp.toPath(), out.toPath());
             moved = true;
         } finally {
             if (!moved) {

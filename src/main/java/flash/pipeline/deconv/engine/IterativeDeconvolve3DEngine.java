@@ -109,6 +109,7 @@ public final class IterativeDeconvolve3DEngine implements DeconvolutionEngine {
         ImagePlus stackCopy = null;
         ImagePlus psfCopy = null;
         ImagePlus rawResult = null;
+        int[] beforeIds = null;
 
         WindowManagerLock.LOCK.lock();
         try {
@@ -119,7 +120,7 @@ public final class IterativeDeconvolve3DEngine implements DeconvolutionEngine {
             stackCopy.show();
             psfCopy.show();
 
-            int[] beforeIds = imageJRunner.getWindowIds();
+            beforeIds = imageJRunner.getWindowIds();
             imageJRunner.run(stackCopy, COMMAND_NAME, buildMacroOptions(stackTitle, psfTitle, outputTitle, params));
 
             rawResult = imageJRunner.getImage(outputTitle);
@@ -151,6 +152,7 @@ public final class IterativeDeconvolve3DEngine implements DeconvolutionEngine {
             if (leftover != null && leftover != rawResult) {
                 disposeImage(leftover);
             }
+            closeNewImages(beforeIds, imageJRunner);
             WindowManagerLock.LOCK.unlock();
         }
     }
@@ -217,6 +219,20 @@ public final class IterativeDeconvolve3DEngine implements DeconvolutionEngine {
             if (image != null) return image;
         }
         return null;
+    }
+
+    private static void closeNewImages(int[] beforeIds, ImageJRunner imageJRunner) {
+        if (beforeIds == null || imageJRunner == null) return;
+        Set<Integer> seen = new HashSet<Integer>();
+        for (int id : beforeIds) {
+            seen.add(Integer.valueOf(id));
+        }
+        int[] afterIds = imageJRunner.getWindowIds();
+        if (afterIds == null) return;
+        for (int id : afterIds) {
+            if (seen.contains(Integer.valueOf(id))) continue;
+            disposeImage(imageJRunner.getImage(id));
+        }
     }
 
     private static void disposeDistinct(ImagePlus... images) {

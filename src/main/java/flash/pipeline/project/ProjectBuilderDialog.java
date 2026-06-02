@@ -24,6 +24,7 @@ import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
 import javax.swing.JTable;
 import javax.swing.JTextField;
+import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.TransferHandler;
@@ -511,10 +512,45 @@ public final class ProjectBuilderDialog {
     }
 
     private void openProjectChooser() {
-        File projectJson = chooseProjectJson("Open FLASH project", null);
+        File recentRoot = mostRecentProjectRoot();
+        File browseDir = recentRoot;
+        if (recentRoot != null) {
+            File parent = recentRoot.getParentFile();
+            if (parent != null && parent.isDirectory()) {
+                // Browse the folder that *contains* the recent project so the
+                // project folder is listed and pre-selected, ready to open.
+                browseDir = parent;
+            }
+        }
+        File projectJson = chooseProjectJson("Open FLASH project", browseDir, recentRoot);
         if (projectJson != null) {
             loadProjectJson(projectJson, true, null);
         }
+    }
+
+    /**
+     * The output-root folder of the most recently opened project that still
+     * exists on disk, or {@code null}. Used to point the Open-project chooser
+     * at a location the user will recognise.
+     */
+    private File mostRecentProjectRoot() {
+        if (pluginsDir == null) {
+            return null;
+        }
+        for (RecentProject recent : RecentProjectsStore.read(pluginsDir)) {
+            if (recent == null || recent.path == null || recent.path.trim().isEmpty()) {
+                continue;
+            }
+            File projectJson = ProjectPathResolver.resolveProjectJson(new File(recent.path));
+            if (projectJson == null) {
+                continue;
+            }
+            File root = FlashProjectLayout.projectRootForConfigurationDir(projectJson.getParentFile());
+            if (root != null && root.isDirectory()) {
+                return root;
+            }
+        }
+        return null;
     }
 
     private void openRecentPicker() {
@@ -575,41 +611,70 @@ public final class ProjectBuilderDialog {
             return null;
         }
         File start = ProjectPathResolver.nearestExistingParent(storedProjectJson);
-        return chooseProjectJson("Locate " + (recent.name.isEmpty() ? "FLASH project" : recent.name), start);
+        return chooseProjectJson("Locate " + (recent.name.isEmpty() ? "FLASH project" : recent.name),
+                start, null);
     }
 
-    private File chooseProjectJson(String title, File initialLocation) {
+    /**
+     * Show the folder/file chooser and resolve the picked location to a
+     * {@code project.json}.
+     *
+     * @param browseDir directory the chooser opens at, or {@code null}.
+     * @param preselect file or folder highlighted on open, or {@code null}.
+     */
+    private File chooseProjectJson(String title, File browseDir, File preselect) {
         JFileChooser chooser = new JFileChooser();
         chooser.setDialogTitle(title);
+        chooser.setApproveButtonText("Open");
         chooser.setFileSelectionMode(JFileChooser.FILES_AND_DIRECTORIES);
+        chooser.setAccessory(buildOpenProjectHint());
         chooser.setFileFilter(new FileFilter() {
             @Override public boolean accept(File f) {
                 if (f == null) return false;
                 return f.isDirectory() || ProjectFileIO.FILE_NAME.equalsIgnoreCase(f.getName());
             }
             @Override public String getDescription() {
-                return "FLASH folder, project output folder, or project.json";
+                return "FLASH project folder (the folder that contains 'FLASH'), "
+                        + "the FLASH folder, or project.json";
             }
         });
-        if (initialLocation != null) {
-            File start = initialLocation.isDirectory() ? initialLocation : initialLocation.getParentFile();
-            if (start != null && start.isDirectory()) {
-                chooser.setCurrentDirectory(start);
-            }
-            if (initialLocation.isFile()) {
-                chooser.setSelectedFile(initialLocation);
-            }
+        if (browseDir != null && browseDir.isDirectory()) {
+            chooser.setCurrentDirectory(browseDir);
+        }
+        if (preselect != null && preselect.exists()) {
+            chooser.setSelectedFile(preselect);
         }
         if (chooser.showOpenDialog(dialog) != JFileChooser.APPROVE_OPTION) {
             return null;
         }
-        File projectJson = ProjectPathResolver.projectJsonFromSelectedLocation(chooser.getSelectedFile());
+        // Resolve robustly: the explicit selection first, then the chooser's
+        // current directory. The latter rescues the common case where the user
+        // double-clicked the project (or FLASH) folder so the chooser navigated
+        // *into* it and returned no selection.
+        File projectJson = ProjectPathResolver.resolveProjectJsonNear(chooser.getSelectedFile());
+        if (projectJson == null) {
+            projectJson = ProjectPathResolver.resolveProjectJsonNear(chooser.getCurrentDirectory());
+        }
         if (projectJson == null) {
             JOptionPane.showMessageDialog(dialog,
-                    "Choose a FLASH folder, project output folder, or project.json file.",
-                    "Project not found", JOptionPane.WARNING_MESSAGE);
+                    "That location does not contain a FLASH project.\n\n"
+                            + "Pick the project folder (the one that holds the 'FLASH' folder),\n"
+                            + "the 'FLASH' folder itself, or a project.json file.",
+                    "No FLASH project here", JOptionPane.WARNING_MESSAGE);
         }
         return projectJson;
+    }
+
+    private JComponent buildOpenProjectHint() {
+        JLabel hint = new JLabel("<html><div style='width:160px'>"
+                + "<b>Open a FLASH project</b><br><br>"
+                + "Pick the <b>project folder</b> &mdash; the one that contains the "
+                + "<b>FLASH</b> folder (your project's output folder).<br><br>"
+                + "Selecting the <b>FLASH</b> folder or a <b>project.json</b> "
+                + "file also works.</div></html>");
+        hint.setBorder(BorderFactory.createEmptyBorder(6, 12, 6, 8));
+        hint.setVerticalAlignment(SwingConstants.TOP);
+        return hint;
     }
 
     private boolean loadProjectJson(File projectJson, boolean showErrors, String obsoleteRecentPath) {

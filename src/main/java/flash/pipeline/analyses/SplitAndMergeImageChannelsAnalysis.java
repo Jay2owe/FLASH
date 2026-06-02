@@ -121,6 +121,11 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis, RunRecordAw
     }
 
     @Override
+    public boolean requiresHeadedMode() {
+        return true;
+    }
+
+    @Override
     public void setSuppressDialogs(boolean suppress) {
         this.suppressDialogs = suppress;
     }

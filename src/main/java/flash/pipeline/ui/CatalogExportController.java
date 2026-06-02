@@ -6,7 +6,6 @@ import flash.pipeline.segmentation.catalog.ModelEntry;
 
 import java.io.IOException;
 import java.io.OutputStream;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -80,12 +79,9 @@ public final class CatalogExportController {
                 out.closeEntry();
             }
         }
-        try {
-            Files.move(tmp, zip, StandardCopyOption.ATOMIC_MOVE,
-                    StandardCopyOption.REPLACE_EXISTING);
-        } catch (AtomicMoveNotSupportedException e) {
-            Files.move(tmp, zip, StandardCopyOption.REPLACE_EXISTING);
-        }
+        // Atomic move with retry/backoff for transient locks (cloud-sync, AV).
+        // No in-place fallback: export zips can be large, never read into memory.
+        flash.pipeline.io.IoUtils.moveReplacing(tmp, zip);
     }
 
     public ImportSummary importCatalog(Path sourceZip, ConflictPolicy conflictPolicy)

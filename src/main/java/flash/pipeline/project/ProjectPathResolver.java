@@ -23,6 +23,15 @@ public final class ProjectPathResolver {
 
     private static final int SOURCE_NAME_SEARCH_DEPTH = 3;
 
+    /**
+     * How many parent levels {@link #resolveProjectJsonNear} climbs before
+     * giving up. Covers {@code .settings} → {@code Config} → {@code FLASH} →
+     * project root and a little headroom, so standing a couple of folders deep
+     * inside a project still resolves without matching unrelated projects far
+     * above the selection.
+     */
+    private static final int UPWARD_SEARCH_DEPTH = 5;
+
     private ProjectPathResolver() {
     }
 
@@ -78,6 +87,44 @@ public final class ProjectPathResolver {
                 FlashProjectLayout.forDirectory(absolute.getAbsolutePath()).configurationWriteDir(),
                 ProjectFileIO.FILE_NAME);
         return projectRootConfig.isFile() ? projectRootConfig.getAbsoluteFile() : null;
+    }
+
+    /**
+     * Resolve a {@code project.json} from anywhere in or near a user selection.
+     *
+     * <p>Probes the selection itself with {@link #projectJsonFromSelectedLocation}
+     * and, failing that, walks up a few parent levels probing each one. This
+     * makes every reasonable pick resolve to the same project: the project
+     * output folder (the one that contains {@code FLASH}), the {@code FLASH}
+     * folder, the {@code Config} or {@code .settings} folder, a {@code
+     * project.json} file, or merely standing inside any of those — which is
+     * what happens when a file chooser hands back its current directory instead
+     * of the folder the user meant to select.
+     *
+     * @return the resolved project.json, or {@code null} when no enclosing
+     *         FLASH project is found near the selection.
+     */
+    public static File resolveProjectJsonNear(File selected) {
+        if (selected == null) {
+            return null;
+        }
+        File start = selected.getAbsoluteFile();
+        File direct = projectJsonFromSelectedLocation(start);
+        if (direct != null) {
+            return direct;
+        }
+        // No project at or beneath the selection itself: climb toward an
+        // enclosing FLASH project (e.g. the user picked FLASH/Results or the
+        // chooser returned a folder one level inside the project root).
+        File cursor = start.getParentFile();
+        for (int climbed = 0; cursor != null && climbed < UPWARD_SEARCH_DEPTH; climbed++) {
+            File found = projectJsonFromSelectedLocation(cursor);
+            if (found != null) {
+                return found;
+            }
+            cursor = cursor.getParentFile();
+        }
+        return null;
     }
 
     /**

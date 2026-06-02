@@ -132,6 +132,8 @@ public class SplitAndMergeImageChannelsAnalysisTest {
                 BinField.Z_SLICE),
                 analysis.requiredBinFields());
         assertFalse(analysis.benefitsFromRois());
+        assertTrue("Split/merge must open its setup dialog during GUI runs",
+                analysis.requiresHeadedMode());
     }
 
     @Test

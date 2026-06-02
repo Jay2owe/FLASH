@@ -81,14 +81,42 @@ public final class FilterExecutor {
 
     public static void runMacroString(final ImagePlus imp, final String macroContent) {
         if (imp == null || macroContent == null || macroContent.isEmpty()) return;
-        Boolean dagResult = runEmbeddedDagIfPresent(imp, macroContent);
+        final String safeMacro = normalizeDuplicateCommand(macroContent);
+        Boolean dagResult = runEmbeddedDagIfPresent(imp, safeMacro);
         if (dagResult != null) return;
         runLegacyMacroSandboxed(imp, new Runnable() {
             @Override
             public void run() {
-                IJ.runMacro(macroContent);
+                IJ.runMacro(safeMacro);
             }
         });
+    }
+
+    /**
+     * Regex for a bare {@code run("Duplicate", ...)} / {@code run("Duplicate")}
+     * call — i.e. the standard duplicator command spelled WITHOUT its trailing
+     * {@code ...}. Matches the command token only; the args (if any) are left
+     * untouched.
+     */
+    private static final java.util.regex.Pattern BARE_DUPLICATE = java.util.regex.Pattern.compile(
+            "(run\\s*\\(\\s*\")Duplicate(\"\\s*[,)])");
+
+    /**
+     * REGRESSION GUARD (docs/filter-branch-robustness): a FLASH-generated filter
+     * macro must never run {@code run("Duplicate", ...)} without the ellipsis —
+     * ImageJ then dispatches it to the Image5D plugin's {@code Duplicate}
+     * command, which throws "Image is not an Image5D" on a normal stack. Upstream
+     * fixes (verbatim command names in the DAG round-trip, node-identity arg
+     * binding) should prevent this ever reaching here; this is a last-resort
+     * backstop scoped to the internal filter execution path. It deliberately
+     * targets only the exact bare {@code "Duplicate"} token, so a macro that
+     * already uses {@code "Duplicate..."} is left unchanged.
+     */
+    static String normalizeDuplicateCommand(String macroContent) {
+        if (macroContent == null || macroContent.indexOf("Duplicate") < 0) {
+            return macroContent;
+        }
+        return BARE_DUPLICATE.matcher(macroContent).replaceAll("$1Duplicate...$2");
     }
 
     /**

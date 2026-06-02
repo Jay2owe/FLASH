@@ -29,6 +29,8 @@ public class FlashProjectLayoutTest {
 
         assertPath(new File(project, "FLASH"), layout.flashRoot());
         assertPath(new File(project, "FLASH/Config"), layout.visibleConfigurationDir());
+        assertPath(new File(project, "FLASH/Config/Segmentation models"), layout.segmentationModelsRoot());
+        assertPath(new File(project, "FLASH/Config/Training Datasets"), layout.trainingDatasetsRoot());
         assertPath(new File(project, "FLASH/Config/.settings"), layout.configurationWriteDir());
         assertPath(new File(project, "FLASH/Results/Tables/Project Summary/Conditions.csv"),
                 layout.projectSummaryWriteFile(FlashProjectLayout.CONDITIONS_FILENAME));

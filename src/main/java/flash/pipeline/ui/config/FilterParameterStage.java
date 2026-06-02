@@ -2,6 +2,7 @@ package flash.pipeline.ui.config;
 
 import flash.pipeline.help.SetupHelpCatalog;
 import flash.pipeline.help.SetupHelpTopic;
+import flash.pipeline.image.FilterBranchLabels;
 import flash.pipeline.image.FilterMacroEditorModel;
 import flash.pipeline.image.dag.Combiner;
 import flash.pipeline.image.dag.DagIR;
@@ -110,7 +111,8 @@ public final class FilterParameterStage implements ConfigQcStage {
     private static final String STALE_TEXT = "Preview is stale. Press Run Preview.";
     private static final String EMPTY_TEXT = "Choose a filter preset or click Custom macro...";
     private static final String BRANCHED_BANNER_TEXT =
-            "This pipeline has branches. Use Custom macro... to edit the visual structure.";
+            "This pipeline has branches. Edit and sweep parameters per branch here; "
+                    + "use Custom macro... to change the branch structure.";
 
     private static final Pattern RUN_LINE_PATTERN = Pattern.compile(
             "run\\s*\\(\\s*\"([^\"]+)\"(?:\\s*,\\s*\"([^\"]*)\")?\\s*\\)");
@@ -1354,10 +1356,9 @@ public final class FilterParameterStage implements ConfigQcStage {
     }
 
     private void openMacroVariationsDialog() {
-        if (!linear) {
-            setError("Use Custom macro... to vary branched pipelines.");
-            return;
-        }
+        // Branched filters are sweepable: the sweep substitutes parameters
+        // surgically through the faithful text model (FilterMacroEditorModel),
+        // never re-emitting through the DAG. See docs/filter-branch-robustness.
         if (!canPreview() || activeContext == null) {
             setError("Choose a filter and source image first.");
             return;
@@ -1981,17 +1982,19 @@ public final class FilterParameterStage implements ConfigQcStage {
         if (varyButton == null) return;
         boolean hasMacro = hasMacro();
         boolean hasSource = sourceImage != null;
-        boolean available = controlsEnabled && linear && hasMacro && hasSource;
+        // Branched filters ARE sweepable now (parameters vary through the faithful
+        // text model), so linearity no longer gates the Vary button.
+        boolean available = controlsEnabled && hasMacro && hasSource;
         varyButton.setEnabled(available);
-        if (!linear) {
-            varyButton.setToolTipText("Use Custom macro... to vary branched pipelines");
-        } else if (!hasMacro) {
+        if (!hasMacro) {
             varyButton.setToolTipText("Choose a filter before varying parameters.");
         } else if (!hasSource) {
             varyButton.setToolTipText(
                     "No source image is available for parameter variations.");
         } else if (!controlsEnabled) {
             varyButton.setToolTipText("Wait for the current preview to finish.");
+        } else if (!linear) {
+            varyButton.setToolTipText("Vary parameters across the branches of this filter.");
         } else {
             varyButton.setToolTipText("Open parameter variations for this filter.");
         }

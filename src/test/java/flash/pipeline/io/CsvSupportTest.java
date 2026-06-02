@@ -99,7 +99,11 @@ public class CsvSupportTest {
         });
 
         assertEquals(Arrays.asList("new"), Files.readAllLines(csv.toPath(), CsvSupport.CHARSET));
-        File[] leftovers = csv.getParentFile().listFiles((dir, name) ->
+        assertNoLeftoverTemp(csv);
+    }
+
+    private static void assertNoLeftoverTemp(File csv) {
+        File[] leftovers = csv.getAbsoluteFile().getParentFile().listFiles((dir, name) ->
                 name.startsWith("." + csv.getName() + ".") && name.endsWith(".tmp"));
         assertTrue(leftovers == null || leftovers.length == 0);
     }

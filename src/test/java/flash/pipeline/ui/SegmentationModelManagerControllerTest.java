@@ -59,8 +59,11 @@ public class SegmentationModelManagerControllerTest {
         assertTrue(added.filePath.isPresent());
         assertFalse(added.filePath.get().contains(":"));
         assertTrue(added.filePath.get().startsWith("files/" + added.modelKey + "/"));
-        assertTrue(Files.isRegularFile(root.resolve("Configuration")
-                .resolve("Segmentation Models").resolve(added.filePath.get())));
+        Path expectedCatalogDir = root.resolve("FLASH").resolve("Config").resolve("Segmentation models");
+        assertEquals(expectedCatalogDir.toAbsolutePath().normalize(),
+                ModelCatalogIO.catalogDirectory(root).toAbsolutePath().normalize());
+        assertTrue(Files.isRegularFile(expectedCatalogDir.resolve(added.filePath.get())));
+        assertFalse(Files.exists(root.resolve("Configuration")));
     }
 
     @Test

@@ -430,8 +430,13 @@ public final class ConfigQcDialog {
 
     private void refreshButtons() {
         boolean hasPreviousStage = findPreviousApplicable(stageIndex - 1) >= 0;
-        backButton.setVisible(hasPreviousStage);
-        backButton.setEnabled(hasPreviousStage);
+        // Even on the first internal stage, allow Back when this dialog continues a
+        // larger per-channel QC sequence (e.g. Segmentation Method following Filter).
+        // goBack() then closes with ConfigQcResult.BACK, which the embedded QC caller
+        // turns into a "back" that returns to the previous step.
+        boolean canReturnToPreviousStep = hasPreviousStage || hasPreviousOuterStep();
+        backButton.setVisible(canReturnToPreviousStep);
+        backButton.setEnabled(canReturnToPreviousStep);
         previousImageButton.setEnabled(currentStage() != null
                 && context.hasImages()
                 && context.getCurrentImageIndex() > 0);
@@ -782,6 +787,15 @@ public final class ConfigQcDialog {
             }
         }
         return -1;
+    }
+
+    /**
+     * True when this dialog is a continuation of a larger per-channel QC sequence and the
+     * active step is not the first one in the breadcrumb path. In that case Back should
+     * exit the dialog (ConfigQcResult.BACK) so the caller can re-open the previous step.
+     */
+    private boolean hasPreviousOuterStep() {
+        return !stagePathOverride.isEmpty() && stagePathCurrentIndexOverride > 0;
     }
 
     private int findApplicableStageByKey(String stageKey) {

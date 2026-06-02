@@ -202,7 +202,7 @@ public class DependencyServiceTest {
     }
 
     @Test
-    public void dialogRowsNeedingAttentionIncludeOnlyVisibleMissingRows() {
+    public void dialogRowsNeedingAttentionIncludeVisibleMissingRows() {
         DependencyService service = DependencyRuntimeTestSupport.serviceWith(
                 DependencyRuntimeTestSupport.withStatuses(
                         DependencyId.PLUGIN_JAR_INTEGRITY,
@@ -216,17 +216,17 @@ public class DependencyServiceTest {
         Set<DependencyId> ids = rowIds(rows);
 
         assertTrue(service.hasVisibleDependenciesNeedingAttention());
+        assertTrue(ids.contains(DependencyId.PLUGIN_JAR_INTEGRITY));
         assertTrue(ids.contains(DependencyId.APACHE_POI_RUNTIME));
         assertTrue(ids.contains(DependencyId.STARDIST_RUNTIME));
-        assertFalse(ids.contains(DependencyId.PLUGIN_JAR_INTEGRITY));
     }
 
     @Test
     public void dialogRowsNeedingAttentionAreEmptyWhenOnlyHiddenRowsAreMissing() {
         DependencyService service = DependencyRuntimeTestSupport.serviceWith(
                 DependencyRuntimeTestSupport.withStatuses(
-                        DependencyId.PLUGIN_JAR_INTEGRITY,
-                        DependencyStatus.missing("FLASH jar missing")));
+                        DependencyId.IMAGEJ_RUNTIME,
+                        DependencyStatus.missing("ImageJ runtime missing")));
 
         assertTrue(service.getDialogRowsNeedingAttention().isEmpty());
         assertFalse(service.hasVisibleDependenciesNeedingAttention());

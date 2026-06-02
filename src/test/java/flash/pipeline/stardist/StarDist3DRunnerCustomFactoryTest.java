@@ -83,7 +83,7 @@ public class StarDist3DRunnerCustomFactoryTest {
         Settings settings = new Settings(image());
         StarDist3DRunner.configureStarDistDetector(settings, 0.61, 0.22, modelFile);
 
-        Path expected = root.resolve("Configuration").resolve("Segmentation Models")
+        Path expected = ModelCatalogIO.catalogDirectory(root)
                 .resolve(saved.filePath.get()).toAbsolutePath().normalize();
         assertEquals(expected.toFile().getAbsolutePath(),
                 settings.detectorSettings.get(StarDistCustomDetectorFactory.KEY_MODEL_FILEPATH));

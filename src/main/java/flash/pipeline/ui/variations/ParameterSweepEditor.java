@@ -1,6 +1,7 @@
 package flash.pipeline.ui.variations;
 
 import flash.pipeline.bin.BinConfig;
+import flash.pipeline.image.FilterBranchLabels;
 import flash.pipeline.image.FilterMacroEditorModel;
 import flash.pipeline.ui.FlashTheme;
 import flash.pipeline.ui.config.CellposeParameterStage;
@@ -480,12 +481,20 @@ public final class ParameterSweepEditor extends JPanel {
     private static ParameterSections filterSectionsFor(FilterVariationEngineContext context) {
         List<ParameterDefinition> primary = new ArrayList<ParameterDefinition>();
         FilterMacroEditorModel.MacroDefinition macro = context.baseMacro();
+        // Branch labels are derived from the same rendered macro the indices
+        // below walk, so each parameter can show which image branch it is on.
+        String macroText = macro.render();
+        boolean branched = FilterBranchLabels.isBranched(macroText);
+        java.util.Map<Integer, String> branchByLine = branched
+                ? FilterBranchLabels.labelByLine(macroText)
+                : java.util.Collections.<Integer, String>emptyMap();
         List<FilterMacroEditorModel.Section> sections = macro.getSections();
         int stepIndex = 0;
         for (int i = 0; i < sections.size(); i++) {
             FilterMacroEditorModel.Section section = sections.get(i);
             for (int j = 0; j < section.entries.size(); j++) {
                 FilterMacroEditorModel.Entry entry = section.entries.get(j);
+                String branchLabel = branchLabelFor(branched, branchByLine, entry.lineIndex);
                 for (int k = 0; k < entry.parameters.size(); k++) {
                     FilterMacroEditorModel.Parameter parameter =
                             entry.parameters.get(k);
@@ -494,7 +503,7 @@ public final class ParameterSweepEditor extends JPanel {
                             ? ParameterKey.ValueKind.STRING
                             : ParameterKey.ValueKind.NUMBER;
                     FilterParameterId id = new FilterParameterId(i, j, k,
-                            entry.label, parameter.key, kind);
+                            entry.label, parameter.key, kind, branchLabel);
                     primary.add(new ParameterDefinition(id, baseValue,
                             parserForFilterValue(baseValue), stepIndex));
                 }
@@ -503,6 +512,24 @@ public final class ParameterSweepEditor extends JPanel {
         }
         return new ParameterSections(primary,
                 Collections.<ParameterDefinition>emptyList());
+    }
+
+    /**
+     * Branch label for an entry, or "" when the macro is linear or the entry is
+     * on the (un-branched) source/preamble path — we only label genuine branches.
+     */
+    private static String branchLabelFor(boolean branched,
+                                         java.util.Map<Integer, String> branchByLine,
+                                         int lineIndex) {
+        if (!branched) {
+            return "";
+        }
+        String label = branchByLine.get(lineIndex);
+        if (label == null || label.isEmpty()
+                || FilterBranchLabels.SOURCE.equals(label)) {
+            return "";
+        }
+        return label;
     }
 
     private static ValueChipPanel.ValueParser parserFor(ParameterId id) {
