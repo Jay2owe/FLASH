@@ -13,7 +13,9 @@ import java.awt.GridLayout;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 public class VariationGridWindowLayoutTest {
 
@@ -53,17 +55,44 @@ public class VariationGridWindowLayoutTest {
                 VariationGridWindow window = new VariationGridWindow(
                         null, "FLASH variations", cells);
                 try {
+                    // The baseline cell carries a source crop, so the grid is
+                    // sized to the image aspect for the live monitor; assert the
+                    // baseline is counted and the tiles cover every cell rather
+                    // than a fixed (monitor-dependent) row/column split.
                     GridLayout layout =
                             (GridLayout) window.gridPanelForTest().getLayout();
+                    int rows = layout.getRows();
+                    int cols = layout.getColumns();
                     assertEquals(4, window.cellsForTest().size());
-                    assertEquals(4, window.gridPanelForTest().getComponentCount());
-                    assertEquals(2, layout.getRows());
-                    assertEquals(2, layout.getColumns());
+                    assertTrue(rows >= 1 && cols >= 1);
+                    assertTrue(rows * cols >= 4);
+                    assertEquals(rows * cols,
+                            window.gridPanelForTest().getComponentCount());
                 } finally {
                     window.dispose();
                 }
             }
         });
+    }
+
+    @Test
+    public void optimalGridStacksWideImagesAndSplitsTallImages() {
+        // A wide image (2 tiles, 4:1) on a square area stacks vertically...
+        int[] wide = VariationGridWindow.optimalGrid(2, 1200, 1200, 4.0, 2, 2);
+        assertEquals(2, wide[0]);
+        assertEquals(1, wide[1]);
+        // ...while a tall image (2 tiles, 1:4) splits side-by-side.
+        int[] tall = VariationGridWindow.optimalGrid(2, 1200, 1200, 0.25, 2, 2);
+        assertEquals(1, tall[0]);
+        assertEquals(2, tall[1]);
+    }
+
+    @Test
+    public void optimalGridFallsBackToSquareWhenInputsUnusable() {
+        int[] noAspect = VariationGridWindow.optimalGrid(9, 1200, 1200, 0.0, 2, 2);
+        assertArrayEquals(VariationGridWindow.gridDimensions(9), noAspect);
+        int[] noArea = VariationGridWindow.optimalGrid(9, 0, 0, 1.0, 2, 2);
+        assertArrayEquals(VariationGridWindow.gridDimensions(9), noArea);
     }
 
     private static void assertGridDimensions(int cells, int expectedRows,

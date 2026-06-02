@@ -3,6 +3,7 @@ package flash.pipeline.intelligence;
 import flash.pipeline.FLASH_Pipeline;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.OrientationManifestIO;
+import flash.pipeline.io.ProjectStatusStore;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -82,15 +83,18 @@ public class AnalysisStatusScannerTest {
     }
 
     @Test
-    public void writeSidecar_usesFlashStatusDirectory() throws Exception {
+    public void writeSidecar_usesProjectStatusJson() throws Exception {
         File dir = temp.newFolder("sidecar-new");
 
         AnalysisStatusScanner.writeSidecar(dir, AnalysisStatusScanner.CREATE_BIN_ID, 3);
 
-        File sidecar = new File(FlashProjectLayout.forDirectory(dir.getAbsolutePath())
-                .analysisStatusWriteDir(), AnalysisStatusScanner.CREATE_BIN_ID + ".json");
-        assertEquals(true, sidecar.isFile());
+        File status = ProjectStatusStore.statusFile(dir);
+        assertEquals(true, status.isFile());
+        Map<String, Object> createBin = ProjectStatusStore.readAnalysisStatus(dir,
+                AnalysisStatusScanner.CREATE_BIN_ID);
+        assertEquals(3, ((Number) createBin.get("imageCount")).intValue());
         assertEquals(false, new File(dir, ".flash-status/createBin.json").exists());
+        assertEquals(false, new File(dir, "FLASH/Status").exists());
     }
 
     @Test

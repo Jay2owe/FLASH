@@ -82,6 +82,7 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
     private AnalysisRunContext runRecordContext = null;
     private static final double COLOC_THRESHOLD = 30.0;
     private static final int MAX_TEXTURE_CLASS_FRACTION_COLUMNS = 16;
+    private static final String NUM_Z_SLICES_COLUMN = "numZSlices";
     private static final String MASTER_INTENSITIES_MIP_FILENAME = "Image Intensities_MIP.csv";
     private static final String MASTER_INTENSITIES_3D_FILENAME = "Image Intensities_3D.csv";
 
@@ -2007,6 +2008,7 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
                 int areaCol = columnIndex(colIdx, "%Area", null);
                 int areaBinarizedCol = columnIndex(colIdx, "%Area_binarized", null);
                 int intDenUnfilteredCol = columnIndex(colIdx, "IntDen_Unfiltered", "RawIntDen");
+                int zCol = columnIndex(colIdx, "z", null);
 
                 boolean usesLegacyRawIntDen = !colIdx.containsKey("IntDen_Unfiltered")
                         && colIdx.containsKey("RawIntDen");
@@ -2067,6 +2069,8 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
                 int numSections = numSectionsPerAnimal.containsKey(parentAnimal)
                         ? numSectionsPerAnimal.get(parentAnimal) : 1;
                 metrics.put("numSections", (double) numSections);
+                metrics.put(NUM_Z_SLICES_COLUMN,
+                        (double) countZSlices(animalRows, zCol, classified.mode));
 
                 animalMetrics.put(groupKey, metrics);
             }
@@ -2084,9 +2088,11 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
             List<String> columns = new ArrayList<String>();
             columns.add("AnimalName");
             columns.add("numSections");
+            columns.add(NUM_Z_SLICES_COLUMN);
             Set<String> seenColumns = new LinkedHashSet<String>();
             seenColumns.add("AnimalName");
             seenColumns.add("numSections");
+            seenColumns.add(NUM_Z_SLICES_COLUMN);
             for (Map.Entry<String, Map<String, LinkedHashMap<String, Double>>> chEntry : bucket.channelData.entrySet()) {
                 for (LinkedHashMap<String, Double> metrics : chEntry.getValue().values()) {
                     for (String key : metrics.keySet()) {
@@ -2101,9 +2107,21 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
                     new LinkedHashMap<String, LinkedHashMap<String, Double>>();
             for (String groupKey : bucket.allAnimals) {
                 LinkedHashMap<String, Double> row = new LinkedHashMap<String, Double>();
+                double maxZSlices = Double.NaN;
                 for (Map<String, LinkedHashMap<String, Double>> animalMap : bucket.channelData.values()) {
                     LinkedHashMap<String, Double> m = animalMap.get(groupKey);
-                    if (m != null) row.putAll(m);
+                    if (m != null) {
+                        Double zSlices = m.get(NUM_Z_SLICES_COLUMN);
+                        if (zSlices != null && Double.isFinite(zSlices.doubleValue())) {
+                            maxZSlices = Double.isNaN(maxZSlices)
+                                    ? zSlices.doubleValue()
+                                    : Math.max(maxZSlices, zSlices.doubleValue());
+                        }
+                        row.putAll(m);
+                    }
+                }
+                if (!Double.isNaN(maxZSlices)) {
+                    row.put(NUM_Z_SLICES_COLUMN, Double.valueOf(maxZSlices));
                 }
                 table.put(groupKey, row);
             }
@@ -2200,6 +2218,28 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
         if (mode == IntensitySpatialOutputMode.MIP) return MASTER_INTENSITIES_MIP_FILENAME;
         if (mode == IntensitySpatialOutputMode.NATIVE_3D) return MASTER_INTENSITIES_3D_FILENAME;
         return FlashProjectLayout.MASTER_INTENSITIES_FILENAME;
+    }
+
+    private static int countZSlices(List<String[]> rows,
+                                    int zColumnIndex,
+                                    IntensitySpatialOutputMode mode) {
+        if (rows == null || rows.isEmpty()) {
+            return 0;
+        }
+        if (mode == IntensitySpatialOutputMode.MIP
+                || mode == IntensitySpatialOutputMode.NATIVE_3D
+                || zColumnIndex < 0) {
+            return rows.size();
+        }
+
+        int count = 0;
+        for (String[] row : rows) {
+            String value = safeGet(row, zColumnIndex).trim();
+            if (!value.isEmpty()) {
+                count++;
+            }
+        }
+        return count > 0 ? count : rows.size();
     }
 
     private static List<DynamicIntensityColumn> dynamicIntensityColumns(

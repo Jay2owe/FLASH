@@ -31,12 +31,9 @@ public class LooseTiffRelocatorTest {
     }
 
     @Test
-    public void shouldPrompt_returnsFalseWhenFlashStatusMarkerExists() throws Exception {
+    public void shouldPrompt_returnsFalseWhenProjectStatusMarkerExists() throws Exception {
         File dir = temp.newFolder("marker-new");
-        File marker = FlashProjectLayout.forDirectory(dir.getAbsolutePath())
-                .statusWriteFile(LooseTiffRelocator.NO_PROMPT_MARKER);
-        assertTrue(marker.getParentFile().mkdirs());
-        assertTrue(marker.createNewFile());
+        ProjectStatusStore.setMarker(dir, LooseTiffRelocator.NO_PROMPT_MARKER, true);
 
         assertFalse(LooseTiffRelocator.shouldPrompt(dir.getAbsolutePath()));
     }

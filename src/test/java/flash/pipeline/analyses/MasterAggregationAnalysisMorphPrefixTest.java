@@ -32,6 +32,8 @@ public class MasterAggregationAnalysisMorphPrefixTest {
         assertTrue(MasterAggregationAnalysis.needsChannelPrefix("Morph_Moment3"));
         assertTrue(MasterAggregationAnalysis.needsChannelPrefix("Morph_FEV_Mag"));
         assertTrue(MasterAggregationAnalysis.needsChannelPrefix("Morph_TDR"));
+        assertTrue(MasterAggregationAnalysis.needsChannelPrefix("Morph_ShollSchoenenIndex"));
+        assertTrue(MasterAggregationAnalysis.needsChannelPrefix("Morph_SkeletonBranches"));
     }
 
     @Test
@@ -64,6 +66,10 @@ public class MasterAggregationAnalysisMorphPrefixTest {
                 "Morph_DistCenter_Min_um", "Morph_DistCenter_Max_um",
                 "Morph_DistCenter_Mean_um", "Morph_DistCenter_SD_um",
                 "Morph_RI", "Morph_SRI", "Morph_PB", "Morph_MP", "Morph_VSD",
+                "Morph_ShollCriticalRadius_um", "Morph_ShollCriticalIntersections",
+                "Morph_ShollSchoenenIndex", "Morph_ShollPrimaryBranches",
+                "Morph_SkeletonBranches", "Morph_SkeletonJunctions",
+                "Morph_SkeletonEndpoints",
                 "Morph_CMS", "Morph_SMSD", "Morph_IMDI",
                 "Morph_TDR", "Morph_FEV_Mag"
         };

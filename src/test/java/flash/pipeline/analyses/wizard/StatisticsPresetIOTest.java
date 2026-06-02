@@ -8,7 +8,9 @@ import org.junit.rules.TemporaryFolder;
 import java.io.File;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -56,6 +58,8 @@ public class StatisticsPresetIOTest {
             assertEquals(preset.getDistributionMode(), reparsed.getDistributionMode());
             assertEquals(preset.getPostHocMethod(), reparsed.getPostHocMethod());
             assertEquals(preset.getMetricFilter(), reparsed.getMetricFilter());
+            assertEquals(preset.getMetricAggregationOverrides(),
+                    reparsed.getMetricAggregationOverrides());
         }
     }
 
@@ -171,6 +175,30 @@ public class StatisticsPresetIOTest {
         StatisticsPreset reparsed = StatisticsPreset.fromJson(preset.toJson());
         assertNotNull(reparsed.getMetricFilter());
         assertTrue(reparsed.getMetricFilter().isEmpty());
+    }
+
+    @Test
+    public void presetMetricAggregationOverridesRoundTrip() throws Exception {
+        Map<String, StatisticsConfig.MetricAggregation> aggregation =
+                new LinkedHashMap<String, StatisticsConfig.MetricAggregation>();
+        aggregation.put("ObjectsDetected", StatisticsConfig.MetricAggregation.SUM);
+        aggregation.put("CellCount", StatisticsConfig.MetricAggregation.MEAN);
+        StatisticsPreset preset = new StatisticsPreset(
+                "Aggregation overrides",
+                "test",
+                StatisticsConfig.PairedMode.OFF,
+                StatisticsConfig.DistributionMode.AUTO,
+                StatisticsConfig.PostHocMethod.BONFERRONI,
+                null,
+                aggregation);
+
+        StatisticsPreset reparsed = StatisticsPreset.fromJson(preset.toJson());
+
+        assertEquals(aggregation, reparsed.getMetricAggregationOverrides());
+        assertEquals(StatisticsConfig.MetricAggregation.SUM,
+                reparsed.toConfig().metricAggregationFor("ObjectsDetected"));
+        assertEquals(StatisticsConfig.MetricAggregation.MEAN,
+                reparsed.toConfig().metricAggregationFor("CellCount"));
     }
 
     private StatisticsPreset loadStock(String stockName) throws Exception {

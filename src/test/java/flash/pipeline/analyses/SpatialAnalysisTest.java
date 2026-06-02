@@ -1,5 +1,6 @@
 package flash.pipeline.analyses;
 
+import flash.pipeline.atlas.AtlasRegionColumns;
 import ij.ImagePlus;
 import ij.io.FileSaver;
 import ij.process.ShortProcessor;
@@ -235,11 +236,11 @@ public class SpatialAnalysisTest {
         CalibrationIO.write(objectsDir, 1.0, 1.0, 1.0, "um");
 
         writeChannel(objectsDir, "A.csv",
-                "SCN,Animal Name,Hemisphere,Region,Volume (micron^3),Surface (micron^2),XM,YM,ZM,XM_um,YM_um,ZM_um",
-                "1,Mouse1,LH,SCN,10,5,0,0,1,0.10,0.10,1\n" +
-                "1,Mouse1,LH,SCN,10,5,0,0,1,0.20,0.10,1\n" +
-                "1,Mouse1,LH,SCN,10,5,0,0,1,0.20,0.20,1\n" +
-                "1,Mouse1,LH,SCN,10,5,0,0,1,0.10,0.20,1");
+                "SCN,Animal Name,Hemisphere,Region,Atlas Key,Region ID,Region Acronym,Region Name,Volume (micron^3),Surface (micron^2),XM,YM,ZM,XM_um,YM_um,ZM_um",
+                "1,Mouse1,LH,SCN,custom_atlas,999,CUSTOM,Custom region,10,5,0,0,1,0.10,0.10,1\n" +
+                "1,Mouse1,LH,SCN,custom_atlas,999,CUSTOM,Custom region,10,5,0,0,1,0.20,0.10,1\n" +
+                "1,Mouse1,LH,SCN,custom_atlas,999,CUSTOM,Custom region,10,5,0,0,1,0.20,0.20,1\n" +
+                "1,Mouse1,LH,SCN,custom_atlas,999,CUSTOM,Custom region,10,5,0,0,1,0.10,0.20,1");
         writeChannel(objectsDir, "B.csv",
                 "SCN,Animal Name,Hemisphere,Region,Volume (micron^3),Surface (micron^2),XM,YM,ZM,XM_um,YM_um,ZM_um",
                 "1,Mouse1,LH,SCN,10,5,0,0,1,0.60,0.60,1\n" +
@@ -264,6 +265,55 @@ public class SpatialAnalysisTest {
         assertTrue(lines.get(0).contains("Radius_um"));
         assertTrue(lines.get(1).contains("Mouse1"));
         assertTrue(lines.get(1).contains("derived_from_centroids"));
+        String[] header = CsvTableIO.parseCsvLine(lines.get(0));
+        String[] row = CsvTableIO.parseCsvLine(lines.get(1));
+        List<String> headerList = Arrays.asList(header);
+        assertEquals("custom_atlas", row[headerList.indexOf("Atlas Key")]);
+        assertEquals("999", row[headerList.indexOf("Region ID")]);
+        assertEquals("CUSTOM", row[headerList.indexOf("Region Acronym")]);
+        assertEquals("Custom region", row[headerList.indexOf("Region Name")]);
+    }
+
+    @Test
+    public void interactionUnitMetadataPrefersExplicitAtlasMetadata() throws Exception {
+        File root = temp.newFolder("spatial-interaction-atlas");
+        File objectsDir = objectsDir(root);
+
+        writeChannel(objectsDir, "A.csv",
+                "SCN,Animal Name,Hemisphere,Region,ROI,XM_um,YM_um",
+                "1,Mouse1,LH,SCN,SCN,0.10,0.10");
+        writeChannel(objectsDir, "B.csv",
+                "SCN,Animal Name,Hemisphere,Region,Atlas Key,Region ID,Region Acronym,Region Name,ROI,XM_um,YM_um",
+                "1,Mouse1,LH,SCN,custom_atlas,999,CUSTOM,Custom region,SCN,0.60,0.60");
+
+        java.util.LinkedHashMap<String, ChannelData> channels =
+                new java.util.LinkedHashMap<String, ChannelData>();
+        channels.put("A", CsvTableIO.loadChannelCsv(new File(objectsDir, "A.csv"), "A"));
+        channels.put("B", CsvTableIO.loadChannelCsv(new File(objectsDir, "B.csv"), "B"));
+        java.util.LinkedHashMap<String, List<Integer>> rowsByChannel =
+                new java.util.LinkedHashMap<String, List<Integer>>();
+        rowsByChannel.put("A", Arrays.asList(Integer.valueOf(0)));
+        rowsByChannel.put("B", Arrays.asList(Integer.valueOf(0)));
+
+        Class<?> keyClass = Class.forName("flash.pipeline.analyses.SpatialAnalysis$SpatialGroupKey");
+        Constructor<?> keyConstructor =
+                keyClass.getDeclaredConstructor(String.class, String.class, String.class, String.class);
+        keyConstructor.setAccessible(true);
+        Object key = keyConstructor.newInstance("Mouse1", "LH", "SCN", "SCN");
+        Method method = SpatialAnalysis.class.getDeclaredMethod(
+                "atlasMetadataForInteractionUnit",
+                java.util.Map.class,
+                java.util.Map.class,
+                keyClass);
+        method.setAccessible(true);
+        SpatialAnalysis sa = new SpatialAnalysis();
+        AtlasRegionColumns.Metadata metadata =
+                (AtlasRegionColumns.Metadata) method.invoke(sa, channels, rowsByChannel, key);
+
+        assertEquals("custom_atlas", metadata.getAtlasKey());
+        assertEquals("999", metadata.getRegionId());
+        assertEquals("CUSTOM", metadata.getRegionAcronym());
+        assertEquals("Custom region", metadata.getRegionName());
     }
 
     @Test
@@ -747,6 +797,9 @@ public class SpatialAnalysisTest {
                 + "Morph_DistCenter_Min_um,Morph_DistCenter_Max_um,"
                 + "Morph_DistCenter_Mean_um,Morph_DistCenter_SD_um";
         String composites = "Morph_RI,Morph_SRI,Morph_PB,Morph_MP,Morph_VSD";
+        String arborization = "Morph_ShollCriticalRadius_um,Morph_ShollCriticalIntersections,"
+                + "Morph_ShollSchoenenIndex,Morph_ShollPrimaryBranches,"
+                + "Morph_SkeletonBranches,Morph_SkeletonJunctions,Morph_SkeletonEndpoints";
         String population = "Morph_CMS,Morph_SMSD,Morph_IMDI";
         String spatialMorph = "Morph_TDR,Morph_FEV_Mag";
         String commonMeasurements = "SCN,Animal Name,Hemisphere,ROI,Label,Volume (micron^3),"
@@ -757,21 +810,26 @@ public class SpatialAnalysisTest {
                         + ",Colocalisation with B,A_VolColoc30_B,A_VolContains30_B,"
                         + "A_DistToClosest_B,A_ClosestTo_B,A_CPCColoc_B,A_CPCContains_B,"
                         + "A_CPCTargetsHit,A_CPCPattern," + morph2D + "," + morph3D + ","
-                        + composites + "," + population + "," + spatialMorph,
+                        + composites + "," + arborization + "," + population + "," + spatialMorph,
                 "1,Mouse1,LH,SCN,1,10,5,100,20,0,0,0,123,55,1,7,99,4,1,1,1,B,"
                         + "11,12,0.9,0.8,1.2,6,0.7,13,"
                         + "0.42,0.2,1.3,1.1,0.8,4,9,0.1,0.2,0.3,0.4,0.5,1,2,1.5,0.2,"
-                        + "2.3,0.4,0.5,0.6,0.7,0.8,1.1,0.2,1.3,1.4");
+                        + "2.3,0.4,0.5,0.6,0.7,5,3,1.5,2,4,1,5,0.8,1.1,0.2,1.3,1.4");
         writeChannel(objectsDir, "B.csv",
                 commonMeasurements
                         + ",Colocalisation with A,B_VolColoc30_A,B_VolContains30_A,"
                         + "B_DistToClosest_A,B_ClosestTo_A,B_CPCColoc_A,B_CPCContains_A,"
                         + "B_CPCTargetsHit,B_CPCPattern," + morph2D + "," + morph3D + ","
-                        + composites + "," + population + "," + spatialMorph,
+                        + composites + "," + arborization + "," + population + "," + spatialMorph,
                 "1,Mouse1,LH,SCN,1,12,6,120,22,3,4,0,456,50,1,8,88,5,1,1,1,A,"
                         + "21,22,0.8,0.7,1.1,5,0.6,23,"
                         + "0.52,0.3,1.4,1.2,0.7,5,10,0.2,0.3,0.4,0.5,0.6,1,2,1.5,0.2,"
-                        + "2.4,0.5,0.6,0.7,0.8,0.9,1.2,0.3,1.4,1.5");
+                        + "2.4,0.5,0.6,0.7,0.8,6,4,1.6,2.5,5,2,6,0.9,1.2,0.3,1.4,1.5");
+        File morphometryDir = FlashProjectLayout.forDirectory(root.getAbsolutePath())
+                .tablesMorphometryWriteDir();
+        assertTrue(morphometryDir.mkdirs());
+        writeShollProfile(morphometryDir, "A");
+        writeShollProfile(morphometryDir, "B");
 
         SpatialAnalysisWizard.DerivedConfig config = new SpatialAnalysisWizard.DerivedConfig();
         config.doDistances = true;
@@ -798,7 +856,7 @@ public class SpatialAnalysisTest {
         assertEquals("123", a.get(0, "Length"));
         assertEquals("0.42", a.get(0, "Morph_Sphericity"));
         assertEquals("88", b.get(0, "B_DistToClosest_A"));
-        assertFalse(new File(root, "FLASH/Results/Tables/Morphometry").exists());
+        assertTrue(new File(morphometryDir, "A_ShollProfile.csv").isFile());
     }
 
     @Test
@@ -894,6 +952,17 @@ public class SpatialAnalysisTest {
             if (!row.endsWith("\n")) {
                 pw.println();
             }
+        } finally {
+            pw.close();
+        }
+    }
+
+    private void writeShollProfile(File morphometryDir, String channelName) throws Exception {
+        File csv = new File(morphometryDir, channelName + "_ShollProfile.csv");
+        PrintWriter pw = new PrintWriter(csv, "UTF-8");
+        try {
+            pw.println("Channel,Animal Name,Region,Hemisphere,ROI,SCN,Label,Radius_um,Intersections");
+            pw.println(channelName + ",Mouse1,SCN,LH,SCN,1,1,1.0,2");
         } finally {
             pw.close();
         }

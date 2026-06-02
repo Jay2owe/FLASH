@@ -73,7 +73,7 @@ public class RunSettingsSnapshotTest {
                 null);
 
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(dir.getAbsolutePath());
-        String prefix = "04 - 3D Object Analysis";
+        String prefix = "3D Object Analysis";
         File snapshotFile = new File(layout.settingsSnapshotsWriteDir(),
                 prefix + RunSettingsSnapshot.SETTINGS_EXTENSION);
         File replayFile = new File(layout.replayCommandsWriteDir(),

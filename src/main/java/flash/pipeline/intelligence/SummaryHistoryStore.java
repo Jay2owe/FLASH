@@ -4,6 +4,7 @@ import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinConfigIO;
 import flash.pipeline.io.CsvTableIO;
 import flash.pipeline.io.FlashProjectLayout;
+import flash.pipeline.io.ProjectStatusStore;
 import flash.pipeline.naming.ImageNameParser;
 import flash.pipeline.naming.NameParts;
 
@@ -24,8 +25,7 @@ import java.util.Map;
 
 final class SummaryHistoryStore {
 
-    static final String FILE_NAME = "summary_history.json";
-    static final String LEGACY_FILE_NAME = ".ihf-summary.json";
+    static final String FILE_NAME = FlashProjectLayout.STATUS_FILENAME;
     private static final String[][] SUMMARY_TABLES = new String[][] {
             { FlashProjectLayout.MASTER_OBJECTS_FILENAME },
             { FlashProjectLayout.MASTER_INTENSITIES_FILENAME }
@@ -44,42 +44,23 @@ final class SummaryHistoryStore {
     }
 
     static Snapshot load(String directory) throws IOException {
-        File file = firstExistingHistoryFile(directory);
-        if (!file.isFile()) return null;
-        String json = new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8);
-        Object parsed = MiniJson.parse(json);
-        if (!(parsed instanceof Map)) {
-            throw new IOException("Summary history file does not contain a JSON object.");
-        }
-        return Snapshot.fromJson(asMap(parsed));
+        Map<String, Object> json = ProjectStatusStore.readSummaryHistory(directory);
+        if (json.isEmpty()) return null;
+        return Snapshot.fromJson(json);
     }
 
     static void save(String directory, Snapshot snapshot) throws IOException {
         if (directory == null || directory.trim().isEmpty() || snapshot == null) return;
-        File file = historyWriteFile(directory);
-        File parent = file.getParentFile();
-        if (parent != null && !parent.isDirectory() && !parent.mkdirs() && !parent.isDirectory()) {
-            throw new IOException("Could not create summary history folder: " + parent.getAbsolutePath());
-        }
-        Files.write(file.toPath(),
-                MiniJson.write(snapshot.toJson()).getBytes(StandardCharsets.UTF_8));
+        ProjectStatusStore.writeSummaryHistory(directory, snapshot.toJson());
     }
 
     static File historyWriteFile(String directory) {
-        return FlashProjectLayout.forDirectory(directory).statusWriteFile(FILE_NAME);
-    }
-
-    private static File firstExistingHistoryFile(String directory) {
-        FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
-        File newFile = layout.statusWriteFile(FILE_NAME);
-        if (newFile.isFile()) return newFile;
-        File legacy = new File(directory, LEGACY_FILE_NAME);
-        return legacy.isFile() ? legacy : newFile;
+        return ProjectStatusStore.statusFile(directory);
     }
 
     static List<String> diffLines(Snapshot previous, Snapshot current) {
         List<String> lines = new ArrayList<String>();
-        lines.add("—— R-07 Re-run diff ——");
+        lines.add("—— Re-run diff ——");
         if (previous == null) {
             lines.add("  INFO  no previous run snapshot found in this folder.");
             lines.add("");

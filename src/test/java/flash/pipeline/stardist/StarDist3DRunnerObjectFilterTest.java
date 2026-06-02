@@ -32,6 +32,28 @@ public class StarDist3DRunnerObjectFilterTest {
     }
 
     @Test
+    public void applyObjectFiltersKeepsLabelsExactlyAtBounds() {
+        ImagePlus labels = labelImage(new int[] {1, 2, 2});
+        ResultsTable stats = new ResultsTable();
+        stats.incrementCounter();
+        stats.setValue("Label", 0, 1);
+        stats.setValue(StarDist3DRunner.STATS_AREA_MEAN, 0, 5);
+        stats.setValue(StarDist3DRunner.STATS_QUALITY_MEAN, 0, 0.5);
+        stats.setValue(StarDist3DRunner.STATS_INTENSITY_MEAN, 0, 50);
+        stats.incrementCounter();
+        stats.setValue("Label", 1, 2);
+        stats.setValue(StarDist3DRunner.STATS_AREA_MEAN, 1, 10);
+        stats.setValue(StarDist3DRunner.STATS_QUALITY_MEAN, 1, 0.5);
+        stats.setValue(StarDist3DRunner.STATS_INTENSITY_MEAN, 1, 50);
+
+        int removed = StarDist3DRunner.applyObjectFilters(labels, stats,
+                5, 10, 0.5, 50);
+
+        assertEquals(0, removed);
+        assertEquals(2, StarDist3DRunner.countLabels(labels));
+    }
+
+    @Test
     public void countLabelsCountsDistinctPositiveLabelsRatherThanMaximumLabelValue() {
         ImagePlus labels = labelImage(new int[] {1, 7, 7, 0});
 

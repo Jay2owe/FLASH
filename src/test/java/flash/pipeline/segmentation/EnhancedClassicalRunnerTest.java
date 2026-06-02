@@ -43,6 +43,9 @@ public class EnhancedClassicalRunnerTest {
     @Test
     public void sphericityFilterDropsElongatedObjects() {
         ImagePlus image = sphereAndRodImage();
+        // OC3DPlus sphericity uses the Lindblad-corrected surface (mcib3d convention), so a
+        // digitized sphere reads near 1.0. Measured values for this fixture: sphere=0.968,
+        // rod=0.722. Threshold sits between them with margin.
         ImagePlus result = new EnhancedClassicalRunner().run(
                 image,
                 params(image, MorphPredicate.parse("sphericity>=0.8")));
@@ -58,6 +61,18 @@ public class EnhancedClassicalRunnerTest {
                 params(image, MorphPredicate.parse("volume>=100")));
 
         assertEquals(0, countLabels(result));
+    }
+
+    @Test
+    public void volumeFilterKeepsObjectExactlyAtInclusiveBounds() {
+        ImagePlus image = cubeImage(3, 200);
+        ImagePlus result = new EnhancedClassicalRunner().run(
+                image,
+                params(image,
+                        MorphPredicate.parse("volume>=27"),
+                        MorphPredicate.parse("volume<=27")));
+
+        assertEquals(1, countLabels(result));
     }
 
     @Test

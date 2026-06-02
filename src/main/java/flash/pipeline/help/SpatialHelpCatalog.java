@@ -75,7 +75,7 @@ public final class SpatialHelpCatalog {
             section("Sub-analyses",
                     "Extract 2D morphology: area, circularity, solidity, Feret diameter, and similar planar descriptors. Useful when 3D is unstable or unnecessary.",
                     "3D shape features: sphericity, compactness, elongation, flatness, spareness, 3D Feret, 3D moments, centroid-to-surface distance statistics via mcib3d.",
-                    "Complex shape analysis: composite indices from the 3D features - Ramification Index (RI), Surface Roughness Index (SRI), Process Burden (PB), Morphological Polarity (MP), Volume-Span Discrepancy (VSD). Requires 3D shape features.",
+                    "Complex shape analysis: composite indices from the 3D features - Ramification Index (RI), Surface Roughness Index (SRI), Process Burden (PB), Morphological Polarity (MP), Volume-Span Discrepancy (VSD), centroid-based 3D Sholl critical radius/Schoenen index, and skeleton branch/junction/endpoint counts. Requires 3D shape features.",
                     "Population morphometric scoring: population-normalised composites - Composite Morphological Score (CMS), Shape Moment Signature Distance (SMSD), Intensity-Morphology Dissociation Index (IMDI), Morphological Diversity Score (MDS). Requires Complex shape analysis.",
                     "Spatial-morphometric analysis: combines shape with spatial context - Territorial Dominance Ratio (TDR), Feret Eccentricity Vector (FEV), Pathology Proximity Response Profile (PPRP). Requires 3D shape features plus distances and/or Voronoi for the corresponding columns."),
             section("When to use",

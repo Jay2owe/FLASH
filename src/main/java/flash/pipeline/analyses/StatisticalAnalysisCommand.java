@@ -48,6 +48,15 @@ public final class StatisticalAnalysisCommand implements Command {
     private String metricFilter;
 
     @Parameter(required = false)
+    private String metricAggregation;
+
+    @Parameter(required = false)
+    private String sumMetrics;
+
+    @Parameter(required = false)
+    private String meanMetrics;
+
+    @Parameter(required = false)
     private Boolean headless;
 
     @Parameter(required = false)
@@ -118,6 +127,17 @@ public final class StatisticalAnalysisCommand implements Command {
         if (hasText(metricFilter)) {
             config.metricFilter = splitMetricFilter(metricFilter);
         }
+        if (hasText(metricAggregation)) {
+            parseMetricAggregationPairs(metricAggregation, config);
+        }
+        if (hasText(sumMetrics)) {
+            parseMetricAggregationList(sumMetrics,
+                    StatisticsConfig.MetricAggregation.SUM, config);
+        }
+        if (hasText(meanMetrics)) {
+            parseMetricAggregationList(meanMetrics,
+                    StatisticsConfig.MetricAggregation.MEAN, config);
+        }
         return config;
     }
 
@@ -134,6 +154,9 @@ public final class StatisticalAnalysisCommand implements Command {
         put(common, "distribution_mode", distributionMode);
         put(common, "post_hoc_method", postHocMethod);
         put(common, "metric_filter", metricFilter);
+        put(common, "metric_aggregation", metricAggregation);
+        put(common, "sum_metrics", sumMetrics);
+        put(common, "mean_metrics", meanMetrics);
         put(common, "verbose", verbose);
         if (config != null) {
             common.put("effective_paired_mode", config.pairedMode.name());
@@ -141,6 +164,12 @@ public final class StatisticalAnalysisCommand implements Command {
             common.put("effective_post_hoc_method", config.postHocMethod.name());
             if (config.metricFilter != null) {
                 common.put("effective_metric_filter", new ArrayList<String>(config.metricFilter));
+            }
+            if (config.metricAggregationOverrides != null
+                    && !config.metricAggregationOverrides.isEmpty()) {
+                common.put("effective_metric_aggregation",
+                        new LinkedHashMap<String, StatisticsConfig.MetricAggregation>(
+                                config.metricAggregationOverrides));
             }
         }
         if (preset != null) {
@@ -161,6 +190,33 @@ public final class StatisticalAnalysisCommand implements Command {
             if (!trimmed.isEmpty()) out.add(trimmed);
         }
         return out;
+    }
+
+    private static void parseMetricAggregationPairs(String value, StatisticsConfig config) {
+        if (value == null || config == null) return;
+        String[] parts = value.split(",");
+        for (String part : parts) {
+            if (part == null) continue;
+            String trimmed = part.trim();
+            if (trimmed.isEmpty()) continue;
+            int sep = trimmed.lastIndexOf(':');
+            if (sep < 0) sep = trimmed.lastIndexOf('=');
+            if (sep <= 0 || sep + 1 >= trimmed.length()) continue;
+            config.putMetricAggregationOverride(trimmed.substring(0, sep),
+                    StatisticsConfig.MetricAggregation.parse(trimmed.substring(sep + 1),
+                            StatisticsConfig.MetricAggregation.AUTO));
+        }
+    }
+
+    private static void parseMetricAggregationList(String value,
+                                                   StatisticsConfig.MetricAggregation aggregation,
+                                                   StatisticsConfig config) {
+        if (value == null || aggregation == null || config == null) return;
+        String[] parts = value.split(",");
+        for (String part : parts) {
+            if (part == null) continue;
+            config.putMetricAggregationOverride(part, aggregation);
+        }
     }
 
     private static File requireDirectory(File dir) {

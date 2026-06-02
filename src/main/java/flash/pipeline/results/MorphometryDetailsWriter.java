@@ -74,6 +74,15 @@ public final class MorphometryDetailsWriter {
                 w.write("             Range 0-1. 0 = disc/oblate, 0.5 = isotropic, 1 = rod/prolate.\n\n");
                 w.write("  Morph_VSD  Volume-Span Discrepancy = log10(Feret^3 / Volume).\n");
                 w.write("             ~0.28 for sphere. Higher = span disproportionate to volume.\n");
+                w.write("\n");
+                w.write("  Morph_ShollCriticalRadius_um      Radius with the maximum 3D Sholl intersections.\n");
+                w.write("  Morph_ShollCriticalIntersections  Maximum intersections in the centroid-based Sholl profile.\n");
+                w.write("  Morph_ShollSchoenenIndex          Critical intersections / first non-zero-radius intersections.\n");
+                w.write("  Morph_ShollPrimaryBranches        First non-zero Sholl intersection count, used as the soma-free primary-branch proxy.\n");
+                w.write("                                    Per-object radius/intersection curves are written to *_ShollProfile.csv.\n");
+                w.write("  Morph_SkeletonBranches            AnalyzeSkeleton-style branch count from the object skeleton.\n");
+                w.write("  Morph_SkeletonJunctions           AnalyzeSkeleton-style junction count.\n");
+                w.write("  Morph_SkeletonEndpoints           AnalyzeSkeleton-style endpoint count.\n");
                 w.write("</Complex Shape Analysis>\n\n");
             }
 

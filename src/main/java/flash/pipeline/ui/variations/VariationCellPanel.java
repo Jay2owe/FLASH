@@ -13,21 +13,27 @@ import ij.process.ByteProcessor;
 import ij.process.ImageProcessor;
 
 import javax.swing.BorderFactory;
+import javax.swing.JDialog;
 import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
+import javax.swing.WindowConstants;
 import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
+import java.awt.Dialog;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.FontMetrics;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.GraphicsEnvironment;
 import java.awt.Point;
 import java.awt.RadialGradientPaint;
+import java.awt.Rectangle;
 import java.awt.RenderingHints;
+import java.awt.Window;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.geom.Path2D;
@@ -76,6 +82,8 @@ public final class VariationCellPanel extends JPanel {
     private static final int PICK_PILL_HEIGHT = 22;
     private static final int PICK_PILL_RADIUS = 8;
     private static final int PICK_PILL_INSET = 10;
+    private static final int MAGNIFIER_SIZE = 22;
+    private static final int MAGNIFIER_INSET = 8;
     private static final Color OVERLAY_STRIP = new Color(0, 0, 0, 140);
     private static final Color OVERLAY_TEXT = Color.WHITE;
     private static final String ERROR_BADGE = "\u26a0";
@@ -180,9 +188,10 @@ public final class VariationCellPanel extends JPanel {
         setOpaque(false);
         setBackground(CARD_BACKGROUND);
         setPreferredSize(new Dimension(CELL_SIZE, CELL_SIZE));
-        setBorder(BorderFactory.createEmptyBorder(6, 6, 6, 6));
+        setBorder(BorderFactory.createEmptyBorder());
         preview.setSlim(true);
         preview.setZRowVisible(false);
+        preview.setChromeless(true);
         add(preview, BorderLayout.CENTER);
         installMouseHandlers();
         refreshFooter();
@@ -203,6 +212,20 @@ public final class VariationCellPanel extends JPanel {
 
     public ParameterCombo combo() {
         return combo;
+    }
+
+    /**
+     * Pixel dimensions of the source crop this cell renders, or {@code null}
+     * when the cell has no source image. Every cell in a sweep shares one crop,
+     * so the grid uses this to size tiles to the image's aspect ratio.
+     */
+    Dimension sourceImageSize() {
+        ImagePlus src = croppedSource;
+        if (src == null) {
+            return null;
+        }
+        return new Dimension(Math.max(1, src.getWidth()),
+                Math.max(1, src.getHeight()));
     }
 
     void markAsBaseline(ImagePlus croppedSource) {
@@ -877,26 +900,29 @@ public final class VariationCellPanel extends JPanel {
         Graphics2D g2 = (Graphics2D) g.create();
         g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
                 RenderingHints.VALUE_ANTIALIAS_ON);
-        RoundRectangle2D card = cardShape();
+        // Edge-to-edge: the image fills the cell, so there is no card box. Only
+        // the baseline and the compare selection get a flush outline; knee and
+        // stability winners are still flagged by their halo and corner ribbon.
         g2.setColor(CARD_BACKGROUND);
-        g2.fill(card);
-        float outlineWidth = selectedForCompare
-                ? COMPARE_OUTLINE_WIDTH
-                : isBaseline ? 3f : DEFAULT_OUTLINE_WIDTH;
-        if (isBaseline) {
-            g2.setStroke(new BasicStroke(outlineWidth,
-                    BasicStroke.CAP_ROUND,
-                    BasicStroke.JOIN_ROUND,
-                    0f,
-                    new float[] { 7f, 4f },
-                    0f));
-        } else {
-            g2.setStroke(new BasicStroke(outlineWidth));
+        g2.fillRect(0, 0, getWidth(), getHeight());
+        if (isBaseline || selectedForCompare) {
+            float outlineWidth = selectedForCompare ? COMPARE_OUTLINE_WIDTH : 3f;
+            if (isBaseline) {
+                g2.setStroke(new BasicStroke(outlineWidth,
+                        BasicStroke.CAP_ROUND,
+                        BasicStroke.JOIN_ROUND,
+                        0f,
+                        new float[] { 7f, 4f },
+                        0f));
+            } else {
+                g2.setStroke(new BasicStroke(outlineWidth));
+            }
+            g2.setColor(isBaseline ? STABILITY_BORDER : COMPARE_BORDER);
+            int half = Math.max(1, Math.round(outlineWidth / 2f));
+            g2.drawRect(half, half,
+                    Math.max(1, getWidth() - 2 * half),
+                    Math.max(1, getHeight() - 2 * half));
         }
-        g2.setColor(isBaseline
-                ? STABILITY_BORDER
-                : selectedForCompare ? COMPARE_BORDER : DEFAULT_BORDER);
-        g2.draw(cardShape(outlineWidth));
         g2.dispose();
     }
 
@@ -909,6 +935,7 @@ public final class VariationCellPanel extends JPanel {
             paintRibbons(g);
             paintMetricOverlays(g);
             paintPickPill(g);
+            paintMagnifier(g);
         }
     }
 
@@ -956,6 +983,15 @@ public final class VariationCellPanel extends JPanel {
     private void installMouseHandlers() {
         MouseAdapter listener = new MouseAdapter() {
             @Override public void mousePressed(MouseEvent e) {
+                if (e != null && SwingUtilities.isLeftMouseButton(e)
+                        && !e.isShiftDown()
+                        && hitMagnifier(pointInCell(e))) {
+                    e.consume();
+                    cancelPeek(true);
+                    pressPoint = null;
+                    openLargeView();
+                    return;
+                }
                 handleMousePressed(e);
                 if (suppressNextClick) {
                     suppressNextClick = false;
@@ -1423,6 +1459,103 @@ public final class VariationCellPanel extends JPanel {
         } finally {
             g2.dispose();
         }
+    }
+
+    /** True when the corner magnifier (open-larger-view) affordance is shown. */
+    private boolean magnifierVisible() {
+        return !peeking
+                && getWidth() > 0
+                && getHeight() > 0
+                && largeViewImage() != null;
+    }
+
+    private Rectangle magnifierBounds() {
+        int size = MAGNIFIER_SIZE;
+        int x = MAGNIFIER_INSET;
+        int y = Math.max(MAGNIFIER_INSET,
+                getHeight() - METRIC_STRIP_HEIGHT - size - 4);
+        return new Rectangle(x, y, size, size);
+    }
+
+    private boolean hitMagnifier(Point pointInCell) {
+        return magnifierVisible() && pointInCell != null
+                && magnifierBounds().contains(pointInCell);
+    }
+
+    private void paintMagnifier(Graphics g) {
+        if (!magnifierVisible()) {
+            return;
+        }
+        Rectangle b = magnifierBounds();
+        Graphics2D g2 = (Graphics2D) g.create();
+        try {
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                    RenderingHints.VALUE_ANTIALIAS_ON);
+            g2.setClip(cardShape());
+            g2.setColor(new Color(0, 0, 0, hover ? 180 : 120));
+            g2.fillRoundRect(b.x, b.y, b.width, b.height, 8, 8);
+            g2.setColor(new Color(255, 255, 255, 50));
+            g2.drawRoundRect(b.x, b.y, b.width - 1, b.height - 1, 8, 8);
+            // Loupe glyph: a circle with a short diagonal handle.
+            g2.setColor(hover ? Color.WHITE : new Color(0xE0, 0xE4, 0xE8));
+            g2.setStroke(new BasicStroke(1.8f, BasicStroke.CAP_ROUND,
+                    BasicStroke.JOIN_ROUND));
+            int pad = 5;
+            int lens = b.height - 2 * pad - 4;
+            int lx = b.x + pad;
+            int ly = b.y + pad;
+            g2.drawOval(lx, ly, lens, lens);
+            int hx = lx + lens;
+            int hy = ly + lens;
+            g2.drawLine(hx, hy, hx + 4, hy + 4);
+        } finally {
+            g2.dispose();
+        }
+    }
+
+    private ImagePlus largeViewImage() {
+        return displayedPreviewImage != null
+                ? displayedPreviewImage
+                : currentPreviewImage;
+    }
+
+    private String largeViewTitle() {
+        if (isBaseline) {
+            return "Original source crop";
+        }
+        return "Variation (larger view)";
+    }
+
+    /** Pops a large, resizable view of this tile's current preview image. */
+    private void openLargeView() {
+        ImagePlus img = largeViewImage();
+        if (img == null) {
+            return;
+        }
+        Window owner = SwingUtilities.getWindowAncestor(this);
+        final JDialog dialog = new JDialog(owner, largeViewTitle(),
+                Dialog.ModalityType.MODELESS);
+        dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+        ImagePreviewPanel large = new ImagePreviewPanel(largeViewTitle());
+        large.setImage(img);
+        large.setCurrentZ(preview.getCurrentZ());
+        large.setToolTipText(getToolTipText());
+        dialog.setLayout(new BorderLayout());
+        dialog.add(large, BorderLayout.CENTER);
+        Rectangle desktop = GraphicsEnvironment
+                .getLocalGraphicsEnvironment()
+                .getMaximumWindowBounds();
+        int w = Math.max(480, Math.min(1400,
+                (int) Math.round(desktop.width * 0.6d)));
+        int h = Math.max(360, Math.min(1100,
+                (int) Math.round(desktop.height * 0.7d)));
+        dialog.setSize(w, h);
+        dialog.setLocationRelativeTo(owner);
+        dialog.setVisible(true);
+    }
+
+    boolean magnifierVisibleForTest() {
+        return magnifierVisible();
     }
 
     private void paintFilterOverlays(Graphics2D g2, int width, int height) {

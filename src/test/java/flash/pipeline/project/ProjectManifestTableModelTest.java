@@ -1,9 +1,12 @@
 package flash.pipeline.project;
 
+import flash.pipeline.ui.wizard.RegionTableCellEditor;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
+import javax.swing.JTable;
+import javax.swing.JTextField;
 import java.io.File;
 import java.util.Arrays;
 
@@ -108,6 +111,22 @@ public class ProjectManifestTableModelTest {
         ProjectManifestTableModel.Row row = model.get(0);
         assertEquals("renamed", row.animalId);
         assertFalse(row.include);
+    }
+
+    @Test
+    public void regionTableEditorCommitsCanonicalAtlasTextToModel() throws Exception {
+        ProjectManifestTableModel model = new ProjectManifestTableModel();
+        model.addFile(touch("Exp-A_LH_X.lif"));
+        JTable table = new JTable(model);
+        table.getColumnModel().getColumn(ProjectManifestTableModel.COL_REGION)
+                .setCellEditor(new RegionTableCellEditor());
+
+        assertTrue(table.editCellAt(0, ProjectManifestTableModel.COL_REGION));
+        JTextField editor = (JTextField) table.getEditorComponent();
+        editor.setText("286");
+        assertTrue(table.getCellEditor().stopCellEditing());
+
+        assertEquals("SCH", model.get(0).region);
     }
 
     @Test

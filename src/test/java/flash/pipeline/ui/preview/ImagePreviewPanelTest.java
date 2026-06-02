@@ -311,6 +311,22 @@ public class ImagePreviewPanelTest {
         assertTrue(slimTitle == null || slimTitle.getParent() != panel);
     }
 
+    @Test
+    public void setChromeless_removesTitleHeaderAndBorder() {
+        ImagePreviewPanel panel = new ImagePreviewPanel("Original");
+
+        panel.setSlim(true);
+        panel.setChromeless(true);
+
+        JLabel slimTitle = panel.slimTitleLabelForTest();
+        assertFalse(panel.metadataHeaderVisibleForTest());
+        assertFalse(panel.zRowVisibleForTest());
+        assertTrue(slimTitle == null || slimTitle.getParent() != panel);
+        Border border = panel.getBorder();
+        assertTrue(border == null || border instanceof EmptyBorder);
+        assertFalse(containsTitledBorder(border));
+    }
+
     private static ImagePlus stack(String title, int slices) {
         ImageStack stack = new ImageStack(3, 3);
         for (int i = 0; i < slices; i++) {

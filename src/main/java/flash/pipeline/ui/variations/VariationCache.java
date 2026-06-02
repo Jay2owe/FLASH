@@ -14,6 +14,7 @@ import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 public final class VariationCache {
@@ -141,9 +142,23 @@ public final class VariationCache {
             return;
         }
         memory.put(key, label);
+    }
+
+    /**
+     * Writes a single label image to the on-disk cache, overwriting any
+     * existing entry for {@code key}. {@link #put} deliberately never touches
+     * disk; disk persistence happens only through this method (driven by the
+     * grid's "Save variations cache" button) so that ordinary preview sweeps do
+     * not fill the project folder with TIFFs. Returns {@code true} on success.
+     */
+    public synchronized boolean writeToDisk(String key, ImagePlus image) {
+        if (cacheDir == null || key == null || key.trim().isEmpty()
+                || image == null) {
+            return false;
+        }
         File file = fileFor(key);
         if (file == null) {
-            return;
+            return false;
         }
         try {
             if (!file.getParentFile().isDirectory()) {
@@ -152,11 +167,41 @@ public final class VariationCache {
             }
             File temp = new File(file.getParentFile(),
                     key + ".tmp-" + Thread.currentThread().getId() + ".tif");
-            IJ.saveAs(label, "Tiff", temp.getAbsolutePath());
+            IJ.saveAs(image, "Tiff", temp.getAbsolutePath());
             moveIntoPlace(temp.toPath(), file.toPath());
+            return true;
         } catch (Throwable ignored) {
             // Disk cache failures should not break a preview sweep.
+            return false;
         }
+    }
+
+    /**
+     * Persists every successful result in {@code results} to the on-disk cache,
+     * keyed exactly as the sweep strategies key their writes, so a later run can
+     * reuse them. Skips baseline/failed/empty results. Returns the number of
+     * entries written.
+     */
+    public synchronized int snapshotResultsToDisk(ParameterSweep sweep,
+                                                  List<VariationResult> results) {
+        if (cacheDir == null || sweep == null || results == null) {
+            return 0;
+        }
+        int written = 0;
+        for (int i = 0; i < results.size(); i++) {
+            VariationResult result = results.get(i);
+            if (result == null || result.hasError() || result.combo() == null) {
+                continue;
+            }
+            ImagePlus label = result.label();
+            if (label == null) {
+                continue;
+            }
+            if (writeToDisk(keyFor(sweep, result.combo()), label)) {
+                written++;
+            }
+        }
+        return written;
     }
 
     int memorySizeForTest() {

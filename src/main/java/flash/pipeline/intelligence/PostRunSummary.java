@@ -19,18 +19,20 @@ import java.util.TreeSet;
 
 /**
  * Post-run summary writer. Runs after aggregation and writes
- * {@code ihf-summary.txt} beside the active aggregation master CSVs with
+ * {@code run_summary.txt} beside the active aggregation master CSVs with
  * informational findings:
  *
- *   R-01 Per-animal count variance
- *   R-07 Re-run diff
- *   R-08 Zero-count sentinel
- *   R-09 Hemisphere completeness
+ *   Per-animal count variance
+ *   Re-run diff
+ *   Zero-count sentinel
+ *   Hemisphere completeness
  *
- * It also persists a JSON snapshot to {@code FLASH/Status/.settings/summary_history.json} so future
+ * It also persists a JSON snapshot to {@code FLASH/.settings/status.json} so future
  * runs in the same folder can compare settings and summary-table values.
  */
 public final class PostRunSummary {
+
+    static final String SUMMARY_FILE_NAME = "run_summary.txt";
 
     private PostRunSummary() {}
 
@@ -75,7 +77,7 @@ public final class PostRunSummary {
                 lines.addAll(SummaryHistoryStore.diffLines(previous, current));
             }
 
-            File out = new File(exportDir, "ihf-summary.txt");
+            File out = new File(exportDir, SUMMARY_FILE_NAME);
             Files.write(out.toPath(), lines, StandardCharsets.UTF_8);
             SummaryHistoryStore.save(directory, current);
             IJ.log("Post-run summary written: " + out.getAbsolutePath());
@@ -100,7 +102,7 @@ public final class PostRunSummary {
     private static void renderPerAnimalVariance(List<String[]> rows, int animalCol,
                                                 List<Integer> countCols, String[] header,
                                                 List<String> lines) {
-        lines.add("—— R-01 Per-animal variance ——");
+        lines.add("—— Per-animal variance ——");
         Map<String, Map<Integer, List<Double>>> perAnimal = new LinkedHashMap<String, Map<Integer, List<Double>>>();
         for (int r = 1; r < rows.size(); r++) {
             String[] row = rows.get(r);
@@ -146,7 +148,7 @@ public final class PostRunSummary {
     private static void renderZeroCountSentinel(List<String[]> rows, int animalCol, int regionCol,
                                                 List<Integer> countCols, String[] header,
                                                 List<String> lines) {
-        lines.add("—— R-08 Zero-count sentinel ——");
+        lines.add("—— Zero-count sentinel ——");
         int flagged = 0;
         for (int c : countCols) {
             List<Double> allVals = new ArrayList<Double>();
@@ -174,7 +176,7 @@ public final class PostRunSummary {
 
     private static void renderHemisphereCompleteness(List<String[]> rows, int animalCol,
                                                      int regionCol, List<String> lines) {
-        lines.add("—— R-09 Hemisphere completeness ——");
+        lines.add("—— Hemisphere completeness ——");
         if (animalCol < 0) {
             lines.add("  INFO  no Animal column.");
             lines.add("");

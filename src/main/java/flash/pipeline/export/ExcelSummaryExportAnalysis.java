@@ -269,6 +269,7 @@ public class ExcelSummaryExportAnalysis implements Analysis, RunRecordAware {
         }
         return !col.equals("AnimalName")
                 && !col.equals("numSections")
+                && !col.equals("numZSlices")
                 && (ExcelNameMap.convert(col) != null
                     || includeTextureFeatureColumn(col));
     }

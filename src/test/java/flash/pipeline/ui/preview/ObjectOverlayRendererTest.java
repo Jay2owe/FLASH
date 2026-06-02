@@ -244,6 +244,23 @@ public class ObjectOverlayRendererTest {
         assertTrue(removed.contains(Integer.valueOf(3)));
     }
 
+    @Test
+    public void sizeFilterSummaryKeepsObjectsExactlyAtBounds() {
+        ResultsTable stats = new ResultsTable();
+        stats.incrementCounter();
+        stats.setValue("Label", 0, 10);
+        stats.setValue("Volume (pixel^3)", 0, 5);
+        stats.incrementCounter();
+        stats.setValue("Label", 1, 20);
+        stats.setValue("Volume (pixel^3)", 1, 100);
+
+        ObjectSizeFilterPreview.Summary summary =
+                ObjectSizeFilterPreview.summarize(stats, null, 5, 100, true);
+
+        assertEquals(2, summary.keptCount);
+        assertTrue(summary.removedLabels().isEmpty());
+    }
+
     private static int blend(int base, int overlay, double alpha) {
         int br = (base >> 16) & 0xff;
         int bg = (base >> 8) & 0xff;

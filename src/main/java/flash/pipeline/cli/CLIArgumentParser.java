@@ -15,6 +15,7 @@ import ij.IJ;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 
@@ -297,6 +298,8 @@ public final class CLIArgumentParser {
                 + "  stats.distribution=auto|parametric|non_parametric\n"
                 + "  stats.posthoc=bonferroni|tukey|dunns|none\n"
                 + "  stats.metrics=Col1,Col2,Col3\n"
+                + "  stats.metric_aggregation=Col1:sum,Col2:mean\n"
+                + "  stats.sum_metrics=CountLikeCol   stats.mean_metrics=MeanLikeCol\n"
                 + "  splitmerge.useDeconv=true|false\n"
                 + "  threeD.useDeconv=true|false\n"
                 + "  intensityV2.useDeconv=true|false\n"
@@ -887,6 +890,7 @@ public final class CLIArgumentParser {
      *       (alias of {@code AUTO} / {@code ASSUME_NORMAL} / {@code ASSUME_SKEWED}).</li>
      *   <li>{@code stats.posthoc=bonferroni|tukey|dunns|none}.</li>
      *   <li>{@code stats.metrics=col1,col2,col3} — comma-separated metric column allow-list.</li>
+     *   <li>{@code stats.metric_aggregation=col1:sum,col2:mean} — explicit nested-row collapse modes.</li>
      * </ul>
      * Explicit overrides apply on top of any preset; bad enum tokens fall back to defaults.
      */
@@ -928,6 +932,94 @@ public final class CLIArgumentParser {
                 stats.metrics = values;
             }
         }
+
+        String metricAggregation = firstValue(options,
+                "stats.metric_aggregation", "stats.metricAggregation", "stats.aggregation");
+        if (metricAggregation != null && !metricAggregation.trim().isEmpty()) {
+            parseMetricAggregationPairs(metricAggregation, stats);
+        }
+
+        String sumMetrics = firstValue(options, "stats.sum_metrics", "stats.sumMetrics");
+        if (sumMetrics != null && !sumMetrics.trim().isEmpty()) {
+            parseMetricAggregationList(sumMetrics, StatisticsConfig.MetricAggregation.SUM, stats);
+        }
+
+        String meanMetrics = firstValue(options, "stats.mean_metrics", "stats.meanMetrics");
+        if (meanMetrics != null && !meanMetrics.trim().isEmpty()) {
+            parseMetricAggregationList(meanMetrics, StatisticsConfig.MetricAggregation.MEAN, stats);
+        }
+    }
+
+    private static String firstValue(String options, String... keys) {
+        if (keys == null) return null;
+        for (String key : keys) {
+            String value = getValue(options, key);
+            if (value != null) return value;
+        }
+        return null;
+    }
+
+    private static void parseMetricAggregationPairs(String value, CLIConfig.StatsConfig stats) {
+        if (value == null || stats == null) return;
+        String[] parts = value.split(",");
+        for (String part : parts) {
+            if (part == null) continue;
+            String trimmed = part.trim();
+            if (trimmed.isEmpty()) continue;
+            int sep = trimmed.lastIndexOf(':');
+            if (sep < 0) sep = trimmed.lastIndexOf('=');
+            if (sep <= 0 || sep + 1 >= trimmed.length()) continue;
+            String metric = trimmed.substring(0, sep).trim();
+            String mode = trimmed.substring(sep + 1).trim();
+            putMetricAggregation(stats, metric,
+                    StatisticsConfig.MetricAggregation.parse(
+                            mode, StatisticsConfig.MetricAggregation.AUTO));
+        }
+    }
+
+    private static void parseMetricAggregationList(String value,
+                                                   StatisticsConfig.MetricAggregation aggregation,
+                                                   CLIConfig.StatsConfig stats) {
+        if (value == null || stats == null || aggregation == null) return;
+        String[] parts = value.split(",");
+        for (String part : parts) {
+            if (part == null) continue;
+            putMetricAggregation(stats, part.trim(), aggregation);
+        }
+    }
+
+    private static void putMetricAggregation(CLIConfig.StatsConfig stats,
+                                             String metric,
+                                             StatisticsConfig.MetricAggregation aggregation) {
+        if (stats == null || metric == null || aggregation == null
+                || aggregation == StatisticsConfig.MetricAggregation.AUTO) {
+            return;
+        }
+        String trimmed = metric.trim();
+        if (trimmed.isEmpty()) return;
+        if (stats.metricAggregations == null) {
+            stats.metricAggregations =
+                    new LinkedHashMap<String, StatisticsConfig.MetricAggregation>();
+        }
+        String existing = existingMetricAggregationKey(stats, trimmed);
+        if (existing != null) {
+            stats.metricAggregations.remove(existing);
+        }
+        stats.metricAggregations.put(trimmed, aggregation);
+    }
+
+    private static String existingMetricAggregationKey(CLIConfig.StatsConfig stats,
+                                                       String metric) {
+        if (stats == null || stats.metricAggregations == null || metric == null) {
+            return null;
+        }
+        String trimmed = metric.trim();
+        for (String key : stats.metricAggregations.keySet()) {
+            if (key != null && key.trim().equalsIgnoreCase(trimmed)) {
+                return key;
+            }
+        }
+        return null;
     }
 
     private static Boolean parseNullableBoolean(String options, String key, Boolean current) {

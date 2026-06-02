@@ -431,6 +431,29 @@ public class MasterAggregationAnalysisTest {
         assertEquals("15", row.get("Iba1_ROI_IntDenMean"));
         assertEquals("25", row.get("Iba1_ROI_%AreaMean"));
         assertEquals("120", row.get("Iba1_ROI_IntDen_UnfilteredMean"));
+        assertEquals("2", row.get("numZSlices"));
+    }
+
+    @Test
+    public void execute_countsZRowsWithoutWritingZMean() throws Exception {
+        File root = temp.newFolder("master-agg-z-count");
+        File intensities = FlashProjectLayout.forDirectory(root.getAbsolutePath()).tablesIntensityWriteDir();
+        assertTrue(intensities.mkdirs());
+
+        writeCsv(new File(intensities, "Iba1.csv"),
+                "Animal Name,ROI,Region,SCN,Hemisphere,z,IntDen,%Area,IntDen_Unfiltered",
+                "Mouse1,SCN1,SCN,1,LH,5,12,20,100\n"
+                        + "Mouse1,SCN1,SCN,1,LH,6,18,30,140\n"
+                        + "Mouse1,SCN1,SCN,1,LH,7,30,40,180");
+
+        Map<String, String> row = aggregateIntensityRow(root);
+        String header = Files.readAllLines(
+                aggregationFile(root, "Image Intensities.csv").toPath(),
+                StandardCharsets.UTF_8).get(0);
+
+        assertEquals("3", row.get("numZSlices"));
+        assertEquals("20", row.get("Iba1_ROI_IntDenMean"));
+        assertFalse(header.contains("zMean"));
     }
 
     @Test
@@ -490,17 +513,17 @@ public class MasterAggregationAnalysisTest {
                 "Animal Name,ROI,Region,SCN,Hemisphere,IntDen,%Area,IntDen_Unfiltered",
                 "BaseMouse,SCN1,SCN,1,LH,20,4,200");
         writeCsv(new File(intensities, "DAPI_MIP.csv"),
-                "Animal Name,ROI,Region,SCN,Hemisphere,Intensity_HotspotMoransI,DAPI_Pearson_mCherry",
-                "MipMouse,SCN1,SCN,1,LH,0.75,0.5");
+                "Animal Name,ROI,Region,SCN,Hemisphere,z,Intensity_HotspotMoransI,DAPI_Pearson_mCherry",
+                "MipMouse,SCN1,SCN,1,LH,MIP,0.75,0.5");
         writeCsv(new File(intensities, "mCherry_MIP.csv"),
-                "Animal Name,ROI,Region,SCN,Hemisphere,Intensity_HotspotMoransI",
-                "MipMouse,SCN1,SCN,1,LH,0.25");
+                "Animal Name,ROI,Region,SCN,Hemisphere,z,Intensity_HotspotMoransI",
+                "MipMouse,SCN1,SCN,1,LH,MIP,0.25");
         writeCsv(new File(intensities, "DAPI_3D.csv"),
-                "Animal Name,ROI,Region,SCN,Hemisphere,Intensity_Anisotropy3DCoherency,DAPI_Pearson3D_mCherry",
-                "NativeMouse,SCN1,SCN,1,LH,0.9,0.6");
+                "Animal Name,ROI,Region,SCN,Hemisphere,z,Intensity_Anisotropy3DCoherency,DAPI_Pearson3D_mCherry",
+                "NativeMouse,SCN1,SCN,1,LH,3D,0.9,0.6");
         writeCsv(new File(intensities, "mCherry_3D.csv"),
-                "Animal Name,ROI,Region,SCN,Hemisphere,Intensity_Anisotropy3DCoherency",
-                "NativeMouse,SCN1,SCN,1,LH,0.2");
+                "Animal Name,ROI,Region,SCN,Hemisphere,z,Intensity_Anisotropy3DCoherency",
+                "NativeMouse,SCN1,SCN,1,LH,3D,0.2");
 
         Map<String, String> baseRow = aggregateIntensityRow(root);
         Map<String, String> mipRow = aggregateIntensityRow(root, "Image Intensities_MIP.csv");
@@ -509,6 +532,8 @@ public class MasterAggregationAnalysisTest {
         assertEquals("BaseMouse", baseRow.get("AnimalName"));
         assertEquals("MipMouse", mipRow.get("AnimalName"));
         assertEquals("NativeMouse", nativeRow.get("AnimalName"));
+        assertEquals("1", mipRow.get("numZSlices"));
+        assertEquals("1", nativeRow.get("numZSlices"));
         assertEquals("0.75", mipRow.get("DAPI_ROI_Intensity_HotspotMoransIMean"));
         assertEquals("0.5", mipRow.get("DAPI_ROI_DAPI_Pearson_mCherryMean"));
         assertEquals("0.9", nativeRow.get("DAPI_ROI_Intensity_Anisotropy3DCoherencyMean"));

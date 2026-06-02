@@ -22,6 +22,16 @@ public class StatisticRow {
     public final String notes;
     public final boolean paired;
     public final String postHocMethod;
+    public final String inferentialUnit;
+    public final int group1NAnimals;
+    public final int group2NAnimals;
+    public final int totalNAnimals;
+    public final double group1Mean;
+    public final double group2Mean;
+    public final String effectSizeType;
+    public final double effectSize;
+    public final double effectCI95Low;
+    public final double effectCI95High;
 
     private StatisticRow(Builder b) {
         this.metric = b.metric;
@@ -40,6 +50,16 @@ public class StatisticRow {
         this.notes = b.notes;
         this.paired = b.paired;
         this.postHocMethod = b.postHocMethod;
+        this.inferentialUnit = b.inferentialUnit;
+        this.group1NAnimals = b.group1NAnimals;
+        this.group2NAnimals = b.group2NAnimals;
+        this.totalNAnimals = b.totalNAnimals;
+        this.group1Mean = b.group1Mean;
+        this.group2Mean = b.group2Mean;
+        this.effectSizeType = b.effectSizeType;
+        this.effectSize = b.effectSize;
+        this.effectCI95Low = b.effectCI95Low;
+        this.effectCI95High = b.effectCI95High;
     }
 
     public static Builder builder() {
@@ -63,6 +83,16 @@ public class StatisticRow {
         String notes = "";
         boolean paired = false;
         String postHocMethod = "";
+        String inferentialUnit = "";
+        int group1NAnimals = 0;
+        int group2NAnimals = 0;
+        int totalNAnimals = 0;
+        double group1Mean = Double.NaN;
+        double group2Mean = Double.NaN;
+        String effectSizeType = "";
+        double effectSize = Double.NaN;
+        double effectCI95Low = Double.NaN;
+        double effectCI95High = Double.NaN;
 
         public Builder metric(String v) { this.metric = v; return this; }
         public Builder test(String v) { this.test = v; return this; }
@@ -80,6 +110,16 @@ public class StatisticRow {
         public Builder notes(String v) { this.notes = v; return this; }
         public Builder paired(boolean v) { this.paired = v; return this; }
         public Builder postHocMethod(String v) { this.postHocMethod = v == null ? "" : v; return this; }
+        public Builder inferentialUnit(String v) { this.inferentialUnit = v == null ? "" : v; return this; }
+        public Builder group1NAnimals(int v) { this.group1NAnimals = Math.max(0, v); return this; }
+        public Builder group2NAnimals(int v) { this.group2NAnimals = Math.max(0, v); return this; }
+        public Builder totalNAnimals(int v) { this.totalNAnimals = Math.max(0, v); return this; }
+        public Builder group1Mean(double v) { this.group1Mean = v; return this; }
+        public Builder group2Mean(double v) { this.group2Mean = v; return this; }
+        public Builder effectSizeType(String v) { this.effectSizeType = v == null ? "" : v; return this; }
+        public Builder effectSize(double v) { this.effectSize = v; return this; }
+        public Builder effectCI95Low(double v) { this.effectCI95Low = v; return this; }
+        public Builder effectCI95High(double v) { this.effectCI95High = v; return this; }
 
         public StatisticRow build() { return new StatisticRow(this); }
     }

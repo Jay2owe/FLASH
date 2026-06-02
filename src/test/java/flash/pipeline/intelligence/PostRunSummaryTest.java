@@ -36,21 +36,22 @@ public class PostRunSummaryTest {
         File json = SummaryHistoryStore.historyWriteFile(root.getAbsolutePath());
         assertTrue(json.isFile());
         assertTrue(json.getAbsolutePath().contains(
-                new File("FLASH/Status/" + FlashProjectLayout.SETTINGS_DIR
-                        + "/" + SummaryHistoryStore.FILE_NAME).getPath()));
-        assertTrue(!new File(root, SummaryHistoryStore.LEGACY_FILE_NAME).exists());
+                new File("FLASH/" + FlashProjectLayout.SETTINGS_DIR
+                        + "/" + FlashProjectLayout.STATUS_FILENAME).getPath()));
+        assertFalse(new File(root, "FLASH/Status").exists());
 
         writeBin(root, "500");
         writeObjectsMaster(root, 15);
 
         PostRunSummary.writeIfPossible(root.getAbsolutePath());
 
-        File txt = new File(exportDir, "ihf-summary.txt");
+        File txt = new File(exportDir, PostRunSummary.SUMMARY_FILE_NAME);
         assertTrue(txt.isFile());
 
         List<String> lines = Files.readAllLines(txt.toPath(), StandardCharsets.UTF_8);
         String joined = String.join("\n", lines);
-        assertTrue(joined.contains("R-07 Re-run diff"));
+        assertTrue(joined.contains("Re-run diff"));
+        assertFalse(joined.contains("R-0"));
         assertTrue(joined.contains("Object thresholds: default -> 500"));
         assertTrue(joined.contains("DAPI_Count 10.000 -> 15.000"));
     }
@@ -147,7 +148,7 @@ public class PostRunSummaryTest {
 
         PostRunSummary.writeIfPossible(root.getAbsolutePath());
 
-        File txt = new File(aggregationDir, "ihf-summary.txt");
+        File txt = new File(aggregationDir, PostRunSummary.SUMMARY_FILE_NAME);
         assertTrue(txt.isFile());
         SummaryHistoryStore.Snapshot snapshot = SummaryHistoryStore.load(root.getAbsolutePath());
         assertTrue(snapshot != null);
@@ -167,7 +168,7 @@ public class PostRunSummaryTest {
 
         PostRunSummary.writeIfPossible(root.getAbsolutePath());
 
-        File txt = new File(aggregationDir, "ihf-summary.txt");
+        File txt = new File(aggregationDir, PostRunSummary.SUMMARY_FILE_NAME);
         assertTrue(txt.isFile());
         SummaryHistoryStore.Snapshot snapshot = SummaryHistoryStore.load(root.getAbsolutePath());
         assertTrue(snapshot != null);

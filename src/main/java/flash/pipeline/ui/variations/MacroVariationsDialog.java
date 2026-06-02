@@ -619,10 +619,33 @@ public final class MacroVariationsDialog extends PipelineDialog {
                 }
             }
         });
+        gridWindow.attachSaveCacheActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                snapshotVariationsCache();
+            }
+        });
         gridWindow.setAutoRequestFocus(true);
         gridWindow.setVisible(true);
         gridWindow.toFront();
         gridWindow.requestFocus();
+    }
+
+    private void snapshotVariationsCache() {
+        VariationCache cache = currentRunCache;
+        ParameterSweep sweep = currentSweep;
+        if (gridWindow == null) {
+            return;
+        }
+        if (cache == null || sweep == null) {
+            gridWindow.setActionStatus("No variations to save yet.");
+            return;
+        }
+        int written = cache.snapshotResultsToDisk(sweep,
+                new ArrayList<VariationResult>(resultsByCell));
+        gridWindow.setActionStatus(written == 0
+                ? "No variations to save yet."
+                : "Saved " + written + " variation" + (written == 1 ? "" : "s")
+                        + " to the disk cache.");
     }
 
     private String gridWindowTitle() {

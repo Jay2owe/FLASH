@@ -6,12 +6,8 @@ import flash.pipeline.ui.PipelineDialog;
 import javax.swing.JButton;
 import java.awt.GraphicsEnvironment;
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.OutputStreamWriter;
-import java.io.PrintWriter;
 import java.lang.reflect.Method;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.List;
@@ -21,17 +17,14 @@ import java.util.List;
  */
 public final class LooseTiffRelocator {
 
-    public static final String NO_PROMPT_MARKER = ".ihf-no-input-folder";
+    public static final String NO_PROMPT_MARKER = "noInputFolderPrompt";
 
     public enum Choice { MOVED, LEAVE_LOOSE, CANCELLED }
 
     private LooseTiffRelocator() {}
 
     public static boolean shouldPrompt(String directory) {
-        for (File marker : FlashProjectLayout.forDirectory(directory).statusReadFiles(NO_PROMPT_MARKER)) {
-            if (marker.isFile()) return false;
-        }
-        return true;
+        return !ProjectStatusStore.hasMarker(directory, NO_PROMPT_MARKER);
     }
 
     public static Choice promptAndMaybeMove(String directory, List<File> looseTiffs) {
@@ -128,19 +121,11 @@ public final class LooseTiffRelocator {
     }
 
     private static void writeMarker(String directory) {
-        File marker = FlashProjectLayout.forDirectory(directory).statusWriteFile(NO_PROMPT_MARKER);
-        File parent = marker.getParentFile();
-        if (parent != null && !parent.isDirectory() && !parent.mkdirs() && !parent.isDirectory()) {
-            IJ.log("FLASH: failed to create status marker folder: "
-                    + parent.getAbsolutePath());
-            return;
-        }
-        try (PrintWriter writer = new PrintWriter(new OutputStreamWriter(
-                new FileOutputStream(marker), StandardCharsets.UTF_8))) {
-            writer.println("# FLASH: do not prompt to move loose TIFFs in this directory.");
+        try {
+            ProjectStatusStore.setMarker(directory, NO_PROMPT_MARKER, true);
         } catch (IOException e) {
             IJ.log("FLASH: failed to write loose-TIFF prompt marker: "
-                    + marker.getAbsolutePath());
+                    + e.getMessage());
         }
     }
 }

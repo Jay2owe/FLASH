@@ -22,6 +22,7 @@ import org.junit.rules.TemporaryFolder;
 
 import java.io.File;
 import java.io.PrintWriter;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -105,6 +106,55 @@ public class SpatialAnalysisObjectTextureTest {
         File centroidFile = new File(FlashProjectLayout.forDirectory(root.getAbsolutePath()).configurationWriteDir(),
                 "morph_texture_centroids_3D_A.txt");
         assertTrue(centroidFile.isFile());
+    }
+
+    @Test
+    public void executeWritesComplexArborizationColumnsAndShollProfilesHeadlessly() throws Exception {
+        File root = temp.newFolder("spatial-object-arborization");
+        Fixture fixture = createFixture(root);
+
+        runComplexMorphometry(root);
+
+        File channelFile = new File(fixture.objectsDir, "A.csv");
+        CsvTableIO.ChannelData data = CsvTableIO.loadChannelCsv(channelFile, "A");
+        assertNotNull(data);
+        assertArborizationColumnsPresent(data);
+        assertAnyFinite(data, "Morph_ShollCriticalRadius_um");
+        assertAnyFinite(data, "Morph_ShollCriticalIntersections");
+        assertAnyFinite(data, "Morph_ShollSchoenenIndex");
+        assertFinite(data, 0, "Morph_SkeletonBranches");
+        assertFinite(data, 0, "Morph_SkeletonJunctions");
+        assertFinite(data, 0, "Morph_SkeletonEndpoints");
+
+        File shollFile = new File(FlashProjectLayout.forDirectory(root.getAbsolutePath())
+                .tablesMorphometryWriteDir(), "A_ShollProfile.csv");
+        assertTrue(shollFile.isFile());
+        assertTrue(Files.readAllLines(shollFile.toPath()).size() > 1);
+    }
+
+    @Test
+    public void oldComplexOutputsMissingArborizationColumnsAreRecomputed() throws Exception {
+        File root = temp.newFolder("spatial-old-complex-arborization");
+        Fixture fixture = createFixture(root);
+
+        runComplexMorphometry(root);
+        File channelFile = new File(fixture.objectsDir, "A.csv");
+        File shollFile = new File(FlashProjectLayout.forDirectory(root.getAbsolutePath())
+                .tablesMorphometryWriteDir(), "A_ShollProfile.csv");
+        removeColumns(channelFile, "A", arborizationColumns());
+        assertTrue(shollFile.delete());
+
+        runComplexMorphometry(root);
+
+        CsvTableIO.ChannelData data = CsvTableIO.loadChannelCsv(channelFile, "A");
+        assertNotNull(data);
+        assertArborizationColumnsPresent(data);
+        assertAnyFinite(data, "Morph_ShollSchoenenIndex");
+        assertTrue(shollFile.isFile());
+
+        assertTrue(shollFile.delete());
+        runComplexMorphometry(root);
+        assertTrue(shollFile.isFile());
     }
 
     @Test
@@ -236,9 +286,29 @@ public class SpatialAnalysisObjectTextureTest {
         assertTrue(data.colIdx.containsKey("MorphTexture_F3D8"));
     }
 
+    private static void assertArborizationColumnsPresent(CsvTableIO.ChannelData data) {
+        assertTrue(data.colIdx.containsKey("Morph_ShollCriticalRadius_um"));
+        assertTrue(data.colIdx.containsKey("Morph_ShollCriticalIntersections"));
+        assertTrue(data.colIdx.containsKey("Morph_ShollSchoenenIndex"));
+        assertTrue(data.colIdx.containsKey("Morph_ShollPrimaryBranches"));
+        assertTrue(data.colIdx.containsKey("Morph_SkeletonBranches"));
+        assertTrue(data.colIdx.containsKey("Morph_SkeletonJunctions"));
+        assertTrue(data.colIdx.containsKey("Morph_SkeletonEndpoints"));
+    }
+
     private static void assertFinite(CsvTableIO.ChannelData data, int row, String column) {
         double value = data.getDouble(row, column);
         assertTrue(column + " should be finite", !Double.isNaN(value) && !Double.isInfinite(value));
+    }
+
+    private static void assertAnyFinite(CsvTableIO.ChannelData data, String column) {
+        for (int row = 0; row < data.rows.size(); row++) {
+            double value = data.getDouble(row, column);
+            if (!Double.isNaN(value) && !Double.isInfinite(value)) {
+                return;
+            }
+        }
+        assertTrue(column + " should have at least one finite value", false);
     }
 
     private static void blankColumn(File channelFile, String channelName, String column) {
@@ -248,6 +318,41 @@ public class SpatialAnalysisObjectTextureTest {
             data.set(row, column, "");
         }
         CsvTableIO.writeChannelCsv(channelFile, data);
+    }
+
+    private static List<String> arborizationColumns() {
+        return Arrays.asList("Morph_ShollCriticalRadius_um",
+                "Morph_ShollCriticalIntersections",
+                "Morph_ShollSchoenenIndex",
+                "Morph_ShollPrimaryBranches",
+                "Morph_SkeletonBranches",
+                "Morph_SkeletonJunctions",
+                "Morph_SkeletonEndpoints");
+    }
+
+    private static void removeColumns(File channelFile, String channelName, List<String> columns) {
+        CsvTableIO.ChannelData data = CsvTableIO.loadChannelCsv(channelFile, channelName);
+        assertNotNull(data);
+        List<String> header = new ArrayList<String>();
+        for (String column : data.header) {
+            if (!columns.contains(column)) {
+                header.add(column);
+            }
+        }
+        Map<String, Integer> colIdx = new LinkedHashMap<String, Integer>();
+        for (int i = 0; i < header.size(); i++) {
+            colIdx.put(header.get(i), Integer.valueOf(i));
+        }
+        List<List<String>> rows = new ArrayList<List<String>>();
+        for (int row = 0; row < data.rows.size(); row++) {
+            List<String> newRow = new ArrayList<String>();
+            for (String column : header) {
+                newRow.add(data.get(row, column));
+            }
+            rows.add(newRow);
+        }
+        CsvTableIO.writeChannelCsv(channelFile,
+                new CsvTableIO.ChannelData(channelName, header, rows, colIdx));
     }
 
     private static void runTexture(File root) {
@@ -267,6 +372,17 @@ public class SpatialAnalysisObjectTextureTest {
         SpatialAnalysisWizard.DerivedConfig config = new SpatialAnalysisWizard.DerivedConfig();
         config.doNative3DTexture = true;
         config.textureClassK = 2;
+        SpatialAnalysis analysis = new SpatialAnalysis();
+        analysis.setHeadless(true);
+        analysis.setSuppressDialogs(true);
+        analysis.setWizardConfig(config);
+        analysis.execute(root.getAbsolutePath());
+    }
+
+    private static void runComplexMorphometry(File root) {
+        SpatialAnalysisWizard.DerivedConfig config = new SpatialAnalysisWizard.DerivedConfig();
+        config.do3DMorphology = true;
+        config.doCompositeIndices = true;
         SpatialAnalysis analysis = new SpatialAnalysis();
         analysis.setHeadless(true);
         analysis.setSuppressDialogs(true);

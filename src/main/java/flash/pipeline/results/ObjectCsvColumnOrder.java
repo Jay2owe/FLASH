@@ -1,5 +1,6 @@
 package flash.pipeline.results;
 
+import flash.pipeline.atlas.AtlasRegionColumns;
 import flash.pipeline.io.CsvTableIO.ChannelData;
 
 import java.util.ArrayList;
@@ -23,6 +24,10 @@ public final class ObjectCsvColumnOrder {
 
     private static final Map<String, Integer> METADATA_ORDER = fixedOrder(
             "Region",
+            AtlasRegionColumns.ATLAS_KEY,
+            AtlasRegionColumns.REGION_ID,
+            AtlasRegionColumns.REGION_ACRONYM,
+            AtlasRegionColumns.REGION_NAME,
             "Hemisphere",
             "ROI",
             "Animal Name",
@@ -73,7 +78,14 @@ public final class ObjectCsvColumnOrder {
             "Morph_SRI",
             "Morph_PB",
             "Morph_MP",
-            "Morph_VSD"
+            "Morph_VSD",
+            "Morph_ShollCriticalRadius_um",
+            "Morph_ShollCriticalIntersections",
+            "Morph_ShollSchoenenIndex",
+            "Morph_ShollPrimaryBranches",
+            "Morph_SkeletonBranches",
+            "Morph_SkeletonJunctions",
+            "Morph_SkeletonEndpoints"
     );
     private static final Map<String, Integer> MORPH_POPULATION_ORDER = fixedOrder(
             "Morph_CMS",

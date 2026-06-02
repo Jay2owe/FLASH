@@ -1,5 +1,6 @@
 package flash.pipeline.analyses;
 
+import flash.pipeline.analyses.wizard.StatisticsPreset;
 import flash.pipeline.execution.AnalysisRunCoordinator;
 import flash.pipeline.io.ConditionManifestIO;
 import flash.pipeline.io.FlashProjectLayout;
@@ -16,6 +17,7 @@ import org.scijava.plugin.Plugin;
 import java.io.File;
 import java.io.PrintWriter;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.LinkedHashMap;
 import java.util.concurrent.Callable;
 
@@ -38,6 +40,29 @@ public class StatisticalAnalysisCommandTest {
 
         assertParameter("directory", File.class);
         assertParameter("coordinator", AnalysisRunCoordinator.class);
+        assertParameter("metricAggregation", String.class);
+        assertParameter("sumMetrics", String.class);
+        assertParameter("meanMetrics", String.class);
+    }
+
+    @Test
+    public void commandResolveConfigParsesMetricAggregationParameters() throws Exception {
+        StatisticalAnalysisCommand command = new StatisticalAnalysisCommand();
+        setField(command, "metricAggregation", "ObjectsDetected:sum");
+        setField(command, "sumMetrics", "SpotTotal");
+        setField(command, "meanMetrics", "CellCount");
+
+        Method resolveConfig = StatisticalAnalysisCommand.class
+                .getDeclaredMethod("resolveConfig", StatisticsPreset.class);
+        resolveConfig.setAccessible(true);
+        StatisticsConfig cfg = (StatisticsConfig) resolveConfig.invoke(command, new Object[]{null});
+
+        assertEquals(StatisticsConfig.MetricAggregation.SUM,
+                cfg.metricAggregationFor("ObjectsDetected"));
+        assertEquals(StatisticsConfig.MetricAggregation.SUM,
+                cfg.metricAggregationFor("SpotTotal"));
+        assertEquals(StatisticsConfig.MetricAggregation.MEAN,
+                cfg.metricAggregationFor("cellcount"));
     }
 
     @Test
@@ -79,6 +104,12 @@ public class StatisticalAnalysisCommandTest {
         Field field = StatisticalAnalysisCommand.class.getDeclaredField(name);
         assertEquals(type, field.getType());
         assertNotNull(field.getAnnotation(Parameter.class));
+    }
+
+    private static void setField(Object target, String name, Object value) throws Exception {
+        Field field = target.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        field.set(target, value);
     }
 
     private static void writeMasterObjects(File file) throws Exception {

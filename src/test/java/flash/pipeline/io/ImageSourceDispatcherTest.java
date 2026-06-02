@@ -407,12 +407,10 @@ public class ImageSourceDispatcherTest {
     }
 
     @Test
-    public void maybeWarnUncalibrated_flashStatusMarkerSuppressesWarning() throws Exception {
+    public void maybeWarnUncalibrated_projectStatusMarkerSuppressesWarning() throws Exception {
         File dir = createProjectWithInputTiff("uncalibrated-suppressed-new");
-        File marker = FlashProjectLayout.forDirectory(dir.getAbsolutePath())
-                .statusWriteFile(ImageSourceDispatcher.SUPPRESS_CALIBRATION_WARNING_MARKER);
-        assertTrue(marker.getParentFile().mkdirs());
-        assertTrue(marker.createNewFile());
+        ProjectStatusStore.setMarker(dir,
+                ImageSourceDispatcher.SUPPRESS_CALIBRATION_WARNING_MARKER, true);
 
         String added = captureLogOutput(new ThrowingRunnable() {
             @Override
@@ -421,7 +419,7 @@ public class ImageSourceDispatcherTest {
             }
         });
 
-        assertFalse("FLASH/Status marker should suppress calibration warning",
+        assertFalse("project status marker should suppress calibration warning",
                 added.contains("no physical calibration"));
     }
 

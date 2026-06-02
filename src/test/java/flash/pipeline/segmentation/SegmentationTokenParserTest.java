@@ -131,6 +131,14 @@ public class SegmentationTokenParserTest {
     }
 
     @Test
+    public void morphPredicateInclusiveOperatorsKeepExactBoundaryValues() {
+        assertTrue(MorphPredicate.parse("volume>=27").matches(27));
+        assertTrue(MorphPredicate.parse("volume<=27").matches(27));
+        assertFalse(MorphPredicate.parse("volume>27").matches(27));
+        assertFalse(MorphPredicate.parse("volume<27").matches(27));
+    }
+
+    @Test
     public void repeatedKeysTrailingColonsAndEmptySegmentsUseLastValue() {
         SegmentationMethod method = SegmentationTokenParser.parse(
                 "stardist:0.5:0.4::quality=0.1:quality=0.2:");

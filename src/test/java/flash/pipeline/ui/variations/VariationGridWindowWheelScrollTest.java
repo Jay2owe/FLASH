@@ -8,12 +8,14 @@ import org.junit.Test;
 
 import javax.swing.SwingUtilities;
 import java.awt.GraphicsEnvironment;
+import java.awt.event.InputEvent;
 import java.awt.event.MouseWheelEvent;
 import java.awt.event.MouseWheelListener;
 import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 public class VariationGridWindowWheelScrollTest {
 
@@ -53,6 +55,56 @@ public class VariationGridWindowWheelScrollTest {
                 }
             }
         });
+    }
+
+    @Test
+    public void ctrlWheelZoomsGrid() throws Exception {
+        Assume.assumeFalse(GraphicsEnvironment.isHeadless());
+        SwingUtilities.invokeAndWait(new Runnable() {
+            @Override public void run() {
+                VariationGridWindow window = new VariationGridWindow(
+                        null, "FLASH variations", cellsWithSource(4));
+                try {
+                    assertEquals(1.0, window.zoomForTest(), 1e-9);
+                    int fitWidth = window.gridPanelForTest()
+                            .getPreferredSize().width;
+                    MouseWheelEvent zoomIn = new MouseWheelEvent(
+                            window.gridPanelForTest(),
+                            MouseWheelEvent.MOUSE_WHEEL,
+                            System.currentTimeMillis(),
+                            InputEvent.CTRL_DOWN_MASK,
+                            10,
+                            10,
+                            0,
+                            false,
+                            MouseWheelEvent.WHEEL_UNIT_SCROLL,
+                            1,
+                            -1);
+                    MouseWheelListener[] listeners =
+                            window.gridPanelForTest().getMouseWheelListeners();
+                    for (int i = 0; i < listeners.length; i++) {
+                        listeners[i].mouseWheelMoved(zoomIn);
+                    }
+                    assertTrue("Ctrl+wheel should zoom past fit",
+                            window.zoomForTest() > 1.0);
+                    assertTrue("zoomed grid should grow beyond its fit size",
+                            window.gridPanelForTest().getPreferredSize().width
+                                    > fitWidth);
+                } finally {
+                    window.dispose();
+                }
+            }
+        });
+    }
+
+    private static List<VariationCellPanel> cellsWithSource(int count) {
+        ImagePlus source = new ImagePlus("src", new ByteProcessor(40, 30));
+        List<VariationCellPanel> cells = new ArrayList<VariationCellPanel>();
+        for (int i = 0; i < count; i++) {
+            cells.add(new VariationCellPanel(
+                    ParameterCombo.builder().build(), source, null, null));
+        }
+        return cells;
     }
 
     private static List<VariationCellPanel> cells(int count, int slices) {

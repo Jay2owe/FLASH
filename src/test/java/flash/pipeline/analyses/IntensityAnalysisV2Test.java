@@ -22,6 +22,7 @@ import flash.pipeline.runtime.DependencyService;
 import flash.pipeline.runtime.DependencyStatus;
 import flash.pipeline.runtime.FeatureDependencyGate;
 import ij.measure.ResultsTable;
+import ij.ImageStack;
 import ij.process.FloatProcessor;
 import org.junit.After;
 import org.junit.Rule;
@@ -173,6 +174,10 @@ public class IntensityAnalysisV2Test {
 
         assertFalse(baseColumns.contains("Intensity_PatchinessCV50"));
         assertTrue(mipColumns.contains("Intensity_PatchinessCV50"));
+        assertTrue(mipColumns.contains("z"));
+        assertFalse(mipColumns.contains("IntDen"));
+        assertTrue(mipColumns.indexOf("z")
+                < mipColumns.indexOf("Intensity_PatchinessCV50"));
     }
 
     @Test
@@ -286,10 +291,12 @@ public class IntensityAnalysisV2Test {
                 spatial,
                 new boolean[]{true, false});
 
-        assertEquals(Arrays.asList("Region", "Hemisphere", "ROI", "Animal Name",
+        assertEquals(Arrays.asList("Region", "Atlas Key", "Region ID", "Region Acronym",
+                "Region Name", "Hemisphere", "ROI", "Animal Name",
+                "z",
                 "IntDen", "IntDen_binarized", "%Area", "%Area_binarized",
                 "IntDen_Unfiltered"),
-                columns.subList(0, 9));
+                columns.subList(0, 14));
         assertTrue(columns.indexOf("Intensity_PatchinessCV50")
                 < columns.indexOf("DAPI_Pearson_GFAP"));
         assertTrue(columns.contains("Intensity_PatchinessCV50_binarized"));
@@ -312,6 +319,51 @@ public class IntensityAnalysisV2Test {
         assertEquals(20.0, table.getValue("%Area", 0), 0.0001);
         assertEquals(50.0, table.getValue("%Area_binarized", 0), 0.0001);
         assertEquals(30.0, table.getValue("IntDen_Unfiltered", 0), 0.0001);
+    }
+
+    @Test
+    public void baseIntensityRowsRecordOriginalZSliceNumbers() throws Exception {
+        File dir = temp.newFolder("z-column");
+        File binDir = new File(dir, ".bin");
+        assertTrue(binDir.mkdirs());
+        File outputRoot = FlashProjectLayout.forDirectory(dir.getAbsolutePath())
+                .tablesIntensityWriteDir();
+        assertTrue(outputRoot.mkdirs());
+
+        String[] channelNames = {"DAPI"};
+        boolean[] binarization = {false};
+        String[] thresholds = {"0"};
+        String[] filterSources = {"Basic background and noise removal"};
+        IntensitySpatialConfig spatial = IntensitySpatialConfig.disabled();
+        IntensityAnalysisV2.IntensityOutputPlan plan = IntensityAnalysisV2.buildOutputPlan(
+                outputRoot, channelNames, false, -1, spatial, 3, false);
+        Object totalTables = newOutputTables(plan);
+
+        invokeRunIntensityMeasurementsForThisImage(
+                new IntensityAnalysisV2(),
+                new NameParts("", "SyntheticMouse", "LH", "SCN"),
+                new ImagePlus[]{syntheticStackImage(8, 8, 3)},
+                1,
+                binarization,
+                thresholds,
+                channelNames,
+                -1,
+                plan,
+                totalTables,
+                1,
+                null,
+                5,
+                intensityConfig("DAPI", "default"),
+                filterSources,
+                binDir,
+                "",
+                null);
+
+        ResultsTable table = tableFor(totalTables, IntensitySpatialOutputKey.base("DAPI"));
+        assertEquals(3, table.size());
+        assertEquals(5.0, table.getValue("z", 0), 0.0);
+        assertEquals(6.0, table.getValue("z", 1), 0.0);
+        assertEquals(7.0, table.getValue("z", 2), 0.0);
     }
 
     @Test
@@ -439,7 +491,7 @@ public class IntensityAnalysisV2Test {
                         channelNames, spatial, binarization));
         assertTrue(out.isFile());
         String csv = new String(Files.readAllBytes(out.toPath()), StandardCharsets.UTF_8);
-        assertTrue(csv.startsWith("Region,Hemisphere,ROI,Animal Name,IntDen,%Area,IntDen_Unfiltered"));
+        assertTrue(csv.startsWith("Region,Atlas Key,Region ID,Region Acronym,Region Name,Hemisphere,ROI,Animal Name,z,IntDen,%Area,IntDen_Unfiltered"));
         assertTrue(csv.contains("Intensity_GranularityPeak_um"));
         assertTrue(csv.contains("NaN"));
         assertTrue(log.contains("granularity skipped"));
@@ -674,6 +726,27 @@ public class IntensityAnalysisV2Test {
         return image;
     }
 
+    private static ImagePlus syntheticStackImage(int width, int height, int slices) {
+        ImageStack stack = new ImageStack(width, height);
+        for (int z = 1; z <= slices; z++) {
+            float[] pixels = new float[width * height];
+            for (int y = 0; y < height; y++) {
+                for (int x = 0; x < width; x++) {
+                    pixels[y * width + x] = (float) (25.0 + z + x + y);
+                }
+            }
+            stack.addSlice("z" + z, new FloatProcessor(width, height, pixels, null));
+        }
+        ImagePlus image = new ImagePlus("synthetic-stack", stack);
+        image.setDimensions(1, Math.max(1, slices), 1);
+        Calibration calibration = new Calibration();
+        calibration.pixelWidth = 1.0;
+        calibration.pixelHeight = 1.0;
+        calibration.setUnit("um");
+        image.setCalibration(calibration);
+        return image;
+    }
+
     private static String captureImageJLogOutput(ThrowingRunnable action) throws Exception {
         PrintStream originalOut = System.out;
         ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -750,6 +823,31 @@ public class IntensityAnalysisV2Test {
             File binDir,
             String basicFilterMacro,
             Roi roi) throws Exception {
+        invokeRunIntensityMeasurementsForThisImage(analysis, parts, chans, n,
+                binarization, thresholds, channelNames, roiChannelIndex1Based,
+                outputPlan, totalTables, scnIndex1Based, roiSetName, 1,
+                cfg, filterSources, binDir, basicFilterMacro, roi);
+    }
+
+    private static void invokeRunIntensityMeasurementsForThisImage(
+            IntensityAnalysisV2 analysis,
+            NameParts parts,
+            ImagePlus[] chans,
+            int n,
+            boolean[] binarization,
+            String[] thresholds,
+            String[] channelNames,
+            int roiChannelIndex1Based,
+            IntensityAnalysisV2.IntensityOutputPlan outputPlan,
+            Object totalTables,
+            int scnIndex1Based,
+            String roiSetName,
+            int firstZSlice,
+            BinConfig cfg,
+            String[] filterSources,
+            File binDir,
+            String basicFilterMacro,
+            Roi roi) throws Exception {
         Class<?> outputTablesType = Class.forName(
                 "flash.pipeline.analyses.IntensityAnalysisV2$IntensityOutputTables");
         Method method = IntensityAnalysisV2.class.getDeclaredMethod(
@@ -765,6 +863,7 @@ public class IntensityAnalysisV2Test {
                 outputTablesType,
                 int.class,
                 String.class,
+                int.class,
                 BinConfig.class,
                 String[].class,
                 File.class,
@@ -774,7 +873,7 @@ public class IntensityAnalysisV2Test {
         method.invoke(analysis, parts, chans, Integer.valueOf(n), binarization,
                 thresholds, channelNames, Integer.valueOf(roiChannelIndex1Based),
                 outputPlan, totalTables, Integer.valueOf(scnIndex1Based), roiSetName,
-                cfg, filterSources, binDir, basicFilterMacro, roi);
+                Integer.valueOf(firstZSlice), cfg, filterSources, binDir, basicFilterMacro, roi);
     }
 
     private static void writeChannelNamesOnlyConfig(File dir, String... names) throws Exception {

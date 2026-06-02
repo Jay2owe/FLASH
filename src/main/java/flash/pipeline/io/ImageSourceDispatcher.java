@@ -4,17 +4,13 @@ import ij.IJ;
 import flash.pipeline.intelligence.JunkFileFilter;
 import flash.pipeline.project.ProjectFile;
 import flash.pipeline.project.ProjectFileIO;
+import flash.pipeline.project.ProjectPathResolver;
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.ToggleSwitch;
 
 import javax.swing.JComboBox;
 import java.io.File;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.OutputStreamWriter;
-import java.io.PrintWriter;
 import java.lang.reflect.Method;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -63,7 +59,7 @@ public final class ImageSourceDispatcher {
     public enum SourceMode { CONTAINER, TIFF_INPUT_SUBFOLDER, TIFF_LOOSE }
 
     public static final String SUPPRESS_CALIBRATION_WARNING_MARKER =
-            ".ihf-suppress-calibration-warning";
+            "suppressCalibrationWarning";
 
     private static final String CALIBRATION_WARNING_MESSAGE =
             "Input TIFFs have no physical calibration.\n"
@@ -168,6 +164,8 @@ public final class ImageSourceDispatcher {
         if (project == null || project.items == null) {
             return null;
         }
+        ProjectPathResolver.relocateForLoad(project,
+                new File(settingsDir, ProjectFileIO.FILE_NAME), outputRoot);
         List<File> containers = new ArrayList<File>();
         List<List<Integer>> includes = new ArrayList<List<Integer>>();
         List<File> tiffs = new ArrayList<File>();
@@ -460,8 +458,7 @@ public final class ImageSourceDispatcher {
         ToggleSwitch dontShowAgain = dialog.addToggle(
                 "Don't show again for this project", false);
         if (dialog.showDialog() && dontShowAgain.isSelected()) {
-            writeCalibrationWarningSuppressMarker(
-                    layout.statusWriteFile(SUPPRESS_CALIBRATION_WARNING_MARKER));
+            writeCalibrationWarningSuppressMarker(layout);
         }
     }
 
@@ -528,10 +525,11 @@ public final class ImageSourceDispatcher {
     }
 
     private static boolean hasMarker(FlashProjectLayout layout, String fileName) {
-        for (File marker : layout.statusReadFiles(fileName)) {
-            if (marker.isFile()) return true;
+        try {
+            return ProjectStatusStore.hasMarker(layout.projectRoot(), fileName);
+        } catch (java.io.IOException e) {
+            return false;
         }
-        return false;
     }
 
     private static File requireDirectory(String directory) {
@@ -594,19 +592,13 @@ public final class ImageSourceDispatcher {
         return java.awt.GraphicsEnvironment.isHeadless();
     }
 
-    private static void writeCalibrationWarningSuppressMarker(File marker) {
-        File parent = marker.getParentFile();
-        if (parent != null && !parent.isDirectory() && !parent.mkdirs() && !parent.isDirectory()) {
-            IJ.log("FLASH: failed to create calibration warning marker folder: "
-                    + parent.getAbsolutePath());
-            return;
-        }
-        try (PrintWriter writer = new PrintWriter(new OutputStreamWriter(
-                new FileOutputStream(marker), StandardCharsets.UTF_8))) {
-            writer.println("# FLASH: suppress calibration warning for this project.");
-        } catch (IOException e) {
+    private static void writeCalibrationWarningSuppressMarker(FlashProjectLayout layout) {
+        try {
+            ProjectStatusStore.setMarker(layout.projectRoot(),
+                    SUPPRESS_CALIBRATION_WARNING_MARKER, true);
+        } catch (java.io.IOException e) {
             IJ.log("FLASH: failed to write calibration warning marker: "
-                    + marker.getAbsolutePath());
+                    + e.getMessage());
         }
     }
 }

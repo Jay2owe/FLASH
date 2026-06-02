@@ -30,7 +30,7 @@ public class SpatialAnalysisWizard extends WizardFlow {
     public static final String MORPH_NONE = "Not measuring morphology";
     public static final String MORPH_2D = "Simple shape (area / circularity / aspect ratio)";
     public static final String MORPH_3D = "3D shape (sphericity / elongation / Feret diameter)";
-    public static final String MORPH_COMPLEX = "Cell-level complexity score (RI / SRI / PB / MP / VSD)";
+    public static final String MORPH_COMPLEX = "Cell-level complexity score (RI / Sholl / skeleton)";
     public static final String MORPH_POPULATION = "Population-scale scoring (CMS / SMSD / IMDI)";
     public static final String MORPH_TERRITORY = "Territory x morphology (TDR / FEV_Mag)";
     public static final String MORPH_ALL = "Everything (exploratory)";

@@ -5,6 +5,7 @@ import flash.pipeline.bin.ChannelConfigIO;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.ImageSourceDispatcher;
 import flash.pipeline.io.OrientationManifestIO;
+import flash.pipeline.io.ProjectStatusStore;
 import flash.pipeline.roi.RoiIO;
 
 import java.io.File;
@@ -14,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.security.MessageDigest;
 import java.text.SimpleDateFormat;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -25,9 +27,8 @@ import java.util.TimeZone;
  * Headless-safe filesystem scan for the main analysis-selection status badges.
  */
 public class AnalysisStatusScanner {
-    public static final String STATUS_DIR = FlashProjectLayout.STATUS_DIR + File.separator
-            + FlashProjectLayout.SETTINGS_DIR + File.separator
-            + FlashProjectLayout.ANALYSIS_STATUS_DIR;
+    public static final String STATUS_DIR = FlashProjectLayout.SETTINGS_DIR + File.separator
+            + FlashProjectLayout.STATUS_FILENAME;
     public static final String CREATE_BIN_ID = "createBin";
     public static final String AGGREGATION_ID = "aggregation";
 
@@ -108,17 +109,12 @@ public class AnalysisStatusScanner {
     public static void writeSidecar(File directory, String analysisId, int imageCount) throws IOException {
         if (directory == null || analysisId == null || analysisId.trim().isEmpty()) return;
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory.getAbsolutePath());
-        File statusDir = layout.analysisStatusWriteDir();
-        if (!statusDir.isDirectory() && !statusDir.mkdirs() && !statusDir.isDirectory()) {
-            throw new IOException("Failed to create " + statusDir.getAbsolutePath());
-        }
 
         Map<String, Object> json = new HashMap<String, Object>();
         json.put("binHash", sha256(new File(layout.configurationWriteDir(), ChannelConfigIO.FILE_NAME)));
         json.put("ranAt", isoNow());
         json.put("imageCount", Integer.valueOf(Math.max(0, imageCount)));
-        Files.write(new File(statusDir, analysisId + ".json").toPath(),
-                MiniJson.write(json).getBytes(StandardCharsets.UTF_8));
+        ProjectStatusStore.writeAnalysisStatus(directory, analysisId, json);
     }
 
     public static void writeSidecar(String directory, String analysisId, int imageCount) throws IOException {
@@ -187,21 +183,23 @@ public class AnalysisStatusScanner {
     }
 
     private AnalysisStatus sidecarStatus(File directory, String analysisId, String currentBinHash, boolean fallbackDone) {
-        File sidecar = firstExistingFile(statusSidecarReadFiles(directory, analysisId));
-        if (sidecar != null && sidecar.isFile()) {
-            SidecarStatus data = readSidecar(sidecar);
-            if (data != null) {
-                String tooltip = sidecarTooltip(data, currentBinHash);
-                int index = CREATE_BIN_ID.equals(analysisId)
-                        ? FLASH_Pipeline.IDX_CREATE_BIN
-                        : FLASH_Pipeline.IDX_AGGREGATION;
-                tooltips.put(Integer.valueOf(index), tooltip);
-                if (data.binHash != null && currentBinHash != null
-                        && !data.binHash.equals(currentBinHash)) {
-                    return AnalysisStatus.STALE;
-                }
-                return AnalysisStatus.DONE;
+        Map<String, Object> status = Collections.emptyMap();
+        try {
+            status = ProjectStatusStore.readAnalysisStatus(directory, analysisId);
+        } catch (IOException ignored) {
+        }
+        if (!status.isEmpty()) {
+            SidecarStatus data = readSidecar(status);
+            String tooltip = sidecarTooltip(data, currentBinHash);
+            int index = CREATE_BIN_ID.equals(analysisId)
+                    ? FLASH_Pipeline.IDX_CREATE_BIN
+                    : FLASH_Pipeline.IDX_AGGREGATION;
+            tooltips.put(Integer.valueOf(index), tooltip);
+            if (data.binHash != null && currentBinHash != null
+                    && !data.binHash.equals(currentBinHash)) {
+                return AnalysisStatus.STALE;
             }
+            return AnalysisStatus.DONE;
         }
         return fallbackDone ? AnalysisStatus.DONE : AnalysisStatus.NOT_STARTED;
     }
@@ -223,24 +221,17 @@ public class AnalysisStatusScanner {
         return "Not run on this folder";
     }
 
-    private SidecarStatus readSidecar(File sidecar) {
-        try {
-            Object parsed = MiniJson.parse(new String(Files.readAllBytes(sidecar.toPath()), StandardCharsets.UTF_8));
-            if (!(parsed instanceof Map)) return null;
-            Map<?, ?> map = (Map<?, ?>) parsed;
-            SidecarStatus out = new SidecarStatus();
-            Object binHash = map.get("binHash");
-            Object ranAt = map.get("ranAt");
-            Object imageCount = map.get("imageCount");
-            out.binHash = binHash == null ? "" : String.valueOf(binHash);
-            out.ranAt = ranAt == null ? "" : String.valueOf(ranAt);
-            if (imageCount instanceof Number) {
-                out.imageCount = ((Number) imageCount).intValue();
-            }
-            return out;
-        } catch (IOException e) {
-            return null;
+    private SidecarStatus readSidecar(Map<String, Object> map) {
+        SidecarStatus out = new SidecarStatus();
+        Object binHash = map.get("binHash");
+        Object ranAt = map.get("ranAt");
+        Object imageCount = map.get("imageCount");
+        out.binHash = binHash == null ? "" : String.valueOf(binHash);
+        out.ranAt = ranAt == null ? "" : String.valueOf(ranAt);
+        if (imageCount instanceof Number) {
+            out.imageCount = ((Number) imageCount).intValue();
         }
+        return out;
     }
 
     private String sidecarTooltip(SidecarStatus data, String currentBinHash) {
@@ -339,24 +330,6 @@ public class AnalysisStatusScanner {
         } catch (Exception e) {
             return "";
         }
-    }
-
-    private static List<File> statusSidecarReadFiles(File directory, String analysisId) {
-        FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory.getAbsolutePath());
-        List<File> out = new java.util.ArrayList<File>();
-        for (File dir : layout.analysisStatusReadDirs()) {
-            out.add(new File(dir, analysisId + ".json"));
-        }
-        return out;
-    }
-
-    private static File firstExistingFile(List<File> files) {
-        if (files == null) return null;
-        for (int i = 0; i < files.size(); i++) {
-            File file = files.get(i);
-            if (file != null && file.isFile()) return file;
-        }
-        return null;
     }
 
     private static String isoNow() {

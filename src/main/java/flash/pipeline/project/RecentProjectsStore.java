@@ -102,6 +102,15 @@ public final class RecentProjectsStore {
      * list at {@link RecentProject#MAX_ENTRIES}. Returns the new list.
      */
     public static List<RecentProject> recordOpened(File pluginsDir, RecentProject entry) throws IOException {
+        return recordOpenedReplacing(pluginsDir, entry, null);
+    }
+
+    /**
+     * Record an opened project while removing a stale path it replaced (for
+     * example after a Dropbox project moved between Windows user profiles).
+     */
+    public static List<RecentProject> recordOpenedReplacing(File pluginsDir, RecentProject entry,
+                                                            String obsoletePath) throws IOException {
         if (entry == null || entry.path == null || entry.path.trim().isEmpty()) {
             return read(pluginsDir);
         }
@@ -109,8 +118,10 @@ public final class RecentProjectsStore {
         List<RecentProject> next = new ArrayList<RecentProject>(existing.size() + 1);
         next.add(entry);
         String canonical = canonicalisePath(entry.path);
+        String obsoleteCanonical = canonicalisePath(obsoletePath);
         for (RecentProject prior : existing) {
-            if (!canonicalisePath(prior.path).equals(canonical)) {
+            String priorCanonical = canonicalisePath(prior.path);
+            if (!priorCanonical.equals(canonical) && !priorCanonical.equals(obsoleteCanonical)) {
                 next.add(prior);
             }
         }

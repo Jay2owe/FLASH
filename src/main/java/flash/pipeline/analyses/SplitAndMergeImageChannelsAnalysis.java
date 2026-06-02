@@ -264,9 +264,21 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis, RunRecordAw
             return;
         }
 
-        BinSetupDispatcher.Outcome outcome = BinSetupDispatcher.ensure(
-                directory, "Split & Merge Image Channels", requiredBinFields(),
-                benefitsFromRois(), suppressDialogs, cliConfig);
+        BinSetupDispatcher.Outcome outcome;
+        try {
+            outcome = BinSetupDispatcher.ensure(
+                    directory, "Split & Merge Image Channels", requiredBinFields(),
+                    benefitsFromRois(), suppressDialogs, cliConfig);
+        } catch (IllegalArgumentException e) {
+            if (headless || suppressDialogs || GraphicsEnvironment.isHeadless()) {
+                String message = e.getMessage() == null
+                        ? "Split & Merge Image Channels setup failed." : e.getMessage();
+                IJ.log("[FLASH] " + message);
+                recordWarn(message);
+                return;
+            }
+            throw e;
+        }
         if (outcome == BinSetupDispatcher.Outcome.CANCELLED) {
             IJ.log("[FLASH] Split & Merge cancelled by user.");
             recordWarn("Split & Merge cancelled by user.");

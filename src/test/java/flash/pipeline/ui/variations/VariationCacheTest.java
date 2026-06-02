@@ -9,6 +9,10 @@ import org.junit.rules.TemporaryFolder;
 
 import java.io.File;
 import java.io.FileOutputStream;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.Assert.assertEquals;
@@ -48,10 +52,21 @@ public class VariationCacheTest {
     }
 
     @Test
+    public void putNeverWritesToDisk() throws Exception {
+        File bin = temp.newFolder(".bin");
+        VariationCache cache = new VariationCache(bin);
+
+        cache.put("ffffffffffffffff", labelImage("memory-only", 9));
+
+        assertFalse(cache.fileForTest("ffffffffffffffff").exists());
+        assertNull(new VariationCache(bin).get("ffffffffffffffff"));
+    }
+
+    @Test
     public void diskRoundTripSurvivesNewCacheInstance() throws Exception {
         File bin = temp.newFolder(".bin");
         VariationCache first = new VariationCache(bin);
-        first.put("bbbbbbbbbbbbbbbb", labelImage("disk-label", 123));
+        assertTrue(first.writeToDisk("bbbbbbbbbbbbbbbb", labelImage("disk-label", 123)));
 
         VariationCache reopened = new VariationCache(bin);
         ImagePlus loaded = reopened.get("bbbbbbbbbbbbbbbb");
@@ -61,11 +76,11 @@ public class VariationCacheTest {
     }
 
     @Test
-    public void putLeavesNoTemporaryTiffBesideFinalFile() throws Exception {
+    public void writeToDiskLeavesNoTemporaryTiffBesideFinalFile() throws Exception {
         File bin = temp.newFolder(".bin");
         VariationCache cache = new VariationCache(bin);
 
-        cache.put("abababababababab", labelImage("atomic-label", 321));
+        assertTrue(cache.writeToDisk("abababababababab", labelImage("atomic-label", 321)));
 
         File finalFile = cache.fileForTest("abababababababab");
         assertTrue(finalFile.isFile());
@@ -109,6 +124,34 @@ public class VariationCacheTest {
         assertEquals(1, deleted);
         assertFalse(oldFile.exists());
         assertTrue(newFile.exists());
+    }
+
+    @Test
+    public void snapshotResultsToDiskWritesOnlySuccessfulResults() throws Exception {
+        File bin = temp.newFolder(".bin");
+        VariationCache cache = new VariationCache(bin);
+        FilterParameterId sigma =
+                new FilterParameterId(0, 0, 0, "Gaussian Blur", "sigma");
+        Map<ParameterKey, ParameterValueList> values =
+                new LinkedHashMap<ParameterKey, ParameterValueList>();
+        values.put(sigma, ParameterValueList.ofDoubles(1.0d, 2.0d));
+        ParameterSweep sweep = new ParameterSweep(ParameterSweep.Method.FILTER,
+                values, CropSpec.full(), "DAPI", "image-x", "filter:macrohash");
+        List<ParameterCombo> combos = sweep.combos();
+
+        VariationResult ok = VariationResult.success(
+                combos.get(0), labelImage("ok", 5), 3, 4L, null);
+        VariationResult failed = VariationResult.failure(
+                combos.get(1), new RuntimeException("boom"));
+
+        int written = cache.snapshotResultsToDisk(sweep,
+                Arrays.asList(ok, failed, null));
+
+        assertEquals(1, written);
+        assertTrue(cache.fileForTest(
+                VariationCache.keyFor(sweep, combos.get(0))).exists());
+        assertFalse(cache.fileForTest(
+                VariationCache.keyFor(sweep, combos.get(1))).exists());
     }
 
     private static ImagePlus labelImage(String title, int value) {

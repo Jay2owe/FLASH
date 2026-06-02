@@ -50,9 +50,8 @@ public final class FlashProjectLayout {
     public static final String CONFIGURATION_DIR = "Config";
     public static final String PRESETS_DIR = "Presets";
     public static final String CACHE_DIR = "Cache";
-    public static final String STATUS_DIR = "Status";
+    public static final String STATUS_FILENAME = "status.json";
     public static final String TIF_CACHE_DIR = "TIF";
-    public static final String ANALYSIS_STATUS_DIR = "Analysis";
 
     public static final String CUSTOM_FILTER_PRESET_DIR = "Custom Filter Presets";
     public static final String CONDITIONS_FILENAME = "Conditions.csv";
@@ -332,32 +331,8 @@ public final class FlashProjectLayout {
         return Collections.singletonList(tifCacheWriteDir());
     }
 
-    public File statusRoot() {
-        return new File(flashRoot(), STATUS_DIR);
-    }
-
-    public File statusSettingsRoot() {
-        return settingsDir(statusRoot());
-    }
-
-    public List<File> statusReadDirs() {
-        return Collections.singletonList(statusSettingsRoot());
-    }
-
-    public File analysisStatusWriteDir() {
-        return new File(statusSettingsRoot(), ANALYSIS_STATUS_DIR);
-    }
-
-    public List<File> analysisStatusReadDirs() {
-        return Collections.singletonList(analysisStatusWriteDir());
-    }
-
-    public File statusWriteFile(String fileName) {
-        return new File(statusSettingsRoot(), fileName);
-    }
-
-    public List<File> statusReadFiles(String fileName) {
-        return Collections.singletonList(statusWriteFile(fileName));
+    public File statusWriteFile() {
+        return new File(settingsRoot(), STATUS_FILENAME);
     }
 
 }

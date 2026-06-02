@@ -39,10 +39,7 @@ public class FlashProjectLayoutTest {
         assertPath(new File(project, "FLASH/.settings/Presets"), layout.presetsRoot());
         assertPath(new File(project, "FLASH/Cache"), layout.cacheRoot());
         assertPath(new File(project, "FLASH/Cache/TIF"), layout.tifCacheWriteDir());
-        assertPath(new File(project, "FLASH/Status"), layout.statusRoot());
-        assertPath(new File(project, "FLASH/Status/.settings/Analysis"), layout.analysisStatusWriteDir());
-        assertPath(new File(project, "FLASH/Status/.settings/cli_status.txt"),
-                layout.statusWriteFile("cli_status.txt"));
+        assertPath(new File(project, "FLASH/.settings/status.json"), layout.statusWriteFile());
     }
 
     @Test
@@ -155,12 +152,6 @@ public class FlashProjectLayoutTest {
                 new File(project, "FLASH/.settings/Presets/Custom Filter Presets"));
         assertPaths(layout.tifCacheReadDirs(),
                 new File(project, "FLASH/Cache/TIF"));
-        assertPaths(layout.statusReadDirs(),
-                new File(project, "FLASH/Status/.settings"));
-        assertPaths(layout.analysisStatusReadDirs(),
-                new File(project, "FLASH/Status/.settings/Analysis"));
-        assertPaths(layout.statusReadFiles(".ihf-no-input-folder"),
-                new File(project, "FLASH/Status/.settings/.ihf-no-input-folder"));
     }
 
     private static void assertPaths(List<File> actual, File... expected) {

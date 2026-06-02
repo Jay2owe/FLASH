@@ -140,6 +140,12 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
         if (src.getMetrics() != null && !src.getMetrics().isEmpty()) {
             target.metricFilter = new ArrayList<String>(src.getMetrics());
         }
+        if (src.getMetricAggregations() != null && !src.getMetricAggregations().isEmpty()) {
+            for (Map.Entry<String, StatisticsConfig.MetricAggregation> entry
+                    : src.getMetricAggregations().entrySet()) {
+                target.putMetricAggregationOverride(entry.getKey(), entry.getValue());
+            }
+        }
         return target;
     }
 
@@ -248,7 +254,8 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
         }
 
         AnimalMetricTable animalMetricTable =
-                collapseRowsToAnimalMetrics(mergedRows, rowToAnimal, metricColumns);
+                collapseRowsToAnimalMetrics(mergedRows, rowToAnimal, metricColumns,
+                        statisticsConfig);
         mergedData.putAll(animalMetricTable.valuesByAnimal);
         LinkedHashMap<String, String> objectRunIdsByAnimal =
                 collapseSourceRunIdsToAnimals(objData, rowToAnimal);
@@ -462,7 +469,7 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
 
             for (String cond : conditionOrder) {
                 groups.get(cond).add(byCondition.get(cond).get(subject)
-                        .value(isSummedAnimalMetric(metric)));
+                        .value(isSummedAnimalMetric(metric, cfg)));
             }
         }
         return groups;
@@ -723,7 +730,8 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
     private static AnimalMetricTable collapseRowsToAnimalMetrics(
             LinkedHashMap<String, Map<String, Double>> rowsByName,
             Map<String, String> rowToAnimal,
-            List<String> metricColumns) {
+            List<String> metricColumns,
+            StatisticsConfig cfg) {
         LinkedHashMap<String, Map<String, MetricAccumulator>> accumulators =
                 new LinkedHashMap<String, Map<String, MetricAccumulator>>();
 
@@ -761,7 +769,7 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
             for (String metric : metricColumns) {
                 MetricAccumulator acc = animalEntry.getValue().get(metric);
                 if (acc == null || acc.n <= 0) continue;
-                values.put(metric, Double.valueOf(acc.value(isSummedAnimalMetric(metric))));
+                values.put(metric, Double.valueOf(acc.value(isSummedAnimalMetric(metric, cfg))));
                 nestedCounts.put(metric, Integer.valueOf(acc.n));
             }
             table.valuesByAnimal.put(animal, values);
@@ -819,7 +827,7 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
             for (String metric : metricColumns) {
                 MetricAccumulator acc = entry.getValue().get(metric);
                 if (acc == null || acc.n <= 0) continue;
-                values.put(metric, Double.valueOf(acc.value(isSummedAnimalMetric(metric))));
+                values.put(metric, Double.valueOf(acc.value(isSummedAnimalMetric(metric, cfg))));
                 nestedCounts.put(metric, Integer.valueOf(acc.n));
             }
             table.valuesByAnimal.put(entry.getKey(), values);
@@ -1000,6 +1008,15 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
             return false;
         }
         return lower.endsWith("total") || lower.contains("count");
+    }
+
+    private static boolean isSummedAnimalMetric(String metric, StatisticsConfig cfg) {
+        StatisticsConfig.MetricAggregation aggregation = cfg == null
+                ? StatisticsConfig.MetricAggregation.AUTO
+                : cfg.metricAggregationFor(metric);
+        if (aggregation == StatisticsConfig.MetricAggregation.SUM) return true;
+        if (aggregation == StatisticsConfig.MetricAggregation.MEAN) return false;
+        return isSummedAnimalMetric(metric);
     }
 
     private static LinkedHashMap<String, String> readPersistedConditionAssignments(String directory) {
@@ -1237,7 +1254,8 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
                 cfg.pairedMode,
                 cfg.distributionMode,
                 cfg.postHocMethod,
-                cfg.metricFilter);
+                cfg.metricFilter,
+                cfg.metricAggregationOverrides);
         try {
             new StatisticsPresetIO(new File(directory)).save(preset);
             IJ.log("Saved Statistics preset: " + trimmed);
@@ -1263,6 +1281,10 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
           .append(cfg.postHocMethod == null ? "BONFERRONI" : cfg.postHocMethod.name());
         if (cfg.metricFilter != null && !cfg.metricFilter.isEmpty()) {
             sb.append(", metrics=").append(cfg.metricFilter);
+        }
+        if (cfg.metricAggregationOverrides != null
+                && !cfg.metricAggregationOverrides.isEmpty()) {
+            sb.append(", metricAggregation=").append(cfg.metricAggregationOverrides);
         }
         IJ.log(sb.toString());
     }
@@ -1726,6 +1748,8 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
         if (col.equals("AnimalName")) return false;
         if (col.equals("numSections")) return false;
         if (col.contains("numSections")) return false;
+        if (col.equals("numZSlices")) return false;
+        if (col.contains("numZSlices")) return false;
         return true;
     }
 

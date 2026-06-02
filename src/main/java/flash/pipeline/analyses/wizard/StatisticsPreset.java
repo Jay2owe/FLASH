@@ -26,6 +26,7 @@ public final class StatisticsPreset implements Preset<StatisticsPreset> {
     private final StatisticsConfig.DistributionMode distributionMode;
     private final StatisticsConfig.PostHocMethod postHocMethod;
     private final List<String> metricFilter;
+    private final Map<String, StatisticsConfig.MetricAggregation> metricAggregationOverrides;
 
     public StatisticsPreset(String name,
                             String description,
@@ -33,6 +34,17 @@ public final class StatisticsPreset implements Preset<StatisticsPreset> {
                             StatisticsConfig.DistributionMode distributionMode,
                             StatisticsConfig.PostHocMethod postHocMethod,
                             List<String> metricFilter) {
+        this(name, description, pairedMode, distributionMode, postHocMethod,
+                metricFilter, null);
+    }
+
+    public StatisticsPreset(String name,
+                            String description,
+                            StatisticsConfig.PairedMode pairedMode,
+                            StatisticsConfig.DistributionMode distributionMode,
+                            StatisticsConfig.PostHocMethod postHocMethod,
+                            List<String> metricFilter,
+                            Map<String, StatisticsConfig.MetricAggregation> metricAggregationOverrides) {
         this.name = requireText("name", name);
         this.description = emptyToNull(description);
         this.libraryVersion = CURRENT_LIBRARY_VERSION;
@@ -42,6 +54,7 @@ public final class StatisticsPreset implements Preset<StatisticsPreset> {
         this.postHocMethod = postHocMethod == null
                 ? StatisticsConfig.PostHocMethod.BONFERRONI : postHocMethod;
         this.metricFilter = freezeList(metricFilter);
+        this.metricAggregationOverrides = freezeMetricAggregationOverrides(metricAggregationOverrides);
     }
 
     @Override
@@ -84,6 +97,10 @@ public final class StatisticsPreset implements Preset<StatisticsPreset> {
         return metricFilter;
     }
 
+    public Map<String, StatisticsConfig.MetricAggregation> getMetricAggregationOverrides() {
+        return metricAggregationOverrides;
+    }
+
     /** Builds a fresh {@link StatisticsConfig} with this preset's choices. */
     public StatisticsConfig toConfig() {
         StatisticsConfig cfg = new StatisticsConfig();
@@ -91,6 +108,10 @@ public final class StatisticsPreset implements Preset<StatisticsPreset> {
         cfg.distributionMode = distributionMode;
         cfg.postHocMethod = postHocMethod;
         cfg.metricFilter = metricFilter == null ? null : new ArrayList<String>(metricFilter);
+        cfg.metricAggregationOverrides = metricAggregationOverrides == null
+                ? null
+                : new LinkedHashMap<String, StatisticsConfig.MetricAggregation>(
+                        metricAggregationOverrides);
         return cfg;
     }
 
@@ -109,6 +130,16 @@ public final class StatisticsPreset implements Preset<StatisticsPreset> {
             root.put("metricFilter", null);
         } else {
             root.put("metricFilter", new ArrayList<String>(metricFilter));
+        }
+        if (metricAggregationOverrides == null) {
+            root.put("metricAggregationOverrides", null);
+        } else {
+            LinkedHashMap<String, String> out = new LinkedHashMap<String, String>();
+            for (Map.Entry<String, StatisticsConfig.MetricAggregation> entry
+                    : metricAggregationOverrides.entrySet()) {
+                out.put(entry.getKey(), entry.getValue().name());
+            }
+            root.put("metricAggregationOverrides", out);
         }
         return root;
     }
@@ -137,7 +168,10 @@ public final class StatisticsPreset implements Preset<StatisticsPreset> {
                 JsonIO.stringValue(root.get("postHocMethod")),
                 StatisticsConfig.PostHocMethod.BONFERRONI);
         List<String> metricFilter = parseMetricFilter(root);
-        return new StatisticsPreset(name, description, paired, distribution, postHoc, metricFilter);
+        Map<String, StatisticsConfig.MetricAggregation> metricAggregationOverrides =
+                parseMetricAggregationOverrides(root);
+        return new StatisticsPreset(name, description, paired, distribution, postHoc,
+                metricFilter, metricAggregationOverrides);
     }
 
     private static List<String> parseMetricFilter(Map<String, Object> root) {
@@ -157,6 +191,54 @@ public final class StatisticsPreset implements Preset<StatisticsPreset> {
         return out;
     }
 
+    private static Map<String, StatisticsConfig.MetricAggregation> parseMetricAggregationOverrides(
+            Map<String, Object> root) {
+        Object raw = root.get("metricAggregationOverrides");
+        if (raw == null) {
+            raw = root.get("metricAggregation");
+        }
+        if (raw == null) {
+            return null;
+        }
+        LinkedHashMap<String, StatisticsConfig.MetricAggregation> out =
+                new LinkedHashMap<String, StatisticsConfig.MetricAggregation>();
+        if (raw instanceof Map<?, ?>) {
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) raw).entrySet()) {
+                if (entry.getKey() == null) continue;
+                putMetricAggregation(out, String.valueOf(entry.getKey()),
+                        JsonIO.stringValue(entry.getValue()));
+            }
+        } else {
+            for (Object item : JsonIO.asList(raw)) {
+                if (item == null) continue;
+                String text = String.valueOf(item).trim();
+                int sep = text.lastIndexOf(':');
+                if (sep < 0) sep = text.lastIndexOf('=');
+                if (sep <= 0 || sep + 1 >= text.length()) continue;
+                putMetricAggregation(out, text.substring(0, sep), text.substring(sep + 1));
+            }
+        }
+        return out.isEmpty() ? null : out;
+    }
+
+    private static void putMetricAggregation(
+            Map<String, StatisticsConfig.MetricAggregation> out,
+            String metric,
+            String aggregation) {
+        if (metric == null || aggregation == null) return;
+        String trimmed = metric.trim();
+        if (trimmed.isEmpty()) return;
+        StatisticsConfig.MetricAggregation parsed =
+                StatisticsConfig.MetricAggregation.parse(
+                        aggregation, StatisticsConfig.MetricAggregation.AUTO);
+        if (parsed == StatisticsConfig.MetricAggregation.AUTO) return;
+        String existing = existingMetricAggregationKey(out, trimmed);
+        if (existing != null) {
+            out.remove(existing);
+        }
+        out.put(trimmed, parsed);
+    }
+
     private static List<String> freezeList(List<String> values) {
         if (values == null) {
             return null;
@@ -168,6 +250,43 @@ public final class StatisticsPreset implements Preset<StatisticsPreset> {
             if (!trimmed.isEmpty()) out.add(trimmed);
         }
         return Collections.unmodifiableList(out);
+    }
+
+    private static Map<String, StatisticsConfig.MetricAggregation>
+    freezeMetricAggregationOverrides(
+            Map<String, StatisticsConfig.MetricAggregation> values) {
+        if (values == null) {
+            return null;
+        }
+        LinkedHashMap<String, StatisticsConfig.MetricAggregation> out =
+                new LinkedHashMap<String, StatisticsConfig.MetricAggregation>();
+        for (Map.Entry<String, StatisticsConfig.MetricAggregation> entry : values.entrySet()) {
+            if (entry.getKey() == null || entry.getValue() == null) continue;
+            String trimmed = entry.getKey().trim();
+            if (trimmed.isEmpty()
+                    || entry.getValue() == StatisticsConfig.MetricAggregation.AUTO) {
+                continue;
+            }
+            String existing = existingMetricAggregationKey(out, trimmed);
+            if (existing != null) {
+                out.remove(existing);
+            }
+            out.put(trimmed, entry.getValue());
+        }
+        return Collections.unmodifiableMap(out);
+    }
+
+    private static String existingMetricAggregationKey(
+            Map<String, StatisticsConfig.MetricAggregation> values,
+            String metric) {
+        if (values == null || metric == null) return null;
+        String trimmed = metric.trim();
+        for (String key : values.keySet()) {
+            if (key != null && key.trim().equalsIgnoreCase(trimmed)) {
+                return key;
+            }
+        }
+        return null;
     }
 
     private static String requireText(String label, String value) {

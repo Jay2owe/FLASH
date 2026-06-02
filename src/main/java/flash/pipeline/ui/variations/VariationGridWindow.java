@@ -7,7 +7,11 @@ import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JProgressBar;
+import javax.swing.JScrollPane;
 import javax.swing.JSlider;
+import javax.swing.JViewport;
+import javax.swing.Scrollable;
+import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingConstants;
 import javax.swing.JToolBar;
 import javax.swing.WindowConstants;
@@ -30,6 +34,18 @@ import java.util.List;
 
 public final class VariationGridWindow extends JDialog {
 
+    /** Gutter between tiles and the grid's outer margin, in pixels. */
+    private static final int CELL_GAP = 2;
+    private static final int GRID_BORDER = 2;
+    /** Conservative allowances for the window's title bar and side borders so
+     * the packed window stays within the monitor without distorting tiles. */
+    private static final int TOP_DECORATION = 72;
+    private static final int SIDE_DECORATION = 24;
+    /** Ctrl+wheel zoom: 1.0 is fit-to-window; the grid can grow up to this. */
+    private static final double MAX_ZOOM = 10.0;
+    private static final double ZOOM_STEP = 1.15;
+    private static final Color CANVAS_BACKGROUND = new Color(0x1E, 0x20, 0x24);
+
     private final SyncedSliceController controller = new SyncedSliceController();
     private final List<VariationCellPanel> cells =
             new ArrayList<VariationCellPanel>();
@@ -40,8 +56,10 @@ public final class VariationGridWindow extends JDialog {
     private final JCheckBox downstreamVerdictCheckBox =
             new JCheckBox("Show downstream verdict");
     private final JButton stopDownstreamButton = new JButton("Stop downstream");
+    private final JButton saveCacheButton = new JButton("Save variations cache");
     private final JButton pickSelectedButton = new JButton("Pick selected");
-    private final JPanel gridPanel;
+    private final ZoomableGrid gridPanel;
+    private final JScrollPane gridScroll;
     private final JSlider zSlider = new JSlider(1, 1, 1);
     private final JLabel zSliceLabel = new JLabel(" ");
     private final JLabel statusLabel = new JLabel(" ");
@@ -51,6 +69,9 @@ public final class VariationGridWindow extends JDialog {
     private int total;
     private int failed;
     private boolean updatingSlider;
+    /** Grid preferred size at zoom 1.0 (fit-to-window); the zoom base. */
+    private Dimension fitGridSize;
+    private double zoom = 1.0;
 
     public VariationGridWindow(Window owner,
                                String title,
@@ -70,30 +91,57 @@ public final class VariationGridWindow extends JDialog {
             }
         }
 
-        int[] dims = gridDimensions(cells.size());
-        gridPanel = new JPanel(new GridLayout(dims[0], dims[1], 4, 4));
-        gridPanel.setBackground(new Color(0x1E, 0x20, 0x24));
-        gridPanel.setBorder(BorderFactory.createEmptyBorder(4, 4, 4, 4));
+        configureToolBar();
+        configureSlider();
+        configureFooter();
+        JPanel south = southPanel();
+
+        Dimension imageSize = imageDimsFromCells();
+        Rectangle desktop = GraphicsEnvironment
+                .getLocalGraphicsEnvironment()
+                .getMaximumWindowBounds();
+        int toolBarHeight = toolBar.getPreferredSize().height;
+        int southHeight = south.getPreferredSize().height;
+        int availW = Math.max(1, desktop.width - SIDE_DECORATION);
+        int availH = Math.max(1, desktop.height - toolBarHeight - southHeight
+                - TOP_DECORATION);
+
+        int[] dims = imageSize == null
+                ? gridDimensions(cells.size())
+                : optimalGrid(cells.size(), availW, availH,
+                        imageSize.width / (double) imageSize.height,
+                        CELL_GAP, GRID_BORDER);
+        gridPanel = new ZoomableGrid(new GridLayout(dims[0], dims[1], CELL_GAP, CELL_GAP));
+        gridPanel.setBackground(CANVAS_BACKGROUND);
+        gridPanel.setBorder(BorderFactory.createEmptyBorder(
+                GRID_BORDER, GRID_BORDER, GRID_BORDER, GRID_BORDER));
         for (int i = 0; i < cells.size(); i++) {
             gridPanel.add(cells.get(i));
         }
         padGrid();
+        // The grid lives in a scrollable viewport so Ctrl+wheel can zoom the
+        // whole collage and the user can pan around it like a light table.
+        gridScroll = new JScrollPane(gridPanel,
+                ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
+                ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+        gridScroll.setBorder(BorderFactory.createEmptyBorder());
+        gridScroll.getViewport().setBackground(CANVAS_BACKGROUND);
+        gridScroll.setWheelScrollingEnabled(false);
+        gridScroll.getVerticalScrollBar().setUnitIncrement(24);
+        gridScroll.getHorizontalScrollBar().setUnitIncrement(24);
         installMouseWheelHandler();
-
-        configureToolBar();
-        configureSlider();
-        configureFooter();
 
         setLayout(new BorderLayout());
         add(toolBar, BorderLayout.NORTH);
-        add(gridPanel, BorderLayout.CENTER);
-        add(southPanel(), BorderLayout.SOUTH);
+        add(gridScroll, BorderLayout.CENTER);
+        add(south, BorderLayout.SOUTH);
         setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
 
         total = cells.size();
         setCompletedCount(0, total, 0);
         setSliceMax(controller.maxSlice());
-        applyInitialSizeAndLocation(owner);
+        applySizeAndLocation(desktop, dims[0], dims[1], imageSize,
+                toolBarHeight, southHeight, availW, availH);
     }
 
     public void setSliceMax(int sliceMax) {
@@ -129,8 +177,17 @@ public final class VariationGridWindow extends JDialog {
         stopDownstreamButton.addActionListener(listener);
     }
 
+    public void attachSaveCacheActionListener(ActionListener listener) {
+        saveCacheButton.addActionListener(listener);
+    }
+
     public void attachPickSelectedActionListener(ActionListener listener) {
         pickSelectedButton.addActionListener(listener);
+    }
+
+    /** Shows a one-off message in the footer (e.g. the save-cache outcome). */
+    public void setActionStatus(String text) {
+        statusLabel.setText(text == null ? " " : text);
     }
 
     public void setDownstreamControlsEnabled(boolean checkBoxEnabled,
@@ -169,6 +226,10 @@ public final class VariationGridWindow extends JDialog {
         return stopDownstreamButton;
     }
 
+    public JButton saveCacheButtonForTest() {
+        return saveCacheButton;
+    }
+
     public JButton pickSelectedButtonForTest() {
         return pickSelectedButton;
     }
@@ -193,6 +254,14 @@ public final class VariationGridWindow extends JDialog {
         return gridPanel;
     }
 
+    public JScrollPane gridScrollForTest() {
+        return gridScroll;
+    }
+
+    public double zoomForTest() {
+        return zoom;
+    }
+
     public List<VariationCellPanel> cellsForTest() {
         return new ArrayList<VariationCellPanel>(cells);
     }
@@ -206,6 +275,10 @@ public final class VariationGridWindow extends JDialog {
         otsuOverlayCheckBox.setOpaque(false);
         downstreamVerdictCheckBox.setOpaque(false);
         stopDownstreamButton.setEnabled(false);
+        saveCacheButton.setToolTipText(
+                "Variations are not written to disk by default. Click to save the "
+                + "current variations to the disk cache so a later run can reuse "
+                + "them.");
         pickSelectedButton.setEnabled(false);
         pickSelectedButton.setToolTipText(
                 "Use the currently selected variation as the result.");
@@ -213,6 +286,8 @@ public final class VariationGridWindow extends JDialog {
         toolBar.addSeparator();
         toolBar.add(downstreamVerdictCheckBox);
         toolBar.add(stopDownstreamButton);
+        toolBar.addSeparator();
+        toolBar.add(saveCacheButton);
         toolBar.addSeparator();
         toolBar.add(pickSelectedButton);
     }
@@ -264,6 +339,18 @@ public final class VariationGridWindow extends JDialog {
     private void installMouseWheelHandler() {
         gridPanel.addMouseWheelListener(new MouseWheelListener() {
             @Override public void mouseWheelMoved(MouseWheelEvent e) {
+                if (e.isControlDown()) {
+                    // Ctrl+wheel zooms the whole collage around the cursor.
+                    double factor = Math.pow(ZOOM_STEP, -e.getWheelRotation());
+                    zoomBy(factor, e.getPoint());
+                    return;
+                }
+                if (zoom > 1.0) {
+                    // Zoomed in: the wheel pans the light table instead.
+                    panBy(e.getWheelRotation(), e.isShiftDown());
+                    return;
+                }
+                // Fit-to-window: the wheel steps through Z, as before.
                 if (!zSlider.isEnabled()) {
                     return;
                 }
@@ -272,6 +359,61 @@ public final class VariationGridWindow extends JDialog {
                 zSlider.setValue(next);
             }
         });
+    }
+
+    /**
+     * Scales the whole grid by {@code factor}, keeping the point under the
+     * cursor ({@code cursor}, in grid coordinates) anchored in place. Zoom is
+     * clamped to [1.0, MAX_ZOOM]; 1.0 is fit-to-window.
+     */
+    private void zoomBy(double factor, Point cursor) {
+        JViewport viewport = gridScroll.getViewport();
+        Dimension extent = viewport.getExtentSize();
+        if (fitGridSize == null) {
+            fitGridSize = new Dimension(Math.max(1, extent.width),
+                    Math.max(1, extent.height));
+        }
+        double newZoom = Math.max(1.0, Math.min(MAX_ZOOM, zoom * factor));
+        if (Math.abs(newZoom - zoom) < 1e-4) {
+            return;
+        }
+        Point view = viewport.getViewPosition();
+        Point anchor = cursor == null ? new Point(view.x, view.y) : cursor;
+        int cursorVpX = anchor.x - view.x;
+        int cursorVpY = anchor.y - view.y;
+        double ratio = newZoom / zoom;
+        zoom = newZoom;
+
+        Dimension pref = new Dimension(
+                Math.max(1, (int) Math.round(fitGridSize.width * zoom)),
+                Math.max(1, (int) Math.round(fitGridSize.height * zoom)));
+        // At zoom 1.0 the grid tracks the viewport (fills it, no scrollbars);
+        // above 1.0 it takes its preferred size so the viewport can pan.
+        gridPanel.setPreferredSize(pref);
+        gridPanel.revalidate();
+        gridScroll.validate();
+
+        int targetX = (int) Math.round(anchor.x * ratio) - cursorVpX;
+        int targetY = (int) Math.round(anchor.y * ratio) - cursorVpY;
+        int maxX = Math.max(0, gridPanel.getWidth() - extent.width);
+        int maxY = Math.max(0, gridPanel.getHeight() - extent.height);
+        viewport.setViewPosition(new Point(
+                clamp(targetX, 0, maxX), clamp(targetY, 0, maxY)));
+    }
+
+    private void panBy(int wheelRotation, boolean horizontal) {
+        JViewport viewport = gridScroll.getViewport();
+        Dimension extent = viewport.getExtentSize();
+        Point view = viewport.getViewPosition();
+        int delta = wheelRotation * 48;
+        if (horizontal) {
+            int maxX = Math.max(0, gridPanel.getWidth() - extent.width);
+            view.x = clamp(view.x + delta, 0, maxX);
+        } else {
+            int maxY = Math.max(0, gridPanel.getHeight() - extent.height);
+            view.y = clamp(view.y + delta, 0, maxY);
+        }
+        viewport.setViewPosition(view);
     }
 
     private void padGrid() {
@@ -318,35 +460,96 @@ public final class VariationGridWindow extends JDialog {
         return text;
     }
 
-    private void applyInitialSizeAndLocation(Window owner) {
+    private Dimension imageDimsFromCells() {
+        for (int i = 0; i < cells.size(); i++) {
+            Dimension size = cells.get(i).sourceImageSize();
+            if (size != null && size.width > 0 && size.height > 0) {
+                return size;
+            }
+        }
+        return null;
+    }
+
+    private void applySizeAndLocation(Rectangle desktop, int rows, int cols,
+                                      Dimension imageSize, int toolBarHeight,
+                                      int southHeight, int availW, int availH) {
         setMinimumSize(new Dimension(640, 480));
-        Rectangle desktop = GraphicsEnvironment
-                .getLocalGraphicsEnvironment()
-                .getMaximumWindowBounds();
-        Rectangle ownerBounds = owner == null ? null : owner.getBounds();
-        Dimension size;
-        Point location;
-        if (ownerBounds != null && ownerBounds.width > 0
-                && ownerBounds.x + ownerBounds.width + 660 <= desktop.x + desktop.width) {
-            // Place beside the dialog, occupying the remaining horizontal space.
-            int leftEdge = ownerBounds.x + ownerBounds.width + 8;
-            int rightEdge = desktop.x + desktop.width - 8;
-            int width = clamp(rightEdge - leftEdge, 640, 1600);
-            int height = clamp((int) Math.round(desktop.height * 0.9d), 480, 1200);
-            int top = clamp(ownerBounds.y, desktop.y, desktop.y + desktop.height - height);
-            size = new Dimension(width, height);
-            location = new Point(leftEdge, top);
-        } else {
-            // No room beside the dialog. Fall back to a large centred window.
+        if (imageSize == null) {
+            // Aspect unknown (e.g. no source crop): fall back to a large
+            // centred window, as before.
             int width = clamp((int) Math.round(desktop.width * 0.85d), 640, 1600);
             int height = clamp((int) Math.round(desktop.height * 0.85d), 480, 1200);
-            size = new Dimension(width, height);
-            location = new Point(
+            setSize(width, height);
+            setLocation(
                     desktop.x + (desktop.width - width) / 2,
                     desktop.y + (desktop.height - height) / 2);
+            return;
         }
-        setSize(size);
-        setLocation(location);
+
+        int[] cell = computeCellSize(rows, cols, availW, availH,
+                imageSize.width, imageSize.height);
+        int gridW = cols * cell[0] + (cols - 1) * CELL_GAP + 2 * GRID_BORDER;
+        int gridH = rows * cell[1] + (rows - 1) * CELL_GAP + 2 * GRID_BORDER;
+        // Drive the window size from the grid's preferred size so the centre
+        // region ends up the exact aspect ratio of the (uniform) image tiles.
+        gridPanel.setPreferredSize(new Dimension(gridW, gridH));
+        fitGridSize = new Dimension(gridW, gridH);
+        pack();
+        Dimension packed = getSize();
+        int width = Math.min(Math.max(packed.width, 640), desktop.width);
+        int height = Math.min(Math.max(packed.height, 480), desktop.height);
+        setSize(width, height);
+        setLocation(
+                desktop.x + Math.max(0, (desktop.width - width) / 2),
+                desktop.y + Math.max(0, (desktop.height - height) / 2));
+    }
+
+    private static int[] computeCellSize(int rows, int cols, int availW,
+                                         int availH, int imageW, int imageH) {
+        double cellAvailW = (availW - 2.0 * GRID_BORDER - (cols - 1) * CELL_GAP)
+                / Math.max(1, cols);
+        double cellAvailH = (availH - 2.0 * GRID_BORDER - (rows - 1) * CELL_GAP)
+                / Math.max(1, rows);
+        double scale = Math.min(cellAvailW / imageW, cellAvailH / imageH);
+        if (!(scale > 0.0)) {
+            scale = 1.0;
+        }
+        int width = Math.max(1, (int) Math.floor(imageW * scale));
+        int height = Math.max(1, (int) Math.floor(imageH * scale));
+        return new int[] { width, height };
+    }
+
+    /**
+     * Chooses the row/column split that makes each (uniform) image tile as
+     * large as possible within {@code availW x availH}, given the image's
+     * aspect ratio. Falls back to a square-ish split when the inputs are not
+     * usable.
+     */
+    static int[] optimalGrid(int count, int availW, int availH,
+                             double imageAspect, int gap, int border) {
+        int n = Math.max(1, count);
+        if (!(imageAspect > 0.0) || availW <= 0 || availH <= 0) {
+            return gridDimensions(n);
+        }
+        int bestCols = 1;
+        double bestTileHeight = -1.0;
+        for (int cols = 1; cols <= n; cols++) {
+            int rows = (int) Math.ceil(n / (double) cols);
+            double cellW = (availW - 2.0 * border - (cols - 1) * gap) / cols;
+            double cellH = (availH - 2.0 * border - (rows - 1) * gap) / rows;
+            if (cellW <= 1.0 || cellH <= 1.0) {
+                continue;
+            }
+            // Tile height when the image is fitted into the cell preserving
+            // aspect; tile area grows monotonically with this, so maximise it.
+            double tileHeight = Math.min(cellH, cellW / imageAspect);
+            if (tileHeight > bestTileHeight) {
+                bestTileHeight = tileHeight;
+                bestCols = cols;
+            }
+        }
+        int rows = (int) Math.ceil(n / (double) bestCols);
+        return new int[] { rows, bestCols };
     }
 
     static int[] gridDimensions(int count) {
@@ -358,5 +561,44 @@ public final class VariationGridWindow extends JDialog {
 
     private static int clamp(int value, int min, int max) {
         return Math.max(min, Math.min(max, value));
+    }
+
+    /**
+     * The grid panel. At fit-zoom it tracks the viewport size so it fills the
+     * window with no scrollbars (preserving the original collage look); once
+     * the user Ctrl+wheels past 1.0 it falls back to its (enlarged) preferred
+     * size so the viewport can scroll and pan over it.
+     */
+    private final class ZoomableGrid extends JPanel implements Scrollable {
+
+        ZoomableGrid(GridLayout layout) {
+            super(layout);
+        }
+
+        @Override public Dimension getPreferredScrollableViewportSize() {
+            return getPreferredSize();
+        }
+
+        @Override public int getScrollableUnitIncrement(Rectangle visible,
+                                                        int orientation,
+                                                        int direction) {
+            return 24;
+        }
+
+        @Override public int getScrollableBlockIncrement(Rectangle visible,
+                                                         int orientation,
+                                                         int direction) {
+            return orientation == SwingConstants.HORIZONTAL
+                    ? Math.max(1, visible.width - 24)
+                    : Math.max(1, visible.height - 24);
+        }
+
+        @Override public boolean getScrollableTracksViewportWidth() {
+            return zoom <= 1.0;
+        }
+
+        @Override public boolean getScrollableTracksViewportHeight() {
+            return zoom <= 1.0;
+        }
     }
 }

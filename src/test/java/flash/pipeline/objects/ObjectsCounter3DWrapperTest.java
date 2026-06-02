@@ -50,6 +50,46 @@ public class ObjectsCounter3DWrapperTest {
     }
 
     @Test
+    public void fromLabelImageKeepsObjectsExactlyAtSizeBounds() {
+        assumeTrue(ObjectsCounter3DWrapper.isMcib3dAvailable());
+
+        ByteProcessor labels = new ByteProcessor(5, 1);
+        labels.set(0, 0, 1);
+        labels.set(1, 0, 1);
+        labels.set(2, 0, 2);
+        labels.set(3, 0, 2);
+        labels.set(4, 0, 2);
+        ImagePlus labelImage = new ImagePlus("labels", labels);
+        ImagePlus redirect = new ImagePlus("redirect", new ByteProcessor(5, 1));
+
+        ObjectsCounter3DWrapper.Result result = new ObjectsCounter3DWrapper()
+                .fromLabelImage(labelImage, redirect, 2, 3, true, false);
+
+        assertEquals(2, result.getStatistics().size());
+        assertEquals(1, result.getObjectsMap().getProcessor().get(0, 0));
+        assertEquals(2, result.getObjectsMap().getProcessor().get(2, 0));
+    }
+
+    @Test
+    public void runNativeKeepsThresholdedObjectsExactlyAtSizeBounds() {
+        assumeTrue(ObjectsCounter3DWrapper.isMcib3dAvailable());
+
+        ByteProcessor pixels = new ByteProcessor(6, 1);
+        pixels.set(0, 0, 200);
+        pixels.set(1, 0, 200);
+        pixels.set(3, 0, 200);
+        pixels.set(4, 0, 200);
+        pixels.set(5, 0, 200);
+        ImagePlus image = new ImagePlus("thresholded", pixels);
+
+        ObjectsCounter3DWrapper.Result result = new ObjectsCounter3DWrapper()
+                .runNative(image, 100, 2, 3, false, image, true, false);
+
+        assertEquals(2, result.getStatistics().size());
+        assertEquals(2, CpcUtils.extractObjects(result.getObjectsMap()).size());
+    }
+
+    @Test
     public void thresholdCopyUsesFloatPixelValuesForThresholdComparison() throws Exception {
         FloatProcessor pixels = new FloatProcessor(3, 1);
         pixels.setf(0, 0, 9.6f);

@@ -63,6 +63,8 @@ public class QualityReport {
     private int skippedChannelQcRecords = 0;
     private boolean channelQcLimitLogged = false;
     private final List<SpectralPreviewQC> spectralPreviewData = new ArrayList<SpectralPreviewQC>();
+    private StudyYamlWriter.ProjectMetadata studyMetadata;
+    private boolean studyMetadataCaptured = false;
 
     public void setEnabled(boolean enabled) {
         this.enabled = enabled;
@@ -368,13 +370,33 @@ public class QualityReport {
 
     private void writeReport() {
         if (directory == null) return;
+        FlashProjectLayout layout;
         try {
-            FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
+            layout = FlashProjectLayout.forDirectory(directory);
+        } catch (Exception e) {
+            IJ.log("QC Report: failed to resolve report directory: " + e.getMessage());
+            return;
+        }
+        try {
             IoUtils.mustMkdirs(layout.qcRoot());
             HtmlReportWriter.write(layout.qcReportWriteFile(), this);
         } catch (Exception e) {
             IJ.log("QC Report: failed to write HTML: " + e.getMessage());
         }
+        try {
+            IoUtils.mustMkdirs(layout.qcRoot());
+            StudyYamlWriter.write(layout.qcStudyMetadataWriteFile(), this, getStudyMetadata());
+        } catch (Exception e) {
+            IJ.log("QC Report: failed to write study.yaml: " + e.getMessage());
+        }
+    }
+
+    private StudyYamlWriter.ProjectMetadata getStudyMetadata() {
+        if (!studyMetadataCaptured) {
+            studyMetadata = StudyYamlWriter.capture(directory);
+            studyMetadataCaptured = true;
+        }
+        return studyMetadata;
     }
 
     // ── Accessors for HtmlReportWriter ──

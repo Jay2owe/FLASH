@@ -171,6 +171,7 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
             item.series.addAll(row.selectedSeries);
             project.items.add(item);
         }
+        ProjectPathResolver.addRelativePathHints(project, new File(project.outputRoot));
         return project;
     }
 

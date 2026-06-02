@@ -6,6 +6,7 @@ import flash.pipeline.io.ImageSourceDispatcher;
 import flash.pipeline.io.LifIO;
 import flash.pipeline.io.SeriesMeta;
 import flash.pipeline.ui.FlashTheme;
+import flash.pipeline.ui.wizard.RegionTableCellEditor;
 import ij.IJ;
 
 import javax.swing.BorderFactory;
@@ -29,6 +30,7 @@ import javax.swing.TransferHandler;
 import javax.swing.ListSelectionModel;
 import javax.swing.WindowConstants;
 import javax.swing.filechooser.FileFilter;
+import javax.swing.table.TableCellEditor;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
@@ -217,6 +219,7 @@ public final class ProjectBuilderDialog {
         JButton addFolder = new JButton("Add folder…");
         JButton addFiles = new JButton("Add files…");
         JButton openRecent = new JButton("Open recent…");
+        JButton openProject = new JButton("Open project...");
         JButton remove = new JButton("Remove selected");
 
         addFolder.addActionListener(new ActionListener() {
@@ -260,6 +263,12 @@ public final class ProjectBuilderDialog {
             }
         });
 
+        openProject.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                openProjectChooser();
+            }
+        });
+
         remove.addActionListener(new ActionListener() {
             @Override public void actionPerformed(ActionEvent e) {
                 removeSelectedRows();
@@ -268,6 +277,7 @@ public final class ProjectBuilderDialog {
 
         bar.add(addFolder);
         bar.add(addFiles);
+        bar.add(openProject);
         bar.add(openRecent);
         bar.add(Box.createHorizontalStrut(12));
         bar.add(remove);
@@ -307,6 +317,8 @@ public final class ProjectBuilderDialog {
         for (int c = 0; c < widths.length && c < table.getColumnCount(); c++) {
             table.getColumnModel().getColumn(c).setPreferredWidth(widths[c]);
         }
+        table.getColumnModel().getColumn(ProjectManifestTableModel.COL_REGION)
+                .setCellEditor(new RegionTableCellEditor());
     }
 
     // ── Context menu / DnD / series shortcut ───────────────────────────────
@@ -498,6 +510,13 @@ public final class ProjectBuilderDialog {
         }
     }
 
+    private void openProjectChooser() {
+        File projectJson = chooseProjectJson("Open FLASH project", null);
+        if (projectJson != null) {
+            loadProjectJson(projectJson, true, null);
+        }
+    }
+
     private void openRecentPicker() {
         if (pluginsDir == null) {
             JOptionPane.showMessageDialog(dialog,
@@ -533,10 +552,91 @@ public final class ProjectBuilderDialog {
     }
 
     private void loadRecent(RecentProject recent) {
-        File projectJson = new File(recent.path);
+        if (recent == null || recent.path == null || recent.path.trim().isEmpty()) {
+            return;
+        }
+        File storedProjectJson = new File(recent.path);
+        File projectJson = ProjectPathResolver.resolveProjectJson(storedProjectJson);
+        if (projectJson == null) {
+            projectJson = locateMissingRecentProject(recent, storedProjectJson);
+        }
+        if (projectJson != null) {
+            loadProjectJson(projectJson, true, recent.path);
+        }
+    }
+
+    private File locateMissingRecentProject(RecentProject recent, File storedProjectJson) {
+        int choice = JOptionPane.showConfirmDialog(dialog,
+                "This recent project could not be found at its saved path:\n"
+                        + storedProjectJson.getAbsolutePath()
+                        + "\n\nLocate the moved project now?",
+                "Recent project moved", JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE);
+        if (choice != JOptionPane.OK_OPTION) {
+            return null;
+        }
+        File start = ProjectPathResolver.nearestExistingParent(storedProjectJson);
+        return chooseProjectJson("Locate " + (recent.name.isEmpty() ? "FLASH project" : recent.name), start);
+    }
+
+    private File chooseProjectJson(String title, File initialLocation) {
+        JFileChooser chooser = new JFileChooser();
+        chooser.setDialogTitle(title);
+        chooser.setFileSelectionMode(JFileChooser.FILES_AND_DIRECTORIES);
+        chooser.setFileFilter(new FileFilter() {
+            @Override public boolean accept(File f) {
+                if (f == null) return false;
+                return f.isDirectory() || ProjectFileIO.FILE_NAME.equalsIgnoreCase(f.getName());
+            }
+            @Override public String getDescription() {
+                return "FLASH folder, project output folder, or project.json";
+            }
+        });
+        if (initialLocation != null) {
+            File start = initialLocation.isDirectory() ? initialLocation : initialLocation.getParentFile();
+            if (start != null && start.isDirectory()) {
+                chooser.setCurrentDirectory(start);
+            }
+            if (initialLocation.isFile()) {
+                chooser.setSelectedFile(initialLocation);
+            }
+        }
+        if (chooser.showOpenDialog(dialog) != JFileChooser.APPROVE_OPTION) {
+            return null;
+        }
+        File projectJson = ProjectPathResolver.projectJsonFromSelectedLocation(chooser.getSelectedFile());
+        if (projectJson == null) {
+            JOptionPane.showMessageDialog(dialog,
+                    "Choose a FLASH folder, project output folder, or project.json file.",
+                    "Project not found", JOptionPane.WARNING_MESSAGE);
+        }
+        return projectJson;
+    }
+
+    private boolean loadProjectJson(File projectJson, boolean showErrors, String obsoleteRecentPath) {
+        if (projectJson == null) {
+            return false;
+        }
         File settingsDir = projectJson.getParentFile();
         File fallbackOutputRoot = FlashProjectLayout.projectRootForConfigurationDir(settingsDir);
-        loadProjectFromSettingsDir(settingsDir, fallbackOutputRoot, true);
+        boolean loaded = loadProjectFromSettingsDir(settingsDir, fallbackOutputRoot, showErrors);
+        if (loaded) {
+            rememberOpenedProject(projectJson, obsoleteRecentPath);
+        }
+        return loaded;
+    }
+
+    private void rememberOpenedProject(File projectJson, String obsoleteRecentPath) {
+        if (pluginsDir == null || projectJson == null) {
+            return;
+        }
+        try {
+            RecentProjectsStore.recordOpenedReplacing(pluginsDir,
+                    new RecentProject(nameField.getText().trim(), projectJson.getAbsolutePath(),
+                            System.currentTimeMillis()),
+                    obsoleteRecentPath);
+        } catch (IOException ex) {
+            IJ.log("[FLASH] Could not update recent projects: " + ex.getMessage());
+        }
     }
 
     private boolean loadExistingProjectIfPresent(File outputRoot, boolean promptIfModelHasRows) {
@@ -568,6 +668,8 @@ public final class ProjectBuilderDialog {
             }
             return false;
         }
+        File projectJson = settingsDir == null ? null : new File(settingsDir, ProjectFileIO.FILE_NAME);
+        ProjectPathResolver.relocateForLoad(loaded, projectJson, fallbackOutputRoot);
         loadProject(loaded, fallbackOutputRoot);
         return true;
     }
@@ -591,6 +693,9 @@ public final class ProjectBuilderDialog {
     // ── Save ───────────────────────────────────────────────────────────────
 
     private void onSave() {
+        if (!commitActiveTableEdit()) {
+            return;
+        }
         String name = nameField.getText().trim();
         String outRoot = outputRootField.getText().trim();
         if (name.isEmpty()) {
@@ -672,6 +777,14 @@ public final class ProjectBuilderDialog {
 
         result = new Result(project, outputRoot, projectFile);
         dialog.dispose();
+    }
+
+    private boolean commitActiveTableEdit() {
+        if (!table.isEditing()) {
+            return true;
+        }
+        TableCellEditor editor = table.getCellEditor();
+        return editor == null || editor.stopCellEditing();
     }
 
     /**

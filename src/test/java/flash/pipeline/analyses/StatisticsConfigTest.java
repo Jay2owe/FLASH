@@ -1,6 +1,7 @@
 package flash.pipeline.analyses;
 
 import flash.pipeline.analyses.StatisticsConfig.DistributionMode;
+import flash.pipeline.analyses.StatisticsConfig.MetricAggregation;
 import flash.pipeline.analyses.StatisticsConfig.PairedMode;
 import flash.pipeline.analyses.StatisticsConfig.PostHocMethod;
 import org.junit.Test;
@@ -21,6 +22,7 @@ public class StatisticsConfigTest {
         assertEquals(DistributionMode.AUTO, cfg.distributionMode);
         assertEquals(PostHocMethod.BONFERRONI, cfg.postHocMethod);
         assertNull(cfg.metricFilter);
+        assertNull(cfg.metricAggregationOverrides);
     }
 
     @Test
@@ -96,6 +98,35 @@ public class StatisticsConfigTest {
     }
 
     @Test
+    public void metricAggregation_aliasesNormalised() {
+        assertEquals(MetricAggregation.SUM, MetricAggregation.parse("sum", MetricAggregation.AUTO));
+        assertEquals(MetricAggregation.SUM, MetricAggregation.parse("count", MetricAggregation.AUTO));
+        assertEquals(MetricAggregation.SUM, MetricAggregation.parse("total", MetricAggregation.AUTO));
+        assertEquals(MetricAggregation.MEAN, MetricAggregation.parse("avg", MetricAggregation.AUTO));
+        assertEquals(MetricAggregation.MEAN, MetricAggregation.parse("average", MetricAggregation.AUTO));
+        assertEquals(MetricAggregation.AUTO, MetricAggregation.parse("heuristic", MetricAggregation.SUM));
+    }
+
+    @Test
+    public void metricAggregationOverride_lookupIsCaseInsensitive() {
+        StatisticsConfig cfg = new StatisticsConfig();
+        cfg.putMetricAggregationOverride("ObjectsDetected", MetricAggregation.SUM);
+
+        assertEquals(MetricAggregation.SUM, cfg.metricAggregationFor("objectsdetected"));
+        assertEquals(MetricAggregation.AUTO, cfg.metricAggregationFor("OtherMetric"));
+    }
+
+    @Test
+    public void metricAggregationOverride_laterCaseVariantReplacesEarlierValue() {
+        StatisticsConfig cfg = new StatisticsConfig();
+        cfg.putMetricAggregationOverride("CellCount", MetricAggregation.SUM);
+        cfg.putMetricAggregationOverride("cellcount", MetricAggregation.MEAN);
+
+        assertEquals(MetricAggregation.MEAN, cfg.metricAggregationFor("CellCount"));
+        assertEquals(1, cfg.metricAggregationOverrides.size());
+    }
+
+    @Test
     public void allEnumsRoundTripThroughName() {
         for (PairedMode m : PairedMode.values()) {
             assertEquals(m, PairedMode.parse(m.name(), PairedMode.OFF));
@@ -105,6 +136,9 @@ public class StatisticsConfigTest {
         }
         for (PostHocMethod m : PostHocMethod.values()) {
             assertEquals(m, PostHocMethod.parse(m.name(), PostHocMethod.BONFERRONI));
+        }
+        for (MetricAggregation m : MetricAggregation.values()) {
+            assertEquals(m, MetricAggregation.parse(m.name(), MetricAggregation.AUTO));
         }
     }
 }

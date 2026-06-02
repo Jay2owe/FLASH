@@ -95,6 +95,7 @@ public final class VariationsDialog extends PipelineDialog {
 
     private VariationExecutor executor;
     private ParameterSweep currentSweep;
+    private VariationCache currentRunCache;
     private VariationState resumeState;
     private ComparisonPreviewDialog comparisonDialog;
     private VariationGridWindow gridWindow;
@@ -437,6 +438,7 @@ public final class VariationsDialog extends PipelineDialog {
         ImagePlus croppedSource = currentSweep.cropSpec().apply(source);
         List<ParameterCombo> combos = currentSweep.combos();
         VariationCache runCache = new VariationCache(context.configContext());
+        currentRunCache = runCache;
         VariationState activeResume = compatibleResumeState(currentSweep);
         Map<String, VariationState.CompletedCell> resumeCompleted =
                 activeResume == null
@@ -540,8 +542,31 @@ public final class VariationsDialog extends PipelineDialog {
         gridWindow.setDownstreamVerdictSelected(false);
         gridWindow.setDownstreamControlsEnabled(false, false,
                 "Downstream verdicts are only available for macro variations.");
+        gridWindow.attachSaveCacheActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                snapshotVariationsCache();
+            }
+        });
         gridWindow.setVisible(true);
         updateGridWindowProgress();
+    }
+
+    private void snapshotVariationsCache() {
+        VariationCache cache = currentRunCache;
+        ParameterSweep sweep = currentSweep;
+        if (gridWindow == null) {
+            return;
+        }
+        if (cache == null || sweep == null) {
+            gridWindow.setActionStatus("No variations to save yet.");
+            return;
+        }
+        int written = cache.snapshotResultsToDisk(sweep,
+                new ArrayList<VariationResult>(resultsByCell));
+        gridWindow.setActionStatus(written == 0
+                ? "No variations to save yet."
+                : "Saved " + written + " variation" + (written == 1 ? "" : "s")
+                        + " to the disk cache.");
     }
 
     private void updateGridWindowProgress() {

@@ -24,6 +24,12 @@ IHF Master Plan.txt
 Potential_Names.md
 /.claude/
 /.task/
+/.codex/
+
+# Internal planning / agent context (kept local, not part of the public surface)
+/AGENTS.md
+/EXECUTION_STATUS.md
+/FLASH Master Plan.txt
 
 # graphify knowledge graph artifacts (regenerated on commit via post-commit hook)
 /graphify-out/

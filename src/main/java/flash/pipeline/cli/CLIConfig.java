@@ -372,6 +372,13 @@ public class CLIConfig {
             parts.add("stats.metrics="
                     + (joined.contains(" ") ? "[" + joined + "]" : joined));
         }
+        if (stats.metricAggregations != null && !stats.metricAggregations.isEmpty()) {
+            String joined = joinMetricAggregations(stats.metricAggregations);
+            if (!joined.isEmpty()) {
+                parts.add("stats.metric_aggregation="
+                        + (joined.contains(" ") ? "[" + joined + "]" : joined));
+            }
+        }
 
         if (!splitMergeUseDeconv) parts.add("splitmerge.useDeconv=false");
         if (!threeDUseDeconv) parts.add("threeD.useDeconv=false");
@@ -505,6 +512,23 @@ public class CLIConfig {
         if (mode == StatisticsConfig.DistributionMode.ASSUME_NORMAL) return "parametric";
         if (mode == StatisticsConfig.DistributionMode.ASSUME_SKEWED) return "non_parametric";
         return "auto";
+    }
+
+    private static String joinMetricAggregations(
+            Map<String, StatisticsConfig.MetricAggregation> values) {
+        StringBuilder sb = new StringBuilder();
+        if (values == null) return "";
+        for (Map.Entry<String, StatisticsConfig.MetricAggregation> entry : values.entrySet()) {
+            if (entry.getKey() == null || entry.getKey().trim().isEmpty()
+                    || entry.getValue() == null
+                    || entry.getValue() == StatisticsConfig.MetricAggregation.AUTO) {
+                continue;
+            }
+            if (sb.length() > 0) sb.append(',');
+            sb.append(entry.getKey().trim()).append(':')
+                    .append(entry.getValue().name().toLowerCase(Locale.ROOT));
+        }
+        return sb.toString();
     }
 
     private static String formatDouble(double value) {
@@ -892,19 +916,24 @@ public class CLIConfig {
         StatisticsConfig.DistributionMode distMode = null;
         StatisticsConfig.PostHocMethod postHoc = null;
         List<String> metrics = null;
+        Map<String, StatisticsConfig.MetricAggregation> metricAggregations = null;
 
         public String getPresetName() { return presetName; }
         public StatisticsConfig.PairedMode getPairedMode() { return pairedMode; }
         public StatisticsConfig.DistributionMode getDistMode() { return distMode; }
         public StatisticsConfig.PostHocMethod getPostHoc() { return postHoc; }
         public List<String> getMetrics() { return metrics; }
+        public Map<String, StatisticsConfig.MetricAggregation> getMetricAggregations() {
+            return metricAggregations;
+        }
 
         public boolean hasConfiguration() {
             return (presetName != null && !presetName.trim().isEmpty())
                     || pairedMode != null
                     || distMode != null
                     || postHoc != null
-                    || (metrics != null && !metrics.isEmpty());
+                    || (metrics != null && !metrics.isEmpty())
+                    || (metricAggregations != null && !metricAggregations.isEmpty());
         }
     }
 }

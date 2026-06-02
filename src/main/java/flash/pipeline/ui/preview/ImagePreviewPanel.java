@@ -67,6 +67,7 @@ public final class ImagePreviewPanel extends JPanel {
     private boolean updatingSlider;
     private boolean metadataHeaderVisible = true;
     private boolean slim;
+    private boolean chromeless;
     private JLabel slimTitleLabel;
     private ZSliceChangeListener zSliceChangeListener;
     private PixelClickListener pixelClickListener;
@@ -74,6 +75,7 @@ public final class ImagePreviewPanel extends JPanel {
     private boolean displaySettingsEnabled = true;
     private ObjectSizeFilterPreview.Summary objectSizeGuide;
     private double drawScale = 1.0;
+    private int canvasPadding = 6;
     private int drawOriginX;
     private int drawOriginY;
     private int imageW;
@@ -165,6 +167,37 @@ public final class ImagePreviewPanel extends JPanel {
             setZRowVisible(true);
         }
         refreshBorder();
+    }
+
+    /**
+     * Strips every scrap of chrome (title label, borders, panel gap and the
+     * canvas padding) so the image fills the whole panel edge-to-edge. Intended
+     * for tiled grids where each cell should be the size of the image itself.
+     */
+    public void setChromeless(boolean chromeless) {
+        if (this.chromeless == chromeless) {
+            return;
+        }
+        this.chromeless = chromeless;
+        if (chromeless) {
+            canvasPadding = 0;
+            setPanelGap(0);
+            removeSlimTitleLabel();
+            setMetadataHeaderVisible(false);
+            setZRowVisible(false);
+        } else {
+            canvasPadding = 6;
+            setPanelGap(slim ? SLIM_PANEL_GAP : DEFAULT_PANEL_GAP);
+            if (slim) {
+                installSlimTitleLabel();
+            } else {
+                setMetadataHeaderVisible(true);
+                setZRowVisible(true);
+            }
+        }
+        refreshBorder();
+        revalidate();
+        repaint();
     }
 
     public void setImage(ImagePlus image) {
@@ -389,7 +422,9 @@ public final class ImagePreviewPanel extends JPanel {
     }
 
     private void refreshBorder() {
-        if (slim) {
+        if (chromeless) {
+            setBorder(BorderFactory.createEmptyBorder());
+        } else if (slim) {
             setBorder(BorderFactory.createEmptyBorder(2, 2, 2, 2));
         } else {
             setBorder(BorderFactory.createCompoundBorder(
@@ -652,8 +687,9 @@ public final class ImagePreviewPanel extends JPanel {
 
                 int imageWidth = processor.getWidth();
                 int imageHeight = processor.getHeight();
-                int availableWidth = Math.max(1, getWidth() - 12);
-                int availableHeight = Math.max(1, getHeight() - 12);
+                int pad = 2 * canvasPadding;
+                int availableWidth = Math.max(1, getWidth() - pad);
+                int availableHeight = Math.max(1, getHeight() - pad);
                 double scale = Math.min(
                         availableWidth / (double) imageWidth,
                         availableHeight / (double) imageHeight);
@@ -671,8 +707,10 @@ public final class ImagePreviewPanel extends JPanel {
                         RenderingHints.KEY_INTERPOLATION,
                         RenderingHints.VALUE_INTERPOLATION_BILINEAR);
                 g2.drawImage(awtImage, x, y, drawWidth, drawHeight, null);
-                g2.setColor(new Color(120, 120, 120));
-                g2.drawRect(x, y, drawWidth - 1, drawHeight - 1);
+                if (!chromeless) {
+                    g2.setColor(new Color(120, 120, 120));
+                    g2.drawRect(x, y, drawWidth - 1, drawHeight - 1);
+                }
                 drawImageOverlay(g2, x, y, scale);
                 drawObjectSizeGuide(g2, x, y, drawWidth, drawHeight, scale);
             } finally {

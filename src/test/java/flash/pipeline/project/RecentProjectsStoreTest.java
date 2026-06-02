@@ -101,6 +101,23 @@ public class RecentProjectsStoreTest {
     }
 
     @Test
+    public void recordOpenedReplacingDropsObsoletePath() throws Exception {
+        File plugins = temp.newFolder("plugins");
+        RecentProjectsStore.write(plugins, Arrays.asList(
+                new RecentProject("Old", "C:/Users/Owner/project/project.json", 100L),
+                new RecentProject("Other", "D:/other/project.json", 200L)));
+
+        List<RecentProject> after = RecentProjectsStore.recordOpenedReplacing(plugins,
+                new RecentProject("Moved", "C:/Users/jamie/project/project.json", 999L),
+                "C:/Users/Owner/project/project.json");
+
+        assertEquals(2, after.size());
+        assertEquals("Moved", after.get(0).name);
+        assertEquals("C:/Users/jamie/project/project.json", after.get(0).path);
+        assertEquals("Other", after.get(1).name);
+    }
+
+    @Test
     public void recordOpenedSkipsBlankEntry() throws Exception {
         File plugins = temp.newFolder("plugins");
         RecentProjectsStore.write(plugins, Arrays.asList(

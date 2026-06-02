@@ -54,6 +54,7 @@ import flash.pipeline.roi.RoiIO;
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.ToggleSwitch;
 import flash.pipeline.zslice.ZSliceOps;
+import flash.pipeline.zslice.ZSliceSelection;
 
 import ij.IJ;
 import ij.ImagePlus;
@@ -989,6 +990,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                 }
             }
             if (imp == null) continue;
+            int firstZSlice = firstOriginalZSlice(cfg, idx, imp);
             imp = applyConfiguredZSliceSubset(cfg, idx, imp, "Intensity Analysis");
 
             // Start loading next image while processing this one
@@ -1060,6 +1062,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                                 binarization, thresholds,
                                 channelNames, roiChannelIndex1Based,
                                 outputPlan, totalTables, idx + 1, roiZipNames[rSet],
+                                firstZSlice,
                                 cfg, filterSources, binDir,
                                 basicFilterMacro, activeRoi);
                     }
@@ -1069,6 +1072,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                             binarization, thresholds,
                             channelNames, -1,
                             outputPlan, totalTables, idx + 1, null,
+                            firstZSlice,
                             cfg, filterSources, binDir,
                             basicFilterMacro, null);
                 }
@@ -1140,6 +1144,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
 
                         ImagePlus imp = indexed.image;
                         int idx = indexed.index;
+                        int firstZSlice = firstOriginalZSlice(cfg, idx, imp);
                         imp = applyConfiguredZSliceSubset(cfg, idx, imp, "Intensity Analysis");
 
                         ParallelContext.enterParallel();
@@ -1207,6 +1212,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                                                 binarization, thresholds,
                                                 channelNames, roiChannelIndex1Based,
                                                 outputPlan, localTables, idx + 1, roiZipNames[rSet],
+                                                firstZSlice,
                                                 cfg, filterSources, binDir,
                                                 basicFilterMacro, activeRoi);
                                     }
@@ -1216,6 +1222,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                                             binarization, thresholds,
                                             channelNames, -1,
                                             outputPlan, localTables, idx + 1, null,
+                                            firstZSlice,
                                             cfg, filterSources, binDir,
                                             basicFilterMacro, null);
                                 }
@@ -1353,6 +1360,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
             IntensityOutputTables totalTables,
             int scnIndex1Based,
             String roiSetName,
+            int firstZSlice,
             final BinConfig cfg,
             final String[] filterSources,
             final File binDir,
@@ -1535,6 +1543,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                         int row = total.size() - 1;
 
                         writeMetadataColumns(total, row, parts, roiLabel);
+                        writeZColumn(total, row, firstZSlice + r);
                         writeMeasurementColumns(total, row,
                                 allIntDenFilteredFullRoi[c][r],
                                 allAreaFractionFilteredFullRoi[c][r],
@@ -2365,6 +2374,16 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         AtlasRegionColumns.writeTo(table, row, region, roiLabel);
     }
 
+    static void writeZColumn(ResultsTable table, int row, int zSlice) {
+        if (table == null) return;
+        table.setValue("z", row, zSlice);
+    }
+
+    static void writeZColumn(ResultsTable table, int row, String zLabel) {
+        if (table == null) return;
+        table.setValue("z", row, zLabel == null ? "" : zLabel);
+    }
+
     private void appendSpatialModeRow(IntensityOutputPlan outputPlan,
                                       IntensityOutputTables totalTables,
                                       NameParts parts,
@@ -2382,8 +2401,15 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         table.incrementCounter();
         int row = table.size() - 1;
         writeMetadataColumns(table, row, parts, roiLabel);
+        writeZColumn(table, row, zLabelForMode(mode));
         writeSpatialPlaceholderColumns(table, row, key, channelNames, binarization, spatialConfig);
         writeSpatialResultColumns(table, row, spatialResult);
+    }
+
+    private static String zLabelForMode(IntensitySpatialOutputMode mode) {
+        if (mode == IntensitySpatialOutputMode.MIP) return "MIP";
+        if (mode == IntensitySpatialOutputMode.NATIVE_3D) return "3D";
+        return "";
     }
 
     private static void writeSpatialResultColumns(ResultsTable table,
@@ -2521,6 +2547,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         ordered.add("Hemisphere");
         ordered.add("ROI");
         ordered.add("Animal Name");
+        ordered.add("z");
 
         if (key == null || key.mode() == IntensitySpatialOutputMode.BASE) {
             ordered.add("IntDen");
@@ -3509,6 +3536,15 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
             imp.flush();
         }
         return subset;
+    }
+
+    private static int firstOriginalZSlice(BinConfig cfg, int seriesIndex, ImagePlus imp) {
+        if (imp == null || cfg == null || !cfg.usesZSliceSubset()) return 1;
+        ZSliceSelection selection = cfg.getZSliceSelection(seriesIndex);
+        if (selection == null || selection.range == null) return 1;
+        int actualSlices = Math.max(1, imp.getNSlices());
+        if (!selection.range.isValidFor(actualSlices)) return 1;
+        return selection.range.startSlice;
     }
 
     private static String formatDuration(long ms) {

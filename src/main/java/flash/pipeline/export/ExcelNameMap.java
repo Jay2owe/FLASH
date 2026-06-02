@@ -224,6 +224,27 @@ public final class ExcelNameMap {
                 "<ab> Mean Vol-Span Discr.",
                 OBJ_COUNTER + "Mean Volume-Span Discrepancy per <ab> object. "
                 + "VSD = log10(Feret\u00B3 / Volume). Higher = more extended.");
+        addRule("<ab>_Morph_ShollCriticalRadius_umMean",
+                "<ab> Mean Sholl Crit. Radius",
+                OBJ_COUNTER + "Mean radius at which centroid-based 3D Sholl intersections peak per <ab> object.");
+        addRule("<ab>_Morph_ShollCriticalIntersectionsMean",
+                "<ab> Mean Sholl Crit. Value",
+                OBJ_COUNTER + "Mean maximum centroid-based 3D Sholl intersection count per <ab> object.");
+        addRule("<ab>_Morph_ShollSchoenenIndexMean",
+                "<ab> Mean Schoenen Index",
+                OBJ_COUNTER + "Mean Schoenen ramification index per <ab> object, computed as critical intersections divided by the first non-zero Sholl intersection count.");
+        addRule("<ab>_Morph_ShollPrimaryBranchesMean",
+                "<ab> Mean Sholl Primary Proxy",
+                OBJ_COUNTER + "Mean first non-zero centroid-based Sholl intersection count per <ab> object.");
+        addRule("<ab>_Morph_SkeletonBranchesMean",
+                "<ab> Mean Skeleton Branches",
+                OBJ_COUNTER + "Mean AnalyzeSkeleton-style branch count per <ab> object.");
+        addRule("<ab>_Morph_SkeletonJunctionsMean",
+                "<ab> Mean Skeleton Junctions",
+                OBJ_COUNTER + "Mean AnalyzeSkeleton-style junction count per <ab> object.");
+        addRule("<ab>_Morph_SkeletonEndpointsMean",
+                "<ab> Mean Skeleton Endpoints",
+                OBJ_COUNTER + "Mean AnalyzeSkeleton-style endpoint count per <ab> object.");
 
         // Tier 2 population composite indices
         addRule("<ab>_Morph_CMSMean",

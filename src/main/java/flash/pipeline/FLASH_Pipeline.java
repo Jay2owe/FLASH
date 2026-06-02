@@ -32,6 +32,7 @@ import flash.pipeline.io.ImageCache;
 import flash.pipeline.io.ConditionManifestIO;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.ImageSourceDispatcher;
+import flash.pipeline.io.ProjectStatusStore;
 import flash.pipeline.intelligence.DiagnosticsDialog;
 import flash.pipeline.intelligence.AnalysisStatus;
 import flash.pipeline.intelligence.AnalysisStatusScanner;
@@ -83,10 +84,7 @@ import java.awt.Font;
 import java.awt.GraphicsEnvironment;
 import java.io.File;
 import java.io.IOException;
-import java.io.PrintWriter;
 import java.net.URL;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -295,7 +293,7 @@ public class FLASH_Pipeline implements PlugIn {
                 }
             }
 
-            // Post-run summary (R-01, R-08, R-09) — informational only
+            // Post-run summary, informational only
             runGuiStepSafely("Post-run summary", new Runnable() {
                 @Override public void run() {
                     PostRunSummary.writeIfPossible(directory);
@@ -476,7 +474,7 @@ public class FLASH_Pipeline implements PlugIn {
             }
         }
 
-        // Post-run summary (R-01, R-08, R-09) — informational only
+        // Post-run summary, informational only
         PostRunSummary.writeIfPossible(directory);
         writeStartHereIfPossible(directory);
 
@@ -588,20 +586,8 @@ public class FLASH_Pipeline implements PlugIn {
 
     static void writeCliStatus(File directory, boolean ok,
                                List<String> failed, String reason) {
-        File status = FlashProjectLayout.forDirectory(directory.getAbsolutePath())
-                .statusWriteFile("cli_status.txt");
-        File parent = status.getParentFile();
-        if (parent != null && !parent.isDirectory() && !parent.mkdirs() && !parent.isDirectory()) {
-            IJ.log("[CLI] could not create status folder: " + parent.getAbsolutePath());
-            return;
-        }
-        try (PrintWriter w = new PrintWriter(
-                Files.newBufferedWriter(status.toPath(), StandardCharsets.UTF_8))) {
-            w.println("ok=" + ok);
-            if (reason != null) w.println("reason=" + reason);
-            if (failed != null) {
-                for (String f : failed) w.println("failed=" + f);
-            }
+        try {
+            ProjectStatusStore.writeCliStatus(directory, ok, failed, reason);
         } catch (IOException ioe) {
             IJ.log("[CLI] could not write CLI status: " + ioe.getMessage());
         }
@@ -1105,8 +1091,7 @@ public class FLASH_Pipeline implements PlugIn {
     private void saveProjectRecipe(boolean[] selections) {
         try {
             PipelineRecipe recipe = PipelineRecipe.fromSelections("last-run", "Last successful run", selections);
-            PipelineRecipeIO.saveToFile(recipe,
-                    FlashProjectLayout.forDirectory(directory).statusWriteFile("recipe.json"));
+            ProjectStatusStore.writeLastRunRecipe(directory, recipe.toJsonObject());
         } catch (IOException e) {
             IJ.log("[FLASH] Warning: could not save project pipeline recipe: " + e.getMessage());
         }

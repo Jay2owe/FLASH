@@ -1,5 +1,6 @@
 package flash.pipeline;
 
+import flash.pipeline.io.ProjectStatusStore;
 import flash.pipeline.report.QualityReport;
 import org.junit.Rule;
 import org.junit.Test;
@@ -8,9 +9,8 @@ import org.junit.rules.TemporaryFolder;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.util.Collections;
+import java.util.Map;
 
 import static org.junit.Assert.*;
 
@@ -100,18 +100,21 @@ public class FLASH_PipelineQualityReportLifecycleTest {
     }
 
     @Test
-    public void writeCliStatus_usesFlashStatusFolder() throws IOException {
+    public void writeCliStatus_usesProjectStatusJson() throws IOException {
         FLASH_Pipeline.writeCliStatus(tmp.getRoot(), false,
                 Collections.singletonList("3D Object Analysis"), "failed");
 
-        File status = new File(tmp.getRoot(), "FLASH/Status/.settings/cli_status.txt");
+        File status = ProjectStatusStore.statusFile(tmp.getRoot());
         assertTrue(status.isFile());
         assertFalse(new File(tmp.getRoot(), ".cli_status").exists());
+        assertFalse(new File(tmp.getRoot(), "FLASH/Status").exists());
 
-        String text = new String(Files.readAllBytes(status.toPath()), StandardCharsets.UTF_8);
-        assertTrue(text.contains("ok=false"));
-        assertTrue(text.contains("reason=failed"));
-        assertTrue(text.contains("failed=3D Object Analysis"));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> cliStatus = (Map<String, Object>)
+                ProjectStatusStore.load(tmp.getRoot()).get(ProjectStatusStore.SECTION_CLI_STATUS);
+        assertEquals(Boolean.FALSE, cliStatus.get("ok"));
+        assertEquals("failed", cliStatus.get("reason"));
+        assertEquals(Collections.singletonList("3D Object Analysis"), cliStatus.get("failed"));
     }
 
     private static void writeStubFile(File f) throws IOException {

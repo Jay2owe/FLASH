@@ -1,6 +1,7 @@
 package flash.pipeline.stats;
 
 import flash.pipeline.analyses.StatisticsConfig;
+import org.apache.commons.math3.distribution.TDistribution;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -113,6 +114,7 @@ public final class MetricStatisticsEngine {
         return StatisticRow.builder()
                 .metric(metric)
                 .test("Skipped")
+                .inferentialUnit("Animal")
                 .notes("Insufficient data (min n=3 per group): " + reason)
                 .build();
     }
@@ -168,14 +170,21 @@ public final class MetricStatisticsEngine {
 
         boolean significant = pValue < 0.05;
 
-        results.add(StatisticRow.builder()
+        StatisticRow.Builder global = StatisticRow.builder()
                 .metric(metric)
                 .test(testName)
                 .statistic(statistic)
                 .pValue(pValue)
                 .significant(significant ? "Yes" : "No")
                 .normalityResult(normalityInfo)
-                .build());
+                .inferentialUnit("Animal")
+                .totalNAnimals(totalN(groups));
+        if (k == 2) {
+            String c1 = conditionOrder.get(0);
+            String c2 = conditionOrder.get(1);
+            addPairEffect(global, c1, c2, groups.get(c1), groups.get(c2), false);
+        }
+        results.add(global.build());
 
         StatisticsConfig.PostHocMethod method = cfg.postHocMethod;
         if (method == StatisticsConfig.PostHocMethod.TUKEY) {
@@ -260,7 +269,7 @@ public final class MetricStatisticsEngine {
 
         boolean significant = pValue < 0.05;
 
-        results.add(StatisticRow.builder()
+        StatisticRow.Builder global = StatisticRow.builder()
                 .metric(metric)
                 .test(testName)
                 .statistic(statistic)
@@ -268,7 +277,14 @@ public final class MetricStatisticsEngine {
                 .significant(significant ? "Yes" : "No")
                 .normalityResult(normalityInfo)
                 .paired(true)
-                .build());
+                .inferentialUnit("Animal")
+                .totalNAnimals(firstSize);
+        if (k == 2) {
+            String c1 = conditionOrder.get(0);
+            String c2 = conditionOrder.get(1);
+            addPairEffect(global, c1, c2, groups.get(c1), groups.get(c2), true);
+        }
+        results.add(global.build());
 
         // Pairwise post-hoc: paired t / Wilcoxon per pair. Tukey/Dunn's are
         // independence-based and fall back to Bonferroni-corrected paired
@@ -348,7 +364,7 @@ public final class MetricStatisticsEngine {
                 }
                 String sig = significanceStars(pForSignificance);
 
-                results.add(StatisticRow.builder()
+                StatisticRow.Builder row = StatisticRow.builder()
                         .metric(metric)
                         .test(testName)
                         .statistic(statistic)
@@ -364,7 +380,10 @@ public final class MetricStatisticsEngine {
                         .significance(sig)
                         .paired(paired)
                         .postHocMethod(postHocLabel)
-                        .build());
+                        .inferentialUnit("Animal")
+                        .totalNAnimals(totalN(groups));
+                addPairEffect(row, c1, c2, g1, g2, paired);
+                results.add(row.build());
             }
         }
     }
@@ -383,7 +402,7 @@ public final class MetricStatisticsEngine {
         List<PostHocRow> rows = TukeyHSD.pairwise(groupList, conditionOrder);
         for (PostHocRow tr : rows) {
             String sig = significanceStars(tr.pAdjusted);
-            results.add(StatisticRow.builder()
+            StatisticRow.Builder row = StatisticRow.builder()
                     .metric(metric)
                     .test(testName)
                     .statistic(statistic)
@@ -398,7 +417,11 @@ public final class MetricStatisticsEngine {
                     .correctedPValue(tr.pAdjusted)
                     .significance(sig)
                     .postHocMethod("Tukey HSD")
-                    .build());
+                    .inferentialUnit("Animal")
+                    .totalNAnimals(totalN(groups));
+            addPairEffect(row, tr.groupA, tr.groupB,
+                    groups.get(tr.groupA), groups.get(tr.groupB), false);
+            results.add(row.build());
         }
     }
 
@@ -416,7 +439,7 @@ public final class MetricStatisticsEngine {
         List<PostHocRow> rows = DunnsTest.pairwise(groupList, conditionOrder);
         for (PostHocRow dr : rows) {
             String sig = significanceStars(dr.pAdjusted);
-            results.add(StatisticRow.builder()
+            StatisticRow.Builder row = StatisticRow.builder()
                     .metric(metric)
                     .test(testName)
                     .statistic(statistic)
@@ -431,8 +454,128 @@ public final class MetricStatisticsEngine {
                     .correctedPValue(dr.pAdjusted)
                     .significance(sig)
                     .postHocMethod("Dunn's")
-                    .build());
+                    .inferentialUnit("Animal")
+                    .totalNAnimals(totalN(groups));
+            addPairEffect(row, dr.groupA, dr.groupB,
+                    groups.get(dr.groupA), groups.get(dr.groupB), false);
+            results.add(row.build());
         }
+    }
+
+    // ================================================================
+    //  Animal-level effect summaries
+    // ================================================================
+
+    private static int totalN(LinkedHashMap<String, List<Double>> groups) {
+        int n = 0;
+        if (groups == null) return 0;
+        for (List<Double> values : groups.values()) {
+            if (values == null) continue;
+            for (Double value : values) {
+                if (value != null && Double.isFinite(value.doubleValue())) n++;
+            }
+        }
+        return n;
+    }
+
+    private static void addPairEffect(StatisticRow.Builder row,
+                                      String group1,
+                                      String group2,
+                                      List<Double> values1,
+                                      List<Double> values2,
+                                      boolean paired) {
+        if (row == null || values1 == null || values2 == null
+                || values1.isEmpty() || values2.isEmpty()) {
+            return;
+        }
+
+        double mean1 = mean(values1);
+        double mean2 = mean(values2);
+        double effect = mean2 - mean1;
+        int n1 = finiteCount(values1);
+        int n2 = finiteCount(values2);
+        double[] ci = paired
+                ? pairedMeanDifferenceCi(values1, values2)
+                : independentMeanDifferenceCi(values1, values2);
+
+        row.group1(group1)
+           .group2(group2)
+           .group1NAnimals(n1)
+           .group2NAnimals(n2)
+           .totalNAnimals(paired ? n1 : n1 + n2)
+           .group1Mean(mean1)
+           .group2Mean(mean2)
+           .effectSizeType("MeanDifference_Group2MinusGroup1")
+           .effectSize(effect)
+           .effectCI95Low(ci[0])
+           .effectCI95High(ci[1]);
+    }
+
+    private static int finiteCount(List<Double> values) {
+        int n = 0;
+        if (values == null) return 0;
+        for (Double value : values) {
+            if (value != null && Double.isFinite(value.doubleValue())) n++;
+        }
+        return n;
+    }
+
+    private static double[] independentMeanDifferenceCi(List<Double> a, List<Double> b) {
+        int n1 = finiteCount(a);
+        int n2 = finiteCount(b);
+        if (n1 < 2 || n2 < 2) {
+            return new double[]{Double.NaN, Double.NaN};
+        }
+
+        double m1 = mean(a);
+        double m2 = mean(b);
+        double v1 = variance(a, m1);
+        double v2 = variance(b, m2);
+        double effect = m2 - m1;
+        double se = Math.sqrt(v1 / n1 + v2 / n2);
+        if (se == 0.0) {
+            return new double[]{effect, effect};
+        }
+
+        double term1 = v1 / n1;
+        double term2 = v2 / n2;
+        double numerator = (term1 + term2) * (term1 + term2);
+        double denominator = (term1 * term1) / (n1 - 1.0)
+                + (term2 * term2) / (n2 - 1.0);
+        if (denominator <= 0.0) {
+            return new double[]{Double.NaN, Double.NaN};
+        }
+        double df = numerator / denominator;
+        double critical = new TDistribution(df).inverseCumulativeProbability(0.975);
+        double margin = critical * se;
+        return new double[]{effect - margin, effect + margin};
+    }
+
+    private static double[] pairedMeanDifferenceCi(List<Double> a, List<Double> b) {
+        if (a == null || b == null || a.size() != b.size()) {
+            return new double[]{Double.NaN, Double.NaN};
+        }
+        List<Double> differences = new ArrayList<Double>();
+        for (int i = 0; i < a.size(); i++) {
+            double av = a.get(i);
+            double bv = b.get(i);
+            if (Double.isFinite(av) && Double.isFinite(bv)) {
+                differences.add(bv - av);
+            }
+        }
+        if (differences.size() < 2) {
+            return new double[]{Double.NaN, Double.NaN};
+        }
+        double effect = mean(differences);
+        double variance = variance(differences, effect);
+        double se = Math.sqrt(variance / differences.size());
+        if (se == 0.0) {
+            return new double[]{effect, effect};
+        }
+        double critical = new TDistribution(differences.size() - 1)
+                .inverseCumulativeProbability(0.975);
+        double margin = critical * se;
+        return new double[]{effect - margin, effect + margin};
     }
 
     // ================================================================

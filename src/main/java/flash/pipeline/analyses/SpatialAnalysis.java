@@ -2275,13 +2275,15 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
             double[] g = SpatialStatistics.computeGFunction(points, radii);
             SpatialStatistics.MonteCarloEnvelope env =
                     SpatialStatistics.monteCarloEnvelopes(DEFAULT_CSR_SIMULATIONS, window, points.length, radii, key.seed());
+            AtlasRegionColumns.Metadata atlasMetadata =
+                    atlasMetadataForGroup(cd, indices, key.region, key.roi);
 
             for (int i = 0; i < radii.length; i++) {
                 List<String> row = new ArrayList<String>();
                 row.add(key.animal);
                 row.add(key.hemisphere);
                 row.add(key.region);
-                addAtlasRegionValues(row, key.region, key.roi);
+                addAtlasRegionValues(row, atlasMetadata);
                 row.add(key.roi);
                 row.add(String.valueOf(points.length));
                 row.add(WINDOW_SOURCE_DERIVED);
@@ -2350,6 +2352,49 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         addAtlasRegionValues(row, metadata);
     }
 
+    private AtlasRegionColumns.Metadata atlasMetadataForGroup(ChannelData cd,
+                                                             List<Integer> sourceRows,
+                                                             String region,
+                                                             String roi) {
+        AtlasRegionColumns.Metadata explicit = explicitAtlasMetadataForGroup(cd, sourceRows);
+        return hasAtlasMetadata(explicit) ? explicit : AtlasRegionColumns.metadataFor(region, roi);
+    }
+
+    private AtlasRegionColumns.Metadata explicitAtlasMetadataForGroup(ChannelData cd,
+                                                                      List<Integer> sourceRows) {
+        if (cd != null && sourceRows != null) {
+            for (Integer sourceRow : sourceRows) {
+                if (sourceRow == null) continue;
+                int row = sourceRow.intValue();
+                if (!hasExplicitAtlasMetadata(cd, row)) continue;
+                return AtlasRegionColumns.metadataForExistingOrResolved(
+                        safeValue(cd, row, AtlasRegionColumns.ATLAS_KEY),
+                        safeValue(cd, row, AtlasRegionColumns.REGION_ID),
+                        safeValue(cd, row, AtlasRegionColumns.REGION_ACRONYM),
+                        safeValue(cd, row, AtlasRegionColumns.REGION_NAME),
+                        safeValue(cd, row, "Region"),
+                        safeValue(cd, row, "ROI"));
+            }
+        }
+        return null;
+    }
+
+    private AtlasRegionColumns.Metadata atlasMetadataForInteractionUnit(Map<String, ChannelData> channels,
+                                                                        Map<String, List<Integer>> channelRows,
+                                                                        SpatialGroupKey key) {
+        if (channels != null && channelRows != null) {
+            for (Map.Entry<String, List<Integer>> entry : channelRows.entrySet()) {
+                ChannelData cd = channels.get(entry.getKey());
+                AtlasRegionColumns.Metadata metadata =
+                        explicitAtlasMetadataForGroup(cd, entry.getValue());
+                if (hasAtlasMetadata(metadata)) {
+                    return metadata;
+                }
+            }
+        }
+        return AtlasRegionColumns.metadataFor(key.region, key.roi);
+    }
+
     private void addAtlasRegionValues(List<String> row, ChannelData cd, int sourceRow) {
         if (row == null || cd == null) return;
         AtlasRegionColumns.Metadata metadata = AtlasRegionColumns.metadataForExistingOrResolved(
@@ -2370,6 +2415,21 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         row.add(metadata.getRegionId());
         row.add(metadata.getRegionAcronym());
         row.add(metadata.getRegionName());
+    }
+
+    private boolean hasExplicitAtlasMetadata(ChannelData cd, int row) {
+        return !safeValue(cd, row, AtlasRegionColumns.ATLAS_KEY).isEmpty()
+                || !safeValue(cd, row, AtlasRegionColumns.REGION_ID).isEmpty()
+                || !safeValue(cd, row, AtlasRegionColumns.REGION_ACRONYM).isEmpty()
+                || !safeValue(cd, row, AtlasRegionColumns.REGION_NAME).isEmpty();
+    }
+
+    private boolean hasAtlasMetadata(AtlasRegionColumns.Metadata metadata) {
+        return metadata != null
+                && (!metadata.getAtlasKey().isEmpty()
+                || !metadata.getRegionId().isEmpty()
+                || !metadata.getRegionAcronym().isEmpty()
+                || !metadata.getRegionName().isEmpty());
     }
 
     private String spatialStatsRoiLabel(ChannelData cd, int row) {
@@ -3675,6 +3735,8 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         for (Map.Entry<SpatialGroupKey, Map<String, List<Integer>>> ge : groupsByUnit.entrySet()) {
             SpatialGroupKey key = ge.getKey();
             Map<String, List<Integer>> chMap = ge.getValue();
+            AtlasRegionColumns.Metadata atlasMetadata =
+                    atlasMetadataForInteractionUnit(channels, chMap, key);
 
             // Build combined point set with type labels for this analysis unit
             List<double[]> allPoints = new ArrayList<double[]>();
@@ -3712,7 +3774,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                     row.add(key.animal);
                     row.add(key.hemisphere);
                     row.add(key.region);
-                    addAtlasRegionValues(row, key.region, key.roi);
+                    addAtlasRegionValues(row, atlasMetadata);
                     row.add(key.roi);
                     row.add(im.types[a]);
                     row.add(im.types[b]);

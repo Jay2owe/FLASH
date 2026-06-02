@@ -25,7 +25,6 @@ import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
@@ -168,7 +167,7 @@ public final class RunSettingsSnapshot {
                 .replaceAll("\\s+", " ")
                 .trim();
         if (name.isEmpty()) name = "analysis";
-        return String.format(Locale.ROOT, "%02d - %s", analysisIndex, name);
+        return name;
     }
 
     private static Map<String, String> fieldSources(BinConfig cfg,
