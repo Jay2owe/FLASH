@@ -637,7 +637,22 @@ public final class VariationsDialog extends PipelineDialog {
         PreviewDisplaySettings.LutMode mode = gridLutGrey
                 ? PreviewDisplaySettings.LutMode.GREY
                 : PreviewDisplaySettings.LutMode.CHANNEL;
-        return PreviewDisplaySettings.of(gridRangeMin, gridRangeMax, mode, context.channelName());
+        return PreviewDisplaySettings.of(gridRangeMin, gridRangeMax, mode, gridChannelLutName());
+    }
+
+    /**
+     * The channel's display LUT colour (e.g. "Red"), not the channel/marker name.
+     * The overlay renderer only maps the six named colours plus grey, so passing
+     * the marker name made both LUT modes fall back to grey.
+     */
+    private String gridChannelLutName() {
+        if (context.configContext() != null) {
+            String lut = context.configContext().getChannelLutName();
+            if (lut != null && !lut.trim().isEmpty()) {
+                return lut;
+            }
+        }
+        return context.channelName();
     }
 
     private void rebuildGridDisplaySettings() {
@@ -654,7 +669,7 @@ public final class VariationsDialog extends PipelineDialog {
     }
 
     private String channelLutName() {
-        return PreviewDisplaySettings.defaultFor(context.channelName()).getChannelLutName();
+        return PreviewDisplaySettings.defaultFor(gridChannelLutName()).getChannelLutName();
     }
 
     private String lutToggleText() {

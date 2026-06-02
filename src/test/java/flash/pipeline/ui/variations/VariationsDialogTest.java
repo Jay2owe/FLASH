@@ -1,5 +1,6 @@
 package flash.pipeline.ui.variations;
 
+import flash.pipeline.bin.BinConfig;
 import flash.pipeline.testutil.UiTestAssumptions;
 import flash.pipeline.ui.config.ConfigQcContext;
 
@@ -81,9 +82,73 @@ public class VariationsDialogTest {
         });
     }
 
+    @Test(timeout = 10000)
+    public void objectGridLutToggleUsesChannelColourThenGrey() throws Exception {
+        UiTestAssumptions.assumeInteractiveUiTestsEnabled();
+        final VariationsDialog[] holder = new VariationsDialog[1];
+
+        SwingUtilities.invokeAndWait(new Runnable() {
+            @Override public void run() {
+                VariationsDialog dialog = new VariationsDialog(null,
+                        colouredContext("DAPI", "Red"),
+                        new java.util.function.Consumer<ParameterCombo>() {
+                            @Override public void accept(ParameterCombo combo) {
+                            }
+                        });
+                dialog.setSweepForTest(twoAxisSweep());
+                dialog.setStrategyForTest(new EchoStrategy());
+                dialog.start();
+                holder[0] = dialog;
+            }
+        });
+
+        holder[0].waitForDoneForTest(5000L);
+
+        SwingUtilities.invokeAndWait(new Runnable() {
+            @Override public void run() {
+                VariationCellPanel cell = holder[0].gridWindowForTest()
+                        .cellsForTest().get(1);
+                // Default channel LUT must be the channel COLOUR ("Red"), not the
+                // marker name ("DAPI") — the latter made both modes render grey.
+                assertEquals("Red",
+                        cell.objectDisplaySettingsForTest().effectiveLutName());
+
+                holder[0].gridWindowForTest().lutToggleButtonForTest().doClick();
+                assertEquals("Grays",
+                        cell.objectDisplaySettingsForTest().effectiveLutName());
+
+                holder[0].gridWindowForTest().lutToggleButtonForTest().doClick();
+                assertEquals("Red",
+                        cell.objectDisplaySettingsForTest().effectiveLutName());
+
+                holder[0].dispose();
+            }
+        });
+    }
+
     private static VariationEngineContext context() {
         ImagePlus source = stack("synthetic", 10);
         return context(source, source);
+    }
+
+    private static VariationEngineContext colouredContext(String channelName, String lutColour) {
+        ImagePlus source = stack(channelName, 10);
+        File bin = new File("target/variation-dialog-test-bin-"
+                + channelName.replaceAll("[^A-Za-z0-9_.-]", "_") + "-" + lutColour);
+        BinConfig config = new BinConfig();
+        config.channelNames.add(channelName);
+        config.channelColors.add(lutColour);
+        ConfigQcContext qc = ConfigQcContext.fromImages(new File("."), bin, config,
+                Collections.singletonList(source),
+                Collections.singletonList(channelName),
+                0);
+        ParameterCombo base = ParameterCombo.builder()
+                .put(ParameterId.THRESHOLD, Integer.valueOf(100))
+                .put(ParameterId.MIN_SIZE, Integer.valueOf(50))
+                .put(ParameterId.MAX_SIZE, Integer.valueOf(500))
+                .build();
+        return VariationEngineContext.forClassical(channelName, source, source,
+                qc, base, null);
     }
 
     private static VariationEngineContext context(ImagePlus rawSource,
