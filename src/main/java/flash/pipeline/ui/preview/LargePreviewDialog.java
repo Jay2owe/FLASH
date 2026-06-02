@@ -41,6 +41,16 @@ public final class LargePreviewDialog extends JDialog {
                            boolean positive, boolean clear);
     }
 
+    /**
+     * Fired when the dialog's overlay controls are driven by an upstream renderer
+     * (the object-filter preview flow). The dialog forwards the requested state instead
+     * of rendering the overlay locally, because it lacks the removed-label filter data.
+     */
+    interface OverlayChoiceListener {
+        void overlayToggleChanged(boolean selected);
+        void overlaySourceChanged(boolean rawSource);
+    }
+
     private final ImagePreviewPanel originalPreview = new ImagePreviewPanel("Original image");
     private final ImagePreviewPanel adjustedPreview = new ImagePreviewPanel("Adjusted preview");
     private final ImagePreviewPanel extraPreview = new ImagePreviewPanel("Object map");
@@ -56,8 +66,11 @@ public final class LargePreviewDialog extends JDialog {
     private SourceChoiceListener sourceChoiceListener;
     private DisplayActionListener displayActionListener;
     private ObjectClickListener objectClickListener;
+    private OverlayChoiceListener overlayChoiceListener;
     private boolean syncingSlices;
     private boolean updatingSourceChoice;
+    private boolean updatingOverlayControls;
+    private boolean externalOverlayControl;
     private boolean extraPreviewVisible;
     private PreviewDisplaySettings originalDisplaySettings = PreviewDisplaySettings.defaultFor("Grays");
     private PreviewDisplaySettings adjustedDisplaySettings = PreviewDisplaySettings.defaultFor("Grays");
@@ -105,6 +118,40 @@ public final class LargePreviewDialog extends JDialog {
 
     public void setObjectClickListener(ObjectClickListener objectClickListener) {
         this.objectClickListener = objectClickListener;
+    }
+
+    void setOverlayChoiceListener(OverlayChoiceListener overlayChoiceListener) {
+        this.overlayChoiceListener = overlayChoiceListener;
+    }
+
+    /**
+     * Lets an upstream renderer (object-filter preview) own the overlay controls. When
+     * {@code external} is true the controls reflect the supplied state and any user change
+     * is forwarded through {@link OverlayChoiceListener} rather than rendered locally; when
+     * false the dialog returns to rendering its own overlay from the raw label map.
+     */
+    void setExternalOverlayState(boolean external,
+                                 boolean toggleEnabled,
+                                 boolean selected,
+                                 boolean sourceEnabled,
+                                 boolean rawSource) {
+        externalOverlayControl = external;
+        if (!external) {
+            updateOverlayControls();
+            return;
+        }
+        updatingOverlayControls = true;
+        try {
+            overlayControls.setVisible(true);
+            overlayCheck.setSelected(selected);
+            overlayCheck.setEnabled(toggleEnabled);
+            overlaySourceChoice.setSelectedItem(rawSource ? "Raw image" : "Filtered image");
+            overlaySourceChoice.setEnabled(sourceEnabled);
+        } finally {
+            updatingOverlayControls = false;
+        }
+        overlayControls.revalidate();
+        overlayControls.repaint();
     }
 
     void setDisplayActionState(String lutButtonText, String lutButtonTooltip) {
@@ -232,6 +279,26 @@ public final class LargePreviewDialog extends JDialog {
 
     boolean overlayControlsVisibleForTest() {
         return overlayControls.isVisible();
+    }
+
+    boolean overlayCheckEnabledForTest() {
+        return overlayCheck.isEnabled();
+    }
+
+    boolean overlayCheckSelectedForTest() {
+        return overlayCheck.isSelected();
+    }
+
+    boolean overlaySourceEnabledForTest() {
+        return overlaySourceChoice.isEnabled();
+    }
+
+    void clickOverlayCheckForTest() {
+        overlayCheck.doClick();
+    }
+
+    void selectOverlaySourceFromUiForTest(String label) {
+        overlaySourceChoice.setSelectedItem(label);
     }
 
     boolean sourceControlsVisibleForTest() {
@@ -416,10 +483,31 @@ public final class LargePreviewDialog extends JDialog {
 
     private void wireOverlayControls() {
         overlayCheck.addActionListener(e -> {
+            if (updatingOverlayControls) return;
+            if (externalOverlayControl) {
+                if (overlayChoiceListener != null) {
+                    overlayChoiceListener.overlayToggleChanged(overlayCheck.isSelected());
+                }
+                return;
+            }
             refreshObjectPreviewImage();
             updateOverlayControls();
         });
-        overlaySourceChoice.addActionListener(e -> refreshObjectPreviewImage());
+        overlaySourceChoice.addActionListener(e -> {
+            if (updatingOverlayControls) return;
+            if (externalOverlayControl) {
+                if (overlayChoiceListener != null) {
+                    overlayChoiceListener.overlaySourceChanged(isOverlaySourceRawSelected());
+                }
+                return;
+            }
+            refreshObjectPreviewImage();
+        });
+    }
+
+    private boolean isOverlaySourceRawSelected() {
+        Object selected = overlaySourceChoice.getSelectedItem();
+        return selected != null && "Raw image".equals(selected.toString());
     }
 
     private void wireDisplayActionControls() {
@@ -536,6 +624,7 @@ public final class LargePreviewDialog extends JDialog {
     }
 
     private void updateOverlayControls() {
+        if (externalOverlayControl) return;
         boolean hasObjectMap = extraPreviewVisible && extraDisplayImage != null;
         boolean hasSource = originalImage != null || adjustedImage != null
                 || hasSourceChoiceImages();
@@ -585,6 +674,7 @@ public final class LargePreviewDialog extends JDialog {
         sourceChoiceListener = null;
         displayActionListener = null;
         objectClickListener = null;
+        overlayChoiceListener = null;
         originalPreview.setZSliceChangeListener(null);
         adjustedPreview.setZSliceChangeListener(null);
         extraPreview.setZSliceChangeListener(null);

@@ -72,6 +72,46 @@ public class LargePreviewDialogTest {
     }
 
     @Test
+    public void externallyDrivenOverlayControlsForwardToggleAndSource() {
+        assumeFalse(GraphicsEnvironment.isHeadless());
+
+        LargePreviewDialog dialog = new LargePreviewDialog(null);
+        AtomicReference<Boolean> toggled = new AtomicReference<Boolean>();
+        AtomicReference<Boolean> rawSource = new AtomicReference<Boolean>();
+        try {
+            ImagePlus labels = labels("Object labels");
+            dialog.setOverlayChoiceListener(new LargePreviewDialog.OverlayChoiceListener() {
+                @Override public void overlayToggleChanged(boolean selected) {
+                    toggled.set(selected);
+                }
+
+                @Override public void overlaySourceChanged(boolean raw) {
+                    rawSource.set(raw);
+                }
+            });
+            dialog.setImages(image("raw"), image("filtered"), labels, labels, 1);
+
+            // An upstream renderer takes ownership of the overlay controls.
+            dialog.setExternalOverlayState(true, true, false, true, false);
+
+            assertTrue(dialog.overlayControlsVisibleForTest());
+            assertTrue(dialog.overlayCheckEnabledForTest());
+
+            dialog.clickOverlayCheckForTest();
+            assertEquals(Boolean.TRUE, toggled.get());
+
+            dialog.selectOverlaySourceFromUiForTest("Raw image");
+            assertEquals(Boolean.TRUE, rawSource.get());
+
+            // Releasing external control restores the dialog's own enable logic.
+            dialog.setExternalOverlayState(false, false, false, false, false);
+            assertTrue(dialog.overlayCheckEnabledForTest());
+        } finally {
+            dialog.dispose();
+        }
+    }
+
+    @Test
     public void overlayControlsStayHiddenWithoutObjectMap() {
         assumeFalse(GraphicsEnvironment.isHeadless());
 

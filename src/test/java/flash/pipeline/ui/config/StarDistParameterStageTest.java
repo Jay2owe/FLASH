@@ -21,6 +21,8 @@ import javax.swing.text.JTextComponent;
 import java.awt.Component;
 import java.awt.Container;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -162,9 +164,10 @@ public class StarDistParameterStageTest {
         assertContainsText(controls, "Area min");
         assertContainsText(controls, "Area max");
         assertContainsText(controls, "Quality min");
+        assertContainsText(controls, "Final 3D voxel volume:");
+        assertContainsText(controls, "Min");
+        assertContainsText(controls, "Max");
         assertNotContainsText(controls, "Object size:");
-        assertNotContainsText(controls, "Size min");
-        assertNotContainsText(controls, "Size max");
         assertFalse("Area min belongs in Filters, not Detection.",
                 siblingContainerContains(controls, "Detection:", "Area min"));
         assertFalse("Area max belongs in Filters, not Detection.",
@@ -240,6 +243,126 @@ public class StarDistParameterStageTest {
         assertEquals("stardist:0.5:0.4:area=5.0-10.0:quality=0.5:intensity=50.0:"
                         + "model=stardist_versatile_fluo",
                 store.token);
+    }
+
+    @Test
+    public void finalVoxelVolumeEditsAfterPreviewRelabelRemovedObjectsWithoutRerunning() throws Exception {
+        RecordingStore store = new RecordingStore("stardist:0.5:0.4");
+        RecordingSizeStore sizeStore = new RecordingSizeStore("0-Infinity");
+        RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
+        RecordingActions actions = new RecordingActions(pair);
+        StarDistParameterStage stage = new StarDistParameterStage(store, sizeStore, adapter);
+
+        stage.buildControls(context(), actions);
+        stage.onEnter(context(), pair);
+        stage.runPreviewNowForTest();
+        adapter.previewRuns = 0;
+
+        stage.setSizeMinForTest("2");
+
+        assertFalse(stage.isPreviewStaleForTest());
+        assertEquals("Final voxel volume edits must reuse cached label sizes",
+                0, adapter.previewRuns);
+        assertEquals("Objects: 1 kept; removed 1 small, 0 large",
+                actions.status);
+        assertEquals("Objects: 1 kept; removed 1 small, 0 large",
+                stage.sizeCutoffSummaryForTest());
+        assertLabelOnlyRenderHides(pair, 1);
+        assertLabelOnlyRenderKeeps(pair, 2);
+
+        assertTrue(stage.lockIn(context()));
+        assertEquals("2-Infinity", sizeStore.token);
+        assertEquals("stardist:0.5:0.4:model=stardist_versatile_fluo", store.token);
+    }
+
+    @Test
+    public void invalidFinalVoxelVolumeAfterFreshPreviewStaysInErrorState() throws Exception {
+        RecordingStore store = new RecordingStore("stardist:0.5:0.4");
+        RecordingSizeStore sizeStore = new RecordingSizeStore("4-2");
+        RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
+        RecordingActions actions = new RecordingActions(new PreviewPairPanel("Original", "Adjusted"));
+        StarDistParameterStage stage = new StarDistParameterStage(store, sizeStore, adapter);
+
+        stage.buildControls(context(), actions);
+        stage.onEnter(context(), actions.pair);
+        stage.runPreviewNowForTest();
+
+        assertTrue(stage.isPreviewStaleForTest());
+        assertTrue(actions.previewButtonStale);
+        assertEquals("Enter valid StarDist filters and final voxel volume limits.",
+                actions.status);
+    }
+
+    @Test
+    public void finalVoxelVolumeMaxRemovesOnlyObjectsAboveMax() throws Exception {
+        RecordingStore store = new RecordingStore("stardist:0.5:0.4");
+        RecordingSizeStore sizeStore = new RecordingSizeStore("0-1");
+        RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
+        RecordingActions actions = new RecordingActions(pair);
+        StarDistParameterStage stage = new StarDistParameterStage(store, sizeStore, adapter);
+
+        stage.buildControls(context(), actions);
+        stage.onEnter(context(), pair);
+        stage.runPreviewNowForTest();
+
+        assertEquals("Objects: 1 kept; removed 0 small, 1 large",
+                actions.status);
+        assertLabelOnlyRenderKeeps(pair, 1);
+        assertLabelOnlyRenderHides(pair, 2);
+    }
+
+    @Test
+    public void loadedRunParticleSizeAppliesToFinalVoxelVolumeFilter() throws Exception {
+        RecordingStore store = new RecordingStore("stardist:0.5:0.4");
+        RecordingSizeStore sizeStore = new RecordingSizeStore("0-Infinity");
+        RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
+        RecordingActions actions = new RecordingActions(pair);
+        StarDistParameterStage stage = new StarDistParameterStage(store, sizeStore, adapter);
+        Map<String, Object> loaded = new HashMap<String, Object>();
+        loaded.put("segmentation_methods", Arrays.asList("stardist:0.6:0.3"));
+        loaded.put("particle_sizes", Arrays.asList("3-Infinity"));
+
+        stage.buildControls(context(), actions);
+        stage.onEnter(context(), pair);
+        stage.applyLoadedParameters(loaded);
+        stage.runPreviewNowForTest();
+
+        assertEquals("3-Infinity", sizeStore.token);
+        assertEquals(0.6, adapter.lastPreviewParameters.probabilityThreshold, 0.001);
+        assertEquals(0.3, adapter.lastPreviewParameters.nmsThreshold, 0.001);
+        assertEquals("Objects: 1 kept; removed 1 small, 0 large",
+                actions.status);
+        assertLabelOnlyRenderHides(pair, 1);
+        assertLabelOnlyRenderKeeps(pair, 2);
+    }
+
+    @Test
+    public void starDistAndFinalVoxelVolumeFiltersDoNotDoubleCountSameRemovedObject() throws Exception {
+        RecordingStore store = new RecordingStore("stardist:0.5:0.4:quality=0.5");
+        RecordingSizeStore sizeStore = new RecordingSizeStore("2-Infinity");
+        RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
+        RecordingActions actions = new RecordingActions(pair);
+        StarDistParameterStage stage = new StarDistParameterStage(store, sizeStore, adapter);
+
+        stage.buildControls(context(), actions);
+        stage.onEnter(context(), pair);
+        stage.runPreviewNowForTest();
+
+        assertEquals("Objects: 1 kept; removed 1 by StarDist filters",
+                actions.status);
+        assertLabelOnlyRenderHides(pair, 1);
+        assertLabelOnlyRenderKeeps(pair, 2);
+
+        stage.setSizeMinForTest("4");
+
+        assertEquals("Objects: 0 kept; removed 1 by StarDist filters, 1 small, 0 large",
+                actions.status);
+        assertLabelOnlyRenderHides(pair, 1);
+        assertLabelOnlyRenderHides(pair, 2);
     }
 
     @Test
@@ -434,6 +557,22 @@ public class StarDistParameterStageTest {
 
         @Override public void save(String methodToken) {
             token = methodToken;
+        }
+    }
+
+    private static final class RecordingSizeStore implements StarDistParameterStage.SizeStore {
+        String token;
+
+        RecordingSizeStore(String token) {
+            this.token = token;
+        }
+
+        @Override public String get() {
+            return token;
+        }
+
+        @Override public void set(String token) {
+            this.token = token;
         }
     }
 

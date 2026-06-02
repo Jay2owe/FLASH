@@ -2,6 +2,7 @@ package flash.pipeline.ui.variations;
 
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.preview.ComparisonPreviewDialog;
+import flash.pipeline.ui.preview.MinMaxControlPanel;
 import flash.pipeline.ui.preview.PreviewDisplaySettings;
 import flash.pipeline.ui.preview.VariationComparisonPreview;
 import flash.pipeline.ui.variations.analysis.IouStability;
@@ -99,6 +100,8 @@ public final class VariationsDialog extends PipelineDialog {
     private VariationState resumeState;
     private ComparisonPreviewDialog comparisonDialog;
     private VariationGridWindow gridWindow;
+    private VariationCellPanel pickSelectedCell;
+    private ParameterCombo pickSelectedCombo;
     private CropSpec currentCropSpec = CropSpec.centre256();
     private boolean suppressCropEvents;
     private int completedCount;
@@ -107,6 +110,14 @@ public final class VariationsDialog extends PipelineDialog {
     private VariationStrategy strategyForTest;
     private String stableCountStatus = "";
     private String stableMasksStatus = "";
+    private ImagePlus croppedRawSource;
+    private ImagePlus croppedFilteredSource;
+    private PreviewDisplaySettings gridDisplaySettings;
+    private boolean gridLutGrey;
+    private double gridRangeMin = Double.NaN;
+    private double gridRangeMax = Double.NaN;
+    private JDialog gridBrightnessDialog;
+    private MinMaxControlPanel gridBrightnessControls;
 
     public VariationsDialog(Window owner,
                             VariationEngineContext context,
@@ -436,6 +447,14 @@ public final class VariationsDialog extends PipelineDialog {
         suggestButton.setEnabled(false);
         runStartedAtMs = System.currentTimeMillis();
         ImagePlus croppedSource = currentSweep.cropSpec().apply(source);
+        croppedFilteredSource = croppedSource;
+        croppedRawSource = context.rawSource() == null
+                ? null
+                : currentSweep.cropSpec().apply(context.rawSource());
+        gridLutGrey = false;
+        gridRangeMin = Double.NaN;
+        gridRangeMax = Double.NaN;
+        gridDisplaySettings = buildGridDisplaySettings();
         List<ParameterCombo> combos = currentSweep.combos();
         VariationCache runCache = new VariationCache(context.configContext());
         currentRunCache = runCache;
@@ -465,11 +484,19 @@ public final class VariationsDialog extends PipelineDialog {
             VariationCellPanel cell = new VariationCellPanel(combo, croppedSource,
                     new Consumer<ParameterCombo>() {
                         @Override public void accept(ParameterCombo accepted) {
-                            acceptAndClose(accepted);
+                            // Click selects the tile; the toolbar "Pick
+                            // selected" button commits it.
+                            selectForPick(accepted);
                         }
                     },
                     compare,
                     i);
+            cell.setOnPickCommit(new Consumer<ParameterCombo>() {
+                @Override public void accept(ParameterCombo accepted) {
+                    // The tile's "Pick" pill commits this variation directly.
+                    acceptAndClose(accepted);
+                }
+            });
             cell.setState("running");
             cell.setZ(1);
             cells.add(cell);
@@ -537,11 +564,50 @@ public final class VariationsDialog extends PipelineDialog {
     }
 
     private void openGridWindowForRun() {
-        gridWindow = new VariationGridWindow(getWindow(), "FLASH variations", cells);
-        gridWindow.setOtsuOverlaySelected(false);
-        gridWindow.setDownstreamVerdictSelected(false);
-        gridWindow.setDownstreamControlsEnabled(false, false,
-                "Downstream verdicts are only available for macro variations.");
+        pickSelectedCell = null;
+        pickSelectedCombo = null;
+        disposeGridBrightnessDialog();
+        gridWindow = new VariationGridWindow(getWindow(), "FLASH variations", cells, true);
+        gridWindow.setPickSelectedEnabled(false);
+        applyObjectOverlaySourcesToCells();
+        applyGridDisplaySettingsToCells();
+        gridWindow.setObjectOverlaySourceEnabled(gridWindow.isObjectOverlaySelected());
+        gridWindow.setLutToggleText(lutToggleText(), lutToggleTooltip());
+        gridWindow.attachObjectOverlayActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                boolean selected = gridWindow.isObjectOverlaySelected();
+                gridWindow.setObjectOverlaySourceEnabled(selected);
+                for (VariationCellPanel cell : cells) {
+                    cell.setObjectOverlayEnabled(selected);
+                }
+            }
+        });
+        gridWindow.attachObjectOverlaySourceActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                boolean raw = gridWindow.isObjectOverlaySourceRaw();
+                for (VariationCellPanel cell : cells) {
+                    cell.setObjectOverlaySourceRaw(raw);
+                }
+                reseedGridBrightnessControls();
+            }
+        });
+        gridWindow.attachLutToggleActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                toggleGridLut();
+            }
+        });
+        gridWindow.attachBrightnessActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                showGridBrightnessDialog();
+            }
+        });
+        gridWindow.attachPickSelectedActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                if (pickSelectedCombo != null) {
+                    acceptAndClose(pickSelectedCombo);
+                }
+            }
+        });
         gridWindow.attachSaveCacheActionListener(new ActionListener() {
             @Override public void actionPerformed(ActionEvent e) {
                 snapshotVariationsCache();
@@ -549,6 +615,118 @@ public final class VariationsDialog extends PipelineDialog {
         });
         gridWindow.setVisible(true);
         updateGridWindowProgress();
+    }
+
+    private void applyObjectOverlaySourcesToCells() {
+        boolean selected = gridWindow != null && gridWindow.isObjectOverlaySelected();
+        boolean raw = gridWindow != null && gridWindow.isObjectOverlaySourceRaw();
+        for (VariationCellPanel cell : cells) {
+            cell.setObjectRawCrop(croppedRawSource);
+            cell.setObjectOverlaySourceRaw(raw);
+            cell.setObjectOverlayEnabled(selected);
+        }
+    }
+
+    private void applyGridDisplaySettingsToCells() {
+        for (VariationCellPanel cell : cells) {
+            cell.setObjectDisplaySettings(gridDisplaySettings);
+        }
+    }
+
+    private PreviewDisplaySettings buildGridDisplaySettings() {
+        PreviewDisplaySettings.LutMode mode = gridLutGrey
+                ? PreviewDisplaySettings.LutMode.GREY
+                : PreviewDisplaySettings.LutMode.CHANNEL;
+        return PreviewDisplaySettings.of(gridRangeMin, gridRangeMax, mode, context.channelName());
+    }
+
+    private void rebuildGridDisplaySettings() {
+        gridDisplaySettings = buildGridDisplaySettings();
+        applyGridDisplaySettingsToCells();
+    }
+
+    private void toggleGridLut() {
+        gridLutGrey = !gridLutGrey;
+        rebuildGridDisplaySettings();
+        if (gridWindow != null) {
+            gridWindow.setLutToggleText(lutToggleText(), lutToggleTooltip());
+        }
+    }
+
+    private String channelLutName() {
+        return PreviewDisplaySettings.defaultFor(context.channelName()).getChannelLutName();
+    }
+
+    private String lutToggleText() {
+        return gridLutGrey ? channelLutName() + " LUT" : "Grey LUT";
+    }
+
+    private String lutToggleTooltip() {
+        return gridLutGrey
+                ? "Show the source with the channel LUT."
+                : "Show the source in grey.";
+    }
+
+    private ImagePlus currentOverlaySourceImage() {
+        boolean raw = gridWindow != null && gridWindow.isObjectOverlaySourceRaw();
+        if (raw && croppedRawSource != null) {
+            return croppedRawSource;
+        }
+        if (croppedFilteredSource != null) {
+            return croppedFilteredSource;
+        }
+        return croppedRawSource;
+    }
+
+    private void showGridBrightnessDialog() {
+        if (GraphicsEnvironment.isHeadless() || gridWindow == null) {
+            return;
+        }
+        if (gridBrightnessControls == null) {
+            gridBrightnessControls = new MinMaxControlPanel(false);
+            gridBrightnessControls.setListener(new MinMaxControlPanel.Listener() {
+                @Override public void rangeChanged(double min, double max, boolean adjusting) {
+                    gridRangeMin = min;
+                    gridRangeMax = max;
+                    rebuildGridDisplaySettings();
+                }
+
+                @Override public void autoRequested() { /* range already applied */ }
+
+                @Override public void resetRequested() { /* range already applied */ }
+
+                @Override public void setRequested() { /* modeless: no commit step */ }
+            });
+        }
+        if (gridBrightnessDialog == null) {
+            gridBrightnessDialog = new JDialog(gridWindow, "Tile Brightness/Contrast");
+            gridBrightnessDialog.setDefaultCloseOperation(JDialog.HIDE_ON_CLOSE);
+            gridBrightnessDialog.setContentPane(gridBrightnessControls);
+            gridBrightnessDialog.setMinimumSize(new Dimension(360, 320));
+        }
+        reseedGridBrightnessControls();
+        gridBrightnessDialog.pack();
+        gridBrightnessDialog.setLocationRelativeTo(gridWindow);
+        gridBrightnessDialog.setVisible(true);
+        gridBrightnessDialog.toFront();
+    }
+
+    private void reseedGridBrightnessControls() {
+        if (gridBrightnessControls == null) {
+            return;
+        }
+        gridBrightnessControls.setImage(currentOverlaySourceImage());
+        if (Double.isFinite(gridRangeMin) && Double.isFinite(gridRangeMax)
+                && gridRangeMax > gridRangeMin) {
+            gridBrightnessControls.setRange(gridRangeMin, gridRangeMax);
+        }
+    }
+
+    private void disposeGridBrightnessDialog() {
+        if (gridBrightnessDialog != null) {
+            gridBrightnessDialog.dispose();
+            gridBrightnessDialog = null;
+        }
     }
 
     private void snapshotVariationsCache() {
@@ -946,7 +1124,50 @@ public final class VariationsDialog extends PipelineDialog {
     }
 
     private void handleCompare(ParameterCombo combo, VariationCellPanel cell) {
+        // Shift-click drives the two-tile comparison; clear any single-tile
+        // pick selection so only one highlight is ever active.
+        clearPickSelection();
         comparisonSelection.handleShiftClick(cell);
+    }
+
+    /**
+     * Single left-click: mark a tile as the pick candidate (highlight it and
+     * enable the toolbar "Pick selected" button) without committing, so the
+     * user can zoom/compare before choosing.
+     */
+    private void selectForPick(ParameterCombo combo) {
+        if (comparisonSelection.hasPendingSelection()) {
+            comparisonSelection.cancelSelection();
+        }
+        VariationCellPanel cell = combo == null
+                ? null
+                : cellsByCombo.get(combo.toCanonicalJson());
+        if (pickSelectedCell != null && pickSelectedCell != cell) {
+            pickSelectedCell.setSelectedForCompare(false);
+        }
+        pickSelectedCell = cell;
+        pickSelectedCombo = combo;
+        if (cell != null) {
+            cell.setSelectedForCompare(true);
+        }
+        if (gridWindow != null) {
+            gridWindow.setPickSelectedEnabled(combo != null);
+        }
+        if (combo != null) {
+            setStatusTextNow(
+                    "Selected. Use the Pick selected button to apply it.");
+        }
+    }
+
+    private void clearPickSelection() {
+        if (pickSelectedCell != null) {
+            pickSelectedCell.setSelectedForCompare(false);
+            pickSelectedCell = null;
+        }
+        pickSelectedCombo = null;
+        if (gridWindow != null) {
+            gridWindow.setPickSelectedEnabled(false);
+        }
     }
 
     private void openComparison(VariationCellPanel left, VariationCellPanel right) {
@@ -981,6 +1202,7 @@ public final class VariationsDialog extends PipelineDialog {
     }
 
     private void disposeGridWindow() {
+        disposeGridBrightnessDialog();
         if (gridWindow != null) {
             gridWindow.dispose();
             gridWindow = null;

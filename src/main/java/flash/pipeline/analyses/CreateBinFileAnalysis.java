@@ -716,6 +716,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         for (int i = 0; i < cfg.names.size(); i++) {
             String existingMethod = i < cfg.segmentationMethods.size() ? cfg.segmentationMethods.get(i) : null;
             applySegmentationSelection(cfg.segmentationMethods, i, selections.get(i), existingMethod, preferCellposeGpu);
+            normalizeNewStarDistSizeDefault(cfg, i, existingMethod);
         }
         return true;
     }
@@ -3058,6 +3059,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
             cfg.segmentationMethods.add(currentMethod);
             applySegmentationSelection(cfg.segmentationMethods, i, selection, currentMethod,
                     preferCellposeGpu);
+            normalizeNewStarDistSizeDefault(cfg, i, currentMethod);
         }
 
         cfg.markerIds.clear();
@@ -6911,7 +6913,6 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         ConfigQcResult result = showEmbeddedConfigQcDialog(context, stages);
         if (result == ConfigQcResult.DONE || result == ConfigQcResult.SKIP_CURRENT_IMAGE) {
             if (isStarDistSegmentation(cfg, channelIndex)) {
-                cfg.sizes.set(channelIndex, "0-Infinity");
                 if (!includeAiChannelThreshold) {
                     cfg.objectThresholds.set(channelIndex, "default");
                 }
@@ -7459,7 +7460,6 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                 context, Collections.<ConfigQcStage>singletonList(stage));
         if (result == ConfigQcResult.DONE || result == ConfigQcResult.SKIP_CURRENT_IMAGE) {
             cfg.objectThresholds.set(channelIndex, "default");
-            cfg.sizes.set(channelIndex, "0-Infinity");
             return "continue";
         }
         if (result == ConfigQcResult.BACK) {
@@ -7481,6 +7481,15 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
 
                     @Override public void save(String methodToken) {
                         cfg.segmentationMethods.set(channelIndex, methodToken);
+                    }
+                },
+                new StarDistParameterStage.SizeStore() {
+                    @Override public String get() {
+                        return cfg.sizes.get(channelIndex);
+                    }
+
+                    @Override public void set(String token) {
+                        cfg.sizes.set(channelIndex, token);
                     }
                 },
                 new StarDistParameterStage.PreviewAdapter() {
@@ -9378,6 +9387,32 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                 useGpu));
     }
 
+    private static void normalizeNewStarDistSizeDefault(BinUserConfig cfg,
+                                                        int channelIndex,
+                                                        String previousMethod) {
+        if (cfg == null || channelIndex < 0 || channelIndex >= cfg.segmentationMethods.size()) {
+            return;
+        }
+        String currentMethod = cfg.segmentationMethods.get(channelIndex);
+        if (!safe(currentMethod).startsWith("stardist")
+                || safe(previousMethod).startsWith("stardist")) {
+            return;
+        }
+        while (cfg.sizes.size() <= channelIndex) {
+            cfg.sizes.add("100-Infinity");
+        }
+        if (isGenericParticleSizeDefault(cfg.sizes.get(channelIndex))) {
+            cfg.sizes.set(channelIndex, "0-Infinity");
+        }
+    }
+
+    private static boolean isGenericParticleSizeDefault(String token) {
+        return token == null
+                || token.trim().isEmpty()
+                || "100-Infinity".equalsIgnoreCase(token.trim())
+                || "100-inf".equalsIgnoreCase(token.trim());
+    }
+
     private static LinkedHashMap<String, Integer> buildCellposeCompanionChoices(List<String> channelNames,
                                                                                 int primaryChannelIndex) {
         LinkedHashMap<String, Integer> choices = new LinkedHashMap<String, Integer>();
@@ -9722,6 +9757,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                 String existingMethod = currentToken();
                 applySegmentationSelection(cfg.segmentationMethods, channelIndex,
                         normalized, existingMethod, preferCellposeGpu);
+                normalizeNewStarDistSizeDefault(cfg, channelIndex, existingMethod);
             }
             rememberCurrentToken();
             return true;

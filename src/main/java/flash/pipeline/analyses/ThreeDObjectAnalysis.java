@@ -3916,9 +3916,23 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                             + "): " + nObjects + " objects detected");
                 }
 
-                // StarDist object filtering is controlled by StarDist area/quality/intensity parameters.
-                int minSizeVox = 0;
-                int maxSizeVox = Integer.MAX_VALUE;
+                String effectiveSizeToken = sizeToken == null || sizeToken.trim().isEmpty()
+                        ? "0-Infinity"
+                        : sizeToken;
+                String[] sizeParts = effectiveSizeToken.split("-");
+                String minSize = sizeParts.length > 0 ? sizeParts[0] : "0";
+                String maxSize = sizeParts.length > 1 ? sizeParts[1] : "Infinity";
+                int minSizeVox = ObjectsCounter3DWrapper.parseMinSizeVoxels(minSize, 0);
+                int maxSizeVox = ObjectsCounter3DWrapper.parseMaxSizeVoxels(maxSize, binaryMask);
+                String maxSizeText = maxSize == null ? "" : maxSize.trim();
+                boolean maxSizeFinite = !("Infinity".equalsIgnoreCase(maxSizeText)
+                        || "inf".equalsIgnoreCase(maxSizeText)
+                        || maxSizeText.isEmpty());
+                if (!compactLog && (minSizeVox > 0 || maxSizeFinite)) {
+                    IJ.log("    - [Ch " + (c + 1) + "] StarDist final 3D voxel volume filter: "
+                            + minSizeVox + "-" + (maxSizeFinite ? String.valueOf(maxSizeVox) : "Infinity")
+                            + " voxels");
+                }
 
                 return new ChannelFilterResult(c, channelName, ch, binaryMask,
                         null, minSizeVox, maxSizeVox, false, null,

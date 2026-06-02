@@ -62,7 +62,13 @@ public class VariationsDialogTest {
                 for (int i = 1; i < cells.size(); i++) {
                     assertTrue(cells.get(i).cachedLabelForTest() != null);
                 }
+                // Click selects the tile; the toolbar "Pick selected" button
+                // commits it.
                 cells.get(1).clickForTest(false);
+                assertTrue(holder[0].gridWindowForTest()
+                        .pickSelectedButtonForTest().isEnabled());
+                holder[0].gridWindowForTest()
+                        .pickSelectedButtonForTest().doClick();
             }
         });
         assertTrue(accepted.get() != null);

@@ -545,12 +545,20 @@ public final class MacroVariationsDialog extends PipelineDialog {
             VariationCellPanel cell = new VariationCellPanel(combo, croppedSource,
                     new Consumer<ParameterCombo>() {
                         @Override public void accept(ParameterCombo accepted) {
+                            // Click selects the tile (enables the explicit Pick
+                            // controls); committing happens via "Use this combo"
+                            // / the toolbar "Pick selected" button.
                             selectCombo(accepted, strategy);
-                            acceptAndClose(accepted, strategy);
                         }
                     },
                     null,
                     i);
+            cell.setOnPickCommit(new Consumer<ParameterCombo>() {
+                @Override public void accept(ParameterCombo accepted) {
+                    // The tile's "Pick" pill commits this variation directly.
+                    acceptAndClose(accepted, strategy);
+                }
+            });
             cell.setState("running");
             cell.setZ(1);
             cell.setOverlayMode(currentOverlayMode());

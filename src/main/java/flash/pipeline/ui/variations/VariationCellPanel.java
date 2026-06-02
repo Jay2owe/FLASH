@@ -3,6 +3,7 @@ package flash.pipeline.ui.variations;
 import flash.pipeline.ui.FlashTheme;
 import flash.pipeline.ui.preview.ImagePreviewPanel;
 import flash.pipeline.ui.preview.ObjectOverlayRenderer;
+import flash.pipeline.ui.preview.PreviewDisplaySettings;
 import flash.pipeline.ui.preview.ThresholdOverlayRenderer;
 
 import ij.ImagePlus;
@@ -104,6 +105,7 @@ public final class VariationCellPanel extends JPanel {
     private final ImagePlus croppedSource;
     private final Consumer<ParameterCombo> onAccept;
     private final BiConsumer<ParameterCombo, VariationCellPanel> onCompare;
+    private Consumer<ParameterCombo> onPickCommit;
     private final int placeholderIndex;
     private final ImagePreviewPanel preview = new ImagePreviewPanel("Variation");
     private final List<ParameterKey> footerParameterKeys =
@@ -122,6 +124,13 @@ public final class VariationCellPanel extends JPanel {
     private ImagePlus ownedDisplayedPreviewImage;
     private OverlayMode overlayMode = OverlayMode.NONE;
     private double cachedOtsuLower = Double.NaN;
+    // Object-overlay state (segmentation tiles only). The filtered crop is
+    // {@link #croppedSource}; the raw crop is supplied separately so the grid
+    // can overlay labels on either source and honour a shared LUT / display range.
+    private ImagePlus objectRawCrop;
+    private boolean objectOverlayEnabled = true;
+    private boolean objectOverlaySourceRaw;
+    private PreviewDisplaySettings objectDisplaySettings;
     private long durationMs = -1L;
     private int objectCount = -1;
     private int deltaN = UNKNOWN_DELTA;
@@ -212,6 +221,15 @@ public final class VariationCellPanel extends JPanel {
 
     public ParameterCombo combo() {
         return combo;
+    }
+
+    /**
+     * Sets the action run when the tile's "Pick" pill (top-right) is clicked.
+     * This commits the variation directly, distinct from a body click which
+     * only selects the tile.
+     */
+    public void setOnPickCommit(Consumer<ParameterCombo> onPickCommit) {
+        this.onPickCommit = onPickCommit;
     }
 
     /**
@@ -489,19 +507,107 @@ public final class VariationCellPanel extends JPanel {
         clearDownstreamVerdictState();
         showSegmentationFooter();
 
-        ImagePlus rendered = null;
-        if (croppedSource != null && dimensionsMatch(croppedSource, cachedLabel)) {
-            rendered = ObjectOverlayRenderer.renderOverlay(croppedSource, cachedLabel);
-        }
-        if (rendered == null) {
-            rendered = ObjectOverlayRenderer.renderLabelMap(cachedLabel, objectCount);
-        }
-        if (rendered == null) {
-            rendered = cachedLabel;
-        }
-        setDisplayedPreviewImage(rendered, rendered != cachedLabel);
+        ImagePlus rendered = renderObjectPreview();
+        setDisplayedPreviewImage(rendered, rendered != null && rendered != cachedLabel);
         refreshFooter();
         refreshTooltip();
+    }
+
+    /**
+     * Toggles whether segmentation tiles draw their labels over a source image
+     * ({@code true}) or show the bare colour-coded label map ({@code false}).
+     * No-op for filter, baseline and error tiles.
+     */
+    public void setObjectOverlayEnabled(final boolean enabled) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setObjectOverlayEnabled(enabled);
+                }
+            });
+            return;
+        }
+        objectOverlayEnabled = enabled;
+        refreshObjectOverlay();
+    }
+
+    /** Chooses the raw ({@code true}) or filtered ({@code false}) crop as the overlay background. */
+    public void setObjectOverlaySourceRaw(final boolean raw) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setObjectOverlaySourceRaw(raw);
+                }
+            });
+            return;
+        }
+        objectOverlaySourceRaw = raw;
+        refreshObjectOverlay();
+    }
+
+    /** Raw source crop used when the overlay background is set to "Raw image". */
+    public void setObjectRawCrop(final ImagePlus rawCrop) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setObjectRawCrop(rawCrop);
+                }
+            });
+            return;
+        }
+        objectRawCrop = rawCrop;
+        refreshObjectOverlay();
+    }
+
+    /** Shared LUT + display range applied to the overlay background. */
+    public void setObjectDisplaySettings(final PreviewDisplaySettings settings) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setObjectDisplaySettings(settings);
+                }
+            });
+            return;
+        }
+        objectDisplaySettings = settings;
+        refreshObjectOverlay();
+    }
+
+    private void refreshObjectOverlay() {
+        if (isBaseline || errorState || filterFooterActive || cachedLabel == null) {
+            return;
+        }
+        ImagePlus rendered = renderObjectPreview();
+        setDisplayedPreviewImage(rendered, rendered != null && rendered != cachedLabel);
+    }
+
+    private ImagePlus renderObjectPreview() {
+        ImagePlus label = cachedLabel;
+        if (label == null) {
+            return null;
+        }
+        ImagePlus source = objectOverlayEnabled ? objectOverlaySource() : null;
+        ImagePlus rendered = null;
+        if (source != null && dimensionsMatch(source, label)) {
+            rendered = ObjectOverlayRenderer.renderFiltered(source, label, null, true,
+                    objectDisplaySettings);
+        }
+        if (rendered == null) {
+            rendered = ObjectOverlayRenderer.renderLabelMap(label, objectCount);
+        }
+        if (rendered == null) {
+            rendered = label;
+        }
+        return rendered;
+    }
+
+    private ImagePlus objectOverlaySource() {
+        ImagePlus raw = objectRawCrop;
+        ImagePlus filtered = croppedSource;
+        if (objectOverlaySourceRaw) {
+            return raw != null ? raw : filtered;
+        }
+        return filtered != null ? filtered : raw;
     }
 
     public void setOverlayMode(final OverlayMode mode) {
@@ -789,6 +895,18 @@ public final class VariationCellPanel extends JPanel {
         return overlayMode;
     }
 
+    boolean objectOverlayEnabledForTest() {
+        return objectOverlayEnabled;
+    }
+
+    boolean objectOverlaySourceRawForTest() {
+        return objectOverlaySourceRaw;
+    }
+
+    PreviewDisplaySettings objectDisplaySettingsForTest() {
+        return objectDisplaySettings;
+    }
+
     double cachedOtsuLowerForTest() {
         return cachedOtsuLower;
     }
@@ -891,8 +1009,27 @@ public final class VariationCellPanel extends JPanel {
         }
     }
 
-    boolean isPickPillVisibleForTest() {
+    private boolean pickPillVisible() {
         return acceptEnabled && !isBaseline;
+    }
+
+    boolean isPickPillVisibleForTest() {
+        return pickPillVisible();
+    }
+
+    private Rectangle pickPillBounds() {
+        int width = getWidth();
+        int height = getHeight();
+        int x = Math.max(PICK_PILL_INSET,
+                width - PICK_PILL_WIDTH - PICK_PILL_INSET);
+        int y = Math.min(Math.max(PICK_PILL_INSET, 0),
+                Math.max(0, height - PICK_PILL_HEIGHT - PICK_PILL_INSET));
+        return new Rectangle(x, y, PICK_PILL_WIDTH, PICK_PILL_HEIGHT);
+    }
+
+    private boolean hitPickPill(Point p) {
+        return !peeking && pickPillVisible() && p != null
+                && pickPillBounds().contains(p);
     }
 
     @Override protected void paintComponent(Graphics g) {
@@ -990,6 +1127,16 @@ public final class VariationCellPanel extends JPanel {
                     cancelPeek(true);
                     pressPoint = null;
                     openLargeView();
+                    return;
+                }
+                if (e != null && SwingUtilities.isLeftMouseButton(e)
+                        && !e.isShiftDown()
+                        && onPickCommit != null
+                        && hitPickPill(pointInCell(e))) {
+                    e.consume();
+                    cancelPeek(true);
+                    pressPoint = null;
+                    onPickCommit.accept(combo);
                     return;
                 }
                 handleMousePressed(e);
@@ -1425,7 +1572,7 @@ public final class VariationCellPanel extends JPanel {
     }
 
     private void paintPickPill(Graphics g) {
-        if (!isPickPillVisibleForTest()) {
+        if (!pickPillVisible()) {
             return;
         }
         int width = getWidth();
@@ -1438,10 +1585,9 @@ public final class VariationCellPanel extends JPanel {
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
                     RenderingHints.VALUE_ANTIALIAS_ON);
             g2.setClip(cardShape());
-            int x = Math.max(PICK_PILL_INSET,
-                    width - PICK_PILL_WIDTH - PICK_PILL_INSET);
-            int y = Math.min(Math.max(PICK_PILL_INSET, 0),
-                    Math.max(0, height - PICK_PILL_HEIGHT - PICK_PILL_INSET));
+            Rectangle pill = pickPillBounds();
+            int x = pill.x;
+            int y = pill.y;
             g2.setColor(hover ? STABILITY_BORDER.brighter() : STABILITY_BORDER);
             g2.fillRoundRect(x, y, PICK_PILL_WIDTH, PICK_PILL_HEIGHT,
                     PICK_PILL_RADIUS, PICK_PILL_RADIUS);

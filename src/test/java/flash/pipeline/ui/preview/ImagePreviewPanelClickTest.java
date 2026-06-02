@@ -23,6 +23,30 @@ public class ImagePreviewPanelClickTest {
     }
 
     @Test
+    public void canvasInterceptsClicksOnlyWhenPixelClickListenerIsSet() {
+        // REGRESSION: the canvas used to register a mouse listener
+        // unconditionally in its constructor. Because Swing delivers a mouse
+        // event to the deepest component that has a listener, the canvas
+        // swallowed clicks meant for an ancestor (e.g. a variation tile's
+        // pick/select handler) whenever no pixel-click consumer was set, so
+        // clicking a variation tile appeared to do nothing. The canvas must
+        // only listen while a PixelClickListener is registered.
+        ImagePreviewPanel panel = new ImagePreviewPanel("Preview");
+        assertEquals(0, panel.canvasForTest().getMouseListeners().length);
+
+        panel.setPixelClickListener(new ImagePreviewPanel.PixelClickListener() {
+            @Override public void pixelClicked(ImagePreviewPanel src, double imageX,
+                                               double imageY, int z, int button,
+                                               int modifiers) {
+            }
+        });
+        assertEquals(1, panel.canvasForTest().getMouseListeners().length);
+
+        panel.setPixelClickListener(null);
+        assertEquals(0, panel.canvasForTest().getMouseListeners().length);
+    }
+
+    @Test
     public void clickOutsideDrawnImageIsIgnored() {
         ImagePreviewPanel panel = paintedPanel(260, 260);
         final int[] count = {0};

@@ -545,6 +545,51 @@ public class CreateBinFileAnalysisTest {
     }
 
     @Test
+    public void buildConfigFromDialogSwitchingToStarDistClearsGenericSizeDefault() throws Exception {
+        CreateBinFileAnalysis analysis = new CreateBinFileAnalysis();
+        CreateBinFileAnalysis.BinUserConfig draft = twoChannelConfig();
+        Object bindings = newBinSetupBindings(2);
+        @SuppressWarnings("unchecked")
+        JComboBox<String>[] segmentationCombos = new JComboBox[]{
+                new JComboBox<String>(new String[]{"Classical", "StarDist 3D"}),
+                new JComboBox<String>(new String[]{"Classical", "StarDist 3D"})
+        };
+        segmentationCombos[0].setSelectedItem("Classical");
+        segmentationCombos[1].setSelectedItem("StarDist 3D");
+        copyBindingArray(bindings, "segmentationCombos", segmentationCombos);
+
+        CreateBinFileAnalysis.BinUserConfig result =
+                invokeBuildBinUserConfigFromDialog(analysis, 2, draft, bindings);
+
+        assertEquals("classical", result.segmentationMethods.get(0));
+        assertEquals("stardist:0.5:0.4", result.segmentationMethods.get(1));
+        assertEquals("100-Infinity", result.sizes.get(0));
+        assertEquals("0-Infinity", result.sizes.get(1));
+    }
+
+    @Test
+    public void buildConfigFromDialogSwitchingToStarDistPreservesExplicitSizeFilter() throws Exception {
+        CreateBinFileAnalysis analysis = new CreateBinFileAnalysis();
+        CreateBinFileAnalysis.BinUserConfig draft = twoChannelConfig();
+        draft.sizes.set(1, "80-Infinity");
+        Object bindings = newBinSetupBindings(2);
+        @SuppressWarnings("unchecked")
+        JComboBox<String>[] segmentationCombos = new JComboBox[]{
+                new JComboBox<String>(new String[]{"Classical", "StarDist 3D"}),
+                new JComboBox<String>(new String[]{"Classical", "StarDist 3D"})
+        };
+        segmentationCombos[0].setSelectedItem("Classical");
+        segmentationCombos[1].setSelectedItem("StarDist 3D");
+        copyBindingArray(bindings, "segmentationCombos", segmentationCombos);
+
+        CreateBinFileAnalysis.BinUserConfig result =
+                invokeBuildBinUserConfigFromDialog(analysis, 2, draft, bindings);
+
+        assertEquals("stardist:0.5:0.4", result.segmentationMethods.get(1));
+        assertEquals("80-Infinity", result.sizes.get(1));
+    }
+
+    @Test
     public void buildConfigFromDialogDoesNotPersistLoadingFiltersPlaceholder() throws Exception {
         CreateBinFileAnalysis analysis = new CreateBinFileAnalysis();
         CreateBinFileAnalysis.BinUserConfig draft = twoChannelConfig();

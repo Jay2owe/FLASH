@@ -57,7 +57,10 @@ public class MacroVariationsDialogAcceptCallbackTest {
                     assertEquals(2, dialog.cellsForTest().size());
                     assertTrue(dialog.cellsForTest().get(0).isBaselineForTest());
                     assertFalse(dialog.useComboButtonForTest().isEnabled());
+                    // Click selects the tile; committing is an explicit button.
                     dialog.cellsForTest().get(1).clickForTest(false);
+                    assertTrue(dialog.useComboButtonForTest().isEnabled());
+                    dialog.useComboButtonForTest().doClick();
                 }
             });
 

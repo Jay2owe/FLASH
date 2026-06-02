@@ -71,6 +71,12 @@ public final class ImagePreviewPanel extends JPanel {
     private JLabel slimTitleLabel;
     private ZSliceChangeListener zSliceChangeListener;
     private PixelClickListener pixelClickListener;
+    private final MouseAdapter canvasClickAdapter = new MouseAdapter() {
+        @Override public void mouseClicked(MouseEvent e) {
+            handleCanvasClick(e);
+        }
+    };
+    private boolean canvasClickAdapterInstalled;
     private PreviewDisplaySettings displaySettings = PreviewDisplaySettings.defaultFor("Grays");
     private boolean displaySettingsEnabled = true;
     private ObjectSizeFilterPreview.Summary objectSizeGuide;
@@ -268,6 +274,18 @@ public final class ImagePreviewPanel extends JPanel {
 
     public void setPixelClickListener(PixelClickListener listener) {
         this.pixelClickListener = listener;
+        // The canvas should only intercept mouse events when something actually
+        // consumes pixel clicks. Otherwise it would swallow clicks meant for an
+        // ancestor (e.g. a variation tile's pick/select handler), since Swing
+        // delivers a mouse event to the deepest component that has a listener.
+        boolean shouldInstall = listener != null;
+        if (shouldInstall && !canvasClickAdapterInstalled) {
+            canvas.addMouseListener(canvasClickAdapter);
+            canvasClickAdapterInstalled = true;
+        } else if (!shouldInstall && canvasClickAdapterInstalled) {
+            canvas.removeMouseListener(canvasClickAdapter);
+            canvasClickAdapterInstalled = false;
+        }
     }
 
     public void refresh() {
@@ -661,11 +679,9 @@ public final class ImagePreviewPanel extends JPanel {
             setBackground(Color.BLACK);
             setOpaque(true);
             setMinimumSize(new Dimension(180, 160));
-            addMouseListener(new MouseAdapter() {
-                @Override public void mouseClicked(MouseEvent e) {
-                    handleCanvasClick(e);
-                }
-            });
+            // The pixel-click listener is attached lazily by
+            // setPixelClickListener so the canvas does not steal clicks from
+            // ancestors when no consumer is registered.
         }
 
         @Override protected void paintComponent(Graphics g) {

@@ -561,6 +561,36 @@ public class PreviewPairPanelTest {
     }
 
     @Test
+    public void objectFilterLargeViewOverlayControlsAreLiveAndDriveRenderer() {
+        assumeFalse(GraphicsEnvironment.isHeadless());
+
+        PreviewPairPanel pair = new PreviewPairPanel("Filtered", "Objects");
+        LargePreviewDialog dialog = new LargePreviewDialog(null);
+        try {
+            ImagePlus labels = objectFilterLabels("Object labels");
+            pair.setLargePreviewImages(singleSlice("raw", 0, 100),
+                    singleSlice("filtered", 0, 100), labels);
+            pair.setLargePreviewDialogForTest(dialog);
+            pair.setObjectFilterPreview(labels, removedLabels(2), null, 3);
+            pair.renderObjectPreviewNowForTest();
+
+            // Regression: the large-view overlay controls used to be greyed out because the
+            // dialog received a pre-rendered object map distinct from the raw label map.
+            assertTrue(dialog.overlayControlsVisibleForTest());
+            assertTrue(dialog.overlayCheckEnabledForTest());
+            assertFalse(dialog.overlayCheckSelectedForTest());
+
+            // Toggling the overlay in the large view drives this panel's renderer.
+            dialog.clickOverlayCheckForTest();
+
+            assertTrue(pair.objectOverlaySelected());
+            assertTrue(dialog.overlayCheckSelectedForTest());
+        } finally {
+            dialog.dispose();
+        }
+    }
+
+    @Test
     public void duplicateCurrentObjectPreviewForComparisonUsesRenderedDisplay() {
         PreviewPairPanel pair = new PreviewPairPanel("Filtered", "Objects");
         ImagePlus labels = objectFilterLabels("Object labels");

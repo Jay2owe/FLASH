@@ -254,6 +254,70 @@ public class VariationCellPanelShiftClickTest {
         });
     }
 
+    @Test
+    public void pickPillClickCommitsWithoutSelecting() throws Exception {
+        SwingUtilities.invokeAndWait(new Runnable() {
+            @Override public void run() {
+                final AtomicReference<ParameterCombo> selected =
+                        new AtomicReference<ParameterCombo>();
+                final AtomicReference<ParameterCombo> committed =
+                        new AtomicReference<ParameterCombo>();
+                final ParameterCombo combo = combo(7);
+                VariationCellPanel cell = new VariationCellPanel(combo, source(),
+                        selected::set, null);
+                cell.setOnPickCommit(committed::set);
+                cell.setLabel(label(), null, 1, 1L);
+                cell.setSize(260, 260);
+
+                // Press within the top-right "Pick" pill: commits directly,
+                // does not route to the body-click select handler.
+                pressAt(cell, 225, 21);
+
+                assertSame(combo, committed.get());
+                assertSame(null, selected.get());
+            }
+        });
+    }
+
+    @Test
+    public void bodyClickDoesNotCommitViaPickPill() throws Exception {
+        SwingUtilities.invokeAndWait(new Runnable() {
+            @Override public void run() {
+                final AtomicReference<ParameterCombo> selected =
+                        new AtomicReference<ParameterCombo>();
+                final AtomicReference<ParameterCombo> committed =
+                        new AtomicReference<ParameterCombo>();
+                VariationCellPanel cell = new VariationCellPanel(combo(7), source(),
+                        selected::set, null);
+                cell.setOnPickCommit(committed::set);
+                cell.setLabel(label(), null, 1, 1L);
+                cell.setSize(260, 260);
+
+                // Press in the centre (tile body): selects, never commits.
+                pressAt(cell, 130, 130);
+
+                assertSame(null, committed.get());
+                assertTrue(selected.get() != null);
+            }
+        });
+    }
+
+    private static void pressAt(VariationCellPanel cell, int x, int y) {
+        MouseEvent event = new MouseEvent(cell,
+                MouseEvent.MOUSE_PRESSED,
+                System.currentTimeMillis(),
+                0,
+                x,
+                y,
+                1,
+                false,
+                MouseEvent.BUTTON1);
+        MouseListener[] listeners = cell.getMouseListeners();
+        for (int i = 0; i < listeners.length; i++) {
+            listeners[i].mousePressed(event);
+        }
+    }
+
     private static VariationCellPanel renderedCell(
             final ParameterCombo combo,
             final VariationComparisonSelection selection,

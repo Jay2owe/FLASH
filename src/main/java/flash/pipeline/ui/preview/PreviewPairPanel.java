@@ -1361,6 +1361,15 @@ public final class PreviewPairPanel extends JPanel {
                 setLargePreviewSourceMode(mode);
             }
         });
+        largePreviewDialog.setOverlayChoiceListener(new LargePreviewDialog.OverlayChoiceListener() {
+            @Override public void overlayToggleChanged(boolean selected) {
+                setObjectOverlaySelected(selected);
+            }
+
+            @Override public void overlaySourceChanged(boolean rawSource) {
+                setObjectOverlaySourceRaw(rawSource);
+            }
+        });
         largePreviewDialog.setDisplayActionListener(new LargePreviewDialog.DisplayActionListener() {
             @Override public void adjustBrightnessContrastRequested() {
                 activateLargeDisplayControls();
@@ -1597,6 +1606,7 @@ public final class PreviewPairPanel extends JPanel {
         largePreviewDialog.setAdjustedStatusText(adjustedPreview.statusTextForTest());
         largePreviewDialog.setDisplaySettings(largeFirstDisplaySettings(),
                 largeSecondDisplaySettings());
+        pushObjectOverlayStateToLargeDialog();
         applyClickOverlayMarkers();
     }
 
@@ -1992,6 +2002,53 @@ public final class PreviewPairPanel extends JPanel {
         }
         objectOverlayControls.revalidate();
         objectOverlayControls.repaint();
+        pushObjectOverlayStateToLargeDialog();
+    }
+
+    /**
+     * Mirrors the panel's object-overlay state onto the Large preview dialog so its overlay
+     * controls drive this renderer instead of sitting greyed out. The dialog cannot render the
+     * filtered overlay itself (it lacks the removed-label data), so it forwards control changes
+     * back here through {@link LargePreviewDialog.OverlayChoiceListener}.
+     */
+    private void pushObjectOverlayStateToLargeDialog() {
+        if (largePreviewDialog == null) return;
+        if (objectTrueLabelMap == null) {
+            largePreviewDialog.setExternalOverlayState(false, false, false, false, false);
+            return;
+        }
+        boolean hasSource = largePreviewFirstImage != null || largePreviewSecondImage != null;
+        boolean toggleEnabled = objectOverlayEnabled && hasSource;
+        boolean selected = objectOverlayCheck.isSelected();
+        largePreviewDialog.setExternalOverlayState(
+                true,
+                toggleEnabled,
+                selected,
+                toggleEnabled && selected,
+                overlaySourceIsRaw());
+    }
+
+    private boolean overlaySourceIsRaw() {
+        if (sourceToggleVisible) {
+            return sourceMode == SourceMode.RAW;
+        }
+        Object selected = objectOverlaySourceChoice.getSelectedItem();
+        return selected != null && "Raw image".equals(selected.toString());
+    }
+
+    private void setObjectOverlaySourceRaw(boolean raw) {
+        if (sourceToggleVisible) {
+            SourceMode mode = raw ? SourceMode.RAW : SourceMode.FILTERED;
+            if (sourceMode != mode) {
+                setSourceMode(mode);
+                if (sourceModeListener != null) {
+                    sourceModeListener.sourceModeChanged(sourceMode);
+                }
+            }
+            return;
+        }
+        objectOverlaySourceChoice.setSelectedItem(raw ? "Raw image" : "Filtered image");
+        updateAdjustedPreviewImage();
     }
 
     private boolean objectOverlayAvailable() {

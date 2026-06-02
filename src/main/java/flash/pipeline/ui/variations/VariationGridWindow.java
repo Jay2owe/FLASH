@@ -3,6 +3,7 @@ package flash.pipeline.ui.variations;
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
+import javax.swing.JComboBox;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
@@ -58,6 +59,13 @@ public final class VariationGridWindow extends JDialog {
     private final JButton stopDownstreamButton = new JButton("Stop downstream");
     private final JButton saveCacheButton = new JButton("Save variations cache");
     private final JButton pickSelectedButton = new JButton("Pick selected");
+    // Object-grid overlay controls (mirrors the Large preview footer); only added
+    // to the toolbar when {@code objectOverlayToolbar} is set.
+    private final JCheckBox objectOverlayCheckBox = new JCheckBox("Overlay objects");
+    private final JComboBox<String> objectOverlaySourceChoice = new JComboBox<String>();
+    private final JButton lutToggleButton = new JButton("Grey LUT");
+    private final JButton brightnessButton = new JButton("Adjust Brightness/Contrast");
+    private final boolean objectOverlayToolbar;
     private final ZoomableGrid gridPanel;
     private final JScrollPane gridScroll;
     private final JSlider zSlider = new JSlider(1, 1, 1);
@@ -76,7 +84,15 @@ public final class VariationGridWindow extends JDialog {
     public VariationGridWindow(Window owner,
                                String title,
                                List<VariationCellPanel> sourceCells) {
+        this(owner, title, sourceCells, false);
+    }
+
+    public VariationGridWindow(Window owner,
+                               String title,
+                               List<VariationCellPanel> sourceCells,
+                               boolean objectOverlayToolbar) {
         super(owner, Dialog.ModalityType.MODELESS);
+        this.objectOverlayToolbar = objectOverlayToolbar;
         setTitle(title == null || title.trim().length() == 0
                 ? "FLASH variations"
                 : title.trim());
@@ -169,6 +185,40 @@ public final class VariationGridWindow extends JDialog {
         otsuOverlayCheckBox.addActionListener(listener);
     }
 
+    public void attachObjectOverlayActionListener(ActionListener listener) {
+        objectOverlayCheckBox.addActionListener(listener);
+    }
+
+    public void attachObjectOverlaySourceActionListener(ActionListener listener) {
+        objectOverlaySourceChoice.addActionListener(listener);
+    }
+
+    public void attachLutToggleActionListener(ActionListener listener) {
+        lutToggleButton.addActionListener(listener);
+    }
+
+    public void attachBrightnessActionListener(ActionListener listener) {
+        brightnessButton.addActionListener(listener);
+    }
+
+    public boolean isObjectOverlaySelected() {
+        return objectOverlayCheckBox.isSelected();
+    }
+
+    public boolean isObjectOverlaySourceRaw() {
+        Object selected = objectOverlaySourceChoice.getSelectedItem();
+        return selected != null && "Raw image".equals(selected.toString());
+    }
+
+    public void setObjectOverlaySourceEnabled(boolean enabled) {
+        objectOverlaySourceChoice.setEnabled(enabled);
+    }
+
+    public void setLutToggleText(String text, String tooltip) {
+        lutToggleButton.setText(text == null || text.trim().isEmpty() ? "Grey LUT" : text);
+        lutToggleButton.setToolTipText(tooltip);
+    }
+
     public void attachDownstreamVerdictActionListener(ActionListener listener) {
         downstreamVerdictCheckBox.addActionListener(listener);
     }
@@ -216,6 +266,22 @@ public final class VariationGridWindow extends JDialog {
 
     public JCheckBox otsuOverlayCheckBoxForTest() {
         return otsuOverlayCheckBox;
+    }
+
+    public JCheckBox objectOverlayCheckBoxForTest() {
+        return objectOverlayCheckBox;
+    }
+
+    public JComboBox<String> objectOverlaySourceChoiceForTest() {
+        return objectOverlaySourceChoice;
+    }
+
+    public JButton lutToggleButtonForTest() {
+        return lutToggleButton;
+    }
+
+    public JButton brightnessButtonForTest() {
+        return brightnessButton;
     }
 
     public JCheckBox downstreamVerdictCheckBoxForTest() {
@@ -272,9 +338,6 @@ public final class VariationGridWindow extends JDialog {
 
     private void configureToolBar() {
         toolBar.setFloatable(false);
-        otsuOverlayCheckBox.setOpaque(false);
-        downstreamVerdictCheckBox.setOpaque(false);
-        stopDownstreamButton.setEnabled(false);
         saveCacheButton.setToolTipText(
                 "Variations are not written to disk by default. Click to save the "
                 + "current variations to the disk cache so a later run can reuse "
@@ -282,10 +345,44 @@ public final class VariationGridWindow extends JDialog {
         pickSelectedButton.setEnabled(false);
         pickSelectedButton.setToolTipText(
                 "Use the currently selected variation as the result.");
+        if (objectOverlayToolbar) {
+            configureObjectOverlayToolBar();
+        } else {
+            configureFilterToolBar();
+        }
+    }
+
+    private void configureFilterToolBar() {
+        otsuOverlayCheckBox.setOpaque(false);
+        downstreamVerdictCheckBox.setOpaque(false);
+        stopDownstreamButton.setEnabled(false);
         toolBar.add(otsuOverlayCheckBox);
         toolBar.addSeparator();
         toolBar.add(downstreamVerdictCheckBox);
         toolBar.add(stopDownstreamButton);
+        toolBar.addSeparator();
+        toolBar.add(saveCacheButton);
+        toolBar.addSeparator();
+        toolBar.add(pickSelectedButton);
+    }
+
+    private void configureObjectOverlayToolBar() {
+        objectOverlayCheckBox.setOpaque(false);
+        objectOverlayCheckBox.setSelected(true);
+        objectOverlayCheckBox.setToolTipText("Draw the segmented objects over the source image.");
+        objectOverlaySourceChoice.addItem("Filtered image");
+        objectOverlaySourceChoice.addItem("Raw image");
+        objectOverlaySourceChoice.setToolTipText("Choose the image the objects are drawn over.");
+        // Keep the picker compact so the JToolBar's BoxLayout does not stretch it tall.
+        objectOverlaySourceChoice.setMaximumSize(objectOverlaySourceChoice.getPreferredSize());
+        lutToggleButton.setToolTipText("Show the source in grey.");
+        brightnessButton.setToolTipText("Adjust the source brightness/contrast for all tiles.");
+        toolBar.add(objectOverlayCheckBox);
+        toolBar.add(new JLabel("over"));
+        toolBar.add(objectOverlaySourceChoice);
+        toolBar.addSeparator();
+        toolBar.add(lutToggleButton);
+        toolBar.add(brightnessButton);
         toolBar.addSeparator();
         toolBar.add(saveCacheButton);
         toolBar.addSeparator();
