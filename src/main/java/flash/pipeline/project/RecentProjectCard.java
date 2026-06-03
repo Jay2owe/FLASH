@@ -8,6 +8,7 @@ import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
+import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JMenuItem;
 import javax.swing.JPanel;
@@ -48,14 +49,18 @@ public final class RecentProjectCard extends JPanel {
     public interface Actions {
         void open(RecentProjectCard card);
         void edit(RecentProjectCard card);
+        void locate(RecentProjectCard card);
         void remove(RecentProjectCard card);
     }
 
     private final RecentProject recent;
     private final Actions actions;
+    private final JLabel nameLabel;
     private final JLabel progressLabel;
+    private final JButton locateButton;
     private final Color normalBackground;
     private File resolvedProjectJson;
+    private ProjectService.ResolveOutcome resolveOutcome;
     private boolean unresolved;
 
     public RecentProjectCard(RecentProject recent, boolean continueCard, long nowMillis,
@@ -78,11 +83,11 @@ public final class RecentProjectCard extends JPanel {
         text.setOpaque(false);
         text.setLayout(new BoxLayout(text, BoxLayout.Y_AXIS));
 
-        JLabel name = new JLabel(displayName(continueCard));
-        name.setForeground(FlashTheme.TEXT_HEADER);
-        name.setFont(continueCard ? FlashTheme.bodyMedium().deriveFont(Font.BOLD)
+        nameLabel = new JLabel(displayName(continueCard));
+        nameLabel.setForeground(FlashTheme.TEXT_HEADER);
+        nameLabel.setFont(continueCard ? FlashTheme.bodyMedium().deriveFont(Font.BOLD)
                 : FlashTheme.bodyMedium());
-        text.add(name);
+        text.add(nameLabel);
         text.add(Box.createVerticalStrut(3));
 
         progressLabel = new JLabel("checking...");
@@ -90,15 +95,35 @@ public final class RecentProjectCard extends JPanel {
         progressLabel.setFont(FlashTheme.caption());
         text.add(progressLabel);
 
+        JPanel meta = new JPanel();
+        meta.setOpaque(false);
+        meta.setLayout(new BoxLayout(meta, BoxLayout.Y_AXIS));
+
         JLabel lastOpened = new JLabel(relativeLastOpened(this.recent.lastOpenedAt, nowMillis));
         lastOpened.setForeground(FlashTheme.TEXT_MUTED);
         lastOpened.setFont(FlashTheme.caption());
+        lastOpened.setAlignmentX(RIGHT_ALIGNMENT);
+
+        locateButton = new JButton("Locate...");
+        locateButton.setFont(FlashTheme.caption());
+        locateButton.setVisible(false);
+        locateButton.setAlignmentX(RIGHT_ALIGNMENT);
+        locateButton.addActionListener(new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) {
+                if (actions != null) {
+                    actions.locate(RecentProjectCard.this);
+                }
+            }
+        });
+        meta.add(lastOpened);
+        meta.add(Box.createVerticalStrut(4));
+        meta.add(locateButton);
 
         add(text, BorderLayout.CENTER);
-        add(lastOpened, BorderLayout.EAST);
+        add(meta, BorderLayout.EAST);
 
         Dimension preferred = getPreferredSize();
-        setMaximumSize(new Dimension(Integer.MAX_VALUE, Math.max(58, preferred.height)));
+        setMaximumSize(new Dimension(Integer.MAX_VALUE, Math.max(72, preferred.height)));
         attachMouseActions();
         attachKeyboardActions();
     }
@@ -111,34 +136,73 @@ public final class RecentProjectCard extends JPanel {
         return resolvedProjectJson;
     }
 
+    public ProjectService.ResolveOutcome resolveOutcome() {
+        return resolveOutcome;
+    }
+
     public boolean isUnresolved() {
         return unresolved;
     }
 
     public void setChecking() {
         unresolved = false;
+        resolvedProjectJson = null;
+        resolveOutcome = null;
+        nameLabel.setForeground(FlashTheme.TEXT_HEADER);
         progressLabel.setText("checking...");
+        locateButton.setVisible(false);
+        revalidate();
+        repaint();
+    }
+
+    public void setReconnecting() {
+        unresolved = false;
+        nameLabel.setForeground(FlashTheme.TEXT_HEADER);
+        progressLabel.setText("reconnecting...");
+        locateButton.setVisible(false);
+        revalidate();
+        repaint();
     }
 
     public void applyStatusResult(StatusResult result) {
         if (result == null) {
             unresolved = false;
             resolvedProjectJson = null;
+            resolveOutcome = null;
+            nameLabel.setForeground(FlashTheme.TEXT_HEADER);
             progressLabel.setText("status unavailable");
+            locateButton.setVisible(false);
             return;
         }
         unresolved = !result.resolved;
         resolvedProjectJson = result.projectJson;
+        resolveOutcome = result.outcome;
+        nameLabel.setForeground(unresolved ? FlashTheme.TEXT_MUTED : FlashTheme.TEXT_HEADER);
         progressLabel.setText(result.progressText);
+        locateButton.setVisible(unresolved);
+        revalidate();
+        repaint();
     }
 
     void markResolvedForTests(File projectJson) {
         resolvedProjectJson = projectJson;
+        resolveOutcome = new ProjectService.ResolveOutcome(projectJson,
+                projectJson == null ? null : projectJson.getAbsolutePath(), false);
         unresolved = false;
+        nameLabel.setForeground(FlashTheme.TEXT_HEADER);
+        locateButton.setVisible(false);
     }
 
     String progressTextForTests() {
         return progressLabel.getText();
+    }
+
+    boolean locateButtonVisibleForTests() {
+        return locateButton.isVisible();
+    }
+
+    void clickLocateForTests() {
+        locateButton.doClick();
     }
 
     private String displayName(boolean continueCard) {
@@ -204,9 +268,13 @@ public final class RecentProjectCard extends JPanel {
 
         if (unresolved) {
             JMenuItem locate = new JMenuItem("Locate...");
-            // TODO(project-home-screen 03): enable this unresolved-recent action
-            // once visible path repair is implemented.
-            locate.setEnabled(false);
+            locate.addActionListener(new AbstractAction() {
+                @Override public void actionPerformed(ActionEvent e) {
+                    if (actions != null) {
+                        actions.locate(RecentProjectCard.this);
+                    }
+                }
+            });
             menu.add(locate);
         }
 
@@ -294,20 +362,35 @@ public final class RecentProjectCard extends JPanel {
     static final class StatusResult {
         final boolean resolved;
         final File projectJson;
+        final ProjectService.ResolveOutcome outcome;
         final String progressText;
 
-        private StatusResult(boolean resolved, File projectJson, String progressText) {
+        private StatusResult(boolean resolved, File projectJson,
+                             ProjectService.ResolveOutcome outcome,
+                             String progressText) {
             this.resolved = resolved;
             this.projectJson = projectJson;
+            this.outcome = outcome;
             this.progressText = progressText == null ? "status unavailable" : progressText;
         }
 
         static StatusResult resolved(File projectJson, String progressText) {
-            return new StatusResult(true, projectJson, progressText);
+            ProjectService.ResolveOutcome outcome = new ProjectService.ResolveOutcome(projectJson,
+                    projectJson == null ? null : projectJson.getAbsolutePath(), false);
+            return resolved(outcome, progressText);
+        }
+
+        static StatusResult resolved(ProjectService.ResolveOutcome outcome, String progressText) {
+            File projectJson = outcome == null ? null : outcome.projectJson;
+            return new StatusResult(true, projectJson, outcome, progressText);
         }
 
         static StatusResult unresolved() {
-            return new StatusResult(false, null, "project not found");
+            return unresolved("Unavailable");
+        }
+
+        static StatusResult unresolved(String progressText) {
+            return new StatusResult(false, null, null, progressText);
         }
     }
 }

@@ -335,6 +335,10 @@ public final class ProjectHomeDialog {
                     chooseRecentAsync(card, Choice.Action.EDIT_EXISTING);
                 }
 
+                @Override public void locate(RecentProjectCard card) {
+                    locateRecent(card);
+                }
+
                 @Override public void remove(RecentProjectCard card) {
                     removeRecentAsync(card);
                 }
@@ -402,16 +406,17 @@ public final class ProjectHomeDialog {
         ProjectService.ResolveOutcome outcome = ProjectService.resolveRecent(
                 recent == null ? null : recent.path);
         if (outcome.projectJson == null) {
-            return RecentProjectCard.StatusResult.unresolved();
+            return RecentProjectCard.StatusResult.unresolved(
+                    unavailableTextForPath(recent == null ? null : recent.path));
         }
         File outputRoot = FlashProjectLayout.projectRootForConfigurationDir(
                 outcome.projectJson.getParentFile());
         if (outputRoot == null) {
-            return RecentProjectCard.StatusResult.resolved(outcome.projectJson,
+            return RecentProjectCard.StatusResult.resolved(outcome,
                     "project found - status unavailable");
         }
         Map<Integer, AnalysisStatus> statuses = new AnalysisStatusScanner().scan(outputRoot);
-        return RecentProjectCard.StatusResult.resolved(outcome.projectJson,
+        return RecentProjectCard.StatusResult.resolved(outcome,
                 RecentProjectCard.progressSummary(statuses));
     }
 
@@ -421,21 +426,138 @@ public final class ProjectHomeDialog {
         }
         File alreadyResolved = card.resolvedProjectJson();
         if (alreadyResolved != null) {
-            choose(action == Choice.Action.EDIT_EXISTING
-                    ? Choice.editExisting(alreadyResolved)
-                    : Choice.openExisting(alreadyResolved));
+            chooseResolvedRecent(card, action, card.resolveOutcome());
             return;
         }
         if (card.isUnresolved()) {
-            card.applyStatusResult(RecentProjectCard.StatusResult.unresolved());
+            card.applyStatusResult(RecentProjectCard.StatusResult.unresolved(
+                    unavailableTextForPath(card.recent().path)));
             return;
         }
 
         card.setChecking();
         final int generation = probeGeneration.get();
+        SwingWorker<ProjectService.ResolveOutcome, Void> worker =
+                new SwingWorker<ProjectService.ResolveOutcome, Void>() {
+            @Override protected ProjectService.ResolveOutcome doInBackground() {
+                return ProjectService.resolveRecent(card.recent().path);
+            }
+
+            @Override protected void done() {
+                if (closed || generation != probeGeneration.get()
+                        || !dialog.isDisplayable()) {
+                    return;
+                }
+                try {
+                    ProjectService.ResolveOutcome outcome = get();
+                    if (outcome == null || outcome.projectJson == null) {
+                        card.applyStatusResult(RecentProjectCard.StatusResult.unresolved(
+                                unavailableTextForPath(card.recent().path)));
+                        return;
+                    }
+                    chooseResolvedRecent(card, action, outcome);
+                } catch (Exception e) {
+                    IJ.log("[FLASH] Could not resolve recent project: " + e.getMessage());
+                    card.applyStatusResult(null);
+                }
+            }
+        };
+        submit(worker, "recent project resolve");
+    }
+
+    private void chooseResolvedRecent(final RecentProjectCard card, Choice.Action action,
+                                      ProjectService.ResolveOutcome outcome) {
+        File projectJson = outcome == null ? card.resolvedProjectJson() : outcome.projectJson;
+        if (projectJson == null) {
+            card.applyStatusResult(RecentProjectCard.StatusResult.unresolved(
+                    unavailableTextForPath(card.recent().path)));
+            return;
+        }
+        if (action == Choice.Action.EDIT_EXISTING) {
+            choose(Choice.editExisting(projectJson));
+            return;
+        }
+        if (outcome != null && outcome.relocated) {
+            if (!confirmRelocatedOpen(projectJson)) {
+                return;
+            }
+            recordReplacementAndOpen(card, projectJson, outcome.storedPath);
+            return;
+        }
+        choose(Choice.openExisting(projectJson));
+    }
+
+    private boolean confirmRelocatedOpen(File projectJson) {
+        int result = JOptionPane.showOptionDialog(dialog,
+                relocationMessage(projectJson),
+                "FLASH Project Reconnected",
+                JOptionPane.OK_CANCEL_OPTION,
+                JOptionPane.INFORMATION_MESSAGE,
+                null,
+                new String[]{"Open", "Cancel"},
+                "Open");
+        return result == JOptionPane.OK_OPTION;
+    }
+
+    private void recordReplacementAndOpen(final RecentProjectCard card, final File projectJson,
+                                          final String obsoletePath) {
+        if (card == null || projectJson == null) {
+            return;
+        }
+        card.setReconnecting();
+        final int generation = probeGeneration.get();
+        SwingWorker<File, Void> worker = new SwingWorker<File, Void>() {
+            @Override protected File doInBackground() throws IOException {
+                if (pluginsDir != null) {
+                    RecentProjectsStore.recordOpenedReplacing(pluginsDir,
+                            replacementEntryForResolvedPath(card.recent(), projectJson,
+                                    System.currentTimeMillis()),
+                            obsoletePath);
+                }
+                return projectJson;
+            }
+
+            @Override protected void done() {
+                if (closed || generation != probeGeneration.get()
+                        || !dialog.isDisplayable()) {
+                    return;
+                }
+                try {
+                    choose(Choice.openExisting(get()));
+                } catch (Exception e) {
+                    IJ.log("[FLASH] Could not update recent project path: " + e.getMessage());
+                    choose(Choice.openExisting(projectJson));
+                }
+            }
+        };
+        submit(worker, "recent project relocation");
+    }
+
+    private void locateRecent(final RecentProjectCard card) {
+        if (card == null) {
+            return;
+        }
+        JFileChooser chooser = new JFileChooser();
+        chooser.setFileSelectionMode(JFileChooser.FILES_AND_DIRECTORIES);
+        chooser.setDialogTitle("Locate FLASH project");
+        File start = startingDirectoryForStoredPath(card.recent().path);
+        if (start != null) {
+            chooser.setCurrentDirectory(start);
+        }
+        if (chooser.showOpenDialog(dialog) == JFileChooser.APPROVE_OPTION) {
+            resolveLocatedRecentAsync(card, chooser.getSelectedFile());
+        }
+    }
+
+    private void resolveLocatedRecentAsync(final RecentProjectCard card, final File selected) {
+        if (card == null || selected == null) {
+            return;
+        }
+        card.setChecking();
+        final int generation = probeGeneration.get();
         SwingWorker<File, Void> worker = new SwingWorker<File, Void>() {
             @Override protected File doInBackground() {
-                return ProjectService.resolveRecent(card.recent().path).projectJson;
+                return ProjectService.resolveProjectJson(selected);
             }
 
             @Override protected void done() {
@@ -446,19 +568,22 @@ public final class ProjectHomeDialog {
                 try {
                     File projectJson = get();
                     if (projectJson == null) {
-                        card.applyStatusResult(RecentProjectCard.StatusResult.unresolved());
+                        card.applyStatusResult(RecentProjectCard.StatusResult.unresolved(
+                                unavailableTextForPath(card.recent().path)));
+                        JOptionPane.showMessageDialog(dialog,
+                                "That folder is not a FLASH project.",
+                                "Locate FLASH Project",
+                                JOptionPane.INFORMATION_MESSAGE);
                         return;
                     }
-                    choose(action == Choice.Action.EDIT_EXISTING
-                            ? Choice.editExisting(projectJson)
-                            : Choice.openExisting(projectJson));
+                    recordReplacementAndOpen(card, projectJson, card.recent().path);
                 } catch (Exception e) {
-                    IJ.log("[FLASH] Could not resolve recent project: " + e.getMessage());
+                    IJ.log("[FLASH] Could not locate recent project: " + e.getMessage());
                     card.applyStatusResult(null);
                 }
             }
         };
-        submit(worker, "recent project resolve");
+        submit(worker, "recent project locate");
     }
 
     private void removeRecentAsync(final RecentProjectCard card) {
@@ -502,6 +627,67 @@ public final class ProjectHomeDialog {
         if (chooser.showOpenDialog(dialog) == JFileChooser.APPROVE_OPTION) {
             choose(Choice.browseFolder(chooser.getSelectedFile()));
         }
+    }
+
+    static String relocationMessage(File projectJson) {
+        String path = projectJson == null ? "(unknown path)" : projectJson.getAbsolutePath();
+        return "Reconnected - your project moved with Dropbox and was found at:\n"
+                + path + "\nOpen it?";
+    }
+
+    static RecentProject replacementEntryForResolvedPath(RecentProject recent, File projectJson,
+                                                         long openedAt) {
+        String name = recent == null ? "" : recent.name;
+        String path = projectJson == null ? "" : projectJson.getAbsolutePath();
+        return new RecentProject(name, path, openedAt);
+    }
+
+    static File startingDirectoryForStoredPath(String storedPath) {
+        if (storedPath == null || storedPath.trim().isEmpty()) {
+            return null;
+        }
+        File stored = new File(storedPath);
+        File parent = stored.getParentFile();
+        if (parent != null && parent.isDirectory()) {
+            return parent.getAbsoluteFile();
+        }
+        File near = ProjectPathResolver.nearestExistingParent(parent == null ? stored : parent);
+        return near == null ? null : near.getAbsoluteFile();
+    }
+
+    static String unavailableTextForPath(String storedPath) {
+        return storedRootAvailable(storedPath)
+                ? "Unavailable - folder missing"
+                : "Unavailable - still syncing or offline?";
+    }
+
+    static boolean storedRootAvailable(String storedPath) {
+        if (storedPath == null || storedPath.trim().isEmpty()) {
+            return true;
+        }
+        File stored = new File(storedPath).getAbsoluteFile();
+        if (stored.exists()) {
+            return true;
+        }
+        java.nio.file.Path rootPath = stored.toPath().getRoot();
+        if (rootPath == null) {
+            return true;
+        }
+        File rootFile = rootPath.toFile();
+        if (rootFile.exists()) {
+            return true;
+        }
+        File[] roots = File.listRoots();
+        if (roots == null) {
+            return false;
+        }
+        String wanted = normaliseStoredPath(rootFile.getAbsolutePath());
+        for (int i = 0; i < roots.length; i++) {
+            if (normaliseStoredPath(roots[i].getAbsolutePath()).equals(wanted)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @SuppressWarnings("unchecked")

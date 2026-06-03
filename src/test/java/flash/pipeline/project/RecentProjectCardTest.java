@@ -4,12 +4,16 @@ import flash.pipeline.FLASH_Pipeline;
 import flash.pipeline.intelligence.AnalysisStatus;
 import org.junit.Test;
 
+import java.io.File;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertTrue;
 
 public class RecentProjectCardTest {
 
@@ -64,5 +68,58 @@ public class RecentProjectCardTest {
         assertEquals("status unavailable", card.progressTextForTests());
         assertFalse(card.isUnresolved());
         assertNull(card.resolvedProjectJson());
+    }
+
+    @Test
+    public void unresolvedStatusShowsUnavailableTextAndLocateAction() {
+        final AtomicInteger locateCalls = new AtomicInteger();
+        RecentProject recent = new RecentProject("Project", "C:/missing/project.json", 1L);
+        RecentProjectCard card = new RecentProjectCard(recent, false, 1L,
+                new NoOpActions() {
+                    @Override public void locate(RecentProjectCard card) {
+                        locateCalls.incrementAndGet();
+                    }
+                });
+
+        card.applyStatusResult(RecentProjectCard.StatusResult.unresolved(
+                "Unavailable - still syncing or offline?"));
+
+        assertTrue(card.isUnresolved());
+        assertEquals("Unavailable - still syncing or offline?", card.progressTextForTests());
+        assertTrue(card.locateButtonVisibleForTests());
+
+        card.clickLocateForTests();
+
+        assertEquals(1, locateCalls.get());
+    }
+
+    @Test
+    public void resolvedStatusHidesLocateAndKeepsRelocationOutcome() {
+        RecentProject recent = new RecentProject("Project", "C:/old/project.json", 1L);
+        RecentProjectCard card = new RecentProjectCard(recent, false, 1L, null);
+        ProjectService.ResolveOutcome outcome = new ProjectService.ResolveOutcome(
+                new File("C:/new/project.json"), "C:/old/project.json", true);
+
+        card.applyStatusResult(RecentProjectCard.StatusResult.resolved(outcome,
+                "finished Intensity - next: Spatial"));
+
+        assertFalse(card.isUnresolved());
+        assertFalse(card.locateButtonVisibleForTests());
+        assertSame(outcome, card.resolveOutcome());
+        assertEquals(outcome.projectJson, card.resolvedProjectJson());
+    }
+
+    private static class NoOpActions implements RecentProjectCard.Actions {
+        @Override public void open(RecentProjectCard card) {
+        }
+
+        @Override public void edit(RecentProjectCard card) {
+        }
+
+        @Override public void locate(RecentProjectCard card) {
+        }
+
+        @Override public void remove(RecentProjectCard card) {
+        }
     }
 }
