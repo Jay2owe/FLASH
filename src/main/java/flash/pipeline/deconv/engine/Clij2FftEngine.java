@@ -288,6 +288,7 @@ public final class Clij2FftEngine implements DeconvolutionEngine {
         }
 
         @Override
+        @SuppressWarnings({"unchecked", "rawtypes"})
         public Object createFloatLike(Object sourceBuffer) throws Exception {
             Object dimensions = invokeInstanceMethod(sourceBuffer, "getDimensions");
             Class<?> nativeTypeClass = Class.forName(
@@ -295,7 +296,6 @@ public final class Clij2FftEngine implements DeconvolutionEngine {
                     false,
                     loader
             );
-            @SuppressWarnings("unchecked")
             Class<? extends Enum> enumClass = (Class<? extends Enum>) nativeTypeClass.asSubclass(Enum.class);
             Object floatType = Enum.valueOf(enumClass, "Float");
             return invokeInstanceMethod(clij2, "create", dimensions, floatType);
