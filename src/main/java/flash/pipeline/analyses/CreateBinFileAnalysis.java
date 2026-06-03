@@ -69,6 +69,7 @@ import flash.pipeline.ui.config.ConfigQcDialog;
 import flash.pipeline.ui.config.ConfigQcResult;
 import flash.pipeline.ui.config.ConfigQcStage;
 import flash.pipeline.ui.config.ConfigReviewPanel;
+import flash.pipeline.ui.config.SaveAsPresetPopover;
 import flash.pipeline.ui.config.ChannelThresholdStage;
 import flash.pipeline.ui.config.ClassicalSegmentationStage;
 import flash.pipeline.ui.config.CellposeParameterStage;
@@ -110,6 +111,7 @@ import javax.swing.BoxLayout;
 import javax.swing.DefaultComboBoxModel;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
+import javax.swing.JFileChooser;
 import javax.swing.Icon;
 import javax.swing.ImageIcon;
 import javax.swing.JLabel;
@@ -120,6 +122,7 @@ import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
+import javax.swing.filechooser.FileNameExtensionFilter;
 
 import java.awt.BorderLayout;
 import java.awt.Color;
@@ -187,6 +190,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
     private static final String REVIEW_ACTION_BACK = "back";
     private static final String REVIEW_ACTION_CANCEL = "cancel";
     private static final String REVIEW_EDIT_PREFIX = "edit:";
+    private static final String COPY_CONFIG_ACTION = "copied_config";
     private static final String CUSTOM_FILTER_PRESET_DIR = FlashProjectLayout.CUSTOM_FILTER_PRESET_DIR;
     private static final String LOADING_FILTERS_OPTION = "Loading filters...";
     private static final String FILTER_OPTIONS_REFRESH_TOKEN_PROPERTY =
@@ -1598,7 +1602,13 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
             }
         });
         dialog.addComponent(review);
-        // TODO setup-flow-ux 03: add the Save as preset action to this review screen.
+        JButton savePresetButton = dialog.addFooterButton("Save as preset");
+        savePresetButton.addActionListener(e -> {
+            String status = saveCurrentConfigAsPreset(dialog.getWindow(), binFolder, cfg);
+            if (hasText(status)) {
+                dialog.setTransientStatus(status);
+            }
+        });
 
         if (dialog.showDialog()) {
             return REVIEW_ACTION_SAVE;
@@ -1612,6 +1622,83 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
 
     private boolean shouldSkipReviewUi() {
         return headless || suppressDialogs || GraphicsEnvironment.isHeadless();
+    }
+
+    private String saveCurrentConfigAsPreset(Window owner, File binFolder, BinUserConfig cfg) {
+        if (shouldSkipReviewUi()) {
+            return null;
+        }
+        String suggestedName = suggestedPresetName(cfg);
+        String name = SaveAsPresetPopover.prompt(owner, suggestedName);
+        if (!hasText(name)) {
+            return null;
+        }
+        File projectRoot = projectRootForConfigurationDir(binFolder);
+        if (projectRoot == null) {
+            return "Could not save preset: project folder was not found.";
+        }
+        BinPresetIO io = new BinPresetIO(projectRoot);
+        try {
+            if (presetExists(io, name) && !confirmPresetOverwrite(owner, name)) {
+                return null;
+            }
+            io.save(binPresetFromUserConfig(name, "Saved from Set Up Configuration review.", cfg));
+            return "Saved preset \"" + name + "\".";
+        } catch (IOException e) {
+            IJ.log("[FLASH] Could not save channel configuration preset: " + e.getMessage());
+            return "Could not save preset: " + e.getMessage();
+        } catch (RuntimeException e) {
+            IJ.log("[FLASH] Could not save channel configuration preset: " + e.getMessage());
+            return "Could not save preset: " + e.getMessage();
+        }
+    }
+
+    private boolean presetExists(BinPresetIO io, String name) throws IOException {
+        try {
+            io.load(name);
+            return true;
+        } catch (java.io.FileNotFoundException e) {
+            return false;
+        }
+    }
+
+    protected boolean confirmPresetOverwrite(Window owner, String name) {
+        if (shouldSkipReviewUi()) {
+            return false;
+        }
+        PipelineDialog dialog = new PipelineDialog(owner, "Overwrite preset");
+        dialog.addHeader("Overwrite preset");
+        dialog.addMessage("A preset named \"" + escapeHtmlText(name)
+                + "\" already exists. Replace it?");
+        dialog.setPrimaryButtonText("Overwrite");
+        return dialog.showDialog();
+    }
+
+    private static String suggestedPresetName(BinUserConfig cfg) {
+        if (cfg == null || cfg.names == null || cfg.names.isEmpty()) {
+            return "Channel configuration";
+        }
+        List<String> tokens = new ArrayList<String>();
+        for (int i = 0; i < cfg.names.size() && tokens.size() < 3; i++) {
+            String name = cfg.names.get(i);
+            if (hasText(name)) {
+                tokens.add(name.trim());
+            }
+        }
+        return tokens.isEmpty()
+                ? "Channel configuration"
+                : joinStrings(tokens, " + ");
+    }
+
+    public static BinPreset binPresetFromUserConfig(String name, String description, BinUserConfig cfg) {
+        return new BinPreset(
+                name,
+                description,
+                BinPreset.CURRENT_LIBRARY_VERSION,
+                toPresetBinConfig(cfg),
+                cfg == null ? Collections.<String>emptyList() : cfg.markerIds,
+                cfg == null ? Collections.<String>emptyList() : cfg.markerShapes,
+                cfg == null ? Collections.<Boolean>emptyList() : cfg.markerCrowdingSensitive);
     }
 
     private static RuntimeException reviewDialogFailure(Throwable cause) {
@@ -2942,13 +3029,22 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                 }
             }, channelCountHint, "Enter at least 1 channel.");
             final BinUserConfig[] loadedFromRun = new BinUserConfig[1];
+            final BinUserConfig[] copiedConfig = new BinUserConfig[1];
             installLoadFromRunButton(gdCount, directory, loadedFromRun, new Runnable() {
                 @Override public void run() {
                     gdCount.closeWithAction("loaded_run");
                 }
             });
+            installCopyFromPresetOrProjectButton(gdCount, binFolder, 0, copiedConfig, new Runnable() {
+                @Override public void run() {
+                    gdCount.closeWithAction(COPY_CONFIG_ACTION);
+                }
+            });
             if (!gdCount.showDialog()) {
-                if ("loaded_run".equals(gdCount.getActionCommand()) && loadedFromRun[0] != null) {
+                if (COPY_CONFIG_ACTION.equals(gdCount.getActionCommand()) && copiedConfig[0] != null) {
+                    draftConfig = copiedConfig[0];
+                    n = Math.max(1, draftConfig.names.size());
+                } else if ("loaded_run".equals(gdCount.getActionCommand()) && loadedFromRun[0] != null) {
                     draftConfig = loadedFromRun[0];
                     n = Math.max(1, draftConfig.names.size());
                 } else {
@@ -2987,6 +3083,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
             JLabel channelNameHint = pd.addHelpText("");
             bindChannelNameValidation(pd, binBindings.nameFields, channelNameHint);
             final BinUserConfig[] loadedFromRun = new BinUserConfig[1];
+            final BinUserConfig[] copiedConfig = new BinUserConfig[1];
             installLoadFromRunButton(pd, directory, loadedFromRun, new Runnable() {
                 @Override public void run() {
                     if (loadedFromRun[0] != null) {
@@ -2995,7 +3092,17 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                     pd.closeWithAction("loaded_run");
                 }
             });
+            installCopyFromPresetOrProjectButton(pd, binFolder, channelCount, copiedConfig, new Runnable() {
+                @Override public void run() {
+                    if (copiedConfig[0] != null) {
+                        applyLoadedConfigToIdentityBindings(copiedConfig[0], binBindings);
+                    }
+                }
+            });
             if (!pd.showDialog()) {
+                if (COPY_CONFIG_ACTION.equals(pd.getActionCommand()) && copiedConfig[0] != null) {
+                    return copiedConfig[0];
+                }
                 if ("loaded_run".equals(pd.getActionCommand()) && loadedFromRun[0] != null) {
                     return loadedFromRun[0];
                 }
@@ -3016,7 +3123,20 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                             return isValidChannelCountToken(channelCountField2.getText());
                         }
                     }, channelCountHint2, "Enter at least 1 channel.");
-                    if (!gdCount2.showDialog()) return null;
+                    final BinUserConfig[] copiedConfig2 = new BinUserConfig[1];
+                    installCopyFromPresetOrProjectButton(gdCount2, binFolder, 0, copiedConfig2, new Runnable() {
+                        @Override public void run() {
+                            gdCount2.closeWithAction(COPY_CONFIG_ACTION);
+                        }
+                    });
+                    if (!gdCount2.showDialog()) {
+                        if (COPY_CONFIG_ACTION.equals(gdCount2.getActionCommand()) && copiedConfig2[0] != null) {
+                            draftConfig = copiedConfig2[0];
+                            n = Math.max(1, draftConfig.names.size());
+                            continue;
+                        }
+                        return null;
+                    }
                     n = (int) gdCount2.getNextNumber();
                     if (n <= 0) {
                         IJ.error("Set Up Configuration", "Must have at least 1 channel.");
@@ -3077,6 +3197,268 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                         return result;
                     }
                 });
+    }
+
+    private void installCopyFromPresetOrProjectButton(final PipelineDialog dialog,
+                                                      final File binFolder,
+                                                      final int currentChannelCount,
+                                                      final BinUserConfig[] target,
+                                                      final Runnable afterApply) {
+        if (dialog == null || shouldSkipImportUi()) {
+            return;
+        }
+        JButton copyButton = dialog.addFooterButton("Copy from preset or project...");
+        copyButton.addActionListener(e -> dialog.runChildWorkflow(new Runnable() {
+            @Override public void run() {
+                BinUserConfig copied = copyConfigFromPresetOrProject(
+                        dialog.getWindow(),
+                        projectRootForConfigurationDir(binFolder),
+                        currentChannelCount);
+                if (copied == null) {
+                    return;
+                }
+                if (target != null && target.length > 0) {
+                    target[0] = copied;
+                }
+                activeWizardCfg = copyBinUserConfig(copied);
+                if (afterApply != null) {
+                    afterApply.run();
+                }
+            }
+        }));
+    }
+
+    private boolean shouldSkipImportUi() {
+        return headless || suppressDialogs || GraphicsEnvironment.isHeadless();
+    }
+
+    private BinUserConfig copyConfigFromPresetOrProject(Window owner, File projectRoot,
+                                                        int currentChannelCount) {
+        if (shouldSkipImportUi()) {
+            return null;
+        }
+        ImportSourceSelection selection = chooseImportSource(owner, projectRoot);
+        if (selection == null) {
+            return null;
+        }
+        ChannelConfig importedConfig;
+        if (selection.preset != null) {
+            importedConfig = channelConfigFromPreset(selection.preset);
+        } else {
+            importedConfig = readImportedChannelConfig(selection.file);
+            if (importedConfig == null) {
+                showImportReadFailure(owner, selection.file);
+                return null;
+            }
+        }
+        BinUserConfig imported = binUserConfigFromChannelConfig(importedConfig);
+        return adjustImportedConfigForChannelCount(owner, imported, currentChannelCount);
+    }
+
+    private ImportSourceSelection chooseImportSource(Window owner, File projectRoot) {
+        if (shouldSkipImportUi()) {
+            return null;
+        }
+        List<BinPreset> presets = Collections.emptyList();
+        File safeProjectRoot = projectRoot == null ? new File(".") : projectRoot;
+        try {
+            presets = new BinPresetIO(safeProjectRoot).listAll();
+        } catch (IOException e) {
+            IJ.log("[FLASH] Could not list channel configuration presets: " + e.getMessage());
+        }
+
+        List<String> labels = new ArrayList<String>();
+        for (int i = 0; i < presets.size(); i++) {
+            labels.add("Preset: " + presets.get(i).getName());
+        }
+        labels.add("Browse for another project...");
+
+        PipelineDialog picker = new PipelineDialog(owner, "Copy setup");
+        picker.addHeader("Copy setup");
+        picker.addMessage("Choose a saved preset or browse to another project's channel_config.json.");
+        final JComboBox<String> sourceChoice = picker.addChoice(
+                "Source",
+                labels.toArray(new String[labels.size()]),
+                labels.get(0));
+        picker.setPrimaryButtonText("Copy");
+        if (!picker.showDialog()) {
+            return null;
+        }
+        int index = sourceChoice.getSelectedIndex();
+        if (index >= 0 && index < presets.size()) {
+            return ImportSourceSelection.forPreset(presets.get(index));
+        }
+        File selected = chooseProjectConfigFile(owner, safeProjectRoot);
+        return selected == null ? null : ImportSourceSelection.forFile(selected);
+    }
+
+    private File chooseProjectConfigFile(Window owner, File projectRoot) {
+        if (shouldSkipImportUi()) {
+            return null;
+        }
+        JFileChooser chooser = new JFileChooser(projectRoot == null ? new File(".") : projectRoot);
+        chooser.setDialogTitle("Copy channel configuration");
+        chooser.setFileSelectionMode(JFileChooser.FILES_AND_DIRECTORIES);
+        chooser.setAcceptAllFileFilterUsed(true);
+        chooser.addChoosableFileFilter(new FileNameExtensionFilter(
+                "FLASH channel config (channel_config.json)", "json"));
+        if (chooser.showOpenDialog(owner) != JFileChooser.APPROVE_OPTION) {
+            return null;
+        }
+        return chooser.getSelectedFile();
+    }
+
+    private BinUserConfig adjustImportedConfigForChannelCount(Window owner, BinUserConfig imported,
+                                                              int currentChannelCount) {
+        if (imported == null) {
+            return null;
+        }
+        int importedChannelCount = imported.names == null ? 0 : imported.names.size();
+        if (currentChannelCount <= 0 || importedChannelCount == currentChannelCount) {
+            return imported;
+        }
+        ImportChannelCountAction action = showImportChannelCountMismatch(
+                owner, importedChannelCount, currentChannelCount);
+        if (action == ImportChannelCountAction.CANCEL) {
+            return null;
+        }
+        BinUserConfig adjusted = copyBinUserConfig(imported);
+        if (action == ImportChannelCountAction.TRUNCATE) {
+            trimConfigToChannelCount(adjusted, currentChannelCount);
+        } else if (action == ImportChannelCountAction.PAD) {
+            padConfigToChannelCount(adjusted, currentChannelCount);
+        }
+        return adjusted;
+    }
+
+    protected ImportChannelCountAction showImportChannelCountMismatch(Window owner,
+                                                                      int importedChannelCount,
+                                                                      int currentChannelCount) {
+        if (shouldSkipImportUi()) {
+            return ImportChannelCountAction.CANCEL;
+        }
+        PipelineDialog dialog = new PipelineDialog(owner, "Channel count mismatch");
+        dialog.addHeader("Channel count mismatch");
+        dialog.addMessage("The copied setup has " + importedChannelCount
+                + " channels, but the current image has " + currentChannelCount
+                + ". Choose how to adapt it before copying.");
+        dialog.setDefaultButtonsVisible(false);
+        JButton cancel = dialog.addRightFooterButton("Cancel");
+        cancel.addActionListener(e -> dialog.closeWithAction("cancel"));
+        if (importedChannelCount > currentChannelCount) {
+            JButton truncate = dialog.addRightFooterButton("Truncate to " + currentChannelCount);
+            truncate.addActionListener(e -> dialog.closeWithAction("truncate"));
+        } else {
+            JButton pad = dialog.addRightFooterButton("Pad with defaults");
+            pad.addActionListener(e -> dialog.closeWithAction("pad"));
+        }
+        dialog.showDialog();
+        String action = dialog.getActionCommand();
+        if ("truncate".equals(action)) {
+            return ImportChannelCountAction.TRUNCATE;
+        }
+        if ("pad".equals(action)) {
+            return ImportChannelCountAction.PAD;
+        }
+        return ImportChannelCountAction.CANCEL;
+    }
+
+    private void showImportReadFailure(Window owner, File selected) {
+        String reason = "No readable channel_config.json was found for the selected project or file.";
+        String source = selected == null ? "" : "\nSource: " + selected.getAbsolutePath();
+        showImportMessage(owner, "Copy setup", reason + source);
+    }
+
+    private void showImportMessage(Window owner, String title, String message) {
+        if (shouldSkipImportUi()) {
+            IJ.log("[FLASH] " + message);
+            return;
+        }
+        PipelineDialog dialog = new PipelineDialog(owner, title);
+        dialog.addHeader(title);
+        dialog.addMessage(escapeHtmlText(message).replace("\n", "<br>"));
+        dialog.showDialog();
+    }
+
+    private static ChannelConfig readImportedChannelConfig(File selected) {
+        File settingsDir = resolveImportedSettingsDir(selected);
+        return settingsDir == null ? null : ChannelConfigIO.read(settingsDir);
+    }
+
+    public static BinUserConfig importBinUserConfigFromSettingsDir(File selected) {
+        ChannelConfig cfg = readImportedChannelConfig(selected);
+        return cfg == null ? null : binUserConfigFromChannelConfig(cfg);
+    }
+
+    private static File resolveImportedSettingsDir(File selected) {
+        if (selected == null) {
+            return null;
+        }
+        if (selected.isFile()) {
+            return ChannelConfigIO.FILE_NAME.equals(selected.getName())
+                    ? selected.getParentFile()
+                    : null;
+        }
+        if (!selected.isDirectory()) {
+            return null;
+        }
+        File directConfig = new File(selected, ChannelConfigIO.FILE_NAME);
+        if (directConfig.isFile()) {
+            return selected;
+        }
+        File settingsChild = FlashProjectLayout.settingsDir(selected);
+        if (new File(settingsChild, ChannelConfigIO.FILE_NAME).isFile()) {
+            return settingsChild;
+        }
+        File projectSettings = FlashProjectLayout.forDirectory(selected.getPath()).configurationWriteDir();
+        return new File(projectSettings, ChannelConfigIO.FILE_NAME).isFile() ? projectSettings : null;
+    }
+
+    private static ChannelConfig channelConfigFromPreset(BinPreset preset) {
+        if (preset == null) {
+            return null;
+        }
+        ChannelConfig cfg = ChannelConfigIO.fromBinConfig(preset.getPayload());
+        for (int i = 0; cfg.channels != null && i < cfg.channels.size(); i++) {
+            ChannelConfig.Channel channel = cfg.channels.get(i);
+            if (channel == null) {
+                continue;
+            }
+            channel.markerId = valueAt(preset.getMarkerIds(), i, "");
+            channel.markerShape = valueAt(preset.getMarkerShapes(), i, "");
+            channel.markerCrowdingSensitive =
+                    valueAt(preset.getMarkerCrowdingSensitive(), i, Boolean.FALSE).booleanValue();
+        }
+        return cfg;
+    }
+
+    public static BinUserConfig binUserConfigFromPreset(BinPreset preset) {
+        ChannelConfig cfg = channelConfigFromPreset(preset);
+        return cfg == null ? null : binUserConfigFromChannelConfig(cfg);
+    }
+
+    protected enum ImportChannelCountAction {
+        CANCEL,
+        TRUNCATE,
+        PAD
+    }
+
+    private static final class ImportSourceSelection {
+        final BinPreset preset;
+        final File file;
+
+        private ImportSourceSelection(BinPreset preset, File file) {
+            this.preset = preset;
+            this.file = file;
+        }
+
+        static ImportSourceSelection forPreset(BinPreset preset) {
+            return new ImportSourceSelection(preset, null);
+        }
+
+        static ImportSourceSelection forFile(File file) {
+            return new ImportSourceSelection(null, file);
+        }
     }
 
     private void addSavedStatusMessage(PipelineDialog dialog) {
@@ -4480,6 +4862,22 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
 
     private static boolean hasText(String value) {
         return value != null && !value.trim().isEmpty();
+    }
+
+    private static String joinStrings(List<String> values, String delimiter) {
+        StringBuilder out = new StringBuilder();
+        String sep = delimiter == null ? "" : delimiter;
+        for (int i = 0; values != null && i < values.size(); i++) {
+            String value = values.get(i);
+            if (!hasText(value)) {
+                continue;
+            }
+            if (out.length() > 0) {
+                out.append(sep);
+            }
+            out.append(value.trim());
+        }
+        return out.toString();
     }
 
     private void showQcOpenMessageIfPresent(QcImageOpenResult result) {
