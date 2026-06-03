@@ -107,6 +107,20 @@ public final class PreFlightChecks {
      * when the folder looks like a previous run's output.
      */
     public static boolean confirmProceedOnOutputFolder(String directory) {
+        return confirmProceedOnOutputFolder(directory, false);
+    }
+
+    /**
+     * Returns true if the user wants to proceed. Known project reopens have
+     * already selected an existing FLASH project, so they do not need this
+     * duplicate re-run warning.
+     */
+    public static boolean confirmProceedOnOutputFolder(String directory, boolean knownProject) {
+        if (knownProject) {
+            IJ.log("[PreFlight] Known project reopen; skipping output-folder re-run warning: "
+                    + directory);
+            return true;
+        }
         OutputFolderResult r = detectOutputFolder(directory);
         if (!r.likelyOutput) return true;
 

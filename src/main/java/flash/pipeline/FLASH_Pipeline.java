@@ -238,9 +238,7 @@ public class FLASH_Pipeline implements PlugIn {
 
         // L-10: if this folder already contains a prior run's output dirs,
         // confirm that a re-run is intended before doing anything else.
-        // TODO(project-home-screen 05): use fastReopen to skip the redundant
-        // output-folder warning for known project reopens.
-        if (!PreFlightChecks.confirmProceedOnOutputFolder(directory)) {
+        if (!PreFlightChecks.confirmProceedOnOutputFolder(directory, fastReopen)) {
             return;
         }
         if (!confirmInputSourceAndWarn(true)) {
@@ -408,6 +406,8 @@ public class FLASH_Pipeline implements PlugIn {
         if (resolvedProjectJson == null) {
             return null;
         }
+        // Fast reopen deliberately loads the existing project and skips the
+        // builder save path, avoiding redundant project.json/Conditions.csv rewrites.
         ProjectFile project = ProjectService.load(resolvedProjectJson);
         if (project == null) {
             return null;
