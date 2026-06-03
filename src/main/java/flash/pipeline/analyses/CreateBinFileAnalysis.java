@@ -68,6 +68,7 @@ import flash.pipeline.ui.config.ConfigQcActions;
 import flash.pipeline.ui.config.ConfigQcDialog;
 import flash.pipeline.ui.config.ConfigQcResult;
 import flash.pipeline.ui.config.ConfigQcStage;
+import flash.pipeline.ui.config.ConfigReviewPanel;
 import flash.pipeline.ui.config.ChannelThresholdStage;
 import flash.pipeline.ui.config.ClassicalSegmentationStage;
 import flash.pipeline.ui.config.CellposeParameterStage;
@@ -181,6 +182,11 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
     private static final String[] THRESHOLD_WINDOW_TITLES =
             new String[]{"Threshold", "Threshold..."};
     private static final String ACTION_SKIP_CURRENT_IMAGE = "skip_current_image";
+    private static final String REVIEW_ACTION_SAVE = "save";
+    private static final String REVIEW_ACTION_SAVED = "saved";
+    private static final String REVIEW_ACTION_BACK = "back";
+    private static final String REVIEW_ACTION_CANCEL = "cancel";
+    private static final String REVIEW_EDIT_PREFIX = "edit:";
     private static final String CUSTOM_FILTER_PRESET_DIR = FlashProjectLayout.CUSTOM_FILTER_PRESET_DIR;
     private static final String LOADING_FILTERS_OPTION = "Loading filters...";
     private static final String FILTER_OPTIONS_REFRESH_TOKEN_PROPERTY =
@@ -1126,7 +1132,10 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         BinUserConfig cfg = null;
         boolean[][] customSettings = null;
 
-        int step = 1; // 1=collectConfig, 2=analysisScope, 3=granularFork, 4=zSliceQC, 5=channelQC, 6=save
+        int step = 1; // 1=collectConfig, 2=analysisScope, 3=granularFork, 4=zSliceQC, 5=channelQC, 6=review
+        boolean editingFromReview = false;
+        boolean reviewDependencyRun = false;
+        int lastStepBeforeReview = 5;
         WizardResumeState resume = readWizardResumeState(directory, binFolder);
         if (resume != null) {
             int choice = showResumePrompt(resume);
@@ -1148,6 +1157,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
             setWizardCancelContext(binFolder, cfg, customSettings, step, wizardStepLabel(step));
             switch (step) {
                 case 1: {
+                    int previousChannelCount = cfg == null || cfg.names == null ? 0 : cfg.names.size();
                     cfg = collectBinConfigFromUser(directory, binFolder, existing, cfg);
                     if (cfg == null) {
                         if (!shouldExitAfterWizardCancel(binFolder, cfg, customSettings, step, wizardStepLabel(step))) {
@@ -1157,16 +1167,34 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                         IJ.showMessage("Set Up Configuration", "Cancelled.");
                         return;
                     }
+                    int currentChannelCount = cfg.names == null ? 0 : cfg.names.size();
+                    if (editingFromReview && previousChannelCount != currentChannelCount) {
+                        customSettings = settingsMatrixForChannelCount(customSettings, currentChannelCount);
+                    }
                     writeChannelFilters(binFolder, cfg);
                     rememberSavedAt(persistIncremental(binFolder, cfg, customSettings,
                             1, wizardStepLabel(1), -1, null));
-                    step = 2;
+                    if (editingFromReview && !reviewDependencyRun) {
+                        if (previousChannelCount != currentChannelCount) {
+                            reviewDependencyRun = true;
+                            step = 2;
+                        } else {
+                            lastStepBeforeReview = 1;
+                            step = 6;
+                        }
+                    } else {
+                        step = 2;
+                    }
                     break;
                 }
                 case 2: {
                     Boolean scopeAccepted = showAnalysisScopeDialog(cfg, true);
                     if (scopeAccepted == null) {
-                        if (lastWasBack) { step = 1; break; }
+                        if (lastWasBack) {
+                            if (editingFromReview) reviewDependencyRun = true;
+                            step = 1;
+                            break;
+                        }
                         if (!shouldExitAfterWizardCancel(binFolder, cfg, customSettings, step, wizardStepLabel(step))) {
                             break;
                         }
@@ -1176,7 +1204,12 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                     }
                     rememberSavedAt(persistIncremental(binFolder, cfg, customSettings,
                             2, wizardStepLabel(2), -1, null));
-                    step = 3;
+                    if (editingFromReview && !reviewDependencyRun) {
+                        lastStepBeforeReview = 2;
+                        step = cfg.usesZSliceSubset() ? 4 : 6;
+                    } else {
+                        step = 3;
+                    }
                     break;
                 }
                 case 3: {
@@ -1192,7 +1225,11 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                         settingsStatusReference = previousStatusReference;
                     }
                     if (selectedSettings == null) {
-                        if (lastWasBack) { step = 2; break; }
+                        if (lastWasBack) {
+                            if (editingFromReview) reviewDependencyRun = true;
+                            step = 2;
+                            break;
+                        }
                         if (!shouldExitAfterWizardCancel(binFolder, cfg, customSettings, step, wizardStepLabel(step))) {
                             break;
                         }
@@ -1203,13 +1240,23 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                     customSettings = selectedSettings;
                     rememberSavedAt(persistIncremental(binFolder, cfg, customSettings,
                             3, wizardStepLabel(3), -1, null));
-                    step = cfg.usesZSliceSubset() ? 4
-                            : (needsQcImages(customSettings, cfg) ? 5 : 6);
+                    if (editingFromReview && !reviewDependencyRun) {
+                        lastStepBeforeReview = 3;
+                        step = needsQcImages(customSettings, cfg) ? 5 : 6;
+                    } else {
+                        step = cfg.usesZSliceSubset() ? 4
+                                : (needsQcImages(customSettings, cfg) ? 5 : 6);
+                        if (step == 6) lastStepBeforeReview = 3;
+                    }
                     break;
                 }
                 case 4: {
                     String zSliceResult = interactiveZSliceSubsetQC(directory, cfg);
-                    if ("back".equals(zSliceResult)) { step = 3; break; }
+                    if ("back".equals(zSliceResult)) {
+                        if (editingFromReview) reviewDependencyRun = true;
+                        step = 3;
+                        break;
+                    }
                     if ("cancel".equals(zSliceResult)) {
                         if (!shouldExitAfterWizardCancel(binFolder, cfg, customSettings, step, wizardStepLabel(step))) {
                             break;
@@ -1220,7 +1267,11 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                     }
                     rememberSavedAt(persistIncremental(binFolder, cfg, customSettings,
                             4, wizardStepLabel(4), -1, null));
+                    if (editingFromReview && !reviewDependencyRun) {
+                        lastStepBeforeReview = 4;
+                    }
                     step = needsQcImages(customSettings, cfg) ? 5 : 6;
+                    if (step == 6) lastStepBeforeReview = 4;
                     break;
                 }
                 case 5: {
@@ -1244,7 +1295,11 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                                 ? interactiveQC(qcOpenResult.images, cfg, binFolder, qcSettings)
                                 : "done";
                         cleanupImages(qcOpenResult.images);
-                        if ("back".equals(qcResult)) { step = 3; break; }
+                        if ("back".equals(qcResult)) {
+                            if (editingFromReview) reviewDependencyRun = true;
+                            step = 3;
+                            break;
+                        }
                         if ("cancel".equals(qcResult)) {
                             if (!shouldExitAfterWizardCancel(binFolder, cfg, customSettings, step, wizardStepLabel(step))) {
                                 break;
@@ -1257,12 +1312,39 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                     }
                     rememberSavedAt(persistIncremental(binFolder, cfg, customSettings,
                             5, wizardStepLabel(5), -1, null));
+                    lastStepBeforeReview = 5;
                     step = 6;
                     break;
                 }
                 case 6: {
-                    persistCommit(binFolder, cfg, customSettings);
-                    IJ.showMessage("Set Up Configuration", "Created configuration in:\n" + binFolder.getAbsolutePath());
+                    reviewDependencyRun = false;
+                    String reviewAction = showReviewDialog(binFolder, cfg, customSettings);
+                    if (REVIEW_ACTION_SAVE.equals(reviewAction)) {
+                        persistCommit(binFolder, cfg, customSettings);
+                        if (!shouldSkipReviewUi()) {
+                            IJ.showMessage("Set Up Configuration", "Created configuration in:\n" + binFolder.getAbsolutePath());
+                        }
+                        return;
+                    }
+                    if (REVIEW_ACTION_SAVED.equals(reviewAction)) {
+                        return;
+                    }
+                    if (REVIEW_ACTION_BACK.equals(reviewAction)) {
+                        editingFromReview = true;
+                        step = Math.max(1, Math.min(5, lastStepBeforeReview));
+                        break;
+                    }
+                    int editStep = parseReviewEditStep(reviewAction);
+                    if (editStep >= 1 && editStep <= 5) {
+                        editingFromReview = true;
+                        step = editStep;
+                        break;
+                    }
+                    if (!shouldExitAfterWizardCancel(binFolder, cfg, customSettings, step, wizardStepLabel(step))) {
+                        break;
+                    }
+                    if (!hasFiles(binFolder)) deleteRecursively(binFolder);
+                    IJ.showMessage("Set Up Configuration", "Cancelled.");
                     return;
                 }
             }
@@ -1469,6 +1551,85 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         } catch (IOException e) {
             IJ.log("FLASH: final config write failed: " + e.getMessage());
             throw new RuntimeException(e);
+        }
+    }
+
+    private String showReviewDialog(File binFolder, BinUserConfig cfg, boolean[][] customSettings) {
+        if (shouldSkipReviewUi()) {
+            persistCommit(binFolder, cfg, customSettings);
+            return REVIEW_ACTION_SAVED;
+        }
+        if (SwingUtilities.isEventDispatchThread()) {
+            return showReviewDialogOnEventThread(binFolder, cfg, customSettings);
+        }
+        final String[] result = new String[]{REVIEW_ACTION_CANCEL};
+        try {
+            SwingUtilities.invokeAndWait(new Runnable() {
+                @Override public void run() {
+                    result[0] = showReviewDialogOnEventThread(binFolder, cfg, customSettings);
+                }
+            });
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return REVIEW_ACTION_CANCEL;
+        } catch (java.lang.reflect.InvocationTargetException e) {
+            throw reviewDialogFailure(e.getCause());
+        }
+        return result[0] == null ? REVIEW_ACTION_CANCEL : result[0];
+    }
+
+    private String showReviewDialogOnEventThread(File binFolder, BinUserConfig cfg,
+                                                 boolean[][] customSettings) {
+        final PipelineDialog dialog = setupAnalysisDialog("Review configuration");
+        installWizardCancelHook(dialog);
+        dialog.enableBackButton();
+        dialog.setPrimaryButtonText("Save configuration");
+        dialog.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
+        dialog.addHeader("Review configuration");
+        addSavedStatusMessage(dialog);
+        dialog.addMessage("Check the setup before it is saved.");
+
+        ChannelConfig reviewConfig = ChannelConfigIO.fromBinUserConfig(cfg);
+        ConfigReviewPanel review = new ConfigReviewPanel(
+                ConfigReviewPanel.ReviewModel.from(reviewConfig, customSettings));
+        review.setStepEditListener(new ConfigReviewPanel.StepEditListener() {
+            @Override public void editStep(int stepIndex) {
+                dialog.closeWithAction(REVIEW_EDIT_PREFIX + stepIndex);
+            }
+        });
+        dialog.addComponent(review);
+        // TODO setup-flow-ux 03: add the Save as preset action to this review screen.
+
+        if (dialog.showDialog()) {
+            return REVIEW_ACTION_SAVE;
+        }
+        if (dialog.wasBackPressed()) return REVIEW_ACTION_BACK;
+        String action = dialog.getActionCommand();
+        return action != null && action.startsWith(REVIEW_EDIT_PREFIX)
+                ? action
+                : REVIEW_ACTION_CANCEL;
+    }
+
+    private boolean shouldSkipReviewUi() {
+        return headless || suppressDialogs || GraphicsEnvironment.isHeadless();
+    }
+
+    private static RuntimeException reviewDialogFailure(Throwable cause) {
+        if (cause instanceof RuntimeException) {
+            return (RuntimeException) cause;
+        }
+        if (cause instanceof Error) {
+            throw (Error) cause;
+        }
+        return new IllegalStateException("Could not show configuration review.", cause);
+    }
+
+    private static int parseReviewEditStep(String action) {
+        if (action == null || !action.startsWith(REVIEW_EDIT_PREFIX)) return -1;
+        try {
+            return Integer.parseInt(action.substring(REVIEW_EDIT_PREFIX.length()));
+        } catch (NumberFormatException e) {
+            return -1;
         }
     }
 
@@ -1720,7 +1881,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         int zDone = cfg == null ? 0 : cfg.zSliceSelections.size();
         lines.add(progressLine(step, 4, "Z-slice ranges", zDone, 0));
         lines.add(progressLine(step, 5, "Quality check", countFilledQcValues(cfg), Math.max(0, cfg == null ? 0 : cfg.names.size())));
-        lines.add(progressLine(step, 6, "Save configuration", 0, 0));
+        lines.add(progressLine(step, 6, "Review configuration", 0, 0));
         return lines;
     }
 
@@ -1743,7 +1904,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                 + countConfigured(cfg, ChannelConfig.P_SIZE)
                 + countConfigured(cfg, ChannelConfig.P_SEGMENTATION);
         lines.add(progressLine(step, 5, "Quality check", qcDone, channels * 6));
-        lines.add(progressLine(step, 6, "Save configuration", 0, 0));
+        lines.add(progressLine(step, 6, "Review configuration", 0, 0));
         return lines;
     }
 
@@ -1816,7 +1977,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
             case 3: return "Settings Mode";
             case 4: return "Z-slice QC";
             case 5: return "Quality Check";
-            case 6: return "Save Configuration";
+            case 6: return "Review Configuration";
             default: return "Set Up Configuration";
         }
     }
