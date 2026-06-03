@@ -683,6 +683,8 @@ public class CreateBinFileAnalysisTest {
         applied.filterPresets.addAll(Arrays.asList("Default", "High Signal-Noise Particle Filter"));
         applied.intensityThresholds.clear();
         applied.intensityThresholds.addAll(Arrays.asList("33", "44"));
+        applied.segmentationMethods.clear();
+        applied.segmentationMethods.addAll(Arrays.asList("cellpose:cyto2:30:true:0.4:0.0", "stardist:0.6:0.3"));
         applied.markerIds.clear();
         applied.markerIds.addAll(Arrays.asList("neun", "iba1"));
         applied.markerShapes.clear();
@@ -703,6 +705,8 @@ public class CreateBinFileAnalysisTest {
         assertEquals(Arrays.asList("10-90", "20-120"), result.minmax);
         assertEquals(Arrays.asList("Default", "High Signal-Noise Particle Filter"), result.filterPresets);
         assertEquals(Arrays.asList("33", "44"), result.intensityThresholds);
+        assertEquals(Arrays.asList("cellpose:cyto2:30:true:0.4:0.0", "stardist:0.6:0.3"),
+                result.segmentationMethods);
         assertEquals(Arrays.asList("neun", "iba1"), result.markerIds);
         assertEquals(Arrays.asList("round", "ramified"), result.markerShapes);
         assertEquals(Arrays.asList(Boolean.FALSE, Boolean.TRUE), result.markerCrowdingSensitive);

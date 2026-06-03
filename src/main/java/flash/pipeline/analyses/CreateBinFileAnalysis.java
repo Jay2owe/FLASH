@@ -3741,7 +3741,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                 minmax, filterPresets, intThresholds);
         cfg.segmentationMethods.clear();
         for (int i = 0; i < channelCount; i++) {
-            String currentMethod = valueAt(existingUser.segmentationMethods, i, "classical");
+            String currentMethod = valueAt(sourceForHiddenFields.segmentationMethods, i, "classical");
             String selection = comboText(bindings == null ? null : bindings.segmentationCombos[i],
                     segmentationChoiceForMethod(currentMethod));
             cfg.segmentationMethods.add(currentMethod);
