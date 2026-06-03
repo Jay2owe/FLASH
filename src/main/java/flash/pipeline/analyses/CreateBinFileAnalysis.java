@@ -139,8 +139,10 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Date;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -190,6 +192,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
     private static final String EXTRA_LAST_STEP_INDEX = "lastStepIndex";
     private static final String EXTRA_LAST_STEP_LABEL = "lastStepLabel";
     private static final String EXTRA_CUSTOM_SETTINGS = "customSettings";
+    private static final String SAVED_STATUS_PREFIX = "Saved \u2713 ";
     private static final List<String> CHANNEL_CONFIG_PROPERTIES;
     static {
         String[] bundled = NamedFilterLoader.FILTER_NAMES;
@@ -283,6 +286,11 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
     private boolean[][] activeWizardCustomSettings = null;
     private int activeWizardStep = 1;
     private String activeWizardLabel = "";
+    private long lastWizardSavedAtMillis = 0L;
+
+    private interface ValidationCheck {
+        boolean isValid();
+    }
     private CancelConfirmationDialog.Choice lastWizardCancelChoice = null;
     private final ConfigQcContext.FilteredStackCache setupFilteredStackCache =
             new ConfigQcContext.FilteredStackCache();
@@ -482,6 +490,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
 
     protected ConfigQcResult showEmbeddedConfigQcDialog(ConfigQcContext context,
                                                         List<ConfigQcStage> stages) {
+        attachSavedStatus(context);
         final List<String> dialogStagePath = activeEmbeddedStagePath;
         final int dialogStagePathIndex = activeEmbeddedStagePathIndex;
         if (!SwingUtilities.isEventDispatchThread()) {
@@ -540,6 +549,13 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         ConfigQcDialog dialog = ConfigQcDialog.createModeless(
                 null, context, stages, stagePath, activeStagePathIndex);
         return dialog.showDialog();
+    }
+
+    private void attachSavedStatus(ConfigQcContext context) {
+        if (context == null) return;
+        String status = savedStatusText(lastWizardSavedAtMillis);
+        context.putAttribute(ConfigQcDialog.SAVED_STATUS_ATTRIBUTE,
+                hasText(status) ? status : null);
     }
 
     private static RuntimeException embeddedDialogFailure(Throwable cause) {
@@ -1125,6 +1141,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                 step = Math.max(1, Math.min(6, resume.stepIndex));
             }
         }
+        lastWizardSavedAtMillis = readSavedAtMillis(binFolder);
 
         try {
         while (step >= 1 && step <= 6) {
@@ -1141,8 +1158,8 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                         return;
                     }
                     writeChannelFilters(binFolder, cfg);
-                    persistIncremental(binFolder, cfg, customSettings,
-                            1, wizardStepLabel(1), -1, null);
+                    rememberSavedAt(persistIncremental(binFolder, cfg, customSettings,
+                            1, wizardStepLabel(1), -1, null));
                     step = 2;
                     break;
                 }
@@ -1157,8 +1174,8 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                         IJ.showMessage("Set Up Configuration", "Cancelled.");
                         return;
                     }
-                    persistIncremental(binFolder, cfg, customSettings,
-                            2, wizardStepLabel(2), -1, null);
+                    rememberSavedAt(persistIncremental(binFolder, cfg, customSettings,
+                            2, wizardStepLabel(2), -1, null));
                     step = 3;
                     break;
                 }
@@ -1184,8 +1201,8 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                         return;
                     }
                     customSettings = selectedSettings;
-                    persistIncremental(binFolder, cfg, customSettings,
-                            3, wizardStepLabel(3), -1, null);
+                    rememberSavedAt(persistIncremental(binFolder, cfg, customSettings,
+                            3, wizardStepLabel(3), -1, null));
                     step = cfg.usesZSliceSubset() ? 4
                             : (needsQcImages(customSettings, cfg) ? 5 : 6);
                     break;
@@ -1201,8 +1218,8 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                         IJ.showMessage("Set Up Configuration", "Cancelled.");
                         return;
                     }
-                    persistIncremental(binFolder, cfg, customSettings,
-                            4, wizardStepLabel(4), -1, null);
+                    rememberSavedAt(persistIncremental(binFolder, cfg, customSettings,
+                            4, wizardStepLabel(4), -1, null));
                     step = needsQcImages(customSettings, cfg) ? 5 : 6;
                     break;
                 }
@@ -1238,8 +1255,8 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                         }
                         // "done" or "skip" → proceed to save
                     }
-                    persistIncremental(binFolder, cfg, customSettings,
-                            5, wizardStepLabel(5), -1, null);
+                    rememberSavedAt(persistIncremental(binFolder, cfg, customSettings,
+                            5, wizardStepLabel(5), -1, null));
                     step = 6;
                     break;
                 }
@@ -1416,17 +1433,18 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         }
     }
 
-    private void persistIncremental(File binFolder, BinUserConfig user, boolean[][] customSettings,
+    private long persistIncremental(File binFolder, BinUserConfig user, boolean[][] customSettings,
                                     int stepIndex, String stepLabel,
                                     int channelIndex, String propertyKey) {
-        persistIncrementalProperties(binFolder, user, customSettings,
+        return persistIncrementalProperties(binFolder, user, customSettings,
                 stepIndex, stepLabel, channelIndex, propertyKey);
     }
 
-    private void persistIncrementalProperties(File binFolder, BinUserConfig user, boolean[][] customSettings,
+    private long persistIncrementalProperties(File binFolder, BinUserConfig user, boolean[][] customSettings,
                                               int stepIndex, String stepLabel,
                                               int channelIndex, String... propertyKeys) {
         try {
+            File settingsDir = channelConfigSettingsDir(binFolder);
             ChannelConfig cc = mergeIntoExisting(
                     binFolder, user, customSettings, stepIndex, stepLabel,
                     -1, null, ChannelConfig.PropertyStatus.CONFIGURED);
@@ -1436,9 +1454,12 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                     markPropertyCommit(channel, propertyKeys[i], ChannelConfig.PropertyStatus.CONFIGURED);
                 }
             }
-            ChannelConfigIO.write(channelConfigSettingsDir(binFolder), cc);
+            ChannelConfigIO.write(settingsDir, cc);
+            ChannelConfig persisted = ChannelConfigIO.read(settingsDir);
+            return persisted == null ? cc.writtenAtMillis : persisted.writtenAtMillis;
         } catch (IOException e) {
             IJ.log("FLASH: incremental config write failed: " + e.getMessage());
+            return 0L;
         }
     }
 
@@ -1449,6 +1470,25 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
             IJ.log("FLASH: final config write failed: " + e.getMessage());
             throw new RuntimeException(e);
         }
+    }
+
+    private void rememberSavedAt(long millis) {
+        if (millis > 0) {
+            lastWizardSavedAtMillis = millis;
+        }
+    }
+
+    private long readSavedAtMillis(File binFolder) {
+        ChannelConfig persisted = ChannelConfigIO.read(channelConfigSettingsDir(binFolder));
+        return persisted == null ? 0L : persisted.writtenAtMillis;
+    }
+
+    static String savedStatusText(long millis) {
+        return millis <= 0 ? "" : SAVED_STATUS_PREFIX + formatSavedTime(millis);
+    }
+
+    static String formatSavedTime(long millis) {
+        return new SimpleDateFormat("HH:mm", Locale.ROOT).format(new Date(millis));
     }
 
     private ChannelConfig mergeIntoExisting(File binFolder, BinUserConfig user, boolean[][] customSettings,
@@ -1791,6 +1831,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
             IJ.error("Set Up Configuration", "Cannot read existing config. Use 'Override ALL' instead.");
             return;
         }
+        lastWizardSavedAtMillis = readSavedAtMillis(binFolder);
 
         int n = existing.numChannels();
         List<String> names = new ArrayList<>(existing.channelNames);
@@ -1828,6 +1869,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                     installWizardCancelHook(pd);
                     pd.setModal(false);
                     pd.addHeader("Filter Preset Per Channel");
+                    addSavedStatusMessage(pd);
                     pd.addHelpText("'Custom' opens the standard Set Filter and Parameters QC step with the current channel macro loaded. Saved custom filters can be reused from this list on later runs.");
                     for (int i = 0; i < n; i++) {
                         String defaultPreset = cfg.filterPresets.get(i);
@@ -2008,6 +2050,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         installWizardCancelHook(fork);
         fork.enableBackButton();
         fork.addSetupHelpHeader("Settings Mode", SetupHelpCatalog.SETTINGS_MODE);
+        addSavedStatusMessage(fork);
         fork.addMessage("Toggle ON the settings you want to adjust interactively per channel.");
 
         int n = channelNames == null ? 0 : channelNames.size();
@@ -2729,7 +2772,14 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
             installWizardCancelHook(gdCount);
             gdCount.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
             gdCount.addSetupHelpSubHeader("Channel Setup", SetupHelpCatalog.CHANNEL_IDENTITY);
-            gdCount.addNumericField("Number of channels", 3, 0);
+            addSavedStatusMessage(gdCount);
+            final JTextField channelCountField = gdCount.addNumericField("Number of channels", 3, 0);
+            JLabel channelCountHint = gdCount.addHelpText("");
+            bindValidation(gdCount, channelCountField, new ValidationCheck() {
+                @Override public boolean isValid() {
+                    return isValidChannelCountToken(channelCountField.getText());
+                }
+            }, channelCountHint, "Enter at least 1 channel.");
             final BinUserConfig[] loadedFromRun = new BinUserConfig[1];
             installLoadFromRunButton(gdCount, directory, loadedFromRun, new Runnable() {
                 @Override public void run() {
@@ -2765,6 +2815,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
             pd.setModal(false);
             if (existing == null) pd.enableBackButton();
             pd.addSetupHelpHeader("Channel Identity", SetupHelpCatalog.CHANNEL_IDENTITY);
+            addSavedStatusMessage(pd);
             final int channelCount = n;
             final BinSetupBindings binBindings = new BinSetupBindings(channelCount);
             pd.addMessage("Assign each channel's display name and LUT.");
@@ -2772,6 +2823,8 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                     false, false, null);
             bindChannelIdentityGrid(binBindings, identityGrid);
             pd.addComponent(identityGrid.panel);
+            JLabel channelNameHint = pd.addHelpText("");
+            bindChannelNameValidation(pd, binBindings.nameFields, channelNameHint);
             final BinUserConfig[] loadedFromRun = new BinUserConfig[1];
             installLoadFromRunButton(pd, directory, loadedFromRun, new Runnable() {
                 @Override public void run() {
@@ -2794,7 +2847,14 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                     installWizardCancelHook(gdCount2);
                     gdCount2.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
                     gdCount2.addSetupHelpSubHeader("Channel Setup", SetupHelpCatalog.CHANNEL_IDENTITY);
-                    gdCount2.addNumericField("Number of channels", n, 0);
+                    addSavedStatusMessage(gdCount2);
+                    final JTextField channelCountField2 = gdCount2.addNumericField("Number of channels", n, 0);
+                    JLabel channelCountHint2 = gdCount2.addHelpText("");
+                    bindValidation(gdCount2, channelCountField2, new ValidationCheck() {
+                        @Override public boolean isValid() {
+                            return isValidChannelCountToken(channelCountField2.getText());
+                        }
+                    }, channelCountHint2, "Enter at least 1 channel.");
                     if (!gdCount2.showDialog()) return null;
                     n = (int) gdCount2.getNextNumber();
                     if (n <= 0) {
@@ -2856,6 +2916,85 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                         return result;
                     }
                 });
+    }
+
+    private void addSavedStatusMessage(PipelineDialog dialog) {
+        if (dialog == null) return;
+        String status = savedStatusText(lastWizardSavedAtMillis);
+        dialog.addHelpText(hasText(status) ? status : "");
+    }
+
+    private static void bindValidation(PipelineDialog dialog,
+                                       JTextField field,
+                                       final ValidationCheck check,
+                                       JLabel hintLabel,
+                                       String hintText) {
+        PipelineDialog.bindValidation(dialog, field, new java.util.function.Predicate<String>() {
+            @Override public boolean test(String ignored) {
+                return check != null && check.isValid();
+            }
+        }, hintLabel, hintText);
+    }
+
+    private static void bindValidation(PipelineDialog dialog,
+                                       JTextField[] fields,
+                                       final ValidationCheck check,
+                                       JLabel hintLabel,
+                                       String hintText) {
+        if (fields == null) return;
+        for (int i = 0; i < fields.length; i++) {
+            if (fields[i] != null) {
+                bindValidation(dialog, fields[i], check, hintLabel, hintText);
+            }
+        }
+    }
+
+    private static void bindChannelNameValidation(final PipelineDialog dialog,
+                                                  final JTextField[] fields,
+                                                  JLabel hintLabel) {
+        if (fields == null) return;
+        for (int i = 0; i < fields.length; i++) {
+            JTextField field = fields[i];
+            if (field == null) continue;
+            bindValidation(dialog, field, new ValidationCheck() {
+                @Override public boolean isValid() {
+                    return areValidChannelNames(fields);
+                }
+            }, hintLabel, "Enter a name for every channel.");
+        }
+    }
+
+    static boolean areValidChannelNames(JTextField[] fields) {
+        if (fields == null || fields.length == 0) return false;
+        for (int i = 0; i < fields.length; i++) {
+            if (fields[i] == null || !isValidChannelName(fields[i].getText())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    static boolean isValidChannelName(String value) {
+        return hasText(value);
+    }
+
+    static boolean isValidChannelCountToken(String value) {
+        try {
+            double parsed = Double.parseDouble(value == null ? "" : value.trim());
+            return !Double.isNaN(parsed) && !Double.isInfinite(parsed) && parsed > 0;
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+
+    static boolean areValidNumericFields(JTextField[] fields) {
+        if (fields == null || fields.length == 0) return false;
+        for (int i = 0; i < fields.length; i++) {
+            if (fields[i] == null || !isValidNumericToken(fields[i].getText())) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static void applyLoadedConfigToIdentityBindings(BinUserConfig cfg,
@@ -3561,6 +3700,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         installWizardCancelHook(pd);
         if (allowBack) pd.enableBackButton();
         pd.addSetupHelpHeader("Analysis Scope", SetupHelpCatalog.ANALYSIS_SCOPE);
+        addSavedStatusMessage(pd);
         pd.addMessage("Choose whether the analysis should use the full z-stack or a contiguous z-slice subset.");
         pd.addToggle(Z_SLICE_SCOPE_LABEL, cfg != null && cfg.usesZSliceSubset());
         pd.addHelpText("Default OFF analyses the full stack. When ON, every image series will be reviewed before the other QC stages.");
@@ -5353,6 +5493,16 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                     sdDialog.addHelpText("Min Quality: removes detections with low StarDist/TrackMate quality scores. Higher values are stricter.");
                     final JTextField intensityMinField = sdDialog.addNumericField("Min Mean Intensity", sdParams[8], 1);
                     sdDialog.addHelpText("Min Mean Intensity: removes dim objects based on their mean signal in this channel. Increase it to suppress weak background detections.");
+                    final JTextField[] starDistNumericFields = new JTextField[]{
+                            probField, nmsField, linkingField, gapClosingField, frameGapField,
+                            areaMinField, areaMaxField, qualityMinField, intensityMinField
+                    };
+                    JLabel starDistNumericHint = sdDialog.addHelpText("");
+                    bindValidation(sdDialog, starDistNumericFields, new ValidationCheck() {
+                        @Override public boolean isValid() {
+                            return areValidNumericFields(starDistNumericFields);
+                        }
+                    }, starDistNumericHint, "Enter numeric values for all StarDist parameters.");
 
                     // Preview button — runs StarDist on the filtered image with current params
                     JButton previewBtn = sdDialog.addFooterButton("Run StarDist Preview");
@@ -5659,6 +5809,15 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                     cpDialog.addHelpText("Flow Threshold: flow-error QC cutoff. Set 0 to disable this QC step entirely; above 0, larger values are more permissive and reject fewer masks.");
                     final JTextField cellprobField = cpDialog.addNumericField("Cell Probability Threshold", cpNumericParams[2], 2);
                     cpDialog.addHelpText("Cell Probability Threshold: minimum Cellpose mask probability. Higher values return fewer, more confident objects; lower values return more objects, including weaker ones.");
+                    final JTextField[] cellposeNumericFields = new JTextField[]{
+                            diameterField, flowField, cellprobField
+                    };
+                    JLabel cellposeNumericHint = cpDialog.addHelpText("");
+                    bindValidation(cpDialog, cellposeNumericFields, new ValidationCheck() {
+                        @Override public boolean isValid() {
+                            return areValidNumericFields(cellposeNumericFields);
+                        }
+                    }, cellposeNumericHint, "Enter numeric values for all Cellpose parameters.");
                     ToggleSwitch gpuToggle = cpDialog.addToggle("Use GPU", cpGpuParam[0]);
                     cpDialog.addHelpText("Use GPU: runs Cellpose on a detected compatible GPU if one is available. Turn this off to force CPU. This switch does not install GPU support by itself.");
                     JButton installGpuBtn = cpDialog.addButton("Install GPU Support");
@@ -6013,9 +6172,20 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                         gdSize.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
                         gdSize.addSetupHelpSubHeader("Particle Sizes (n Voxels)",
                                 SetupHelpCatalog.CLASSICAL_OBJECT_SEGMENTATION);
-                        gdSize.addNumericField("Min Size (n Voxels)", minSize, 0);
+                        final JTextField minSizeField = gdSize.addNumericField("Min Size (n Voxels)", minSize, 0);
                         String maxStr = maxSize >= 99999999 ? "Infinity" : String.valueOf(maxSize);
-                        gdSize.addStringField("Max Size (n Voxels)", maxStr, 15);
+                        final JTextField maxSizeField = gdSize.addStringField("Max Size (n Voxels)", maxStr, 15);
+                        JLabel sizeHint = gdSize.addHelpText("");
+                        ValidationCheck sizeValidation = new ValidationCheck() {
+                            @Override public boolean isValid() {
+                                return ParticleSizeStage.isValidSizeFields(
+                                        minSizeField.getText(), maxSizeField.getText(), null);
+                            }
+                        };
+                        bindValidation(gdSize, minSizeField, sizeValidation, sizeHint,
+                                "Use min and max voxel sizes, for example 100-Infinity.");
+                        bindValidation(gdSize, maxSizeField, sizeValidation, sizeHint,
+                                "Use min and max voxel sizes, for example 100-Infinity.");
                         addSkipCurrentImageButton(gdSize);
                         if (!gdSize.showDialog()) {
                             if (isSkipCurrentImageAction(gdSize)) {
@@ -6093,21 +6263,21 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         if (step == null) return;
         switch (step.stage) {
             case FILTER_PARAMETERS:
-                persistIncremental(binFolder, cfg, customSettings,
-                        5, wizardStepLabel(5), step.channelIndex, ChannelConfig.P_FILTER);
+                rememberSavedAt(persistIncremental(binFolder, cfg, customSettings,
+                        5, wizardStepLabel(5), step.channelIndex, ChannelConfig.P_FILTER));
                 break;
             case DISPLAY_RANGE:
-                persistIncremental(binFolder, cfg, customSettings,
-                        5, wizardStepLabel(5), step.channelIndex, ChannelConfig.P_MINMAX);
+                rememberSavedAt(persistIncremental(binFolder, cfg, customSettings,
+                        5, wizardStepLabel(5), step.channelIndex, ChannelConfig.P_MINMAX));
                 break;
             case CHANNEL_THRESHOLD:
-                persistIncrementalProperties(binFolder, cfg, customSettings,
+                rememberSavedAt(persistIncrementalProperties(binFolder, cfg, customSettings,
                         5, wizardStepLabel(5), step.channelIndex,
-                        ChannelConfig.P_THRESHOLD, ChannelConfig.P_INTENSITY);
+                        ChannelConfig.P_THRESHOLD, ChannelConfig.P_INTENSITY));
                 break;
             case PARTICLE_SIZE:
-                persistIncremental(binFolder, cfg, customSettings,
-                        5, wizardStepLabel(5), step.channelIndex, ChannelConfig.P_SIZE);
+                rememberSavedAt(persistIncremental(binFolder, cfg, customSettings,
+                        5, wizardStepLabel(5), step.channelIndex, ChannelConfig.P_SIZE));
                 break;
             case SEGMENTATION_OBJECT:
             case STARDIST_PARAMETERS:
@@ -6115,15 +6285,15 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                 if (!isStarDistSegmentation(cfg, step.channelIndex)
                         && !isCellposeSegmentation(cfg, step.channelIndex)
                         || step.includeAiChannelThreshold) {
-                    persistIncrementalProperties(binFolder, cfg, customSettings,
+                    rememberSavedAt(persistIncrementalProperties(binFolder, cfg, customSettings,
                             5, wizardStepLabel(5), step.channelIndex,
                             ChannelConfig.P_SEGMENTATION, ChannelConfig.P_THRESHOLD,
-                            ChannelConfig.P_SIZE, ChannelConfig.P_INTENSITY);
+                            ChannelConfig.P_SIZE, ChannelConfig.P_INTENSITY));
                 } else {
-                    persistIncrementalProperties(binFolder, cfg, customSettings,
+                    rememberSavedAt(persistIncrementalProperties(binFolder, cfg, customSettings,
                             5, wizardStepLabel(5), step.channelIndex,
                             ChannelConfig.P_SEGMENTATION, ChannelConfig.P_THRESHOLD,
-                            ChannelConfig.P_SIZE);
+                            ChannelConfig.P_SIZE));
                 }
                 break;
             default:
@@ -8390,7 +8560,13 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                 dialog.addHelpText("Enter a numeric threshold manually. Type 'default' only if you want automatic thresholding.");
                 dialog.addHelpText("Suggested automatic threshold: " + suggestedAutoThreshold);
             }
-            dialog.addStringField(fieldLabel, fieldValue, 20);
+            final JTextField thresholdField = dialog.addStringField(fieldLabel, fieldValue, 20);
+            JLabel thresholdHint = dialog.addHelpText("");
+            bindValidation(dialog, thresholdField, new ValidationCheck() {
+                @Override public boolean isValid() {
+                    return isValidThresholdToken(normalizeThresholdToken(thresholdField.getText()));
+                }
+            }, thresholdHint, "Enter 'default' or a numeric threshold.");
             JButton skip = dialog.addFooterButton("Skip Current Image");
             skip.addActionListener(e -> dialog.closeWithAction(ACTION_SKIP_CURRENT_IMAGE));
             if (!dialog.showDialog()) {
@@ -8449,11 +8625,11 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                 && threshold != ImageProcessor.NO_THRESHOLD;
     }
 
-    private boolean isValidThresholdToken(String token) {
+    static boolean isValidThresholdToken(String token) {
         return "default".equalsIgnoreCase(token) || isNumericThresholdToken(token);
     }
 
-    private boolean isNumericThresholdToken(String token) {
+    static boolean isNumericThresholdToken(String token) {
         if (token == null || token.trim().isEmpty()) return false;
         try {
             double parsed = Double.parseDouble(token.trim());
@@ -8463,7 +8639,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         }
     }
 
-    private String normalizeThresholdToken(String token) {
+    static String normalizeThresholdToken(String token) {
         if (token == null) return "";
         String trimmed = token.trim();
         if ("default".equalsIgnoreCase(trimmed)) return "default";
@@ -9067,7 +9243,25 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
 
     // ── Parsing helpers ─────────────────────────────────────────────────
 
-    private double[] parseMinMax(String token) {
+    static boolean isValidDisplayRangeToken(String token) {
+        return "None".equalsIgnoreCase(token == null ? "" : token.trim()) || parseMinMax(token) != null;
+    }
+
+    static boolean isValidSizeRangeToken(String token) {
+        return parseSizeRange(token) != null;
+    }
+
+    static boolean isValidNumericToken(String token) {
+        if (token == null || token.trim().isEmpty()) return false;
+        try {
+            double parsed = Double.parseDouble(token.trim());
+            return !Double.isNaN(parsed) && !Double.isInfinite(parsed);
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+
+    static double[] parseMinMax(String token) {
         if (token == null || "None".equalsIgnoreCase(token)) return null;
         String[] parts = token.split("-");
         if (parts.length != 2) return null;
@@ -9078,7 +9272,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         }
     }
 
-    private double[] parseSizeRange(String token) {
+    static double[] parseSizeRange(String token) {
         if (token == null) return null;
         String[] parts = token.split("-");
         if (parts.length != 2) return null;

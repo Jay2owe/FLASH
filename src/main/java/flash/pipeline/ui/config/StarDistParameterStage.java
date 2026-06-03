@@ -299,8 +299,12 @@ public final class StarDistParameterStage implements ConfigQcStage {
         panel.add(sizeCutoffPanel);
         loadFields(savedParameters);
         loadSizeFields(savedSize);
+        updateParameterValidationState();
         refreshSizeCutoffPanelOnly();
         markPreviewStale(EMPTY_TEXT);
+        if (!updateParameterValidationState()) {
+            setStatus(validationHint());
+        }
         return panel;
     }
 
@@ -338,6 +342,7 @@ public final class StarDistParameterStage implements ConfigQcStage {
             loadedAny = true;
         }
         if (loadedAny) {
+            updateParameterValidationState();
             markPreviewStale("Loaded StarDist parameters. Press Run Preview.");
         }
         return LoadedRunParameters.Result.merge(method.result, size.result);
@@ -377,6 +382,7 @@ public final class StarDistParameterStage implements ConfigQcStage {
             if (filteredSource == null) {
                 throw new IllegalStateException("No filtered StarDist input image is available.");
             }
+            updateParameterValidationState();
             if (preview != null) {
                 preview.setOriginal(currentSourceImage());
                 preview.setAdjusted(null);
@@ -385,6 +391,9 @@ public final class StarDistParameterStage implements ConfigQcStage {
             refreshSizeCutoffPanelOnly();
             refreshLargePreviewModel();
             setStatus(EMPTY_TEXT);
+            if (!updateParameterValidationState()) {
+                setStatus(validationHint());
+            }
             setVariationsButtonReady(true);
         } catch (Exception e) {
             closeImages();
@@ -1031,6 +1040,7 @@ public final class StarDistParameterStage implements ConfigQcStage {
         if (pendingDefaultsPrevious == null) return;
         Parameters previous = copyParameters(pendingDefaultsPrevious);
         loadFields(previous);
+        updateParameterValidationState();
         selectedModelKeySnapshot = previous.modelKey;
         clearPendingDefaults();
         markPreviewStale(STALE_TEXT);
@@ -1097,6 +1107,7 @@ public final class StarDistParameterStage implements ConfigQcStage {
                 current.intensityMin,
                 selected.entry.modelKey);
         loadFields(updated);
+        updateParameterValidationState();
         warnIfAdvancedRgbSelection(selected.entry);
         captureCurrentPreviewForComparison();
         if (defaultsChanged(previous, updated)) {
@@ -1140,6 +1151,7 @@ public final class StarDistParameterStage implements ConfigQcStage {
         parameterStore.save(formatMethod(current));
         savedParameters = current;
         refreshMissingModelNoticeRow();
+        updateParameterValidationState();
         setStatus("Replacement model selected.");
         markPreviewStale(STALE_TEXT);
     }
@@ -1176,6 +1188,7 @@ public final class StarDistParameterStage implements ConfigQcStage {
             missingModelKey = null;
         }
         refreshMissingModelNoticeRow();
+        updateParameterValidationState();
     }
 
     private ModelOption selectedModelOption() {
@@ -1200,11 +1213,19 @@ public final class StarDistParameterStage implements ConfigQcStage {
 
     private void fieldChanged() {
         if (updatingFields) return;
+        if (!updateParameterValidationState()) {
+            setStatus(validationHint());
+            return;
+        }
         markPreviewStale(STALE_TEXT);
     }
 
     private void postDetectionFilterFieldChanged() {
         if (updatingFields) return;
+        if (!updateParameterValidationState()) {
+            setStatus(validationHint());
+            return;
+        }
         if (!refreshObjectFilterPreview() && !objectFilterValidationError) {
             markPreviewStale(STALE_TEXT);
         }
@@ -1213,8 +1234,55 @@ public final class StarDistParameterStage implements ConfigQcStage {
     private void resetToSaved() {
         loadFields(savedParameters);
         loadSizeFields(savedSize);
+        updateParameterValidationState();
         if (!refreshObjectFilterPreview() && !objectFilterValidationError) {
             markPreviewStale(STALE_TEXT);
+        }
+    }
+
+    private boolean updateParameterValidationState() {
+        String hint = validationHint();
+        boolean valid = hint.length() == 0;
+        if (actions != null) {
+            actions.setPrimaryButtonEnabled(valid);
+        }
+        return valid;
+    }
+
+    private String validationHint() {
+        if (missingModelKey != null) {
+            return "Select an available StarDist model.";
+        }
+        if (!areNumericParameterFieldsValid()) {
+            return "Enter numeric values for all StarDist parameters.";
+        }
+        if (!ParticleSizeStage.isValidSizeFields(
+                sizeMinField == null ? null : sizeMinField.getText(),
+                sizeMaxField == null ? null : sizeMaxField.getText(),
+                filteredSource)) {
+            return "Use min and max voxel volumes, for example 0-Infinity.";
+        }
+        return "";
+    }
+
+    private boolean areNumericParameterFieldsValid() {
+        JTextField[] fields = new JTextField[]{
+                probabilityField, nmsField, linkingField, gapClosingField, frameGapField,
+                areaMinField, areaMaxField, qualityMinField, intensityMinField
+        };
+        for (int i = 0; i < fields.length; i++) {
+            if (!isValidNumericField(fields[i])) return false;
+        }
+        return true;
+    }
+
+    private static boolean isValidNumericField(JTextField field) {
+        if (field == null || field.getText() == null || field.getText().trim().isEmpty()) return false;
+        try {
+            double parsed = Double.parseDouble(field.getText().trim());
+            return Double.isFinite(parsed);
+        } catch (NumberFormatException e) {
+            return false;
         }
     }
 

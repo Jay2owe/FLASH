@@ -96,6 +96,7 @@ public final class ParticleSizeStage implements ConfigQcStage {
     private JButton resetButton;
     private ToggleSwitch showRemovedObjectsSwitch;
     private JLabel thresholdLabel;
+    private JLabel sizeValidationLabel;
     private ObjectSizeCutoffPanel sizeCutoffPanel;
     private ObjectSizeFilterPreview.Summary sizeSummary;
     private boolean showRawSource;
@@ -147,11 +148,17 @@ public final class ParticleSizeStage implements ConfigQcStage {
         });
         panel.add(buildSizeRow());
         panel.add(Box.createVerticalStrut(4));
+        sizeValidationLabel = new JLabel(" ");
+        sizeValidationLabel.setForeground(FlashTheme.TEXT_HELP);
+        sizeValidationLabel.setAlignmentX(JComponent.LEFT_ALIGNMENT);
+        panel.add(sizeValidationLabel);
+        panel.add(Box.createVerticalStrut(4));
         sizeCutoffPanel = new ObjectSizeCutoffPanel();
         panel.add(sizeCutoffPanel);
         panel.add(Box.createVerticalStrut(4));
         panel.add(buildActionRow());
         loadFields(savedSize);
+        updateSizeValidationState();
         refreshSizeCutoffPanelOnly();
         markPreviewStale(EMPTY_TEXT);
         return panel;
@@ -190,6 +197,7 @@ public final class ParticleSizeStage implements ConfigQcStage {
             if (filteredSource == null) {
                 throw new IllegalStateException("No filtered particle-size input image is available.");
             }
+            updateSizeValidationState();
             thresholdValue = Integer.valueOf(previewAdapter.resolveThreshold(filteredSource, context));
             refreshThresholdLabel();
             refreshSizeCutoffPanelOnly();
@@ -425,6 +433,10 @@ public final class ParticleSizeStage implements ConfigQcStage {
 
     private void fieldChanged() {
         if (updatingFields) return;
+        if (!updateSizeValidationState()) {
+            markPreviewStale("Use min and max voxel sizes, for example 100-Infinity.");
+            return;
+        }
         if (!sizeFieldsReadyForLivePreview()) {
             markPreviewStale(STALE_TEXT);
             return;
@@ -436,6 +448,7 @@ public final class ParticleSizeStage implements ConfigQcStage {
 
     private void resetToSaved() {
         loadFields(savedSize);
+        updateSizeValidationState();
         if (!refreshSizeFilterPreview()) {
             markPreviewStale(STALE_TEXT);
         }
@@ -743,6 +756,20 @@ public final class ParticleSizeStage implements ConfigQcStage {
         }
     }
 
+    private boolean updateSizeValidationState() {
+        boolean valid = isValidSizeFields(
+                minField == null ? null : minField.getText(),
+                maxField == null ? null : maxField.getText(),
+                filteredSource);
+        if (sizeValidationLabel != null) {
+            sizeValidationLabel.setText(valid ? " " : "Use min and max voxel sizes, for example 100-Infinity.");
+        }
+        if (actions != null) {
+            actions.setPrimaryButtonEnabled(valid);
+        }
+        return valid;
+    }
+
     private void setError(String text) {
         setPreviewState(PreviewPairPanel.PreviewState.ERROR, text);
         setStatus(text);
@@ -835,6 +862,23 @@ public final class ParticleSizeStage implements ConfigQcStage {
             max = "Infinity";
         }
         return new SizeToken(min, max);
+    }
+
+    public static boolean isValidSizeRangeToken(String token) {
+        if (token == null) return false;
+        String[] parts = token.trim().split("-", 2);
+        return parts.length == 2 && isValidSizeFields(parts[0], parts[1], null);
+    }
+
+    public static boolean isValidSizeFields(String minText, String maxText, ImagePlus source) {
+        try {
+            int min = Math.max(0, ObjectsCounter3DWrapper.parseMinSizeVoxels(minText, 100));
+            String max = normalizeMaxText(maxText);
+            int maxSize = ObjectsCounter3DWrapper.parseMaxSizeVoxels(max, source);
+            return !isFiniteMaxToken(max) || maxSize > min;
+        } catch (RuntimeException e) {
+            return false;
+        }
     }
 
     private static SizeToken normalizedSizeToken(SizeToken token) {

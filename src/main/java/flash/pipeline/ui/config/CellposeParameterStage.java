@@ -341,9 +341,13 @@ public final class CellposeParameterStage implements ConfigQcStage {
         panel.add(buildActionRow());
         loadFields(savedParameters);
         loadSizeFields(savedSize);
+        updateParameterValidationState();
         refreshSizeCutoffPanelOnly();
         refreshCompanionState();
         markPreviewStale(EMPTY_TEXT);
+        if (!updateParameterValidationState()) {
+            setStatus(validationHint());
+        }
         return panel;
     }
 
@@ -376,6 +380,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
             loadSizeFields(size.value);
             refreshSizeCutoffPanelOnly();
         }
+        updateParameterValidationState();
         markPreviewStale("Loaded Cellpose parameters. Press Run Preview.");
         return LoadedRunParameters.Result.merge(method.result, size.result);
     }
@@ -413,6 +418,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
             if (filteredSource == null) {
                 throw new IllegalStateException("No filtered Cellpose input image is available.");
             }
+            updateParameterValidationState();
             if (preview != null) {
                 preview.setOriginal(currentSourceImage());
                 preview.setAdjusted(null);
@@ -421,6 +427,9 @@ public final class CellposeParameterStage implements ConfigQcStage {
             refreshSizeCutoffPanelOnly();
             refreshLargePreviewModel();
             setStatus(EMPTY_TEXT);
+            if (!updateParameterValidationState()) {
+                setStatus(validationHint());
+            }
             setVariationsButtonReady(true);
         } catch (Exception e) {
             closeImages();
@@ -1094,6 +1103,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
         if (pendingDefaultsPrevious == null) return;
         Parameters previous = copyParameters(pendingDefaultsPrevious);
         loadFields(previous);
+        updateParameterValidationState();
         selectedModelKeySnapshot = previous.modelToken;
         clearPendingDefaults();
         markPreviewStale(STALE_TEXT);
@@ -1146,6 +1156,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
                         defaultDouble(selected.entry.defaults.get("cellprobThreshold"), current.cellprobThreshold),
                         current.useGpu);
                 loadFields(updated);
+                updateParameterValidationState();
                 captureCurrentPreviewForComparison();
                 if (defaultsChanged(previous, updated)) {
                     showPendingDefaults(previous, updated, selected.entry.name);
@@ -1278,11 +1289,19 @@ public final class CellposeParameterStage implements ConfigQcStage {
 
     private void fieldChanged() {
         if (updatingControls) return;
+        if (!updateParameterValidationState()) {
+            setStatus(validationHint());
+            return;
+        }
         markPreviewStale(STALE_TEXT);
     }
 
     private void sizeFieldChanged() {
         if (updatingControls) return;
+        if (!updateParameterValidationState()) {
+            setStatus(validationHint());
+            return;
+        }
         if (!sizeFieldsReadyForLivePreview()) {
             markPreviewStale(STALE_TEXT);
             return;
@@ -1296,8 +1315,52 @@ public final class CellposeParameterStage implements ConfigQcStage {
         loadFields(savedParameters);
         loadSizeFields(savedSize);
         refreshCompanionState();
+        updateParameterValidationState();
         if (!refreshSizeFilterPreview()) {
             markPreviewStale(STALE_TEXT);
+        }
+    }
+
+    private boolean updateParameterValidationState() {
+        String hint = validationHint();
+        boolean valid = hint.length() == 0;
+        if (actions != null) {
+            actions.setPrimaryButtonEnabled(valid);
+        }
+        return valid;
+    }
+
+    private String validationHint() {
+        if (missingModelKey != null) {
+            return "Select an available Cellpose model.";
+        }
+        if (!areNumericParameterFieldsValid()) {
+            return "Enter numeric values for all Cellpose parameters.";
+        }
+        if (!ParticleSizeStage.isValidSizeFields(
+                sizeMinField == null ? null : sizeMinField.getText(),
+                sizeMaxField == null ? null : sizeMaxField.getText(),
+                filteredSource)) {
+            return "Use min and max voxel sizes, for example 100-Infinity.";
+        }
+        return "";
+    }
+
+    private boolean areNumericParameterFieldsValid() {
+        JTextField[] fields = new JTextField[]{diameterField, flowField, cellprobField};
+        for (int i = 0; i < fields.length; i++) {
+            if (!isValidNumericField(fields[i])) return false;
+        }
+        return true;
+    }
+
+    private static boolean isValidNumericField(JTextField field) {
+        if (field == null || field.getText() == null || field.getText().trim().isEmpty()) return false;
+        try {
+            double parsed = Double.parseDouble(field.getText().trim());
+            return Double.isFinite(parsed);
+        } catch (NumberFormatException e) {
+            return false;
         }
     }
 
@@ -2086,6 +2149,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
         parameterStore.save(formatMethod(current));
         savedParameters = current;
         refreshMissingModelNoticeRow();
+        updateParameterValidationState();
         setStatus("Replacement model selected.");
         markPreviewStale(STALE_TEXT);
     }
@@ -2130,6 +2194,7 @@ public final class CellposeParameterStage implements ConfigQcStage {
             missingModelKey = null;
         }
         refreshMissingModelNoticeRow();
+        updateParameterValidationState();
     }
 
     private void updateModelTooltip(ModelOption option) {

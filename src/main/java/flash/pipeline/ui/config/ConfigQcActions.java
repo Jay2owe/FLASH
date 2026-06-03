@@ -31,4 +31,7 @@ public interface ConfigQcActions {
 
     default void setPreviewButtonRunning(boolean running) {
     }
+
+    default void setPrimaryButtonEnabled(boolean enabled) {
+    }
 }

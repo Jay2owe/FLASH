@@ -56,6 +56,8 @@ import java.util.concurrent.CountDownLatch;
 
 public final class ConfigQcDialog {
 
+    public static final String SAVED_STATUS_ATTRIBUTE = "setupSavedStatus";
+
     private static final Color BG_COLOR = FlashTheme.SURFACE;
     private static final Color HEADER_COLOR = FlashTheme.TEXT_HEADER;
     private static final Color HELP_COLOR = FlashTheme.TEXT_HELP;
@@ -95,6 +97,7 @@ public final class ConfigQcDialog {
     private final JLabel channelLabel = new JLabel(" ");
     private final JLabel progressLabel = new JLabel(" ");
     private final JLabel statusLabel = new JLabel(" ");
+    private final JLabel savedStatusLabel = new JLabel(" ");
     private final JButton stageHelpButton = HelpButton.question("Stage help is not available yet.");
     private final JButton loadRunButton;
     private final JButton backButton = new JButton("Back");
@@ -121,6 +124,7 @@ public final class ConfigQcDialog {
     private String stagePathText = " ";
     private String activeStagePathText = " ";
     private JLabel activeStagePathLabel;
+    private boolean primaryButtonValid = true;
 
     public ConfigQcDialog(Window owner, ConfigQcContext context, List<ConfigQcStage> stages, boolean modal) {
         this(owner, context, stages, modal, null, -1);
@@ -323,6 +327,9 @@ public final class ConfigQcDialog {
         gbc.fill = GridBagConstraints.NONE;
         gbc.insets = new Insets(0, 0, 0, 6);
         gbc.gridx++;
+        savedStatusLabel.setForeground(HELP_COLOR);
+        footer.add(savedStatusLabel, gbc);
+        gbc.gridx++;
         footer.add(cancelButton, gbc);
         gbc.gridx++;
         gbc.insets = new Insets(0, 0, 0, 0);
@@ -391,6 +398,7 @@ public final class ConfigQcDialog {
         String navigationStatus = pendingNavigationStatus;
         pendingNavigationStatus = null;
         setStatus(" ");
+        setPrimaryButtonEnabled(true);
         previewPair.setChannelLutName(context.getChannelLutName());
         previewPair.setDisplayControlsAvailable(stage.showPreviewDisplayControls());
         previewPair.resetStageToolstripState();
@@ -424,6 +432,7 @@ public final class ConfigQcDialog {
         currentImageDisplayName = context.getCurrentImageDisplayName();
         String imageName = context.getCurrentImageShortDisplayName();
         progressLabel.setText(imageProgressHeaderText(imageName));
+        refreshSavedStatus();
         previewPair.setOriginalPreviewTitle("Original Image - " + imageName);
         previewPair.setAdjustedPreviewTitle("Adjusted / output preview");
     }
@@ -446,6 +455,7 @@ public final class ConfigQcDialog {
         lockInButton.setText(isLastApplicableStage() && isLastImage()
                 ? "Lock in & Done"
                 : "Lock in & Next");
+        lockInButton.setEnabled(currentStage() != null && primaryButtonValid);
         previewPair.setDisplayControlsAvailable(currentStage() == null
                 || currentStage().showPreviewDisplayControls());
         if (loadRunButton != null) {
@@ -566,6 +576,18 @@ public final class ConfigQcDialog {
         statusLabel.setText(text == null || text.trim().isEmpty() ? " " : text);
     }
 
+    private void refreshSavedStatus() {
+        Object saved = context == null ? null : context.getAttribute(SAVED_STATUS_ATTRIBUTE);
+        String text = saved == null ? "" : String.valueOf(saved).trim();
+        savedStatusLabel.setText(text.isEmpty() ? " " : text);
+        savedStatusLabel.setVisible(!text.isEmpty());
+    }
+
+    private void setPrimaryButtonEnabled(boolean enabled) {
+        primaryButtonValid = enabled;
+        lockInButton.setEnabled(currentStage() != null && primaryButtonValid);
+    }
+
     private void markPreviewStale(String text) {
         previewPair.setAdjustedState(PreviewPairPanel.PreviewState.STALE, text);
         setPreviewButtonStale(true);
@@ -614,6 +636,7 @@ public final class ConfigQcDialog {
     }
 
     private void lockInAndAdvance() {
+        if (!lockInButton.isEnabled()) return;
         ConfigQcStage stage = currentStage();
         if (stage == null) return;
         int startingStageIndex = stageIndex;
@@ -1245,6 +1268,10 @@ public final class ConfigQcDialog {
 
         @Override public void setPreviewButtonRunning(boolean running) {
             ConfigQcDialog.this.setPreviewButtonRunning(running);
+        }
+
+        @Override public void setPrimaryButtonEnabled(boolean enabled) {
+            ConfigQcDialog.this.setPrimaryButtonEnabled(enabled);
         }
     }
 }

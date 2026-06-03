@@ -8,6 +8,8 @@ import flash.pipeline.help.SetupHelpTopic;
 import ij.IJ;
 
 import javax.swing.*;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import java.awt.*;
 import java.awt.SecondaryLoop;
 import java.awt.event.MouseAdapter;
@@ -17,6 +19,7 @@ import java.awt.event.WindowEvent;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 /**
@@ -685,6 +688,69 @@ public class PipelineDialog {
         component.setAlignmentX(Component.LEFT_ALIGNMENT);
         addToBody(component);
         addToBody(Box.createVerticalStrut(4));
+    }
+
+    /** Binds live validation to an existing text field and gates only the primary button. */
+    public static Runnable bindValidation(final PipelineDialog dialog,
+                                          final JTextField field,
+                                          final Predicate<String> predicate,
+                                          final JLabel hintLabel,
+                                          final String hintText) {
+        final Runnable update = new Runnable() {
+            @Override public void run() {
+                String text = field == null || field.getText() == null ? "" : field.getText();
+                boolean valid = predicate != null && predicate.test(text);
+                applyValidationState(dialog, hintLabel, valid, hintText);
+            }
+        };
+        if (field != null) {
+            field.getDocument().addDocumentListener(new DocumentListener() {
+                @Override public void insertUpdate(DocumentEvent e) {
+                    update.run();
+                }
+
+                @Override public void removeUpdate(DocumentEvent e) {
+                    update.run();
+                }
+
+                @Override public void changedUpdate(DocumentEvent e) {
+                    update.run();
+                }
+            });
+        }
+        update.run();
+        return update;
+    }
+
+    /** Binds live validation to an existing dropdown and gates only the primary button. */
+    public static Runnable bindValidation(final PipelineDialog dialog,
+                                          final JComboBox<String> combo,
+                                          final Predicate<String> predicate,
+                                          final JLabel hintLabel,
+                                          final String hintText) {
+        final Runnable update = new Runnable() {
+            @Override public void run() {
+                Object selected = combo == null ? null : combo.getSelectedItem();
+                String text = selected == null ? "" : selected.toString();
+                boolean valid = predicate != null && predicate.test(text);
+                applyValidationState(dialog, hintLabel, valid, hintText);
+            }
+        };
+        if (combo != null) {
+            combo.addActionListener(e -> update.run());
+        }
+        update.run();
+        return update;
+    }
+
+    private static void applyValidationState(PipelineDialog dialog, JLabel hintLabel,
+                                             boolean valid, String hintText) {
+        if (hintLabel != null) {
+            hintLabel.setText(valid ? "" : (hintText == null ? "" : hintText));
+        }
+        if (dialog != null) {
+            dialog.setPrimaryButtonEnabled(valid);
+        }
     }
 
     /**
