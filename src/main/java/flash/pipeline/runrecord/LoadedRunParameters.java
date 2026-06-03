@@ -351,6 +351,7 @@ public final class LoadedRunParameters {
         return value == null ? fallback : value;
     }
 
+    @SafeVarargs
     private static int maxSize(List<Object>... lists) {
         int max = 0;
         if (lists != null) {

@@ -565,7 +565,7 @@ public final class ObjectsCounter3DWrapper {
         if (headings != null) {
             for (int i = 0; i < headings.length; i++) {
                 String h = headings[i];
-                if (h != null && !h.isEmpty()) dst.setHeading(i, h);
+                if (h != null && !h.isEmpty()) setTableHeading(dst, i, h);
             }
         }
 
@@ -609,13 +609,13 @@ public final class ObjectsCounter3DWrapper {
         if (cal != null) voxelVol = cal.pixelWidth * cal.pixelHeight * cal.pixelDepth;
 
         // Headings to match the subset your pipeline exports.
-        rt.setHeading(0, "Volume (" + unit + "^3)");
-        rt.setHeading(1, "Surface (" + unit + "^2)");
-        rt.setHeading(2, "IntDen");
-        rt.setHeading(3, "Mean");
-        rt.setHeading(4, "XM");
-        rt.setHeading(5, "YM");
-        rt.setHeading(6, "ZM");
+        setTableHeading(rt, 0, "Volume (" + unit + "^3)");
+        setTableHeading(rt, 1, "Surface (" + unit + "^2)");
+        setTableHeading(rt, 2, "IntDen");
+        setTableHeading(rt, 3, "Mean");
+        setTableHeading(rt, 4, "XM");
+        setTableHeading(rt, 5, "YM");
+        setTableHeading(rt, 6, "ZM");
 
         for (int i = 0; i < objs.size(); i++) {
             Object o = objs.get(i);
@@ -666,6 +666,11 @@ public final class ObjectsCounter3DWrapper {
         } catch (Exception ignored) {
         }
         return fallback;
+    }
+
+    @SuppressWarnings("deprecation")
+    private static void setTableHeading(ResultsTable table, int column, String heading) {
+        table.setHeading(column, heading);
     }
 
     private static double[] getDoubleArrayField(Object obj, String fieldName) {
