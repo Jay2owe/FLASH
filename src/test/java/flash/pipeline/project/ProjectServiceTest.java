@@ -7,6 +7,7 @@ import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
 import java.io.File;
+import java.nio.file.Files;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -100,6 +101,37 @@ public class ProjectServiceTest {
     }
 
     @Test
+    public void resolveRecentRelocatesProjectMovedUnderDropboxRoot() throws Exception {
+        File oldHome = temp.newFolder("old-home");
+        File oldProject = new File(new File(oldHome, "Dropbox"), "Cohort");
+        ProjectFixture fixture = createProjectAt(oldProject, new ProjectFile());
+        String storedPath = fixture.projectJson.getAbsolutePath();
+
+        File currentHome = temp.newFolder("current-home");
+        File currentDropbox = new File(currentHome, "Dropbox");
+        assertTrue(currentDropbox.mkdirs());
+        File currentProject = new File(currentDropbox, "Cohort");
+        Files.move(oldProject.toPath(), currentProject.toPath());
+        File currentProjectJson = new File(
+                FlashProjectLayout.forDirectory(currentProject.getAbsolutePath()).configurationWriteDir(),
+                ProjectFileIO.FILE_NAME);
+
+        String originalUserHome = System.getProperty("user.home");
+        try {
+            System.setProperty("user.home", currentHome.getAbsolutePath());
+
+            ProjectService.ResolveOutcome outcome = ProjectService.resolveRecent(storedPath);
+
+            assertNotNull(outcome.projectJson);
+            assertEquals(currentProjectJson.getCanonicalPath(), outcome.projectJson.getCanonicalPath());
+            assertEquals(storedPath, outcome.storedPath);
+            assertTrue(outcome.relocated);
+        } finally {
+            System.setProperty("user.home", originalUserHome);
+        }
+    }
+
+    @Test
     public void resolveRecentReturnsUnresolvedOutcomeForMissingProject() throws Exception {
         File missing = new File(temp.getRoot(), "missing-project.json");
 
@@ -127,6 +159,10 @@ public class ProjectServiceTest {
 
     private ProjectFixture createProject(String folderName, ProjectFile project) throws Exception {
         File outputRoot = temp.newFolder(folderName);
+        return createProjectAt(outputRoot, project);
+    }
+
+    private ProjectFixture createProjectAt(File outputRoot, ProjectFile project) throws Exception {
         File settingsDir = FlashProjectLayout.forDirectory(outputRoot.getAbsolutePath()).configurationWriteDir();
         ProjectFileIO.write(settingsDir, project);
         return new ProjectFixture(outputRoot, settingsDir, new File(settingsDir, ProjectFileIO.FILE_NAME));
