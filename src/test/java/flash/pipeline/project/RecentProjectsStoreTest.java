@@ -141,14 +141,24 @@ public class RecentProjectsStoreTest {
     }
 
     @Test
-    public void readRejectsWrongSchemaVersion() throws Exception {
+    public void readFutureSchemaVersionKeepsEntriesAndUpgradesInPlace() throws Exception {
         File plugins = temp.newFolder("plugins");
         File file = new File(plugins, RecentProjectsStore.FILE_NAME);
         java.nio.file.Files.write(file.toPath(),
-                "{\"schemaVersion\":2,\"entries\":[{\"path\":\"x\"}]}"
+                ("{\"schemaVersion\":99,\"entries\":["
+                        + "{\"name\":\"future\",\"path\":\"D:/future/project.json\","
+                        + "\"lastOpenedAt\":123,\"extra\":\"ignored\"}]}")
                         .getBytes(java.nio.charset.StandardCharsets.UTF_8));
 
-        assertTrue(RecentProjectsStore.read(plugins).isEmpty());
+        List<RecentProject> back = RecentProjectsStore.read(plugins);
+
+        assertEquals(1, back.size());
+        assertEquals("future", back.get(0).name);
+        assertEquals("D:/future/project.json", back.get(0).path);
+        assertEquals(123L, back.get(0).lastOpenedAt);
+        String upgraded = new String(java.nio.file.Files.readAllBytes(file.toPath()),
+                java.nio.charset.StandardCharsets.UTF_8);
+        assertTrue(upgraded.contains("\"schemaVersion\":1"));
     }
 
     @Test
@@ -175,5 +185,23 @@ public class RecentProjectsStoreTest {
 
         assertTrue(new File(plugins, RecentProjectsStore.FILE_NAME).isFile());
         assertFalse(new File(plugins, RecentProjectsStore.FILE_NAME + ".tmp").exists());
+    }
+
+    @Test
+    public void readMigratesLegacyPluginsStoreToNewStoreDir() throws Exception {
+        File storeDir = temp.newFolder(".flash");
+        File legacyPlugins = temp.newFolder("legacy-plugins");
+        RecentProjectsStore.write(legacyPlugins, Arrays.asList(
+                new RecentProject("Legacy A", "D:/legacy-a/project.json", 100L),
+                new RecentProject("Legacy B", "D:/legacy-b/project.json", 200L)));
+
+        List<RecentProject> migrated = RecentProjectsStore.read(storeDir, legacyPlugins);
+
+        assertEquals(2, migrated.size());
+        assertEquals("Legacy B", migrated.get(0).name);
+        assertEquals("D:/legacy-b/project.json", migrated.get(0).path);
+        assertTrue(new File(storeDir, RecentProjectsStore.FILE_NAME).isFile());
+        assertTrue(new File(legacyPlugins, RecentProjectsStore.FILE_NAME).isFile());
+        assertEquals(2, RecentProjectsStore.read(storeDir, null).size());
     }
 }

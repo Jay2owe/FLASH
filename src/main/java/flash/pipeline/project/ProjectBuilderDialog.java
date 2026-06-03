@@ -556,7 +556,7 @@ public final class ProjectBuilderDialog {
     private void openRecentPicker() {
         if (pluginsDir == null) {
             JOptionPane.showMessageDialog(dialog,
-                    "Recent projects list is unavailable (plugins directory not found).",
+                    "Recent projects list is unavailable (settings directory not found).",
                     "Recent projects", JOptionPane.INFORMATION_MESSAGE);
             return;
         }

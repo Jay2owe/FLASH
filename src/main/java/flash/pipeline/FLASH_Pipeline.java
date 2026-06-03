@@ -229,7 +229,7 @@ public class FLASH_Pipeline implements PlugIn {
                 return;
             }
             ProjectLaunchSelection picked = chooseProjectFromHome(
-                    null, RecentProjectsStore.resolvePluginsDir());
+                    null, RecentProjectsStore.resolveStoreDir());
             if (picked == null || picked.outputRoot == null) {
                 IJ.showMessage("Error", "No project chosen, plugin cancelled.");
                 return;
@@ -793,7 +793,7 @@ public class FLASH_Pipeline implements PlugIn {
                 // preserves the existing full-edit behaviour for this stage.
                 ProjectBuilderDialog.Result picked = ProjectBuilderDialog.open(
                         javax.swing.SwingUtilities.getWindowAncestor(changeBtn),
-                        RecentProjectsStore.resolvePluginsDir(),
+                        RecentProjectsStore.resolveStoreDir(),
                         directory == null ? null : new java.io.File(directory));
                 if (picked != null) {
                     directory = picked.outputRoot.getAbsolutePath();

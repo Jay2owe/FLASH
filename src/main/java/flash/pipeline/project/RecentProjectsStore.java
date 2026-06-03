@@ -17,15 +17,14 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Read/write the recent-projects list at
- * {@code <pluginsDir>/.flash-recent.json}. Per-Fiji-install (not per-user),
- * so the list resets when Fiji is reinstalled.
+ * Read/write the recent-projects list in the user's FLASH settings directory.
  *
- * <p>All entry-points take an explicit {@code pluginsDir} so tests can use a
- * temp folder. Production callers use {@link #resolvePluginsDir()}.
+ * <p>All entry-points take an explicit {@code storeDir} so tests can use a
+ * temp folder. Production callers use {@link #resolveStoreDir()}.
  */
 public final class RecentProjectsStore {
     public static final String FILE_NAME = ".flash-recent.json";
+    private static final String STORE_DIR_NAME = ".flash";
     private static final int SCHEMA_VERSION = 1;
     private static final String K_SCHEMA_VERSION = "schemaVersion";
     private static final String K_ENTRIES = "entries";
@@ -37,32 +36,32 @@ public final class RecentProjectsStore {
     }
 
     /** Returns the list ordered most-recent-first; never null. */
-    public static List<RecentProject> read(File pluginsDir) {
-        File file = file(pluginsDir);
+    public static List<RecentProject> read(File storeDir) {
+        return read(storeDir, legacyPluginsDirFor(storeDir));
+    }
+
+    static List<RecentProject> read(File storeDir, File legacyPluginsDir) {
+        File file = migrateLegacyIfNeeded(storeDir, legacyPluginsDir);
         if (file == null || !file.isFile()) {
             return new ArrayList<RecentProject>();
         }
+        return readExistingFile(file, storeDir);
+    }
+
+    private static List<RecentProject> readExistingFile(File file, File upgradeDir) {
         try {
             String json = new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8);
             Map<String, Object> root = JsonIO.parseObject(json);
             int version = JsonIO.intValue(root.get(K_SCHEMA_VERSION), -1);
-            if (version != SCHEMA_VERSION) {
-                return new ArrayList<RecentProject>();
-            }
-            List<Object> rows = JsonIO.asList(root.get(K_ENTRIES));
-            List<RecentProject> out = new ArrayList<RecentProject>();
-            for (Object row : rows) {
-                Map<String, Object> obj = JsonIO.asObject(row);
-                String path = JsonIO.stringValue(obj.get(K_PATH));
-                if (path == null || path.trim().isEmpty()) {
-                    continue;
-                }
-                out.add(new RecentProject(
-                        JsonIO.stringValue(obj.get(K_NAME)),
-                        path,
-                        longValue(obj.get(K_LAST_OPENED_AT), 0L)));
-            }
+            List<RecentProject> out = parseEntries(root);
             sortDescending(out);
+            if (version != SCHEMA_VERSION && upgradeDir != null && !out.isEmpty()) {
+                try {
+                    write(upgradeDir, out);
+                } catch (IOException e) {
+                    IJ.log("[FLASH] Could not upgrade " + file.getAbsolutePath() + ": " + e.getMessage());
+                }
+            }
             return out;
         } catch (IOException e) {
             IJ.log("[FLASH] Could not read " + file.getAbsolutePath() + ": " + e.getMessage());
@@ -70,9 +69,9 @@ public final class RecentProjectsStore {
         }
     }
 
-    public static void write(File pluginsDir, List<RecentProject> entries) throws IOException {
-        if (pluginsDir == null) {
-            throw new IOException("Cannot write " + FILE_NAME + " without a plugins directory.");
+    public static void write(File storeDir, List<RecentProject> entries) throws IOException {
+        if (storeDir == null) {
+            throw new IOException("Cannot write " + FILE_NAME + " without a recent-projects directory.");
         }
         List<RecentProject> sorted = new ArrayList<RecentProject>(entries == null ? Collections.<RecentProject>emptyList() : entries);
         sortDescending(sorted);
@@ -92,7 +91,7 @@ public final class RecentProjectsStore {
         }
         root.put(K_ENTRIES, rows);
 
-        BinConfigIO.writeAtomic(new File(pluginsDir, FILE_NAME).toPath(),
+        BinConfigIO.writeAtomic(new File(storeDir, FILE_NAME).toPath(),
                 Arrays.asList(JsonIO.write(root)));
     }
 
@@ -101,20 +100,20 @@ public final class RecentProjectsStore {
      * {@code path} (case-insensitive), prepends the new entry, and caps the
      * list at {@link RecentProject#MAX_ENTRIES}. Returns the new list.
      */
-    public static List<RecentProject> recordOpened(File pluginsDir, RecentProject entry) throws IOException {
-        return recordOpenedReplacing(pluginsDir, entry, null);
+    public static List<RecentProject> recordOpened(File storeDir, RecentProject entry) throws IOException {
+        return recordOpenedReplacing(storeDir, entry, null);
     }
 
     /**
      * Record an opened project while removing a stale path it replaced (for
      * example after a Dropbox project moved between Windows user profiles).
      */
-    public static List<RecentProject> recordOpenedReplacing(File pluginsDir, RecentProject entry,
+    public static List<RecentProject> recordOpenedReplacing(File storeDir, RecentProject entry,
                                                             String obsoletePath) throws IOException {
         if (entry == null || entry.path == null || entry.path.trim().isEmpty()) {
-            return read(pluginsDir);
+            return read(storeDir);
         }
-        List<RecentProject> existing = read(pluginsDir);
+        List<RecentProject> existing = read(storeDir);
         List<RecentProject> next = new ArrayList<RecentProject>(existing.size() + 1);
         next.add(entry);
         String canonical = canonicalisePath(entry.path);
@@ -125,7 +124,7 @@ public final class RecentProjectsStore {
                 next.add(prior);
             }
         }
-        write(pluginsDir, next);
+        write(storeDir, next);
         return new ArrayList<RecentProject>(next.subList(0, Math.min(next.size(), RecentProject.MAX_ENTRIES)));
     }
 
@@ -142,8 +141,95 @@ public final class RecentProjectsStore {
         return new File(dir);
     }
 
-    private static File file(File pluginsDir) {
-        return pluginsDir == null ? null : new File(pluginsDir, FILE_NAME);
+    /**
+     * Resolve the per-user FLASH settings directory for recent projects.
+     * Prefers ImageJ's user directory and falls back to {@code user.home}.
+     */
+    public static File resolveStoreDir() {
+        File imagej = subdir(IJ.getDir("imagej"), true);
+        if (imagej != null) {
+            return imagej;
+        }
+        return subdir(System.getProperty("user.home"), true);
+    }
+
+    private static File migrateLegacyIfNeeded(File storeDir, File legacyPluginsDir) {
+        File storeFile = file(storeDir);
+        if (storeFile == null || storeFile.isFile()) {
+            return storeFile;
+        }
+        File legacyFile = file(legacyPluginsDir);
+        if (legacyFile == null || !legacyFile.isFile() || samePath(storeFile, legacyFile)) {
+            return storeFile;
+        }
+        List<RecentProject> imported = readExistingFile(legacyFile, null);
+        if (imported.isEmpty()) {
+            return storeFile;
+        }
+        try {
+            write(storeDir, imported);
+            return storeFile;
+        } catch (IOException e) {
+            IJ.log("[FLASH] Could not migrate recent projects from "
+                    + legacyFile.getAbsolutePath() + ": " + e.getMessage());
+            return legacyFile;
+        }
+    }
+
+    private static List<RecentProject> parseEntries(Map<String, Object> root) {
+        List<Object> rows = JsonIO.asList(root.get(K_ENTRIES));
+        List<RecentProject> out = new ArrayList<RecentProject>();
+        for (Object row : rows) {
+            Map<String, Object> obj = JsonIO.asObject(row);
+            String path = JsonIO.stringValue(obj.get(K_PATH));
+            if (path == null || path.trim().isEmpty()) {
+                continue;
+            }
+            out.add(new RecentProject(
+                    JsonIO.stringValue(obj.get(K_NAME)),
+                    path,
+                    longValue(obj.get(K_LAST_OPENED_AT), 0L)));
+        }
+        return out;
+    }
+
+    private static File legacyPluginsDirFor(File storeDir) {
+        if (storeDir == null || !STORE_DIR_NAME.equals(storeDir.getName())) {
+            return null;
+        }
+        return resolvePluginsDir();
+    }
+
+    private static File subdir(String parent, boolean create) {
+        if (parent == null || parent.trim().isEmpty()) {
+            return null;
+        }
+        File dir = new File(parent, STORE_DIR_NAME);
+        if (dir.isDirectory()) {
+            return dir;
+        }
+        if (dir.exists()) {
+            return null;
+        }
+        if (create && dir.mkdirs() && dir.isDirectory()) {
+            return dir;
+        }
+        return null;
+    }
+
+    private static File file(File storeDir) {
+        return storeDir == null ? null : new File(storeDir, FILE_NAME);
+    }
+
+    private static boolean samePath(File a, File b) {
+        if (a == null || b == null) {
+            return false;
+        }
+        try {
+            return a.getCanonicalPath().equalsIgnoreCase(b.getCanonicalPath());
+        } catch (IOException e) {
+            return a.getAbsolutePath().equalsIgnoreCase(b.getAbsolutePath());
+        }
     }
 
     private static void sortDescending(List<RecentProject> entries) {

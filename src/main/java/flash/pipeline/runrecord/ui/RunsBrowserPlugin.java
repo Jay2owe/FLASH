@@ -50,7 +50,7 @@ public final class RunsBrowserPlugin implements PlugIn {
 
     private static File pickProjectRoot() {
         ProjectBuilderDialog.Result picked = ProjectBuilderDialog.open(
-                null, RecentProjectsStore.resolvePluginsDir(), null);
+                null, RecentProjectsStore.resolveStoreDir(), null);
         return picked == null || picked.outputRoot == null
                 ? null
                 : picked.outputRoot.getAbsoluteFile();
