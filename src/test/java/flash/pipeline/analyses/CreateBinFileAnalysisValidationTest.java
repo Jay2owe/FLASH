@@ -5,6 +5,7 @@ import org.junit.Test;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
+/** Unit coverage for Set Up Configuration live-validation predicates. */
 public class CreateBinFileAnalysisValidationTest {
 
     @Test

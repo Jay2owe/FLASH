@@ -8,6 +8,7 @@ import org.junit.Test;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
+/** Unit coverage for the Set Up Configuration review model and panel defaults. */
 public class ConfigReviewPanelTest {
 
     private static final int SETTING_MIN_MAX = 1;

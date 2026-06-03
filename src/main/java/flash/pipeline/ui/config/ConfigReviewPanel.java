@@ -33,8 +33,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+/** Two-panel read-only review of every Set Up Configuration wizard step. */
 public final class ConfigReviewPanel extends JPanel {
 
+    /** Callback for requesting that the wizard re-open a completed step. */
     public interface StepEditListener {
         void editStep(int stepIndex);
     }
@@ -307,6 +309,7 @@ public final class ConfigReviewPanel extends JPanel {
                 FlashTheme.pad(3, 10, 3, 10)));
     }
 
+    /** Immutable review model assembled from the current channel config draft. */
     public static final class ReviewModel {
         public final List<ReviewStep> steps;
         public final String footerText;
@@ -346,6 +349,7 @@ public final class ConfigReviewPanel extends JPanel {
         }
     }
 
+    /** One wizard step displayed in the review rail and detail pane. */
     public static final class ReviewStep {
         public final int index;
         public final String shortLabel;
@@ -363,6 +367,7 @@ public final class ConfigReviewPanel extends JPanel {
         }
     }
 
+    /** One read-only value or section heading shown in a review step. */
     public static final class ReviewRow {
         public final String subject;
         public final String setting;
