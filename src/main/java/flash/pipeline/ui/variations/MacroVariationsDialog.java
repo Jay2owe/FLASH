@@ -59,6 +59,7 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
+@SuppressWarnings("unchecked")
 public final class MacroVariationsDialog extends PipelineDialog {
 
     public enum Mode {
