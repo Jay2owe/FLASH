@@ -122,7 +122,7 @@ public final class RecentProjectCard extends JPanel {
 
     public void applyStatusResult(StatusResult result) {
         if (result == null) {
-            unresolved = true;
+            unresolved = false;
             resolvedProjectJson = null;
             progressLabel.setText("status unavailable");
             return;

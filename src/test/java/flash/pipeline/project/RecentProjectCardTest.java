@@ -8,6 +8,8 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 
 public class RecentProjectCardTest {
 
@@ -50,5 +52,17 @@ public class RecentProjectCardTest {
         }
         assertEquals("finished Excel Export - complete",
                 RecentProjectCard.progressSummary(statuses));
+    }
+
+    @Test
+    public void statusUnavailableDoesNotBlockLaterOpenResolve() {
+        RecentProject recent = new RecentProject("Project", "C:/projects/p/project.json", 1L);
+        RecentProjectCard card = new RecentProjectCard(recent, false, 1L, null);
+
+        card.applyStatusResult(null);
+
+        assertEquals("status unavailable", card.progressTextForTests());
+        assertFalse(card.isUnresolved());
+        assertNull(card.resolvedProjectJson());
     }
 }
