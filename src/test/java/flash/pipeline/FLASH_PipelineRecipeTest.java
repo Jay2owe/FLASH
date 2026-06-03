@@ -1,10 +1,13 @@
 package flash.pipeline;
 
+import flash.pipeline.io.ProjectStatusStore;
 import flash.pipeline.recipes.PipelineRecipe;
 import flash.pipeline.recipes.PipelineRecipeIO;
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.ToggleSwitch;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 
 import javax.swing.JButton;
 import javax.swing.JLabel;
@@ -12,7 +15,11 @@ import javax.swing.JPanel;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Container;
+import java.io.File;
 import java.lang.reflect.Method;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -21,6 +28,9 @@ import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 public class FLASH_PipelineRecipeTest {
+
+    @Rule
+    public TemporaryFolder temp = new TemporaryFolder();
 
     @Test
     public void standardAndFullRecipesDoNotSelect3DDeconvolution() throws Exception {
@@ -79,6 +89,40 @@ public class FLASH_PipelineRecipeTest {
         } finally {
             dialog.closeWithAction("test");
         }
+    }
+
+    @Test
+    public void applySelectionsToTogglesSetsTrueAndFalseStates() {
+        ToggleSwitch[] toggles = new ToggleSwitch[FLASH_Pipeline.IDX_EXCEL_EXPORT + 1];
+        toggles[FLASH_Pipeline.IDX_CREATE_BIN] = new ToggleSwitch(false);
+        toggles[FLASH_Pipeline.IDX_DRAW_ROIS] = new ToggleSwitch(true);
+        toggles[FLASH_Pipeline.IDX_INTENSITY] = new ToggleSwitch(false);
+        boolean[] selections = new boolean[toggles.length];
+        selections[FLASH_Pipeline.IDX_CREATE_BIN] = true;
+        selections[FLASH_Pipeline.IDX_INTENSITY] = true;
+
+        int applied = FLASH_Pipeline.applySelectionsToToggles(toggles, selections);
+
+        assertEquals(2, applied);
+        assertTrue(toggles[FLASH_Pipeline.IDX_CREATE_BIN].isSelected());
+        assertFalse(toggles[FLASH_Pipeline.IDX_DRAW_ROIS].isSelected());
+        assertTrue(toggles[FLASH_Pipeline.IDX_INTENSITY].isSelected());
+    }
+
+    @Test
+    public void readLastRunRecipeSelectionsUsesProjectStatusRecipe() throws Exception {
+        File project = temp.newFolder("pipeline-recipe-restore");
+        Map<String, Object> recipe = new LinkedHashMap<String, Object>();
+        recipe.put("name", "last-run");
+        recipe.put("analyses", Arrays.asList("SplitMerge", "Statistics"));
+        ProjectStatusStore.writeLastRunRecipe(project.getAbsolutePath(), recipe);
+
+        boolean[] selections = FLASH_Pipeline.readLastRunRecipeSelections(
+                project.getAbsolutePath(), FLASH_Pipeline.IDX_SPECTRAL_DECONTAMINATION + 1);
+
+        assertTrue(selections[FLASH_Pipeline.IDX_SPLIT_MERGE]);
+        assertTrue(selections[FLASH_Pipeline.IDX_STATISTICS]);
+        assertFalse(selections[FLASH_Pipeline.IDX_CREATE_BIN]);
     }
 
     private static JPanel quickStartPanel(FLASH_Pipeline pipeline, PipelineDialog dialog) throws Exception {

@@ -156,6 +156,15 @@ public final class ProjectStatusStore {
                 new LinkedHashMap<String, Object>(recipe));
     }
 
+    public static synchronized Map<String, Object> readLastRunRecipe(String directory) {
+        try {
+            Map<String, Object> recipe = object(readRoot(new File(directory)).get(SECTION_LAST_RUN_RECIPE));
+            return recipe.isEmpty() ? null : recipe;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     private static synchronized void writeSection(File projectRoot,
                                                   String sectionName,
                                                   Map<String, Object> section) throws IOException {

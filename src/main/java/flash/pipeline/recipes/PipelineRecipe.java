@@ -159,6 +159,21 @@ public final class PipelineRecipe {
                 keys, Collections.<String, String>emptyMap());
     }
 
+    public boolean[] toSelections(int length) {
+        boolean[] selections = new boolean[Math.max(0, length)];
+        for (String key : analyses) {
+            Integer index = KEY_TO_IDX.get(key);
+            if (index == null) {
+                continue;
+            }
+            int i = index.intValue();
+            if (i >= 0 && i < selections.length) {
+                selections[i] = true;
+            }
+        }
+        return selections;
+    }
+
     private static List<String> strings(Object value) {
         List<String> out = new ArrayList<String>();
         for (Object item : JsonIO.asList(value)) {

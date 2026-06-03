@@ -81,12 +81,15 @@ import javax.swing.JTextField;
 import javax.swing.JTextArea;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
+import javax.swing.SwingWorker;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.GraphicsEnvironment;
 import java.awt.Window;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.io.File;
 import java.io.IOException;
 import java.net.URL;
@@ -96,6 +99,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 
 public class FLASH_Pipeline implements PlugIn {
@@ -773,6 +777,7 @@ public class FLASH_Pipeline implements PlugIn {
             Arrays.fill(statusRowsByAnalysis, -1);
             final int[] nextStatusRow = new int[]{0};
             final boolean[] statusRowsReady = new boolean[]{false};
+            @SuppressWarnings("unchecked")
             final Map<Integer, AnalysisStatus>[] pendingStatuses = new Map[1];
             final AnalysisStatusScanner[] pendingScanner = new AnalysisStatusScanner[1];
             final Icon pendingIcon = loadStatusIcon("status_pending.png");
@@ -799,8 +804,6 @@ public class FLASH_Pipeline implements PlugIn {
                 }
             });
 
-            // TODO(project-home-screen 06): use fastReopen to restore the saved
-            // last-run recipe before the user sees the analysis toggles.
             addRecipeWarningPanel(pd);
 
             final ToggleSwitch[] togglesByAnalysis = new ToggleSwitch[analyses.length];
@@ -831,6 +834,7 @@ public class FLASH_Pipeline implements PlugIn {
                     IDX_STATISTICS,
                     IDX_EXCEL_EXPORT
             }, pendingIcon, statusRowsByAnalysis, nextStatusRow, togglesByAnalysis);
+            startLastRunRecipeRestore(pd, togglesByAnalysis);
             statusRowsReady[0] = true;
             if (pendingStatuses[0] != null && pendingScanner[0] != null) {
                 applyAnalysisStatuses(pd, statusRowsByAnalysis, pendingStatuses[0], pendingScanner[0]);
@@ -1252,6 +1256,142 @@ public class FLASH_Pipeline implements PlugIn {
             ProjectStatusStore.writeLastRunRecipe(directory, recipe.toJsonObject());
         } catch (IOException e) {
             IJ.log("[FLASH] Warning: could not save project pipeline recipe: " + e.getMessage());
+        }
+    }
+
+    private void startLastRunRecipeRestore(final PipelineDialog pd,
+                                           final ToggleSwitch[] togglesByAnalysis) {
+        if (pd == null || togglesByAnalysis == null || directory == null) {
+            return;
+        }
+        final String restoreDirectory = directory;
+        final Window window = pd.getWindow();
+        final boolean[] closed = new boolean[]{false};
+        final boolean[] applyingRestore = new boolean[]{false};
+        final boolean[] userChangedSelection = new boolean[]{false};
+        final WindowAdapter closeListener = new WindowAdapter() {
+            @Override public void windowClosed(WindowEvent e) {
+                closed[0] = true;
+            }
+        };
+        if (window != null) {
+            window.addWindowListener(closeListener);
+        }
+        for (int i = 0; i < togglesByAnalysis.length; i++) {
+            ToggleSwitch toggle = togglesByAnalysis[i];
+            if (toggle != null) {
+                toggle.addChangeListener(new Runnable() {
+                    @Override public void run() {
+                        if (!applyingRestore[0]) {
+                            userChangedSelection[0] = true;
+                        }
+                    }
+                });
+            }
+        }
+
+        final AtomicBoolean handled = new AtomicBoolean(false);
+        SwingWorker<boolean[], Void> worker = new SwingWorker<boolean[], Void>() {
+            @Override protected boolean[] doInBackground() throws Exception {
+                return readLastRunRecipeSelections(restoreDirectory, analyses.length);
+            }
+
+            @Override protected void done() {
+                if (!handled.compareAndSet(false, true)) {
+                    return;
+                }
+                if (window != null) {
+                    window.removeWindowListener(closeListener);
+                }
+                if (closed[0] || userChangedSelection[0]
+                        || !restoreDirectory.equals(directory)) {
+                    return;
+                }
+                try {
+                    boolean[] selections = get();
+                    if (selections == null) {
+                        return;
+                    }
+                    applyRestoredRecipeSelections(togglesByAnalysis, selections, applyingRestore);
+                } catch (Exception e) {
+                    IJ.log("[FLASH] Could not restore last-run recipe: " + e.getMessage());
+                }
+            }
+        };
+        worker.execute();
+        if (!SwingUtilities.isEventDispatchThread()) {
+            try {
+                boolean[] selections = worker.get();
+                if (handled.compareAndSet(false, true)) {
+                    if (window != null) {
+                        window.removeWindowListener(closeListener);
+                    }
+                    if (selections != null && !closed[0] && !userChangedSelection[0]
+                            && restoreDirectory.equals(directory)) {
+                        applyRestoredRecipeSelectionsOnEdt(togglesByAnalysis, selections, applyingRestore);
+                    }
+                }
+            } catch (Exception e) {
+                if (handled.compareAndSet(false, true)) {
+                    if (window != null) {
+                        window.removeWindowListener(closeListener);
+                    }
+                    IJ.log("[FLASH] Could not restore last-run recipe: " + e.getMessage());
+                }
+            }
+        }
+    }
+
+    static boolean[] readLastRunRecipeSelections(String projectDirectory, int length) throws IOException {
+        Map<String, Object> recipe = ProjectStatusStore.readLastRunRecipe(projectDirectory);
+        if (recipe == null) {
+            return null;
+        }
+        return PipelineRecipe.fromJsonObject(recipe).toSelections(length);
+    }
+
+    static int applySelectionsToToggles(ToggleSwitch[] togglesByAnalysis, boolean[] selections) {
+        if (togglesByAnalysis == null || selections == null) {
+            return 0;
+        }
+        int applied = 0;
+        for (int i = 0; i < togglesByAnalysis.length; i++) {
+            ToggleSwitch toggle = togglesByAnalysis[i];
+            if (toggle == null) {
+                continue;
+            }
+            boolean selected = i < selections.length && selections[i];
+            toggle.setSelected(selected);
+            if (selected) {
+                applied++;
+            }
+        }
+        return applied;
+    }
+
+    private static void applyRestoredRecipeSelectionsOnEdt(final ToggleSwitch[] togglesByAnalysis,
+                                                           final boolean[] selections,
+                                                           final boolean[] applyingRestore)
+            throws Exception {
+        if (SwingUtilities.isEventDispatchThread()) {
+            applyRestoredRecipeSelections(togglesByAnalysis, selections, applyingRestore);
+            return;
+        }
+        SwingUtilities.invokeAndWait(new Runnable() {
+            @Override public void run() {
+                applyRestoredRecipeSelections(togglesByAnalysis, selections, applyingRestore);
+            }
+        });
+    }
+
+    private static void applyRestoredRecipeSelections(ToggleSwitch[] togglesByAnalysis,
+                                                      boolean[] selections,
+                                                      boolean[] applyingRestore) {
+        applyingRestore[0] = true;
+        try {
+            applySelectionsToToggles(togglesByAnalysis, selections);
+        } finally {
+            applyingRestore[0] = false;
         }
     }
 
