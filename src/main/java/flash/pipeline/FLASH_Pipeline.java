@@ -55,6 +55,10 @@ import flash.pipeline.runtime.ImageJRestartHelper;
 import flash.pipeline.runtime.PluginInstallGuard;
 
 import flash.pipeline.project.ProjectBuilderDialog;
+import flash.pipeline.project.ProjectFile;
+import flash.pipeline.project.ProjectHomeDialog;
+import flash.pipeline.project.ProjectService;
+import flash.pipeline.project.RecentProject;
 import flash.pipeline.project.RecentProjectsStore;
 import flash.pipeline.runrecord.LoadedRunParameters;
 
@@ -82,6 +86,7 @@ import java.awt.Component;
 import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.GraphicsEnvironment;
+import java.awt.Window;
 import java.io.File;
 import java.io.IOException;
 import java.net.URL;
@@ -107,6 +112,7 @@ public class FLASH_Pipeline implements PlugIn {
     private boolean useTifCache = false;
     private String overwriteBehavior = "Auto-Overwrite";
     private boolean generateQcReport = true;
+    private boolean fastReopen = false;
     /** GPU inference permit override; 0 = auto-detect (see {@link GpuConcurrency}). */
     private int gpuPermits = 0;
     private static final Color SAVE_RECIPE_BG = new Color(232, 245, 253);
@@ -192,6 +198,7 @@ public class FLASH_Pipeline implements PlugIn {
     public void run(String arg) {
         cliInvocation = false;
         cliConfig = null;
+        fastReopen = false;
         configureFeatureDependencyGate();
         PluginInstallGuard.auditPinnedRuntimeJarsOnStartup(
                 DependencyId.STARDIST_RUNTIME,
@@ -213,19 +220,26 @@ public class FLASH_Pipeline implements PlugIn {
         showStartupDependencyWarningIfNeeded();
 
         if (directory == null) {
-            ProjectBuilderDialog.Result picked = ProjectBuilderDialog.open(
-                    null, RecentProjectsStore.resolvePluginsDir(), null);
-            if (picked == null) {
+            if (GraphicsEnvironment.isHeadless()) {
+                IJ.log("[FLASH] No project chosen, plugin cancelled.");
+                return;
+            }
+            ProjectLaunchSelection picked = chooseProjectFromHome(
+                    null, RecentProjectsStore.resolvePluginsDir());
+            if (picked == null || picked.outputRoot == null) {
                 IJ.showMessage("Error", "No project chosen, plugin cancelled.");
                 return;
             }
             // The plugin treats `directory` as the project output root from this
             // point onward; source files come from the project's item list.
             directory = picked.outputRoot.getAbsolutePath();
+            fastReopen = picked.fastReopen;
         }
 
         // L-10: if this folder already contains a prior run's output dirs,
         // confirm that a re-run is intended before doing anything else.
+        // TODO(project-home-screen 05): use fastReopen to skip the redundant
+        // output-folder warning for known project reopens.
         if (!PreFlightChecks.confirmProceedOnOutputFolder(directory)) {
             return;
         }
@@ -323,6 +337,141 @@ public class FLASH_Pipeline implements PlugIn {
 
         releaseImageCache();
         IJ.log("Pipeline finished.");
+    }
+
+    private ProjectLaunchSelection chooseProjectFromHome(Window owner, File pluginsDir) {
+        return routeHomeChoice(ProjectHomeDialog.open(owner, pluginsDir), owner, pluginsDir,
+                new ProjectBuilderOpener() {
+                    @Override public ProjectBuilderDialog.Result open(Window builderOwner,
+                                                                       File builderPluginsDir,
+                                                                       File suggestedSourceFolder) {
+                        return ProjectBuilderDialog.open(builderOwner, builderPluginsDir,
+                                suggestedSourceFolder);
+                    }
+                });
+    }
+
+    static ProjectLaunchSelection routeHomeChoice(ProjectHomeDialog.Choice choice,
+                                                  Window owner,
+                                                  File pluginsDir,
+                                                  ProjectBuilderOpener builderOpener) {
+        if (choice == null || choice.action == ProjectHomeDialog.Choice.Action.CANCEL) {
+            return null;
+        }
+        switch (choice.action) {
+            case OPEN_EXISTING:
+                return openExistingHomeProject(choice.projectJson, pluginsDir);
+            case NEW_PROJECT:
+                return selectionFromBuilder(openBuilder(builderOpener, owner, pluginsDir, null));
+            case BROWSE_FOLDER:
+                return routeBrowsedFolder(choice.folder, owner, pluginsDir, builderOpener);
+            case EDIT_EXISTING:
+                return selectionFromBuilder(openBuilder(builderOpener, owner, pluginsDir,
+                        outputRootForProjectJson(choice.projectJson)));
+            case CANCEL:
+            default:
+                return null;
+        }
+    }
+
+    private static ProjectLaunchSelection routeBrowsedFolder(File folder,
+                                                             Window owner,
+                                                             File pluginsDir,
+                                                             ProjectBuilderOpener builderOpener) {
+        ProjectService.ProjectKind kind = ProjectService.classify(folder);
+        if (kind == ProjectService.ProjectKind.VALID_FLASH) {
+            return openExistingHomeProject(ProjectService.resolveProjectJson(folder), pluginsDir);
+        }
+        return selectionFromBuilder(openBuilder(builderOpener, owner, pluginsDir, folder));
+    }
+
+    private static ProjectBuilderDialog.Result openBuilder(ProjectBuilderOpener opener,
+                                                           Window owner,
+                                                           File pluginsDir,
+                                                           File suggestedSourceFolder) {
+        return opener == null ? null : opener.open(owner, pluginsDir, suggestedSourceFolder);
+    }
+
+    private static ProjectLaunchSelection selectionFromBuilder(ProjectBuilderDialog.Result picked) {
+        if (picked == null || picked.outputRoot == null) {
+            return null;
+        }
+        return new ProjectLaunchSelection(picked.outputRoot.getAbsoluteFile(), false);
+    }
+
+    private static ProjectLaunchSelection openExistingHomeProject(File projectJson,
+                                                                 File pluginsDir) {
+        File resolvedProjectJson = ProjectService.resolveProjectJson(projectJson);
+        if (resolvedProjectJson == null) {
+            return null;
+        }
+        ProjectFile project = ProjectService.load(resolvedProjectJson);
+        if (project == null) {
+            return null;
+        }
+        File outputRoot = outputRootFor(project, resolvedProjectJson);
+        if (outputRoot == null) {
+            return null;
+        }
+        rememberHomeOpenedProject(pluginsDir, project, resolvedProjectJson, outputRoot);
+        return new ProjectLaunchSelection(outputRoot, true);
+    }
+
+    private static File outputRootForProjectJson(File projectJson) {
+        File resolvedProjectJson = ProjectService.resolveProjectJson(projectJson);
+        if (resolvedProjectJson == null) {
+            resolvedProjectJson = projectJson;
+        }
+        ProjectFile project = ProjectService.load(resolvedProjectJson);
+        File outputRoot = outputRootFor(project, resolvedProjectJson);
+        return outputRoot == null ? null : outputRoot.getAbsoluteFile();
+    }
+
+    private static File outputRootFor(ProjectFile project, File projectJson) {
+        String outputRoot = project == null ? null : project.outputRoot;
+        if (outputRoot != null && !outputRoot.trim().isEmpty()) {
+            return new File(outputRoot.trim()).getAbsoluteFile();
+        }
+        File settingsDir = projectJson == null ? null : projectJson.getParentFile();
+        File fallback = FlashProjectLayout.projectRootForConfigurationDir(settingsDir);
+        return fallback == null ? null : fallback.getAbsoluteFile();
+    }
+
+    private static void rememberHomeOpenedProject(File pluginsDir, ProjectFile project,
+                                                  File projectJson, File outputRoot) {
+        if (pluginsDir == null || projectJson == null) {
+            return;
+        }
+        try {
+            RecentProjectsStore.recordOpened(pluginsDir,
+                    new RecentProject(recentProjectName(project, outputRoot),
+                            projectJson.getAbsolutePath(),
+                            System.currentTimeMillis()));
+        } catch (IOException ex) {
+            IJ.log("[FLASH] Could not update recent projects: " + ex.getMessage());
+        }
+    }
+
+    private static String recentProjectName(ProjectFile project, File outputRoot) {
+        String name = project == null ? null : project.name;
+        if (name != null && !name.trim().isEmpty()) {
+            return name.trim();
+        }
+        return outputRoot == null ? "" : outputRoot.getName();
+    }
+
+    interface ProjectBuilderOpener {
+        ProjectBuilderDialog.Result open(Window owner, File pluginsDir, File suggestedSourceFolder);
+    }
+
+    static final class ProjectLaunchSelection {
+        final File outputRoot;
+        final boolean fastReopen;
+
+        ProjectLaunchSelection(File outputRoot, boolean fastReopen) {
+            this.outputRoot = outputRoot;
+            this.fastReopen = fastReopen;
+        }
     }
 
     /**
@@ -631,6 +780,9 @@ public class FLASH_Pipeline implements PlugIn {
             final JLabel dirLabel = pd.addMessage(directory);
             JButton changeBtn = pd.addButton("Change Directory");
             changeBtn.addActionListener(e -> {
+                // TODO(project-home-screen): route this through ProjectHomeDialog
+                // with EDT-safe load/classify work. Keeping the builder here
+                // preserves the existing full-edit behaviour for this stage.
                 ProjectBuilderDialog.Result picked = ProjectBuilderDialog.open(
                         javax.swing.SwingUtilities.getWindowAncestor(changeBtn),
                         RecentProjectsStore.resolvePluginsDir(),
@@ -643,6 +795,8 @@ public class FLASH_Pipeline implements PlugIn {
                 }
             });
 
+            // TODO(project-home-screen 06): use fastReopen to restore the saved
+            // last-run recipe before the user sees the analysis toggles.
             addRecipeWarningPanel(pd);
 
             final ToggleSwitch[] togglesByAnalysis = new ToggleSwitch[analyses.length];
