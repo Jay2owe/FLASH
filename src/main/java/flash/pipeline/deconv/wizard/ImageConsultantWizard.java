@@ -16,6 +16,7 @@ import java.util.Locale;
 /**
  * Guided wizard that collapses expert deconvolution choices into 2-4 user questions.
  */
+@SuppressWarnings("unchecked")
 public final class ImageConsultantWizard {
 
     private static final String DIALOG_TITLE = "Image Consultant";
