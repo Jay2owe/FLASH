@@ -380,7 +380,10 @@ public class FLASH_Pipeline implements PlugIn {
                                                              ProjectBuilderOpener builderOpener) {
         ProjectService.ProjectKind kind = ProjectService.classify(folder);
         if (kind == ProjectService.ProjectKind.VALID_FLASH) {
-            return openExistingHomeProject(ProjectService.resolveProjectJson(folder), pluginsDir);
+            File projectJson = ProjectService.resolveProjectJson(folder);
+            if (projectJson != null) {
+                return openExistingHomeProject(projectJson, pluginsDir);
+            }
         }
         return selectionFromBuilder(openBuilder(builderOpener, owner, pluginsDir, folder));
     }
@@ -789,6 +792,7 @@ public class FLASH_Pipeline implements PlugIn {
                         directory == null ? null : new java.io.File(directory));
                 if (picked != null) {
                     directory = picked.outputRoot.getAbsolutePath();
+                    fastReopen = false;
                     dirLabel.setText("<html><body width='280'>" + directory + "</body></html>");
                     startAnalysisStatusScan(directory, pd, statusRowsByAnalysis, statusRowsReady,
                             pendingStatuses, pendingScanner);

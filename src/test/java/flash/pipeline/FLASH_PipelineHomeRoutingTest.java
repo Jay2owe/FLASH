@@ -1,5 +1,6 @@
 package flash.pipeline;
 
+import flash.pipeline.bin.ChannelConfigIO;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.project.ProjectBuilderDialog;
 import flash.pipeline.project.ProjectFile;
@@ -64,6 +65,28 @@ public class FLASH_PipelineHomeRoutingTest {
                 selection.outputRoot.getCanonicalPath());
         assertEquals(fixture.projectJson.getAbsolutePath(),
                 RecentProjectsStore.read(plugins).get(0).path);
+    }
+
+    @Test
+    public void browseConfigOnlyFlashFolderFallsBackToBuilder() throws Exception {
+        File plugins = temp.newFolder("plugins");
+        File outputRoot = temp.newFolder("config-only");
+        File settingsDir = FlashProjectLayout.forDirectory(outputRoot.getAbsolutePath())
+                .configurationWriteDir();
+        assertTrue(settingsDir.mkdirs());
+        assertTrue(new File(settingsDir, ChannelConfigIO.FILE_NAME).createNewFile());
+        final File[] suggested = new File[1];
+        final boolean[] opened = new boolean[1];
+
+        FLASH_Pipeline.ProjectLaunchSelection selection = FLASH_Pipeline.routeHomeChoice(
+                ProjectHomeDialog.Choice.browseFolder(outputRoot),
+                null,
+                plugins,
+                capturingBuilder(opened, suggested));
+
+        assertNull(selection);
+        assertTrue(opened[0]);
+        assertEquals(outputRoot.getCanonicalPath(), suggested[0].getCanonicalPath());
     }
 
     @Test
