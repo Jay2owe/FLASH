@@ -64,7 +64,9 @@ public final class ProjectHomeDialog {
                 }
             });
 
+    /** User intent returned by the home screen for pipeline-level routing. */
     public static final class Choice {
+        /** Home-screen actions that the pipeline entry point can route. */
         public enum Action { OPEN_EXISTING, NEW_PROJECT, EDIT_EXISTING, BROWSE_FOLDER, CANCEL }
 
         public final Action action;

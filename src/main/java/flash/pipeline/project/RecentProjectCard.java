@@ -46,6 +46,7 @@ public final class RecentProjectCard extends JPanel {
             FLASH_Pipeline.IDX_EXCEL_EXPORT
     };
 
+    /** Callbacks used by the home dialog to route card interactions. */
     public interface Actions {
         void open(RecentProjectCard card);
         void edit(RecentProjectCard card);

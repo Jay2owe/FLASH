@@ -13,6 +13,7 @@ import java.io.IOException;
 public final class ProjectService {
     private static final int UPWARD_MARKER_SEARCH_DEPTH = 5;
 
+    /** Classification result for a selected folder or FLASH project pointer. */
     public enum ProjectKind {
         NEW_EMPTY,
         VALID_FLASH,
@@ -122,6 +123,7 @@ public final class ProjectService {
         }
     }
 
+    /** Result of resolving a stored recent-project path on the current machine. */
     public static final class ResolveOutcome {
         public final File projectJson;
         public final String storedPath;
