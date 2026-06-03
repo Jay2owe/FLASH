@@ -96,6 +96,7 @@ import java.util.Set;
 /**
  * Standalone 3D deconvolution step that runs before downstream analyses.
  */
+@SuppressWarnings("unchecked")
 public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
 
     private static final String TITLE = "3D Deconvolution";
