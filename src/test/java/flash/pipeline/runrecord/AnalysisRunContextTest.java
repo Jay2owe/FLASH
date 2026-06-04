@@ -154,4 +154,39 @@ public class AnalysisRunContextTest {
         assertEquals(Boolean.TRUE, record.parameters.get("skipExisting"));
         assertEquals("hello", record.parameters.get("note"));
     }
+
+    @Test
+    public void recordParametersMergesAfterOpenAndPersists() throws Exception {
+        // Interactive GUI runs open with an empty parameter map and capture the
+        // confirmed settings during the run via recordParameters().
+        AnalysisRunContext context = open(projectRoot());
+        Map<String, Object> first = new LinkedHashMap<String, Object>();
+        first.put("doVolumetric", Boolean.TRUE);
+        first.put("name", "GUI 3D Object run");
+        context.recordParameters(first);
+        // Later keys override earlier ones; null/empty maps are no-ops.
+        Map<String, Object> override = new LinkedHashMap<String, Object>();
+        override.put("doVolumetric", Boolean.FALSE);
+        context.recordParameters(override);
+        context.recordParameters(null);
+        context.recordParameters(new LinkedHashMap<String, Object>());
+        context.close();
+
+        RunRecord record = RunRecordIO.readLatest(context.recordFile());
+        assertEquals(Boolean.FALSE, record.parameters.get("doVolumetric"));
+        assertEquals("GUI 3D Object run", record.parameters.get("name"));
+    }
+
+    @Test
+    public void recordParametersAfterCloseIsIgnored() throws Exception {
+        AnalysisRunContext context = open(projectRoot());
+        context.close();
+        Map<String, Object> late = new LinkedHashMap<String, Object>();
+        late.put("late", Boolean.TRUE);
+        context.recordParameters(late);
+
+        RunRecord record = RunRecordIO.readLatest(context.recordFile());
+        assertFalse("parameters recorded after close must be ignored",
+                record.parameters.containsKey("late"));
+    }
 }

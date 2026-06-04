@@ -1,7 +1,6 @@
 package flash.pipeline.intensity.spatial;
 
 import flash.pipeline.analyses.wizard.IntensitySpatialConfig;
-import flash.pipeline.analyses.wizard.IntensitySpatialWizard;
 import flash.pipeline.cli.CLIArgumentParser;
 import flash.pipeline.cli.CLIConfig;
 import ij.ImagePlus;
@@ -10,7 +9,6 @@ import ij.process.FloatProcessor;
 import org.junit.Test;
 
 import java.util.LinkedHashMap;
-import java.util.Map;
 import java.util.Set;
 
 import static org.junit.Assert.assertEquals;
@@ -45,12 +43,6 @@ public class TextureClassAnalysisTest {
 
     @Test
     public void advancedAnalysesAreNotSelectedByDefault() throws Exception {
-        Map<String, Object> answers = new LinkedHashMap<String, Object>();
-        answers.put("intensity.spatial.intent", IntensitySpatialWizard.INTENT_ALL);
-        IntensitySpatialConfig guiConfig = IntensitySpatialWizard.deriveConfig(
-                new String[]{"DAPI", "IBA1"}, new boolean[]{false, true}, 8, answers);
-        assertFalse(containsAdvanced(guiConfig.getEnabledAnalyses()));
-
         IntensitySpatialConfig presetConfig =
                 IntensitySpatialConfig.fromJsonObject(new LinkedHashMap<String, Object>());
         assertFalse(containsAdvanced(presetConfig.getEnabledAnalyses()));

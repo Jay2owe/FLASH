@@ -16,6 +16,16 @@ public final class ChannelConfig {
     public ZSliceMode zSliceMode = ZSliceMode.FULL;
     public Map<String, ZSliceRange> zSliceSelections = new LinkedHashMap<String, ZSliceRange>();
     public boolean clickCaptureUsed;
+    // Explicit "configuration finished" signal. true only after the final commit
+    // write; false when explicitly written incomplete; null when absent (files
+    // written before this flag existed). Null falls back to the per-property
+    // COMMITTED check so old projects keep loading unchanged.
+    public Boolean complete;
+    // Runtime-only (never serialized): the schemaVersion that was on disk before
+    // decode, and whether a migration ran. Used by ChannelConfigIO.readResult to
+    // persist an upgraded file exactly once.
+    public int originalSchemaVersion;
+    public boolean migrated;
     public Map<String, Object> extras = new LinkedHashMap<String, Object>();
 
     public static final class Channel {

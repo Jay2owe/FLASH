@@ -2,13 +2,7 @@ package flash.pipeline.analyses.wizard;
 
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.ChannelIdentities;
-import flash.pipeline.ui.PipelineDialog;
-import flash.pipeline.ui.ToggleSwitch;
-import flash.pipeline.ui.wizard.WizardFlow;
 
-import javax.swing.JComboBox;
-import javax.swing.JTextField;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -17,9 +11,14 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * Intent-led setup helper for Intensity Analysis.
+ * Configuration derivation for Intensity Analysis.
+ *
+ * <p>Holds the measurement-mode constants and the static derivation logic that
+ * turns a {@link BinConfig}, channel identities, saved presets, or raw answer
+ * maps into a {@link DerivedConfig}. This is pure configuration logic with no
+ * UI; it was extracted from the former interactive Intensity setup wizard.
  */
-public class IntensityWizard extends WizardFlow {
+public final class IntensitySetupConfig {
 
     public static final String MODE_WHOLE_ROI_MEAN = "Whole ROI mean (all pixels, including background)";
     public static final String MODE_THRESHOLD_MEAN = "Only bright pixels above threshold (puncta / cells)";
@@ -27,33 +26,11 @@ public class IntensityWizard extends WizardFlow {
     private static final String LEGACY_MODE_AREA_FRACTION = "Fraction of ROI covered (% positive area)";
     public static final String MASK_NONE = "No";
 
-    private static final String[] MODE_OPTIONS = {
-            MODE_WHOLE_ROI_MEAN,
-            MODE_THRESHOLD_MEAN
-    };
+    /** Per-channel filter-source tokens shared with the Intensity dialog. */
+    public static final String FILTER_BIN = "Bin filter";
+    public static final String FILTER_BASIC = "Basic background and noise removal";
 
-    private final BinConfig binConfig;
-    private final ChannelIdentities identities;
-    private final List<String> roiSetNames;
-
-    public IntensityWizard(MainPanelBinding panel,
-                           BinConfig binConfig,
-                           ChannelIdentities identities,
-                           List<String> roiSetNames,
-                           boolean headless) {
-        super("Intensity Helper", panel, headless);
-        this.binConfig = binConfig == null ? new BinConfig() : binConfig;
-        this.identities = identities == null ? new ChannelIdentities(null) : identities;
-        this.roiSetNames = roiSetNames == null
-                ? Collections.<String>emptyList()
-                : new ArrayList<String>(roiSetNames);
-        register(new ModeScreen());
-        register(new MaskScreen());
-        register(new RoiSetScreen());
-    }
-
-    public DerivedConfig deriveCurrentConfig() {
-        return deriveConfig(binConfig, identities, currentAnswers(), roiSetNames);
+    private IntensitySetupConfig() {
     }
 
     public static DerivedConfig deriveConfig(BinConfig cfg,
@@ -122,6 +99,7 @@ public class IntensityWizard extends WizardFlow {
             out.measurementModes[c] = modeForPreset(safePreset, safeCfg, identity, c);
             out.binarization[c] = !MODE_WHOLE_ROI_MEAN.equals(out.measurementModes[c]);
             out.thresholds[c] = thresholdForPreset(safePreset, safeCfg, c);
+            out.filterSources[c] = filterSourceForPreset(safePreset, safeCfg, c);
         }
 
         boolean hasRoiHint = safePreset.getRoiSetNameHints() != null && !safePreset.getRoiSetNameHints().isEmpty();
@@ -213,6 +191,14 @@ public class IntensityWizard extends WizardFlow {
         return byNumber == null ? thresholdAt(cfg, channelIndex) : byNumber;
     }
 
+    private static String filterSourceForPreset(IntensityPreset preset, BinConfig cfg, int channelIndex) {
+        String value = preset.getFilterSources().get(String.valueOf(channelIndex + 1));
+        if (value == null) {
+            value = preset.getFilterSources().get(nameAt(cfg, channelIndex));
+        }
+        return FILTER_BASIC.equals(value) ? FILTER_BASIC : FILTER_BIN;
+    }
+
     private static boolean isKnownMode(String mode) {
         return MODE_WHOLE_ROI_MEAN.equals(mode)
                 || MODE_THRESHOLD_MEAN.equals(mode);
@@ -268,14 +254,6 @@ public class IntensityWizard extends WizardFlow {
         return "Channel " + (index + 1);
     }
 
-    private static String[] channelNames(BinConfig cfg) {
-        String[] out = new String[cfg.numChannels()];
-        for (int i = 0; i < out.length; i++) {
-            out[i] = nameAt(cfg, i);
-        }
-        return out;
-    }
-
     private static String markerText(ChannelIdentities.Entry entry) {
         return entry == null ? "" : safe(entry.getMarkerId()).toLowerCase(Locale.ROOT);
     }
@@ -317,6 +295,7 @@ public class IntensityWizard extends WizardFlow {
         public final String[] measurementModes;
         public final boolean[] binarization;
         public final String[] thresholds;
+        public final String[] filterSources;
         public int maskChannelIndex = -1;
         public String maskChannelChoice = MASK_NONE;
         public final boolean[] roiSetSelected;
@@ -326,127 +305,9 @@ public class IntensityWizard extends WizardFlow {
             this.measurementModes = new String[Math.max(0, channels)];
             this.binarization = new boolean[Math.max(0, channels)];
             this.thresholds = new String[Math.max(0, channels)];
+            this.filterSources = new String[Math.max(0, channels)];
+            Arrays.fill(this.filterSources, FILTER_BIN);
             this.roiSetSelected = new boolean[Math.max(0, roiSets)];
-        }
-    }
-
-    private final class ModeScreen extends Screen {
-        private ModeScreen() {
-            super("For each channel, what are you measuring?");
-            for (int c = 0; c < binConfig.numChannels(); c++) {
-                defaultAnswer("mode." + (c + 1), defaultMode(identities.findByChannelIndex(c)));
-                defaultAnswer("threshold." + (c + 1), thresholdAt(binConfig, c));
-            }
-        }
-
-        public boolean isApplicable(AnswerMap prior) {
-            return binConfig.numChannels() > 0;
-        }
-
-        public void build(PipelineDialog dialog, AnswerMap answers) {
-            dialog.addHeader("For each channel, what are you measuring?");
-            for (int c = 0; c < binConfig.numChannels(); c++) {
-                dialog.addHeader(nameAt(binConfig, c));
-                JComboBox<String> choice = dialog.addChoice("Measurement mode", MODE_OPTIONS,
-                        answers.getString("mode." + (c + 1), defaultMode(identities.findByChannelIndex(c))));
-                final JTextField threshold = dialog.addStringField("Threshold (auto-detected from configuration)",
-                        answers.getString("threshold." + (c + 1), thresholdAt(binConfig, c)), 8);
-                final ToggleSwitch override = dialog.addToggle("Override threshold", false);
-                boolean needsThreshold = !MODE_WHOLE_ROI_MEAN.equals(choice.getSelectedItem());
-                override.setEnabled(needsThreshold);
-                threshold.setEnabled(needsThreshold && override.isSelected());
-                choice.addActionListener(e -> {
-                    boolean selectedModeNeedsThreshold = !MODE_WHOLE_ROI_MEAN.equals(choice.getSelectedItem());
-                    override.setEnabled(selectedModeNeedsThreshold);
-                    if (!selectedModeNeedsThreshold) {
-                        override.setSelected(false);
-                    }
-                    threshold.setEnabled(selectedModeNeedsThreshold && override.isSelected());
-                });
-                override.addChangeListener(new Runnable() {
-                    public void run() {
-                        threshold.setEnabled(override.isEnabled() && override.isSelected());
-                    }
-                });
-            }
-        }
-
-        public void read(PipelineDialog dialog, AnswerMap answers) {
-            for (int c = 0; c < binConfig.numChannels(); c++) {
-                String mode = dialog.getNextChoice();
-                String threshold = dialog.getNextString();
-                dialog.getNextBoolean();
-                answers.put("mode." + (c + 1), mode);
-                answers.put("threshold." + (c + 1), threshold);
-            }
-        }
-
-        public void writeTo(MainPanelBinding panel, AnswerMap answers) {
-            panel.setValue("intensity.config", deriveCurrentConfig());
-        }
-    }
-
-    private final class MaskScreen extends Screen {
-        private MaskScreen() {
-            super("Do you want to measure only inside another channel's positive area?");
-            defaultAnswer("mask.choice", MASK_NONE);
-        }
-
-        public void build(PipelineDialog dialog, AnswerMap answers) {
-            dialog.addHeader("Do you want to measure only inside another channel's positive area?");
-            String[] choices = maskChoices();
-            dialog.addChoice("Channel ROI Mask", choices, answers.getString("mask.choice", MASK_NONE));
-        }
-
-        public void read(PipelineDialog dialog, AnswerMap answers) {
-            answers.put("mask.choice", dialog.getNextChoice());
-        }
-
-        public void writeTo(MainPanelBinding panel, AnswerMap answers) {
-        }
-
-        private String[] maskChoices() {
-            List<String> out = new ArrayList<String>();
-            out.add(MASK_NONE);
-            for (String name : channelNames(binConfig)) {
-                out.add(name);
-            }
-            return out.toArray(new String[out.size()]);
-        }
-    }
-
-    private final class RoiSetScreen extends Screen {
-        private RoiSetScreen() {
-            super("Which ROI sets should intensity be measured inside?");
-            for (int r = 0; r < roiSetNames.size(); r++) {
-                defaultAnswer("roi." + r, Boolean.TRUE);
-            }
-        }
-
-        public boolean isApplicable(AnswerMap prior) {
-            return roiSetNames.size() > 1;
-        }
-
-        public void build(PipelineDialog dialog, AnswerMap answers) {
-            dialog.addHeader("Which ROI sets should intensity be measured inside?");
-            for (int r = 0; r < roiSetNames.size(); r++) {
-                dialog.addToggle(roiSetNames.get(r), answers.getBoolean("roi." + r, true));
-            }
-        }
-
-        public void read(PipelineDialog dialog, AnswerMap answers) {
-            boolean any = false;
-            for (int r = 0; r < roiSetNames.size(); r++) {
-                boolean selected = dialog.getNextBoolean();
-                answers.put("roi." + r, Boolean.valueOf(selected));
-                any = any || selected;
-            }
-            if (!any && !roiSetNames.isEmpty()) {
-                answers.put("roi.0", Boolean.TRUE);
-            }
-        }
-
-        public void writeTo(MainPanelBinding panel, AnswerMap answers) {
         }
     }
 }

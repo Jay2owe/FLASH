@@ -26,6 +26,7 @@ public final class IntensityPreset implements Preset<IntensityPreset> {
     private final Map<String, String> thresholds;
     private final String maskChannelHint;
     private final List<String> roiSetNameHints;
+    private final Map<String, String> filterSources;
     private final IntensitySpatialConfig spatial;
 
     public IntensityPreset(String name,
@@ -38,7 +39,7 @@ public final class IntensityPreset implements Preset<IntensityPreset> {
                            String maskChannelHint,
                            List<String> roiSetNameHints) {
         this(name, description, libraryVersion, strategy, defaultMode, channelModes,
-                thresholds, maskChannelHint, roiSetNameHints, null);
+                thresholds, maskChannelHint, roiSetNameHints, null, null);
     }
 
     public IntensityPreset(String name,
@@ -51,6 +52,21 @@ public final class IntensityPreset implements Preset<IntensityPreset> {
                            String maskChannelHint,
                            List<String> roiSetNameHints,
                            IntensitySpatialConfig spatial) {
+        this(name, description, libraryVersion, strategy, defaultMode, channelModes,
+                thresholds, maskChannelHint, roiSetNameHints, spatial, null);
+    }
+
+    public IntensityPreset(String name,
+                           String description,
+                           String libraryVersion,
+                           String strategy,
+                           String defaultMode,
+                           Map<String, String> channelModes,
+                           Map<String, String> thresholds,
+                           String maskChannelHint,
+                           List<String> roiSetNameHints,
+                           IntensitySpatialConfig spatial,
+                           Map<String, String> filterSources) {
         this.name = requireText("name", name);
         this.description = emptyToNull(description);
         this.libraryVersion = emptyToNull(libraryVersion) == null
@@ -58,12 +74,13 @@ public final class IntensityPreset implements Preset<IntensityPreset> {
                 : libraryVersion.trim();
         this.strategy = emptyToNull(strategy) == null ? "custom" : strategy.trim();
         this.defaultMode = emptyToNull(defaultMode) == null
-                ? IntensityWizard.MODE_WHOLE_ROI_MEAN
+                ? IntensitySetupConfig.MODE_WHOLE_ROI_MEAN
                 : defaultMode.trim();
         this.channelModes = immutableStringMap(channelModes);
         this.thresholds = immutableStringMap(thresholds);
         this.maskChannelHint = emptyToNull(maskChannelHint);
         this.roiSetNameHints = immutableStringList(roiSetNameHints);
+        this.filterSources = immutableStringMap(filterSources);
         this.spatial = spatial == null ? IntensitySpatialConfig.disabled() : spatial;
     }
 
@@ -77,6 +94,7 @@ public final class IntensityPreset implements Preset<IntensityPreset> {
     public Map<String, String> getThresholds() { return thresholds; }
     public String getMaskChannelHint() { return maskChannelHint; }
     public List<String> getRoiSetNameHints() { return roiSetNameHints; }
+    public Map<String, String> getFilterSources() { return filterSources; }
     public IntensitySpatialConfig getSpatial() { return spatial; }
 
     public Map<String, Object> toJsonObject() {
@@ -90,6 +108,9 @@ public final class IntensityPreset implements Preset<IntensityPreset> {
         root.put("thresholds", new LinkedHashMap<String, String>(thresholds));
         if (maskChannelHint != null) root.put("maskChannelHint", maskChannelHint);
         root.put("roiSetNameHints", new ArrayList<String>(roiSetNameHints));
+        if (!filterSources.isEmpty()) {
+            root.put("filterSources", new LinkedHashMap<String, String>(filterSources));
+        }
         if (spatial != null && spatial.hasConfiguration()) {
             root.put("spatial", spatial.toJsonObject());
         }
@@ -111,12 +132,13 @@ public final class IntensityPreset implements Preset<IntensityPreset> {
                 JsonIO.stringValue(root.get("description")),
                 stringOr(root.get("libraryVersion"), CURRENT_LIBRARY_VERSION),
                 stringOr(root.get("strategy"), "custom"),
-                stringOr(root.get("defaultMode"), IntensityWizard.MODE_WHOLE_ROI_MEAN),
+                stringOr(root.get("defaultMode"), IntensitySetupConfig.MODE_WHOLE_ROI_MEAN),
                 stringMap(root.get("channelModes")),
                 stringMap(root.get("thresholds")),
                 JsonIO.stringValue(root.get("maskChannelHint")),
                 stringList(root.get("roiSetNameHints")),
-                IntensitySpatialConfig.fromJsonObject(root.get("spatial")));
+                IntensitySpatialConfig.fromJsonObject(root.get("spatial")),
+                stringMap(root.get("filterSources")));
     }
 
     private static Map<String, String> stringMap(Object value) {

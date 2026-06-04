@@ -16,7 +16,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
-public class ThreeDObjectWizardTest {
+public class ThreeDObjectSetupConfigTest {
 
     @Rule
     public TemporaryFolder temp = new TemporaryFolder();
@@ -33,9 +33,9 @@ public class ThreeDObjectWizardTest {
                 {false, false, true}
         };
         String[] strictness = new String[]{
-                ThreeDObjectWizard.STRICTNESS_LOOSE,
-                ThreeDObjectWizard.STRICTNESS_STANDARD,
-                ThreeDObjectWizard.STRICTNESS_STRICT
+                ThreeDObjectSetupConfig.STRICTNESS_LOOSE,
+                ThreeDObjectSetupConfig.STRICTNESS_STANDARD,
+                ThreeDObjectSetupConfig.STRICTNESS_STRICT
         };
         double[] thresholds = new double[]{10.0, 30.0, 60.0};
 
@@ -47,7 +47,7 @@ public class ThreeDObjectWizardTest {
                 answers.put("intent.spatial", Boolean.valueOf(intent[2]));
                 answers.put("coloc.strictness", strictness[i]);
 
-                ThreeDObjectWizard.DerivedConfig derived = ThreeDObjectWizard.deriveConfig(
+                ThreeDObjectSetupConfig.DerivedConfig derived = ThreeDObjectSetupConfig.deriveConfig(
                         cfg, identities, answers, null);
 
                 assertEquals(intent[0], derived.doVolumetric);
@@ -62,7 +62,7 @@ public class ThreeDObjectWizardTest {
 
     @Test
     public void looseStrictnessIsDefaultWhenAmyloidIsPresent() {
-        ThreeDObjectWizard.DerivedConfig derived = ThreeDObjectWizard.deriveConfig(
+        ThreeDObjectSetupConfig.DerivedConfig derived = ThreeDObjectSetupConfig.deriveConfig(
                 dapiIba1AbetaConfig(), dapiIba1AbetaIdentities(), colocAnswers(), null);
 
         assertTrue(derived.doVolumetric);
@@ -80,7 +80,7 @@ public class ThreeDObjectWizardTest {
         Map<String, Object> answers = new LinkedHashMap<String, Object>();
         answers.put("intent.intensityColoc", Boolean.TRUE);
 
-        ThreeDObjectWizard.DerivedConfig derived = ThreeDObjectWizard.deriveConfig(
+        ThreeDObjectSetupConfig.DerivedConfig derived = ThreeDObjectSetupConfig.deriveConfig(
                 dapiIba1AbetaConfig(), dapiIba1AbetaIdentities(), answers, null);
 
         assertFalse(derived.doVolumetric);
@@ -93,7 +93,7 @@ public class ThreeDObjectWizardTest {
         Map<String, Object> answers = new LinkedHashMap<String, Object>();
         answers.put("intent.process", Boolean.TRUE);
 
-        ThreeDObjectWizard.DerivedConfig derived = ThreeDObjectWizard.deriveConfig(
+        ThreeDObjectSetupConfig.DerivedConfig derived = ThreeDObjectSetupConfig.deriveConfig(
                 dapiIba1AbetaConfig(), dapiIba1AbetaIdentities(), answers, null);
 
         assertEquals(0, derived.nuclearMarkerIndex);
@@ -104,7 +104,7 @@ public class ThreeDObjectWizardTest {
 
     @Test
     public void centroidRoiFilteringDefaultsOn() {
-        ThreeDObjectWizard.DerivedConfig derived = ThreeDObjectWizard.deriveConfig(
+        ThreeDObjectSetupConfig.DerivedConfig derived = ThreeDObjectSetupConfig.deriveConfig(
                 dapiIba1AbetaConfig(), dapiIba1AbetaIdentities(),
                 new LinkedHashMap<String, Object>(), null);
 
@@ -113,7 +113,7 @@ public class ThreeDObjectWizardTest {
 
     @Test
     public void fallbackPresetLoadDefaultsCentroidRoiFilteringOn() {
-        ThreeDObjectWizard.DerivedConfig derived = ThreeDObjectWizard.fromPreset(
+        ThreeDObjectSetupConfig.DerivedConfig derived = ThreeDObjectSetupConfig.fromPreset(
                 dapiIba1AbetaConfig(), dapiIba1AbetaIdentities(), null);
 
         assertTrue(derived.classicalCentroidFiltering);
@@ -133,7 +133,7 @@ public class ThreeDObjectWizardTest {
                 "Count + Coloc Loose",
                 "Count + Process Length"), presetNames(presets));
         for (ThreeDObjectPreset preset : presets) {
-            ThreeDObjectWizard.DerivedConfig derived = ThreeDObjectWizard.fromPreset(
+            ThreeDObjectSetupConfig.DerivedConfig derived = ThreeDObjectSetupConfig.fromPreset(
                     dapiIba1AbetaConfig(), dapiIba1AbetaIdentities(), preset);
 
             assertTrue(preset.getName(), derived.classicalCentroidFiltering);
@@ -155,7 +155,7 @@ public class ThreeDObjectWizardTest {
                 null,
                 null);
 
-        ThreeDObjectWizard.DerivedConfig derived = ThreeDObjectWizard.fromPreset(
+        ThreeDObjectSetupConfig.DerivedConfig derived = ThreeDObjectSetupConfig.fromPreset(
                 dapiIba1AbetaConfig(), dapiIba1AbetaIdentities(), preset);
 
         assertFalse(derived.classicalCentroidFiltering);
@@ -170,7 +170,7 @@ public class ThreeDObjectWizardTest {
                 new ChannelIdentities.Entry(0, "nuclei_dapi", "round", false),
                 new ChannelIdentities.Entry(1, "microglia_iba1", "complex", true)));
 
-        ThreeDObjectWizard.DerivedConfig derived = ThreeDObjectWizard.deriveConfig(
+        ThreeDObjectSetupConfig.DerivedConfig derived = ThreeDObjectSetupConfig.deriveConfig(
                 cfg, identities, colocAnswers(), null);
 
         assertTrue(derived.primaryPairs.contains("1-2"));

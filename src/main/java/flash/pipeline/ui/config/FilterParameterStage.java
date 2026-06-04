@@ -148,6 +148,8 @@ public final class FilterParameterStage implements ConfigQcStage {
     private final List<CollapsibleSection> sectionPanels = new ArrayList<CollapsibleSection>();
     /** Per-row metadata aligned to {@link #sectionPanels}. */
     private final List<RowHandle> rowHandles = new ArrayList<RowHandle>();
+    /** Branch subheader titles emitted in the last accordion rebuild (test seam). */
+    private final List<String> branchSubheaderTitles = new ArrayList<String>();
 
     private ConfigQcActions actions;
     private PreviewPairPanel preview;
@@ -540,6 +542,11 @@ public final class FilterParameterStage implements ConfigQcStage {
         return linear;
     }
 
+    /** Branch subheader titles rendered in the accordion, in order (empty if linear). */
+    List<String> branchSubheaderTitlesForTest() {
+        return new ArrayList<String>(branchSubheaderTitles);
+    }
+
     String parameterFieldValueForTest(String key) {
         for (int i = 0; i < fieldBindings.size(); i++) {
             FilterFieldBinding binding = fieldBindings.get(i);
@@ -871,6 +878,7 @@ public final class FilterParameterStage implements ConfigQcStage {
             fieldBindings.clear();
             sectionPanels.clear();
             rowHandles.clear();
+            branchSubheaderTitles.clear();
             parameterPanel.removeAll();
             String accordionMacro = currentDisplayMacro != null ? currentDisplayMacro : currentMacro;
             definition = FilterMacroEditorModel.parse(accordionMacro);
@@ -883,12 +891,31 @@ public final class FilterParameterStage implements ConfigQcStage {
                 parameterPanel.add(Box.createVerticalStrut(2));
                 List<FilterMacroEditorModel.Section> sections = definition.getSections();
                 List<FilterBuilderPanel.NodeSummary> summaries = nodeSummariesIfLinear();
+                // Branch subheaders: a branched filter (Duplicate scaffolding +
+                // imageCalculator merge) is labeled per image branch so the user
+                // sees which steps belong to which path. The macro text is the
+                // source of truth — entry.lineIndex (from the freshly parsed,
+                // un-mutated definition) indexes the same lines FilterBranchLabels
+                // walks. See docs/filter-branch-robustness_COMPLETED/08_design_pivot.md.
+                boolean branched = FilterBranchLabels.isBranched(accordionMacro);
+                Map<Integer, String> branchByLine = branched
+                        ? FilterBranchLabels.labelByLine(accordionMacro)
+                        : Collections.<Integer, String>emptyMap();
+                String shownBranchTitle = null;
                 int rowCursor = 0;
                 for (int i = 0; i < sections.size(); i++) {
                     FilterMacroEditorModel.Section section = sections.get(i);
                     for (int j = 0; j < section.entries.size(); j++) {
                         FilterMacroEditorModel.Entry entry = section.entries.get(j);
                         if (!shouldShowEntry(entry)) continue;
+                        if (branched) {
+                            String title = branchSectionTitle(
+                                    branchByLine.get(entry.lineIndex));
+                            if (!title.equals(shownBranchTitle)) {
+                                addBranchSubheader(title);
+                                shownBranchTitle = title;
+                            }
+                        }
                         rowCursor = addAccordionRow(entry,
                                 rowHandles.size(), summaries, rowCursor);
                     }
@@ -1280,6 +1307,32 @@ public final class FilterParameterStage implements ConfigQcStage {
         parameterPanel.add(label);
     }
 
+    /** Display title for a branch label from {@link FilterBranchLabels}. */
+    private static String branchSectionTitle(String label) {
+        if (label == null || label.isEmpty()
+                || FilterBranchLabels.SOURCE.equals(label)) {
+            return "Source";
+        }
+        if (FilterBranchLabels.COMBINE.equals(label)) {
+            return "Combine";
+        }
+        if (FilterBranchLabels.AFTER_COMBINE.equals(label)) {
+            return "After combine";
+        }
+        return "Branch: " + label;
+    }
+
+    /** Bold subheader row that groups the following accordion steps by branch. */
+    private void addBranchSubheader(String title) {
+        branchSubheaderTitles.add(title);
+        JLabel label = new JLabel(title);
+        label.setFont(label.getFont().deriveFont(java.awt.Font.BOLD));
+        label.setForeground(FlashTheme.TEXT_SUBHEADER);
+        label.setAlignmentX(JComponent.LEFT_ALIGNMENT);
+        label.setBorder(FlashTheme.pad(8, 2, 2, 2));
+        parameterPanel.add(label);
+    }
+
     private void fieldChanged() {
         if (updatingControls) return;
         syncFieldBindings();
@@ -1358,7 +1411,7 @@ public final class FilterParameterStage implements ConfigQcStage {
     private void openMacroVariationsDialog() {
         // Branched filters are sweepable: the sweep substitutes parameters
         // surgically through the faithful text model (FilterMacroEditorModel),
-        // never re-emitting through the DAG. See docs/filter-branch-robustness.
+        // never re-emitting through the DAG. See docs/filter-branch-robustness_COMPLETED.
         if (!canPreview() || activeContext == null) {
             setError("Choose a filter and source image first.");
             return;

@@ -45,6 +45,7 @@ public class QualityReport {
     private boolean enabled = false;
     private String directory;
     private final long startTime = System.currentTimeMillis();
+    private boolean staleArtifactsCleaned = false;
 
     // Global settings
     private String projectDir;
@@ -288,7 +289,9 @@ public class QualityReport {
                 g2d.dispose();
 
                 // Save overlay TIF to disk
-                File overlayDir = FlashProjectLayout.forDirectory(directory).qcOverlaysWriteDir();
+                FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
+                ensureStaleArtifactsCleaned(layout);
+                File overlayDir = layout.qcOverlaysWriteDir();
                 IoUtils.mustMkdirs(overlayDir);
                 String safeName = (imageName == null ? "image" : imageName)
                         .replaceAll("[^a-zA-Z0-9_\\-]", "_");
@@ -377,6 +380,7 @@ public class QualityReport {
             IJ.log("QC Report: failed to resolve report directory: " + e.getMessage());
             return;
         }
+        ensureStaleArtifactsCleaned(layout);
         try {
             IoUtils.mustMkdirs(layout.qcRoot());
             HtmlReportWriter.write(layout.qcReportWriteFile(), this);
@@ -388,6 +392,33 @@ public class QualityReport {
             StudyYamlWriter.write(layout.qcStudyMetadataWriteFile(), this, getStudyMetadata());
         } catch (Exception e) {
             IJ.log("QC Report: failed to write study.yaml: " + e.getMessage());
+        }
+    }
+
+    private void ensureStaleArtifactsCleaned(FlashProjectLayout layout) {
+        if (staleArtifactsCleaned) return;
+        staleArtifactsCleaned = true;
+        if (layout == null) return;
+
+        File overlayDir = layout.qcOverlaysWriteDir();
+        if (overlayDir.isDirectory()) {
+            File[] overlays = overlayDir.listFiles();
+            if (overlays != null) {
+                for (File f : overlays) {
+                    if (!f.delete()) {
+                        IJ.log("QC Report: could not remove stale overlay: " + f.getName());
+                    }
+                }
+            }
+        }
+
+        File oldHtml = layout.qcReportWriteFile();
+        if (oldHtml.exists() && !oldHtml.delete()) {
+            IJ.log("QC Report: could not remove stale QC_Report.html");
+        }
+        File oldStudyYaml = layout.qcStudyMetadataWriteFile();
+        if (oldStudyYaml.exists() && !oldStudyYaml.delete()) {
+            IJ.log("QC Report: could not remove stale study.yaml");
         }
     }
 

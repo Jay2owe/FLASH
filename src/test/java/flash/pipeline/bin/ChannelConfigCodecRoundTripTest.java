@@ -9,6 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
@@ -116,13 +117,46 @@ public class ChannelConfigCodecRoundTripTest {
     }
 
     @Test
-    public void decodeRejectsWrongSchemaVersion() throws Exception {
+    public void completeFlagRoundTripsTrueFalseAndAbsent() throws Exception {
+        ChannelConfig trueCfg = new ChannelConfig();
+        trueCfg.complete = Boolean.TRUE;
+        assertEquals(Boolean.TRUE, ChannelConfigCodec.decode(ChannelConfigCodec.encode(trueCfg)).complete);
+
+        ChannelConfig falseCfg = new ChannelConfig();
+        falseCfg.complete = Boolean.FALSE;
+        assertEquals(Boolean.FALSE, ChannelConfigCodec.decode(ChannelConfigCodec.encode(falseCfg)).complete);
+
+        // Absent stays absent (null), and is not written into the JSON so files
+        // predating the flag stay byte-stable.
+        ChannelConfig absentCfg = new ChannelConfig();
+        String encoded = ChannelConfigCodec.encode(absentCfg);
+        assertFalse(encoded.contains("\"complete\""));
+        assertNull(ChannelConfigCodec.decode(encoded).complete);
+    }
+
+    @Test
+    public void decodeNewerSchemaVersionThrowsTypedException() throws Exception {
         try {
             ChannelConfigCodec.decode("{\"schemaVersion\":2,\"channels\":[]}");
-            fail("Expected IOException");
-        } catch (IOException e) {
+            fail("Expected NewerSchemaException");
+        } catch (NewerSchemaException e) {
+            assertEquals(2, e.getRequestedVersion());
+            assertEquals(ChannelConfigCodec.schemaVersion(), e.getSupportedVersion());
+            // Stays an IOException with a schemaVersion-aware message for old callers.
             assertTrue(e.getMessage().contains("schemaVersion"));
             assertTrue(e.getMessage().contains("2"));
+        }
+    }
+
+    @Test
+    public void decodeMissingOrBelowOneSchemaVersionThrowsPlainIOException() throws Exception {
+        try {
+            ChannelConfigCodec.decode("{\"channels\":[]}");
+            fail("Expected IOException");
+        } catch (NewerSchemaException e) {
+            fail("Missing version is not a newer-version case: " + e.getMessage());
+        } catch (IOException e) {
+            assertTrue(e.getMessage().contains("schemaVersion"));
         }
     }
 

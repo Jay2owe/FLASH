@@ -15,7 +15,7 @@ public final class FilterParameterId implements ParameterKey {
      * Vary picker and variations grid so the user can tell which image branch a
      * swept parameter is on. DISPLAY-ONLY: deliberately excluded from
      * {@link #stableKey()}/{@link #equals}/{@link #hashCode} so VariationCache
-     * disk keys and saved sweeps stay valid. See docs/filter-branch-robustness.
+     * disk keys and saved sweeps stay valid. See docs/filter-branch-robustness_COMPLETED.
      */
     private final String branchLabel;
 

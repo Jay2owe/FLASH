@@ -13,7 +13,7 @@ import flash.pipeline.analyses.wizard.ThreeDObjectPreset;
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.decontamination.SpectralDecontaminationConfig;
 import flash.pipeline.decontamination.wizard.SpectralDecontamPreset;
-import flash.pipeline.decontamination.wizard.SpectralDecontaminationWizard;
+import flash.pipeline.decontamination.wizard.SpectralDecontaminationSetup;
 import flash.pipeline.deconv.wizard.DeconvPreset;
 import flash.pipeline.ui.config.ParticleSizeStage;
 import org.junit.Test;
@@ -148,7 +148,7 @@ public class LoadedRunParametersAdapterTest {
                 .getIgnoredKeys().isEmpty());
         assertFalse(new LineDistanceAnalysis().applyLoadedParameters(parameters)
                 .getIgnoredKeys().isEmpty());
-        assertFalse(new SpectralDecontaminationWizard(
+        assertFalse(new SpectralDecontaminationSetup(
                 new File("."), new BinConfig(), null).applyLoadedParameters(parameters)
                 .getIgnoredKeys().isEmpty());
     }

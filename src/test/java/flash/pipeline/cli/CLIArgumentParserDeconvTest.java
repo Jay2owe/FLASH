@@ -73,4 +73,19 @@ public class CLIArgumentParserDeconvTest {
         assertEquals(parsed.isThreeDUseDeconv(), reparsed.isThreeDUseDeconv());
         assertEquals(parsed.isIntensityV2UseDeconv(), reparsed.isIntensityV2UseDeconv());
     }
+
+    @Test
+    public void skipPreviewEnablesDeconvAndRoundTripsThroughMacroOptions() {
+        CLIConfig parsed = CLIArgumentParser.parse(
+                "dir=[/tmp/project] run_deconv deconv.skipPreview=true");
+        assertNotNull(parsed);
+        // skipPreview with no explicit enabled flag auto-enables deconvolution for unattended runs.
+        assertTrue(parsed.getDeconv().isEnabled());
+        assertTrue(parsed.getDeconv().isSkipPreview());
+
+        CLIConfig reparsed = CLIArgumentParser.parse(parsed.toMacroOptions());
+        assertNotNull(reparsed);
+        assertTrue(reparsed.getDeconv().isEnabled());
+        assertTrue(reparsed.getDeconv().isSkipPreview());
+    }
 }

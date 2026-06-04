@@ -1,7 +1,7 @@
 package flash.pipeline.cli;
 
 import flash.pipeline.analyses.SpatialAnalysis;
-import flash.pipeline.analyses.wizard.SpatialAnalysisWizard;
+import flash.pipeline.analyses.wizard.SpatialSetupConfig;
 import org.junit.Test;
 
 import java.lang.reflect.Method;
@@ -47,11 +47,11 @@ public class CLISpatialTextureTest {
                 + "spatial.texture.classfractions=true "
                 + "spatial.texture.native3d=true "
                 + "spatial.texture.k=6");
-        SpatialAnalysisWizard.DerivedConfig derived =
-                new SpatialAnalysisWizard.DerivedConfig();
+        SpatialSetupConfig.DerivedConfig derived =
+                new SpatialSetupConfig.DerivedConfig();
 
         Method method = SpatialAnalysis.class.getDeclaredMethod("applyCliSpatialOverrides",
-                SpatialAnalysisWizard.DerivedConfig.class, CLIConfig.SpatialConfig.class);
+                SpatialSetupConfig.DerivedConfig.class, CLIConfig.SpatialConfig.class);
         method.setAccessible(true);
         method.invoke(null, derived, parsed.getSpatial());
 

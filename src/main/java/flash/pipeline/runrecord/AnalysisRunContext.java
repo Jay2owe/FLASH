@@ -101,6 +101,13 @@ public final class AnalysisRunContext implements AutoCloseable {
         return runFile;
     }
 
+    /** True once the analysis has recorded an output file. */
+    public boolean hasRecordedOutputs() {
+        synchronized (lock) {
+            return !record.outputs.isEmpty();
+        }
+    }
+
     public InputHandle recordInputStart(File source, int seriesIndex, ProjectFile.Item item) {
         RunRecord.InputItem input = new RunRecord.InputItem();
         input.path = source == null ? "" : source.getAbsolutePath();
@@ -141,6 +148,30 @@ public final class AnalysisRunContext implements AutoCloseable {
         }
         if (output != null) {
             submitOutputFingerprint(out, output);
+        }
+    }
+
+    /**
+     * Merge the analysis's chosen settings into this run's {@code parameters}
+     * map so a later "Load settings from previous run" can restore them.
+     *
+     * <p>Interactive GUI runs open the context with an empty parameter map (the
+     * settings are not known until the dialog is confirmed). Each
+     * {@link RunRecordAware} analysis calls this from within its run, once the
+     * settings are finalised, passing its preset's own JSON object
+     * ({@code preset.toJsonObject()}) so the keys match what
+     * {@code LoadedRunParameters} recognises. Later keys override earlier ones,
+     * mirroring {@link ParameterSnapshot#merged}.
+     */
+    public void recordParameters(Map<String, Object> params) {
+        if (params == null || params.isEmpty()) {
+            return;
+        }
+        synchronized (lock) {
+            if (closed) {
+                return;
+            }
+            record.parameters.putAll(params);
         }
     }
 
@@ -200,6 +231,17 @@ public final class AnalysisRunContext implements AutoCloseable {
                         + runFile.getAbsolutePath() + ": " + e.getMessage());
             }
         }
+    }
+
+    /** Close without writing a run-record snapshot. Used for pre-run GUI cancel. */
+    public void discard() {
+        synchronized (lock) {
+            if (closed) {
+                return;
+            }
+            closed = true;
+        }
+        fingerprintExecutor.shutdownNow();
     }
 
     private void submitFingerprint(final RunRecord.InputItem input, final File source,

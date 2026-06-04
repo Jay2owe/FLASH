@@ -25,12 +25,12 @@ public class IntensityPresetIOTest {
         File root = temp.newFolder("intensity-preset");
         IntensityPresetIO io = new IntensityPresetIO(root);
         Map<String, String> modes = new LinkedHashMap<String, String>();
-        modes.put("2", IntensityWizard.MODE_THRESHOLD_MEAN);
+        modes.put("2", IntensitySetupConfig.MODE_THRESHOLD_MEAN);
         Map<String, String> thresholds = new LinkedHashMap<String, String>();
         thresholds.put("2", "45");
 
         IntensityPreset preset = new IntensityPreset("My Intensity Preset", "test", "1",
-                "custom", IntensityWizard.MODE_WHOLE_ROI_MEAN, modes,
+                "custom", IntensitySetupConfig.MODE_WHOLE_ROI_MEAN, modes,
                 thresholds, "NeuN", Arrays.asList("LH"));
 
         io.save(preset);
@@ -40,7 +40,7 @@ public class IntensityPresetIOTest {
         IntensityPreset loaded = io.load("my_intensity_preset");
 
         assertEquals("My Intensity Preset", loaded.getName());
-        assertEquals(IntensityWizard.MODE_THRESHOLD_MEAN, loaded.getChannelModes().get("2"));
+        assertEquals(IntensitySetupConfig.MODE_THRESHOLD_MEAN, loaded.getChannelModes().get("2"));
         assertEquals("45", loaded.getThresholds().get("2"));
         assertEquals("NeuN", loaded.getMaskChannelHint());
         assertFalse(loaded.getSpatial().isEnabled());
@@ -68,7 +68,7 @@ public class IntensityPresetIOTest {
                 .seed(42L)
                 .build();
         IntensityPreset preset = new IntensityPreset("Spatial Intensity", "test", null,
-                "custom", IntensityWizard.MODE_WHOLE_ROI_MEAN,
+                "custom", IntensitySetupConfig.MODE_WHOLE_ROI_MEAN,
                 new LinkedHashMap<String, String>(), new LinkedHashMap<String, String>(),
                 null, Arrays.asList("LH"), spatial);
 

@@ -4,7 +4,9 @@ import flash.pipeline.image.FilterMacroEditorModel;
 
 import javax.swing.BorderFactory;
 import javax.swing.JComponent;
+import javax.swing.JMenuItem;
 import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
 import javax.swing.SwingUtilities;
 import java.awt.BasicStroke;
 import java.awt.Color;
@@ -28,13 +30,15 @@ public final class ChainRibbon extends JPanel {
     public enum StepState {
         FIXED,
         SWEPT,
-        FOCUSED
+        FOCUSED,
+        BYPASSED,
+        OFF
     }
 
     public enum InteractionMode {
         /** Sweep Parameter / Sweep Step: left-click moves the focus pill. */
         FOCUS,
-        /** Full Sweep: left-click toggles FIXED ↔ SWEPT on sweepable steps. */
+        /** Full Sweep: left-click cycles FIXED/SWEPT/BYPASSED/OFF. */
         SWEEP_TOGGLE,
         /** Sweep Presets: clicks are ignored. */
         PASSIVE
@@ -49,6 +53,8 @@ public final class ChainRibbon extends JPanel {
     static final Color SWEPT_FILL = new Color(0x56, 0xB4, 0xE9);
     static final Color SWEPT_TEXT = new Color(0x22, 0x22, 0x22);
     static final Color FOCUSED_STROKE = new Color(0x56, 0xB4, 0xE9);
+    static final Color BYPASSED_STROKE = new Color(0xE6, 0x9F, 0x00);
+    static final Color OFF_TEXT = new Color(0x9A, 0xA2, 0xA8);
     static final Color CHEVRON = new Color(0x8E, 0x9A, 0xA3);
 
     private final List<Step> steps;
@@ -102,6 +108,9 @@ public final class ChainRibbon extends JPanel {
         }
         if (requested != InteractionMode.SWEEP_TOGGLE) {
             clearAllSwept(false);
+        }
+        if (requested == InteractionMode.PASSIVE) {
+            clearDisabledSteps(false);
         }
         Cursor cursor = requested == InteractionMode.PASSIVE
                 ? Cursor.getPredefinedCursor(Cursor.DEFAULT_CURSOR)
@@ -205,6 +214,7 @@ public final class ChainRibbon extends JPanel {
             return;
         }
         pill.state = safeState;
+        pill.updateTooltip();
         pill.repaint();
         if (notify) {
             fireStepStateChanged(stepIndex, safeState);
@@ -224,9 +234,11 @@ public final class ChainRibbon extends JPanel {
         if (previous >= 0) {
             StepPill previousPill = pillAt(previous);
             previousPill.state = StepState.FIXED;
+            previousPill.updateTooltip();
             previousPill.repaint();
         }
         target.state = StepState.FOCUSED;
+        target.updateTooltip();
         target.repaint();
         if (notify) {
             fireStepStateChanged(stepIndex, StepState.FOCUSED);
@@ -240,6 +252,7 @@ public final class ChainRibbon extends JPanel {
         }
         StepPill pill = pillAt(focused);
         pill.state = StepState.FIXED;
+        pill.updateTooltip();
         pill.repaint();
         if (notify) {
             fireStepStateChanged(focused, StepState.FIXED);
@@ -251,6 +264,22 @@ public final class ChainRibbon extends JPanel {
             StepPill pill = pills.get(i);
             if (pill.state == StepState.SWEPT) {
                 pill.state = StepState.FIXED;
+                pill.updateTooltip();
+                pill.repaint();
+                if (notify) {
+                    fireStepStateChanged(i, StepState.FIXED);
+                }
+            }
+        }
+    }
+
+    private void clearDisabledSteps(boolean notify) {
+        for (int i = 0; i < pills.size(); i++) {
+            StepPill pill = pills.get(i);
+            if (pill.state == StepState.BYPASSED
+                    || pill.state == StepState.OFF) {
+                pill.state = StepState.FIXED;
+                pill.updateTooltip();
                 pill.repaint();
                 if (notify) {
                     fireStepStateChanged(i, StepState.FIXED);
@@ -261,6 +290,10 @@ public final class ChainRibbon extends JPanel {
 
     private boolean isFocusable(int stepIndex) {
         if (stepIndex < 0 || stepIndex >= pills.size()) {
+            return false;
+        }
+        StepState state = pills.get(stepIndex).state;
+        if (state == StepState.BYPASSED || state == StepState.OFF) {
             return false;
         }
         if (!restrictFocusableSteps) {
@@ -327,31 +360,82 @@ public final class ChainRibbon extends JPanel {
             setToolTipText(step.fullLabel);
             addMouseListener(new MouseAdapter() {
                 @Override public void mousePressed(MouseEvent e) {
-                    if (SwingUtilities.isLeftMouseButton(e)) {
-                        handleClick(MouseEvent.BUTTON1);
+                    if (maybeShowPopup(e)) {
+                        return;
                     }
+                    if (SwingUtilities.isLeftMouseButton(e)
+                            || SwingUtilities.isMiddleMouseButton(e)) {
+                        handleClick(e.getButton());
+                    }
+                }
+
+                @Override public void mouseReleased(MouseEvent e) {
+                    maybeShowPopup(e);
                 }
             });
         }
 
         void handleClick(int button) {
-            if (button != MouseEvent.BUTTON1) {
+            if (button != MouseEvent.BUTTON1 && button != MouseEvent.BUTTON2) {
                 return;
             }
             if (interactionMode == InteractionMode.FOCUS) {
+                if (button != MouseEvent.BUTTON1) {
+                    return;
+                }
                 focusStep(stepIndex, true);
                 return;
             }
             if (interactionMode == InteractionMode.SWEEP_TOGGLE) {
-                if (!step.sweepable) {
-                    return;
-                }
-                StepState next = state == StepState.SWEPT
-                        ? StepState.FIXED
-                        : StepState.SWEPT;
+                StepState next = nextSweepToggleState(state, step.sweepable,
+                        button == MouseEvent.BUTTON2);
                 setStepState(stepIndex, next, true);
             }
             // PASSIVE: no-op
+        }
+
+        private StepState nextSweepToggleState(StepState current,
+                                               boolean sweepable,
+                                               boolean skipBypassed) {
+            if (current == StepState.FIXED || current == StepState.FOCUSED) {
+                if (sweepable) {
+                    return StepState.SWEPT;
+                }
+                return skipBypassed ? StepState.OFF : StepState.BYPASSED;
+            }
+            if (current == StepState.SWEPT) {
+                return skipBypassed ? StepState.OFF : StepState.BYPASSED;
+            }
+            if (current == StepState.BYPASSED) {
+                return StepState.OFF;
+            }
+            return StepState.FIXED;
+        }
+
+        private boolean maybeShowPopup(MouseEvent e) {
+            if (e == null || !e.isPopupTrigger()) {
+                return false;
+            }
+            if (interactionMode == InteractionMode.PASSIVE) {
+                return false;
+            }
+            JPopupMenu menu = new JPopupMenu();
+            addStateItem(menu, "Fixed", StepState.FIXED, true);
+            addStateItem(menu, "Swept", StepState.SWEPT, step.sweepable);
+            addStateItem(menu, "Bypassed", StepState.BYPASSED, true);
+            addStateItem(menu, "Off", StepState.OFF, true);
+            menu.show(this, e.getX(), e.getY());
+            return true;
+        }
+
+        private void addStateItem(JPopupMenu menu,
+                                  String label,
+                                  final StepState next,
+                                  boolean enabled) {
+            JMenuItem item = new JMenuItem(label);
+            item.setEnabled(enabled);
+            item.addActionListener(e -> setStepState(stepIndex, next, true));
+            menu.add(item);
         }
 
         @Override public Dimension getPreferredSize() {
@@ -379,6 +463,17 @@ public final class ChainRibbon extends JPanel {
                 g2.drawRoundRect(2, 2, Math.max(1, w - 5),
                         Math.max(1, h - 5), Math.max(1, arc - 4),
                         Math.max(1, arc - 4));
+            } else if (state == StepState.BYPASSED) {
+                g2.setColor(new Color(0x26, 0x2A, 0x2E, 0x55));
+                g2.fillRoundRect(0, 0, w - 1, h - 1, arc, arc);
+                g2.setColor(BYPASSED_STROKE);
+                g2.setStroke(new BasicStroke(2.0f));
+                g2.drawRoundRect(1, 1, Math.max(1, w - 3),
+                        Math.max(1, h - 3), Math.max(1, arc - 2),
+                        Math.max(1, arc - 2));
+            } else if (state == StepState.OFF) {
+                g2.setColor(new Color(0x26, 0x2A, 0x2E, 0x66));
+                g2.fillRoundRect(0, 0, w - 1, h - 1, arc, arc);
             } else {
                 g2.setColor(FIXED_FILL);
                 g2.fillRoundRect(0, 0, w - 1, h - 1, arc, arc);
@@ -393,6 +488,11 @@ public final class ChainRibbon extends JPanel {
             int y = (h - fm.getHeight()) / 2 + fm.getAscent();
             g2.setColor(textColor());
             g2.drawString(text, x, y);
+            if (state == StepState.BYPASSED) {
+                int lineY = y - fm.getAscent() / 3;
+                g2.drawLine(Math.max(4, x - 2), lineY,
+                        Math.min(w - 4, x + fm.stringWidth(text) + 2), lineY);
+            }
             g2.dispose();
         }
 
@@ -407,10 +507,24 @@ public final class ChainRibbon extends JPanel {
             if (state == StepState.SWEPT) {
                 return SWEPT_TEXT;
             }
+            if (state == StepState.BYPASSED) {
+                return BYPASSED_STROKE;
+            }
+            if (state == StepState.OFF) {
+                return OFF_TEXT;
+            }
             return FIXED_TEXT;
         }
 
         private void updateTooltip() {
+            if (state == StepState.BYPASSED) {
+                setToolTipText(step.fullLabel + " (bypassed)");
+                return;
+            }
+            if (state == StepState.OFF) {
+                setToolTipText(step.fullLabel + " (off)");
+                return;
+            }
             if (interactionMode == InteractionMode.PASSIVE) {
                 setToolTipText(step.fullLabel);
                 return;

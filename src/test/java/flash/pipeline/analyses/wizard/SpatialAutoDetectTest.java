@@ -13,16 +13,16 @@ public class SpatialAutoDetectTest {
 
     @Test
     public void missingCalibrationDisablesRipleyOptionAndWarningIsShown() {
-        assertFalse(SpatialAnalysisWizard.isSpatialOptionEnabled(
-                SpatialAnalysisWizard.SPATIAL_CLUSTERED, false));
-        assertEquals(SpatialAnalysisWizard.RIPLEY_CALIBRATION_WARNING,
-                SpatialAnalysisWizard.spatialOptionWarning(
-                        SpatialAnalysisWizard.SPATIAL_CLUSTERED, false));
+        assertFalse(SpatialSetupConfig.isSpatialOptionEnabled(
+                SpatialSetupConfig.SPATIAL_CLUSTERED, false));
+        assertEquals(SpatialSetupConfig.RIPLEY_CALIBRATION_WARNING,
+                SpatialSetupConfig.spatialOptionWarning(
+                        SpatialSetupConfig.SPATIAL_CLUSTERED, false));
 
         Map<String, Object> answers = new LinkedHashMap<String, Object>();
-        answers.put("spatial.question", SpatialAnalysisWizard.SPATIAL_CLUSTERED);
+        answers.put("spatial.question", SpatialSetupConfig.SPATIAL_CLUSTERED);
 
-        SpatialAnalysisWizard.DerivedConfig config = SpatialAnalysisWizard.deriveConfig(
+        SpatialSetupConfig.DerivedConfig config = SpatialSetupConfig.deriveConfig(
                 null, null, false, answers);
 
         assertFalse(config.doSpatialStats);
@@ -33,16 +33,16 @@ public class SpatialAutoDetectTest {
         MetadataDiagnostics.SeriesInfo info = new MetadataDiagnostics.SeriesInfo();
         info.sizeZ = 3;
 
-        assertFalse(SpatialAnalysisWizard.isMorphologyOptionEnabled(
-                SpatialAnalysisWizard.MORPH_3D, info));
+        assertFalse(SpatialSetupConfig.isMorphologyOptionEnabled(
+                SpatialSetupConfig.MORPH_3D, info));
         assertEquals("(requires z-stack with more slices)",
-                SpatialAnalysisWizard.morphologyOptionWarning(
-                        SpatialAnalysisWizard.MORPH_3D, info));
+                SpatialSetupConfig.morphologyOptionWarning(
+                        SpatialSetupConfig.MORPH_3D, info));
 
         Map<String, Object> answers = new LinkedHashMap<String, Object>();
-        answers.put("morph.question", SpatialAnalysisWizard.MORPH_POPULATION);
+        answers.put("morph.question", SpatialSetupConfig.MORPH_POPULATION);
 
-        SpatialAnalysisWizard.DerivedConfig config = SpatialAnalysisWizard.deriveConfig(
+        SpatialSetupConfig.DerivedConfig config = SpatialSetupConfig.deriveConfig(
                 null, info, true, answers);
 
         assertFalse(config.do3DMorphology);

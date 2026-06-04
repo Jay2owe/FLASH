@@ -14,7 +14,7 @@ import java.util.regex.Pattern;
  * Maps each line of a filter macro to the image branch it belongs to.
  *
  * <p>Part of the universal branch-autodetection design
- * (docs/filter-branch-robustness/08_design_pivot.md): the macro text is the
+ * (docs/filter-branch-robustness_COMPLETED/08_design_pivot.md): the macro text is the
  * source of truth, and branch membership is overlaid on it without re-emitting
  * through the DAG. The accordion uses this to show per-branch sections; the
  * parameter sweep uses it to label which branch each swept parameter is on.

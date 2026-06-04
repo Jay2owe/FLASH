@@ -7,9 +7,9 @@ import flash.pipeline.bin.ChannelConfigIO;
 import flash.pipeline.bin.ChannelIdentities;
 import flash.pipeline.analyses.wizard.IntensityPreset;
 import flash.pipeline.analyses.wizard.IntensityPresetIO;
+import flash.pipeline.ui.config.PresetManagerDialog;
+import flash.pipeline.analyses.wizard.IntensitySetupConfig;
 import flash.pipeline.analyses.wizard.IntensitySpatialConfig;
-import flash.pipeline.analyses.wizard.IntensitySpatialWizard;
-import flash.pipeline.analyses.wizard.IntensityWizard;
 import flash.pipeline.bin.BinField;
 import flash.pipeline.bin.BinSetupDispatcher;
 import flash.pipeline.cli.CLIConfig;
@@ -45,6 +45,7 @@ import flash.pipeline.results.RunIdCsv;
 import flash.pipeline.runrecord.AnalysisRunContext;
 import flash.pipeline.runrecord.LoadedRunParameterApplier;
 import flash.pipeline.runrecord.LoadedRunParameters;
+import flash.pipeline.runrecord.ParameterSnapshot;
 import flash.pipeline.runrecord.RunRecordAware;
 import flash.pipeline.runrecord.ui.LoadFromRunButton;
 import flash.pipeline.runtime.DependencyId;
@@ -88,7 +89,10 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
+import javax.swing.JButton;
 import javax.swing.JComboBox;
+import javax.swing.JOptionPane;
+import javax.swing.JPanel;
 import javax.swing.JTextField;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -115,9 +119,22 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
     private CLIConfig cliConfig = null;
     private int cliConfiguredMaskIndex1Based = -1;
     private IntensitySpatialConfig intensitySpatialConfig = IntensitySpatialConfig.disabled();
-    private IntensityWizard.DerivedConfig configuredOptions = null;
+    private IntensitySetupConfig.DerivedConfig configuredOptions = null;
     private AnalysisRunContext runRecordContext = null;
     private final AtomicBoolean stalePluginWarningShown = new AtomicBoolean(false);
+
+    private static final String INTENSITY_PRESET_PLACEHOLDER = "(choose preset)";
+
+    /** Live references to the primary-dialog controls, used by the preset row. */
+    private static final class IntensityPresetBindings {
+        JComboBox<String> presetCombo;
+        boolean programmaticChange;
+        ToggleSwitch useDeconvToggle;
+        ToggleSwitch roiAnalysisToggle;
+        ToggleSwitch intensitySpatialToggle;
+        List<ToggleSwitch> binarizeToggles;
+        List<JComboBox<String>> filterSourceChoices;
+    }
 
     @Override
     public Set<BinField> requiredBinFields() {
@@ -194,7 +211,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         }
     }
 
-    void setWizardConfig(IntensityWizard.DerivedConfig config) {
+    void setWizardConfig(IntensitySetupConfig.DerivedConfig config) {
         this.configuredOptions = config;
     }
 
@@ -210,7 +227,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         }
         File binDir = FlashProjectLayout.forDirectory(directory).configurationWriteDir();
         ChannelIdentities identities = ChannelConfigIO.readChannelIdentities(binDir);
-        setWizardConfig(IntensityWizard.fromPreset(cfg, identities, preset, roiSetNames));
+        setWizardConfig(IntensitySetupConfig.fromPreset(cfg, identities, preset, roiSetNames));
     }
 
     @Override
@@ -307,26 +324,27 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
 
         boolean[] roiZipSelected = new boolean[roiZips.size()];
         Arrays.fill(roiZipSelected, true);
+
+        // Per-channel filter source: "Bin filter" (loads saved Cn_Filters.ijm)
+        // or "Basic background and noise removal" (intensity-filter macro). Default Bin.
+        String[] filterSources = new String[channelNames.length];
+        Arrays.fill(filterSources, IntensitySetupConfig.FILTER_BIN);
+
         cliConfiguredMaskIndex1Based = -1;
         intensitySpatialConfig = IntensitySpatialConfig.disabled();
         if (configuredOptions != null) {
             applyIntensityDerivedConfig(configuredOptions, binarization,
-                    thresholds, roiZipSelected, channelNames);
+                    thresholds, filterSources, roiZipSelected, channelNames);
             intensitySpatialConfig = configuredOptions.spatialConfig == null
                     ? IntensitySpatialConfig.disabled()
                     : configuredOptions.spatialConfig;
             cliConfiguredMaskIndex1Based = configuredOptions.maskChannelIndex + 1;
         }
 
-        // Per-channel filter source: "Bin filter" (loads saved Cn_Filters.ijm)
-        // or "Basic background and noise removal" (intensity-filter macro). Default Bin.
-        String[] filterSources = new String[channelNames.length];
-        Arrays.fill(filterSources, "Bin filter");
-
         String roiChannelChoice = "None";
         int roiChannelIndex1Based = -1;
         applyCliIntensityConfiguration(directory, cfg, channelIdentities, roiSetNameList,
-                binarization, thresholds,
+                binarization, thresholds, filterSources,
                 roiZipSelected, channelNames);
         roiChannelIndex1Based = cliConfiguredMaskIndex1Based;
         if (roiChannelIndex1Based > 0 && roiChannelIndex1Based <= channelNames.length) {
@@ -342,21 +360,60 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                 PipelineDialog gd = new PipelineDialog("Fluorescence Intensity Analysis", PipelineDialog.Phase.ANALYSE);
                 gd.addAnalysisHelpHeader("Fluorescence Intensity Analysis", FLASH_Pipeline.IDX_INTENSITY);
 
-                gd.addHelpText("Choose a filter source for each channel: "
-                        + "the saved named filter loads the per-channel macro saved in the Configuration folder "
-                        + "(C1_Filters.ijm, C2_Filters.ijm, ...) — same filter used by "
-                        + "3D Object Analysis. \"Basic background and noise removal\" "
-                        + "applies a generic Median r=2 + Subtract Background rolling=50.");
+                final IntensityPresetBindings pb = new IntensityPresetBindings();
+                final JComboBox<String> presetCombo =
+                        new JComboBox<String>(listIntensityPresetNames(directory));
+                pb.presetCombo = presetCombo;
+                JButton saveIntensityPreset = new JButton("Save as preset...");
+                flash.pipeline.ui.FlashIcons.apply(saveIntensityPreset, flash.pipeline.ui.FlashIcons.save());
+                saveIntensityPreset.setToolTipText(
+                        "Save the current Intensity Analysis options as a named preset.");
+                saveIntensityPreset.addActionListener(e -> handleSaveIntensityPreset(
+                        directory, pb, cfg, channelNames, thresholds, roiZipSelected, roiZipNames));
+                JButton manageIntensityPresets = new JButton("Manage...");
+                manageIntensityPresets.setToolTipText("Delete saved Intensity Analysis presets.");
+                manageIntensityPresets.addActionListener(e -> {
+                    boolean changed = PresetManagerDialog.manage(pb.presetCombo,
+                            new IntensityPresetIO(new File(directory)), "Manage Intensity Presets");
+                    if (changed) {
+                        refreshIntensityPresetChoice(directory, pb, INTENSITY_PRESET_PLACEHOLDER);
+                    }
+                });
+                JPanel intensityPresetRow = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 6, 0));
+                intensityPresetRow.setOpaque(false);
+                presetCombo.setMaximumSize(new java.awt.Dimension(260, 24));
+                intensityPresetRow.add(presetCombo);
+                intensityPresetRow.add(saveIntensityPreset);
+                intensityPresetRow.add(manageIntensityPresets);
+                presetCombo.addActionListener(e -> {
+                    if (pb.programmaticChange) {
+                        return;
+                    }
+                    Object selectedPreset = presetCombo.getSelectedItem();
+                    if (selectedPreset != null
+                            && !INTENSITY_PRESET_PLACEHOLDER.equals(String.valueOf(selectedPreset))) {
+                        IntensitySetupConfig.DerivedConfig derived = loadIntensityPresetConfig(
+                                directory, cfg, channelIdentities, roiSetNameList,
+                                String.valueOf(selectedPreset));
+                        applyIntensityPresetToStep0(derived, pb, binarization, thresholds,
+                                filterSources, roiZipSelected, channelNames, cfg, anyRois);
+                    }
+                });
+                gd.addComponent(intensityPresetRow);
 
                 gd.addSubHeader("Analysis Options");
                 final ToggleSwitch useDeconvToggle =
                         gd.addToggle("Use deconvolved stacks if available", useDeconvolvedInput);
+                pb.useDeconvToggle = useDeconvToggle;
                 final ToggleSwitch roiAnalysisToggle = gd.addToggle("ROI Analysis", anyRois);
+                pb.roiAnalysisToggle = roiAnalysisToggle;
                 final ToggleSwitch intensitySpatialToggle =
                         gd.addToggle("Intensity-spatial analysis", runIntensitySpatial);
+                pb.intensitySpatialToggle = intensitySpatialToggle;
 
                 gd.addHeader("Filter Source (per channel)");
                 final List<JComboBox<String>> filterSourceChoices = new ArrayList<JComboBox<String>>();
+                pb.filterSourceChoices = filterSourceChoices;
                 for (int i = 0; i < channelNames.length; i++) {
                     String savedFilterLabel = savedFilterChoiceLabel(i, cfg);
                     String[] filterSourceOptions = new String[]{
@@ -380,6 +437,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                 for (int i = 0; i < channelNames.length; i++) {
                     binarizeToggles.add(gd.addToggle("Binarise " + channelNames[i], binarization[i]));
                 }
+                pb.binarizeToggles = binarizeToggles;
 
                 LoadFromRunButton.install(gd, "IntensityAnalysisV2", new File(directory),
                         new LoadedRunParameterApplier() {
@@ -387,29 +445,10 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                                     Map<String, Object> parameters) {
                                 LoadedRunParameters.PresetLoad<IntensityPreset> load =
                                         LoadedRunParameters.intensityPreset(parameters);
-                                IntensityWizard.DerivedConfig derived = IntensityWizard.fromPreset(
+                                IntensitySetupConfig.DerivedConfig derived = IntensitySetupConfig.fromPreset(
                                         cfg, channelIdentities, load.payload, roiSetNameList);
-                                applyIntensityDerivedConfig(derived, binarization, thresholds,
-                                        roiZipSelected, channelNames);
-                                intensitySpatialConfig = derived.spatialConfig == null
-                                        ? IntensitySpatialConfig.disabled()
-                                        : derived.spatialConfig;
-                                cliConfiguredMaskIndex1Based = derived.maskChannelIndex + 1;
-                                setToggle(useDeconvToggle, useDeconvolvedInput);
-                                setToggle(roiAnalysisToggle, anyRois && anySelected(roiZipSelected));
-                                setToggle(intensitySpatialToggle,
-                                        intensitySpatialConfig.hasConfiguration());
-                                for (int i = 0; i < binarizeToggles.size()
-                                        && i < binarization.length; i++) {
-                                    setToggle(binarizeToggles.get(i), binarization[i]);
-                                }
-                                for (int i = 0; i < filterSourceChoices.size()
-                                        && i < filterSources.length; i++) {
-                                    filterSourceChoices.get(i).setSelectedItem(
-                                            "Basic background and noise removal".equals(filterSources[i])
-                                                    ? "Basic background and noise removal"
-                                                    : savedFilterChoiceLabel(i, cfg));
-                                }
+                                applyIntensityPresetToStep0(derived, pb, binarization, thresholds,
+                                        filterSources, roiZipSelected, channelNames, cfg, anyRois);
                                 return load.result;
                             }
                         });
@@ -514,10 +553,10 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                                         Map<String, Object> parameters) {
                                     LoadedRunParameters.PresetLoad<IntensityPreset> load =
                                             LoadedRunParameters.intensityPreset(parameters);
-                                    IntensityWizard.DerivedConfig derived = IntensityWizard.fromPreset(
+                                    IntensitySetupConfig.DerivedConfig derived = IntensitySetupConfig.fromPreset(
                                             cfg, channelIdentities, load.payload, roiSetNameList);
                                     applyIntensityDerivedConfig(derived, binarization, thresholds,
-                                            roiZipSelected, channelNames);
+                                            filterSources, roiZipSelected, channelNames);
                                     intensitySpatialConfig = derived.spatialConfig == null
                                             ? IntensitySpatialConfig.disabled()
                                             : derived.spatialConfig;
@@ -626,23 +665,28 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                     });
         } else {
             if (runIntensitySpatial) {
-                IntensitySpatialWizard spatialWizard = IntensitySpatialWizard.analysisChooser(
-                        flash.pipeline.ui.wizard.WizardFlow.MainPanelBinding.NULL,
-                        channelNames,
+                int likelyStackDepth = likelyStackDepthForSpatialWizard(directory, cfg);
+                intensitySpatialConfig = intensitySpatialConfig.validateForChannelSetup(
+                        channelNames.length,
                         binarization,
-                        likelyStackDepthForSpatialWizard(directory, cfg),
-                        intensitySpatialConfig,
-                        false);
-                spatialWizard.run();
-                if (spatialWizard.wasCancelled()) {
-                    IJ.log("[FLASH] Intensity-spatial setup cancelled by user.");
-                    return;
-                }
-                intensitySpatialConfig = spatialWizard.deriveCurrentConfig();
+                        likelyStackDepth > 0 ? Integer.valueOf(likelyStackDepth) : null,
+                        new IntensitySpatialConfig.LockLogger() {
+                            public void log(String message) {
+                                IJ.log("[FLASH] " + message);
+                            }
+                        });
             } else {
                 intensitySpatialConfig = IntensitySpatialConfig.disabled();
             }
         }
+
+        // Capture the finalized GUI settings into the run record so a later
+        // "Load settings from previous run" can restore them. No-op for
+        // CLI/headless/scripted paths (runRecordContext == null), which already
+        // record parameters via IntensityAnalysisV2Command.
+        recordIntensityRunParameters(channelNames, binarization, thresholds,
+                roiAnalysis, roiChannelIndex1Based, roiZipNames, roiZipSelected,
+                intensitySpatialConfig);
 
         String validationError = validateIntensityConfiguration(
                 binarization, thresholds, channelNames, roiAnalysis, roiChannelIndex1Based);
@@ -3115,17 +3159,193 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         return minDepth == Integer.MAX_VALUE ? -1 : minDepth;
     }
 
-    private IntensityWizard.DerivedConfig loadIntensityPresetConfig(String directory,
+    private IntensitySetupConfig.DerivedConfig loadIntensityPresetConfig(String directory,
                                                                     BinConfig cfg,
                                                                     ChannelIdentities identities,
                                                                     List<String> roiSetNames,
                                                                     String presetName) {
         try {
             IntensityPreset preset = new IntensityPresetIO(new File(directory)).load(presetName);
-            return IntensityWizard.fromPreset(cfg, identities, preset, roiSetNames);
+            return IntensitySetupConfig.fromPreset(cfg, identities, preset, roiSetNames);
         } catch (IOException e) {
             IJ.showMessage("Intensity Analysis", "Could not load preset: " + e.getMessage());
             return null;
+        }
+    }
+
+    private String[] listIntensityPresetNames(String directory) {
+        List<String> labels = new ArrayList<String>();
+        labels.add(INTENSITY_PRESET_PLACEHOLDER);
+        try {
+            for (IntensityPreset preset : new IntensityPresetIO(new File(directory)).listAll()) {
+                labels.add(preset.getName());
+            }
+        } catch (IOException e) {
+            IJ.log("WARNING: Could not list Intensity presets: " + e.getMessage());
+        }
+        return labels.toArray(new String[labels.size()]);
+    }
+
+    /**
+     * Writes a derived configuration (from a preset or a loaded run) into the
+     * primary dialog: the backing arrays plus the live toggles/choices. The
+     * secondary dialog reads the same backing arrays when it is built, so
+     * thresholds, ROI selection and the mask channel follow automatically.
+     */
+    private void applyIntensityPresetToStep0(IntensitySetupConfig.DerivedConfig derived,
+                                             IntensityPresetBindings bindings,
+                                             boolean[] binarization,
+                                             String[] thresholds,
+                                             String[] filterSources,
+                                             boolean[] roiZipSelected,
+                                             String[] channelNames,
+                                             BinConfig cfg,
+                                             boolean anyRois) {
+        if (derived == null || bindings == null) {
+            return;
+        }
+        applyIntensityDerivedConfig(derived, binarization, thresholds, filterSources,
+                roiZipSelected, channelNames);
+        intensitySpatialConfig = derived.spatialConfig == null
+                ? IntensitySpatialConfig.disabled()
+                : derived.spatialConfig;
+        cliConfiguredMaskIndex1Based = derived.maskChannelIndex + 1;
+        bindings.programmaticChange = true;
+        try {
+            setToggle(bindings.useDeconvToggle, useDeconvolvedInput);
+            setToggle(bindings.roiAnalysisToggle, anyRois && anySelected(roiZipSelected));
+            setToggle(bindings.intensitySpatialToggle, intensitySpatialConfig.hasConfiguration());
+            if (bindings.binarizeToggles != null) {
+                for (int i = 0; i < bindings.binarizeToggles.size() && i < binarization.length; i++) {
+                    setToggle(bindings.binarizeToggles.get(i), binarization[i]);
+                }
+            }
+            if (bindings.filterSourceChoices != null) {
+                for (int i = 0; i < bindings.filterSourceChoices.size() && i < filterSources.length; i++) {
+                    bindings.filterSourceChoices.get(i).setSelectedItem(
+                            IntensitySetupConfig.FILTER_BASIC.equals(filterSources[i])
+                                    ? IntensitySetupConfig.FILTER_BASIC
+                                    : savedFilterChoiceLabel(i, cfg));
+                }
+            }
+        } finally {
+            bindings.programmaticChange = false;
+        }
+    }
+
+    private void handleSaveIntensityPreset(String directory,
+                                           IntensityPresetBindings bindings,
+                                           BinConfig cfg,
+                                           String[] channelNames,
+                                           String[] thresholds,
+                                           boolean[] roiZipSelected,
+                                           String[] roiZipNames) {
+        if (suppressDialogs || cliConfig != null || GraphicsEnvironment.isHeadless()) {
+            return;
+        }
+        if (bindings == null) {
+            IJ.showMessage("Intensity Analysis", "Could not save preset: dialog options are not available.");
+            return;
+        }
+        String name = JOptionPane.showInputDialog(
+                bindings.presetCombo,
+                "Preset name:",
+                "Save Intensity Preset",
+                JOptionPane.PLAIN_MESSAGE);
+        if (name == null) {
+            return;
+        }
+        String trimmed = name.trim();
+        if (trimmed.isEmpty()) {
+            IJ.showMessage("Intensity Analysis", "Preset name cannot be empty.");
+            return;
+        }
+        try {
+            IntensityPreset preset = buildIntensityPresetFromBindings(trimmed, bindings, cfg,
+                    channelNames, thresholds, roiZipSelected, roiZipNames);
+            new IntensityPresetIO(new File(directory)).save(preset);
+            IJ.log("Saved Intensity preset: " + trimmed);
+            refreshIntensityPresetChoice(directory, bindings, preset.getName());
+        } catch (IOException e) {
+            IJ.showMessage("Intensity Analysis", "Could not save preset: " + e.getMessage());
+        } catch (IllegalArgumentException e) {
+            IJ.showMessage("Intensity Analysis", "Could not save preset: " + e.getMessage());
+        }
+    }
+
+    private IntensityPreset buildIntensityPresetFromBindings(String name,
+                                                             IntensityPresetBindings bindings,
+                                                             BinConfig cfg,
+                                                             String[] channelNames,
+                                                             String[] thresholds,
+                                                             boolean[] roiZipSelected,
+                                                             String[] roiZipNames) {
+        Map<String, String> channelModes = new LinkedHashMap<String, String>();
+        Map<String, String> thresholdMap = new LinkedHashMap<String, String>();
+        Map<String, String> filterMap = new LinkedHashMap<String, String>();
+        for (int c = 0; c < channelNames.length; c++) {
+            boolean binarised = bindings.binarizeToggles != null
+                    && c < bindings.binarizeToggles.size()
+                    && bindings.binarizeToggles.get(c).isSelected();
+            channelModes.put(channelNames[c], binarised
+                    ? IntensitySetupConfig.MODE_THRESHOLD_MEAN
+                    : IntensitySetupConfig.MODE_WHOLE_ROI_MEAN);
+            if (c < thresholds.length && thresholds[c] != null) {
+                thresholdMap.put(channelNames[c], thresholds[c]);
+            }
+            String filterSource = IntensitySetupConfig.FILTER_BIN;
+            if (bindings.filterSourceChoices != null && c < bindings.filterSourceChoices.size()) {
+                Object selected = bindings.filterSourceChoices.get(c).getSelectedItem();
+                filterSource = IntensitySetupConfig.FILTER_BASIC.equals(String.valueOf(selected))
+                        ? IntensitySetupConfig.FILTER_BASIC
+                        : IntensitySetupConfig.FILTER_BIN;
+            }
+            filterMap.put(channelNames[c], filterSource);
+        }
+        String maskHint = null;
+        if (cliConfiguredMaskIndex1Based > 0 && cliConfiguredMaskIndex1Based <= channelNames.length) {
+            maskHint = channelNames[cliConfiguredMaskIndex1Based - 1];
+        }
+        List<String> roiHints = new ArrayList<String>();
+        boolean allSelected = true;
+        for (int r = 0; r < roiZipNames.length && r < roiZipSelected.length; r++) {
+            if (roiZipSelected[r]) {
+                roiHints.add(roiZipNames[r]);
+            } else {
+                allSelected = false;
+            }
+        }
+        if (allSelected) {
+            // Empty hints mean "all ROI sets", which keeps the preset portable.
+            roiHints = new ArrayList<String>();
+        }
+        IntensitySpatialConfig spatial = (intensitySpatialConfig != null
+                && intensitySpatialConfig.hasConfiguration())
+                ? intensitySpatialConfig
+                : null;
+        return new IntensityPreset(name, "Saved from Intensity Analysis dialog",
+                IntensityPreset.CURRENT_LIBRARY_VERSION, "custom",
+                IntensitySetupConfig.MODE_WHOLE_ROI_MEAN, channelModes, thresholdMap,
+                maskHint, roiHints, spatial, filterMap);
+    }
+
+    private void refreshIntensityPresetChoice(String directory,
+                                              IntensityPresetBindings bindings,
+                                              String selectedName) {
+        if (bindings == null || bindings.presetCombo == null) {
+            return;
+        }
+        bindings.programmaticChange = true;
+        try {
+            bindings.presetCombo.removeAllItems();
+            for (String presetName : listIntensityPresetNames(directory)) {
+                bindings.presetCombo.addItem(presetName);
+            }
+            bindings.presetCombo.setSelectedItem(selectedName == null
+                    ? INTENSITY_PRESET_PLACEHOLDER
+                    : selectedName);
+        } finally {
+            bindings.programmaticChange = false;
         }
     }
 
@@ -3135,6 +3355,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                                                 List<String> roiSetNames,
                                                 boolean[] binarization,
                                                 String[] thresholds,
+                                                String[] filterSources,
                                                 boolean[] roiZipSelected,
                                                 String[] channelNames) {
         if (cliConfig == null || cliConfig.getIntensity() == null || !cliConfig.getIntensity().hasConfiguration()) {
@@ -3143,12 +3364,12 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         cliConfiguredMaskIndex1Based = -1;
         intensitySpatialConfig = IntensitySpatialConfig.disabled();
         CLIConfig.IntensityConfig intensity = cliConfig.getIntensity();
-        IntensityWizard.DerivedConfig derived = null;
+        IntensitySetupConfig.DerivedConfig derived = null;
         if (intensity.getPresetName() != null && !intensity.getPresetName().trim().isEmpty()) {
             derived = loadIntensityPresetConfig(directory, cfg, identities, roiSetNames, intensity.getPresetName());
         }
         if (derived == null) {
-            derived = IntensityWizard.deriveConfig(cfg, identities,
+            derived = IntensitySetupConfig.deriveConfig(cfg, identities,
                     Collections.<String, Object>emptyMap(), roiSetNames);
         }
         applyCliIntensityOverrides(derived, intensity);
@@ -3161,13 +3382,13 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                 });
         intensitySpatialConfig = derived.spatialConfig;
         applyIntensityDerivedConfig(derived, binarization,
-                thresholds, roiZipSelected, channelNames);
+                thresholds, filterSources, roiZipSelected, channelNames);
         cliConfiguredMaskIndex1Based = derived.maskChannelIndex + 1;
         IJ.log("[CLI] Intensity Analysis configured using "
                 + (intensity.getPresetName() == null ? "explicit intensity.* flags" : "intensity.preset=" + intensity.getPresetName()));
     }
 
-    private static void applyCliIntensityOverrides(IntensityWizard.DerivedConfig derived,
+    private static void applyCliIntensityOverrides(IntensitySetupConfig.DerivedConfig derived,
                                                    CLIConfig.IntensityConfig intensity) {
         if (derived == null || intensity == null) return;
         for (Map.Entry<Integer, String> entry : intensity.getThresholds().entrySet()) {
@@ -3179,15 +3400,20 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         }
     }
 
-    private static void applyIntensityDerivedConfig(IntensityWizard.DerivedConfig derived,
+    private static void applyIntensityDerivedConfig(IntensitySetupConfig.DerivedConfig derived,
                                                     boolean[] binarization,
                                                     String[] thresholds,
+                                                    String[] filterSources,
                                                     boolean[] roiZipSelected,
                                                     String[] channelNames) {
         if (derived == null) return;
         for (int c = 0; c < channelNames.length && c < derived.binarization.length; c++) {
             binarization[c] = derived.binarization[c];
             thresholds[c] = derived.thresholds[c];
+            if (filterSources != null && c < filterSources.length
+                    && derived.filterSources != null && c < derived.filterSources.length) {
+                filterSources[c] = derived.filterSources[c];
+            }
         }
         for (int r = 0; r < roiZipSelected.length && r < derived.roiSetSelected.length; r++) {
             roiZipSelected[r] = derived.roiSetSelected[r];
@@ -3197,7 +3423,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
     public LoadedRunParameters.Result applyLoadedParameters(Map<String, Object> parameters) {
         LoadedRunParameters.PresetLoad<IntensityPreset> load =
                 LoadedRunParameters.intensityPreset(parameters);
-        configuredOptions = IntensityWizard.fromPreset(
+        configuredOptions = IntensitySetupConfig.fromPreset(
                 new BinConfig(),
                 new ChannelIdentities(null),
                 load.payload,
@@ -3416,6 +3642,72 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
 
     private AnalysisRunContext.InputHandle recordInputStart(File file, int seriesIndex) {
         return runRecordContext == null ? null : runRecordContext.recordInputStart(file, seriesIndex, null);
+    }
+
+    /**
+     * Capture the finalized interactive Intensity settings into the run record so
+     * a later "Load settings from previous run" can restore them. The map mirrors
+     * {@link IntensityPreset#toJsonObject()} so {@code LoadedRunParameters.INTENSITY_KEYS}
+     * recognises every key. No-op when there is no run context (CLI/headless paths
+     * record parameters via {@link IntensityAnalysisV2Command}).
+     */
+    private void recordIntensityRunParameters(String[] channelNames,
+                                              boolean[] binarization,
+                                              String[] thresholds,
+                                              boolean roiAnalysis,
+                                              int roiChannelIndex1Based,
+                                              String[] roiZipNames,
+                                              boolean[] roiZipSelected,
+                                              IntensitySpatialConfig spatialConfig) {
+        if (runRecordContext == null) {
+            return;
+        }
+        try {
+            Map<String, String> channelModes = new LinkedHashMap<String, String>();
+            Map<String, String> thresholdMap = new LinkedHashMap<String, String>();
+            for (int c = 0; c < channelNames.length; c++) {
+                boolean binarize = c < binarization.length && binarization[c];
+                channelModes.put(String.valueOf(c + 1),
+                        binarize ? IntensitySetupConfig.MODE_THRESHOLD_MEAN
+                                : IntensitySetupConfig.MODE_WHOLE_ROI_MEAN);
+                String threshold = c < thresholds.length ? thresholds[c] : "0";
+                thresholdMap.put(String.valueOf(c + 1),
+                        threshold == null ? "0" : threshold);
+            }
+
+            String maskChannelHint = null;
+            if (roiAnalysis && roiChannelIndex1Based > 0
+                    && roiChannelIndex1Based <= channelNames.length) {
+                maskChannelHint = channelNames[roiChannelIndex1Based - 1];
+            }
+
+            List<String> roiSetNameHints = new ArrayList<String>();
+            if (roiAnalysis && roiZipNames != null) {
+                for (int r = 0; r < roiZipNames.length; r++) {
+                    boolean selected = roiZipSelected != null
+                            && r < roiZipSelected.length && roiZipSelected[r];
+                    if (selected && roiZipNames[r] != null) {
+                        roiSetNameHints.add(roiZipNames[r]);
+                    }
+                }
+            }
+
+            IntensityPreset preset = new IntensityPreset(
+                    "GUI Intensity run",
+                    "Captured from the Fluorescence Intensity Analysis dialog",
+                    IntensityPreset.CURRENT_LIBRARY_VERSION,
+                    "custom",
+                    IntensitySetupConfig.MODE_WHOLE_ROI_MEAN,
+                    channelModes,
+                    thresholdMap,
+                    maskChannelHint,
+                    roiSetNameHints,
+                    spatialConfig == null ? IntensitySpatialConfig.disabled() : spatialConfig);
+            runRecordContext.recordParameters(ParameterSnapshot.fromAnalysisPresetMap(
+                    "IntensityAnalysisV2", preset.toJsonObject()));
+        } catch (RuntimeException e) {
+            IJ.log("[FLASH] Could not capture Intensity run parameters: " + e.getMessage());
+        }
     }
 
     private void recordInputEnd(AnalysisRunContext.InputHandle inputHandle,

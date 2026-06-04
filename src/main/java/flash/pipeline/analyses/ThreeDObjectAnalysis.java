@@ -9,8 +9,8 @@ import flash.pipeline.bin.ChannelConfigIO;
 import flash.pipeline.bin.ChannelIdentities;
 import flash.pipeline.analyses.wizard.ThreeDObjectPreset;
 import flash.pipeline.analyses.wizard.ThreeDObjectPresetIO;
-import flash.pipeline.analyses.wizard.ThreeDObjectWizard;
-import flash.pipeline.analyses.wizard.SpatialAnalysisWizard;
+import flash.pipeline.analyses.wizard.ThreeDObjectSetupConfig;
+import flash.pipeline.analyses.wizard.SpatialSetupConfig;
 import flash.pipeline.analyses.spatial.DiskLabelImageProvider;
 import flash.pipeline.analyses.spatial.InMemoryLabelImageProvider;
 import flash.pipeline.analyses.spatial.LabelImageProvider;
@@ -54,20 +54,20 @@ import flash.pipeline.results.ResultsTableCleaner;
 import flash.pipeline.runrecord.AnalysisRunContext;
 import flash.pipeline.runrecord.LoadedRunParameterApplier;
 import flash.pipeline.runrecord.LoadedRunParameters;
+import flash.pipeline.runrecord.ParameterSnapshot;
 import flash.pipeline.runrecord.RunRecordAware;
 import flash.pipeline.runrecord.ui.LoadFromRunButton;
 import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.FeatureDependencyGate;
 import flash.pipeline.runtime.PluginInstallGuard;
+import flash.pipeline.roi.RegionMask;
 import flash.pipeline.roi.RoiIO;
-import flash.pipeline.roi.RoiOps;
 import flash.pipeline.segmentation.SegmentationMethod;
 import flash.pipeline.segmentation.SegmentationRunFailureException;
 import flash.pipeline.segmentation.SegmentationTokenParser;
 import flash.pipeline.zslice.ZSliceOps;
 
 import flash.pipeline.ui.PipelineDialog;
-import flash.pipeline.ui.wizard.SetupHelperButton;
 
 import flash.pipeline.objects.CpcUtils;
 import flash.pipeline.segmentation.EnhancedClassicalParameters;
@@ -197,7 +197,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             };
 
     interface SpatialOptionsDialogLauncher {
-        SpatialAnalysisWizard.DerivedConfig launch(String directory,
+        SpatialSetupConfig.DerivedConfig launch(String directory,
                                                    List<String> channelNames,
                                                    Map<String, Double> markerThresholds,
                                                    boolean lockVolumetricColoc,
@@ -207,7 +207,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
     private static final SpatialOptionsDialogLauncher DEFAULT_SPATIAL_OPTIONS_DIALOG_LAUNCHER =
             new SpatialOptionsDialogLauncher() {
                 @Override
-                public SpatialAnalysisWizard.DerivedConfig launch(String directory,
+                public SpatialSetupConfig.DerivedConfig launch(String directory,
                                                                   List<String> channelNames,
                                                                   Map<String, Double> markerThresholds,
                                                                   boolean lockVolumetricColoc,
@@ -243,7 +243,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
     private boolean wizardRunSpatial = false;
     private int wizardNuclearMarkerIndex = -1;
     private boolean[] wizardProcessChannels = null;
-    private SpatialAnalysisWizard.DerivedConfig wizardSpatialConfig = null;
+    private SpatialSetupConfig.DerivedConfig wizardSpatialConfig = null;
     private final Map<SectionKey, Map<String, ImagePlus>> retainedLabels =
             new LinkedHashMap<SectionKey, Map<String, ImagePlus>>();
     private SpatialOptionsDialogLauncher spatialOptionsDialogLauncher =
@@ -446,8 +446,8 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         BinConfig cfg = loadBinConfig(directory);
         ChannelIdentities identities = ChannelConfigIO.readChannelIdentities(
                 FlashProjectLayout.forDirectory(directory).configurationWriteDir());
-        ThreeDObjectWizard.DerivedConfig derived =
-                ThreeDObjectWizard.fromPreset(cfg, identities, preset);
+        ThreeDObjectSetupConfig.DerivedConfig derived =
+                ThreeDObjectSetupConfig.fromPreset(cfg, identities, preset);
         applyThreeDObjectDerivedConfig(cfg, derived);
     }
 
@@ -811,7 +811,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         int dialogStep = 0;
         if (suppressDialogs) {
             if (extractProcessLength && processChannels == null) {
-                ThreeDObjectWizard.DerivedConfig derived = ThreeDObjectWizard.deriveConfig(
+                ThreeDObjectSetupConfig.DerivedConfig derived = ThreeDObjectSetupConfig.deriveConfig(
                         cfg, channelIdentities, Collections.<String, Object>emptyMap(),
                         analyseFullImagesWithoutRois ? Collections.<String>emptyList() : Arrays.asList(roiSetNames));
                 nuclearMarkerIndex = derived.nuclearMarkerIndex;
@@ -823,15 +823,12 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                 PipelineDialog gdOpts = new PipelineDialog("3D Object Analysis Options", PipelineDialog.Phase.ANALYSE);
                 gdOpts.addAnalysisHelpHeader("3D Object Analysis", FLASH_Pipeline.IDX_3D_OBJECT);
                 final ThreeDObjectDialogBindings objectBindings = new ThreeDObjectDialogBindings();
-                List<String> setupRoiSetNames = analyseFullImagesWithoutRois
-                        ? Collections.<String>emptyList()
-                        : Arrays.asList(roiSetNames);
                 addThreeDObjectSetupControls(gdOpts, directory, cfg, channelIdentities,
-                        setupRoiSetNames, objectBindings,
+                        objectBindings,
                         new ThreeDObjectConfigApplier() {
                             @Override
                             public void apply(String selectedPresetName,
-                                              ThreeDObjectWizard.DerivedConfig derived) {
+                                              ThreeDObjectSetupConfig.DerivedConfig derived) {
                                 applyThreeDObjectConfigToDialog(cfg, derived,
                                         objectBindings, selectedPresetName);
                             }
@@ -938,7 +935,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             } else if (dialogStep == 1) {
                 String[] names = cfg.channelNames.toArray(new String[0]);
                 if (processChannels == null) {
-                    ThreeDObjectWizard.DerivedConfig derived = ThreeDObjectWizard.deriveConfig(
+                    ThreeDObjectSetupConfig.DerivedConfig derived = ThreeDObjectSetupConfig.deriveConfig(
                             cfg, channelIdentities, Collections.<String, Object>emptyMap(),
                             analyseFullImagesWithoutRois ? Collections.<String>emptyList() : Arrays.asList(roiSetNames));
                     nuclearMarkerIndex = derived.nuclearMarkerIndex;
@@ -986,6 +983,8 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                 break;
             }
         }
+
+        recordThreeDObjectRunParameters(cfg, extractProcessLength, runSpatial);
 
         ExistingObjectDataMode existingObjectDataMode =
                 resolveExistingObjectDataMode(directory, cfg.channelNames);
@@ -1446,11 +1445,9 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                                               final String directory,
                                               final BinConfig cfg,
                                               final ChannelIdentities identities,
-                                              final List<String> roiSetNames,
                                               final ThreeDObjectDialogBindings bindings,
                                               final ThreeDObjectConfigApplier applier) {
         final JComboBox<String> presetCombo = new JComboBox<String>(listThreeDObjectPresetNames(directory));
-        presetCombo.setMaximumSize(new Dimension(260, 24));
         if (bindings != null) {
             bindings.presetCombo = presetCombo;
         }
@@ -1458,29 +1455,18 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         flash.pipeline.ui.FlashIcons.apply(savePreset, flash.pipeline.ui.FlashIcons.save());
         savePreset.setToolTipText("Save the current 3D Object Analysis options as a named preset.");
         savePreset.addActionListener(e -> handleSaveThreeDObjectPreset(directory, cfg, bindings));
-        JPanel row = SetupHelperButton.createHeaderRow("3D Object Setup", presetCombo, savePreset,
-                new SetupHelperButton.WizardLauncher() {
-                    @Override public void run() {
-                        final ThreeDObjectWizard.DerivedConfig[] selected =
-                                new ThreeDObjectWizard.DerivedConfig[1];
-                        dialog.runChildWorkflow(new Runnable() {
-                            @Override public void run() {
-                                selected[0] = runThreeDObjectSetupHelper(
-                                        directory, cfg, identities, roiSetNames);
-                            }
-                        });
-                        if (selected[0] != null && applier != null) {
-                            applier.apply(null, selected[0]);
-                        }
-                    }
-                });
+        JPanel row = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 6, 0));
+        row.setOpaque(false);
+        presetCombo.setMaximumSize(new java.awt.Dimension(260, 24));
+        row.add(presetCombo);
+        row.add(savePreset);
         presetCombo.addActionListener(e -> {
             if (bindings != null && bindings.programmaticChange) {
                 return;
             }
             Object selected = presetCombo.getSelectedItem();
             if (selected != null && !OBJECT_PRESET_PLACEHOLDER.equals(String.valueOf(selected))) {
-                ThreeDObjectWizard.DerivedConfig derived = loadThreeDObjectPresetConfig(
+                ThreeDObjectSetupConfig.DerivedConfig derived = loadThreeDObjectPresetConfig(
                         directory, cfg, identities, String.valueOf(selected));
                 if (derived != null && applier != null) {
                     applier.apply(String.valueOf(selected), derived);
@@ -1491,7 +1477,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
     }
 
     private void applyThreeDObjectConfigToDialog(BinConfig cfg,
-                                                 ThreeDObjectWizard.DerivedConfig derived,
+                                                 ThreeDObjectSetupConfig.DerivedConfig derived,
                                                  ThreeDObjectDialogBindings bindings,
                                                  String selectedPresetName) {
         if (derived == null || bindings == null) {
@@ -1525,7 +1511,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
     public LoadedRunParameters.Result applyLoadedParameters(Map<String, Object> parameters) {
         LoadedRunParameters.PresetLoad<ThreeDObjectPreset> load =
                 LoadedRunParameters.threeDObjectPreset(parameters);
-        applyThreeDObjectDerivedConfig(new BinConfig(), ThreeDObjectWizard.fromPreset(
+        applyThreeDObjectDerivedConfig(new BinConfig(), ThreeDObjectSetupConfig.fromPreset(
                 new BinConfig(), new ChannelIdentities(Collections.<ChannelIdentities.Entry>emptyList()),
                 load.payload));
         LoadedRunParameters.rememberLastResult(load.result);
@@ -1538,8 +1524,8 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                                                             ThreeDObjectDialogBindings bindings) {
         LoadedRunParameters.PresetLoad<ThreeDObjectPreset> load =
                 LoadedRunParameters.threeDObjectPreset(parameters);
-        ThreeDObjectWizard.DerivedConfig derived =
-                ThreeDObjectWizard.fromPreset(cfg, identities, load.payload);
+        ThreeDObjectSetupConfig.DerivedConfig derived =
+                ThreeDObjectSetupConfig.fromPreset(cfg, identities, load.payload);
         applyThreeDObjectConfigToDialog(cfg, derived, bindings, null);
         return load.result;
     }
@@ -1593,6 +1579,43 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                 readFirstThreshold(bindings.thresholdFields),
                 selectedProcessMarkerNames(cfg),
                 selectedNuclearMarkerNames(cfg));
+    }
+
+    /**
+     * Capture the confirmed dialog settings into the run record so a later
+     * "Load settings from previous run" can restore them. GUI runs open the
+     * record with an empty parameter map; without this the loader has nothing
+     * to apply and falls back to defaults. Keys mirror {@link ThreeDObjectPreset#toJsonObject()}
+     * so {@code LoadedRunParameters.THREE_D_OBJECT_KEYS} recognises them.
+     */
+    private void recordThreeDObjectRunParameters(BinConfig cfg,
+                                                 boolean extractProcessLength,
+                                                 boolean runSpatial) {
+        if (runRecordContext == null) {
+            return;
+        }
+        try {
+            double colocThresholdPercent = 30.0;
+            for (Double value : markerThresholds.values()) {
+                if (value != null) {
+                    colocThresholdPercent = value.doubleValue();
+                    break;
+                }
+            }
+            ThreeDObjectPreset preset = new ThreeDObjectPreset(
+                    "GUI 3D Object run",
+                    "Captured from the 3D Object Analysis dialog",
+                    ThreeDObjectPreset.CURRENT_LIBRARY_VERSION,
+                    doVolumetric, doCpc, doIntensityColoc,
+                    extractProcessLength, runSpatial, classicalCentroidFilter,
+                    colocThresholdPercent,
+                    selectedProcessMarkerNames(cfg),
+                    selectedNuclearMarkerNames(cfg));
+            runRecordContext.recordParameters(ParameterSnapshot.fromAnalysisPresetMap(
+                    "ThreeDObjectAnalysis", preset.toJsonObject()));
+        } catch (RuntimeException e) {
+            IJ.log("[FLASH] Could not capture 3D Object run parameters: " + e.getMessage());
+        }
     }
 
     private void refreshThreeDObjectPresetChoice(String directory,
@@ -1652,26 +1675,6 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         return labels.toArray(new String[labels.size()]);
     }
 
-    private ThreeDObjectWizard.DerivedConfig runThreeDObjectSetupHelper(String directory,
-                                                                        BinConfig cfg,
-                                                                        ChannelIdentities identities,
-                                                                        List<String> roiSetNames) {
-        try {
-            ThreeDObjectWizard wizard = new ThreeDObjectWizard(
-                    flash.pipeline.ui.wizard.WizardFlow.MainPanelBinding.NULL,
-                    cfg,
-                    identities,
-                    roiSetNames,
-                    false);
-            ThreeDObjectWizard.DerivedConfig derived = wizard.runAndMaybeLaunchSpatial();
-            wizardSpatialConfig = null;
-            return derived;
-        } catch (Exception e) {
-            IJ.handleException(e);
-            return null;
-        }
-    }
-
     boolean prepareSpatialHandoffBeforeAnalysis(String directory,
                                                 List<String> channelNames,
                                                 boolean runSpatial) {
@@ -1685,7 +1688,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                 || GraphicsEnvironment.isHeadless()) {
             return true;
         }
-        SpatialAnalysisWizard.DerivedConfig spatialConfig =
+        SpatialSetupConfig.DerivedConfig spatialConfig =
                 spatialOptionsDialogLauncher.launch(
                         directory, channelNames, markerThresholds, doVolumetric, doCpc);
         if (spatialConfig == null) {
@@ -1714,13 +1717,13 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         return spatialAnalysis;
     }
 
-    private ThreeDObjectWizard.DerivedConfig loadThreeDObjectPresetConfig(String directory,
+    private ThreeDObjectSetupConfig.DerivedConfig loadThreeDObjectPresetConfig(String directory,
                                                                          BinConfig cfg,
                                                                          ChannelIdentities identities,
                                                                          String presetName) {
         try {
             ThreeDObjectPreset preset = new ThreeDObjectPresetIO(new File(directory)).load(presetName);
-            return ThreeDObjectWizard.fromPreset(cfg, identities, preset);
+            return ThreeDObjectSetupConfig.fromPreset(cfg, identities, preset);
         } catch (IOException e) {
             IJ.showMessage("3D Object Analysis", "Could not load preset: " + e.getMessage());
             return null;
@@ -1732,12 +1735,12 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             return;
         }
         CLIConfig.ThreeDObjectConfig object = cliConfig.getObject();
-        ThreeDObjectWizard.DerivedConfig derived = null;
+        ThreeDObjectSetupConfig.DerivedConfig derived = null;
         if (object.getPresetName() != null && !object.getPresetName().trim().isEmpty()) {
             derived = loadThreeDObjectPresetConfig(directory, cfg, identities, object.getPresetName());
         }
         if (derived == null) {
-            derived = ThreeDObjectWizard.deriveConfig(cfg, identities,
+            derived = ThreeDObjectSetupConfig.deriveConfig(cfg, identities,
                     Collections.<String, Object>emptyMap(), Collections.<String>emptyList());
         }
         if (object.getDoVolumetric() != null) {
@@ -1771,7 +1774,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         applyThreeDObjectDerivedConfig(cfg, derived);
     }
 
-    private void applyThreeDObjectDerivedConfig(BinConfig cfg, ThreeDObjectWizard.DerivedConfig derived) {
+    private void applyThreeDObjectDerivedConfig(BinConfig cfg, ThreeDObjectSetupConfig.DerivedConfig derived) {
         if (derived == null) return;
         doVolumetric = derived.doVolumetric;
         doCpc = derived.doCpc;
@@ -1824,7 +1827,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
     }
 
     private interface ThreeDObjectConfigApplier {
-        void apply(String selectedPresetName, ThreeDObjectWizard.DerivedConfig derived);
+        void apply(String selectedPresetName, ThreeDObjectSetupConfig.DerivedConfig derived);
     }
 
     private static final class ThreeDObjectDialogBindings {
@@ -1894,8 +1897,11 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             RoiSetData roiSet) {
 
         int roiIdx = imageIndex * 2;
-        ij.gui.Roi cropRoi = roiSet == null ? null : roiSet.cloneRoi(roiIdx);
-        ij.gui.Roi clearRoi = roiSet == null ? null : roiSet.cloneRoi(roiIdx + 1);
+        // Geometry is driven ONLY by the original-coordinate (index-0) ROI.
+        // The index-1 "cropped" ROI is a top-left-shifted presentation artifact;
+        // feeding it to the centroid filter or crop/mask is the historical bug
+        // this RegionMask seam prevents. See RegionMask / RegionMaskTest.
+        RegionMask region = roiSet == null ? null : RegionMask.from(roiSet.cloneRoi(roiIdx));
         String roiBase = roiSet == null ? "" : roiSet.name;
         String hemisphere = parts == null ? "" : parts.hemisphere;
         String seriesRegionLabel = parts == null
@@ -1917,7 +1923,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                     run3DObjectsCounterPerChannel(directory, cfg, imp, outDir, imageRoots, channelTables, scnIndex,
                             animalName, parts,
                             extractProcessLength, nuclearMarkerIndex, processChannels,
-                            cropRoi, clearRoi, seriesRegionLabel, roiLabel, roiBase);
+                            region, seriesRegionLabel, roiLabel, roiBase);
 
             IJ.log("  > Colocalization");
             if (doVolumetric) {
@@ -2782,14 +2788,12 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             boolean extractProcessLength,
             int nuclearMarkerIndex,
             boolean[] processChannels,
-            ij.gui.Roi cropRoi,
-            ij.gui.Roi clearRoi,
+            RegionMask region,
             String regionLabel,
             String roiLabel,
             String roiSetName
     ) {
         String hemisphere = parts == null ? "" : parts.hemisphere;
-        String region = parts == null ? "" : parts.region;
         ImagePlus[] chans = ChannelSplitter.split(imp);
         if (chans == null || chans.length == 0) {
 
@@ -2912,7 +2916,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                                     cpSecondChannel[ci] >= 0 && cpSecondChannel[ci] < cellposeCompanionSources.length ? cellposeCompanionSources[cpSecondChannel[ci]] : null,
                                     cpSecondChannel[ci] >= 0 && cpSecondChannel[ci] < channelNames.length ? channelNames[cpSecondChannel[ci]] : null,
                                     cpSecondChannel[ci] >= 0 && cpSecondChannel[ci] < filterFilenames.length ? filterFilenames[cpSecondChannel[ci]] : null,
-                                    cropRoi, clearRoi, roiSetName);
+                                    region, roiSetName);
                         } finally {
                             ParallelContext.exitParallel();
                         }
@@ -2944,7 +2948,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                         cpSecondChannel[c] >= 0 && cpSecondChannel[c] < cellposeCompanionSources.length ? cellposeCompanionSources[cpSecondChannel[c]] : null,
                         cpSecondChannel[c] >= 0 && cpSecondChannel[c] < channelNames.length ? channelNames[cpSecondChannel[c]] : null,
                         cpSecondChannel[c] >= 0 && cpSecondChannel[c] < filterFilenames.length ? filterFilenames[cpSecondChannel[c]] : null,
-                        cropRoi, clearRoi, roiSetName);
+                        region, roiSetName);
             }
         }
 
@@ -3177,45 +3181,31 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                         IJ.log("    [DEBUG] Counter mode: " + (useNative ? "native mcib3d" : "legacy Counter3D"));
                     }
 
-                    // ROI centroid filter — remove objects whose centroids fall outside the ROI.
-                    // In centroid mode: images are still uncropped; filter then crop.
-                    // In crop-first mode: images already cropped; adjust ROI to cropped coords.
-                    if (res.getObjectsMap() != null && (cropRoi != null || clearRoi != null)) {
-                        ij.gui.Roi filterRoi;
-                        if (classicalCentroidFilter) {
-                            // Uncropped images — ROI in original coordinates
-                            filterRoi = (clearRoi != null) ? clearRoi : cropRoi;
-                        } else {
-                            // Already cropped — shift ROI to cropped coordinate space
-                            filterRoi = (clearRoi != null)
-                                    ? (ij.gui.Roi) clearRoi.clone()
-                                    : (ij.gui.Roi) cropRoi.clone();
-                            if (cropRoi != null) {
-                                java.awt.Rectangle cropBounds = cropRoi.getBounds();
-                                filterRoi.setLocation(
-                                        filterRoi.getBounds().x - cropBounds.x,
-                                        filterRoi.getBounds().y - cropBounds.y);
-                            }
-                        }
+                    // ROI centroid filter (centroid mode only). Images are still uncropped
+                    // here, so the filter runs in ORIGINAL image coordinates against the
+                    // region. RegionMask is built from index 0 only; the top-left-shifted
+                    // index-1 ("cropped") ROI must never drive geometry. In crop-first mode
+                    // the image was already cropped+masked to the region in Phase A, so every
+                    // surviving object is in-region by construction and no filter is applied.
+                    if (classicalCentroidFilter && region != null && res.getObjectsMap() != null) {
                         int beforeFilter = objectCount;
-                        int removed = filterLabelsByCentroid(res.getObjectsMap(), filterRoi);
+                        int removed = region.filterByCentroid(res.getObjectsMap());
                         int afterFilter = beforeFilter - removed;
                         IJ.log("    3DObjectCounter [" + channelName + "] ROI filter: "
                                 + beforeFilter + " \u2192 " + afterFilter
                                 + " objects (" + removed + " outside " + roiSetName + " ROI removed)");
 
-                        // Centroid mode: now crop everything to ROI bounds
-                        if (classicalCentroidFilter) {
-                            RoiOps.removeNonRoiThreadSafe(fr.filtered, cropRoi, clearRoi);
-                            RoiOps.removeNonRoiThreadSafe(fr.unfiltered, cropRoi, clearRoi);
-                            RoiOps.removeNonRoiThreadSafe(res.getObjectsMap(), cropRoi, clearRoi);
-                            if (res.getMaskedImage() != null) {
-                                RoiOps.removeNonRoiThreadSafe(res.getMaskedImage(), cropRoi, clearRoi);
-                            }
+                        // Choice (a): keep whole objects — crop to the region bounding
+                        // box only (no shape mask). Coordinates become region-relative.
+                        region.cropToBounds(fr.filtered);
+                        region.cropToBounds(fr.unfiltered);
+                        region.cropToBounds(res.getObjectsMap());
+                        if (res.getMaskedImage() != null) {
+                            region.cropToBounds(res.getMaskedImage());
                         }
 
                         // Re-derive statistics from the (now-cropped) label image
-                        if ((removed > 0 || classicalCentroidFilter) && useNative) {
+                        if (useNative) {
                             res = ocWrapper.fromLabelImage(
                                     res.getObjectsMap(),
                                     fr.unfiltered,
@@ -3225,6 +3215,11 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                             if (fr.enhancedClassical) {
                                 res = withEnhancedMorphStats(res, fr.unfiltered, fr.morphPredicates);
                             }
+                            // QC invariant: cropping relocates objects, it must not
+                            // destroy or create them. A mismatch flags a coordinate
+                            // problem (e.g. the wrong ROI driving the geometry).
+                            int finalCount = res.getStatistics() == null ? 0 : res.getStatistics().size();
+                            logRegionCropQc(channelName, roiSetName, afterFilter, finalCount);
                         }
                     }
                 }
@@ -3407,7 +3402,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                                     cpSecondChannel[ci] >= 0 && cpSecondChannel[ci] < cellposeCompanionSources.length ? cellposeCompanionSources[cpSecondChannel[ci]] : null,
                                     cpSecondChannel[ci] >= 0 && cpSecondChannel[ci] < channelNames.length ? channelNames[cpSecondChannel[ci]] : null,
                                     cpSecondChannel[ci] >= 0 && cpSecondChannel[ci] < filterFilenames.length ? filterFilenames[cpSecondChannel[ci]] : null,
-                                    null, null, null);   // null ROIs = full image
+                                    null, null);   // null region = full image (no ROI restriction)
                         } finally {
                             ParallelContext.exitParallel();
                         }
@@ -3436,7 +3431,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                         cpSecondChannel[c] >= 0 && cpSecondChannel[c] < cellposeCompanionSources.length ? cellposeCompanionSources[cpSecondChannel[c]] : null,
                         cpSecondChannel[c] >= 0 && cpSecondChannel[c] < channelNames.length ? channelNames[cpSecondChannel[c]] : null,
                         cpSecondChannel[c] >= 0 && cpSecondChannel[c] < filterFilenames.length ? filterFilenames[cpSecondChannel[c]] : null,
-                        null, null, null);
+                        null, null);   // null region = full image (no ROI restriction)
             }
         }
 
@@ -3564,8 +3559,9 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             RoiSetData roiSet) {
 
         int roiIdx = imageIndex * 2;
-        ij.gui.Roi cropRoi = roiSet == null ? null : roiSet.cloneRoi(roiIdx);
-        ij.gui.Roi clearRoi = roiSet == null ? null : roiSet.cloneRoi(roiIdx + 1);
+        // Geometry is driven ONLY by the original-coordinate (index-0) ROI; the
+        // index-1 "cropped" ROI is a top-left-shifted presentation artifact. See RegionMask.
+        RegionMask region = roiSet == null ? null : RegionMask.from(roiSet.cloneRoi(roiIdx));
         String roiBase = roiSet == null ? "" : roiSet.name;
         String hemisphere = parts == null ? "" : parts.hemisphere;
         String seriesRegionLabel = parts == null ? "" : parts.csvRegion();
@@ -3596,26 +3592,26 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                 ImagePlus roiUnfiltered = fr.unfiltered != null
                         ? ImageOps.duplicateThreadSafe(fr.unfiltered) : null;
 
-                // Clone ROIs for thread safety
-                ij.gui.Roi localCropRoi = cropRoi != null ? (ij.gui.Roi) cropRoi.clone() : null;
-                ij.gui.Roi localClearRoi = clearRoi != null ? (ij.gui.Roi) clearRoi.clone() : null;
-
-                // Centroid filter — remove objects outside this ROI
-                if (roiLabels != null && (localCropRoi != null || localClearRoi != null)) {
-                    ij.gui.Roi filterRoi = (localClearRoi != null) ? localClearRoi : localCropRoi;
+                // Centroid filter against the region (index-0 / original coords).
+                // This path is centroid-only (useSharedCounting requires allCentroid).
+                int afterFilter = -1;
+                if (region != null && roiLabels != null) {
                     int beforeFilter = fullData.channelHasObjects[c]
                             ? (fullRes.getStatistics() != null ? fullRes.getStatistics().size() : 0)
                             : 0;
-                    int removed = filterLabelsByCentroid(roiLabels, filterRoi);
-                    int afterFilter = beforeFilter - removed;
+                    int removed = region.filterByCentroid(roiLabels);
+                    afterFilter = beforeFilter - removed;
                     IJ.log("    3DObjectCounter [" + channelName + "] ROI filter: "
                             + beforeFilter + " \u2192 " + afterFilter
                             + " objects (" + removed + " outside " + roiBase + " ROI removed)");
                 }
 
-                // Crop label image + unfiltered to ROI bounds
-                RoiOps.removeNonRoiThreadSafe(roiLabels, localCropRoi, localClearRoi);
-                RoiOps.removeNonRoiThreadSafe(roiUnfiltered, localCropRoi, localClearRoi);
+                // Crop to the region bounding box ONLY (choice a — keep whole objects);
+                // coordinates become region-relative (top-left = 0,0).
+                if (region != null) {
+                    region.cropToBounds(roiLabels);
+                    region.cropToBounds(roiUnfiltered);
+                }
 
                 // Re-derive statistics from the cropped, centroid-filtered label image
                 ObjectsCounter3DWrapper.Result roiRes = (roiLabels != null && roiUnfiltered != null)
@@ -3625,13 +3621,18 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                 if (fr.enhancedClassical) {
                     roiRes = withEnhancedMorphStats(roiRes, roiUnfiltered, fr.morphPredicates);
                 }
+                // QC invariant: cropping relocates objects, it must not lose/create them.
+                if (afterFilter >= 0) {
+                    int finalCount = roiRes.getStatistics() == null ? 0 : roiRes.getStatistics().size();
+                    logRegionCropQc(channelName, roiBase, afterFilter, finalCount);
+                }
 
                 // Register images for downstream use (coloc, process length, save)
                 registerImage(channelName + "_unfiltered", roiUnfiltered, false);
 
                 // Clone + crop filtered image for this ROI
                 ImagePlus roiFiltered = fr.filtered != null ? ImageOps.duplicateThreadSafe(fr.filtered) : null;
-                RoiOps.removeNonRoiThreadSafe(roiFiltered, localCropRoi, localClearRoi);
+                if (region != null) region.cropToBounds(roiFiltered);
                 registerImage(channelName + "_filtered", roiFiltered, false);
 
                 ImagePlus roiObjMap = roiRes.getObjectsMap();
@@ -3665,7 +3666,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                 // Save pre-detection filtered image per-ROI (clone + crop from full) under Filtered Inputs/<animal>/.
                 if (fr.preDetectionFiltered != null) {
                     ImagePlus roiPreDetection = ImageOps.duplicateThreadSafe(fr.preDetectionFiltered);
-                    RoiOps.removeNonRoiThreadSafe(roiPreDetection, localCropRoi, localClearRoi);
+                    if (region != null) region.cropToBounds(roiPreDetection);
                     File filteredOutput = new File(filteredAnimalDir, safeChannelName + "_Filtered"
                             + (maskedSuffix.isEmpty() ? "" : "_" + maskedSuffix) + ".tif");
                     AsyncImageSaver.saveAsTiffAsync(roiPreDetection,
@@ -3801,14 +3802,12 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             double cellposeFlowThreshold, double cellposeCellprobThreshold, boolean cellposeUseGpu,
             int cellposeSecondChannelIndex, ImagePlus cellposeSecondChannel,
             String cellposeSecondChannelName, String cellposeSecondChannelFilterFilename,
-            ij.gui.Roi cropRoi, ij.gui.Roi clearRoi, String roiSetName) {
+            RegionMask region, String roiSetName) {
 
-        // Clone ROIs for thread safety — multiple filter threads share the same
-        // cropRoi/clearRoi from the caller. Roi.contains() caches a mask internally,
-        // and concurrent calls corrupt this cache, breaking ROI-based object filtering.
-        if (cropRoi != null) cropRoi = (ij.gui.Roi) cropRoi.clone();
-        if (clearRoi != null) clearRoi = (ij.gui.Roi) clearRoi.clone();
-
+        // Geometry is driven by RegionMask, built from the original-coordinate
+        // (index-0) ROI. RegionMask is thread-safe to share across the parallel
+        // filter threads: filterByCentroid clones before Roi.contains() (whose
+        // mask cache is not thread-safe) and the crop/mask paths clone internally.
         try {
             ch.setTitle(channelName + "_unfiltered");
 
@@ -3861,20 +3860,28 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
 
                 // 3. Filter labels by centroid — remove objects whose centroids
                 // fall outside the tissue ROI (before cropping to bounding box).
-                if (labelImage != null && (cropRoi != null || clearRoi != null)) {
-                    ij.gui.Roi filterRoi = (clearRoi != null) ? clearRoi : cropRoi;
+                int afterFilter = -1;
+                if (labelImage != null && region != null) {
                     int beforeFilter = StarDist3DRunner.countLabels(labelImage);
-                    int removed = filterLabelsByCentroid(labelImage, filterRoi);
-                    int afterFilter = beforeFilter - removed;
+                    int removed = region.filterByCentroid(labelImage);
+                    afterFilter = beforeFilter - removed;
                     IJ.log("    StarDist [" + channelName + "] ROI filter: " + beforeFilter
                             + " → " + afterFilter + " objects (" + removed + " outside " + roiSetName + " ROI removed)");
                 }
 
-                // 4. Crop everything to ROI bounds
-                RoiOps.removeNonRoiThreadSafe(filtered, cropRoi, clearRoi);
-                RoiOps.removeNonRoiThreadSafe(ch, cropRoi, clearRoi);
-                if (labelImage != null) {
-                    RoiOps.removeNonRoiThreadSafe(labelImage, cropRoi, clearRoi);
+                // 4. Crop to the region bounding box ONLY (choice a — keep whole
+                // objects). StarDist filters by centroid, so objects are not clipped
+                // to the outline; coordinates become region-relative (top-left = 0,0).
+                if (region != null) {
+                    region.cropToBounds(filtered);
+                    region.cropToBounds(ch);
+                    if (labelImage != null) {
+                        region.cropToBounds(labelImage);
+                        if (afterFilter >= 0) {
+                            logRegionCropQc(channelName, roiSetName, afterFilter,
+                                    RegionMask.countLabels(labelImage));
+                        }
+                    }
                 }
 
                 // Snapshot the filtered+cropped image for saving
@@ -3989,19 +3996,27 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                             null, 0, 0, true, failureReason);
                 }
 
-                if (labelImage != null && (cropRoi != null || clearRoi != null)) {
-                    ij.gui.Roi filterRoi = (clearRoi != null) ? clearRoi : cropRoi;
+                int afterFilter = -1;
+                if (labelImage != null && region != null) {
                     int beforeFilter = Cellpose3DRunner.countLabels(labelImage);
-                    int removed = filterLabelsByCentroid(labelImage, filterRoi);
-                    int afterFilter = beforeFilter - removed;
+                    int removed = region.filterByCentroid(labelImage);
+                    afterFilter = beforeFilter - removed;
                     IJ.log("    Cellpose [" + channelName + "] ROI filter: " + beforeFilter
                             + " -> " + afterFilter + " objects (" + removed + " outside " + roiSetName + " ROI removed)");
                 }
 
-                RoiOps.removeNonRoiThreadSafe(filtered, cropRoi, clearRoi);
-                RoiOps.removeNonRoiThreadSafe(ch, cropRoi, clearRoi);
-                if (labelImage != null) {
-                    RoiOps.removeNonRoiThreadSafe(labelImage, cropRoi, clearRoi);
+                // Crop to the region bounding box ONLY (choice a — keep whole objects);
+                // Cellpose filters by centroid, so objects are not clipped to the outline.
+                if (region != null) {
+                    region.cropToBounds(filtered);
+                    region.cropToBounds(ch);
+                    if (labelImage != null) {
+                        region.cropToBounds(labelImage);
+                        if (afterFilter >= 0) {
+                            logRegionCropQc(channelName, roiSetName, afterFilter,
+                                    RegionMask.countLabels(labelImage));
+                        }
+                    }
                 }
 
                 ImagePlus preDetection = ImageOps.duplicateThreadSafe(filtered);
@@ -4096,13 +4111,18 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             if (classicalCentroidFilter) {
                 // Keep filtered/ch uncropped for full-image counting in Phase B.
                 // Create a separate cropped copy for skeleton + preDetection.
-                if (cropRoi != null || clearRoi != null) {
+                // Choice (a): crop to the bounding box only (no shape mask).
+                if (region != null) {
                     croppedForSkeleton = ImageOps.duplicateThreadSafe(filtered);
-                    RoiOps.removeNonRoiThreadSafe(croppedForSkeleton, cropRoi, clearRoi);
+                    region.cropToBounds(croppedForSkeleton);
                 }
             } else {
-                RoiOps.removeNonRoiThreadSafe(filtered, cropRoi, clearRoi);
-                RoiOps.removeNonRoiThreadSafe(ch, cropRoi, clearRoi);
+                // Crop-first mode: crop to the bounding box AND clear outside the
+                // traced shape so detection runs on tissue only.
+                if (region != null) {
+                    region.cropAndMask(filtered);
+                    region.cropAndMask(ch);
+                }
             }
 
             // Snapshot the filtered image (cropped region) before thresholding
@@ -4549,56 +4569,35 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
      * @return number of labels removed
      */
     static int filterLabelsByCentroid(ImagePlus labelImage, ij.gui.Roi roi) {
-        if (labelImage == null || roi == null) return 0;
+        // Canonical implementation lives in RegionMask (the single source of
+        // truth for region geometry). Delegated here so existing callers/tests
+        // keep working. The roi must be in the same coordinate space as the
+        // label image (original coords for a full-image map).
+        return RegionMask.filterLabelsByCentroid(labelImage, roi);
+    }
 
-        ij.ImageStack stack = labelImage.getStack();
-        int nSlices = stack.getSize();
-
-        // Pass 1: accumulate centroid sums per label
-        java.util.Map<Integer, long[]> centroids = new java.util.LinkedHashMap<Integer, long[]>();
-        for (int s = 1; s <= nSlices; s++) {
-            ij.process.ImageProcessor ip = stack.getProcessor(s);
-            int nPixels = ip.getPixelCount();
-            int w = ip.getWidth();
-            for (int i = 0; i < nPixels; i++) {
-                int label = ip.get(i);
-                if (label == 0) continue;
-                long[] acc = centroids.get(label);
-                if (acc == null) {
-                    acc = new long[3]; // [sumX, sumY, count]
-                    centroids.put(label, acc);
-                }
-                acc[0] += i % w;  // x
-                acc[1] += i / w;  // y
-                acc[2]++;
-            }
-        }
-
-        // Determine which labels have centroids outside the ROI
-        java.util.Set<Integer> reject = new java.util.HashSet<Integer>();
-        for (java.util.Map.Entry<Integer, long[]> entry : centroids.entrySet()) {
-            long[] acc = entry.getValue();
-            double cx = (double) acc[0] / acc[2];
-            double cy = (double) acc[1] / acc[2];
-            if (!roi.contains((int) Math.round(cx), (int) Math.round(cy))) {
-                reject.add(entry.getKey());
-            }
-        }
-
-        if (reject.isEmpty()) return 0;
-
-        // Pass 2: zero out rejected labels
-        for (int s = 1; s <= nSlices; s++) {
-            ij.process.ImageProcessor ip = stack.getProcessor(s);
-            int nPixels = ip.getPixelCount();
-            for (int i = 0; i < nPixels; i++) {
-                if (reject.contains(ip.get(i))) {
-                    ip.set(i, 0);
-                }
-            }
-        }
-
-        return reject.size();
+    /**
+     * QC invariant for the centroid-filter then crop-to-bounds step: cropping to
+     * the region bounding box re-bases object coordinates but must NOT lose or
+     * create objects (every centroid-kept object lies within the bounding box and
+     * connected components survive the crop). A mismatch is the signature of a
+     * coordinate problem — historically the top-left-shifted index-1 ROI driving
+     * geometry — so it is logged loudly rather than silently producing wrong counts.
+     *
+     * @param channelName   channel for the log line
+     * @param roiSetName    ROI set / region name for the log line
+     * @param keptAfterFilter object count after the centroid filter (pre-crop)
+     * @param finalCount    object count re-derived from the cropped label image
+     */
+    private static void logRegionCropQc(String channelName, String roiSetName,
+            int keptAfterFilter, int finalCount) {
+        if (finalCount == keptAfterFilter) return;
+        IJ.log("    [FLASH][QC] WARNING: object count changed across region crop for "
+                + channelName + " / " + roiSetName + ": kept " + keptAfterFilter
+                + " after centroid filter but re-derived " + finalCount
+                + " after cropping. Cropping should relocate objects, not change their"
+                + " count — check that the region ROI (index 0, original coordinates)"
+                + " matches the label image coordinate space.");
     }
 
     private static int countNonZero(float[] arr) {

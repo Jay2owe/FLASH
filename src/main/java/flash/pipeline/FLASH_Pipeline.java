@@ -16,6 +16,7 @@ import flash.pipeline.cellpose.CellposeRuntime;
 import flash.pipeline.cli.CLIArgumentParser;
 import flash.pipeline.cli.CLIConfig;
 import flash.pipeline.decontamination.SpectralDecontaminationAnalysis;
+import flash.pipeline.execution.AnalysisCancellation;
 import flash.pipeline.execution.AnalysisRegistry;
 import flash.pipeline.execution.AnalysisRunCoordinator;
 import flash.pipeline.execution.RunResult;
@@ -81,15 +82,12 @@ import javax.swing.JTextField;
 import javax.swing.JTextArea;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
-import javax.swing.SwingWorker;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.GraphicsEnvironment;
 import java.awt.Window;
-import java.awt.event.WindowAdapter;
-import java.awt.event.WindowEvent;
 import java.io.File;
 import java.io.IOException;
 import java.net.URL;
@@ -99,7 +97,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 
 public class FLASH_Pipeline implements PlugIn {
@@ -128,6 +125,8 @@ public class FLASH_Pipeline implements PlugIn {
     private boolean dependencyRestartPending = false;
     private String dependencyRestartMessage = "";
     private CLIConfig cliConfig = null;
+    private boolean lastGuiAnalysisCancelled = false;
+    private boolean statusIconResourceWarningLogged = false;
 
     private final String[] analyses = {
             "Set Up Configuration",
@@ -256,6 +255,12 @@ public class FLASH_Pipeline implements PlugIn {
             boolean[] selections = showAnalysisDialog();
             if (selections == null) break;
 
+            int selectedCount = 0;
+            for (boolean sel : selections) if (sel) selectedCount++;
+            if (selectedCount == 0) {
+                continue;
+            }
+
             // Silent pre-flight guards. Fire once per batch invocation.
             if (!runPreFlightGuardsSafely(directory)) continue;
 
@@ -264,14 +269,13 @@ public class FLASH_Pipeline implements PlugIn {
                     directory, generateQcReport, headlessMode, parallelProcessing,
                     parallelThreadCount, verboseLogging, overwriteBehavior);
 
-            // Count selected analyses to suppress intermediate dialogs
-            int selectedCount = 0;
-            for (boolean sel : selections) if (sel) selectedCount++;
             boolean suppressDialogs = selectedCount > 1;
 
             GpuConcurrency.logEffectivePermits();
 
             boolean[] completedAnalyses = new boolean[selections.length];
+            int completedCount = 0;
+            boolean runCancelled = false;
             boolean runHadFailure = false;
             for (int i = 0; i < selections.length; i++) {
                 if (!selections[i]) continue;
@@ -281,12 +285,24 @@ public class FLASH_Pipeline implements PlugIn {
                     configureAnalysis(analysis, i, suppressDialogs, qualityReport);
                     BinSetupDispatcher.clearLastFieldSources();
                     boolean completed = executeAnalysisSafelyForGui(analysis, i, directory);
+                    if (lastGuiAnalysisCancelled) {
+                        runCancelled = true;
+                        break;
+                    }
                     completedAnalyses[i] = completed;
-                    runHadFailure |= !completed;
+                    if (completed) {
+                        completedCount++;
+                    } else {
+                        runHadFailure = true;
+                    }
                 } else {
                     runHadFailure = true;
                     IJ.showMessage("Analysis not implemented");
                 }
+            }
+
+            if (runCancelled || completedCount == 0) {
+                continue;
             }
 
             // Auto-trigger aggregation after 3D Object or Intensity analyses
@@ -302,7 +318,14 @@ public class FLASH_Pipeline implements PlugIn {
                     BinSetupDispatcher.clearLastFieldSources();
                     boolean aggregationCompleted = executeAnalysisSafelyForGui(
                             aggAnalysis, IDX_AGGREGATION, directory);
-                    runHadFailure |= !aggregationCompleted;
+                    if (lastGuiAnalysisCancelled) {
+                        continue;
+                    }
+                    if (aggregationCompleted) {
+                        completedCount++;
+                    } else {
+                        runHadFailure = true;
+                    }
                 } else {
                     runHadFailure = true;
                     IJ.log("[FLASH] Auto aggregation skipped: analysis not implemented.");
@@ -834,7 +857,6 @@ public class FLASH_Pipeline implements PlugIn {
                     IDX_STATISTICS,
                     IDX_EXCEL_EXPORT
             }, pendingIcon, statusRowsByAnalysis, nextStatusRow, togglesByAnalysis);
-            startLastRunRecipeRestore(pd, togglesByAnalysis);
             statusRowsReady[0] = true;
             if (pendingStatuses[0] != null && pendingScanner[0] != null) {
                 applyAnalysisStatuses(pd, statusRowsByAnalysis, pendingStatuses[0], pendingScanner[0]);
@@ -934,11 +956,13 @@ public class FLASH_Pipeline implements PlugIn {
         JButton standardRecipeBtn = new JButton("Standard 3D + Intensity");
         JButton quickCountRecipeBtn = new JButton("Quick cell count");
         JButton fullRecipeBtn = new JButton("Full pipeline");
+        JButton lastRunRecipeBtn = new JButton("Last run");
         JButton customRecipeBtn = new JButton("Clear Recipe");
         JButton saveRecipeBtn = new JButton("Save selection as recipe...");
         setRecipeTooltip(standardRecipeBtn, "standard-3d-intensity");
         setRecipeTooltip(quickCountRecipeBtn, "quick-cell-count");
         setRecipeTooltip(fullRecipeBtn, "full-pipeline");
+        lastRunRecipeBtn.setToolTipText("Tick the same analyses as the last successful run for this project.");
         customRecipeBtn.setToolTipText("Clear all recipe selections.");
         styleSaveRecipeButton(saveRecipeBtn);
         saveRecipeBtn.setToolTipText("Save the currently ticked analyses as a reusable recipe.");
@@ -949,11 +973,14 @@ public class FLASH_Pipeline implements PlugIn {
         buttonRows.setAlignmentX(Component.LEFT_ALIGNMENT);
         buttonRows.add(recipeButtonRow(standardRecipeBtn, quickCountRecipeBtn));
         buttonRows.add(Box.createVerticalStrut(2));
-        buttonRows.add(recipeButtonRow(fullRecipeBtn, customRecipeBtn, saveRecipeBtn));
+        buttonRows.add(recipeButtonRow(fullRecipeBtn, lastRunRecipeBtn, customRecipeBtn));
+        buttonRows.add(Box.createVerticalStrut(2));
+        buttonRows.add(recipeButtonRow(saveRecipeBtn));
 
         standardRecipeBtn.addActionListener(e -> applyRecipe(togglesByAnalysis, recipeCaption, "standard-3d-intensity"));
         quickCountRecipeBtn.addActionListener(e -> applyRecipe(togglesByAnalysis, recipeCaption, "quick-cell-count"));
         fullRecipeBtn.addActionListener(e -> applyRecipe(togglesByAnalysis, recipeCaption, "full-pipeline"));
+        lastRunRecipeBtn.addActionListener(e -> applyLastRunRecipe(togglesByAnalysis, recipeCaption));
         customRecipeBtn.addActionListener(e -> {
             for (int i = 0; i < togglesByAnalysis.length; i++) {
                 if (togglesByAnalysis[i] != null) {
@@ -969,6 +996,13 @@ public class FLASH_Pipeline implements PlugIn {
 
         panel.add(recipeCaption);
         return panel;
+    }
+
+    private JPanel recipeButtonRow(JButton first) {
+        JPanel row = leftAlignedButtonRow();
+        row.add(first);
+        row.add(Box.createHorizontalGlue());
+        return row;
     }
 
     private JPanel recipeButtonRow(JButton first, JButton second) {
@@ -1143,6 +1177,30 @@ public class FLASH_Pipeline implements PlugIn {
         }
     }
 
+    private void applyLastRunRecipe(ToggleSwitch[] togglesByAnalysis, JLabel caption) {
+        if (directory == null) {
+            caption.setText("<html><body width='280'>Pick a project before loading the last run.</body></html>");
+            return;
+        }
+        try {
+            boolean[] selections = readLastRunRecipeSelections(directory, analyses.length);
+            if (selections == null) {
+                caption.setText("<html><body width='280'>No successful previous run was found for this project.</body></html>");
+                return;
+            }
+            int tickedCount = applySelectionsToToggles(togglesByAnalysis, selections);
+            if (tickedCount == 0) {
+                caption.setText("<html><body width='280'>Last run did not match any visible analyses.</body></html>");
+                return;
+            }
+            caption.setText("<html><body width='280'>Applied last successful run.</body></html>");
+        } catch (IOException e) {
+            caption.setText("<html><body width='280'>Could not load last run: "
+                    + htmlText(e.getMessage()) + "</body></html>");
+            IJ.log("[FLASH] Could not load last-run recipe: " + e.getMessage());
+        }
+    }
+
     private void setRecipeTooltip(JButton button, String recipeId) {
         try {
             PipelineRecipe recipe = PipelineRecipeIO.loadFromResources(recipeId);
@@ -1243,10 +1301,12 @@ public class FLASH_Pipeline implements PlugIn {
                 }
             }
         } catch (IOException e) {
-            String entry = recipeId + ": " + e.getMessage();
-            if (!unknown.contains(entry)) {
-                unknown.add(entry);
-            }
+            // A built-in recipe FILE that will not load is a packaging/classpath
+            // problem (e.g. running a stale plugin jar), NOT a "recipe references
+            // unknown analyses" condition. Log it instead of surfacing it in the
+            // alarming warning panel, which previously mislabelled the failure.
+            IJ.log("[FLASH] Could not load built-in pipeline recipe '" + recipeId
+                    + "': " + e.getMessage());
         }
     }
 
@@ -1256,89 +1316,6 @@ public class FLASH_Pipeline implements PlugIn {
             ProjectStatusStore.writeLastRunRecipe(directory, recipe.toJsonObject());
         } catch (IOException e) {
             IJ.log("[FLASH] Warning: could not save project pipeline recipe: " + e.getMessage());
-        }
-    }
-
-    private void startLastRunRecipeRestore(final PipelineDialog pd,
-                                           final ToggleSwitch[] togglesByAnalysis) {
-        if (pd == null || togglesByAnalysis == null || directory == null) {
-            return;
-        }
-        final String restoreDirectory = directory;
-        final Window window = pd.getWindow();
-        final boolean[] closed = new boolean[]{false};
-        final boolean[] applyingRestore = new boolean[]{false};
-        final boolean[] userChangedSelection = new boolean[]{false};
-        final WindowAdapter closeListener = new WindowAdapter() {
-            @Override public void windowClosed(WindowEvent e) {
-                closed[0] = true;
-            }
-        };
-        if (window != null) {
-            window.addWindowListener(closeListener);
-        }
-        for (int i = 0; i < togglesByAnalysis.length; i++) {
-            ToggleSwitch toggle = togglesByAnalysis[i];
-            if (toggle != null) {
-                toggle.addChangeListener(new Runnable() {
-                    @Override public void run() {
-                        if (!applyingRestore[0]) {
-                            userChangedSelection[0] = true;
-                        }
-                    }
-                });
-            }
-        }
-
-        final AtomicBoolean handled = new AtomicBoolean(false);
-        SwingWorker<boolean[], Void> worker = new SwingWorker<boolean[], Void>() {
-            @Override protected boolean[] doInBackground() throws Exception {
-                return readLastRunRecipeSelections(restoreDirectory, analyses.length);
-            }
-
-            @Override protected void done() {
-                if (!handled.compareAndSet(false, true)) {
-                    return;
-                }
-                if (window != null) {
-                    window.removeWindowListener(closeListener);
-                }
-                if (closed[0] || userChangedSelection[0]
-                        || !restoreDirectory.equals(directory)) {
-                    return;
-                }
-                try {
-                    boolean[] selections = get();
-                    if (selections == null) {
-                        return;
-                    }
-                    applyRestoredRecipeSelections(togglesByAnalysis, selections, applyingRestore);
-                } catch (Exception e) {
-                    IJ.log("[FLASH] Could not restore last-run recipe: " + e.getMessage());
-                }
-            }
-        };
-        worker.execute();
-        if (!SwingUtilities.isEventDispatchThread()) {
-            try {
-                boolean[] selections = worker.get();
-                if (handled.compareAndSet(false, true)) {
-                    if (window != null) {
-                        window.removeWindowListener(closeListener);
-                    }
-                    if (selections != null && !closed[0] && !userChangedSelection[0]
-                            && restoreDirectory.equals(directory)) {
-                        applyRestoredRecipeSelectionsOnEdt(togglesByAnalysis, selections, applyingRestore);
-                    }
-                }
-            } catch (Exception e) {
-                if (handled.compareAndSet(false, true)) {
-                    if (window != null) {
-                        window.removeWindowListener(closeListener);
-                    }
-                    IJ.log("[FLASH] Could not restore last-run recipe: " + e.getMessage());
-                }
-            }
         }
     }
 
@@ -1367,32 +1344,6 @@ public class FLASH_Pipeline implements PlugIn {
             }
         }
         return applied;
-    }
-
-    private static void applyRestoredRecipeSelectionsOnEdt(final ToggleSwitch[] togglesByAnalysis,
-                                                           final boolean[] selections,
-                                                           final boolean[] applyingRestore)
-            throws Exception {
-        if (SwingUtilities.isEventDispatchThread()) {
-            applyRestoredRecipeSelections(togglesByAnalysis, selections, applyingRestore);
-            return;
-        }
-        SwingUtilities.invokeAndWait(new Runnable() {
-            @Override public void run() {
-                applyRestoredRecipeSelections(togglesByAnalysis, selections, applyingRestore);
-            }
-        });
-    }
-
-    private static void applyRestoredRecipeSelections(ToggleSwitch[] togglesByAnalysis,
-                                                      boolean[] selections,
-                                                      boolean[] applyingRestore) {
-        applyingRestore[0] = true;
-        try {
-            applySelectionsToToggles(togglesByAnalysis, selections);
-        } finally {
-            applyingRestore[0] = false;
-        }
     }
 
     private boolean[] selectionsFromToggles(ToggleSwitch[] togglesByAnalysis) {
@@ -1458,7 +1409,26 @@ public class FLASH_Pipeline implements PlugIn {
     private Icon loadStatusIcon(String resourceName) {
         if (cliInvocation || GraphicsEnvironment.isHeadless()) return null;
         URL url = getClass().getResource("/icons/" + resourceName);
-        return url == null ? null : new ImageIcon(url);
+        if (url == null) {
+            // Fallback for unusual classloader nesting: the thread context
+            // loader sees the plugin jar in some Fiji/SciJava launch paths.
+            ClassLoader ctx = Thread.currentThread().getContextClassLoader();
+            if (ctx != null) {
+                url = ctx.getResource("icons/" + resourceName);
+            }
+        }
+        if (url == null) {
+            if (!statusIconResourceWarningLogged) {
+                statusIconResourceWarningLogged = true;
+                IJ.log("[FLASH] Status badge icons not found on the running plugin"
+                        + " classpath (/icons/" + resourceName + "). Green/amber"
+                        + " status ticks will not render even when analyses are"
+                        + " complete. This usually means Fiji is running an older"
+                        + " FLASH jar than the one on disk; redeploy and restart Fiji.");
+            }
+            return null;
+        }
+        return new ImageIcon(url);
     }
 
     /**
@@ -1471,23 +1441,30 @@ public class FLASH_Pipeline implements PlugIn {
 
     boolean executeAnalysisSafelyForGui(Analysis analysis, int index, String runDirectory) {
         if (analysis == null) return false;
+        lastGuiAnalysisCancelled = false;
         String label = analysisLabel(index);
+        AnalysisCancellation.Scope cancelScope = AnalysisCancellation.openGuiAnalysisScope();
         try {
             final Analysis selectedAnalysis = analysis;
             final String selectedDirectory = runDirectory;
-            new AnalysisRunCoordinator().run(selectedAnalysis, index, label,
+            RunResult result = new AnalysisRunCoordinator().run(selectedAnalysis, index, label,
                     selectedDirectory, cliConfig, null, "", new Callable<Void>() {
                         @Override public Void call() {
                             selectedAnalysis.execute(selectedDirectory);
                             return null;
                         }
                     });
+            if (RunResult.STATUS_CANCELLED.equals(result.status)) {
+                lastGuiAnalysisCancelled = true;
+                return false;
+            }
             return BinSetupDispatcher.getLastOutcome() != BinSetupDispatcher.Outcome.CANCELLED;
         } catch (Throwable t) {
             rethrowControlThrowable(t);
             reportGuiStepFailure(label, t);
             return false;
         } finally {
+            cancelScope.close();
             resetBioFormatsWindowless();
         }
     }
@@ -2189,52 +2166,17 @@ public class FLASH_Pipeline implements PlugIn {
         JOptionPane.showMessageDialog(null, scrollPane, title, messageType);
     }
 
-    /**
-     * Creates a fresh QualityReport for one pipeline run.
-     * Cleans stale report artifacts from any prior run in the same directory.
-     */
+    /** Creates a fresh QualityReport for one pipeline run. */
     static QualityReport createQualityReportForRun(String dir, boolean enabled,
                                                     boolean headless, boolean parallel,
                                                     int threadCount, boolean verboseLogging,
                                                     String overwriteBehavior) {
-        if (enabled) {
-            cleanStaleReportArtifacts(dir);
-        }
         QualityReport report = new QualityReport();
         report.setEnabled(enabled);
         report.setDirectory(dir);
         report.setGlobalSettings(headless, parallel, threadCount,
                 verboseLogging, overwriteBehavior);
         return report;
-    }
-
-    /**
-     * Removes stale report-owned artifacts from a prior run so the new run
-     * starts clean. Best-effort: failures are logged but never abort the batch.
-     */
-    private static void cleanStaleReportArtifacts(String dir) {
-        FlashProjectLayout layout = FlashProjectLayout.forDirectory(dir);
-
-        File overlayDir = layout.qcOverlaysWriteDir();
-        if (overlayDir.isDirectory()) {
-            File[] overlays = overlayDir.listFiles();
-            if (overlays != null) {
-                for (File f : overlays) {
-                    if (!f.delete()) {
-                        IJ.log("QC Report: could not remove stale overlay: " + f.getName());
-                    }
-                }
-            }
-        }
-
-        File oldHtml = layout.qcReportWriteFile();
-        if (oldHtml.exists() && !oldHtml.delete()) {
-            IJ.log("QC Report: could not remove stale QC_Report.html");
-        }
-        File oldStudyYaml = layout.qcStudyMetadataWriteFile();
-        if (oldStudyYaml.exists() && !oldStudyYaml.delete()) {
-            IJ.log("QC Report: could not remove stale study.yaml");
-        }
     }
 
     /**

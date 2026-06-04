@@ -102,7 +102,7 @@ public final class FilterExecutor {
             "(run\\s*\\(\\s*\")Duplicate(\"\\s*[,)])");
 
     /**
-     * REGRESSION GUARD (docs/filter-branch-robustness): a FLASH-generated filter
+     * REGRESSION GUARD (docs/filter-branch-robustness_COMPLETED): a FLASH-generated filter
      * macro must never run {@code run("Duplicate", ...)} without the ellipsis —
      * ImageJ then dispatches it to the Image5D plugin's {@code Duplicate}
      * command, which throws "Image is not an Image5D" on a normal stack. Upstream

@@ -8,10 +8,10 @@ import flash.pipeline.bin.BinSetupDispatcher;
 import flash.pipeline.bin.ChannelConfig;
 import flash.pipeline.bin.ChannelConfigIO;
 import flash.pipeline.bin.ChannelIdentities;
-import flash.pipeline.analyses.wizard.SpatialAnalysisWizard;
+import flash.pipeline.analyses.wizard.SpatialSetupConfig;
 import flash.pipeline.analyses.wizard.ThreeDObjectPreset;
 import flash.pipeline.analyses.wizard.ThreeDObjectPresetIO;
-import flash.pipeline.analyses.wizard.ThreeDObjectWizard;
+import flash.pipeline.analyses.wizard.ThreeDObjectSetupConfig;
 import flash.pipeline.cli.CLIConfig;
 import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.DependencyService;
@@ -145,7 +145,7 @@ public class ThreeDObjectAnalysisTest {
         assertEquals(6, presets.size());
         for (ThreeDObjectPreset preset : presets) {
             ThreeDObjectAnalysis analysis = new ThreeDObjectAnalysis();
-            ThreeDObjectWizard.DerivedConfig derived = ThreeDObjectWizard.fromPreset(cfg, identities, preset);
+            ThreeDObjectSetupConfig.DerivedConfig derived = ThreeDObjectSetupConfig.fromPreset(cfg, identities, preset);
 
             applyThreeDObjectDerivedConfig(analysis, cfg, derived);
 
@@ -169,7 +169,7 @@ public class ThreeDObjectAnalysisTest {
                 null,
                 null);
         ThreeDObjectAnalysis analysis = new ThreeDObjectAnalysis();
-        ThreeDObjectWizard.DerivedConfig derived = ThreeDObjectWizard.fromPreset(
+        ThreeDObjectSetupConfig.DerivedConfig derived = ThreeDObjectSetupConfig.fromPreset(
                 cfg, dapiIba1AbetaIdentities(), preset);
 
         applyThreeDObjectDerivedConfig(analysis, cfg, derived);
@@ -180,7 +180,7 @@ public class ThreeDObjectAnalysisTest {
     @Test
     public void interactiveSpatialHandoffLaunchesFullSpatialOptionsAndStoresConfig() throws Exception {
         ThreeDObjectAnalysis analysis = new ThreeDObjectAnalysis();
-        final SpatialAnalysisWizard.DerivedConfig expected = new SpatialAnalysisWizard.DerivedConfig();
+        final SpatialSetupConfig.DerivedConfig expected = new SpatialSetupConfig.DerivedConfig();
         expected.doHeatmaps = true;
         final AtomicInteger launches = new AtomicInteger(0);
         final AtomicReference<List<String>> launchedChannels = new AtomicReference<List<String>>();
@@ -190,7 +190,7 @@ public class ThreeDObjectAnalysisTest {
         setMarkerThresholds(analysis, singletonThresholds());
         analysis.setSpatialOptionsDialogLauncherForTest(new ThreeDObjectAnalysis.SpatialOptionsDialogLauncher() {
             @Override
-            public SpatialAnalysisWizard.DerivedConfig launch(String directory,
+            public SpatialSetupConfig.DerivedConfig launch(String directory,
                                                               List<String> channelNames,
                                                               Map<String, Double> markerThresholds,
                                                               boolean lockVolumetricColoc,
@@ -226,14 +226,14 @@ public class ThreeDObjectAnalysisTest {
         final AtomicReference<Boolean> lockCpc = new AtomicReference<Boolean>();
         analysis.setSpatialOptionsDialogLauncherForTest(new ThreeDObjectAnalysis.SpatialOptionsDialogLauncher() {
             @Override
-            public SpatialAnalysisWizard.DerivedConfig launch(String directory,
+            public SpatialSetupConfig.DerivedConfig launch(String directory,
                                                               List<String> channelNames,
                                                               Map<String, Double> markerThresholds,
                                                               boolean lockVolumetricColoc,
                                                               boolean lockCpcColoc) {
                 lockVolumetric.set(Boolean.valueOf(lockVolumetricColoc));
                 lockCpc.set(Boolean.valueOf(lockCpcColoc));
-                return new SpatialAnalysisWizard.DerivedConfig();
+                return new SpatialSetupConfig.DerivedConfig();
             }
         });
 
@@ -252,7 +252,7 @@ public class ThreeDObjectAnalysisTest {
         final AtomicInteger launches = new AtomicInteger(0);
         analysis.setSpatialOptionsDialogLauncherForTest(new ThreeDObjectAnalysis.SpatialOptionsDialogLauncher() {
             @Override
-            public SpatialAnalysisWizard.DerivedConfig launch(String directory,
+            public SpatialSetupConfig.DerivedConfig launch(String directory,
                                                               List<String> channelNames,
                                                               Map<String, Double> markerThresholds,
                                                               boolean lockVolumetricColoc,
@@ -328,7 +328,7 @@ public class ThreeDObjectAnalysisTest {
     public void chainedSpatialAnalysisReceivesStoredConfigAndNoninteractiveMode() throws Exception {
         ThreeDObjectAnalysis analysis = new ThreeDObjectAnalysis();
         analysis.setSuppressDialogs(true);
-        SpatialAnalysisWizard.DerivedConfig config = new SpatialAnalysisWizard.DerivedConfig();
+        SpatialSetupConfig.DerivedConfig config = new SpatialSetupConfig.DerivedConfig();
         config.doDistances = true;
         setField(analysis, "wizardSpatialConfig", config);
 
@@ -450,13 +450,13 @@ public class ThreeDObjectAnalysisTest {
             final AtomicInteger launches) {
         return new ThreeDObjectAnalysis.SpatialOptionsDialogLauncher() {
             @Override
-            public SpatialAnalysisWizard.DerivedConfig launch(String directory,
+            public SpatialSetupConfig.DerivedConfig launch(String directory,
                                                               List<String> channelNames,
                                                               Map<String, Double> markerThresholds,
                                                               boolean lockVolumetricColoc,
                                                               boolean lockCpcColoc) {
                 launches.incrementAndGet();
-                return new SpatialAnalysisWizard.DerivedConfig();
+                return new SpatialSetupConfig.DerivedConfig();
             }
         };
     }
@@ -498,11 +498,11 @@ public class ThreeDObjectAnalysisTest {
 
     private static void applyThreeDObjectDerivedConfig(ThreeDObjectAnalysis analysis,
                                                        BinConfig cfg,
-                                                       ThreeDObjectWizard.DerivedConfig derived) throws Exception {
+                                                       ThreeDObjectSetupConfig.DerivedConfig derived) throws Exception {
         Method method = ThreeDObjectAnalysis.class.getDeclaredMethod(
                 "applyThreeDObjectDerivedConfig",
                 BinConfig.class,
-                ThreeDObjectWizard.DerivedConfig.class);
+                ThreeDObjectSetupConfig.DerivedConfig.class);
         method.setAccessible(true);
         method.invoke(analysis, cfg, derived);
     }

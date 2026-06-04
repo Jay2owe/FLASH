@@ -1,7 +1,7 @@
 package flash.pipeline.analyses;
 
 import flash.pipeline.FLASH_Pipeline;
-import flash.pipeline.analyses.wizard.SpatialAnalysisWizard;
+import flash.pipeline.analyses.wizard.SpatialSetupConfig;
 import flash.pipeline.analyses.wizard.SpatialPreset;
 import flash.pipeline.analyses.wizard.SpatialPresetIO;
 import flash.pipeline.execution.AnalysisRunCoordinator;
@@ -68,7 +68,7 @@ public final class SpatialAnalysisCommand implements Command {
         analysis.setSuppressDialogs(true);
         applyCommonOptions(analysis);
         if (preset != null) {
-            analysis.setWizardConfig(SpatialAnalysisWizard.fromPreset(preset));
+            analysis.setWizardConfig(SpatialSetupConfig.fromPreset(preset));
         }
 
         coordinator().run(analysis, FLASH_Pipeline.IDX_SPATIAL, "Spatial Analysis",

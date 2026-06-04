@@ -18,7 +18,7 @@ public class BinAutoDetectTest {
         info.file = "DAPI_Iba1_GFAP.lif";
         MarkerLibrary library = MarkerLibraryIO.loadBundled();
 
-        Map<Integer, MarkerLibrary.Entry> detected = ChannelSetupWizard.autoDetectMarkers(info, library);
+        Map<Integer, MarkerLibrary.Entry> detected = ChannelSetupSupport.autoDetectMarkers(info, library);
 
         assertEquals("nuclei_dapi", detected.get(Integer.valueOf(0)).getId());
         assertEquals("microglia_iba1", detected.get(Integer.valueOf(1)).getId());
@@ -32,7 +32,7 @@ public class BinAutoDetectTest {
         info.imageName = "DAPI";
         MarkerLibrary library = MarkerLibraryIO.loadBundled();
 
-        Map<Integer, MarkerLibrary.Entry> detected = ChannelSetupWizard.autoDetectMarkers(info, library);
+        Map<Integer, MarkerLibrary.Entry> detected = ChannelSetupSupport.autoDetectMarkers(info, library);
 
         assertTrue(detected.isEmpty());
     }
@@ -44,7 +44,7 @@ public class BinAutoDetectTest {
         info.file = "workflow_pipeline_sample.lif";
         MarkerLibrary library = MarkerLibraryIO.loadBundled();
 
-        Map<Integer, MarkerLibrary.Entry> detected = ChannelSetupWizard.autoDetectMarkers(info, library);
+        Map<Integer, MarkerLibrary.Entry> detected = ChannelSetupSupport.autoDetectMarkers(info, library);
 
         assertTrue(detected.isEmpty());
     }

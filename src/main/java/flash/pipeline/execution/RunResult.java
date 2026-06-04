@@ -5,6 +5,8 @@ import java.io.File;
 /** Outcome handle returned by {@link AnalysisRunCoordinator#run}. */
 public final class RunResult {
 
+    public static final String STATUS_CANCELLED = "cancelled";
+
     public final String runId;
     public final String status;
     public final File recordFile;

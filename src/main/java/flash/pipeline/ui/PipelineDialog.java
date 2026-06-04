@@ -1,5 +1,6 @@
 package flash.pipeline.ui;
 
+import flash.pipeline.execution.AnalysisCancellation;
 import flash.pipeline.help.AnalysisHelpCatalog;
 import flash.pipeline.help.AnalysisHelpDialog;
 import flash.pipeline.help.AnalysisHelpTopic;
@@ -1013,6 +1014,7 @@ public class PipelineDialog {
     private void requestCancelClose() {
         if (cancelConfirmation != null && !cancelConfirmation.get()) return;
         wasCanceled = true;
+        AnalysisCancellation.markDialogCancelRequested();
         dialog.dispose();
     }
 
@@ -1165,6 +1167,9 @@ public class PipelineDialog {
     public void closeWithAction(String action) {
         actionCommand = action == null ? "" : action;
         wasCanceled = true;
+        if ("cancel".equalsIgnoreCase(actionCommand)) {
+            AnalysisCancellation.markDialogCancelRequested();
+        }
         dialog.dispose();
     }
 

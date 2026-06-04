@@ -10,10 +10,9 @@ import flash.pipeline.bin.ChannelConfigIO;
 import flash.pipeline.cellpose.Cellpose3DRunner;
 import flash.pipeline.cellpose.CellposeModel;
 import flash.pipeline.cellpose.CellposeRuntime;
-import flash.pipeline.click.training.ImagePlusProvider;
 import flash.pipeline.analyses.wizard.BinPreset;
 import flash.pipeline.analyses.wizard.BinPresetIO;
-import flash.pipeline.analyses.wizard.ChannelSetupWizard;
+import flash.pipeline.analyses.wizard.ChannelSetupSupport;
 import flash.pipeline.cli.CLIConfig;
 import flash.pipeline.image.FilterMacroEditorModel;
 import flash.pipeline.image.FilterExecutor;
@@ -33,6 +32,7 @@ import flash.pipeline.io.SeriesMeta;
 import flash.pipeline.runrecord.AnalysisRunContext;
 import flash.pipeline.runrecord.LoadedRunParameterApplier;
 import flash.pipeline.runrecord.LoadedRunParameters;
+import flash.pipeline.runrecord.ParameterSnapshot;
 import flash.pipeline.runrecord.RunRecordAware;
 import flash.pipeline.runrecord.ui.LoadFromRunButton;
 import flash.pipeline.help.SetupHelpCatalog;
@@ -49,8 +49,6 @@ import flash.pipeline.qc.QcMinMaxPerConditionSelector;
 import flash.pipeline.qc.QcSelectionChannel;
 import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.FeatureDependencyGate;
-import flash.pipeline.segmentation.EnhancedClassicalParameters;
-import flash.pipeline.segmentation.EnhancedClassicalRunner;
 import flash.pipeline.segmentation.SegmentationMethod;
 import flash.pipeline.segmentation.SegmentationTokenParser;
 import flash.pipeline.segmentation.catalog.ModelCatalog;
@@ -84,8 +82,6 @@ import flash.pipeline.ui.config.ZSliceSelectionStage;
 import flash.pipeline.ui.sandbox.SandboxDialog;
 import flash.pipeline.ui.wizard.MarkerAutoComplete;
 import flash.pipeline.ui.wizard.ResumePromptDialog;
-import flash.pipeline.ui.wizard.TrainCustomEngineWizard;
-import flash.pipeline.ui.wizard.TrainCustomEngineWorkflow;
 import flash.pipeline.zslice.ZSliceConfig;
 import flash.pipeline.zslice.ZSliceMode;
 import flash.pipeline.zslice.ZSliceOps;
@@ -302,6 +298,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         boolean isValid();
     }
     private CancelConfirmationDialog.Choice lastWizardCancelChoice = null;
+    private boolean suppressNextWizardCancelMessage = false;
     private final ConfigQcContext.FilteredStackCache setupFilteredStackCache =
             new ConfigQcContext.FilteredStackCache();
 
@@ -940,6 +937,33 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         BinConfig existingCfg = null;
 
         if (FlashProjectLayout.forDirectory(directory).existingConfigurationDir() != null) {
+            ChannelConfigIO.ReadState existingState = ChannelConfigIO.readResult(binFolder).state;
+            if (existingState == ChannelConfigIO.ReadState.NEWER_VERSION) {
+                IJ.showMessage("Set Up Configuration",
+                        "This project's setup file was made by a newer version of FLASH.\n"
+                        + "Update FLASH to open this project. Your configuration was left "
+                        + "untouched.");
+                return;
+            }
+            if (existingState == ChannelConfigIO.ReadState.CORRUPT
+                    && ChannelConfigIO.readBackup(binFolder) == null) {
+                // Damaged file and no recoverable backup: keep a copy instead of
+                // silently overwriting it, then start a fresh configuration. (When
+                // a good .bak exists, the recovery-aware read below loads it and
+                // the normal override flow continues with the recovered config.)
+                ChannelConfigIO.backupThenDelete(binFolder);
+                IJ.showMessage("Set Up Configuration",
+                        "This project's setup file looked damaged and could not be read.\n"
+                        + "A copy was kept as channel_config.corrupt-....json.\n"
+                        + "Starting a new configuration.");
+                try {
+                    handleFullCreation(directory, binFolder, null);
+                } catch (Exception e) {
+                    recordError("Set Up Configuration failed", e);
+                    IJ.handleException(e);
+                }
+                return;
+            }
             try {
                 existingCfg = BinConfigIO.readFromDirectory(directory);
             } catch (IOException e) {
@@ -1140,18 +1164,20 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         boolean editingFromReview = false;
         boolean reviewDependencyRun = false;
         int lastStepBeforeReview = 5;
+        boolean resumeQcFromSavedProgress = false;
         WizardResumeState resume = readWizardResumeState(directory, binFolder);
         if (resume != null) {
             int choice = showResumePrompt(resume);
             if (choice == 2) return;
             if (choice == 1) {
                 File settingsDir = channelConfigSettingsDir(binFolder);
-                ChannelConfigIO.delete(settingsDir);
+                ChannelConfigIO.backupThenDelete(settingsDir);
                 deleteRecursively(new File(settingsDir, ".draft"));
             } else {
                 cfg = resume.cfg;
                 customSettings = resume.customSettings;
                 step = Math.max(1, Math.min(6, resume.stepIndex));
+                resumeQcFromSavedProgress = step == 5;
             }
         }
         lastWizardSavedAtMillis = readSavedAtMillis(binFolder);
@@ -1168,7 +1194,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                             break;
                         }
                         if (!hasFiles(binFolder)) deleteRecursively(binFolder);
-                        IJ.showMessage("Set Up Configuration", "Cancelled.");
+                        showWizardCancelledMessageIfNeeded();
                         return;
                     }
                     int currentChannelCount = cfg.names == null ? 0 : cfg.names.size();
@@ -1203,7 +1229,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                             break;
                         }
                         if (!hasFiles(binFolder)) deleteRecursively(binFolder);
-                        IJ.showMessage("Set Up Configuration", "Cancelled.");
+                        showWizardCancelledMessageIfNeeded();
                         return;
                     }
                     rememberSavedAt(persistIncremental(binFolder, cfg, customSettings,
@@ -1238,7 +1264,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                             break;
                         }
                         if (!hasFiles(binFolder)) deleteRecursively(binFolder);
-                        IJ.showMessage("Set Up Configuration", "Cancelled.");
+                        showWizardCancelledMessageIfNeeded();
                         return;
                     }
                     customSettings = selectedSettings;
@@ -1266,7 +1292,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                             break;
                         }
                         if (!hasFiles(binFolder)) deleteRecursively(binFolder);
-                        IJ.showMessage("Set Up Configuration", "Cancelled.");
+                        showWizardCancelledMessageIfNeeded();
                         return;
                     }
                     rememberSavedAt(persistIncremental(binFolder, cfg, customSettings,
@@ -1290,16 +1316,19 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                         }
                         if (!hasFiles(binFolder)) deleteRecursively(binFolder);
                         if (!hasText(qcOpenResult.message)) {
-                            IJ.showMessage("Set Up Configuration", "Cancelled.");
+                            showWizardCancelledMessageIfNeeded();
                         }
                         return;
                     }
                     if (qcOpenResult.isReady()) {
+                        boolean useSavedQcProgress = resumeQcFromSavedProgress;
                         String qcResult = anyTrue(qcSettings)
-                                ? interactiveQC(qcOpenResult.images, cfg, binFolder, qcSettings)
+                                ? interactiveQC(qcOpenResult.images, cfg, binFolder, qcSettings,
+                                        useSavedQcProgress)
                                 : "done";
                         cleanupImages(qcOpenResult.images);
                         if ("back".equals(qcResult)) {
+                            resumeQcFromSavedProgress = false;
                             if (editingFromReview) reviewDependencyRun = true;
                             step = 3;
                             break;
@@ -1309,13 +1338,14 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                                 break;
                             }
                             if (!hasFiles(binFolder)) deleteRecursively(binFolder);
-                            IJ.showMessage("Set Up Configuration", "Cancelled.");
+                            showWizardCancelledMessageIfNeeded();
                             return;
                         }
                         // "done" or "skip" → proceed to save
                     }
                     rememberSavedAt(persistIncremental(binFolder, cfg, customSettings,
                             5, wizardStepLabel(5), -1, null));
+                    resumeQcFromSavedProgress = false;
                     lastStepBeforeReview = 5;
                     step = 6;
                     break;
@@ -1348,7 +1378,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                         break;
                     }
                     if (!hasFiles(binFolder)) deleteRecursively(binFolder);
-                    IJ.showMessage("Set Up Configuration", "Cancelled.");
+                    showWizardCancelledMessageIfNeeded();
                     return;
                 }
             }
@@ -1384,6 +1414,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         activeWizardStep = step;
         activeWizardLabel = label == null ? "" : label;
         lastWizardCancelChoice = null;
+        suppressNextWizardCancelMessage = false;
     }
 
     private void clearWizardCancelContext() {
@@ -1393,6 +1424,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         activeWizardStep = 1;
         activeWizardLabel = "";
         lastWizardCancelChoice = null;
+        suppressNextWizardCancelMessage = false;
     }
 
     private void installWizardCancelHook(final PipelineDialog dialog) {
@@ -1414,10 +1446,31 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                                                 boolean[][] customSettings, int step, String label) {
         if (lastWizardCancelChoice == CancelConfirmationDialog.Choice.SAVE_AND_EXIT
                 || lastWizardCancelChoice == CancelConfirmationDialog.Choice.DISCARD_AND_EXIT) {
-            lastWizardCancelChoice = null;
-            return true;
+            return consumeWizardCancelExitChoice();
         }
-        return handleCancelRequest(null, binFolder, cfg, customSettings, step, label);
+        if (!handleCancelRequest(null, binFolder, cfg, customSettings, step, label)) {
+            return false;
+        }
+        return consumeWizardCancelExitChoice();
+    }
+
+    private boolean consumeWizardCancelExitChoice() {
+        suppressNextWizardCancelMessage =
+                lastWizardCancelChoice == CancelConfirmationDialog.Choice.SAVE_AND_EXIT;
+        lastWizardCancelChoice = null;
+        return true;
+    }
+
+    private void showWizardCancelledMessageIfNeeded() {
+        if (shouldShowWizardCancelMessage()) {
+            IJ.showMessage("Set Up Configuration", "Cancelled.");
+        }
+    }
+
+    private boolean shouldShowWizardCancelMessage() {
+        boolean show = !suppressNextWizardCancelMessage;
+        suppressNextWizardCancelMessage = false;
+        return show;
     }
 
     private boolean handleCancelRequest(File binFolder, BinUserConfig cfg,
@@ -1442,7 +1495,9 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
             return true;
         }
         if (choice == CancelConfirmationDialog.Choice.DISCARD_AND_EXIT) {
-            ChannelConfigIO.delete(settingsDir);
+            // Keep a recoverable .corrupt-*.json copy instead of erasing the only
+            // record of the user's work.
+            ChannelConfigIO.backupThenDelete(settingsDir);
             return true;
         }
         return false;
@@ -1484,7 +1539,9 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
     WizardResumeState readWizardResumeState(String directory, File binFolder) {
         ChannelConfig channelConfig = ChannelConfigIO.read(channelConfigSettingsDir(binFolder));
         if (channelConfig == null || channelConfig.channels == null || channelConfig.channels.isEmpty()
-                || allPropertiesHaveStatus(channelConfig, ChannelConfig.PropertyStatus.COMMITTED)) {
+                || ChannelConfigIO.isComplete(channelConfig)) {
+            // Nothing to resume: absent, empty, or already finished. Routing through
+            // isComplete keeps the resume gate and the downstream gate in agreement.
             return null;
         }
         int stepIndex = readStepIndex(channelConfig);
@@ -1511,7 +1568,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
             return 0;
         }
         try {
-            MetadataDiagnostics.SeriesInfo seriesInfo = ChannelSetupWizard.firstSeriesInfo(directory);
+            MetadataDiagnostics.SeriesInfo seriesInfo = ChannelSetupSupport.firstSeriesInfo(directory);
             return seriesInfo == null ? 0 : seriesInfo.sizeC;
         } catch (RuntimeException e) {
             IJ.log("[FLASH] Could not inspect current channel count for resume prompt: " + e.getMessage());
@@ -1868,17 +1925,6 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
             }
         }
         return out;
-    }
-
-    private static boolean allPropertiesHaveStatus(ChannelConfig cfg, ChannelConfig.PropertyStatus status) {
-        if (cfg == null || cfg.channels == null || cfg.channels.isEmpty()) return false;
-        for (ChannelConfig.Channel channel : cfg.channels) {
-            if (channel == null) return false;
-            for (String key : CHANNEL_CONFIG_PROPERTIES) {
-                if (channel.statusOf(key) != status) return false;
-            }
-        }
-        return true;
     }
 
     private static int readStepIndex(ChannelConfig cfg) {
@@ -3006,7 +3052,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                                                     BinConfig existing, BinUserConfig draft) {
         BinUserConfig draftConfig = copyBinUserConfig(draft);
         MetadataDiagnostics.SeriesInfo seriesInfo = existing == null && draftConfig == null
-                ? ChannelSetupWizard.firstSeriesInfo(directory)
+                ? ChannelSetupSupport.firstSeriesInfo(directory)
                 : null;
         int n;
         if (draftConfig != null && !draftConfig.names.isEmpty()) {
@@ -5869,8 +5915,14 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
 
     protected String interactiveQC(List<QcImageSelection> images, BinUserConfig cfg, File binFolder,
                                    boolean[][] customSettings) {
+        return interactiveQC(images, cfg, binFolder, customSettings, false);
+    }
+
+    private String interactiveQC(List<QcImageSelection> images, BinUserConfig cfg, File binFolder,
+                                 boolean[][] customSettings, boolean resumeConfiguredSteps) {
         if (useSequentialEmbeddedQcWorkflow()) {
-            return interactiveSequentialEmbeddedQC(images, cfg, binFolder, customSettings);
+            return interactiveSequentialEmbeddedQC(images, cfg, binFolder, customSettings,
+                    resumeConfiguredSteps);
         }
 
         int nChannels = cfg.names.size();
@@ -6792,8 +6844,13 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
     }
 
     private String interactiveSequentialEmbeddedQC(List<QcImageSelection> images, BinUserConfig cfg,
-                                                   File binFolder, boolean[][] customSettings) {
+                                                   File binFolder, boolean[][] customSettings,
+                                                   boolean resumeConfiguredSteps) {
         List<InteractiveQcStep> steps = buildInteractiveQcSteps(cfg, customSettings);
+        if (resumeConfiguredSteps) {
+            steps = remainingInteractiveQcSteps(steps,
+                    ChannelConfigIO.read(channelConfigSettingsDir(binFolder)), cfg);
+        }
         int stepIndex = 0;
         while (stepIndex < steps.size()) {
             InteractiveQcStep step = steps.get(stepIndex);
@@ -6891,6 +6948,84 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
             }
         }
         return steps;
+    }
+
+    private List<InteractiveQcStep> remainingInteractiveQcSteps(List<InteractiveQcStep> steps,
+                                                                ChannelConfig progress,
+                                                                BinUserConfig cfg) {
+        if (steps == null || steps.isEmpty() || progress == null || progress.channels == null) {
+            return steps;
+        }
+        List<InteractiveQcStep> remaining = new ArrayList<InteractiveQcStep>();
+        for (int i = 0; i < steps.size(); i++) {
+            InteractiveQcStep step = steps.get(i);
+            if (!isInteractiveQcStepConfigured(progress, cfg, step)) {
+                remaining.add(step);
+            }
+        }
+        return remaining;
+    }
+
+    private boolean isInteractiveQcStepConfigured(ChannelConfig progress,
+                                                  BinUserConfig cfg,
+                                                  InteractiveQcStep step) {
+        if (step == null) {
+            return false;
+        }
+        ChannelConfig.Channel channel = channelAt(progress, step.channelIndex);
+        if (channel == null) {
+            return false;
+        }
+        switch (step.stage) {
+            case FILTER_PARAMETERS:
+                return allConfigured(channel, ChannelConfig.P_FILTER);
+            case DISPLAY_RANGE:
+                return allConfigured(channel, ChannelConfig.P_MINMAX);
+            case CHANNEL_THRESHOLD:
+                return allConfigured(channel,
+                        ChannelConfig.P_THRESHOLD,
+                        ChannelConfig.P_INTENSITY);
+            case PARTICLE_SIZE:
+                return allConfigured(channel, ChannelConfig.P_SIZE);
+            case SEGMENTATION_OBJECT:
+            case STARDIST_PARAMETERS:
+            case CELLPOSE_PARAMETERS:
+                if ((!isStarDistSegmentation(cfg, step.channelIndex)
+                        && !isCellposeSegmentation(cfg, step.channelIndex))
+                        || step.includeAiChannelThreshold) {
+                    return allConfigured(channel,
+                            ChannelConfig.P_SEGMENTATION,
+                            ChannelConfig.P_THRESHOLD,
+                            ChannelConfig.P_SIZE,
+                            ChannelConfig.P_INTENSITY);
+                }
+                return allConfigured(channel,
+                        ChannelConfig.P_SEGMENTATION,
+                        ChannelConfig.P_THRESHOLD,
+                        ChannelConfig.P_SIZE);
+            default:
+                return false;
+        }
+    }
+
+    private static boolean allConfigured(ChannelConfig.Channel channel, String... propertyKeys) {
+        if (channel == null || propertyKeys == null || propertyKeys.length == 0) {
+            return false;
+        }
+        for (int i = 0; i < propertyKeys.length; i++) {
+            if (!isConfigured(channel, propertyKeys[i])) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean isConfigured(ChannelConfig.Channel channel, String propertyKey) {
+        ChannelConfig.PropertyStatus status = channel == null
+                ? ChannelConfig.PropertyStatus.PENDING
+                : channel.statusOf(propertyKey);
+        return status == ChannelConfig.PropertyStatus.CONFIGURED
+                || status == ChannelConfig.PropertyStatus.COMMITTED;
     }
 
     private String runInteractiveQcStep(List<QcImageSelection> images, BinUserConfig cfg,
@@ -7699,8 +7834,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                                                                  boolean includeAiChannelThreshold,
                                                                  final SegmentationMethodStage.MethodStore methodStore) {
         List<ConfigQcStage> stages = new ArrayList<ConfigQcStage>();
-        stages.add(new SegmentationMethodStage(methodStore,
-                createTrainCustomEngineLauncher(cfg, binFolder, channelIndex)));
+        stages.add(new SegmentationMethodStage(methodStore));
         stages.add(new ConditionalConfigQcStage(
                 new TrainedRfSummaryStage(methodStore),
                 new StagePredicate() {
@@ -7757,405 +7891,6 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
     private ConfigQcStage withSegmentationMethodSwitcher(ConfigQcStage delegate,
                                                          SegmentationMethodStage.MethodStore methodStore) {
         return new SegmentationMethodSwitchingStage(delegate, methodStore);
-    }
-
-    private SegmentationMethodStage.TrainCustomEngineLauncher createTrainCustomEngineLauncher(
-            final BinUserConfig cfg,
-            final File binFolder,
-            final int channelIndex) {
-        return new SegmentationMethodStage.TrainCustomEngineLauncher() {
-            @Override public boolean launch(final ConfigQcContext context,
-                                            final SegmentationMethodStage.MethodStore methodStore) {
-                return launchWithResult(context, methodStore).isApplied();
-            }
-
-            @Override public SegmentationMethodStage.LaunchResult launchWithResult(
-                    final ConfigQcContext context,
-                    final SegmentationMethodStage.MethodStore methodStore) {
-                if (context == null || methodStore == null) {
-                    return SegmentationMethodStage.LaunchResult.cancelled();
-                }
-
-                final TrainCustomEngineWorkflow[] workflowRef =
-                        new TrainCustomEngineWorkflow[1];
-                ImagePlusProvider rawProvider = new ImagePlusProvider() {
-                    @Override public ImagePlus get(String imageName) {
-                        return createTrainingRawImage(context, cfg, channelIndex, imageName);
-                    }
-                };
-                ImagePlusProvider labelProvider = new ImagePlusProvider() {
-                    @Override public ImagePlus get(String imageName) {
-                        TrainCustomEngineWorkflow workflow = workflowRef[0];
-                        return workflow == null ? null
-                                : createTrainingLabelImage(workflow, context, cfg, binFolder,
-                                channelIndex, imageName);
-                    }
-                };
-
-                TrainCustomEngineWorkflow.ChannelMethodStore channelMethodStore =
-                        new TrainCustomEngineWorkflow.ChannelMethodStore() {
-                            @Override public String getMethodToken() {
-                                return methodStore.getMethodToken();
-                            }
-
-                            @Override public void setMethodToken(String token) {
-                                methodStore.setMethodToken(token);
-                            }
-                        };
-
-                File projectRootFile = context.getProjectDirectory() == null
-                        ? projectRootForConfigurationDir(binFolder)
-                        : context.getProjectDirectory();
-                Path projectRoot = projectRootFile == null
-                        ? new File(".").toPath()
-                        : projectRootFile.toPath();
-                TrainCustomEngineWorkflow.Services services =
-                        new TrainCustomEngineWorkflow.Services(
-                                TrainCustomEngineWorkflow.ImageTrainingServices.rf(
-                                        rawProvider, labelProvider, 17),
-                                TrainCustomEngineWorkflow.ImageTrainingServices.starDist(
-                                        projectRoot, channelIndex + 1,
-                                        context.getClickStore(), rawProvider, labelProvider),
-                                TrainCustomEngineWorkflow.ImageTrainingServices.starDistLocalIfEnabled(),
-                                TrainCustomEngineWorkflow.ImageTrainingServices.cellpose(
-                                        projectRoot, channelIndex + 1,
-                                        context.getClickStore(), rawProvider, labelProvider),
-                                TrainCustomEngineWorkflow.ImageTrainingServices.cellposeLocalIfEnabled(),
-                                null,
-                                null,
-                                null);
-                TrainCustomEngineWorkflow workflow = new TrainCustomEngineWorkflow(
-                        projectRoot,
-                        channelIndex + 1,
-                        channelNameForTraining(cfg, channelIndex),
-                        context.getClickStore(),
-                        channelMethodStore,
-                        services);
-                workflow.setBaseToken(TrainCustomEngineWorkflow.Base.CLASSICAL, "classical");
-                workflow.setBaseToken(TrainCustomEngineWorkflow.Base.ENHANCED_CLASSICAL,
-                        enhancedBaseTokenForTraining(cfg, channelIndex));
-                workflow.setBaseToken(TrainCustomEngineWorkflow.Base.STARDIST,
-                        starDistBaseTokenForTraining(cfg, channelIndex));
-                workflow.setBaseToken(TrainCustomEngineWorkflow.Base.CELLPOSE,
-                        cellposeBaseTokenForTraining(cfg, channelIndex));
-                workflowRef[0] = workflow;
-
-                TrainCustomEngineWizard.Result result = showTrainCustomEngineWizardResult(
-                        context == null ? null : context.getWindowOwner(),
-                        workflow);
-                if (result == TrainCustomEngineWizard.Result.ROUTE_TO_CLICK_PREVIEW) {
-                    workflow.routeToClickPreview();
-                    return SegmentationMethodStage.LaunchResult.routeToStage(
-                            trainingClickPreviewStageKey(workflow.selectedBase()));
-                }
-                return result == TrainCustomEngineWizard.Result.APPLIED
-                        ? SegmentationMethodStage.LaunchResult.applied()
-                        : SegmentationMethodStage.LaunchResult.cancelled();
-            }
-        };
-    }
-
-    private static String trainingClickPreviewStageKey(TrainCustomEngineWorkflow.Base base) {
-        TrainCustomEngineWorkflow.Base routed = base == null
-                ? TrainCustomEngineWorkflow.Base.CLASSICAL
-                : base.tokenBase();
-        if (routed == TrainCustomEngineWorkflow.Base.ENHANCED_CLASSICAL) {
-            return EnhancedClassicalSegmentationStage.class.getName();
-        }
-        if (routed == TrainCustomEngineWorkflow.Base.STARDIST) {
-            return StarDistParameterStage.class.getName();
-        }
-        if (routed == TrainCustomEngineWorkflow.Base.CELLPOSE) {
-            return CellposeParameterStage.class.getName();
-        }
-        return ClassicalSegmentationStage.class.getName();
-    }
-
-    protected TrainCustomEngineWizard.Result showTrainCustomEngineWizardResult(
-            Window owner,
-            TrainCustomEngineWorkflow workflow) {
-        return TrainCustomEngineWizard.showResult(owner, workflow);
-    }
-
-    protected boolean showTrainCustomEngineWizard(Window owner,
-                                                  TrainCustomEngineWorkflow workflow) {
-        return showTrainCustomEngineWizardResult(owner, workflow)
-                == TrainCustomEngineWizard.Result.APPLIED;
-    }
-
-    private ImagePlus createTrainingRawImage(ConfigQcContext context,
-                                             BinUserConfig cfg,
-                                             int channelIndex,
-                                             String imageName) {
-        int previous = context == null ? 0 : context.getCurrentImageIndex();
-        try {
-            selectContextImage(context, imageName);
-            int channelNum = channelIndex + 1;
-            ImagePlus source = duplicateCurrentChannel(context, channelNum);
-            if (source == null) return null;
-            source.setTitle("Training raw input | C" + channelNum + " | " + safe(imageName));
-            return applyPreviewLut(source, channelColor(cfg, channelIndex));
-        } finally {
-            if (context != null) context.setCurrentImageIndex(previous);
-        }
-    }
-
-    private ImagePlus createTrainingLabelImage(TrainCustomEngineWorkflow workflow,
-                                               ConfigQcContext context,
-                                               BinUserConfig cfg,
-                                               File binFolder,
-                                               int channelIndex,
-                                               String imageName) {
-        int previous = context == null ? 0 : context.getCurrentImageIndex();
-        try {
-            selectContextImage(context, imageName);
-            TrainCustomEngineWorkflow.Base base = workflow.selectedBase();
-            if (base == TrainCustomEngineWorkflow.Base.CLASSICAL) {
-                return createClassicalTrainingLabels(context, cfg, binFolder, channelIndex, imageName);
-            }
-            if (base == TrainCustomEngineWorkflow.Base.ENHANCED_CLASSICAL) {
-                return createEnhancedClassicalTrainingLabels(
-                        workflow, context, cfg, binFolder, channelIndex, imageName);
-            }
-            if (base == TrainCustomEngineWorkflow.Base.STARDIST
-                    || base == TrainCustomEngineWorkflow.Base.STARDIST_RF) {
-                return createStarDistTrainingLabels(
-                        workflow, context, cfg, binFolder, channelIndex, imageName);
-            }
-            return createCellposeTrainingLabels(
-                    workflow, context, cfg, binFolder, channelIndex, imageName);
-        } finally {
-            if (context != null) context.setCurrentImageIndex(previous);
-        }
-    }
-
-    private ImagePlus createClassicalTrainingLabels(ConfigQcContext context,
-                                                    BinUserConfig cfg,
-                                                    File binFolder,
-                                                    int channelIndex,
-                                                    String imageName) {
-        ImagePlus filtered = createFilteredSetupSource(context, cfg, binFolder,
-                channelIndex, "Training classical filtered input");
-        try {
-            if (filtered == null) return null;
-            int threshold = trainingThreshold(cfg, channelIndex, filtered);
-            int minSize = trainingMinSize(cfg, channelIndex);
-            int maxSize = trainingMaxSize(cfg, channelIndex, filtered);
-            ObjectsCounter3DWrapper.Result result = runObjectsCounterPreview(
-                    filtered,
-                    threshold,
-                    minSize,
-                    maxSize,
-                    "Training classical input | " + safe(imageName),
-                    "Training classical labels | " + safe(imageName));
-            ImagePlus labels = result == null ? null : result.getObjectsMap();
-            if (labels != null) {
-                labels.setTitle("Training classical labels | " + safe(imageName));
-            }
-            return labels;
-        } finally {
-            closeImageQuietly(filtered);
-        }
-    }
-
-    private ImagePlus createEnhancedClassicalTrainingLabels(TrainCustomEngineWorkflow workflow,
-                                                            ConfigQcContext context,
-                                                            BinUserConfig cfg,
-                                                            File binFolder,
-                                                            int channelIndex,
-                                                            String imageName) {
-        if (!gateObjectsCounterPlusFeature("Enhanced Classical training labels")) {
-            return null;
-        }
-        ImagePlus filtered = createFilteredSetupSource(context, cfg, binFolder,
-                channelIndex, "Training enhanced classical filtered input");
-        ImagePlus raw = createTrainingRawImage(context, cfg, channelIndex, imageName);
-        try {
-            if (filtered == null) return null;
-            SegmentationMethod method =
-                    SegmentationTokenParser.parseLenient(workflow.baseToken(
-                            TrainCustomEngineWorkflow.Base.ENHANCED_CLASSICAL));
-            EnhancedClassicalParameters params = new EnhancedClassicalParameters(
-                    (int) Math.round(SegmentationMethod.threshold(method)),
-                    SegmentationMethod.minSize(method),
-                    SegmentationMethod.maxSize(method),
-                    SegmentationMethod.morphPredicates(method),
-                    raw,
-                    new EnhancedClassicalParameters.WarningSink() {
-                        @Override public void warn(String message) {
-                            IJ.log(message);
-                        }
-                    });
-            ImagePlus labels = new EnhancedClassicalRunner().run(filtered, params);
-            if (labels != null) {
-                labels.setTitle("Training enhanced classical labels | " + safe(imageName));
-            }
-            return labels;
-        } finally {
-            closeImageQuietly(filtered);
-            closeImageQuietly(raw);
-        }
-    }
-
-    private ImagePlus createStarDistTrainingLabels(TrainCustomEngineWorkflow workflow,
-                                                   ConfigQcContext context,
-                                                   BinUserConfig cfg,
-                                                   File binFolder,
-                                                   int channelIndex,
-                                                   String imageName) {
-        ImagePlus filtered = createFilteredSetupSource(context, cfg, binFolder,
-                channelIndex, "Training StarDist filtered input");
-        try {
-            if (filtered == null) return null;
-            SegmentationMethod method =
-                    SegmentationTokenParser.parseLenient(workflow.baseToken(
-                            TrainCustomEngineWorkflow.Base.STARDIST));
-            ImagePlus labels = StarDist3DRunner.run(
-                    filtered,
-                    method,
-                    channelNameForTraining(cfg, channelIndex),
-                    projectRootForConfigurationDir(binFolder));
-            if (labels != null) {
-                labels.setTitle("Training StarDist labels | " + safe(imageName));
-            }
-            return labels;
-        } finally {
-            closeImageQuietly(filtered);
-        }
-    }
-
-    private ImagePlus createCellposeTrainingLabels(TrainCustomEngineWorkflow workflow,
-                                                   ConfigQcContext context,
-                                                   BinUserConfig cfg,
-                                                   File binFolder,
-                                                   int channelIndex,
-                                                   String imageName) {
-        ImagePlus filtered = createFilteredSetupSource(context, cfg, binFolder,
-                channelIndex, "Training Cellpose filtered input");
-        ImagePlus companion = null;
-        try {
-            if (filtered == null) return null;
-            SegmentationMethod method =
-                    SegmentationTokenParser.parseLenient(workflow.baseToken(
-                            TrainCustomEngineWorkflow.Base.CELLPOSE));
-            int companionIndex = SegmentationMethod.cellposeChan2(method);
-            if (companionIndex >= 0 && companionIndex != channelIndex
-                    && companionIndex < cfg.names.size()) {
-                companion = createFilteredSetupSource(context, cfg, binFolder,
-                        companionIndex, "Training Cellpose companion input");
-            }
-            ImagePlus labels = Cellpose3DRunner.run(
-                    filtered,
-                    companion,
-                    SegmentationMethod.cellposeModelKey(method),
-                    SegmentationMethod.cellposeDiameter(method),
-                    SegmentationMethod.cellposeFlow(method),
-                    SegmentationMethod.cellposeCellprob(method),
-                    SegmentationMethod.cellposeUseGpu(method),
-                    channelNameForTraining(cfg, channelIndex),
-                    projectRootForConfigurationDir(binFolder),
-                    workflow.selectedBase().trainsRf());
-            if (labels != null) {
-                labels.setTitle("Training Cellpose labels | " + safe(imageName));
-            }
-            return labels;
-        } finally {
-            closeImageQuietly(filtered);
-            closeImageQuietly(companion);
-        }
-    }
-
-    private void selectContextImage(ConfigQcContext context, String imageName) {
-        if (context == null) return;
-        List<ConfigQcContext.ConfigQcImage> images = context.getImages();
-        String target = safe(imageName);
-        for (int i = 0; i < images.size(); i++) {
-            ConfigQcContext.ConfigQcImage image = images.get(i);
-            if (image != null && target.equals(image.getDisplayName())) {
-                context.setCurrentImageIndex(i);
-                return;
-            }
-        }
-    }
-
-    private int trainingThreshold(BinUserConfig cfg, int channelIndex, ImagePlus filtered) {
-        String token = cfg != null && channelIndex >= 0 && channelIndex < cfg.objectThresholds.size()
-                ? cfg.objectThresholds.get(channelIndex)
-                : null;
-        if (token != null && !"default".equalsIgnoreCase(token.trim())) {
-            try {
-                return (int) Math.round(Double.parseDouble(token.trim()));
-            } catch (NumberFormatException ignored) {
-            }
-        }
-        return autoThreshold(filtered);
-    }
-
-    private int trainingMinSize(BinUserConfig cfg, int channelIndex) {
-        String token = cfg != null && channelIndex >= 0 && channelIndex < cfg.sizes.size()
-                ? cfg.sizes.get(channelIndex)
-                : "100-Infinity";
-        String[] parts = splitSizeToken(token);
-        return ObjectsCounter3DWrapper.parseMinSizeVoxels(parts[0], 100);
-    }
-
-    private int trainingMaxSize(BinUserConfig cfg, int channelIndex, ImagePlus reference) {
-        String token = cfg != null && channelIndex >= 0 && channelIndex < cfg.sizes.size()
-                ? cfg.sizes.get(channelIndex)
-                : "100-Infinity";
-        String[] parts = splitSizeToken(token);
-        return ObjectsCounter3DWrapper.parseMaxSizeVoxels(parts[1], reference);
-    }
-
-    private String enhancedBaseTokenForTraining(BinUserConfig cfg, int channelIndex) {
-        String current = cfg != null && channelIndex >= 0 && channelIndex < cfg.segmentationMethods.size()
-                ? cfg.segmentationMethods.get(channelIndex)
-                : null;
-        if (current != null && current.trim().startsWith("enhanced_classical")) {
-            return SegmentationTokenParser.format(SegmentationTokenParser.parseLenient(current));
-        }
-        String threshold = enhancedThresholdOrFallback(cfg, channelIndex);
-        String size = enhancedSizeOrFallback(cfg, channelIndex);
-        String[] parts = splitSizeToken(size);
-        Map<String, String> params = new LinkedHashMap<String, String>();
-        params.put("thresh", String.valueOf(parseIntegerLike(threshold, 0)));
-        params.put("minSize", String.valueOf(parseIntegerLike(parts[0], 100)));
-        params.put("maxSize", String.valueOf(parseMaxSizeToken(parts[1])));
-        return SegmentationTokenParser.format(new SegmentationMethod(
-                SegmentationMethod.Engine.ENHANCED_CLASSICAL,
-                params,
-                ""));
-    }
-
-    private String starDistBaseTokenForTraining(BinUserConfig cfg, int channelIndex) {
-        String current = cfg != null && channelIndex >= 0 && channelIndex < cfg.segmentationMethods.size()
-                ? cfg.segmentationMethods.get(channelIndex)
-                : null;
-        if (current != null && current.trim().startsWith("stardist")) {
-            return SegmentationTokenParser.format(SegmentationTokenParser.parseLenient(current));
-        }
-        return "stardist:" + BinConfig.DEFAULT_STARDIST_PROB_THRESH
-                + ":" + BinConfig.DEFAULT_STARDIST_NMS_THRESH;
-    }
-
-    private String cellposeBaseTokenForTraining(BinUserConfig cfg, int channelIndex) {
-        String current = cfg != null && channelIndex >= 0 && channelIndex < cfg.segmentationMethods.size()
-                ? cfg.segmentationMethods.get(channelIndex)
-                : null;
-        if (current != null && current.trim().startsWith("cellpose")) {
-            return SegmentationTokenParser.format(SegmentationTokenParser.parseLenient(current));
-        }
-        return defaultCellposeMethod(BinConfig.DEFAULT_CELLPOSE_USE_GPU);
-    }
-
-    private static String channelNameForTraining(BinUserConfig cfg, int channelIndex) {
-        if (cfg != null && channelIndex >= 0 && channelIndex < cfg.names.size()) {
-            String name = cfg.names.get(channelIndex);
-            if (name != null && !name.trim().isEmpty()) {
-                return name.trim();
-            }
-        }
-        return "C" + (channelIndex + 1);
     }
 
     private static String[] splitSizeToken(String token) {
@@ -9299,12 +9034,34 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
             }
             markAllKnown(channel, ChannelConfig.PropertyStatus.COMMITTED);
         }
+        cc.complete = Boolean.TRUE;   // single, crash-proof "configuration finished" signal
         ChannelConfigIO.write(channelConfigSettingsDir(binFolder), cc);
         recordOutput(new File(channelConfigSettingsDir(binFolder), ChannelConfigIO.FILE_NAME), "json");
+        recordCreateBinRunParameters(cc);
         File projectRoot = projectRootForConfigurationDir(binFolder);
         AnalysisStatusScanner.writeSidecar(projectRoot,
                 AnalysisStatusScanner.CREATE_BIN_ID,
                 AnalysisStatusScanner.estimateImageCount(projectRoot.getAbsolutePath()));
+    }
+
+    /**
+     * Capture the confirmed channel configuration into the active run record so
+     * "Load settings from previous run" can restore it. Without this, an
+     * interactive Set Up Configuration run records an empty parameter map and
+     * the loader falls back to defaults. {@code cc} here is the final committed
+     * configuration ({@code complete=TRUE}, all channels COMMITTED) that was just
+     * written to {@code channel_config.json}; its flat keys round-trip through
+     * {@link LoadedRunParameters} on load.
+     */
+    private void recordCreateBinRunParameters(ChannelConfig cc) {
+        if (runRecordContext == null || cc == null) {
+            return;
+        }
+        try {
+            runRecordContext.recordParameters(ParameterSnapshot.fromChannelConfig(cc));
+        } catch (RuntimeException e) {
+            IJ.log("[FLASH] Could not capture Set Up Configuration run parameters: " + e.getMessage());
+        }
     }
 
     private File projectRootForConfigurationDir(File configDir) {

@@ -69,16 +69,18 @@ public class FLASH_PipelineRecipeTest {
         try {
             JPanel quickStart = quickStartPanel(pipeline, dialog);
             JButton standard = findButton(quickStart, "Standard 3D + Intensity");
+            JButton lastRun = findButton(quickStart, "Last run");
             JButton save = findButton(quickStart, "Save selection as recipe...");
             JButton help = findButton(quickStart, "?");
             JLabel caption = findLabelContaining(quickStart, "Pick a recipe");
 
             assertNotNull(standard);
+            assertNotNull(lastRun);
             assertNotNull(save);
             assertNotNull(help);
             assertNotNull(caption);
             assertSame(standard, standard.getParent().getComponent(0));
-            assertSame(findButton(quickStart, "Full pipeline").getParent(), save.getParent());
+            assertSame(findButton(quickStart, "Full pipeline").getParent(), lastRun.getParent());
             assertEquals(Component.LEFT_ALIGNMENT, caption.getAlignmentX(), 0.001f);
             assertEquals(new Color(232, 245, 253), save.getBackground());
             assertEquals(new Color(15, 87, 140), save.getForeground());
@@ -86,6 +88,38 @@ public class FLASH_PipelineRecipeTest {
             assertEquals(save.getForeground(), help.getForeground());
             assertTrue(save.isOpaque());
             assertTrue(save.isContentAreaFilled());
+        } finally {
+            dialog.closeWithAction("test");
+        }
+    }
+
+    @Test
+    public void lastRunRecipeButtonRestoresOnlyWhenClicked() throws Exception {
+        File project = temp.newFolder("last-run-button");
+        Map<String, Object> recipe = new LinkedHashMap<String, Object>();
+        recipe.put("name", "last-run");
+        recipe.put("analyses", Arrays.asList("SplitMerge", "Statistics"));
+        ProjectStatusStore.writeLastRunRecipe(project.getAbsolutePath(), recipe);
+
+        FLASH_Pipeline pipeline = new FLASH_Pipeline();
+        java.lang.reflect.Field directory = FLASH_Pipeline.class.getDeclaredField("directory");
+        directory.setAccessible(true);
+        directory.set(pipeline, project.getAbsolutePath());
+
+        PipelineDialog dialog = new PipelineDialog("Recipes");
+        try {
+            ToggleSwitch[] toggles = new ToggleSwitch[FLASH_Pipeline.IDX_SPECTRAL_DECONTAMINATION + 1];
+            JPanel quickStart = quickStartPanel(pipeline, dialog, toggles);
+            toggles[FLASH_Pipeline.IDX_SPLIT_MERGE] = new ToggleSwitch(false);
+            toggles[FLASH_Pipeline.IDX_STATISTICS] = new ToggleSwitch(false);
+
+            assertFalse(toggles[FLASH_Pipeline.IDX_SPLIT_MERGE].isSelected());
+            assertFalse(toggles[FLASH_Pipeline.IDX_STATISTICS].isSelected());
+
+            findButton(quickStart, "Last run").doClick();
+
+            assertTrue(toggles[FLASH_Pipeline.IDX_SPLIT_MERGE].isSelected());
+            assertTrue(toggles[FLASH_Pipeline.IDX_STATISTICS].isSelected());
         } finally {
             dialog.closeWithAction("test");
         }
@@ -126,11 +160,17 @@ public class FLASH_PipelineRecipeTest {
     }
 
     private static JPanel quickStartPanel(FLASH_Pipeline pipeline, PipelineDialog dialog) throws Exception {
+        return quickStartPanel(pipeline, dialog,
+                new ToggleSwitch[FLASH_Pipeline.IDX_SPECTRAL_DECONTAMINATION + 1]);
+    }
+
+    private static JPanel quickStartPanel(FLASH_Pipeline pipeline,
+                                          PipelineDialog dialog,
+                                          ToggleSwitch[] toggles) throws Exception {
         Method method = FLASH_Pipeline.class.getDeclaredMethod(
                 "buildQuickStartPanel", PipelineDialog.class, ToggleSwitch[].class);
         method.setAccessible(true);
-        return (JPanel) method.invoke(pipeline, dialog,
-                new ToggleSwitch[FLASH_Pipeline.IDX_SPECTRAL_DECONTAMINATION + 1]);
+        return (JPanel) method.invoke(pipeline, dialog, toggles);
     }
 
     private static JButton findButton(Container container, String text) {

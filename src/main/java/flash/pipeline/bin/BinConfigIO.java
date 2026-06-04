@@ -28,7 +28,7 @@ public class BinConfigIO {
             throw new IOException("Missing " + new File(settingsDir, ChannelConfigIO.FILE_NAME).getAbsolutePath()
                     + ". Run Set Up Configuration first.");
         }
-        if (!ChannelConfigIO.allChannelsCommitted(channelConfig)) {
+        if (!ChannelConfigIO.isComplete(channelConfig)) {
             throw new IOException("Incomplete " + new File(settingsDir, ChannelConfigIO.FILE_NAME).getAbsolutePath()
                     + ". Finish Set Up Configuration first.");
         }

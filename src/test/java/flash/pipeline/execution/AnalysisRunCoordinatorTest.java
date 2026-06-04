@@ -105,6 +105,31 @@ public class AnalysisRunCoordinatorTest {
     }
 
     @Test
+    public void guiCancellationWithoutOutputsDiscardsRunRecord() throws Exception {
+        File project = temp.newFolder("project");
+        AnalysisRunCoordinator coordinator = newCoordinator(BinSetupDispatcher.Outcome.COMPLETED);
+        AnalysisCancellation.Scope scope = AnalysisCancellation.openGuiAnalysisScope();
+        try {
+            RunResult result = coordinator.run(new NoopAnalysis(), 0, "Set Up Configuration",
+                    project.getAbsolutePath(), null, null, "", new Callable<Void>() {
+                        @Override
+                        public Void call() {
+                            AnalysisCancellation.markDialogCancelRequested();
+                            return null;
+                        }
+                    });
+
+            assertEquals(RunResult.STATUS_CANCELLED, result.status);
+            assertEquals("", result.runId);
+            assertNull(result.recordFile);
+            assertTrue("cancelled setup should not create run records",
+                    !runsDir(project).exists());
+        } finally {
+            scope.close();
+        }
+    }
+
+    @Test
     public void successfulRunRecordsOk() throws Exception {
         File project = temp.newFolder("project");
         AnalysisRunCoordinator coordinator = newCoordinator(BinSetupDispatcher.Outcome.COMPLETED);

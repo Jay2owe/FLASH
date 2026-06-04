@@ -66,6 +66,7 @@ public final class VariationGridWindow extends JDialog {
     private final JButton lutToggleButton = new JButton("Grey LUT");
     private final JButton brightnessButton = new JButton("Adjust Brightness/Contrast");
     private final boolean objectOverlayToolbar;
+    private final HistogramShapeStrip histogramShapeStrip = new HistogramShapeStrip();
     private final ZoomableGrid gridPanel;
     private final JScrollPane gridScroll;
     private final JSlider zSlider = new JSlider(1, 1, 1);
@@ -148,7 +149,10 @@ public final class VariationGridWindow extends JDialog {
         installMouseWheelHandler();
 
         setLayout(new BorderLayout());
-        add(toolBar, BorderLayout.NORTH);
+        JPanel north = new JPanel(new BorderLayout());
+        north.add(toolBar, BorderLayout.NORTH);
+        north.add(histogramShapeStrip, BorderLayout.SOUTH);
+        add(north, BorderLayout.NORTH);
         add(gridScroll, BorderLayout.CENTER);
         add(south, BorderLayout.SOUTH);
         setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
@@ -312,12 +316,23 @@ public final class VariationGridWindow extends JDialog {
         return progressBar;
     }
 
+    public HistogramShapeStrip histogramShapeStripForTest() {
+        return histogramShapeStrip;
+    }
+
     public JLabel statusLabelForTest() {
         return statusLabel;
     }
 
     public JPanel gridPanelForTest() {
         return gridPanel;
+    }
+
+    public void setHistogramShapeResult(
+            flash.pipeline.ui.variations.analysis.HistogramShapeStability.Result result) {
+        histogramShapeStrip.setResult(result);
+        revalidate();
+        repaint();
     }
 
     public JScrollPane gridScrollForTest() {

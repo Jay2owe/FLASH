@@ -27,8 +27,8 @@ public class SpectralDecontamAutoDetectTest {
                 new ChannelIdentities.Entry(3, "autofluorescence_channel", "", false)
         )));
 
-        SpectralDecontaminationWizard.AutoDetection detection =
-                SpectralDecontaminationWizard.autoDetect(root, binConfig());
+        SpectralDecontaminationSetup.AutoDetection detection =
+                SpectralDecontaminationSetup.autoDetect(root, binConfig());
 
         assertEquals(1, detection.targetChannelIndex);
         assertTrue(detection.bleedThroughChannels.contains(Integer.valueOf(2)));

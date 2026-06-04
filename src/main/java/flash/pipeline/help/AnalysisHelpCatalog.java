@@ -286,7 +286,8 @@ public final class AnalysisHelpCatalog {
                         "A selected deconvolution engine, point spread function settings, iteration count, regularization choice, and optional use of cached outputs."),
                 list(
                         "Choose the images and channels to correct, then confirm the engine and point spread function settings.",
-                        "Preview representative raw and deconvolved output before committing to the batch.",
+                        "Use Preview settings in setup to test the current values on one representative cropped stack, comparing raw and deconvolved output side by side, then continue or go back to refine.",
+                        "If you skip the setup preview, the same representative preview still appears automatically just before the batch unless deconv.skipPreview is set for unattended runs.",
                         "Run the batch and let downstream analyses use deconvolved stacks only when their own opt-in setting is enabled."),
                 list(
                         "FLASH writes corrected stacks to FLASH/Results/Analysis Images/Deconvolution/.",
@@ -304,8 +305,8 @@ public final class AnalysisHelpCatalog {
                         "Large Z-stacks can exceed memory limits, so preview and batch size matter."),
                 optionalImages(
                         "deconvolution",
-                        image("setup.png", "Deconvolution setup", "Engine, point spread function, iteration, and cache settings are chosen before running the batch."),
-                        image("workflow.png", "Deconvolution workflow", "Select stacks, configure blur correction, preview output, write corrected images, then opt in downstream."),
+                        image("setup.png", "Deconvolution setup", "Engine, point spread function, iteration, and cache settings are chosen before running the batch; Preview settings runs the current values on one representative crop first."),
+                        image("workflow.png", "Deconvolution workflow", "Select stacks, configure blur correction, preview the current settings on a representative crop, write corrected images, then opt in downstream."),
                         image("example-output.png", "Deconvolution outputs", "Corrected stacks are saved under FLASH/Results/Analysis Images/Deconvolution.")));
     }
 
@@ -579,11 +580,11 @@ public final class AnalysisHelpCatalog {
                 list(
                         "Use this after Combine results per condition / animal has produced master object or intensity tables.",
                         "Use it when you need a CSV summary of condition comparisons for selected metrics.",
-                        "Use the Statistics Helper or presets when paired design, distribution assumptions, post-hoc method, or metric scope should differ from the default automatic settings."),
+                        "Use presets when paired design, distribution assumptions, post-hoc method, or metric scope should differ from the default automatic settings."),
                 list(
                         "FLASH/Results/Tables/Project Summary/3D Objects.csv or Image Intensities.csv from aggregation.",
                         "Condition assignments from FLASH/Results/Tables/Project Summary/Conditions.csv.",
-                        "A valid statistics configuration, either default automatic selection or a helper/preset choice for paired mode, distribution mode, post-hoc method, and metric filter.",
+                        "A valid statistics configuration, either default automatic selection or a preset choice for paired mode, distribution mode, post-hoc method, and metric filter.",
                         "Enough animal-level or selected grouping-level samples per condition for the configured comparisons to run."),
                 list(
                         "Confirm every animal has the intended condition label in the condition-assignment table.",

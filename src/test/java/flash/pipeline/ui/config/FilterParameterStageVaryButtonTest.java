@@ -17,6 +17,7 @@ import org.junit.Test;
 import javax.swing.JButton;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -28,6 +29,17 @@ public class FilterParameterStageVaryButtonTest {
             "run(\"Gaussian Blur...\", \"sigma=1 stack\");\n"
                     + "run(\"Subtract Background...\", \"rolling=20 stack\");\n"
                     + "run(\"Median...\", \"radius=2 stack\");\n";
+
+    // Two duplicated working copies (_dens, _edge) merged by imageCalculator, with
+    // a trailing post-combine step. The Duplicate lines are hidden in the accordion;
+    // the first SHOWN step of each branch carries the branch subheader.
+    private static final String BRANCHED_TEXT_MACRO =
+            "run(\"Duplicate...\", \"title=_dens duplicate\");\n"
+                    + "run(\"Subtract Background...\", \"rolling=20 stack\");\n"
+                    + "run(\"Duplicate...\", \"title=_edge duplicate\");\n"
+                    + "run(\"Variance...\", \"radius=2 stack\");\n"
+                    + "imageCalculator(\"Add create\", \"_dens\", \"_edge\");\n"
+                    + "run(\"Gaussian Blur...\", \"sigma=3 stack\");\n";
 
     @Test
     public void linearMacroWithSourceEnablesVaryButton() {
@@ -42,29 +54,34 @@ public class FilterParameterStageVaryButtonTest {
     }
 
     @Test
-    public void branchedMacroDisablesVaryButtonWithTooltip() {
+    public void branchedMacroWithSourceEnablesVaryButton() {
         ConfigQcContext context = context();
         FilterParameterStage stage = stage(branchedMacro());
 
         stage.buildControls(context, new RecordingActions());
         stage.onEnter(context, new PreviewPairPanel("Original", "Adjusted"));
 
+        // Branched filters are sweepable now (docs/filter-branch-robustness_COMPLETED): the
+        // sweep substitutes parameters surgically through the faithful text model,
+        // so a branched macro WITH a source ENABLES Vary even though it is not
+        // linear.
         assertFalse(stage.isLinearForTest());
-        assertFalse(stage.isVaryButtonEnabledForTest());
-        assertEquals("Use Custom macro... to vary branched pipelines",
+        assertTrue(stage.isVaryButtonEnabledForTest());
+        assertEquals("Vary parameters across the branches of this filter.",
                 stage.varyButtonTooltipForTest());
     }
 
     /**
-     * Integration guard (docs/filter-branch-robustness): the ACTUAL bundled
+     * Integration guard (docs/filter-branch-robustness_COMPLETED): the ACTUAL bundled
      * compound presets — loaded as raw text WITHOUT an {@code @ihf-dag} header,
      * i.e. through the legacy classifier rather than {@code loadEmbeddedDag} —
-     * must classify as branched and disable Vary. This exercises the exact path
-     * the user hit when the crash occurred; {@link #branchedMacro()} above goes
-     * through the embedded-DAG path instead.
+     * must classify as branched yet still be sweepable (Vary enabled with a
+     * source). This exercises the exact path the user hit when the crash
+     * occurred; {@link #branchedMacro()} above goes through the embedded-DAG path
+     * instead.
      */
     @Test
-    public void bundledCompoundPresetsClassifyBranchedAndDisableVary() {
+    public void bundledCompoundPresetsClassifyBranchedAndEnableVary() {
         for (String preset : new String[]{"Puncta Resolve", "Diffuse Object"}) {
             String macro = NamedFilterLoader.loadFilterContent(preset);
             FilterParameterStage stage = stage(macro);
@@ -73,8 +90,36 @@ public class FilterParameterStageVaryButtonTest {
             stage.onEnter(context(), new PreviewPairPanel("Original", "Adjusted"));
 
             assertFalse(preset + " must classify as branched", stage.isLinearForTest());
-            assertFalse(preset + " must disable Vary", stage.isVaryButtonEnabledForTest());
+            assertTrue(preset + " must enable Vary (sweepable per branch)",
+                    stage.isVaryButtonEnabledForTest());
         }
+    }
+
+    @Test
+    public void branchedMacroRendersBranchSubheaders() {
+        ConfigQcContext context = context();
+        FilterParameterStage stage = stage(BRANCHED_TEXT_MACRO);
+
+        stage.buildControls(context, new RecordingActions());
+        stage.onEnter(context, new PreviewPairPanel("Original", "Adjusted"));
+
+        // Hidden Duplicate scaffolding does not emit a subheader; the first shown
+        // step of each branch does, then the post-combine region.
+        assertEquals(Arrays.asList("Branch: dens", "Branch: edge", "After combine"),
+                stage.branchSubheaderTitlesForTest());
+    }
+
+    @Test
+    public void linearMacroRendersNoBranchSubheaders() {
+        ConfigQcContext context = context();
+        FilterParameterStage stage = stage(THREE_STEP_MACRO);
+
+        stage.buildControls(context, new RecordingActions());
+        stage.onEnter(context, new PreviewPairPanel("Original", "Adjusted"));
+
+        List<String> subheaders = stage.branchSubheaderTitlesForTest();
+        assertTrue("linear macro must render no branch subheaders, got " + subheaders,
+                subheaders.isEmpty());
     }
 
     @Test

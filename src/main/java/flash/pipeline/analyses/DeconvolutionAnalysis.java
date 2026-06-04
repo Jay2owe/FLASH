@@ -21,7 +21,6 @@ import flash.pipeline.deconv.psf.PsfSpec;
 import flash.pipeline.deconv.psf.ScopeModality;
 import flash.pipeline.deconv.wizard.DeconvPreset;
 import flash.pipeline.deconv.wizard.DeconvPresetIO;
-import flash.pipeline.deconv.wizard.ImageConsultantWizard;
 import flash.pipeline.image.HeapBudget;
 import flash.pipeline.intelligence.MetadataDiagnostics;
 import flash.pipeline.io.AsyncImageSaver;
@@ -34,6 +33,7 @@ import flash.pipeline.report.QualityReport;
 import flash.pipeline.runrecord.AnalysisRunContext;
 import flash.pipeline.runrecord.LoadedRunParameterApplier;
 import flash.pipeline.runrecord.LoadedRunParameters;
+import flash.pipeline.runrecord.ParameterSnapshot;
 import flash.pipeline.runrecord.RunRecordAware;
 import flash.pipeline.runrecord.ui.LoadFromRunButton;
 import flash.pipeline.runtime.DependencyId;
@@ -117,6 +117,7 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
     private static final int HELP_DIALOG_TEXT_WIDTH = 660;
     private static final int MAX_PSF_SIZE_XY = 257;
     private static final int MAX_PSF_SIZE_Z = 127;
+    private static final int PREVIEW_CROP_SIZE = 256;
 
     private boolean headless = false;
     private boolean suppressDialogs = false;
@@ -222,13 +223,18 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
             // PSF synthesis is performed natively by ScalarPsfSynthesizer, so the EPFL
             // PSF Generator plugin is no longer required for deconvolution to run.
 
-            DeconvPreviewDialog.Decision previewDecision =
-                    showPreviewBeforeBatch(directory, representative, channelNames, settings);
-            if (previewDecision == DeconvPreviewDialog.Decision.RECONFIGURE) {
-                continue;
-            }
-            if (previewDecision == DeconvPreviewDialog.Decision.CANCEL) {
-                return;
+            // An accepted setup preview that still matches the final settings skips the duplicate
+            // automatic pre-batch preview. Any edit after acceptance clears it, so the preview
+            // reappears here.
+            if (!settings.previewAccepted) {
+                DeconvPreviewDialog.Decision previewDecision =
+                        showPreviewBeforeBatch(directory, representative, channelNames, settings);
+                if (previewDecision == DeconvPreviewDialog.Decision.RECONFIGURE) {
+                    continue;
+                }
+                if (previewDecision == DeconvPreviewDialog.Decision.CANCEL) {
+                    return;
+                }
             }
 
             addReportSection(settings, channelNames);
@@ -298,6 +304,10 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
         PipelineDialog dialog = new PipelineDialog(TITLE, PipelineDialog.Phase.SETUP);
         final DialogBindings bindings = new DialogBindings();
         final DeconvPresetIO presetIO = new DeconvPresetIO();
+        final PreviewState previewState = new PreviewState();
+        final Runnable markPreviewStale = new Runnable() {
+            @Override public void run() { previewState.clear(); }
+        };
         JButton helpButton = new JButton("?");
         styleHelpButton(helpButton);
         helpButton.setToolTipText("Explain every 3D Deconvolution option.");
@@ -307,11 +317,7 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
             }
         }));
 
-        dialog.addHeader("Guided Setup");
-        JButton consultantButton = new JButton("Image Consultant");
-        styleSoftBlueButton(consultantButton);
-        dialog.addComponent(buttonRow(consultantButton));
-
+        dialog.addHeader("Presets");
         JComboBox<String> presetChoice = new JComboBox<String>(new String[]{CUSTOM_PRESET_LABEL});
         presetChoice.setMaximumSize(new Dimension(220, 24));
         bindings.presetChoice = presetChoice;
@@ -506,48 +512,6 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
 
         populatePresetChoice(presetChoice, loadPresets(presetIO), CUSTOM_PRESET_LABEL);
 
-        consultantButton.addActionListener(e -> {
-            if (isInteractiveHeadless()) {
-                showOrLogError("Image Consultant is unavailable in headless mode.");
-                return;
-            }
-            final ImageConsultantWizard.Recommendation[] selectedRecommendation =
-                    new ImageConsultantWizard.Recommendation[1];
-            dialog.runChildWorkflow(new Runnable() {
-                @Override public void run() {
-                    ImageConsultantWizard wizard = new ImageConsultantWizard(
-                            representative.seriesInfo,
-                            wizardAvailability(),
-                            bindings.mountingMedium
-                    );
-                    selectedRecommendation[0] = wizard.run();
-                }
-            });
-            ImageConsultantWizard.Recommendation recommendation = selectedRecommendation[0];
-            if (recommendation == null) {
-                return;
-            }
-            applySourceValues(bindings,
-                    recommendation.getEngineKey(),
-                    recommendation.getAlgorithm(),
-                    recommendation.getPsfModel(),
-                    recommendation.getScopeModality(),
-                    recommendation.getPinholeAU(),
-                    recommendation.getSampleRI(),
-                    recommendation.getMountingMediumHint(),
-                    recommendation.getIterations(),
-                    recommendation.getRegularization(),
-                    "Recommended",
-                    refreshAlgorithms,
-                    refreshEnablement);
-            bindings.programmaticChange = true;
-            try {
-                presetChoice.setSelectedItem(CUSTOM_PRESET_LABEL);
-            } finally {
-                bindings.programmaticChange = false;
-            }
-        });
-
         presetButton.addActionListener(e -> saveCurrentPreset(presetIO, bindings, presetChoice,
                 refreshAlgorithms, refreshEnablement));
 
@@ -613,6 +577,73 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
         attachDocumentTagClearer(pinholeField, bindings, bindings.pinholeRow.sourceTagLabel);
         attachSpinnerTagClearer(iterationsSpinner, bindings, bindings.iterationsRow.sourceTagLabel);
         attachSliderTagClearer(regularizationSlider, regularizationLabel, bindings, bindings.regularizationRow.sourceTagLabel);
+
+        // Any change to a setting that affects the rendered preview (including programmatic preset
+        // or previous-run loads) invalidates a previously accepted preview. strictNyquist and
+        // useCache do not change the rendered image, but are cleared here conservatively so any
+        // edit re-triggers acceptance rather than silently keeping a stale "accepted" state.
+        engineChoice.addActionListener(e -> markPreviewStale.run());
+        algorithmChoice.addActionListener(e -> markPreviewStale.run());
+        psfChoice.addActionListener(e -> markPreviewStale.run());
+        modalityChoice.addActionListener(e -> markPreviewStale.run());
+        iterationsSpinner.addChangeListener(e -> markPreviewStale.run());
+        regularizationSlider.addChangeListener(e -> markPreviewStale.run());
+        strictNyquistToggle.addChangeListener(markPreviewStale);
+        useCacheToggle.addChangeListener(markPreviewStale);
+        attachPreviewStaleClearer(pinholeField, markPreviewStale);
+        attachPreviewStaleClearer(sampleRiRow.field, markPreviewStale);
+        attachPreviewStaleClearer(naRow.field, markPreviewStale);
+        attachPreviewStaleClearer(immersionRow.field, markPreviewStale);
+        attachPreviewStaleClearer(xyPixelRow.field, markPreviewStale);
+        attachPreviewStaleClearer(zStepRow.field, markPreviewStale);
+        attachPreviewStaleClearer(emissionRow.field, markPreviewStale);
+        for (ChannelToggleRow channelRow : channelRows) {
+            channelRow.toggle.addChangeListener(markPreviewStale);
+        }
+
+        // Setup preview: render one representative cropped stack with the current values so the user
+        // can confirm settings before committing to the full batch, mirroring Set Up Configuration.
+        JButton previewButton = dialog.addFooterButton("Preview settings...");
+        flash.pipeline.ui.FlashIcons.apply(previewButton, flash.pipeline.ui.FlashIcons.play());
+        previewButton.setToolTipText("Render a raw vs deconvolved preview of one representative crop "
+                + "using the current settings.");
+        previewButton.addActionListener(e -> dialog.runChildWorkflow(new Runnable() {
+            @Override public void run() {
+                RunSettings current = buildRunSettingsFromDialog(channelNames, engineChoice,
+                        algorithmChoice, psfChoice, modalityChoice, pinholeField, sampleRiRow, bindings,
+                        iterationsSpinner, regularizationSlider, strictNyquistToggle, useCacheToggle,
+                        channelRows, naRow, immersionRow, xyPixelRow, zStepRow, emissionRow);
+                List<String> errors = validateRequiredFields(representative.seriesInfo, current);
+                if (!errors.isEmpty()) {
+                    showValidationErrors(errors);
+                    return;
+                }
+                if (!isSelectedEngineReady(current.engineKey)) {
+                    return;
+                }
+                int channelIndex = firstSelectedChannel(current.selectedChannels);
+                if (channelIndex < 0) {
+                    showOrLogError("Select at least one channel before previewing.");
+                    return;
+                }
+                String fingerprint = previewFingerprint(current, representative, channelIndex, PREVIEW_CROP_SIZE);
+                // The user explicitly requested this preview, so always render it even if the CLI
+                // skipPreview flag (meant for unattended runs) is set. `current` is a throwaway copy
+                // and is never returned to execute(), so clearing it here is safe.
+                current.skipPreview = false;
+                DeconvPreviewDialog.Decision decision =
+                        showPreviewBeforeBatch(directory, representative, channelNames, current);
+                if (decision == DeconvPreviewDialog.Decision.RUN_FULL_BATCH) {
+                    previewState.accept(fingerprint);
+                    dialog.setTransientStatus("Preview accepted - press OK to run the full batch, "
+                            + "or keep editing to refine.");
+                } else if (decision == DeconvPreviewDialog.Decision.CANCEL) {
+                    dialog.closeWithAction("cancel");
+                }
+                // RECONFIGURE: leave the setup dialog open with no change.
+            }
+        }));
+
         refreshAlgorithms.run();
         refreshEnablement.run();
 
@@ -620,6 +651,60 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
             return null;
         }
 
+        RunSettings settings = buildRunSettingsFromDialog(channelNames, engineChoice, algorithmChoice,
+                psfChoice, modalityChoice, pinholeField, sampleRiRow, bindings, iterationsSpinner,
+                regularizationSlider, strictNyquistToggle, useCacheToggle, channelRows,
+                naRow, immersionRow, xyPixelRow, zStepRow, emissionRow);
+        int previewChannel = firstSelectedChannel(settings.selectedChannels);
+        String finalFingerprint = previewFingerprint(settings, representative, previewChannel, PREVIEW_CROP_SIZE);
+        settings.previewAccepted = previewState.matches(finalFingerprint);
+        recordDeconvolutionRunParameters(bindings);
+        return settings;
+    }
+
+    /**
+     * Capture the confirmed Deconvolution dialog settings into the run record so
+     * a later "Load settings from previous run" can restore them. Keys mirror
+     * {@link DeconvPreset#toJsonObject()} so {@code LoadedRunParameters.DECONV_KEYS}
+     * recognises them.
+     */
+    private void recordDeconvolutionRunParameters(DialogBindings bindings) {
+        if (runRecordContext == null || bindings == null) {
+            return;
+        }
+        try {
+            DeconvPreset preset = buildPresetFromBindings("GUI Deconvolution run", bindings);
+            runRecordContext.recordParameters(ParameterSnapshot.fromAnalysisPresetMap(
+                    "DeconvolutionAnalysis", preset.toJsonObject()));
+        } catch (RuntimeException e) {
+            IJ.log("[FLASH] Could not capture Deconvolution run parameters: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Collects the current in-dialog values into a {@link RunSettings}. Extracted so both the
+     * final OK path and a setup-dialog preview button can read the live values without waiting
+     * for the dialog to close.
+     */
+    private RunSettings buildRunSettingsFromDialog(
+            String[] channelNames,
+            JComboBox<EngineChoice> engineChoice,
+            JComboBox<AlgorithmChoice> algorithmChoice,
+            JComboBox<PsfModel> psfChoice,
+            JComboBox<ScopeModality> modalityChoice,
+            JTextField pinholeField,
+            MetadataFieldRow sampleRiRow,
+            DialogBindings bindings,
+            JSpinner iterationsSpinner,
+            JSlider regularizationSlider,
+            ToggleSwitch strictNyquistToggle,
+            ToggleSwitch useCacheToggle,
+            List<ChannelToggleRow> channelRows,
+            MetadataFieldRow naRow,
+            MetadataFieldRow immersionRow,
+            MetadataFieldRow xyPixelRow,
+            MetadataFieldRow zStepRow,
+            MetadataFieldRow emissionRow) {
         RunSettings settings = new RunSettings();
         settings.enabled = true;
         EngineChoice selectedEngine = (EngineChoice) engineChoice.getSelectedItem();
@@ -652,6 +737,45 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
         return settings;
     }
 
+    /**
+     * Deterministic fingerprint of the settings that change the rendered preview. Used to detect
+     * when an accepted preview no longer matches the current setup values. Inspection-only:
+     * never affects batch output or cache keys.
+     */
+    String previewFingerprint(RunSettings settings, SeriesJob representative, int channelIndex, int cropSize) {
+        if (settings == null) return "";
+        int channelCount = settings.channelNames == null ? 0 : settings.channelNames.length;
+        StringBuilder sb = new StringBuilder();
+        sb.append(settings.engineKey).append('|');
+        sb.append(settings.algorithm == null ? "" : settings.algorithm.name()).append('|');
+        sb.append(settings.psfModel == null ? "" : settings.psfModel.name()).append('|');
+        sb.append(settings.scopeModality == null ? "" : settings.scopeModality.name()).append('|');
+        sb.append(settings.iterations).append('|');
+        sb.append(DeconvolutionIO.formatDouble(settings.regularization)).append('|');
+        sb.append(settings.pinholeAiryUnits).append('|');
+        sb.append(settings.sampleRiOverride).append('|');
+        sb.append(settings.naOverride).append('|');
+        sb.append(settings.immersionRiOverride).append('|');
+        sb.append(settings.xyPixelSizeOverrideUm).append('|');
+        sb.append(settings.zStepOverrideUm).append('|');
+        sb.append(joinWavelengths(settings.emissionOverridesNm, channelCount)).append('|');
+        sb.append(settings.channelNames == null
+                ? "(none)"
+                : selectedChannelList(settings.channelNames, settings.selectedChannels)).append('|');
+        sb.append(representative == null ? "" : representative.seriesIndex).append('|');
+        sb.append(channelIndex).append('|').append(cropSize);
+        return sb.toString();
+    }
+
+    private static void attachPreviewStaleClearer(JTextField field, Runnable onChange) {
+        if (field == null || onChange == null) return;
+        field.getDocument().addDocumentListener(new DocumentListener() {
+            @Override public void insertUpdate(DocumentEvent e) { onChange.run(); }
+            @Override public void removeUpdate(DocumentEvent e) { onChange.run(); }
+            @Override public void changedUpdate(DocumentEvent e) { onChange.run(); }
+        });
+    }
+
     public LoadedRunParameters.Result applyLoadedParameters(Map<String, Object> parameters) {
         LoadedRunParameters.PresetLoad<DeconvPreset> load =
                 LoadedRunParameters.deconvPreset(parameters);
@@ -672,11 +796,7 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
                         + "the raw data are already clean enough, when metadata are unreliable, or when you need "
                         + "to preserve raw intensities exactly."));
 
-        help.addHeader("Guided Setup");
-        help.addComponent(helpParagraph(
-                "<b>Image Consultant</b> asks a few plain-language questions and fills in sensible "
-                        + "engine, algorithm, PSF model, modality, iteration, regularization, and sample RI "
-                        + "settings. Use it when you are unsure what deconvolution settings fit the image."));
+        help.addHeader("Presets");
         help.addComponent(helpParagraph(
                 "<b>Preset</b> loads a saved settings set. Use presets when repeating the same microscope, "
                         + "objective, sample prep, and image style across experiments. <b>Save as preset</b> stores "
@@ -714,7 +834,7 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
                         + "detected immersion medium is wrong."));
         help.addComponent(helpParagraph(
                 "<b>Sample RI</b> is the refractive index of the tissue or mounting medium. This affects spherical "
-                        + "aberration and z blur. Use the Image Consultant when unsure. Typical fixed tissue/mounting "
+                        + "aberration and z blur. Typical fixed tissue/mounting "
                         + "media are often around 1.45 to 1.52, but the right value depends on the mountant."));
         help.addComponent(helpParagraph(
                 "<b>Emission wavelength (nm)</b> is the fluorescence emission wavelength for each channel, in channel "
@@ -771,23 +891,10 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
         help.addComponent(helpParagraph(
                 "<b>Auto-detected</b> means FLASH read the value from image metadata. <b>Missing</b> means the value is "
                         + "required and must be entered manually. <b>Inferred</b> means FLASH estimated the value from "
-                        + "nearby metadata, such as immersion medium. <b>Recommended</b> means the Image Consultant set "
-                        + "the value. <b>From preset</b> means a saved preset filled it in. Editing a field clears its "
-                        + "source tag because the value is now manual."));
+                        + "nearby metadata, such as immersion medium. <b>From preset</b> means a saved preset filled it in. "
+                        + "Editing a field clears its source tag because the value is now manual."));
 
         help.showDialog();
-    }
-
-    private ImageConsultantWizard.Availability wizardAvailability() {
-        Set<String> available = new HashSet<String>();
-        for (DeconvolutionEngine engine : availableEngines()) {
-            available.add(engine.key());
-        }
-        return new ImageConsultantWizard.Availability(
-                available.contains("CLIJ2"),
-                available.contains("DL2"),
-                available.contains("IterativeDeconvolve3D")
-        );
     }
 
     private List<DeconvPreset> loadPresets(DeconvPresetIO presetIO) {
@@ -1043,6 +1150,44 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
             return DeconvPreviewDialog.Decision.RUN_FULL_BATCH;
         }
 
+        DeconvPreviewDialog.PreviewContent content;
+        try {
+            content = renderPreviewContent(directory, job, channelNames, settings,
+                    channelIndex, PREVIEW_CROP_SIZE, PREVIEW_CROP_SIZE);
+        } catch (Exception e) {
+            String message = "Deconvolution preview failed: " + e.getMessage()
+                    + ". Continuing without preview.";
+            IJ.log(message);
+            recordWarn(message);
+            return DeconvPreviewDialog.Decision.RUN_FULL_BATCH;
+        }
+        if (content == null) {
+            return DeconvPreviewDialog.Decision.RUN_FULL_BATCH;
+        }
+
+        try {
+            return DeconvPreviewDialog.show(content, false);
+        } finally {
+            // Ownership of the returned projections transfers here. The dialog is
+            // modal, so the projections stay valid until show(...) returns.
+            closeQuietly(content.deconvolvedProjection);
+            closeQuietly(content.rawProjection);
+        }
+    }
+
+    /**
+     * Renders a raw/deconvolved representative preview using the same engine, PSF, crop,
+     * and metadata code as the batch. The returned projections are owned by the caller and
+     * must not be closed here; every other temporary {@link ImagePlus} is released before
+     * returning. Returns {@code null} when any required input cannot be produced.
+     */
+    DeconvPreviewDialog.PreviewContent renderPreviewContent(String directory,
+                                                            SeriesJob job,
+                                                            String[] channelNames,
+                                                            RunSettings settings,
+                                                            int channelIndex,
+                                                            int cropWidth,
+                                                            int cropHeight) throws Exception {
         ImagePlus rawChannel = null;
         ImagePlus rawCrop = null;
         ImagePlus psf = null;
@@ -1052,12 +1197,12 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
         try {
             rawChannel = openSeriesChannel(directory, job.seriesIndex, channelIndex);
             if (rawChannel == null) {
-                return DeconvPreviewDialog.Decision.RUN_FULL_BATCH;
+                return null;
             }
 
-            rawCrop = cropCenterStack(rawChannel, 256, 256, "Raw Preview");
+            rawCrop = cropCenterStack(rawChannel, cropWidth, cropHeight, "Raw Preview");
             if (rawCrop == null) {
-                return DeconvPreviewDialog.Decision.RUN_FULL_BATCH;
+                return null;
             }
 
             ResolvedSeriesSettings resolved = resolveSeriesSettings(job.seriesInfo, settings, channelNames.length);
@@ -1065,7 +1210,7 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
             PsfSpec spec = createPsfSpec(resolved, channelIndex, rawCrop, settings.scopeModality);
             psf = getOrCreatePsf(spec, settings.psfModel);
             if (psf == null) {
-                return DeconvPreviewDialog.Decision.RUN_FULL_BATCH;
+                return null;
             }
 
             DeconvolutionEngine engine = resolveEngine(settings.engineKey);
@@ -1076,7 +1221,7 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
                     .build();
             deconvolved = engine.deconvolve(rawCrop, psf, params);
             if (deconvolved == null) {
-                return DeconvPreviewDialog.Decision.RUN_FULL_BATCH;
+                return null;
             }
 
             double[] rawRange = stackDisplayRange(rawCrop);
@@ -1088,21 +1233,14 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
             String deconvolvedLabel = "Deconvolved (" + engine.displayName()
                     + ", " + settings.iterations + " iter, "
                     + settings.psfModel.displayName() + ")";
-            return DeconvPreviewDialog.show(
-                    new DeconvPreviewDialog.PreviewContent(
-                            rawProjection,
-                            deconvolvedProjection,
-                            "Raw",
-                            deconvolvedLabel
-                    ),
-                    false
-            );
-        } catch (Exception e) {
-            String message = "Deconvolution preview failed: " + e.getMessage()
-                    + ". Continuing without preview.";
-            IJ.log(message);
-            recordWarn(message);
-            return DeconvPreviewDialog.Decision.RUN_FULL_BATCH;
+
+            // Ownership transfer: null the local references so the finally block does not
+            // close the projections that the caller/dialog still needs to display.
+            ImagePlus rawOut = rawProjection;
+            ImagePlus deconvOut = deconvolvedProjection;
+            rawProjection = null;
+            deconvolvedProjection = null;
+            return new DeconvPreviewDialog.PreviewContent(rawOut, deconvOut, "Raw", deconvolvedLabel);
         } finally {
             closeQuietly(deconvolvedProjection);
             closeQuietly(rawProjection);
@@ -2740,7 +2878,30 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
         SourceTaggedRow regularizationRow;
     }
 
-    private static final class RunSettings {
+    /**
+     * Tracks whether the most recently accepted preview still matches the current setup values.
+     * Local to the setup dialog; inspection-only and never persisted.
+     */
+    static final class PreviewState {
+        boolean accepted;
+        String acceptedFingerprint;
+
+        void clear() {
+            accepted = false;
+            acceptedFingerprint = null;
+        }
+
+        void accept(String fingerprint) {
+            accepted = true;
+            acceptedFingerprint = fingerprint;
+        }
+
+        boolean matches(String fingerprint) {
+            return accepted && acceptedFingerprint != null && acceptedFingerprint.equals(fingerprint);
+        }
+    }
+
+    static final class RunSettings {
         boolean enabled;
         String engineKey;
         Algorithm algorithm;
@@ -2754,6 +2915,12 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
         boolean strictNyquist;
         boolean useCache;
         boolean skipPreview;
+        /**
+         * Inspection-only: set when the user accepted a setup-dialog preview whose fingerprint still
+         * matches these final values. Lets the batch launch skip a duplicate automatic pre-batch
+         * preview. Never affects batch output, cache keys, or CLI behavior.
+         */
+        boolean previewAccepted;
         boolean[] selectedChannels;
         String[] channelNames;
         Double naOverride;

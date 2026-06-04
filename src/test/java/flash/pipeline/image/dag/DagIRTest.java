@@ -31,7 +31,7 @@ public class DagIRTest {
         // Compound, branched presets (multiple Duplicate working copies +
         // imageCalculator) must seed a NON-linear DAG so the editor routes them
         // to the branched view instead of flattening + corrupting them. Flat
-        // chains stay linear. See docs/filter-branch-robustness.
+        // chains stay linear. See docs/filter-branch-robustness_COMPLETED.
         java.util.Set<String> branched = new java.util.HashSet<String>(
                 Arrays.asList("Puncta Resolve", "Diffuse Object"));
         for (String preset : NamedFilterLoader.FILTER_NAMES) {

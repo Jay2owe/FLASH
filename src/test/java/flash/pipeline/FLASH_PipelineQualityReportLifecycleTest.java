@@ -9,6 +9,8 @@ import org.junit.rules.TemporaryFolder;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.Collections;
 import java.util.Map;
 
@@ -53,7 +55,7 @@ public class FLASH_PipelineQualityReportLifecycleTest {
     }
 
     @Test
-    public void createQualityReportForRun_cleansStaleOverlays() throws IOException {
+    public void qualityReportFirstWriteCleansStaleOverlays() throws IOException {
         File reportDir = new File(tmp.getRoot(), "FLASH/Results/QC");
         File overlayDir = new File(reportDir, "overlays");
         assertTrue(overlayDir.mkdirs());
@@ -66,12 +68,21 @@ public class FLASH_PipelineQualityReportLifecycleTest {
         writeStubFile(staleHtml);
         assertTrue(staleHtml.exists());
 
-        FLASH_Pipeline.createQualityReportForRun(
+        QualityReport report = FLASH_Pipeline.createQualityReportForRun(
                 tmp.getRoot().getAbsolutePath(), true,
                 false, false, 1, false, "Auto-Overwrite");
 
+        assertTrue("Creating a run report must not delete files before the run starts",
+                staleOverlay.exists());
+        assertTrue(staleHtml.exists());
+
+        report.addGenericAnalysis("Test Analysis", 1L);
+
         assertFalse("Stale overlay must be removed", staleOverlay.exists());
-        assertFalse("Stale HTML must be removed", staleHtml.exists());
+        assertTrue("QC HTML should be recreated by the first report write", staleHtml.isFile());
+        assertFalse("Stale HTML content must be replaced",
+                new String(Files.readAllBytes(staleHtml.toPath()), StandardCharsets.UTF_8)
+                        .contains("stub"));
     }
 
     @Test

@@ -1,7 +1,7 @@
 package flash.pipeline.cli;
 
 import flash.pipeline.decontamination.SpectralDecontaminationConfig;
-import flash.pipeline.decontamination.wizard.SpectralDecontaminationWizard;
+import flash.pipeline.decontamination.wizard.SpectralDecontaminationSetup;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -34,7 +34,7 @@ public class SpectralDecontamCliTest {
     public void stockPresetLoadsWithFieldOverride() throws Exception {
         File root = temp.newFolder("project");
 
-        SpectralDecontaminationConfig config = SpectralDecontaminationWizard.applyCliOverrides(
+        SpectralDecontaminationConfig config = SpectralDecontaminationSetup.applyCliOverrides(
                 new SpectralDecontaminationConfig(),
                 "patchy_autofluorescence",
                 null,

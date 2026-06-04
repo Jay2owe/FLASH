@@ -4,7 +4,7 @@ import flash.pipeline.atlas.AtlasRegionColumns;
 import ij.ImagePlus;
 import ij.io.FileSaver;
 import ij.process.ShortProcessor;
-import flash.pipeline.analyses.wizard.SpatialAnalysisWizard;
+import flash.pipeline.analyses.wizard.SpatialSetupConfig;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.io.CalibrationIO;
@@ -248,7 +248,7 @@ public class SpatialAnalysisTest {
                 "1,Mouse1,LH,SCN,10,5,0,0,1,0.70,0.70,1\n" +
                 "1,Mouse1,LH,SCN,10,5,0,0,1,0.60,0.70,1");
 
-        SpatialAnalysisWizard.DerivedConfig config = new SpatialAnalysisWizard.DerivedConfig();
+        SpatialSetupConfig.DerivedConfig config = new SpatialSetupConfig.DerivedConfig();
         config.doDistances = true;
         config.doSpatialStats = true;
         SpatialAnalysis sa = new SpatialAnalysis();
@@ -370,7 +370,7 @@ public class SpatialAnalysisTest {
                 "1,Mouse1,LH,SCN,SCN,10,5,0,0,1,2,2,1\n" +
                 "1,Mouse1,LH,SCN,SCN,10,5,0,0,1,8,8,1");
 
-        SpatialAnalysisWizard.DerivedConfig config = new SpatialAnalysisWizard.DerivedConfig();
+        SpatialSetupConfig.DerivedConfig config = new SpatialSetupConfig.DerivedConfig();
         config.doHeatmaps = true;
         SpatialAnalysis sa = new SpatialAnalysis();
         sa.setSuppressDialogs(true);
@@ -406,7 +406,7 @@ public class SpatialAnalysisTest {
         assertTrue(lineSets.mkdirs());
         assertTrue(new File(lineSets, "Boundary.zip").createNewFile());
 
-        SpatialAnalysisWizard.DerivedConfig config = new SpatialAnalysisWizard.DerivedConfig();
+        SpatialSetupConfig.DerivedConfig config = new SpatialSetupConfig.DerivedConfig();
         config.doLineDistance = true;
         SpatialAnalysis analysis = new SpatialAnalysis();
         analysis.setSuppressDialogs(true);
@@ -831,7 +831,7 @@ public class SpatialAnalysisTest {
         writeShollProfile(morphometryDir, "A");
         writeShollProfile(morphometryDir, "B");
 
-        SpatialAnalysisWizard.DerivedConfig config = new SpatialAnalysisWizard.DerivedConfig();
+        SpatialSetupConfig.DerivedConfig config = new SpatialSetupConfig.DerivedConfig();
         config.doDistances = true;
         config.doVolColoc = true;
         config.doCpc = true;

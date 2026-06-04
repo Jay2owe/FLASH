@@ -141,6 +141,19 @@ public class CreateBinFileAnalysisTest {
     }
 
     @Test
+    public void cancelSaveAndExitSuppressesFollowUpCancelledMessage() throws Exception {
+        File binFolder = temp.newFolder("cancel-save-message");
+        CreateBinFileAnalysis.BinUserConfig cfg = oneChannelConfig("Default");
+        CancelChoiceAnalysis analysis = new CancelChoiceAnalysis(
+                CancelConfirmationDialog.Choice.SAVE_AND_EXIT);
+
+        assertTrue(invokeHandleCancelRequest(analysis, binFolder, cfg, null, 3, "Settings Mode"));
+        assertTrue(invokeShouldExitAfterWizardCancel(analysis, binFolder, cfg, null, 3, "Settings Mode"));
+
+        assertFalse(invokeShouldShowWizardCancelMessage(analysis));
+    }
+
+    @Test
     public void cancelDiscardAndExitDeletesChannelConfig() throws Exception {
         File binFolder = temp.newFolder("cancel-discard-draft");
         ChannelConfigIO.write(FlashProjectLayout.settingsDir(binFolder),
@@ -972,6 +985,50 @@ public class CreateBinFileAnalysisTest {
     }
 
     @Test
+    public void resumeQualityCheckStartsAtFirstIncompleteSubStep() throws Exception {
+        File projectRoot = temp.newFolder("resume-qc-substep");
+        File binFolder = FlashProjectLayout.forDirectory(
+                projectRoot.getAbsolutePath()).configurationWriteDir();
+        assertTrue(binFolder.mkdirs());
+
+        CreateBinFileAnalysis.BinUserConfig cfg = oneChannelConfig("Default");
+        cfg.minmax.set(0, "10-100");
+        boolean[][] customSettings = new boolean[6][1];
+        customSettings[1][0] = true; // display range
+        customSettings[2][0] = true; // unified threshold
+
+        ChannelConfig draft = ChannelConfigIO.fromBinUserConfig(cfg);
+        markAllPending(draft.channels.get(0));
+        draft.channels.get(0).status.put(ChannelConfig.P_NAME,
+                ChannelConfig.PropertyStatus.CONFIGURED);
+        draft.channels.get(0).status.put(ChannelConfig.P_COLOR,
+                ChannelConfig.PropertyStatus.CONFIGURED);
+        draft.channels.get(0).status.put(ChannelConfig.P_MARKER,
+                ChannelConfig.PropertyStatus.CONFIGURED);
+        draft.channels.get(0).status.put(ChannelConfig.P_MINMAX,
+                ChannelConfig.PropertyStatus.CONFIGURED);
+        draft.extras.put("lastStepIndex", Integer.valueOf(5));
+        draft.extras.put("lastStepLabel", "Quality Check");
+        draft.extras.put("customSettings", Arrays.<Object>asList(
+                Arrays.<Object>asList(Boolean.FALSE),
+                Arrays.<Object>asList(Boolean.TRUE),
+                Arrays.<Object>asList(Boolean.TRUE),
+                Arrays.<Object>asList(Boolean.FALSE),
+                Arrays.<Object>asList(Boolean.FALSE),
+                Arrays.<Object>asList(Boolean.FALSE)));
+        ChannelConfigIO.write(binFolder, draft);
+
+        ResumeQualityCheckAnalysis analysis = new ResumeQualityCheckAnalysis(
+                privateQcSelections(byteImage("resume qc route")));
+        analysis.setSuppressDialogs(true);
+
+        analysis.handleFullCreation(projectRoot.getAbsolutePath(), binFolder, null);
+
+        assertEquals(Collections.<Class<?>>singletonList(ChannelThresholdStage.class),
+                analysis.firstStageByDialog);
+    }
+
+    @Test
     public void interactiveQcStepPlanRunsEachChannelThroughAllSelectedStagesBeforeNextChannel() throws Exception {
         CreateBinFileAnalysis.BinUserConfig cfg = twoChannelConfig();
         boolean[][] customSettings = new boolean[6][2];
@@ -1187,6 +1244,18 @@ public class CreateBinFileAnalysisTest {
                 new ArrayList<String>(Arrays.asList("default", "default")));
     }
 
+    private static void markAllPending(ChannelConfig.Channel channel) {
+        channel.status.put(ChannelConfig.P_NAME, ChannelConfig.PropertyStatus.PENDING);
+        channel.status.put(ChannelConfig.P_COLOR, ChannelConfig.PropertyStatus.PENDING);
+        channel.status.put(ChannelConfig.P_MARKER, ChannelConfig.PropertyStatus.PENDING);
+        channel.status.put(ChannelConfig.P_THRESHOLD, ChannelConfig.PropertyStatus.PENDING);
+        channel.status.put(ChannelConfig.P_SIZE, ChannelConfig.PropertyStatus.PENDING);
+        channel.status.put(ChannelConfig.P_MINMAX, ChannelConfig.PropertyStatus.PENDING);
+        channel.status.put(ChannelConfig.P_INTENSITY, ChannelConfig.PropertyStatus.PENDING);
+        channel.status.put(ChannelConfig.P_SEGMENTATION, ChannelConfig.PropertyStatus.PENDING);
+        channel.status.put(ChannelConfig.P_FILTER, ChannelConfig.PropertyStatus.PENDING);
+    }
+
     private static Object newBinSetupBindings(int channelCount) throws Exception {
         Class<?> type = Class.forName("flash.pipeline.analyses.CreateBinFileAnalysis$BinSetupBindings");
         java.lang.reflect.Constructor<?> constructor = type.getDeclaredConstructor(int.class);
@@ -1302,6 +1371,37 @@ public class CreateBinFileAnalysisTest {
                 customSettings,
                 Integer.valueOf(step),
                 label)).booleanValue();
+    }
+
+    private static boolean invokeShouldExitAfterWizardCancel(CreateBinFileAnalysis analysis,
+                                                            File binFolder,
+                                                            CreateBinFileAnalysis.BinUserConfig cfg,
+                                                            boolean[][] customSettings,
+                                                            int step,
+                                                            String label) throws Exception {
+        Method method = CreateBinFileAnalysis.class.getDeclaredMethod(
+                "shouldExitAfterWizardCancel",
+                File.class,
+                CreateBinFileAnalysis.BinUserConfig.class,
+                boolean[][].class,
+                int.class,
+                String.class);
+        method.setAccessible(true);
+        return ((Boolean) method.invoke(
+                analysis,
+                binFolder,
+                cfg,
+                customSettings,
+                Integer.valueOf(step),
+                label)).booleanValue();
+    }
+
+    private static boolean invokeShouldShowWizardCancelMessage(CreateBinFileAnalysis analysis)
+            throws Exception {
+        Method method = CreateBinFileAnalysis.class.getDeclaredMethod(
+                "shouldShowWizardCancelMessage");
+        method.setAccessible(true);
+        return ((Boolean) method.invoke(analysis)).booleanValue();
     }
 
     private static Double invokeReadThresholdFromImage(CreateBinFileAnalysis analysis,
@@ -1545,6 +1645,41 @@ public class CreateBinFileAnalysisTest {
             }
             if (nextResultIndex < results.size()) {
                 return results.get(nextResultIndex++);
+            }
+            return ConfigQcResult.DONE;
+        }
+    }
+
+    private static final class ResumeQualityCheckAnalysis extends CreateBinFileAnalysis {
+        final List<Class<?>> firstStageByDialog = new ArrayList<Class<?>>();
+        private final List<?> images;
+
+        ResumeQualityCheckAnalysis(List<?> images) {
+            this.images = images;
+        }
+
+        @Override
+        protected int showResumePrompt(WizardResumeState draft) {
+            return 0;
+        }
+
+        @Override
+        @SuppressWarnings({"rawtypes", "unchecked"})
+        protected QcImageOpenResult openImagesForQC(String directory, File binFolder,
+                                                    BinUserConfig cfg, boolean[][] customSettings) {
+            return QcImageOpenResult.ready((List) images, "");
+        }
+
+        @Override
+        protected boolean embeddedConfigQcUiAvailable() {
+            return true;
+        }
+
+        @Override
+        protected ConfigQcResult showEmbeddedConfigQcDialog(ConfigQcContext context,
+                                                            List<ConfigQcStage> stages) {
+            if (stages != null && !stages.isEmpty()) {
+                firstStageByDialog.add(stages.get(0) == null ? null : stages.get(0).getClass());
             }
             return ConfigQcResult.DONE;
         }

@@ -6,7 +6,7 @@ import static org.junit.Assert.assertEquals;
 
 /**
  * Regression coverage for the executor backstop documented in
- * docs/filter-branch-robustness: a bare {@code run("Duplicate", ...)} (no
+ * docs/filter-branch-robustness_COMPLETED: a bare {@code run("Duplicate", ...)} (no
  * ellipsis) dispatches to the Image5D plugin, so the internal filter execution
  * path normalises it to {@code run("Duplicate...", ...)} before running.
  */

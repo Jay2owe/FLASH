@@ -5,7 +5,7 @@ import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinConfigIO;
 import flash.pipeline.cli.CLIConfig;
 import flash.pipeline.decontamination.wizard.SpectralDecontamPreset;
-import flash.pipeline.decontamination.wizard.SpectralDecontaminationWizard;
+import flash.pipeline.decontamination.wizard.SpectralDecontaminationSetup;
 import flash.pipeline.decontamination.features.EnvelopeCorrectionFeature;
 import flash.pipeline.decontamination.features.FullForwardModelFeature;
 import flash.pipeline.decontamination.features.RocThresholdSearchFeature;
@@ -17,6 +17,7 @@ import flash.pipeline.io.SeriesMeta;
 import flash.pipeline.report.QualityReport;
 import flash.pipeline.results.RunIdCsv;
 import flash.pipeline.runrecord.AnalysisRunContext;
+import flash.pipeline.runrecord.ParameterSnapshot;
 import flash.pipeline.runrecord.RunRecordAware;
 import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.FeatureDependencyGate;
@@ -300,6 +301,7 @@ public class SpectralDecontaminationAnalysis implements Analysis, RunRecordAware
         }
 
         IJ.log("Spectral Decontamination config saved: " + describeConfig(selected, binConfig));
+        recordSpectralRunParameters(selected);
         PreviewRunResult previewResult = setup.previewResult;
         if (previewResult == null) {
             previewResult = PreviewRunResult.failure("Preview was not rendered.");
@@ -310,6 +312,34 @@ public class SpectralDecontaminationAnalysis implements Analysis, RunRecordAware
                 runBatch(directory, binConfig, selected, metas, candidates,
                         previewResult.outputFile, setup.renderedPreviews);
         showInteractiveBatchResult(directory, batchResult, previewResult);
+    }
+
+    /**
+     * Capture the confirmed interactive dialog settings into the run record so a
+     * later "Load settings from previous run" can restore them. GUI runs open the
+     * record with an empty parameter map; without this the loader has nothing to
+     * apply and falls back to defaults. Keys mirror
+     * {@link SpectralDecontamPreset#toJsonObject()} so
+     * {@code LoadedRunParameters.SPECTRAL_KEYS} recognises them.
+     */
+    private void recordSpectralRunParameters(SpectralDecontaminationConfig selected) {
+        if (runRecordContext == null) {
+            return;
+        }
+        try {
+            SpectralDecontamPreset preset = new SpectralDecontamPreset(
+                    "GUI Spectral Decontamination run",
+                    "Captured from the Spectral Decontamination dialog",
+                    SpectralDecontamPreset.CURRENT_LIBRARY_VERSION,
+                    selected,
+                    "",
+                    "",
+                    "");
+            runRecordContext.recordParameters(ParameterSnapshot.fromAnalysisPresetMap(
+                    "SpectralDecontaminationAnalysis", preset.toJsonObject()));
+        } catch (RuntimeException e) {
+            IJ.log("[FLASH] Could not capture Spectral Decontamination run parameters: " + e.getMessage());
+        }
     }
 
     BinConfig loadBinConfig(String directory) throws IOException {
@@ -992,7 +1022,7 @@ public class SpectralDecontaminationAnalysis implements Analysis, RunRecordAware
         }
         CLIConfig.SpectralConfig spectral = cliConfig.getSpectral();
         try {
-            SpectralDecontaminationConfig updated = SpectralDecontaminationWizard.applyCliOverrides(
+            SpectralDecontaminationConfig updated = SpectralDecontaminationSetup.applyCliOverrides(
                     config,
                     spectral.getPresetName(),
                     spectral.getGoal(),

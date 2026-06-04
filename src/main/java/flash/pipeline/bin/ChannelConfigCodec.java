@@ -22,6 +22,7 @@ public final class ChannelConfigCodec {
     private static final String K_Z_SLICE_MODE = "zSliceMode";
     private static final String K_Z_SLICE_SELECTIONS = "zSliceSelections";
     private static final String K_CLICK_CAPTURE_USED = "clickCaptureUsed";
+    private static final String K_COMPLETE = "complete";
 
     private static final String K_INDEX = "index";
     private static final String K_NAME = "name";
@@ -58,6 +59,27 @@ public final class ChannelConfigCodec {
         }
     }
 
+    /** The schema version this build writes and can read up to. */
+    public static int schemaVersion() {
+        return SCHEMA_VERSION;
+    }
+
+    /**
+     * Read only the {@code schemaVersion} field without decoding the rest.
+     * Returns -1 when the text is not a parseable JSON object or the field is
+     * missing/invalid. Used to tell a newer-version file apart from a corrupt
+     * one before attempting a full decode.
+     */
+    public static int peekSchemaVersion(String json) {
+        try {
+            return JsonIO.intValue(JsonIO.parseObject(json).get(K_SCHEMA_VERSION), -1);
+        } catch (IOException e) {
+            return -1;
+        } catch (RuntimeException e) {
+            return -1;
+        }
+    }
+
     private static Map<String, Object> toJsonObject(ChannelConfig cfg) {
         Map<String, Object> root = JsonIO.object();
         appendComment(root, cfg.extras);
@@ -68,16 +90,35 @@ public final class ChannelConfigCodec {
         root.put(K_Z_SLICE_MODE, (cfg.zSliceMode == null ? ZSliceMode.FULL : cfg.zSliceMode).name());
         root.put(K_Z_SLICE_SELECTIONS, zSliceSelectionsToJson(cfg.zSliceSelections));
         root.put(K_CLICK_CAPTURE_USED, Boolean.valueOf(cfg.clickCaptureUsed));
+        // Write the completeness flag only when set, so files predating it stay
+        // byte-stable on a read/write cycle (absent => per-property fallback).
+        if (cfg.complete != null) {
+            root.put(K_COMPLETE, cfg.complete);
+        }
         appendUnknown(root, cfg.extras);
         return root;
     }
 
     private static ChannelConfig fromJsonObject(Map<String, Object> root) throws IOException {
         ChannelConfig cfg = new ChannelConfig();
-        cfg.schemaVersion = JsonIO.intValue(root.get(K_SCHEMA_VERSION), -1);
-        if (cfg.schemaVersion != SCHEMA_VERSION) {
-            throw new IOException("Unsupported channel_config schemaVersion: " + cfg.schemaVersion);
+        int onDisk = JsonIO.intValue(root.get(K_SCHEMA_VERSION), -1);
+        if (onDisk < 1) {
+            throw new IOException("Unsupported channel_config schemaVersion: " + onDisk);
         }
+        if (onDisk > SCHEMA_VERSION) {
+            // Made by a newer FLASH than this build understands. Surface a typed
+            // signal so callers can warn and refuse to overwrite, instead of
+            // treating it as blank (which would wipe the user's newer project).
+            throw new NewerSchemaException(onDisk, SCHEMA_VERSION);
+        }
+        if (onDisk < SCHEMA_VERSION) {
+            // Older on-disk shape: bring the parsed map up to the current schema
+            // with ordered, additive migration steps before extracting fields.
+            root = ChannelConfigMigrations.upgrade(root, onDisk);
+        }
+        cfg.originalSchemaVersion = onDisk;
+        cfg.migrated = onDisk < SCHEMA_VERSION;
+        cfg.schemaVersion = SCHEMA_VERSION;
 
         cfg.writerId = JsonIO.stringValue(root.get(K_WRITER_ID));
         cfg.writtenAtMillis = longValue(root.get(K_WRITTEN_AT_MILLIS), 0L);
@@ -85,6 +126,7 @@ public final class ChannelConfigCodec {
         cfg.zSliceMode = ZSliceMode.fromConfigToken(JsonIO.stringValue(root.get(K_Z_SLICE_MODE)));
         cfg.zSliceSelections = zSliceSelectionsFromJson(JsonIO.asObject(root.get(K_Z_SLICE_SELECTIONS)));
         cfg.clickCaptureUsed = JsonIO.booleanValue(root.get(K_CLICK_CAPTURE_USED), false);
+        cfg.complete = booleanOrNull(root.get(K_COMPLETE));
         cfg.extras = extras(root, rootKnownKeys());
         return cfg;
     }
@@ -220,6 +262,16 @@ public final class ChannelConfigCodec {
         return ChannelConfig.PropertyStatus.PENDING;
     }
 
+    private static Boolean booleanOrNull(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Boolean) {
+            return (Boolean) value;
+        }
+        return Boolean.valueOf(Boolean.parseBoolean(String.valueOf(value).trim()));
+    }
+
     private static long longValue(Object value, long fallback) {
         if (value instanceof Number) {
             return ((Number) value).longValue();
@@ -270,6 +322,7 @@ public final class ChannelConfigCodec {
         keys.put(K_Z_SLICE_MODE, Boolean.TRUE);
         keys.put(K_Z_SLICE_SELECTIONS, Boolean.TRUE);
         keys.put(K_CLICK_CAPTURE_USED, Boolean.TRUE);
+        keys.put(K_COMPLETE, Boolean.TRUE);
         return keys;
     }
 

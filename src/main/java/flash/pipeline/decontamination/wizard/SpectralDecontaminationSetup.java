@@ -19,8 +19,6 @@ import flash.pipeline.decontamination.features.VetoMasksFeature;
 import flash.pipeline.io.ConditionManifestIO;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.runrecord.LoadedRunParameters;
-import flash.pipeline.ui.PipelineDialog;
-import ij.IJ;
 
 import java.io.File;
 import java.io.IOException;
@@ -34,62 +32,16 @@ import java.util.Map;
 
 /**
  * Intent-based setup helper for Spectral Decontamination.
+ *
+ * <p>Holds the reusable configuration logic: auto-detection of channel roles,
+ * deriving a {@link SpectralDecontaminationConfig} from an intent
+ * {@link Selection}, CLI overrides, and loading presets from saved runs.
  */
-public class SpectralDecontaminationWizard {
+public class SpectralDecontaminationSetup {
 
-    private static final String TITLE = "Decontamination Helper";
-
-    private final File projectRoot;
-    private final BinConfig binConfig;
-    private final SpectralDecontaminationConfig startingConfig;
-
-    public SpectralDecontaminationWizard(File projectRoot,
-                                         BinConfig binConfig,
-                                         SpectralDecontaminationConfig startingConfig) {
-        this.projectRoot = projectRoot;
-        this.binConfig = binConfig;
-        this.startingConfig = startingConfig == null
-                ? SpectralDecontaminationConfig.defaults(binConfig == null ? 0 : binConfig.numChannels())
-                : startingConfig.copy();
-    }
-
-    public SpectralDecontaminationConfig showDialog() {
-        if (IJ.getInstance() == null) {
-            return null;
-        }
-        if (binConfig == null || binConfig.numChannels() <= 0) {
-            IJ.showMessage(TITLE, "No channels are available. Run Set Up Configuration first.");
-            return null;
-        }
-
-        AutoDetection auto = autoDetect(projectRoot, binConfig);
-        Selection selection = new Selection();
-        selection.contaminationType = askContaminationType(auto.hasExistingObjects);
-        if (selection.contaminationType == null) return null;
-
-        selection.targetChannelIndex = auto.targetChannelIndex >= 0
-                ? auto.targetChannelIndex
-                : Math.max(0, startingConfig.getTargetChannelIndex());
-        selection.bleedThroughChannels.addAll(auto.bleedThroughChannels);
-        selection.autofluorescenceChannels.addAll(auto.autofluorescenceChannels);
-        if (!askChannels(selection, auto)) return null;
-
-        selection.goal = askGoal(selection.contaminationType, auto.hasExistingObjects);
-        if (selection.goal == null) return null;
-
-        selection.hasControls = auto.hasControlConditions;
-        if (shouldAskCalibration(selection)) {
-            selection.calibration = askCalibration();
-            if (selection.calibration == null) return null;
-        }
-
-        if (selection.contaminationType == ContaminationType.BOTH) {
-            selection.strength = askStrength();
-            if (selection.strength == null) return null;
-        }
-
-        if (!askGuards(selection)) return null;
-        return derive(binConfig, auto, selection).config;
+    public SpectralDecontaminationSetup(File projectRoot,
+                                        BinConfig binConfig,
+                                        SpectralDecontaminationConfig startingConfig) {
     }
 
     public static DerivedConfig derive(BinConfig binConfig, AutoDetection auto, Selection selection) {
@@ -255,118 +207,6 @@ public class SpectralDecontaminationWizard {
                 loaded.payload.getPayload(), loaded.result);
     }
 
-    private ContaminationType askContaminationType(boolean hasExistingObjects) {
-        List<String> labels = new ArrayList<String>();
-        labels.add(ContaminationType.BLEED_THROUGH.label);
-        labels.add(ContaminationType.BROAD_AF.label);
-        labels.add(ContaminationType.PATCHY_AF.label);
-        labels.add(ContaminationType.BOTH.label);
-        if (hasExistingObjects) {
-            labels.add(ContaminationType.SCORE_EXISTING.label);
-        }
-        PipelineDialog dialog = screen("What kind of false signal are you trying to remove?");
-        dialog.addChoice("False signal", labels.toArray(new String[labels.size()]), labels.get(0));
-        if (!dialog.showDialog()) return null;
-        return ContaminationType.fromLabel(dialog.getNextChoice());
-    }
-
-    private boolean askChannels(Selection selection, AutoDetection auto) {
-        AutoDetection detected = auto == null ? new AutoDetection() : auto;
-        PipelineDialog dialog = screen("Which channel is the source of the contamination?");
-        String[] channels = channelChoices(binConfig);
-        dialog.addChoice("Target channel", channels, channels[Math.max(0,
-                Math.min(selection.targetChannelIndex, channels.length - 1))]);
-        if (selection.contaminationType == ContaminationType.BLEED_THROUGH
-                || selection.contaminationType == ContaminationType.BOTH
-                || selection.contaminationType == ContaminationType.SCORE_EXISTING) {
-            dialog.addHeader("Bleed-through source channels");
-            for (int i = 0; i < binConfig.numChannels(); i++) {
-                dialog.addToggle(autoDetectedChannelLabel(binConfig, i,
-                                detected.autoDetectedBleedThroughChannels),
-                        selection.bleedThroughChannels.contains(Integer.valueOf(i)));
-            }
-        }
-        if (selection.contaminationType == ContaminationType.BROAD_AF
-                || selection.contaminationType == ContaminationType.PATCHY_AF
-                || selection.contaminationType == ContaminationType.BOTH
-                || selection.contaminationType == ContaminationType.SCORE_EXISTING) {
-            dialog.addHeader("Autofluorescence channels");
-            for (int i = 0; i < binConfig.numChannels(); i++) {
-                dialog.addToggle(autoDetectedChannelLabel(binConfig, i,
-                                detected.autoDetectedAutofluorescenceChannels),
-                        selection.autofluorescenceChannels.contains(Integer.valueOf(i)));
-            }
-        }
-        if (!dialog.showDialog()) return false;
-        selection.targetChannelIndex = indexFromChoice(dialog.getNextChoice());
-        selection.bleedThroughChannels.clear();
-        if (selection.contaminationType == ContaminationType.BLEED_THROUGH
-                || selection.contaminationType == ContaminationType.BOTH
-                || selection.contaminationType == ContaminationType.SCORE_EXISTING) {
-            selection.bleedThroughChannels.addAll(readToggles(dialog, binConfig.numChannels()));
-        }
-        selection.autofluorescenceChannels.clear();
-        if (selection.contaminationType == ContaminationType.BROAD_AF
-                || selection.contaminationType == ContaminationType.PATCHY_AF
-                || selection.contaminationType == ContaminationType.BOTH
-                || selection.contaminationType == ContaminationType.SCORE_EXISTING) {
-            selection.autofluorescenceChannels.addAll(readToggles(dialog, binConfig.numChannels()));
-        }
-        return true;
-    }
-
-    private DownstreamUse askGoal(ContaminationType type, boolean hasExistingObjects) {
-        if (type == ContaminationType.SCORE_EXISTING) {
-            return DownstreamUse.SCORE_OBJECTS;
-        }
-        List<String> labels = new ArrayList<String>();
-        labels.add(DownstreamUse.CLEANED_IMAGE.label);
-        labels.add(DownstreamUse.CLEANED_MASK.label);
-        if (hasExistingObjects) {
-            labels.add(DownstreamUse.SCORE_OBJECTS.label);
-        }
-        labels.add(DownstreamUse.MEASURE_ONLY.label);
-        PipelineDialog dialog = screen("What are you going to do with the cleaned output?");
-        dialog.addChoice("Downstream use", labels.toArray(new String[labels.size()]), labels.get(0));
-        if (!dialog.showDialog()) return null;
-        return DownstreamUse.fromLabel(dialog.getNextChoice());
-    }
-
-    private Calibration askCalibration() {
-        PipelineDialog dialog = screen("You have negative control images. Use them to calibrate the threshold?");
-        dialog.addChoice("Calibration", new String[]{Calibration.ROC.label, Calibration.MANUAL.label},
-                Calibration.ROC.label);
-        if (!dialog.showDialog()) return null;
-        return Calibration.fromLabel(dialog.getNextChoice());
-    }
-
-    private Strength askStrength() {
-        PipelineDialog dialog = screen("How aggressive should the correction be?");
-        dialog.addMessage("Aggressive correction uses a per-image forward model combining autofluorescence and bleed-through terms. Use it when contamination varies by object shape, field position, or channel overlap pattern.");
-        dialog.addChoice("Strength", new String[]{Strength.STANDARD.label, Strength.AGGRESSIVE.label},
-                Strength.STANDARD.label);
-        if (!dialog.showDialog()) return null;
-        return Strength.fromLabel(dialog.getNextChoice());
-    }
-
-    private boolean askGuards(Selection selection) {
-        PipelineDialog dialog = screen("Handle saturated pixels and small noise specks?");
-        dialog.addToggle("Exclude saturated pixels from correction fitting", selection.saturationExclusion);
-        dialog.addToggle("Remove small connected components from the final mask", selection.sizeFilter);
-        dialog.addNumericField("Minimum voxels", selection.minimumVoxels, 0);
-        if (!dialog.showDialog()) return false;
-        selection.saturationExclusion = dialog.getNextBoolean();
-        selection.sizeFilter = dialog.getNextBoolean();
-        selection.minimumVoxels = Math.max(1, (int) Math.round(dialog.getNextNumber()));
-        return true;
-    }
-
-    private static PipelineDialog screen(String title) {
-        PipelineDialog dialog = new PipelineDialog(TITLE);
-        dialog.addHeader(title);
-        return dialog;
-    }
-
     private static boolean shouldAskCalibration(Selection selection) {
         return selection != null
                 && selection.hasControls
@@ -484,8 +324,8 @@ public class SpectralDecontaminationWizard {
 
     private static String normalizeScienceText(String text) {
         return (text == null ? "" : text.toLowerCase(Locale.US))
-                .replace("\u03b2", "beta")
-                .replace("\u0392", "beta");
+                .replace("β", "beta")
+                .replace("Β", "beta");
     }
 
     private static boolean hasExistingObjectCsv(File projectRoot) {
@@ -539,51 +379,6 @@ public class SpectralDecontaminationWizard {
         return name == null ? "" : name;
     }
 
-    private static String channelLabel(BinConfig binConfig, int index) {
-        String name = channelName(binConfig, index);
-        if (name.trim().isEmpty()) {
-            name = "Channel " + (index + 1);
-        }
-        return (index + 1) + " - " + name;
-    }
-
-    private static String autoDetectedChannelLabel(BinConfig binConfig,
-                                                   int index,
-                                                   List<Integer> autoDetected) {
-        String label = channelLabel(binConfig, index);
-        return autoDetected != null && autoDetected.contains(Integer.valueOf(index))
-                ? label + " (auto-detected)"
-                : label;
-    }
-
-    private static String[] channelChoices(BinConfig binConfig) {
-        String[] choices = new String[binConfig.numChannels()];
-        for (int i = 0; i < choices.length; i++) {
-            choices[i] = channelLabel(binConfig, i);
-        }
-        return choices;
-    }
-
-    private static int indexFromChoice(String choice) {
-        if (choice == null) return -1;
-        int separator = choice.indexOf(" - ");
-        if (separator > 0) {
-            try {
-                return Integer.parseInt(choice.substring(0, separator).trim()) - 1;
-            } catch (NumberFormatException ignored) {
-            }
-        }
-        return -1;
-    }
-
-    private static List<Integer> readToggles(PipelineDialog dialog, int count) {
-        List<Integer> selected = new ArrayList<Integer>();
-        for (int i = 0; i < count; i++) {
-            if (dialog.getNextBoolean()) selected.add(Integer.valueOf(i));
-        }
-        return selected;
-    }
-
     public enum ContaminationType {
         BLEED_THROUGH("Bleed-through from a bright neighbouring channel"),
         BROAD_AF("Broad tissue autofluorescence (uniform across the slice)"),
@@ -595,13 +390,6 @@ public class SpectralDecontaminationWizard {
 
         ContaminationType(String label) {
             this.label = label;
-        }
-
-        static ContaminationType fromLabel(String label) {
-            for (ContaminationType type : values()) {
-                if (type.label.equals(label)) return type;
-            }
-            return BLEED_THROUGH;
         }
 
         static ContaminationType fromCli(String value) {
@@ -625,13 +413,6 @@ public class SpectralDecontaminationWizard {
         DownstreamUse(String label) {
             this.label = label;
         }
-
-        static DownstreamUse fromLabel(String label) {
-            for (DownstreamUse use : values()) {
-                if (use.label.equals(label)) return use;
-            }
-            return CLEANED_IMAGE;
-        }
     }
 
     public enum Calibration {
@@ -643,10 +424,6 @@ public class SpectralDecontaminationWizard {
         Calibration(String label) {
             this.label = label;
         }
-
-        static Calibration fromLabel(String label) {
-            return ROC.label.equals(label) ? ROC : MANUAL;
-        }
     }
 
     public enum Strength {
@@ -657,10 +434,6 @@ public class SpectralDecontaminationWizard {
 
         Strength(String label) {
             this.label = label;
-        }
-
-        static Strength fromLabel(String label) {
-            return AGGRESSIVE.label.equals(label) ? AGGRESSIVE : STANDARD;
         }
     }
 

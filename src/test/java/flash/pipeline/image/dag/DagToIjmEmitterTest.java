@@ -112,7 +112,7 @@ public class DagToIjmEmitterTest {
         // FilterMacroParser, so it serves as the canonical "unknown but legitimate
         // run() target" the loader must preserve through emit -> reload.
         //
-        // REGRESSION GUARD (docs/filter-branch-robustness): the command name must
+        // REGRESSION GUARD (docs/filter-branch-robustness_COMPLETED): the command name must
         // round-trip VERBATIM, ellipsis included. Stripping "..." here is what
         // turned "Duplicate..." into "Duplicate" -> Image5D dispatch crash.
         String userMacro = "run(\"Despeckle...\");\n";

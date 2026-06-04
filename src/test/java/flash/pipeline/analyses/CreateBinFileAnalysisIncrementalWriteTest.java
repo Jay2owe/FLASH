@@ -18,6 +18,7 @@ import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 public class CreateBinFileAnalysisIncrementalWriteTest {
@@ -63,6 +64,21 @@ public class CreateBinFileAnalysisIncrementalWriteTest {
                 cfg.channels.get(0).statusOf(ChannelConfig.P_THRESHOLD));
         assertEquals(ChannelConfig.PropertyStatus.PENDING,
                 cfg.channels.get(0).statusOf(ChannelConfig.P_INTENSITY));
+    }
+
+    @Test
+    public void incrementalWriteDoesNotMarkComplete() throws Exception {
+        // No-leak invariant: mid-wizard writes must never set complete=true, so a
+        // crash before the final commit leaves a resumable (not falsely finished)
+        // config. complete=true is set only at persistCommit.
+        File binFolder = temp.newFolder("incomplete-flag");
+
+        invokePersistIncremental(new CreateBinFileAnalysis(), binFolder, twoChannelConfig(), null,
+                1, "Channel Identity", -1, null);
+
+        ChannelConfig cfg = ChannelConfigIO.read(FlashProjectLayout.settingsDir(binFolder));
+        assertNull(cfg.complete);
+        assertFalse(ChannelConfigIO.isComplete(cfg));
     }
 
     @Test

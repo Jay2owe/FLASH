@@ -11,7 +11,7 @@ import static org.junit.Assert.assertTrue;
 
 /**
  * Regression coverage for the duplicate / branch corruption documented in
- * docs/filter-branch-robustness.
+ * docs/filter-branch-robustness_COMPLETED.
  */
 public class IjmToDagLoaderDuplicateTest {
 

@@ -1,6 +1,6 @@
 package flash.pipeline.analyses;
 
-import flash.pipeline.analyses.wizard.SpatialAnalysisWizard;
+import flash.pipeline.analyses.wizard.SpatialSetupConfig;
 import flash.pipeline.io.CalibrationIO;
 import flash.pipeline.io.CsvTableIO;
 import flash.pipeline.io.FlashProjectLayout;
@@ -356,7 +356,7 @@ public class SpatialAnalysisObjectTextureTest {
     }
 
     private static void runTexture(File root) {
-        SpatialAnalysisWizard.DerivedConfig config = new SpatialAnalysisWizard.DerivedConfig();
+        SpatialSetupConfig.DerivedConfig config = new SpatialSetupConfig.DerivedConfig();
         config.doObjectGLCM = true;
         config.doObjectFractal = true;
         config.doObjectTextureClass = true;
@@ -369,7 +369,7 @@ public class SpatialAnalysisObjectTextureTest {
     }
 
     private static void runNative3DTexture(File root) {
-        SpatialAnalysisWizard.DerivedConfig config = new SpatialAnalysisWizard.DerivedConfig();
+        SpatialSetupConfig.DerivedConfig config = new SpatialSetupConfig.DerivedConfig();
         config.doNative3DTexture = true;
         config.textureClassK = 2;
         SpatialAnalysis analysis = new SpatialAnalysis();
@@ -380,7 +380,7 @@ public class SpatialAnalysisObjectTextureTest {
     }
 
     private static void runComplexMorphometry(File root) {
-        SpatialAnalysisWizard.DerivedConfig config = new SpatialAnalysisWizard.DerivedConfig();
+        SpatialSetupConfig.DerivedConfig config = new SpatialSetupConfig.DerivedConfig();
         config.do3DMorphology = true;
         config.doCompositeIndices = true;
         SpatialAnalysis analysis = new SpatialAnalysis();

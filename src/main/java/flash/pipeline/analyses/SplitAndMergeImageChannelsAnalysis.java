@@ -36,6 +36,7 @@ import flash.pipeline.results.SplitAndMergeDetailsWriter;
 import flash.pipeline.runrecord.AnalysisRunContext;
 import flash.pipeline.runrecord.LoadedRunParameterApplier;
 import flash.pipeline.runrecord.LoadedRunParameters;
+import flash.pipeline.runrecord.ParameterSnapshot;
 import flash.pipeline.runrecord.RunRecordAware;
 import flash.pipeline.runrecord.ui.LoadFromRunButton;
 import flash.pipeline.runtime.DependencyId;
@@ -484,6 +485,12 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis, RunRecordAw
         updateBinMinMax(directory, mdr.processMethodPerCh, mdr.customMinMaxPerCh, nCh);
         IJ.log("  - Min-max display ranges synced to channel_config.json");
 
+        // Capture the confirmed configuration into the run record so a later
+        // "Load settings from previous run" can restore it. We re-read after the
+        // min-max sync above so display_min_max reflects the dialog's chosen
+        // presentation display ranges, matching what the load applier reads back.
+        recordSplitMergeRunParameters(loadBinConfig(directory));
+
         try {
             File detailsFile = AnalysisDetailsWriter.write(
                     detailsRoot,
@@ -559,6 +566,25 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis, RunRecordAw
 
     BinConfig loadBinConfig(String directory) {
         return BinConfigIO.readPartialFromDirectory(directory);
+    }
+
+    /**
+     * Records the confirmed Make Presentation Images configuration into the run
+     * record. Interactive GUI runs would otherwise write an empty parameter map,
+     * leaving "Load settings from previous run" nothing to restore. Keys mirror
+     * {@link ParameterSnapshot#fromBinConfig(BinConfig)} (flat bin keys including
+     * {@code display_min_max}) so {@link LoadedRunParameters#binConfig(java.util.Map)}
+     * recognises them on load.
+     */
+    private void recordSplitMergeRunParameters(BinConfig cfg) {
+        if (runRecordContext == null || cfg == null) {
+            return;
+        }
+        try {
+            runRecordContext.recordParameters(ParameterSnapshot.fromBinConfig(cfg));
+        } catch (RuntimeException e) {
+            IJ.log("[FLASH] Could not capture Make Presentation Images run parameters: " + e.getMessage());
+        }
     }
 
     // ── Pre-flight worklist builder ──

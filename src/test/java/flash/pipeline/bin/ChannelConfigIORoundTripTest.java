@@ -68,6 +68,53 @@ public class ChannelConfigIORoundTripTest {
         assertNull(ChannelConfigIO.read(settingsDir));
     }
 
+    @Test
+    public void allCommittedWithoutCompleteFlagIsComplete() {
+        ChannelConfig cfg = committedConfig("DAPI", "Blue");
+        assertNull(cfg.complete);                       // file predates the flag
+        assertTrue(ChannelConfigIO.isComplete(cfg));    // per-property fallback
+    }
+
+    @Test
+    public void configuredButNotCommittedIsIncompleteUntilFlagSet() {
+        ChannelConfig cfg = committedConfig("DAPI", "Blue");
+        cfg.channels.get(0).status.put(ChannelConfig.P_THRESHOLD,
+                ChannelConfig.PropertyStatus.CONFIGURED);
+        assertFalse(ChannelConfigIO.isComplete(cfg));   // still resumable
+        cfg.complete = Boolean.TRUE;
+        assertTrue(ChannelConfigIO.isComplete(cfg));    // explicit flag wins
+    }
+
+    @Test
+    public void explicitIncompleteFlagOverridesCommittedStatuses() {
+        ChannelConfig cfg = committedConfig("DAPI", "Blue");
+        cfg.complete = Boolean.FALSE;
+        assertFalse(ChannelConfigIO.isComplete(cfg));
+    }
+
+    @Test
+    public void fromBinConfigMarksComplete() {
+        BinConfig bin = new BinConfig();
+        bin.channelNames.add("DAPI");
+        bin.channelColors.add("Blue");
+
+        ChannelConfig cfg = ChannelConfigIO.fromBinConfig(bin);
+
+        assertEquals(Boolean.TRUE, cfg.complete);
+        assertTrue(ChannelConfigIO.isComplete(cfg));
+    }
+
+    @Test
+    public void completeFlagSurvivesWriteRead() throws Exception {
+        File settingsDir = temp.newFolder("complete-flag");
+        ChannelConfig cfg = committedConfig("DAPI", "Blue");
+        cfg.complete = Boolean.TRUE;
+
+        ChannelConfigIO.write(settingsDir, cfg);
+
+        assertEquals(Boolean.TRUE, ChannelConfigIO.read(settingsDir).complete);
+    }
+
     static ChannelConfig committedConfig(String name, String color) {
         ChannelConfig cfg = new ChannelConfig();
         ChannelConfig.Channel channel = new ChannelConfig.Channel();

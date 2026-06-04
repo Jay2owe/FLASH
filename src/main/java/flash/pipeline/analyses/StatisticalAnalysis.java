@@ -1,10 +1,8 @@
 package flash.pipeline.analyses;
 
 import ij.IJ;
-import flash.pipeline.analyses.wizard.AggregationConfig;
 import flash.pipeline.analyses.wizard.StatisticsPreset;
 import flash.pipeline.analyses.wizard.StatisticsPresetIO;
-import flash.pipeline.analyses.wizard.StatisticsWizard;
 import flash.pipeline.cli.CLIConfig;
 import flash.pipeline.io.ConditionManifestIO;
 import flash.pipeline.io.CsvSupport;
@@ -17,8 +15,6 @@ import flash.pipeline.stats.MetricStatisticsEngine;
 import flash.pipeline.stats.StatisticRow;
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.wizard.ConditionManifestPanel;
-import flash.pipeline.ui.wizard.SetupHelperButton;
-import flash.pipeline.ui.wizard.WizardFlow;
 
 import javax.swing.JButton;
 import javax.swing.JComboBox;
@@ -1110,7 +1106,7 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
         final ConditionManifestPanel manifest = new ConditionManifestPanel(animals, prefill);
 
         PipelineDialog pd = new PipelineDialog("Statistical Analysis \u2014 Condition Assignment", PipelineDialog.Phase.EXPORT);
-        pd.addComponent(buildStatisticsHelperRow(pd, directory, manifest));
+        pd.addComponent(buildStatisticsPresetRow(directory));
         pd.addComponent(manifest.getComponent());
 
         if (!pd.showDialog()) return null;
@@ -1124,9 +1120,7 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
         return assignments;
     }
 
-    private JComponent buildStatisticsHelperRow(final PipelineDialog parentDialog,
-                                                final String directory,
-                                                final ConditionManifestPanel manifest) {
+    private JComponent buildStatisticsPresetRow(final String directory) {
         final JComboBox<String> presetCombo =
                 new JComboBox<String>(listStatisticsPresetNames(directory));
         presetCombo.setMaximumSize(new Dimension(260, 24));
@@ -1138,20 +1132,11 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
         savePreset.setToolTipText("Save the current statistics configuration as a named preset.");
         savePreset.addActionListener(e -> handleSaveAsPreset(directory, presetCombo));
 
-        SetupHelperButton.WizardLauncher launcher = new SetupHelperButton.WizardLauncher() {
-            @Override
-            public void run() {
-                parentDialog.runChildWorkflow(new Runnable() {
-                    @Override public void run() {
-                        runStatisticsHelper(directory, manifest);
-                    }
-                });
-            }
-        };
-        JPanel row = SetupHelperButton.createHeaderRow(
-                "Statistics", presetCombo, savePreset, launcher);
-        applyHelperButtonTooltip(row,
-                "Configures hypothesis tests; takes effect when you click OK on this dialog.");
+        javax.swing.JPanel row =
+                new javax.swing.JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 6, 0));
+        row.setOpaque(false);
+        row.add(presetCombo);
+        row.add(savePreset);
 
         presetCombo.addActionListener(e -> {
             Object selected = presetCombo.getSelectedItem();
@@ -1160,23 +1145,6 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
             }
         });
         return row;
-    }
-
-    private static void applyHelperButtonTooltip(JComponent root, String tooltip) {
-        if (root == null) return;
-        Component[] children = root.getComponents();
-        for (Component child : children) {
-            if (child instanceof JButton) {
-                JButton button = (JButton) child;
-                String text = button.getText();
-                if (text != null && text.contains("Helper")) {
-                    button.setToolTipText(tooltip);
-                }
-            }
-            if (child instanceof JComponent) {
-                applyHelperButtonTooltip((JComponent) child, tooltip);
-            }
-        }
     }
 
     private String[] listStatisticsPresetNames(String directory) {
@@ -1192,35 +1160,6 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
             IJ.log("WARNING: Could not list Statistics presets: " + e.getMessage());
         }
         return labels.toArray(new String[labels.size()]);
-    }
-
-    private void runStatisticsHelper(String directory, ConditionManifestPanel manifest) {
-        if (!canShowGuiDialog(suppressDialogs, cliConfig, GraphicsEnvironment.isHeadless())) return;
-        try {
-            LinkedHashMap<String, String> currentAssignments = manifest.collectAssignments();
-            List<Integer> groupSizes = computeGroupSizes(currentAssignments);
-            int conditionCount = countConditions(currentAssignments);
-            List<String> availableMetrics = readAvailableMetricColumns(directory);
-
-            StatisticsWizard wizard = new StatisticsWizard(
-                    WizardFlow.MainPanelBinding.NULL,
-                    new AggregationConfig(),
-                    availableMetrics,
-                    conditionCount,
-                    groupSizes,
-                    false);
-            wizard.run();
-            if (!wizard.wasFinished()) {
-                return;
-            }
-            StatisticsConfig derived = wizard.deriveCurrentConfig();
-            if (derived != null) {
-                this.statisticsConfig = derived;
-                logHelperApplied("wizard", derived);
-            }
-        } catch (Exception e) {
-            IJ.handleException(e);
-        }
     }
 
     private void applyPresetByName(String directory, String presetName) {
@@ -1287,56 +1226,6 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
             sb.append(", metricAggregation=").append(cfg.metricAggregationOverrides);
         }
         IJ.log(sb.toString());
-    }
-
-    private static int countConditions(Map<String, String> assignments) {
-        if (assignments == null) return 0;
-        Set<String> distinct = new LinkedHashSet<String>();
-        for (String cond : assignments.values()) {
-            if (cond != null && !cond.trim().isEmpty()) distinct.add(cond.trim());
-        }
-        return distinct.size();
-    }
-
-    private static List<Integer> computeGroupSizes(Map<String, String> assignments) {
-        if (assignments == null) return new ArrayList<Integer>();
-        LinkedHashMap<String, Integer> counts = new LinkedHashMap<String, Integer>();
-        for (String cond : assignments.values()) {
-            if (cond == null || cond.trim().isEmpty()) continue;
-            String key = cond.trim();
-            Integer current = counts.get(key);
-            counts.put(key, Integer.valueOf(current == null ? 1 : current.intValue() + 1));
-        }
-        return new ArrayList<Integer>(counts.values());
-    }
-
-    private static List<String> readAvailableMetricColumns(String directory) {
-        List<String> out = new ArrayList<String>();
-        File csv = existingProjectSummaryFile(FlashProjectLayout.forDirectory(directory),
-                FlashProjectLayout.MASTER_OBJECTS_FILENAME);
-        if (csv == null) {
-            return out;
-        }
-        try {
-            CsvSupport.RecordReader reader = CsvSupport.openRecordReader(csv);
-            try {
-                CsvSupport.Record header = reader.readRecord();
-                if (header == null) return out;
-                String[] cols = CsvSupport.parseRecord(header.text);
-                for (String col : cols) {
-                    if (col == null) continue;
-                    String trimmed = col.trim();
-                    if (trimmed.isEmpty()) continue;
-                    if (isMetricColumn(trimmed)) {
-                        out.add(trimmed);
-                    }
-                }
-            } finally {
-                reader.close();
-            }
-        } catch (IOException ignored) {
-        }
-        return out;
     }
 
     /**

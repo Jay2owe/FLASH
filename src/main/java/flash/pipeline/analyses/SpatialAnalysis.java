@@ -13,7 +13,7 @@ import flash.pipeline.analyses.spatial.SectionKey;
 import flash.pipeline.analyses.spatial.SpatialArtifactScanner;
 import flash.pipeline.analyses.spatial.SpatialArtifactStatus;
 import flash.pipeline.analyses.spatial.SubAnalysis;
-import flash.pipeline.analyses.wizard.SpatialAnalysisWizard;
+import flash.pipeline.analyses.wizard.SpatialSetupConfig;
 import flash.pipeline.analyses.wizard.SpatialPreset;
 import flash.pipeline.analyses.wizard.SpatialPresetIO;
 import flash.pipeline.atlas.AtlasRegionColumns;
@@ -50,9 +50,13 @@ import flash.pipeline.results.RunIdCsv;
 import flash.pipeline.runrecord.AnalysisRunContext;
 import flash.pipeline.runrecord.LoadedRunParameterApplier;
 import flash.pipeline.runrecord.LoadedRunParameters;
+import flash.pipeline.runrecord.ParameterSnapshot;
 import flash.pipeline.runrecord.RunRecordAware;
 import flash.pipeline.runrecord.ui.LoadFromRunButton;
 import flash.pipeline.runtime.DependencyId;
+import flash.pipeline.runtime.DependencyRegistry;
+import flash.pipeline.runtime.DependencySpec;
+import flash.pipeline.runtime.DependencyStatus;
 import flash.pipeline.runtime.FeatureDependencyGate;
 import flash.pipeline.spatial.CellClustering;
 import flash.pipeline.spatial.DensityHeatmapGenerator;
@@ -61,15 +65,17 @@ import flash.pipeline.spatial.SpatialStatistics;
 import flash.pipeline.spatial.VoronoiAnalysis;
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.ToggleSwitch;
-import flash.pipeline.ui.wizard.SetupHelperButton;
 
 import javax.swing.JButton;
 import javax.swing.JComboBox;
+import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
 
+import java.awt.Color;
 import java.awt.Dimension;
+import java.awt.Font;
 import java.awt.GraphicsEnvironment;
 import java.io.File;
 import java.io.IOException;
@@ -109,6 +115,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
     private static final int DEFAULT_CLUSTER_MAX_K = 10;
     private static final String DEFAULT_HEATMAP_LUT = "Fire";
     private static final String SPATIAL_PRESET_PLACEHOLDER = "(choose preset)";
+    private static final Color DEPENDENCY_LOCK_COLOR = new Color(183, 28, 28);
     private static final String WINDOW_SOURCE_DERIVED = "derived_from_centroids";
     private static final String XM_UM = "XM_um";
     private static final String YM_UM = "YM_um";
@@ -227,7 +234,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
     private boolean verboseLogging = false;
     private int parallelThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
     private CLIConfig cliConfig = null;
-    private SpatialAnalysisWizard.DerivedConfig configuredOptions = null;
+    private SpatialSetupConfig.DerivedConfig configuredOptions = null;
     private SpatialArtifactStatus spatialArtifactStatus = null;
     private boolean forceRerun = false;
     private AnalysisRunContext runRecordContext = null;
@@ -236,6 +243,24 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         PROCEED,
         RECONFIGURE,
         ABORT
+    }
+
+    static final class SpatialDependencyLock {
+        private final boolean locked;
+        private final String message;
+
+        SpatialDependencyLock(boolean locked, String message) {
+            this.locked = locked;
+            this.message = message == null ? "" : message;
+        }
+
+        boolean isLocked() {
+            return locked;
+        }
+
+        String message() {
+            return message;
+        }
     }
 
     private static final class SpatialExecutionContext {
@@ -636,7 +661,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         this.runRecordContext = context;
     }
 
-    public void setWizardConfig(SpatialAnalysisWizard.DerivedConfig config) {
+    public void setWizardConfig(SpatialSetupConfig.DerivedConfig config) {
         this.configuredOptions = config;
     }
 
@@ -800,8 +825,8 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         int clusterK = 0; // 0 = auto-detect
         int textureClassK = ObjectTextureFeatures.DEFAULT_K;
 
-        SpatialAnalysisWizard.DerivedConfig effectiveOptions = configuredOptions;
-        SpatialAnalysisWizard.DerivedConfig cliDerived = loadCliSpatialConfig(directory);
+        SpatialSetupConfig.DerivedConfig effectiveOptions = configuredOptions;
+        SpatialSetupConfig.DerivedConfig cliDerived = loadCliSpatialConfig(directory);
         if (cliDerived != null) {
             effectiveOptions = cliDerived;
         }
@@ -813,7 +838,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
             }
         }
         if (effectiveOptions != null) {
-            SpatialAnalysisWizard.enforceDependencies(effectiveOptions,
+            SpatialSetupConfig.enforceDependencies(effectiveOptions,
                     firstSeriesInfoOrNull(directory), calibrationIsAvailable(directory));
             doDistances = effectiveOptions.doDistances;
             doLineDistance = effectiveOptions.doLineDistance && hasLineRoiSets;
@@ -840,20 +865,37 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
             applyConfiguredMarkerThresholds(effectiveOptions, channelNames);
         }
 
+        SpatialDependencyLock jtsLock =
+                dependencyLock(DependencyId.JTS_CORE, "Voronoi territory analysis");
+        SpatialDependencyLock mcib3dLock =
+                dependencyLock(DependencyId.MCIB3D_CORE, "3D shape features and spatial morphometry");
         if (forceRerun) {
             IJ.log("--- Force re-run enabled: existing spatial outputs will be ignored ---");
             doDistances = true;
             doLineDistance = hasLineRoiSets;
             doSpatialStats = true;
             doCpc = true;
-            doVoronoi = true;
             doHeatmaps = true;
             doPhenotyping = true;
             doMorphology = true;
-            do3DShapeFeatures = true;
-            doCompositeIndices = true;
-            doPopMorphometrics = true;
-            doSpatialMorphometrics = true;
+            if (jtsLock.isLocked()) {
+                doVoronoi = false;
+                IJ.log("[FLASH] Force re-run skipped Voronoi territory analysis: " + jtsLock.message());
+            } else {
+                doVoronoi = true;
+            }
+            if (mcib3dLock.isLocked()) {
+                do3DShapeFeatures = false;
+                doCompositeIndices = false;
+                doPopMorphometrics = false;
+                doSpatialMorphometrics = false;
+                IJ.log("[FLASH] Force re-run skipped 3D morphometry outputs: " + mcib3dLock.message());
+            } else {
+                do3DShapeFeatures = true;
+                doCompositeIndices = true;
+                doPopMorphometrics = true;
+                doSpatialMorphometrics = true;
+            }
         }
         this.forceRerun = forceRerun;
 
@@ -1268,12 +1310,12 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         execute(directory);
     }
 
-    SpatialAnalysisWizard.DerivedConfig showOptionsDialogForChainedRun(String directory,
+    SpatialSetupConfig.DerivedConfig showOptionsDialogForChainedRun(String directory,
                                                                        List<String> channelNames) {
         return showOptionsDialogForChainedRun(directory, channelNames, false, false);
     }
 
-    SpatialAnalysisWizard.DerivedConfig showOptionsDialogForChainedRun(String directory,
+    SpatialSetupConfig.DerivedConfig showOptionsDialogForChainedRun(String directory,
                                                                        List<String> channelNames,
                                                                        boolean lockVolumetricColoc,
                                                                        boolean lockCpcColoc) {
@@ -1297,24 +1339,24 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                 lockVolumetricColoc, lockCpcColoc);
     }
 
-    private SpatialAnalysisWizard.DerivedConfig showSpatialOptionsDialog(
+    private SpatialSetupConfig.DerivedConfig showSpatialOptionsDialog(
             String directory,
             final List<String> channelNames,
             SpatialObjectDataAvailability existingObjectData,
             List<String> availableLineSets,
             SpatialArtifactStatus artifactStatus,
-            SpatialAnalysisWizard.DerivedConfig initialOptions) {
+            SpatialSetupConfig.DerivedConfig initialOptions) {
         return showSpatialOptionsDialog(directory, channelNames, existingObjectData,
                 availableLineSets, artifactStatus, initialOptions, false, false);
     }
 
-    private SpatialAnalysisWizard.DerivedConfig showSpatialOptionsDialog(
+    private SpatialSetupConfig.DerivedConfig showSpatialOptionsDialog(
             String directory,
             final List<String> channelNames,
             SpatialObjectDataAvailability existingObjectData,
             List<String> availableLineSets,
             SpatialArtifactStatus artifactStatus,
-            SpatialAnalysisWizard.DerivedConfig initialOptions,
+            SpatialSetupConfig.DerivedConfig initialOptions,
             boolean lockVolumetricColoc,
             boolean lockCpcColoc) {
         if (channelNames == null || channelNames.isEmpty()) {
@@ -1363,6 +1405,10 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
             final SpatialDialogBindings spatialBindings = new SpatialDialogBindings();
             spatialBindings.lockVolColocFromObjectAnalysis = lockVolumetricColoc;
             spatialBindings.lockCpcFromObjectAnalysis = lockCpcColoc;
+            spatialBindings.jtsLock = dependencyLock(
+                    DependencyId.JTS_CORE, "Voronoi territory analysis");
+            spatialBindings.mcib3dLock = dependencyLock(
+                    DependencyId.MCIB3D_CORE, "3D shape features and spatial morphometry");
             spatialBindings.forceRerunToggle = opts.addToggle(
                     "Force re-run all sub-analyses (ignore existing outputs)", false);
             opts.addHelpText("Recomputes selected spatial outputs even when matching files or columns already exist.");
@@ -1370,7 +1416,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                     new SpatialConfigApplier() {
                         @Override
                         public void apply(String selectedPresetName,
-                                          SpatialAnalysisWizard.DerivedConfig derived) {
+                                          SpatialSetupConfig.DerivedConfig derived) {
                             applySpatialConfigToDialog(derived, channelNames,
                                     spatialBindings, selectedPresetName);
                         }
@@ -1438,11 +1484,13 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
 
             opts.beginAdvancedSection("spatial");
             opts.addSetupHelpHeader("Voronoi Tessellation", SpatialHelpCatalog.VORONOI);
-            spatialBindings.doVoronoiToggle = opts.addToggle(
+            spatialBindings.doVoronoiToggle = addDependencyAwareToggle(opts,
                     decorateArtifactLabel("Voronoi territory analysis", artifactStatus, SubAnalysis.VORONOI),
-                    defaultForArtifactStatus(artifactStatus, SubAnalysis.VORONOI, doVoronoi));
+                    defaultForArtifactStatus(artifactStatus, SubAnalysis.VORONOI, doVoronoi),
+                    spatialBindings.jtsLock);
             opts.addHelpText("Computes Voronoi territories per object: territory area, "
                     + "neighbor count, and inter-channel interaction matrix with permutation test.");
+            addDependencyLockHelpText(opts, spatialBindings.jtsLock);
             opts.endAdvancedSection();
 
             addMorphometricControls(opts, spatialBindings, doMorphology, do3DShapeFeatures,
@@ -1459,6 +1507,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
             opts.addMessage("Toggles marked \"already present\" will be skipped. "
                     + "Tick \"Force re-run\" to recompute everything.");
 
+            applySpatialDependencyLocks(spatialBindings);
             updateVolumetricThresholdEnablement(spatialBindings);
             updateMorphometricDependencyControls(spatialBindings);
 
@@ -1468,9 +1517,9 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                                 Map<String, Object> parameters) {
                             LoadedRunParameters.PresetLoad<SpatialPreset> load =
                                     LoadedRunParameters.spatialPreset(parameters);
-                            SpatialAnalysisWizard.DerivedConfig derived =
-                                    SpatialAnalysisWizard.fromPreset(load.payload);
-                            SpatialAnalysisWizard.enforceDependencies(derived,
+                            SpatialSetupConfig.DerivedConfig derived =
+                                    SpatialSetupConfig.fromPreset(load.payload);
+                            SpatialSetupConfig.enforceDependencies(derived,
                                     firstSeriesInfoOrNull(directory),
                                     calibrationIsAvailable(directory));
                             applySpatialConfigToDialog(derived, channelNames,
@@ -1524,10 +1573,11 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
             if (dependencyAction == RuntimeDependencyAction.ABORT) {
                 return null;
             }
+            recordSpatialRunParameters(spatialBindings);
             dialogDone = true;
         }
 
-        SpatialAnalysisWizard.DerivedConfig config = new SpatialAnalysisWizard.DerivedConfig();
+        SpatialSetupConfig.DerivedConfig config = new SpatialSetupConfig.DerivedConfig();
         config.doDistances = doDistances;
         config.doLineDistance = doLineDistance && hasLineRoiSets;
         config.doSpatialStats = doSpatialStats;
@@ -1555,7 +1605,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         return config;
     }
 
-    private void applyConfiguredMarkerThresholds(SpatialAnalysisWizard.DerivedConfig config,
+    private void applyConfiguredMarkerThresholds(SpatialSetupConfig.DerivedConfig config,
                                                  List<String> channelNames) {
         if (config == null || channelNames == null) {
             return;
@@ -1578,6 +1628,88 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
             }
         }
         return DEFAULT_COLOC_THRESHOLD;
+    }
+
+    private static SpatialDependencyLock dependencyLock(DependencyId id, String requirementDisplayName) {
+        return dependencyLockFromStatus(id, FeatureDependencyGate.getStatus(id), requirementDisplayName);
+    }
+
+    static SpatialDependencyLock dependencyLockFromStatus(DependencyId id,
+                                                          DependencyStatus status,
+                                                          String requirementDisplayName) {
+        DependencySpec spec = id == null ? null : DependencyRegistry.get(id);
+        String dependencyName = spec == null ? String.valueOf(id) : spec.getDisplayName();
+        if (status == null || status.isPresent()) {
+            return new SpatialDependencyLock(false, "");
+        }
+
+        String requirement = requirementDisplayName == null || requirementDisplayName.trim().isEmpty()
+                ? "This option"
+                : requirementDisplayName.trim();
+        String state = status.isError() ? "unavailable" : "missing";
+        StringBuilder message = new StringBuilder();
+        message.append("Locked: ").append(requirement)
+                .append(" requires ").append(dependencyName)
+                .append(", but it is ").append(state).append('.');
+        String detail = status.getDetailMessage();
+        if (detail != null && !detail.trim().isEmpty()) {
+            message.append(' ').append(detail.trim());
+        }
+        if (spec != null && spec.getNonFixableReason() != null
+                && !spec.getNonFixableReason().trim().isEmpty()) {
+            message.append(' ').append(spec.getNonFixableReason().trim());
+        }
+        return new SpatialDependencyLock(true, message.toString());
+    }
+
+    private static ToggleSwitch addDependencyAwareToggle(PipelineDialog opts,
+                                                         String label,
+                                                         boolean defaultValue,
+                                                         SpatialDependencyLock lock) {
+        ToggleSwitch toggle;
+        if (lock != null && lock.isLocked()) {
+            toggle = opts.addToggleWithStatus(label, false, dependencyWarningLabel(lock.message()));
+            applyDependencyLockToToggle(toggle, lock);
+        } else {
+            toggle = opts.addToggle(label, defaultValue);
+        }
+        return toggle;
+    }
+
+    private static JLabel dependencyWarningLabel(String message) {
+        JLabel warning = new JLabel("!");
+        warning.setForeground(DEPENDENCY_LOCK_COLOR);
+        warning.setFont(warning.getFont().deriveFont(Font.BOLD, 13f));
+        warning.setToolTipText(message);
+        return warning;
+    }
+
+    private static void addDependencyLockHelpText(PipelineDialog opts, SpatialDependencyLock lock) {
+        if (opts != null && lock != null && lock.isLocked()) {
+            opts.addHelpText(lock.message());
+        }
+    }
+
+    static void applyDependencyLockToToggle(ToggleSwitch toggle, SpatialDependencyLock lock) {
+        if (toggle == null || lock == null || !lock.isLocked()) {
+            return;
+        }
+        toggle.setSelected(false);
+        toggle.setEnabled(false);
+        toggle.setToolTipText(lock.message());
+    }
+
+    private static void applySpatialDependencyLocks(SpatialDialogBindings bindings) {
+        if (bindings == null) {
+            return;
+        }
+        applyDependencyLockToToggle(bindings.doVoronoiToggle, bindings.jtsLock);
+        if (bindings.mcib3dLock != null && bindings.mcib3dLock.isLocked()) {
+            applyDependencyLockToToggle(bindings.do3DMorphologyToggle, bindings.mcib3dLock);
+            applyDependencyLockToToggle(bindings.doCompositeIndicesToggle, bindings.mcib3dLock);
+            applyDependencyLockToToggle(bindings.doPopMorphometricsToggle, bindings.mcib3dLock);
+            applyDependencyLockToToggle(bindings.doSpatialMorphometricsToggle, bindings.mcib3dLock);
+        }
     }
 
     private static String decorateArtifactLabel(String base,
@@ -5961,7 +6093,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         }
     }
 
-    private void applySpatialConfigToDialog(SpatialAnalysisWizard.DerivedConfig config,
+    private void applySpatialConfigToDialog(SpatialSetupConfig.DerivedConfig config,
                                             List<String> channelNames,
                                             SpatialDialogBindings bindings,
                                             String selectedPresetName) {
@@ -6029,6 +6161,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
             bindings.programmaticChange = false;
         }
         applyLockedColocalizationControls(bindings);
+        applySpatialDependencyLocks(bindings);
         updateVolumetricThresholdEnablement(bindings);
         updateMorphometricDependencyControls(bindings);
     }
@@ -6036,7 +6169,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
     public LoadedRunParameters.Result applyLoadedParameters(Map<String, Object> parameters) {
         LoadedRunParameters.PresetLoad<SpatialPreset> load =
                 LoadedRunParameters.spatialPreset(parameters);
-        this.configuredOptions = SpatialAnalysisWizard.fromPreset(load.payload);
+        this.configuredOptions = SpatialSetupConfig.fromPreset(load.payload);
         LoadedRunParameters.rememberLastResult(load.result);
         return load.result;
     }
@@ -6105,38 +6238,49 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                 defaultForArtifactStatus(artifactStatus, SubAnalysis.MORPHOLOGY_2D, doMorphology));
         opts.addHelpText("Loads saved object label images and extracts 2D shape features "
                 + "(area, circularity, solidity, Feret diameter, etc.).");
-        final ToggleSwitch raw3DToggle = opts.addToggle(
+        final SpatialDependencyLock mcib3dLock = spatialBindings == null
+                ? null
+                : spatialBindings.mcib3dLock;
+        final ToggleSwitch raw3DToggle = addDependencyAwareToggle(opts,
                 decorateArtifactLabel("3D shape features", artifactStatus, SubAnalysis.SHAPE_FEATURES_3D),
-                defaultForArtifactStatus(artifactStatus, SubAnalysis.SHAPE_FEATURES_3D, do3DShapeFeatures));
+                defaultForArtifactStatus(artifactStatus, SubAnalysis.SHAPE_FEATURES_3D, do3DShapeFeatures),
+                mcib3dLock);
         spatialBindings.do3DMorphologyToggle = raw3DToggle;
         opts.addHelpText("Extracts per-object 3D shape descriptors from label images using "
                 + "mcib3d: sphericity, compactness, elongation, flatness, spareness, 3D Feret, "
                 + "3D moments, and centroid-to-surface distance statistics.");
-        final ToggleSwitch complexToggle = opts.addToggle("Complex shape analysis", doCompositeIndices);
+        addDependencyLockHelpText(opts, mcib3dLock);
+        final ToggleSwitch complexToggle = addDependencyAwareToggle(opts,
+                "Complex shape analysis", doCompositeIndices, mcib3dLock);
         spatialBindings.doCompositeIndicesToggle = complexToggle;
         opts.addHelpText("Derives composite indices from 3D features: "
                 + "Ramification Index (RI), Surface Roughness (SRI), "
                 + "Process Burden (PB), Morphological Polarity (MP), "
                 + "Volume-Span Discrepancy (VSD), centroid-based 3D Sholl critical radius/Schoenen index, "
                 + "and skeleton branch/junction/endpoint counts. Requires 3D shape features.");
+        addDependencyLockHelpText(opts, mcib3dLock);
         opts.beginAdvancedSection("spatial");
-        final ToggleSwitch popToggle = opts.addToggle(
+        final ToggleSwitch popToggle = addDependencyAwareToggle(opts,
                 decorateArtifactLabel("Population morphometric scoring", artifactStatus,
                         SubAnalysis.POPULATION_MORPHO),
-                defaultForArtifactStatus(artifactStatus, SubAnalysis.POPULATION_MORPHO, doPopMorphometrics));
+                defaultForArtifactStatus(artifactStatus, SubAnalysis.POPULATION_MORPHO, doPopMorphometrics),
+                mcib3dLock);
         spatialBindings.doPopMorphometricsToggle = popToggle;
         opts.addHelpText("Population-normalised composites: "
                 + "Composite Morphological Score (CMS), Shape Moment Signature Distance (SMSD), "
                 + "Intensity-Morphology Dissociation Index (IMDI), Morphological Diversity Score. "
                 + "Requires complex shape analysis.");
-        final ToggleSwitch spatialMorphToggle = opts.addToggle(
+        addDependencyLockHelpText(opts, mcib3dLock);
+        final ToggleSwitch spatialMorphToggle = addDependencyAwareToggle(opts,
                 decorateArtifactLabel("Spatial-morphometric analysis", artifactStatus,
                         SubAnalysis.SPATIAL_MORPHO),
-                defaultForArtifactStatus(artifactStatus, SubAnalysis.SPATIAL_MORPHO, doSpatialMorphometrics));
+                defaultForArtifactStatus(artifactStatus, SubAnalysis.SPATIAL_MORPHO, doSpatialMorphometrics),
+                mcib3dLock);
         spatialBindings.doSpatialMorphometricsToggle = spatialMorphToggle;
         opts.addHelpText("Territorial Dominance Ratio (TDR), Feret Eccentricity Vector (FEV), "
                 + "Pathology Proximity Response Profile (PPRP). "
                 + "Requires distances and/or Voronoi + 3D shape features.");
+        addDependencyLockHelpText(opts, mcib3dLock);
         opts.endAdvancedSection();
 
         raw3DToggle.addChangeListener(new Runnable() {
@@ -6251,6 +6395,10 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         if (bindings == null) {
             return;
         }
+        if (bindings.mcib3dLock != null && bindings.mcib3dLock.isLocked()) {
+            applySpatialDependencyLocks(bindings);
+            return;
+        }
         boolean raw3DOn = bindings.do3DMorphologyToggle != null
                 && bindings.do3DMorphologyToggle.isSelected();
         if (bindings.doCompositeIndicesToggle != null) {
@@ -6288,7 +6436,6 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                                          final SpatialDialogBindings bindings,
                                          final SpatialConfigApplier applier) {
         final JComboBox<String> presetCombo = new JComboBox<String>(listSpatialPresetNames(directory));
-        presetCombo.setMaximumSize(new Dimension(260, 24));
         if (bindings != null) {
             bindings.presetCombo = presetCombo;
         }
@@ -6296,28 +6443,28 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         flash.pipeline.ui.FlashIcons.apply(savePreset, flash.pipeline.ui.FlashIcons.save());
         savePreset.setToolTipText("Save the current Spatial Analysis options as a named preset.");
         savePreset.addActionListener(e -> handleSaveSpatialPreset(directory, bindings));
-        JPanel row = SetupHelperButton.createHeaderRow("Spatial & Morphometry", presetCombo, savePreset,
-                new SetupHelperButton.WizardLauncher() {
-                    @Override public void run() {
-                        final SpatialAnalysisWizard.DerivedConfig[] selected =
-                                new SpatialAnalysisWizard.DerivedConfig[1];
-                        dialog.runChildWorkflow(new Runnable() {
-                            @Override public void run() {
-                                selected[0] = runSpatialSetupHelper(directory);
-                            }
-                        });
-                        if (selected[0] != null && applier != null) {
-                            applier.apply(null, selected[0]);
-                        }
-                    }
-                });
+        JButton managePreset = new JButton("Manage...");
+        managePreset.setToolTipText("Delete saved Spatial Analysis presets.");
+        managePreset.addActionListener(e -> {
+            boolean changed = flash.pipeline.ui.config.PresetManagerDialog.manage(
+                    presetCombo, new SpatialPresetIO(new File(directory)), "Manage Spatial Presets");
+            if (changed) {
+                refreshSpatialPresetChoice(directory, bindings, SPATIAL_PRESET_PLACEHOLDER);
+            }
+        });
+        JPanel row = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 6, 0));
+        row.setOpaque(false);
+        presetCombo.setMaximumSize(new java.awt.Dimension(260, 24));
+        row.add(presetCombo);
+        row.add(savePreset);
+        row.add(managePreset);
         presetCombo.addActionListener(e -> {
             if (bindings != null && bindings.programmaticChange) {
                 return;
             }
             Object selected = presetCombo.getSelectedItem();
             if (selected != null && !SPATIAL_PRESET_PLACEHOLDER.equals(String.valueOf(selected))) {
-                SpatialAnalysisWizard.DerivedConfig derived =
+                SpatialSetupConfig.DerivedConfig derived =
                         loadSpatialPresetConfig(directory, String.valueOf(selected));
                 if (derived != null && applier != null) {
                     applier.apply(String.valueOf(selected), derived);
@@ -6395,6 +6542,25 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                 readFirstThreshold(bindings.thresholdFields));
     }
 
+    /**
+     * Capture the confirmed Spatial dialog settings into the run record so a
+     * later "Load settings from previous run" can restore them. Keys mirror
+     * {@link SpatialPreset#toJsonObject()} so {@code LoadedRunParameters.SPATIAL_KEYS}
+     * recognises them.
+     */
+    private void recordSpatialRunParameters(SpatialDialogBindings bindings) {
+        if (runRecordContext == null || bindings == null) {
+            return;
+        }
+        try {
+            SpatialPreset preset = buildSpatialPresetFromBindings("GUI Spatial run", bindings);
+            runRecordContext.recordParameters(ParameterSnapshot.fromAnalysisPresetMap(
+                    "SpatialAnalysis", preset.toJsonObject()));
+        } catch (RuntimeException e) {
+            IJ.log("[FLASH] Could not capture Spatial run parameters: " + e.getMessage());
+        }
+    }
+
     private void refreshSpatialPresetChoice(String directory,
                                             SpatialDialogBindings bindings,
                                             String selectedName) {
@@ -6464,34 +6630,11 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         return labels.toArray(new String[labels.size()]);
     }
 
-    private SpatialAnalysisWizard.DerivedConfig runSpatialSetupHelper(String directory) {
-        try {
-            ChannelIdentities identities = ChannelConfigIO.readChannelIdentities(
-                    FlashProjectLayout.forDirectory(directory).configurationWriteDir());
-            MetadataDiagnostics.SeriesInfo info = firstSeriesInfoOrNull(directory);
-            SpatialAnalysisWizard wizard = new SpatialAnalysisWizard(
-                    flash.pipeline.ui.wizard.WizardFlow.MainPanelBinding.NULL,
-                    identities,
-                    info,
-                    calibrationIsAvailable(directory),
-                    !markerThresholds.isEmpty(),
-                    false);
-            wizard.run();
-            if (!wizard.wasFinished()) {
-                return null;
-            }
-            return wizard.deriveCurrentConfig();
-        } catch (Exception e) {
-            IJ.handleException(e);
-            return null;
-        }
-    }
-
-    private SpatialAnalysisWizard.DerivedConfig loadSpatialPresetConfig(String directory, String presetName) {
+    private SpatialSetupConfig.DerivedConfig loadSpatialPresetConfig(String directory, String presetName) {
         try {
             SpatialPreset preset = new SpatialPresetIO(new File(directory)).load(presetName);
-            SpatialAnalysisWizard.DerivedConfig config = SpatialAnalysisWizard.fromPreset(preset);
-            SpatialAnalysisWizard.enforceDependencies(config, firstSeriesInfoOrNull(directory),
+            SpatialSetupConfig.DerivedConfig config = SpatialSetupConfig.fromPreset(preset);
+            SpatialSetupConfig.enforceDependencies(config, firstSeriesInfoOrNull(directory),
                     calibrationIsAvailable(directory));
             return config;
         } catch (IOException e) {
@@ -6500,25 +6643,25 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         }
     }
 
-    private SpatialAnalysisWizard.DerivedConfig loadCliSpatialConfig(String directory) {
+    private SpatialSetupConfig.DerivedConfig loadCliSpatialConfig(String directory) {
         if (cliConfig == null || cliConfig.getSpatial() == null || !cliConfig.getSpatial().hasConfiguration()) {
             return null;
         }
         CLIConfig.SpatialConfig spatial = cliConfig.getSpatial();
-        SpatialAnalysisWizard.DerivedConfig config = null;
+        SpatialSetupConfig.DerivedConfig config = null;
         if (spatial.getPresetName() != null && !spatial.getPresetName().trim().isEmpty()) {
             config = loadSpatialPresetConfig(directory, spatial.getPresetName());
         }
         if (config == null) {
-            config = new SpatialAnalysisWizard.DerivedConfig();
+            config = new SpatialSetupConfig.DerivedConfig();
         }
         applyCliSpatialOverrides(config, spatial);
-        SpatialAnalysisWizard.enforceDependencies(config, firstSeriesInfoOrNull(directory),
+        SpatialSetupConfig.enforceDependencies(config, firstSeriesInfoOrNull(directory),
                 calibrationIsAvailable(directory));
         return config;
     }
 
-    private static void applyCliSpatialOverrides(SpatialAnalysisWizard.DerivedConfig config,
+    private static void applyCliSpatialOverrides(SpatialSetupConfig.DerivedConfig config,
                                                  CLIConfig.SpatialConfig spatial) {
         if (config == null || spatial == null) return;
         if (spatial.getDoDistances() != null) config.doDistances = spatial.getDoDistances().booleanValue();
@@ -6563,13 +6706,15 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
     }
 
     private interface SpatialConfigApplier {
-        void apply(String selectedPresetName, SpatialAnalysisWizard.DerivedConfig derived);
+        void apply(String selectedPresetName, SpatialSetupConfig.DerivedConfig derived);
     }
 
     private static final class SpatialDialogBindings {
         boolean programmaticChange;
         boolean lockVolColocFromObjectAnalysis;
         boolean lockCpcFromObjectAnalysis;
+        SpatialDependencyLock jtsLock;
+        SpatialDependencyLock mcib3dLock;
         JComboBox<String> presetCombo;
         ToggleSwitch forceRerunToggle;
         ToggleSwitch doDistancesToggle;

@@ -77,12 +77,18 @@ public class AnalysisRunCoordinator extends AbstractService {
 
         RuntimeException runtimeFailure = null;
         Error errorFailure = null;
+        boolean discardRecord = false;
         try {
             if (body != null) {
                 body.call();
             }
-            if (binOutcomeProvider.lastOutcome() == BinSetupDispatcher.Outcome.CANCELLED) {
+            boolean guiCancel = AnalysisCancellation.wasCancelRequestedInActiveScope();
+            if (guiCancel && !context.hasRecordedOutputs()) {
+                discardRecord = true;
+            } else if (binOutcomeProvider.lastOutcome() == BinSetupDispatcher.Outcome.CANCELLED) {
                 context.warn("Bin setup was cancelled; analysis did not run to completion.");
+            } else if (guiCancel) {
+                context.warn("Analysis was cancelled after output recording had started.");
             }
         } catch (Exception e) {
             if (isMissingSetupParameter(e)) {
@@ -98,10 +104,14 @@ public class AnalysisRunCoordinator extends AbstractService {
             if (aware) {
                 ((RunRecordAware) analysis).setRunRecordContext(null);
             }
-            context.close();
+            if (discardRecord && runtimeFailure == null && errorFailure == null) {
+                context.discard();
+            } else {
+                context.close();
+            }
         }
 
-        if (writeLegacyAudit) {
+        if (writeLegacyAudit && !discardRecord) {
             writeLegacyAudit(analysis, analysisIndex, analysisLabel, directory, cliConfig);
         }
 
@@ -110,6 +120,9 @@ public class AnalysisRunCoordinator extends AbstractService {
         }
         if (runtimeFailure != null) {
             throw runtimeFailure;
+        }
+        if (discardRecord) {
+            return new RunResult("", RunResult.STATUS_CANCELLED, null);
         }
         return new RunResult(context.runId(), context.status(), context.recordFile());
     }

@@ -14,7 +14,7 @@ import java.util.regex.Pattern;
 /**
  * Seeds a Sandbox DAG from saved IJ1 macro text.
  *
- * <p>REGRESSION GUARD (docs/filter-branch-robustness): this loader must never
+ * <p>REGRESSION GUARD (docs/filter-branch-robustness_COMPLETED): this loader must never
  * (a) turn the per-branch {@code run("Duplicate...", "title=X duplicate")}
  * working-copy scaffolding into a filter node, (b) strip the {@code ...}
  * ellipsis from a recovered command name, or (c) flatten a genuinely branched

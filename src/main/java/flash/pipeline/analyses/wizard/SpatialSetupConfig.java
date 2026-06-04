@@ -2,21 +2,18 @@ package flash.pipeline.analyses.wizard;
 
 import flash.pipeline.bin.ChannelIdentities;
 import flash.pipeline.intelligence.MetadataDiagnostics;
-import flash.pipeline.ui.PipelineDialog;
-import flash.pipeline.ui.ToggleSwitch;
-import flash.pipeline.ui.wizard.WizardFlow;
 
-import javax.swing.JTextField;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
 /**
- * Intent-led setup helper for Spatial & Morphometric Analysis.
+ * Derives Spatial &amp; Morphometric Analysis options from saved presets and
+ * intent answers. The interactive setup helper has been removed; this class
+ * keeps the reusable configuration model that preset IO, the analysis apply
+ * logic, the CLI, and tests depend on.
  */
-public class SpatialAnalysisWizard extends WizardFlow {
+public final class SpatialSetupConfig {
 
     public static final String SPATIAL_NONE = "Not measuring spatial distribution";
     public static final String SPATIAL_DISTANCE = "How close are cells to each other?";
@@ -45,34 +42,7 @@ public class SpatialAnalysisWizard extends WizardFlow {
             "Ripley's K/L/G needs calibration data. Run calibration first to enable this option.";
     public static final String Z_STACK_WARNING = "requires z-stack with more slices";
 
-    private static final String[] LUTS = {"Fire", "Grays", "Cyan", "Green", "Magenta", "Red"};
-    private static final String[] THRESHOLDS = {"Loose (10%)", "Standard (30%)", "Strict (60%)"};
-
-    private final ChannelIdentities identities;
-    private final MetadataDiagnostics.SeriesInfo seriesInfo;
-    private final boolean hasCalibration;
-    private final boolean thresholdsConfiguredUpstream;
-
-    public SpatialAnalysisWizard(MainPanelBinding panel,
-                                 ChannelIdentities identities,
-                                 MetadataDiagnostics.SeriesInfo seriesInfo,
-                                 boolean hasCalibration,
-                                 boolean thresholdsConfiguredUpstream,
-                                 boolean headless) {
-        super("Spatial & Morphometry Helper", panel, headless);
-        this.identities = identities == null ? new ChannelIdentities(null) : identities;
-        this.seriesInfo = seriesInfo;
-        this.hasCalibration = hasCalibration;
-        this.thresholdsConfiguredUpstream = thresholdsConfiguredUpstream;
-        register(new SpatialQuestionScreen());
-        register(new MorphometryQuestionScreen());
-        register(new TextureQuestionScreen());
-        register(new HeatmapTuningScreen());
-        register(new ThresholdScreen());
-    }
-
-    public DerivedConfig deriveCurrentConfig() {
-        return deriveConfig(identities, seriesInfo, hasCalibration, currentAnswers());
+    private SpatialSetupConfig() {
     }
 
     public static DerivedConfig deriveConfig(ChannelIdentities identities,
@@ -273,15 +243,6 @@ public class SpatialAnalysisWizard extends WizardFlow {
         return option;
     }
 
-    private static String textureQuestionDisplayLabel(String option) {
-        String canonical = canonicalTextureQuestion(option);
-        if (TEXTURE_GLCM.equals(canonical)) return textureGlcmDisplayLabel();
-        if (TEXTURE_FRACTAL.equals(canonical)) return textureFractalDisplayLabel();
-        if (TEXTURE_CLASS.equals(canonical)) return textureClassDisplayLabel();
-        if (TEXTURE_ALL.equals(canonical)) return textureAllDisplayLabel();
-        return canonical;
-    }
-
     private static String textureGlcmDisplayLabel() {
         return TEXTURE_GLCM + " (slow)";
     }
@@ -325,34 +286,6 @@ public class SpatialAnalysisWizard extends WizardFlow {
                 || MORPH_POPULATION.equals(option)
                 || MORPH_TERRITORY.equals(option)
                 || MORPH_ALL.equals(option);
-    }
-
-    private static String[] enabledSpatialOptions(boolean hasCalibration) {
-        String[] all = new String[]{
-                SPATIAL_NONE, SPATIAL_DISTANCE, SPATIAL_CLUSTERED, SPATIAL_COLOC,
-                SPATIAL_TERRITORY, SPATIAL_HOTSPOTS, SPATIAL_PHENOTYPES, SPATIAL_ALL
-        };
-        List<String> enabled = new ArrayList<String>();
-        for (String option : all) {
-            if (isSpatialOptionEnabled(option, hasCalibration)) {
-                enabled.add(option);
-            }
-        }
-        return enabled.toArray(new String[enabled.size()]);
-    }
-
-    private static String[] enabledMorphologyOptions(MetadataDiagnostics.SeriesInfo info) {
-        String[] all = new String[]{
-                MORPH_NONE, MORPH_2D, MORPH_3D, MORPH_COMPLEX,
-                MORPH_POPULATION, MORPH_TERRITORY, MORPH_ALL
-        };
-        List<String> enabled = new ArrayList<String>();
-        for (String option : all) {
-            if (isMorphologyOptionEnabled(option, info)) {
-                enabled.add(option);
-            }
-        }
-        return enabled.toArray(new String[enabled.size()]);
     }
 
     private static boolean containsMarker(ChannelIdentities identities, String token) {
@@ -445,172 +378,6 @@ public class SpatialAnalysisWizard extends WizardFlow {
             return forceRerun || doCpc || doHeatmaps || do2DMorphology || do3DMorphology
                     || doObjectGLCM || doObjectFractal
                     || doObjectTextureClass || doNative3DTexture;
-        }
-    }
-
-    private final class SpatialQuestionScreen extends Screen {
-        private SpatialQuestionScreen() {
-            super("What spatial question are you asking?");
-            defaultAnswer("spatial.question", defaultSpatialQuestion(identities, hasCalibration));
-        }
-
-        public void build(PipelineDialog dialog, AnswerMap answers) {
-            dialog.addHeader("What spatial question are you asking?");
-            String selected = answers.getString("spatial.question", defaultSpatialQuestion(identities, hasCalibration));
-            if (!isSpatialOptionEnabled(selected, hasCalibration)) {
-                selected = SPATIAL_NONE;
-            }
-            dialog.addChoice("Spatial question", enabledSpatialOptions(hasCalibration), selected);
-            if (!hasCalibration) {
-                dialog.addMessage(RIPLEY_CALIBRATION_WARNING);
-            }
-        }
-
-        public void read(PipelineDialog dialog, AnswerMap answers) {
-            String selected = dialog.getNextChoice();
-            answers.put("spatial.question", selected);
-        }
-
-        public void writeTo(MainPanelBinding panel, AnswerMap answers) {
-            panel.setValue("spatial.config", deriveCurrentConfig());
-        }
-    }
-
-    private final class MorphometryQuestionScreen extends Screen {
-        private MorphometryQuestionScreen() {
-            super("What morphology question are you asking?");
-            defaultAnswer("morph.question", defaultMorphologyQuestion(identities, seriesInfo));
-        }
-
-        public void build(PipelineDialog dialog, AnswerMap answers) {
-            dialog.addHeader("What morphology question are you asking?");
-            String selected = answers.getString("morph.question", defaultMorphologyQuestion(identities, seriesInfo));
-            if (!isMorphologyOptionEnabled(selected, seriesInfo)) {
-                selected = MORPH_NONE;
-            }
-            dialog.addChoice("Morphology question", enabledMorphologyOptions(seriesInfo), selected);
-            if (seriesInfo != null && seriesInfo.sizeZ > 0 && seriesInfo.sizeZ < 5) {
-                dialog.addMessage("(requires z-stack with more slices)");
-            }
-        }
-
-        public void read(PipelineDialog dialog, AnswerMap answers) {
-            String selected = dialog.getNextChoice();
-            answers.put("morph.question", selected);
-        }
-
-        public void writeTo(MainPanelBinding panel, AnswerMap answers) {
-        }
-    }
-
-    private final class TextureQuestionScreen extends Screen {
-        private TextureQuestionScreen() {
-            super("What object texture / complexity question are you asking?");
-            defaultAnswer("texture.question", TEXTURE_NONE);
-            defaultAnswer("texture.k", Integer.valueOf(4));
-            defaultAnswer("spatial.texture.native3d", Boolean.FALSE);
-        }
-
-        public void build(PipelineDialog dialog, AnswerMap answers) {
-            dialog.addHeader("What object texture / complexity question are you asking?");
-            String selected = textureQuestionDisplayLabel(
-                    answers.getString("texture.question", TEXTURE_NONE));
-            dialog.addChoice("Texture question",
-                    new String[]{TEXTURE_NONE, textureGlcmDisplayLabel(), textureFractalDisplayLabel(),
-                            textureClassDisplayLabel(), textureAllDisplayLabel()},
-                    selected);
-            dialog.beginAdvancedSection("spatial.texture.advanced");
-            dialog.addToggle("Native-3D texture (GLCM + texture classes; very slow)",
-                    answers.getBoolean("spatial.texture.native3d", false));
-            dialog.addNumericField("Texture classes (k)", answers.getInt("texture.k", 4), 0);
-            dialog.endAdvancedSection();
-        }
-
-        public void read(PipelineDialog dialog, AnswerMap answers) {
-            answers.put("texture.question", canonicalTextureQuestion(dialog.getNextChoice()));
-            answers.put("spatial.texture.native3d", Boolean.valueOf(dialog.getNextBoolean()));
-            answers.put("texture.k", Integer.valueOf((int) dialog.getNextNumber()));
-        }
-
-        public void writeTo(MainPanelBinding panel, AnswerMap answers) {
-        }
-    }
-
-    private final class HeatmapTuningScreen extends Screen {
-        private HeatmapTuningScreen() {
-            super("Hotspot / phenotyping tuning");
-            defaultAnswer("heatmap.lut", "Fire");
-            defaultAnswer("heatmap.autoBandwidth", Boolean.TRUE);
-            defaultAnswer("heatmap.bandwidth", Double.valueOf(0.0));
-            defaultAnswer("heatmap.autoK", Boolean.TRUE);
-            defaultAnswer("heatmap.clusterK", Integer.valueOf(0));
-        }
-
-        public boolean isApplicable(AnswerMap prior) {
-            DerivedConfig config = deriveConfig(identities, seriesInfo, hasCalibration, prior);
-            return config.doHeatmaps || config.doPhenotyping;
-        }
-
-        public void build(PipelineDialog dialog, AnswerMap answers) {
-            dialog.addHeader("Hotspot / phenotyping tuning");
-            dialog.addChoice("Heatmap color scheme", LUTS, answers.getString("heatmap.lut", "Fire"));
-            ToggleSwitch autoBandwidth = dialog.addToggle("Auto-detect KDE bandwidth?",
-                    answers.getBoolean("heatmap.autoBandwidth", true));
-            JTextField bandwidth = dialog.addNumericField("KDE bandwidth (um)", answers.getInt("heatmap.bandwidth", 0), 1);
-            bandwidth.setEnabled(!autoBandwidth.isSelected());
-            autoBandwidth.addChangeListener(new Runnable() {
-                public void run() {
-                    bandwidth.setEnabled(!autoBandwidth.isSelected());
-                }
-            });
-            ToggleSwitch autoK = dialog.addToggle("Auto-detect cluster count?",
-                    answers.getBoolean("heatmap.autoK", true));
-            JTextField k = dialog.addNumericField("Clusters (k)", answers.getInt("heatmap.clusterK", 0), 0);
-            k.setEnabled(!autoK.isSelected());
-            autoK.addChangeListener(new Runnable() {
-                public void run() {
-                    k.setEnabled(!autoK.isSelected());
-                }
-            });
-        }
-
-        public void read(PipelineDialog dialog, AnswerMap answers) {
-            answers.put("heatmap.lut", dialog.getNextChoice());
-            answers.put("heatmap.autoBandwidth", Boolean.valueOf(dialog.getNextBoolean()));
-            answers.put("heatmap.bandwidth", Double.valueOf(dialog.getNextNumber()));
-            answers.put("heatmap.autoK", Boolean.valueOf(dialog.getNextBoolean()));
-            answers.put("heatmap.clusterK", Integer.valueOf((int) dialog.getNextNumber()));
-        }
-
-        public void writeTo(MainPanelBinding panel, AnswerMap answers) {
-        }
-    }
-
-    private final class ThresholdScreen extends Screen {
-        private ThresholdScreen() {
-            super("How much overlap counts as colocalized?");
-            defaultAnswer("coloc.threshold", "Standard (30%)");
-        }
-
-        public boolean isApplicable(AnswerMap prior) {
-            if (thresholdsConfiguredUpstream) {
-                return false;
-            }
-            DerivedConfig config = deriveConfig(identities, seriesInfo, hasCalibration, prior);
-            return config.doVolColoc || config.doCpc;
-        }
-
-        public void build(PipelineDialog dialog, AnswerMap answers) {
-            dialog.addHeader("How much overlap counts as colocalized?");
-            dialog.addChoice("Colocalization threshold", THRESHOLDS,
-                    answers.getString("coloc.threshold", "Standard (30%)"));
-        }
-
-        public void read(PipelineDialog dialog, AnswerMap answers) {
-            answers.put("coloc.threshold", dialog.getNextChoice());
-        }
-
-        public void writeTo(MainPanelBinding panel, AnswerMap answers) {
         }
     }
 }

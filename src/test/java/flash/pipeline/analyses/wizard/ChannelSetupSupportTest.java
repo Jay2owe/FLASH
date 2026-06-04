@@ -12,7 +12,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
-public class ChannelSetupWizardTest {
+public class ChannelSetupSupportTest {
 
     private static final String[] TWELVE_MARKERS = {
             "nuclei_dapi",
@@ -37,12 +37,12 @@ public class ChannelSetupWizardTest {
                 new SegmentationEnginePicker.EngineAvailability(true, true);
 
         for (String signal : new String[]{
-                ChannelSetupWizard.SIGNAL_DIM,
-                ChannelSetupWizard.SIGNAL_TYPICAL,
-                ChannelSetupWizard.SIGNAL_BRIGHT}) {
+                ChannelSetupSupport.SIGNAL_DIM,
+                ChannelSetupSupport.SIGNAL_TYPICAL,
+                ChannelSetupSupport.SIGNAL_BRIGHT}) {
             for (String crowding : new String[]{
-                    ChannelSetupWizard.CROWDING_SPARSE,
-                    ChannelSetupWizard.CROWDING_CROWDED}) {
+                    ChannelSetupSupport.CROWDING_SPARSE,
+                    ChannelSetupSupport.CROWDING_CROWDED}) {
                 Map<String, Object> answers = new LinkedHashMap<String, Object>();
                 answers.put("channelCount", Integer.valueOf(TWELVE_MARKERS.length));
                 for (int i = 0; i < TWELVE_MARKERS.length; i++) {
@@ -52,8 +52,8 @@ public class ChannelSetupWizardTest {
                 }
                 answers.put("zSliceMode", "Middle 40%");
 
-                ChannelSetupWizard.DerivedConfig derived =
-                        ChannelSetupWizard.deriveConfig(info, answers, library, availability);
+                ChannelSetupSupport.DerivedConfig derived =
+                        ChannelSetupSupport.deriveConfig(info, answers, library, availability);
 
                 assertEquals(TWELVE_MARKERS.length, derived.names.size());
                 assertEquals(TWELVE_MARKERS.length, derived.filterPresets.size());
@@ -69,12 +69,12 @@ public class ChannelSetupWizardTest {
         MarkerLibrary library = MarkerLibraryIO.loadBundled();
         MetadataDiagnostics.SeriesInfo info = seriesInfo(1, 10, "uint16", "reporter");
 
-        Map<String, Object> typical = oneChannel("reporter_mcherry", ChannelSetupWizard.SIGNAL_TYPICAL);
-        Map<String, Object> dim = oneChannel("reporter_mcherry", ChannelSetupWizard.SIGNAL_DIM);
+        Map<String, Object> typical = oneChannel("reporter_mcherry", ChannelSetupSupport.SIGNAL_TYPICAL);
+        Map<String, Object> dim = oneChannel("reporter_mcherry", ChannelSetupSupport.SIGNAL_DIM);
 
-        double typicalThreshold = Double.parseDouble(ChannelSetupWizard
+        double typicalThreshold = Double.parseDouble(ChannelSetupSupport
                 .deriveConfig(info, typical, library, null).objectThresholds.get(0));
-        double dimThreshold = Double.parseDouble(ChannelSetupWizard
+        double dimThreshold = Double.parseDouble(ChannelSetupSupport
                 .deriveConfig(info, dim, library, null).objectThresholds.get(0));
 
         assertEquals(typicalThreshold / 2.0, dimThreshold, 0.0001);
@@ -87,9 +87,9 @@ public class ChannelSetupWizardTest {
         Map<String, Object> answers = new LinkedHashMap<String, Object>();
         answers.put("channelCount", Integer.valueOf(2));
         answers.put("channel1.markerId", "nuclei_dapi");
-        answers.put("channel2.markerId", ChannelSetupWizard.MARKER_CUSTOM);
+        answers.put("channel2.markerId", ChannelSetupSupport.MARKER_CUSTOM);
 
-        ChannelSetupWizard.DerivedConfig derived = ChannelSetupWizard.deriveConfig(info, answers, library, null);
+        ChannelSetupSupport.DerivedConfig derived = ChannelSetupSupport.deriveConfig(info, answers, library, null);
 
         assertFalse(derived.manual[0]);
         assertTrue(derived.manual[1]);

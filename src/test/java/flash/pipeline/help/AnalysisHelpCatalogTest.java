@@ -38,6 +38,17 @@ public class AnalysisHelpCatalogTest {
     }
 
     @Test
+    public void deconvolutionSetupDescribesSetupPreview() {
+        AnalysisHelpTopic topic = AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_DECONVOLUTION);
+        String setup = String.join(" ", topic.setup)
+                .toLowerCase(java.util.Locale.ROOT);
+        assertTrue("deconvolution help should describe the setup Preview settings step",
+                setup.contains("preview settings"));
+        assertTrue("deconvolution help should mention the representative cropped stack",
+                setup.contains("representative cropped stack"));
+    }
+
+    @Test
     public void catalogContainsOnlyVisibleAnalysisTopics() throws Exception {
         Set<Integer> visible = new HashSet<Integer>();
         int[] visibleOrder = visibleAnalysisOrder();

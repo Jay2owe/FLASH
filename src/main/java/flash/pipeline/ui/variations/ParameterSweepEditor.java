@@ -483,6 +483,10 @@ public final class ParameterSweepEditor extends JPanel {
         FilterMacroEditorModel.MacroDefinition macro = context.baseMacro();
         // Branch labels are derived from the same rendered macro the indices
         // below walk, so each parameter can show which image branch it is on.
+        // entry.lineIndex must be the raw macro line index here — true only while
+        // the definition is un-mutated (a structural edit re-bases lineIndex to a
+        // per-section position via refreshSectionSummariesAndPositions). The sweep
+        // context is always a fresh parse, so this holds.
         String macroText = macro.render();
         boolean branched = FilterBranchLabels.isBranched(macroText);
         java.util.Map<Integer, String> branchByLine = branched

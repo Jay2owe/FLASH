@@ -1,22 +1,15 @@
 package flash.pipeline.analyses.wizard;
 
 import flash.pipeline.bin.BinConfig;
-import flash.pipeline.cellpose.CellposeRuntime;
 import flash.pipeline.intelligence.MetadataDiagnostics;
 import flash.pipeline.marker.MarkerLibrary;
-import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.wizard.SegmentationEnginePicker;
-import flash.pipeline.ui.wizard.MarkerTypeahead;
-import flash.pipeline.ui.wizard.WizardFlow;
 import flash.pipeline.zslice.ZSliceMode;
 import flash.pipeline.zslice.ZSliceRange;
 import flash.pipeline.zslice.ZSliceSelection;
 
 import ij.IJ;
 
-import javax.swing.JLabel;
-import javax.swing.JPanel;
-import java.awt.BorderLayout;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -27,9 +20,14 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * Marker-aware setup helper for Create Bin File.
+ * Marker-aware configuration helpers for Create Bin File.
+ *
+ * <p>Pure non-UI logic: image metadata inspection, marker auto-detection from
+ * filenames, and derivation of a recommended {@link BinConfig} from per-channel
+ * answers. The interactive setup UI lives in Set Up Configuration; this class
+ * holds the reusable derivation logic it (and tests) build on.
  */
-public class ChannelSetupWizard extends WizardFlow {
+public final class ChannelSetupSupport {
 
     public static final String SIGNAL_DIM = "Dim";
     public static final String SIGNAL_TYPICAL = "Typical";
@@ -39,83 +37,7 @@ public class ChannelSetupWizard extends WizardFlow {
     public static final String MARKER_CUSTOM = "other_custom";
     public static final String MARKER_AUTOFLUORESCENCE = "autofluorescence";
 
-    private final MetadataDiagnostics.SeriesInfo seriesInfo;
-    private final MarkerLibrary library;
-    private volatile SegmentationEnginePicker.EngineAvailability availability;
-    private volatile boolean cellposeAvailabilityUnknown;
-
-    public ChannelSetupWizard(MainPanelBinding panel,
-                              MetadataDiagnostics.SeriesInfo seriesInfo,
-                              boolean headless) throws IOException {
-        this(panel, seriesInfo, MarkerLibraryIO.loadBundled(),
-                initialRuntimeAvailability(),
-                headless);
-    }
-
-    public ChannelSetupWizard(MainPanelBinding panel,
-                              MetadataDiagnostics.SeriesInfo seriesInfo,
-                              MarkerLibrary library,
-                              SegmentationEnginePicker.EngineAvailability availability,
-                              boolean headless) {
-        this(panel, seriesInfo, library, new RuntimeAvailabilitySnapshot(availability, false), headless);
-    }
-
-    private ChannelSetupWizard(MainPanelBinding panel,
-                               MetadataDiagnostics.SeriesInfo seriesInfo,
-                               MarkerLibrary library,
-                               RuntimeAvailabilitySnapshot availability,
-                               boolean headless) {
-        super("Channel Setup Helper", panel, headless);
-        this.seriesInfo = seriesInfo;
-        this.library = library;
-        this.availability = availability.availability;
-        this.cellposeAvailabilityUnknown = availability.cellposeUnknown;
-        register(new MarkerScreen());
-        register(new SignalScreen());
-        register(new CrowdingScreen());
-        register(new ZSliceScreen());
-        if (availability.cellposeUnknown) {
-            refreshCellposeAvailabilityAsync();
-        }
-    }
-
-    public DerivedConfig deriveCurrentConfig() {
-        AnswerMap answers = currentAnswers();
-        return deriveConfig(seriesInfo, answers, library, availabilityForDerivation(answers));
-    }
-
-    private static RuntimeAvailabilitySnapshot initialRuntimeAvailability() {
-        CellposeRuntime.Status cellpose = CellposeRuntime.cachedStatus();
-        CellposeRuntime.probeAsync();
-        return new RuntimeAvailabilitySnapshot(
-                new SegmentationEnginePicker.EngineAvailability(
-                        flash.pipeline.stardist.StarDistDetector.isAvailable(),
-                        cellpose != null && cellpose.ready),
-                cellpose != null && cellpose.unknown);
-    }
-
-    private void refreshCellposeAvailabilityAsync() {
-        CellposeRuntime.probeAsync().whenComplete(new java.util.function.BiConsumer<CellposeRuntime.Status, Throwable>() {
-            @Override public void accept(CellposeRuntime.Status status, Throwable throwable) {
-                if (throwable == null && status != null) {
-                    updateCellposeAvailability(status);
-                }
-            }
-        });
-    }
-
-    private SegmentationEnginePicker.EngineAvailability availabilityForDerivation(Map<String, Object> answers) {
-        if (cellposeAvailabilityUnknown && complexCrowdedRecommendationCouldUseCellpose(answers)) {
-            updateCellposeAvailability(CellposeRuntime.probeConfigured());
-        }
-        return availability;
-    }
-
-    private void updateCellposeAvailability(CellposeRuntime.Status status) {
-        SegmentationEnginePicker.EngineAvailability current = availability;
-        boolean starDist = current != null && current.isStarDistAvailable();
-        availability = new SegmentationEnginePicker.EngineAvailability(starDist, status != null && status.ready);
-        cellposeAvailabilityUnknown = status != null && status.unknown;
+    private ChannelSetupSupport() {
     }
 
     public static DerivedConfig deriveConfig(MetadataDiagnostics.SeriesInfo info,
@@ -201,39 +123,6 @@ public class ChannelSetupWizard extends WizardFlow {
         return out;
     }
 
-    private boolean complexCrowdedRecommendationCouldUseCellpose(Map<String, Object> answers) {
-        MarkerLibrary safeLibrary = library;
-        try {
-            if (safeLibrary == null) safeLibrary = MarkerLibraryIO.loadBundled();
-        } catch (IOException e) {
-            return false;
-        }
-        int channels = channelCount(seriesInfo, answers);
-        Map<Integer, MarkerLibrary.Entry> autoDetected = autoDetectMarkers(seriesInfo, safeLibrary);
-        for (int c = 0; c < channels; c++) {
-            String markerId = answerString(answers, markerKey(c), null);
-            if (markerId == null && autoDetected.containsKey(Integer.valueOf(c))) {
-                markerId = autoDetected.get(Integer.valueOf(c)).getId();
-            }
-            if (markerId == null || markerId.trim().isEmpty() || MARKER_CUSTOM.equals(markerId)) {
-                continue;
-            }
-            MarkerLibrary.Entry entry = safeLibrary.byId(markerId);
-            if (entry == null && MARKER_AUTOFLUORESCENCE.equals(markerId)) {
-                entry = autofluorescenceEntry();
-            }
-            if (entry == null || !entry.isCrowdingSensitive()) {
-                continue;
-            }
-            String crowding = answerString(answers, crowdingKey(c), CROWDING_SPARSE);
-            if ("complex".equals(normalizeShape(entry.getShape()))
-                    && "crowded".equals(normalizeCrowding(crowding))) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     public static Map<Integer, MarkerLibrary.Entry> autoDetectMarkers(MetadataDiagnostics.SeriesInfo info,
                                                                       MarkerLibrary library) {
         Map<Integer, MarkerLibrary.Entry> out = new LinkedHashMap<Integer, MarkerLibrary.Entry>();
@@ -276,7 +165,7 @@ public class ChannelSetupWizard extends WizardFlow {
             List<MetadataDiagnostics.SeriesInfo> all = MetadataDiagnostics.scanDirectory(directory);
             return all.isEmpty() ? null : all.get(0);
         } catch (RuntimeException e) {
-            IJ.log("WARNING: Could not read image metadata for Channel Setup Helper: " + e.getMessage());
+            IJ.log("WARNING: Could not read image metadata for Channel Setup: " + e.getMessage());
             return null;
         }
     }
@@ -319,10 +208,6 @@ public class ChannelSetupWizard extends WizardFlow {
         if (value.contains("crowd")) return "crowded";
         if (value.contains("sparse")) return "sparse";
         return value;
-    }
-
-    private static String normalizeShape(String shape) {
-        return shape == null ? "" : shape.trim().toLowerCase(Locale.ROOT).replace('-', '_').replace(' ', '_');
     }
 
     private static double baseObjectThreshold(MarkerLibrary.Entry entry) {
@@ -489,19 +374,6 @@ public class ChannelSetupWizard extends WizardFlow {
         }
     }
 
-    private static final class RuntimeAvailabilitySnapshot {
-        final SegmentationEnginePicker.EngineAvailability availability;
-        final boolean cellposeUnknown;
-
-        RuntimeAvailabilitySnapshot(SegmentationEnginePicker.EngineAvailability availability,
-                                    boolean cellposeUnknown) {
-            this.availability = availability == null
-                    ? new SegmentationEnginePicker.EngineAvailability(false, false)
-                    : availability;
-            this.cellposeUnknown = cellposeUnknown;
-        }
-    }
-
     public static final class DerivedConfig {
         public final List<String> names = new ArrayList<String>();
         public final List<String> colors = new ArrayList<String>();
@@ -539,207 +411,5 @@ public class ChannelSetupWizard extends WizardFlow {
             cfg.zSliceSelections.putAll(zSliceSelections);
             return cfg;
         }
-    }
-
-    private final class MarkerScreen extends Screen {
-        private final List<MarkerTypeahead> markerFields = new ArrayList<MarkerTypeahead>();
-
-        private MarkerScreen() {
-            super("What did you stain for in each channel?");
-            int channels = channelCount(seriesInfo, Collections.<String, Object>emptyMap());
-            defaultAnswer("channelCount", Integer.valueOf(channels));
-            Map<Integer, MarkerLibrary.Entry> detected = autoDetectMarkers(seriesInfo, library);
-            for (int i = 0; i < channels; i++) {
-                MarkerLibrary.Entry entry = detected.get(Integer.valueOf(i));
-                defaultAnswer(markerKey(i), entry == null ? "" : entry.getId());
-            }
-        }
-
-        public void build(PipelineDialog dialog, AnswerMap answers) {
-            dialog.addHeader("What did you stain for in each channel?");
-            dialog.addMessage("Type the marker name (e.g. DAPI, IBA1, GFAP, NeuN, PSD95). "
-                    + "Suggestions appear as you type, but any text is accepted.");
-            markerFields.clear();
-            flash.pipeline.ui.wizard.MarkerLibrary typeaheadLibrary = toTypeaheadLibrary(library);
-            for (int i = 0; i < answers.getInt("channelCount", 3); i++) {
-                MarkerTypeahead typeahead = new MarkerTypeahead(typeaheadLibrary);
-                String selectedId = answers.getString(markerKey(i), "");
-                flash.pipeline.ui.wizard.MarkerLibrary.Entry selected = typeaheadEntryById(typeaheadLibrary, selectedId);
-                if (selected != null) {
-                    typeahead.setSelectedMarker(selected);
-                } else {
-                    typeahead.getTextField().setText(selectedId);
-                }
-                JPanel row = new JPanel(new BorderLayout(8, 0));
-                row.setOpaque(false);
-                row.add(new JLabel("Channel " + (i + 1) + " marker"), BorderLayout.WEST);
-                row.add(typeahead, BorderLayout.CENTER);
-                dialog.addComponent(row);
-                markerFields.add(typeahead);
-            }
-        }
-
-        public void read(PipelineDialog dialog, AnswerMap answers) {
-            for (int i = 0; i < answers.getInt("channelCount", 3); i++) {
-                MarkerTypeahead typeahead = markerFields.get(i);
-                flash.pipeline.ui.wizard.MarkerLibrary.Entry selected = typeahead.getSelectedMarker();
-                String typed = selected == null ? typeahead.getTextField().getText() : selected.getId();
-                answers.put(markerKey(i), resolveTypedMarker(typed));
-            }
-        }
-
-        public void writeTo(MainPanelBinding panel, AnswerMap answers) {
-            writeDerivedConfig(panel, answers);
-        }
-    }
-
-    private final class SignalScreen extends Screen {
-        private SignalScreen() {
-            super("How bright is each channel typically?");
-        }
-
-        public boolean isApplicable(AnswerMap prior) {
-            return true;
-        }
-
-        public void build(PipelineDialog dialog, AnswerMap answers) {
-            dialog.addHeader("How bright is each channel typically?");
-            String[] choices = {SIGNAL_DIM, SIGNAL_TYPICAL, SIGNAL_BRIGHT};
-            for (int i = 0; i < answers.getInt("channelCount", 3); i++) {
-                dialog.addChoice("Channel " + (i + 1), choices, answers.getString(signalKey(i), SIGNAL_TYPICAL));
-            }
-        }
-
-        public void read(PipelineDialog dialog, AnswerMap answers) {
-            for (int i = 0; i < answers.getInt("channelCount", 3); i++) {
-                answers.put(signalKey(i), dialog.getNextChoice());
-            }
-        }
-
-        public void writeTo(MainPanelBinding panel, AnswerMap answers) {
-        }
-    }
-
-    private final class CrowdingScreen extends Screen {
-        private CrowdingScreen() {
-            super("How crowded are these objects in your tissue?");
-        }
-
-        public boolean isApplicable(AnswerMap prior) {
-            for (int i = 0; i < prior.getInt("channelCount", 3); i++) {
-                MarkerLibrary.Entry entry = library.byId(prior.getString(markerKey(i), ""));
-                if (entry != null && entry.isCrowdingSensitive()) return true;
-            }
-            return false;
-        }
-
-        public void build(PipelineDialog dialog, AnswerMap answers) {
-            dialog.addHeader("How crowded are these objects in your tissue?");
-            String[] choices = {CROWDING_SPARSE, CROWDING_CROWDED};
-            for (int i = 0; i < answers.getInt("channelCount", 3); i++) {
-                MarkerLibrary.Entry entry = library.byId(answers.getString(markerKey(i), ""));
-                if (entry != null && entry.isCrowdingSensitive()) {
-                    dialog.addChoice("Channel " + (i + 1), choices, answers.getString(crowdingKey(i), CROWDING_SPARSE));
-                }
-            }
-        }
-
-        public void read(PipelineDialog dialog, AnswerMap answers) {
-            for (int i = 0; i < answers.getInt("channelCount", 3); i++) {
-                MarkerLibrary.Entry entry = library.byId(answers.getString(markerKey(i), ""));
-                if (entry != null && entry.isCrowdingSensitive()) {
-                    answers.put(crowdingKey(i), dialog.getNextChoice());
-                }
-            }
-        }
-
-        public void writeTo(MainPanelBinding panel, AnswerMap answers) {
-        }
-    }
-
-    private final class ZSliceScreen extends Screen {
-        private ZSliceScreen() {
-            super("Analyse the whole z-stack, or just a representative slab?");
-            defaultAnswer("zSliceMode", "Whole stack");
-        }
-
-        public boolean isApplicable(AnswerMap prior) {
-            return seriesInfo != null && seriesInfo.sizeZ > 20;
-        }
-
-        public void build(PipelineDialog dialog, AnswerMap answers) {
-            dialog.addHeader("Analyse the whole z-stack, or just a representative slab?");
-            dialog.addChoice("Z-slice range",
-                    new String[]{"Whole stack", "Middle 40%", "Custom range"},
-                    answers.getString("zSliceMode", "Whole stack"));
-        }
-
-        public void read(PipelineDialog dialog, AnswerMap answers) {
-            answers.put("zSliceMode", dialog.getNextChoice());
-        }
-
-        public void writeTo(MainPanelBinding panel, AnswerMap answers) {
-            DerivedConfig config = deriveConfig(seriesInfo, answers, library, availabilityForDerivation(answers));
-            panel.setValue("zSlice.config", config);
-        }
-    }
-
-    private void writeDerivedConfig(MainPanelBinding panel, AnswerMap answers) {
-        DerivedConfig config = deriveConfig(seriesInfo, answers, library, availabilityForDerivation(answers));
-        for (int i = 0; i < config.names.size(); i++) {
-            panel.setValue("channel" + (i + 1), config);
-            panel.markRecommended("channel" + (i + 1));
-        }
-    }
-
-    private String resolveTypedMarker(String typed) {
-        // Free-form input: any non-empty string is accepted.
-        // - empty -> MARKER_CUSTOM (signals "no marker chosen yet")
-        // - exact library id match -> that id (so saved bins reload deterministically)
-        // - exact displayName/alias match -> that id (typeahead-confirmed selection)
-        // - anything else -> the typed text itself (downstream uses it as the channel name)
-        if (typed == null || typed.trim().isEmpty()) return MARKER_CUSTOM;
-        String value = typed.trim();
-        if (MARKER_CUSTOM.equals(value) || MARKER_AUTOFLUORESCENCE.equals(value)) return value;
-        MarkerLibrary.Entry byId = library.byId(value);
-        if (byId != null) return byId.getId();
-        for (MarkerLibrary.Entry entry : library.entries()) {
-            if (value.equalsIgnoreCase(entry.getDisplayName())) return entry.getId();
-            for (String alias : entry.getAliases()) {
-                if (value.equalsIgnoreCase(alias)) return entry.getId();
-            }
-        }
-        return value;
-    }
-
-    private static flash.pipeline.ui.wizard.MarkerLibrary toTypeaheadLibrary(MarkerLibrary source) {
-        List<flash.pipeline.ui.wizard.MarkerLibrary.Entry> entries =
-                new ArrayList<flash.pipeline.ui.wizard.MarkerLibrary.Entry>();
-        if (source != null) {
-            for (MarkerLibrary.Entry entry : source.entries()) {
-                entries.add(new flash.pipeline.ui.wizard.MarkerLibrary.Entry(
-                        entry.getId(),
-                        entry.getDisplayName(),
-                        entry.getAliases(),
-                        entry.getNameHints(),
-                        entry.getCategory(),
-                        entry.getAdditionalCategories(),
-                        entry.getShape(),
-                        entry.isCrowdingSensitive(),
-                        entry.isCrowdingSensitive()));
-            }
-        }
-        return new flash.pipeline.ui.wizard.MarkerLibrary(entries);
-    }
-
-    private static flash.pipeline.ui.wizard.MarkerLibrary.Entry typeaheadEntryById(
-            flash.pipeline.ui.wizard.MarkerLibrary library, String id) {
-        if (library == null || id == null) return null;
-        for (flash.pipeline.ui.wizard.MarkerLibrary.Entry entry : library.entries()) {
-            if (id.equals(entry.getId())) {
-                return entry;
-            }
-        }
-        return null;
     }
 }

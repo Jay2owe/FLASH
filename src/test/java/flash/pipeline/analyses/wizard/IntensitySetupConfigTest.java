@@ -13,29 +13,29 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
-public class IntensityWizardTest {
+public class IntensitySetupConfigTest {
 
     @Test
     public void markerIdentitiesDriveDefaultModes() {
-        IntensityWizard.DerivedConfig derived = IntensityWizard.deriveConfig(
+        IntensitySetupConfig.DerivedConfig derived = IntensitySetupConfig.deriveConfig(
                 config(), identities(), new LinkedHashMap<String, Object>(), Arrays.asList("LH ROIs"));
 
-        assertEquals(IntensityWizard.MODE_WHOLE_ROI_MEAN, derived.measurementModes[1]);
-        assertEquals(IntensityWizard.MODE_WHOLE_ROI_MEAN, derived.measurementModes[2]);
-        assertEquals(IntensityWizard.MODE_THRESHOLD_MEAN, derived.measurementModes[3]);
+        assertEquals(IntensitySetupConfig.MODE_WHOLE_ROI_MEAN, derived.measurementModes[1]);
+        assertEquals(IntensitySetupConfig.MODE_WHOLE_ROI_MEAN, derived.measurementModes[2]);
+        assertEquals(IntensitySetupConfig.MODE_THRESHOLD_MEAN, derived.measurementModes[3]);
         assertEquals("40", derived.thresholds[3]);
     }
 
     @Test
     public void modeAnswersDriveBinarizationAndThresholds() {
         Map<String, Object> answers = new LinkedHashMap<String, Object>();
-        answers.put("mode.1", IntensityWizard.MODE_WHOLE_ROI_MEAN);
-        answers.put("mode.2", IntensityWizard.MODE_THRESHOLD_MEAN);
-        answers.put("mode.3", IntensityWizard.MODE_THRESHOLD_MEAN);
+        answers.put("mode.1", IntensitySetupConfig.MODE_WHOLE_ROI_MEAN);
+        answers.put("mode.2", IntensitySetupConfig.MODE_THRESHOLD_MEAN);
+        answers.put("mode.3", IntensitySetupConfig.MODE_THRESHOLD_MEAN);
         answers.put("threshold.2", "45");
         answers.put("threshold.3", "55");
 
-        IntensityWizard.DerivedConfig derived = IntensityWizard.deriveConfig(
+        IntensitySetupConfig.DerivedConfig derived = IntensitySetupConfig.deriveConfig(
                 config(), identities(), answers, Arrays.asList("LH ROIs", "RH ROIs"));
 
         assertFalse(derived.binarization[0]);
@@ -50,7 +50,7 @@ public class IntensityWizardTest {
         Map<String, Object> answers = new LinkedHashMap<String, Object>();
         answers.put("mask.choice", "NeuN");
 
-        IntensityWizard.DerivedConfig derived = IntensityWizard.deriveConfig(
+        IntensitySetupConfig.DerivedConfig derived = IntensitySetupConfig.deriveConfig(
                 config(), identities(), answers, Arrays.asList("LH ROIs"));
 
         assertEquals(2, derived.maskChannelIndex);
@@ -60,10 +60,10 @@ public class IntensityWizardTest {
     @Test
     public void spatialConfigAnswersAreValidatedAgainstIntensityBinarization() {
         Map<String, Object> answers = new LinkedHashMap<String, Object>();
-        answers.put("mode.1", IntensityWizard.MODE_WHOLE_ROI_MEAN);
-        answers.put("mode.2", IntensityWizard.MODE_WHOLE_ROI_MEAN);
-        answers.put("mode.3", IntensityWizard.MODE_WHOLE_ROI_MEAN);
-        answers.put("mode.4", IntensityWizard.MODE_WHOLE_ROI_MEAN);
+        answers.put("mode.1", IntensitySetupConfig.MODE_WHOLE_ROI_MEAN);
+        answers.put("mode.2", IntensitySetupConfig.MODE_WHOLE_ROI_MEAN);
+        answers.put("mode.3", IntensitySetupConfig.MODE_WHOLE_ROI_MEAN);
+        answers.put("mode.4", IntensitySetupConfig.MODE_WHOLE_ROI_MEAN);
         answers.put("intensity.spatial.config", IntensitySpatialConfig.builder()
                 .enabled(true)
                 .enabledAnalyses(EnumSet.of(
@@ -71,7 +71,7 @@ public class IntensityWizardTest {
                         IntensitySpatialConfig.AnalysisKey.DISTANCE_SHELL))
                 .build());
 
-        IntensityWizard.DerivedConfig derived = IntensityWizard.deriveConfig(
+        IntensitySetupConfig.DerivedConfig derived = IntensitySetupConfig.deriveConfig(
                 config(), identities(), answers, Arrays.asList("LH ROIs"));
 
         assertTrue(derived.spatialConfig.getEnabledAnalyses()
