@@ -312,6 +312,8 @@ public class LineDistanceAnalysis implements Analysis, RunRecordAware {
                 && "Configured analysis subset".equals(zSliceSourceChoice.getSelectedItem());
 
         // ── Step 1: Draw Lines (if toggled on) ───────────────────────
+        // REGRESSION GUARD: selecting "Draw New Line Set" must start the drawing handoff before measurement.
+        // The fix: keep this explicit branch so a user-confirmed toggle cannot be reduced to a stored boolean.
         if (drawNew) {
             IJ.log("--- Drawing New Line Set ---");
             String newLineName = resolvedName;

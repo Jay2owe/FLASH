@@ -434,6 +434,149 @@ public class IntensityAnalysisV2Test {
     }
 
     @Test
+    public void interactiveIntensitySpatialToggleLaunchesOptionsDialogAndStoresConfig() throws Exception {
+        IntensityAnalysisV2 analysis = new IntensityAnalysisV2();
+        final AtomicInteger launches = new AtomicInteger(0);
+        final AtomicReference<IntensitySpatialConfig> currentConfig =
+                new AtomicReference<IntensitySpatialConfig>();
+        final AtomicReference<String[]> launchedChannels = new AtomicReference<String[]>();
+        final AtomicReference<boolean[]> launchedBinarization = new AtomicReference<boolean[]>();
+        final IntensitySpatialConfig selected = IntensitySpatialConfig.builder()
+                .enabled(true)
+                .addAnalysis(IntensitySpatialConfig.AnalysisKey.GRANULARITY)
+                .build();
+        analysis.setIntensitySpatialOptionsDialogLauncherForTest(
+                new IntensityAnalysisV2.IntensitySpatialOptionsDialogLauncher() {
+                    @Override
+                    public IntensitySpatialConfig launch(String directory,
+                                                         IntensitySpatialConfig current,
+                                                         String[] channelNames,
+                                                         boolean[] binarization,
+                                                         Integer likelyStackDepth) {
+                        launches.incrementAndGet();
+                        currentConfig.set(current);
+                        launchedChannels.set(channelNames);
+                        launchedBinarization.set(binarization);
+                        return selected;
+                    }
+                });
+
+        assertTrue(analysis.prepareIntensitySpatialOptionsBeforeAnalysis(
+                temp.newFolder("intensity-spatial-launch").getAbsolutePath(),
+                TestConfigFiles.basicBinConfig("DAPI", "GFAP"),
+                new String[]{"DAPI", "GFAP"},
+                new boolean[]{false, false},
+                true));
+
+        assertEquals(1, launches.get());
+        assertFalse(currentConfig.get().isEnabled());
+        assertTrue(Arrays.equals(new String[]{"DAPI", "GFAP"}, launchedChannels.get()));
+        assertTrue(Arrays.equals(new boolean[]{false, false}, launchedBinarization.get()));
+        assertTrue(analysis.getIntensitySpatialConfigForTest().isEnabled());
+        assertTrue(analysis.getIntensitySpatialConfigForTest().getEnabledAnalyses()
+                .contains(IntensitySpatialConfig.AnalysisKey.GRANULARITY));
+    }
+
+    @Test
+    public void cancelledIntensitySpatialOptionsCancelBeforeProcessing() throws Exception {
+        IntensityAnalysisV2 analysis = new IntensityAnalysisV2();
+        final AtomicInteger launches = new AtomicInteger(0);
+        analysis.setIntensitySpatialOptionsDialogLauncherForTest(
+                new IntensityAnalysisV2.IntensitySpatialOptionsDialogLauncher() {
+                    @Override
+                    public IntensitySpatialConfig launch(String directory,
+                                                         IntensitySpatialConfig current,
+                                                         String[] channelNames,
+                                                         boolean[] binarization,
+                                                         Integer likelyStackDepth) {
+                        launches.incrementAndGet();
+                        return null;
+                    }
+                });
+
+        assertFalse(analysis.prepareIntensitySpatialOptionsBeforeAnalysis(
+                temp.newFolder("intensity-spatial-cancel").getAbsolutePath(),
+                intensityConfig("DAPI", "default"),
+                new String[]{"DAPI"},
+                new boolean[]{false},
+                true));
+        assertEquals(1, launches.get());
+        assertFalse(analysis.getIntensitySpatialConfigForTest().isEnabled());
+    }
+
+    @Test
+    public void hideImageWindowsStillLaunchesInteractiveIntensitySpatialOptions() throws Exception {
+        IntensityAnalysisV2 analysis = new IntensityAnalysisV2();
+        analysis.setHeadless(true);
+        final AtomicInteger launches = new AtomicInteger(0);
+        final IntensitySpatialConfig selected = IntensitySpatialConfig.builder()
+                .enabled(true)
+                .addAnalysis(IntensitySpatialConfig.AnalysisKey.PATCHINESS)
+                .build();
+        analysis.setIntensitySpatialOptionsDialogLauncherForTest(
+                new IntensityAnalysisV2.IntensitySpatialOptionsDialogLauncher() {
+                    @Override
+                    public IntensitySpatialConfig launch(String directory,
+                                                         IntensitySpatialConfig current,
+                                                         String[] channelNames,
+                                                         boolean[] binarization,
+                                                         Integer likelyStackDepth) {
+                        launches.incrementAndGet();
+                        return selected;
+                    }
+                });
+
+        assertTrue(analysis.prepareIntensitySpatialOptionsBeforeAnalysis(
+                temp.newFolder("intensity-spatial-image-headless").getAbsolutePath(),
+                intensityConfig("DAPI", "default"),
+                new String[]{"DAPI"},
+                new boolean[]{false},
+                true));
+
+        assertEquals(1, launches.get());
+        assertTrue(analysis.getIntensitySpatialConfigForTest().isEnabled());
+    }
+
+    @Test
+    public void suppressedIntensitySpatialSetupValidatesExistingConfigWithoutDialog() throws Exception {
+        IntensityAnalysisV2 analysis = new IntensityAnalysisV2();
+        analysis.setSuppressDialogs(true);
+        setIntensitySpatialConfigForTest(analysis, IntensitySpatialConfig.builder()
+                .enabled(true)
+                .addAnalysis(IntensitySpatialConfig.AnalysisKey.PATCHINESS)
+                .addAnalysis(IntensitySpatialConfig.AnalysisKey.CROSSMARK)
+                .addAnalysis(IntensitySpatialConfig.AnalysisKey.DISTANCE_SHELL)
+                .build());
+        final AtomicInteger launches = new AtomicInteger(0);
+        analysis.setIntensitySpatialOptionsDialogLauncherForTest(
+                new IntensityAnalysisV2.IntensitySpatialOptionsDialogLauncher() {
+                    @Override
+                    public IntensitySpatialConfig launch(String directory,
+                                                         IntensitySpatialConfig current,
+                                                         String[] channelNames,
+                                                         boolean[] binarization,
+                                                         Integer likelyStackDepth) {
+                        launches.incrementAndGet();
+                        return current;
+                    }
+                });
+
+        assertTrue(analysis.prepareIntensitySpatialOptionsBeforeAnalysis(
+                temp.newFolder("intensity-spatial-suppressed").getAbsolutePath(),
+                intensityConfig("DAPI", "default"),
+                new String[]{"DAPI"},
+                new boolean[]{false},
+                true));
+
+        assertEquals(0, launches.get());
+        IntensitySpatialConfig validated = analysis.getIntensitySpatialConfigForTest();
+        assertTrue(validated.isEnabled());
+        assertTrue(validated.getEnabledAnalyses().contains(IntensitySpatialConfig.AnalysisKey.PATCHINESS));
+        assertFalse(validated.getEnabledAnalyses().contains(IntensitySpatialConfig.AnalysisKey.CROSSMARK));
+        assertFalse(validated.getEnabledAnalyses().contains(IntensitySpatialConfig.AnalysisKey.DISTANCE_SHELL));
+    }
+
+    @Test
     public void headlessSpatialMeasurementSkipsMissingOptionalDependencyAndStillWritesBaseCsv() throws Exception {
         installDependencyStatusesForGate(DependencyId.IMGLIB2_ALGORITHM_RUNTIME);
         File dir = temp.newFolder("headless-spatial-missing-dependency");

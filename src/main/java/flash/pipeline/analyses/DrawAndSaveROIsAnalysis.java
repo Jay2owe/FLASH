@@ -594,6 +594,8 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
         closeAllNoPrompt();
 
         // ── Draw Line Set (optional) ─────────────────────────────────
+        // REGRESSION GUARD: selecting "Draw Line Set" must start the line-drawing handoff.
+        // The fix: keep this explicit call after ROI saving so the accepted toggle cannot silently skip line setup.
         if (drawLineSet && lineSetName != null && !lineSetName.isEmpty()) {
             File linesDir = LineDistanceAnalysis.lineSetWriteDir(directory);
             LineDistanceAnalysis lineAnalysis = new LineDistanceAnalysis();
