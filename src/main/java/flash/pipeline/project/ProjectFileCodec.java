@@ -33,6 +33,8 @@ public final class ProjectFileCodec {
     private static final String K_REGION = "region";
     private static final String K_CONDITION = "condition";
     private static final String K_NOTES = "notes";
+    private static final String K_SERIES_META = "seriesMeta";
+    private static final String K_INDEX = "index";
 
     private ProjectFileCodec() {
     }
@@ -101,6 +103,9 @@ public final class ProjectFileCodec {
             row.put(K_REGION, item.region);
             row.put(K_CONDITION, item.condition);
             row.put(K_NOTES, item.notes);
+            if (item.seriesMeta != null && !item.seriesMeta.isEmpty()) {
+                row.put(K_SERIES_META, seriesMetaToJson(item.seriesMeta));
+            }
             appendUnknown(row, item.extras);
             rows.add(row);
         }
@@ -123,10 +128,58 @@ public final class ProjectFileCodec {
             item.region = JsonIO.stringValue(row.get(K_REGION));
             item.condition = JsonIO.stringValue(row.get(K_CONDITION));
             item.notes = JsonIO.stringValue(row.get(K_NOTES));
+            item.seriesMeta = seriesMetaFromJson(JsonIO.asList(row.get(K_SERIES_META)));
             item.extras = extras(row, itemKnownKeys());
             items.add(item);
         }
         return items;
+    }
+
+    private static List<Object> seriesMetaToJson(List<ProjectFile.SeriesItem> seriesMeta) {
+        List<Object> out = new ArrayList<Object>();
+        if (seriesMeta == null) {
+            return out;
+        }
+        for (ProjectFile.SeriesItem series : seriesMeta) {
+            if (series == null) {
+                continue;
+            }
+            Map<String, Object> row = JsonIO.object();
+            appendComment(row, series.extras);
+            row.put(K_INDEX, Integer.valueOf(series.index));
+            row.put(K_INCLUDE, Boolean.valueOf(series.include));
+            row.put(K_NAME, series.name);
+            row.put(K_ANIMAL_ID, series.animalId);
+            row.put(K_HEMISPHERE, series.hemisphere);
+            row.put(K_REGION, series.region);
+            row.put(K_CONDITION, series.condition);
+            row.put(K_NOTES, series.notes);
+            appendUnknown(row, series.extras);
+            out.add(row);
+        }
+        return out;
+    }
+
+    private static List<ProjectFile.SeriesItem> seriesMetaFromJson(List<Object> values) {
+        List<ProjectFile.SeriesItem> out = new ArrayList<ProjectFile.SeriesItem>();
+        if (values == null) {
+            return out;
+        }
+        for (Object value : values) {
+            Map<String, Object> row = JsonIO.asObject(value);
+            ProjectFile.SeriesItem series = new ProjectFile.SeriesItem();
+            series.index = JsonIO.intValue(row.get(K_INDEX), 0);
+            series.include = JsonIO.booleanValue(row.get(K_INCLUDE), true);
+            series.name = JsonIO.stringValue(row.get(K_NAME));
+            series.animalId = JsonIO.stringValue(row.get(K_ANIMAL_ID));
+            series.hemisphere = JsonIO.stringValue(row.get(K_HEMISPHERE));
+            series.region = JsonIO.stringValue(row.get(K_REGION));
+            series.condition = JsonIO.stringValue(row.get(K_CONDITION));
+            series.notes = JsonIO.stringValue(row.get(K_NOTES));
+            series.extras = extras(row, seriesItemKnownKeys());
+            out.add(series);
+        }
+        return out;
     }
 
     private static List<Object> seriesToJson(List<Integer> series) {
@@ -221,6 +274,20 @@ public final class ProjectFileCodec {
         keys.put(K_PATH, Boolean.TRUE);
         keys.put(K_SERIES, Boolean.TRUE);
         keys.put(K_INCLUDE, Boolean.TRUE);
+        keys.put(K_ANIMAL_ID, Boolean.TRUE);
+        keys.put(K_HEMISPHERE, Boolean.TRUE);
+        keys.put(K_REGION, Boolean.TRUE);
+        keys.put(K_CONDITION, Boolean.TRUE);
+        keys.put(K_NOTES, Boolean.TRUE);
+        keys.put(K_SERIES_META, Boolean.TRUE);
+        return keys;
+    }
+
+    private static Map<String, Boolean> seriesItemKnownKeys() {
+        Map<String, Boolean> keys = new LinkedHashMap<String, Boolean>();
+        keys.put(K_INDEX, Boolean.TRUE);
+        keys.put(K_INCLUDE, Boolean.TRUE);
+        keys.put(K_NAME, Boolean.TRUE);
         keys.put(K_ANIMAL_ID, Boolean.TRUE);
         keys.put(K_HEMISPHERE, Boolean.TRUE);
         keys.put(K_REGION, Boolean.TRUE);

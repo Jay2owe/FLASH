@@ -44,6 +44,33 @@ public final class ProjectFile {
         public String region;
         public String condition;
         public String notes;
+        /**
+         * Per-series metadata overrides for multi-series container files. Empty
+         * for single-series sources (TIFs) and for LIFs the user has not
+         * expanded — in that case the file-level fields above apply to every
+         * included series. When populated, each entry carries the identity
+         * (animal/hemisphere/region/condition) the user assigned to one
+         * Bio-Formats series; the file-level fields are then only seeds/defaults.
+         */
+        public List<SeriesItem> seriesMeta = new ArrayList<SeriesItem>();
+        public Map<String, Object> extras = new LinkedHashMap<String, Object>();
+    }
+
+    /**
+     * Per-series identity assigned in the Project Builder. {@link #index} is the
+     * 0-based Bio-Formats series index within the parent {@link Item}; {@link #name}
+     * is the raw series name (the join key used to seed the orientation manifest so
+     * downstream analyses honour these values instead of parsing the series name).
+     */
+    public static final class SeriesItem {
+        public int index;
+        public boolean include = true;
+        public String name;
+        public String animalId;
+        public String hemisphere;
+        public String region;
+        public String condition;
+        public String notes;
         public Map<String, Object> extras = new LinkedHashMap<String, Object>();
     }
 }

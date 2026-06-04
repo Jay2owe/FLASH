@@ -31,10 +31,12 @@ import javax.swing.TransferHandler;
 import javax.swing.ListSelectionModel;
 import javax.swing.WindowConstants;
 import javax.swing.filechooser.FileFilter;
+import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.TableCellEditor;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
+import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Window;
@@ -133,7 +135,7 @@ public final class ProjectBuilderDialog {
         applyColumnPreferences();
         attachContextMenu();
         attachDragAndDrop();
-        attachSeriesDoubleClick();
+        attachExpansionClick();
 
         JScrollPane scroll = new JScrollPane(table);
         scroll.setPreferredSize(new Dimension(960, 320));
@@ -286,7 +288,8 @@ public final class ProjectBuilderDialog {
     }
 
     private JLabel buildHintRow() {
-        JLabel hint = new JLabel("Tip: drag files or folders here. Right-click a row for series and condition options.");
+        JLabel hint = new JLabel("Tip: drag files or folders here. Click the ▸ triangle on a multi-series file "
+                + "to set per-series details. A series needs a hemisphere (LH/RH) for its override to take effect.");
         hint.setForeground(FlashTheme.TEXT_MUTED);
         return hint;
     }
@@ -320,6 +323,29 @@ public final class ProjectBuilderDialog {
         }
         table.getColumnModel().getColumn(ProjectManifestTableModel.COL_REGION)
                 .setCellEditor(new RegionTableCellEditor());
+        table.getColumnModel().getColumn(ProjectManifestTableModel.COL_FILE)
+                .setCellRenderer(new FileColumnRenderer());
+    }
+
+    /**
+     * Draws the File column as a tree: a disclosure triangle on expandable
+     * container files and an indent on the per-series child rows beneath them.
+     */
+    private final class FileColumnRenderer extends DefaultTableCellRenderer {
+        @Override
+        public Component getTableCellRendererComponent(JTable t, Object value, boolean selected,
+                                                       boolean focused, int row, int column) {
+            super.getTableCellRendererComponent(t, value, selected, focused, row, column);
+            String text = value == null ? "" : value.toString();
+            if (model.isSeriesRow(row)) {
+                setText("        " + text);
+            } else if (model.isExpandableFileRow(row)) {
+                setText((model.isExpanded(row) ? "▾  " : "▸  ") + text);
+            } else {
+                setText("     " + text);
+            }
+            return this;
+        }
     }
 
     // ── Context menu / DnD / series shortcut ───────────────────────────────
@@ -327,7 +353,7 @@ public final class ProjectBuilderDialog {
     private void attachContextMenu() {
         final JPopupMenu menu = new JPopupMenu();
         JMenuItem setCondition = new JMenuItem("Set condition…");
-        JMenuItem configureSeries = new JMenuItem("Configure series…");
+        final JMenuItem toggleSeries = new JMenuItem("Expand series");
         JMenuItem removeRow = new JMenuItem("Remove");
 
         setCondition.addActionListener(new ActionListener() {
@@ -335,11 +361,11 @@ public final class ProjectBuilderDialog {
                 bulkSetCondition();
             }
         });
-        configureSeries.addActionListener(new ActionListener() {
+        toggleSeries.addActionListener(new ActionListener() {
             @Override public void actionPerformed(ActionEvent e) {
                 int[] sel = table.getSelectedRows();
                 if (sel.length == 0) return;
-                openSeriesDialog(sel[0]);
+                toggleExpand(sel[0]);
             }
         });
         removeRow.addActionListener(new ActionListener() {
@@ -349,7 +375,7 @@ public final class ProjectBuilderDialog {
         });
 
         menu.add(setCondition);
-        menu.add(configureSeries);
+        menu.add(toggleSeries);
         menu.addSeparator();
         menu.add(removeRow);
 
@@ -362,19 +388,25 @@ public final class ProjectBuilderDialog {
                 if (row >= 0 && !table.isRowSelected(row)) {
                     table.setRowSelectionInterval(row, row);
                 }
+                boolean expandable = row >= 0 && model.isExpandableFileRow(row);
+                toggleSeries.setEnabled(expandable);
+                toggleSeries.setText(expandable && model.isExpanded(row)
+                        ? "Collapse series" : "Expand series");
                 menu.show(e.getComponent(), e.getX(), e.getY());
             }
         });
     }
 
-    private void attachSeriesDoubleClick() {
+    private void attachExpansionClick() {
         table.addMouseListener(new MouseAdapter() {
             @Override public void mouseClicked(MouseEvent e) {
-                if (e.getClickCount() != 2) return;
                 int row = table.rowAtPoint(e.getPoint());
                 int col = table.columnAtPoint(e.getPoint());
-                if (row >= 0 && col == ProjectManifestTableModel.COL_SERIES) {
-                    openSeriesDialog(row);
+                if (row < 0) return;
+                // Clicking the File cell (the triangle) of a multi-series
+                // container toggles its per-series rows. Series rows ignore it.
+                if (col == ProjectManifestTableModel.COL_FILE && model.isExpandableFileRow(row)) {
+                    toggleExpand(row);
                 }
             }
         });
@@ -462,33 +494,56 @@ public final class ProjectBuilderDialog {
         }
     }
 
-    private void openSeriesDialog(int rowIndex) {
-        ProjectManifestTableModel.Row row = model.get(rowIndex);
+    /**
+     * Toggle the per-series rows of a multi-series container. The first
+     * expansion lazily reads the series names from the file so each series row
+     * can be pre-filled and edited independently.
+     */
+    private void toggleExpand(int rowIndex) {
+        if (!model.isExpandableFileRow(rowIndex)) {
+            return;
+        }
+        if (model.isExpanded(rowIndex)) {
+            model.setExpanded(rowIndex, false);
+            return;
+        }
+        ProjectManifestTableModel.Row row = model.getFile(model.fileIndexAt(rowIndex));
+        if (row.series.isEmpty() && !populateSeriesEntries(rowIndex, row)) {
+            return;
+        }
+        model.setExpanded(rowIndex, true);
+    }
+
+    /** Probe the source's series names and build the per-series rows. */
+    private boolean populateSeriesEntries(int rowIndex, ProjectManifestTableModel.Row row) {
         File source = row.source;
-        if (source == null) return;
-        List<SeriesSelectionDialog.SeriesEntry> entries = new ArrayList<SeriesSelectionDialog.SeriesEntry>();
+        if (source == null) {
+            return false;
+        }
+        List<ProjectManifestTableModel.SeriesEntry> entries =
+                new ArrayList<ProjectManifestTableModel.SeriesEntry>();
+        Cursor previous = dialog.getCursor();
         try {
-            List<SeriesMeta> metas = LifIO.readAllSeriesMetadata(source);
-            for (SeriesMeta m : metas) {
-                entries.add(new SeriesSelectionDialog.SeriesEntry(m.index, m.name));
+            dialog.setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
+            for (SeriesMeta m : LifIO.readAllSeriesMetadata(source)) {
+                entries.add(new ProjectManifestTableModel.SeriesEntry(m.index, m.name));
             }
         } catch (Exception ex) {
             JOptionPane.showMessageDialog(dialog,
                     "Could not read series from this file:\n" + ex.getMessage(),
                     "Series unavailable", JOptionPane.WARNING_MESSAGE);
-            return;
+            return false;
+        } finally {
+            dialog.setCursor(previous);
         }
         if (entries.isEmpty()) {
             JOptionPane.showMessageDialog(dialog,
                     "This file reports no series.",
                     "No series", JOptionPane.INFORMATION_MESSAGE);
-            return;
+            return false;
         }
-        List<Integer> chosen = SeriesSelectionDialog.show(dialog, source.getName(), entries, row.selectedSeries);
-        if (chosen != null) {
-            model.setSelectedSeries(rowIndex, chosen);
-            model.setSeriesCount(rowIndex, entries.size());
-        }
+        model.setSeriesEntries(rowIndex, entries);
+        return true;
     }
 
     private void bulkSetCondition() {
@@ -506,8 +561,17 @@ public final class ProjectBuilderDialog {
 
     private void removeSelectedRows() {
         int[] sel = table.getSelectedRows();
-        for (int i = sel.length - 1; i >= 0; i--) {
-            model.removeRow(sel[i]);
+        // Selected rows may be file headers and/or their series children; map
+        // each to its owning file, then delete files highest-index-first so the
+        // remaining indexes stay valid.
+        java.util.TreeSet<Integer> fileIndexes = new java.util.TreeSet<Integer>();
+        for (int v : sel) {
+            if (v >= 0 && v < model.getRowCount()) {
+                fileIndexes.add(Integer.valueOf(model.fileIndexAt(v)));
+            }
+        }
+        for (Integer fileIndex : fileIndexes.descendingSet()) {
+            model.removeFile(fileIndex.intValue());
         }
     }
 
@@ -831,6 +895,15 @@ public final class ProjectBuilderDialog {
             IJ.log("[FLASH] Could not write Conditions.csv: " + ex.getMessage());
         }
 
+        // Seed Image Orientation.csv from per-series identity so downstream
+        // analyses honour the user's animal/hemisphere/region assignments
+        // instead of re-parsing each series name.
+        try {
+            ProjectMetadataSeeder.seedOrientationManifest(outputRoot, project);
+        } catch (IOException ex) {
+            IJ.log("[FLASH] Could not seed Image Orientation.csv: " + ex.getMessage());
+        }
+
         if (pluginsDir != null) {
             try {
                 RecentProjectsStore.recordOpened(pluginsDir,
@@ -869,12 +942,26 @@ public final class ProjectBuilderDialog {
         if (project == null || project.items == null) return out;
         for (ProjectFile.Item item : project.items) {
             if (item == null || !item.include) continue;
-            String animal = item.animalId == null ? "" : item.animalId.trim();
-            String condition = item.condition == null ? "" : item.condition.trim();
-            if (animal.isEmpty() || condition.isEmpty()) continue;
-            out.put(animal, condition);
+            // An expanded multi-series file contributes one (animal, condition)
+            // pair per included series; otherwise the file-level pair applies.
+            if (item.seriesMeta != null && !item.seriesMeta.isEmpty()) {
+                for (ProjectFile.SeriesItem series : item.seriesMeta) {
+                    if (series == null || !series.include) continue;
+                    putAssignment(out, series.animalId, series.condition);
+                }
+            } else {
+                putAssignment(out, item.animalId, item.condition);
+            }
         }
         return out;
+    }
+
+    private static void putAssignment(java.util.LinkedHashMap<String, String> out,
+                                      String animalId, String conditionValue) {
+        String animal = animalId == null ? "" : animalId.trim();
+        String condition = conditionValue == null ? "" : conditionValue.trim();
+        if (animal.isEmpty() || condition.isEmpty()) return;
+        out.put(animal, condition);
     }
 
     private int countIncluded() {

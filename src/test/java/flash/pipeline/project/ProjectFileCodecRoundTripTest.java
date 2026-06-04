@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.util.Arrays;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
@@ -130,6 +131,64 @@ public class ProjectFileCodecRoundTripTest {
 
         assertEquals(Arrays.asList(Integer.valueOf(0), Integer.valueOf(2)),
                 decoded.items.get(0).series);
+    }
+
+    @Test
+    public void seriesMetaRoundTrip() throws Exception {
+        ProjectFile project = new ProjectFile();
+        ProjectFile.Item item = new ProjectFile.Item();
+        item.path = "D:/raw/slide1.lif";
+        item.series.addAll(Arrays.asList(Integer.valueOf(0), Integer.valueOf(2)));
+
+        ProjectFile.SeriesItem s0 = new ProjectFile.SeriesItem();
+        s0.index = 0;
+        s0.include = true;
+        s0.name = "Mouse3_LH_CA1";
+        s0.animalId = "Mouse3";
+        s0.hemisphere = "LH";
+        s0.region = "CA1";
+        s0.condition = "WT";
+        s0.notes = "good";
+        ProjectFile.SeriesItem s2 = new ProjectFile.SeriesItem();
+        s2.index = 2;
+        s2.include = false;
+        s2.name = "Mouse4_RH_DG";
+        s2.animalId = "Mouse4";
+        s2.hemisphere = "RH";
+        s2.region = "DG";
+        s2.condition = "KO";
+        item.seriesMeta.add(s0);
+        item.seriesMeta.add(s2);
+        project.items.add(item);
+
+        String json = ProjectFileCodec.encode(project);
+        assertTrue(json.contains("\"seriesMeta\""));
+        ProjectFile.Item back = ProjectFileCodec.decode(json).items.get(0);
+
+        assertEquals(2, back.seriesMeta.size());
+        ProjectFile.SeriesItem b0 = back.seriesMeta.get(0);
+        assertEquals(0, b0.index);
+        assertTrue(b0.include);
+        assertEquals("Mouse3_LH_CA1", b0.name);
+        assertEquals("Mouse3", b0.animalId);
+        assertEquals("LH", b0.hemisphere);
+        assertEquals("CA1", b0.region);
+        assertEquals("WT", b0.condition);
+        assertEquals("good", b0.notes);
+        ProjectFile.SeriesItem b2 = back.seriesMeta.get(1);
+        assertEquals(2, b2.index);
+        assertFalse(b2.include);
+        assertEquals("Mouse4", b2.animalId);
+    }
+
+    @Test
+    public void absentSeriesMetaDecodesToEmptyList() throws Exception {
+        String json = "{\"schemaVersion\":1,\"items\":[{\"path\":\"X.lif\"}]}";
+
+        ProjectFile decoded = ProjectFileCodec.decode(json);
+
+        assertNotNull(decoded.items.get(0).seriesMeta);
+        assertTrue(decoded.items.get(0).seriesMeta.isEmpty());
     }
 
     @Test
