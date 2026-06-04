@@ -286,7 +286,7 @@ public class AnalysisHelpCatalogTest {
         assertContains(AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_3D_OBJECT).outputs,
                 "FLASH/Results/Tables/Objects/<channel>.csv");
         assertContains(AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_3D_OBJECT).outputs,
-                "FLASH/Results/Analysis Images/Objects/Masks and Label Maps/");
+                "FLASH/Results/Analysis Images/Segmentation/");
         assertContains(AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_3D_OBJECT).outputs,
                 "FLASH/Results/Run Records/analysis_details/");
     }

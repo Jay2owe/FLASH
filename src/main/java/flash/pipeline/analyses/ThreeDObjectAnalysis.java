@@ -150,29 +150,20 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         ExistingObjectDataMode choose(File outputDir, List<File> existingCsvs);
     }
 
-    /** Bundles the three per-family object image output roots (masks/label maps, masked images, filtered inputs). */
-    static final class ObjectImageRoots {
-        final File masksRoot;
-        final File maskedRoot;
-        final File filteredRoot;
+    /** Root for segmentation-related images: label maps, masked images, and filtered inputs. */
+    static final class SegmentationImageRoot {
+        final File root;
 
-        ObjectImageRoots(File masksRoot, File maskedRoot, File filteredRoot) {
-            this.masksRoot = masksRoot;
-            this.maskedRoot = maskedRoot;
-            this.filteredRoot = filteredRoot;
+        SegmentationImageRoot(File root) {
+            this.root = root;
         }
 
-        static ObjectImageRoots forDirectory(String directory) {
+        static SegmentationImageRoot forDirectory(String directory) {
             FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
-            return new ObjectImageRoots(
-                    layout.analysisImagesObjectsMasksDir(),
-                    layout.analysisImagesObjectsMaskedDir(),
-                    layout.analysisImagesObjectsFilteredDir());
+            return new SegmentationImageRoot(layout.analysisImagesSegmentationDir());
         }
 
-        File masksAnimalDir(String animalName) { return new File(masksRoot, animalName); }
-        File maskedAnimalDir(String animalName) { return new File(maskedRoot, animalName); }
-        File filteredAnimalDir(String animalName) { return new File(filteredRoot, animalName); }
+        File animalDir(String animalName) { return new File(root, animalName); }
     }
 
     private static final ExistingObjectDataPrompt DEFAULT_EXISTING_OBJECT_DATA_PROMPT =
@@ -1073,13 +1064,9 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             recordWarn(message);
         }
 
-        ObjectImageRoots imageRoots = ObjectImageRoots.forDirectory(directory);
+        SegmentationImageRoot imageRoot = SegmentationImageRoot.forDirectory(directory);
         //noinspection ResultOfMethodCallIgnored
-        imageRoots.masksRoot.mkdirs();
-        //noinspection ResultOfMethodCallIgnored
-        imageRoots.maskedRoot.mkdirs();
-        //noinspection ResultOfMethodCallIgnored
-        imageRoots.filteredRoot.mkdirs();
+        imageRoot.root.mkdirs();
 
         // Per-channel accumulator tables (macro ultimately writes one CSV per channel)
         Map<String, ij.measure.ResultsTable> channelTables = new LinkedHashMap<>();
@@ -1151,14 +1138,14 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             loader.start();
             IJ.log("Thread split: " + effectiveLoaders + " loaders, " + safeWorkers + " workers");
             compactLog = true;
-            processImagesParallel(loader, safeWorkers, directory, cfg, outDir, imageRoots, channelTables,
+            processImagesParallel(loader, safeWorkers, directory, cfg, outDir, imageRoot, channelTables,
                     roiSets, extractProcessLength, nuclearMarkerIndex, processChannels,
                     analysisStartTime);
             compactLog = false;
         } else {
             compactLog = false;
             // ── Sequential processing: deferred loading with prefetch ──
-            processImagesSequential(supplier, totalImages, directory, cfg, outDir, imageRoots, channelTables,
+            processImagesSequential(supplier, totalImages, directory, cfg, outDir, imageRoot, channelTables,
                     roiSets, extractProcessLength, nuclearMarkerIndex, processChannels,
                     analysisStartTime);
         }
@@ -1455,11 +1442,21 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         flash.pipeline.ui.FlashIcons.apply(savePreset, flash.pipeline.ui.FlashIcons.save());
         savePreset.setToolTipText("Save the current 3D Object Analysis options as a named preset.");
         savePreset.addActionListener(e -> handleSaveThreeDObjectPreset(directory, cfg, bindings));
+        JButton managePreset = new JButton("Manage...");
+        managePreset.setToolTipText("Delete saved 3D Object Analysis presets.");
+        managePreset.addActionListener(e -> {
+            boolean changed = flash.pipeline.ui.config.PresetManagerDialog.manage(
+                    presetCombo, new ThreeDObjectPresetIO(new File(directory)), "Manage 3D Object Presets");
+            if (changed) {
+                refreshThreeDObjectPresetChoice(directory, bindings, OBJECT_PRESET_PLACEHOLDER);
+            }
+        });
         JPanel row = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 6, 0));
         row.setOpaque(false);
         presetCombo.setMaximumSize(new java.awt.Dimension(260, 24));
         row.add(presetCombo);
         row.add(savePreset);
+        row.add(managePreset);
         presetCombo.addActionListener(e -> {
             if (bindings != null && bindings.programmaticChange) {
                 return;
@@ -1885,7 +1882,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             BinConfig cfg,
             ImagePlus imp,
             File outDir,
-            ObjectImageRoots imageRoots,
+            SegmentationImageRoot imageRoot,
             Map<String, ij.measure.ResultsTable> channelTables,
             int imageIndex,
             int scnIndex,
@@ -1920,7 +1917,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
 
         try {
             boolean[] channelHasObjects =
-                    run3DObjectsCounterPerChannel(directory, cfg, imp, outDir, imageRoots, channelTables, scnIndex,
+                    run3DObjectsCounterPerChannel(directory, cfg, imp, outDir, imageRoot, channelTables, scnIndex,
                             animalName, parts,
                             extractProcessLength, nuclearMarkerIndex, processChannels,
                             region, seriesRegionLabel, roiLabel, roiBase);
@@ -1944,7 +1941,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                         hemisphere, seriesRegionLabel, roiLabel, processChannels, nuclearMarkerIndex);
             }
 
-            saveObjectsImages(cfg, imageRoots, animalName, hemisphere, roiLabel);
+            saveObjectsImages(cfg, imageRoot, animalName, hemisphere, roiLabel);
         } finally {
             clearRegistry();
         }
@@ -1953,7 +1950,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
     private void processImagesSequential(
             final DeferredImageSupplier supplier, final int totalImages,
             String directory, BinConfig cfg,
-            File outDir, ObjectImageRoots imageRoots,
+            File outDir, SegmentationImageRoot imageRoot,
             Map<String, ij.measure.ResultsTable> channelTables,
             RoiSetData[] roiSets,
             boolean extractProcessLength, int nuclearMarkerIndex, boolean[] processChannels,
@@ -2064,7 +2061,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                             animalName, parts == null ? "" : parts.hemisphere, null);
                     try {
                         for (RoiSetData roiSet : roiSets) {
-                            processRoiSetFromFullCount(fullData, directory, cfg, imp, outDir, imageRoots,
+                            processRoiSetFromFullCount(fullData, directory, cfg, imp, outDir, imageRoot,
                                     channelTables, i, scnIndex, animalName, parts,
                                     extractProcessLength, nuclearMarkerIndex, processChannels, roiSet);
                         }
@@ -2074,7 +2071,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                 } else {
                     // Original path: count per ROI set
                     for (RoiSetData roiSet : roiSets) {
-                        processRoiSetForImage(directory, cfg, imp, outDir, imageRoots, channelTables,
+                        processRoiSetForImage(directory, cfg, imp, outDir, imageRoot, channelTables,
                                 i, scnIndex, animalName, parts,
                                 extractProcessLength, nuclearMarkerIndex, processChannels, roiSet);
                     }
@@ -2112,7 +2109,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             final BoundedImageLoader loader,
             final int nThreads,
             final String directory, final BinConfig cfg,
-            final File outDir, final ObjectImageRoots imageRoots,
+            final File outDir, final SegmentationImageRoot imageRoot,
             final Map<String, ij.measure.ResultsTable> channelTables,
             final RoiSetData[] roiSets,
             final boolean extractProcessLength, final int nuclearMarkerIndex, final boolean[] processChannels,
@@ -2215,7 +2212,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                                         animalName, parts == null ? "" : parts.hemisphere, null);
                                 try {
                                     for (RoiSetData roiSet : roiSets) {
-                                        processRoiSetFromFullCount(fullData, directory, cfg, imp, outDir, imageRoots,
+                                        processRoiSetFromFullCount(fullData, directory, cfg, imp, outDir, imageRoot,
                                                 localChannelTables, idx, scnIndex, animalName, parts,
                                                 extractProcessLength, nuclearMarkerIndex, processChannels, roiSet);
                                     }
@@ -2224,7 +2221,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                                 }
                             } else {
                                 for (RoiSetData roiSet : roiSets) {
-                                    processRoiSetForImage(directory, cfg, imp, outDir, imageRoots, localChannelTables,
+                                    processRoiSetForImage(directory, cfg, imp, outDir, imageRoot, localChannelTables,
                                             idx, scnIndex, animalName, parts,
                                             extractProcessLength, nuclearMarkerIndex, processChannels, roiSet);
                                 }
@@ -2510,9 +2507,9 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
     }
 
     /** Save objects images (label maps) after colocalization. */
-    private void saveObjectsImages(BinConfig cfg, ObjectImageRoots imageRoots, String animalName, String hemisphere, String region) {
+    private void saveObjectsImages(BinConfig cfg, SegmentationImageRoot imageRoot, String animalName, String hemisphere, String region) {
         String hemiRegion = buildFileSuffix(hemisphere, region, animalName);
-        File perAnimal = imageRoots.masksAnimalDir(animalName);
+        File perAnimal = imageRoot.animalDir(animalName);
         for (int c = 0; c < cfg.numChannels(); c++) {
             String chName = cfg.channelNames.get(c);
             ImagePlus objImg = getRegisteredImage(chName + "_objects");
@@ -2780,7 +2777,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             BinConfig cfg,
             ImagePlus imp,
             File outDir,
-            ObjectImageRoots imageRoots,
+            SegmentationImageRoot imageRoot,
             Map<String, ij.measure.ResultsTable> channelTables,
             int scnIndex,
             String animalName,
@@ -3233,28 +3230,25 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
 
                 appendStatsToChannelTable(res.getStatistics(), channelTables.get(channelName), scnIndex, animalName, hemisphere, regionLabel, roiLabel);
 
-                // Save masked image under Results/Analysis Images/Objects/Masked Images/<animal>/.
-                File maskedAnimalDir = imageRoots.maskedAnimalDir(animalName);
+                // Save segmentation comparison images under Results/Analysis Images/Segmentation/<animal>/.
+                File segmentationAnimalDir = imageRoot.animalDir(animalName);
                 //noinspection ResultOfMethodCallIgnored
-                maskedAnimalDir.mkdirs();
-                File filteredAnimalDir = imageRoots.filteredAnimalDir(animalName);
-                //noinspection ResultOfMethodCallIgnored
-                filteredAnimalDir.mkdirs();
+                segmentationAnimalDir.mkdirs();
 
                 // Build suffix: hemisphere_region, or just one, or animal name for non-convention files
                 String maskedSuffix = buildFileSuffix(hemisphere, roiLabel, animalName);
                 String safeChannelName = ChannelFilenameCodec.toSafe(channelName);
                 if (res.getMaskedImage() != null) {
-                    File maskedOutput = new File(maskedAnimalDir, safeChannelName + "_Masked"
+                    File maskedOutput = new File(segmentationAnimalDir, safeChannelName + "_Masked"
                             + (maskedSuffix.isEmpty() ? "" : "_" + maskedSuffix) + ".tif");
                     AsyncImageSaver.saveAsTiffAsync(res.getMaskedImage(),
                             maskedOutput.getAbsolutePath());
                     recordOutput(maskedOutput, "tiff");
                 }
 
-                // Save the pre-detection filtered image into Filtered Inputs/<animal>/
+                // Save the pre-detection filtered image beside the masked and label-map outputs.
                 if (fr.preDetectionFiltered != null) {
-                    File filteredOutput = new File(filteredAnimalDir, safeChannelName + "_Filtered"
+                    File filteredOutput = new File(segmentationAnimalDir, safeChannelName + "_Filtered"
                             + (maskedSuffix.isEmpty() ? "" : "_" + maskedSuffix) + ".tif");
                     AsyncImageSaver.saveAsTiffAsync(fr.preDetectionFiltered,
                             filteredOutput.getAbsolutePath());
@@ -3547,7 +3541,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             BinConfig cfg,
             ImagePlus imp,
             File outDir,
-            ObjectImageRoots imageRoots,
+            SegmentationImageRoot imageRoot,
             Map<String, ij.measure.ResultsTable> channelTables,
             int imageIndex,
             int scnIndex,
@@ -3646,28 +3640,25 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                 appendStatsToChannelTable(roiRes.getStatistics(), channelTables.get(channelName),
                         scnIndex, animalName, hemisphere, seriesRegionLabel, roiLabel);
 
-                // Save masked image per-ROI under Results/Analysis Images/Objects/Masked Images/<animal>/.
-                File maskedAnimalDir = imageRoots.maskedAnimalDir(animalName);
+                // Save segmentation comparison images per-ROI under Results/Analysis Images/Segmentation/<animal>/.
+                File segmentationAnimalDir = imageRoot.animalDir(animalName);
                 //noinspection ResultOfMethodCallIgnored
-                maskedAnimalDir.mkdirs();
-                File filteredAnimalDir = imageRoots.filteredAnimalDir(animalName);
-                //noinspection ResultOfMethodCallIgnored
-                filteredAnimalDir.mkdirs();
+                segmentationAnimalDir.mkdirs();
                 String maskedSuffix = buildFileSuffix(hemisphere, roiLabel, animalName);
                 String safeChannelName = ChannelFilenameCodec.toSafe(channelName);
                 if (roiRes.getMaskedImage() != null) {
-                    File maskedOutput = new File(maskedAnimalDir, safeChannelName + "_Masked"
+                    File maskedOutput = new File(segmentationAnimalDir, safeChannelName + "_Masked"
                             + (maskedSuffix.isEmpty() ? "" : "_" + maskedSuffix) + ".tif");
                     AsyncImageSaver.saveAsTiffAsync(roiRes.getMaskedImage(),
                             maskedOutput.getAbsolutePath());
                     recordOutput(maskedOutput, "tiff");
                 }
 
-                // Save pre-detection filtered image per-ROI (clone + crop from full) under Filtered Inputs/<animal>/.
+                // Save pre-detection filtered image per-ROI beside the masked and label-map outputs.
                 if (fr.preDetectionFiltered != null) {
                     ImagePlus roiPreDetection = ImageOps.duplicateThreadSafe(fr.preDetectionFiltered);
                     if (region != null) region.cropToBounds(roiPreDetection);
-                    File filteredOutput = new File(filteredAnimalDir, safeChannelName + "_Filtered"
+                    File filteredOutput = new File(segmentationAnimalDir, safeChannelName + "_Filtered"
                             + (maskedSuffix.isEmpty() ? "" : "_" + maskedSuffix) + ".tif");
                     AsyncImageSaver.saveAsTiffAsync(roiPreDetection,
                             filteredOutput.getAbsolutePath());
@@ -3741,7 +3732,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             }
 
             // Save objects images
-            saveObjectsImages(cfg, imageRoots, animalName, hemisphere, roiLabel);
+            saveObjectsImages(cfg, imageRoot, animalName, hemisphere, roiLabel);
         } finally {
             clearRegistry();
         }
@@ -5656,7 +5647,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
     }
 
     static File objectImageOutputsRoot(String directory) {
-        return FlashProjectLayout.forDirectory(directory).analysisImagesObjectsRoot();
+        return FlashProjectLayout.forDirectory(directory).analysisImagesSegmentationDir();
     }
 
     static File objectOutputCsv(File outDir, String channelName) {

@@ -174,12 +174,6 @@ public final class TrainedRfRunner {
         if (modelPath == null && params.projectRoot != null && params.modelKey != null
                 && !params.modelKey.trim().isEmpty()) {
             modelPath = ObjectClassifierPersistence.modelPath(params.projectRoot, params.modelKey);
-            if (!Files.isRegularFile(modelPath)) {
-                Path legacy = ObjectClassifierPersistence.legacyModelPath(params.projectRoot, params.modelKey);
-                if (Files.isRegularFile(legacy)) {
-                    modelPath = legacy;
-                }
-            }
         }
         if (modelPath == null) {
             throw new IllegalArgumentException("No Smile RF model or model path supplied.");

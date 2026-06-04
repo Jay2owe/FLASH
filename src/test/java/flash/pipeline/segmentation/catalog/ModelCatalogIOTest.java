@@ -41,56 +41,6 @@ public class ModelCatalogIOTest {
     }
 
     @Test
-    public void readMigratesLegacyTopLevelCatalogToFlashConfig() throws Exception {
-        Path root = temp.newFolder("legacy").toPath();
-        ModelEntry legacy = userStarDist("legacy_model");
-        Path legacyCatalogDir = ModelCatalogIO.legacyCatalogDirectory(root);
-        Path legacyModelFile = legacyCatalogDir.resolve(legacy.filePath.get());
-        Files.createDirectories(legacyModelFile.getParent());
-        Files.write(legacyModelFile, "legacy-model".getBytes(StandardCharsets.UTF_8));
-
-        Map<String, Object> json = JsonIO.object();
-        json.put("version", Integer.valueOf(ModelCatalogIO.CATALOG_VERSION));
-        json.put("models", Collections.<Object>singletonList(legacy.toJsonObject()));
-        Files.write(legacyCatalogDir.resolve(ModelCatalogIO.CATALOG_FILENAME),
-                Collections.singletonList(JsonIO.write(json)), StandardCharsets.UTF_8);
-
-        ModelCatalog loaded = ModelCatalogIO.read(root);
-        ModelEntry loadedEntry = loaded.get("legacy_model").get();
-
-        Path migratedModelFile = ModelCatalogIO.catalogDirectory(root).resolve(legacy.filePath.get());
-        assertTrue(Files.isRegularFile(migratedModelFile));
-        assertEquals(migratedModelFile.toAbsolutePath().normalize(),
-                loaded.resolve(loadedEntry).toAbsolutePath().normalize());
-    }
-
-    @Test
-    public void readFallsBackToLegacyCatalogWhenMigrationCannotWrite() throws Exception {
-        Path root = temp.newFolder("legacy-blocked").toPath();
-        Files.write(root.resolve("FLASH"), "not-a-directory".getBytes(StandardCharsets.UTF_8));
-        ModelEntry legacy = userStarDist("legacy_unmigrated");
-        Path legacyCatalogDir = ModelCatalogIO.legacyCatalogDirectory(root);
-        Path legacyModelFile = legacyCatalogDir.resolve(legacy.filePath.get());
-        Files.createDirectories(legacyModelFile.getParent());
-        Files.write(legacyModelFile, "legacy-model".getBytes(StandardCharsets.UTF_8));
-
-        Map<String, Object> json = JsonIO.object();
-        json.put("version", Integer.valueOf(ModelCatalogIO.CATALOG_VERSION));
-        json.put("models", Collections.<Object>singletonList(legacy.toJsonObject()));
-        Files.write(legacyCatalogDir.resolve(ModelCatalogIO.CATALOG_FILENAME),
-                Collections.singletonList(JsonIO.write(json)), StandardCharsets.UTF_8);
-
-        ModelCatalog loaded = ModelCatalogIO.read(root);
-        ModelEntry loadedEntry = loaded.get("legacy_unmigrated").get();
-
-        assertEquals(legacyCatalogDir.toAbsolutePath().normalize(),
-                loaded.catalogDirectory().toAbsolutePath().normalize());
-        assertEquals(legacyModelFile.toAbsolutePath().normalize(),
-                loaded.resolve(loadedEntry).toAbsolutePath().normalize());
-        assertFalse(Files.exists(root.resolve("FLASH").resolve("Config")));
-    }
-
-    @Test
     public void roundTripProjectCatalogWithStarDistAndSmileRfEntries() throws Exception {
         Path root = temp.newFolder("roundtrip").toPath();
         ModelEntry starDist = userStarDist("user_microglia_iba1_v3");

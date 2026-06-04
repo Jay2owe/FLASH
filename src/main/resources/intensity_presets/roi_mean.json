@@ -1,7 +1,7 @@
 {
   "name": "ROI mean - all channels",
   "description": "Whole-ROI mean intensity for all measured channels, no co-stain mask.",
-  "libraryVersion": "1",
+  "libraryVersion": "2",
   "strategy": "roi_mean",
   "defaultMode": "Whole ROI mean (all pixels, including background)",
   "channelModes": {},

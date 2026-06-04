@@ -28,9 +28,7 @@ public final class FlashProjectLayout {
     public static final String TILES_DIR = "Tiles";
     public static final String OME_TIFF_DIR = "OME-TIFF";
     public static final String ANALYSIS_IMAGES_DIR = "Analysis Images";
-    public static final String OBJECT_MASKS_LABELMAPS_DIR = "Masks and Label Maps";
-    public static final String OBJECT_MASKED_IMAGES_DIR = "Masked Images";
-    public static final String OBJECT_FILTERED_INPUTS_DIR = "Filtered Inputs";
+    public static final String SEGMENTATION_DIR = "Segmentation";
     public static final String INTENSITY_OVERLAYS_DIR = "Intensity Overlays";
     public static final String SPATIAL_HEATMAPS_DIR = "Spatial Heatmaps";
     public static final String DECONVOLUTION_DIR = "Deconvolution";
@@ -159,20 +157,8 @@ public final class FlashProjectLayout {
         return new File(analysisImagesRoot(), ROIS_DIR);
     }
 
-    public File analysisImagesObjectsRoot() {
-        return new File(analysisImagesRoot(), OBJECTS_DIR);
-    }
-
-    public File analysisImagesObjectsMasksDir() {
-        return new File(analysisImagesObjectsRoot(), OBJECT_MASKS_LABELMAPS_DIR);
-    }
-
-    public File analysisImagesObjectsMaskedDir() {
-        return new File(analysisImagesObjectsRoot(), OBJECT_MASKED_IMAGES_DIR);
-    }
-
-    public File analysisImagesObjectsFilteredDir() {
-        return new File(analysisImagesObjectsRoot(), OBJECT_FILTERED_INPUTS_DIR);
+    public File analysisImagesSegmentationDir() {
+        return new File(analysisImagesRoot(), SEGMENTATION_DIR);
     }
 
     public File analysisImagesIntensityOverlaysDir() {
@@ -273,8 +259,8 @@ public final class FlashProjectLayout {
         if (configDir == null) return null;
 
         File parent = configDir.getParentFile();
-
-        if (parent != null && CONFIGURATION_DIR.equals(parent.getName())) {
+        if (parent != null && SETTINGS_DIR.equals(configDir.getName())
+                && CONFIGURATION_DIR.equals(parent.getName())) {
             File flashDir = parent.getParentFile();
             if (flashDir != null && FLASH_DIR.equals(flashDir.getName())
                     && flashDir.getParentFile() != null) {
@@ -282,12 +268,13 @@ public final class FlashProjectLayout {
             }
         }
 
-        if (parent != null && FLASH_DIR.equals(parent.getName())
+        if (parent != null && CONFIGURATION_DIR.equals(configDir.getName())
+                && FLASH_DIR.equals(parent.getName())
                 && parent.getParentFile() != null) {
             return parent.getParentFile();
         }
 
-        return parent;
+        return null;
     }
 
     public List<File> configurationReadDirs() {

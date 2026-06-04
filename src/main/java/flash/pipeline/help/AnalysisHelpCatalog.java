@@ -455,12 +455,12 @@ public final class AnalysisHelpCatalog {
                         "For each object, FLASH records morphometric measurements, redirected intensity measurements, centroid coordinates, and per-channel counts.",
                         "When enabled, pairwise colocalisation and centroid coincidence are calculated between channel pairs.",
                         "When enabled, process images are skeletonised and measured after subtracting the selected nuclear marker signal.",
-                        "FLASH saves object CSV tables under FLASH/Results/Tables/Objects/, and any produced masks, masked images, and filtered inputs under FLASH/Results/Analysis Images/Objects/."),
+                        "FLASH saves object CSV tables under FLASH/Results/Tables/Objects/, and any produced masks, masked images, and filtered inputs under FLASH/Results/Analysis Images/Segmentation/."),
                 list(
                         "FLASH/Results/Tables/Objects/<channel>.csv contains object-level tables for each segmented channel.",
                         "FLASH/Results/Tables/Objects/calibration.properties records calibration used with object CSV outputs.",
                         "FLASH/Results/Run Records/analysis_details/ records object-analysis settings used for the run.",
-                        "FLASH/Results/Analysis Images/Objects/Masks and Label Maps/<animal>/ contains object label maps, with masked images and filtered inputs under sibling Masked Images and Filtered Inputs folders."),
+                        "FLASH/Results/Analysis Images/Segmentation/<animal>/ contains object label maps, masked images, and filtered inputs together for direct comparison."),
                 list(
                         "Choosing the wrong object channel can produce plausible-looking counts for the wrong marker.",
                         "Size filters that are too strict can remove real cells, puncta, or processes; filters that are too loose can keep debris and merged objects.",
@@ -471,7 +471,7 @@ public final class AnalysisHelpCatalog {
                         "three-d-object",
                         image("setup.png", "3D object setup", "Segmentation, colocalisation, ROI filtering, and process-length options are selected before running object analysis."),
                         image("workflow.png", "3D object workflow", "Load configured channels, threshold or segment in 3D, filter objects, calculate measurements, then save object tables."),
-                        image("example-output.png", "3D object outputs", "Object CSVs are saved under FLASH/Results/Tables/Objects and masks, label maps, masked images, and filtered inputs are saved under FLASH/Results/Analysis Images/Objects.")));
+                        image("example-output.png", "3D object outputs", "Object CSVs are saved under FLASH/Results/Tables/Objects and masks, label maps, masked images, and filtered inputs are saved under FLASH/Results/Analysis Images/Segmentation.")));
     }
 
     private static AnalysisHelpTopic spatialTopic() {
@@ -492,7 +492,7 @@ public final class AnalysisHelpCatalog {
                         "Use the morphometry options when saved object label images should be re-read to add 2D shape, 3D shape, composite morphology, population scoring, or spatial-morphometric columns."),
                 list(
                         "Object CSV files from FLASH/Results/Tables/Objects/.",
-                        "Object label images from FLASH/Results/Analysis Images/Objects/Masks and Label Maps/ when CPC, morphology, 3D morphometry, or heatmaps need saved object maps.",
+                        "Object label images from FLASH/Results/Analysis Images/Segmentation/ when CPC, morphology, 3D morphometry, or heatmaps need saved object maps.",
                         "Calibration metadata from the object output folder when distances, Ripley's K/L/G statistics, Voronoi territories, heatmaps, or micron-scaled morphometry should be reported in calibrated units.",
                         "Channel identities, object names, ROI or region columns, and optional colocalisation thresholds for deciding which partner objects count as overlapping.",
                         "Optional line ROI sets can be consumed from the existing line-distance workflow when the Spatial Analysis options dialog exposes line-distance calculation for the project."),

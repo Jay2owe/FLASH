@@ -191,10 +191,6 @@ public final class RecipeReplayModelResolver {
         if (Files.isRegularFile(defaultPath)) {
             return defaultPath;
         }
-        Path legacyPath = ObjectClassifierPersistence.legacyModelPath(root, key);
-        if (Files.isRegularFile(legacyPath)) {
-            return legacyPath;
-        }
         throw new IllegalArgumentException("Trained RF model '" + key
                 + "' not found in catalog and expected file does not exist: " + defaultPath
                 + ". Please retrain/import it via Manage Models or select a different model.");

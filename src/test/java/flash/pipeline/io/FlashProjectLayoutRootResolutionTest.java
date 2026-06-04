@@ -17,6 +17,8 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 public class FlashProjectLayoutRootResolutionTest {
@@ -26,25 +28,33 @@ public class FlashProjectLayoutRootResolutionTest {
     public TemporaryFolder temp = new TemporaryFolder();
 
     @Test
-    public void legacyBinConfigurationDirResolvesToProjectRoot() throws Exception {
+    public void legacyBinConfigurationDirDoesNotResolveToProjectRoot() throws Exception {
         File project = temp.newFolder("project");
         File legacyBin = new File(project, ".bin");
 
-        assertPath(project, FlashProjectLayout.projectRootForConfigurationDir(legacyBin));
+        assertNull(FlashProjectLayout.projectRootForConfigurationDir(legacyBin));
     }
 
     @Test
-    public void flashChildConfigurationDirResolvesToProjectRoot() throws Exception {
+    public void nonCanonicalFlashChildConfigurationDirDoesNotResolveToProjectRoot() throws Exception {
         File project = temp.newFolder("project");
         File configDir = new File(project, "FLASH/00 - Configuration");
 
-        assertPath(project, FlashProjectLayout.projectRootForConfigurationDir(configDir));
+        assertNull(FlashProjectLayout.projectRootForConfigurationDir(configDir));
     }
 
     @Test
     public void setupSettingsConfigurationDirResolvesToProjectRoot() throws Exception {
         File project = temp.newFolder("project");
         File configDir = new File(project, "FLASH/Config/.settings");
+
+        assertPath(project, FlashProjectLayout.projectRootForConfigurationDir(configDir));
+    }
+
+    @Test
+    public void visibleConfigurationDirResolvesToProjectRoot() throws Exception {
+        File project = temp.newFolder("project");
+        File configDir = new File(project, "FLASH/Config");
 
         assertPath(project, FlashProjectLayout.projectRootForConfigurationDir(configDir));
     }
@@ -64,6 +74,9 @@ public class FlashProjectLayoutRootResolutionTest {
                 "Saved from setup QC",
                 "classical",
                 trained);
+
+        assertFalse("RF model saving must not create the legacy top-level Configuration folder",
+                new File(project, "Configuration").exists());
 
         ModelCatalog analysisCatalog = ModelCatalogIO.read(project.toPath());
         Optional<ModelEntry> entry = analysisCatalog.get("rf_setup_qc");

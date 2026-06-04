@@ -29,7 +29,7 @@ public class ObjectScoreWriterTest {
                 flash.pipeline.io.FlashProjectLayout.forDirectory(directory.getAbsolutePath());
         File objectsDir = layout.tablesObjectsWriteDir();
         assertTrue(objectsDir.mkdirs());
-        File imageDir = new File(layout.analysisImagesObjectsMasksDir(), "AnimalA");
+        File imageDir = new File(layout.analysisImagesSegmentationDir(), "AnimalA");
         assertTrue(imageDir.mkdirs());
 
         File objectCsv = new File(objectsDir, "Target.csv");
@@ -116,7 +116,7 @@ public class ObjectScoreWriterTest {
                 flash.pipeline.io.FlashProjectLayout.forDirectory(directory.getAbsolutePath());
         File objectsDir = layout.tablesObjectsWriteDir();
         assertTrue(objectsDir.mkdirs());
-        File imageDir = new File(layout.analysisImagesObjectsMasksDir(), "AnimalA");
+        File imageDir = new File(layout.analysisImagesSegmentationDir(), "AnimalA");
         assertTrue(imageDir.mkdirs());
 
         File objectCsv = new File(objectsDir, "Target.csv");

@@ -1868,7 +1868,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
     }
 
     private static File objectImageOutputReadRoot(String directory) {
-        return FlashProjectLayout.forDirectory(directory).analysisImagesObjectsMasksDir();
+        return FlashProjectLayout.forDirectory(directory).analysisImagesSegmentationDir();
     }
 
     private static File spatialDataOutputDir(String directory) {

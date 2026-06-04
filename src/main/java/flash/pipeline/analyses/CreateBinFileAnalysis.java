@@ -9039,9 +9039,11 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         recordOutput(new File(channelConfigSettingsDir(binFolder), ChannelConfigIO.FILE_NAME), "json");
         recordCreateBinRunParameters(cc);
         File projectRoot = projectRootForConfigurationDir(binFolder);
-        AnalysisStatusScanner.writeSidecar(projectRoot,
-                AnalysisStatusScanner.CREATE_BIN_ID,
-                AnalysisStatusScanner.estimateImageCount(projectRoot.getAbsolutePath()));
+        if (projectRoot != null) {
+            AnalysisStatusScanner.writeSidecar(projectRoot,
+                    AnalysisStatusScanner.CREATE_BIN_ID,
+                    AnalysisStatusScanner.estimateImageCount(projectRoot.getAbsolutePath()));
+        }
     }
 
     /**

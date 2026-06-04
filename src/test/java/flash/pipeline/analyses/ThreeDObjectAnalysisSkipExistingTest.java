@@ -54,7 +54,7 @@ public class ThreeDObjectAnalysisSkipExistingTest {
 
         assertEquals(new File(project, "FLASH/Results/Tables/Objects"),
                 ThreeDObjectAnalysis.objectCsvWriteDir(project.getAbsolutePath()));
-        assertEquals(new File(project, "FLASH/Results/Analysis Images/Objects"),
+        assertEquals(new File(project, "FLASH/Results/Analysis Images/Segmentation"),
                 ThreeDObjectAnalysis.objectImageOutputsRoot(project.getAbsolutePath()));
         assertEquals(Collections.singletonList(
                         new File(project, "FLASH/Results/Tables/Objects")),

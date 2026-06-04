@@ -72,14 +72,8 @@ public class FlashProjectLayoutTest {
                 layout.presentationOmeTiffDir());
         assertPath(new File(project, "FLASH/Results/Analysis Images"), layout.analysisImagesRoot());
         assertPath(new File(project, "FLASH/Results/Analysis Images/ROIs"), layout.analysisImagesRoiDir());
-        assertPath(new File(project, "FLASH/Results/Analysis Images/Objects"),
-                layout.analysisImagesObjectsRoot());
-        assertPath(new File(project, "FLASH/Results/Analysis Images/Objects/Masks and Label Maps"),
-                layout.analysisImagesObjectsMasksDir());
-        assertPath(new File(project, "FLASH/Results/Analysis Images/Objects/Masked Images"),
-                layout.analysisImagesObjectsMaskedDir());
-        assertPath(new File(project, "FLASH/Results/Analysis Images/Objects/Filtered Inputs"),
-                layout.analysisImagesObjectsFilteredDir());
+        assertPath(new File(project, "FLASH/Results/Analysis Images/Segmentation"),
+                layout.analysisImagesSegmentationDir());
         assertPath(new File(project, "FLASH/Results/Analysis Images/Intensity Overlays"),
                 layout.analysisImagesIntensityOverlaysDir());
         assertPath(new File(project, "FLASH/Results/Analysis Images/Spatial Heatmaps"),

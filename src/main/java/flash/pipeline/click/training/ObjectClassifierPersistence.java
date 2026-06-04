@@ -33,20 +33,6 @@ public final class ObjectClassifierPersistence {
         return modelPathInCatalogDirectory(ModelCatalogIO.catalogDirectory(projectRoot), modelKey);
     }
 
-    public static Path legacyModelPath(Path projectRoot, String modelKey) {
-        if (projectRoot == null) {
-            throw new IllegalArgumentException("projectRoot must not be null");
-        }
-        requireSafeModelKey(modelKey);
-        return projectRoot.resolve("Configuration")
-                .resolve("Segmentation Models")
-                .resolve("files")
-                .resolve(modelKey)
-                .resolve(MODEL_FILENAME)
-                .toAbsolutePath()
-                .normalize();
-    }
-
     private static Path modelPathInCatalogDirectory(Path catalogDirectory, String modelKey) {
         return catalogDirectory
                 .resolve("files")

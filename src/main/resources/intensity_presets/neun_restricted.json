@@ -1,7 +1,7 @@
 {
   "name": "NeuN-restricted signal",
   "description": "Measure non-NeuN channels only inside NeuN-positive pixels.",
-  "libraryVersion": "1",
+  "libraryVersion": "2",
   "strategy": "neun_restricted",
   "defaultMode": "Whole ROI mean (all pixels, including background)",
   "channelModes": {},

@@ -396,7 +396,7 @@ public class SpatialAnalysisObjectTextureTest {
         assertTrue(objectsDir.mkdirs());
         CalibrationIO.write(objectsDir, 1.0, 1.0, 1.0, "um");
 
-        File animalDir = new File(layout.analysisImagesObjectsMasksDir(), "Mouse1");
+        File animalDir = new File(layout.analysisImagesSegmentationDir(), "Mouse1");
         assertTrue(animalDir.mkdirs());
         File inputDir = new File(root, "input");
         assertTrue(inputDir.mkdirs());

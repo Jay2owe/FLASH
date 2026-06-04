@@ -362,7 +362,7 @@ public final class ObjectScoreWriter {
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
         String prefix = safeChannelName(channelName) + "_objects";
         List<File> sorted = new ArrayList<File>();
-        File perAnimal = new File(layout.analysisImagesObjectsMasksDir(), clean(animalName));
+        File perAnimal = new File(layout.analysisImagesSegmentationDir(), clean(animalName));
         if (perAnimal.isDirectory()) {
             File[] files = perAnimal.listFiles();
             if (files != null) {
@@ -410,7 +410,7 @@ public final class ObjectScoreWriter {
                 + "_objects"
                 + (suffix.isEmpty() ? "" : "_" + suffix)
                 + ".tif";
-        return new File(new File(layout.analysisImagesObjectsMasksDir(), metadata.getAnimalName()), name);
+        return new File(new File(layout.analysisImagesSegmentationDir(), metadata.getAnimalName()), name);
     }
 
     private static boolean matchesAnimal(Map<String, String> row, String animalName) {
