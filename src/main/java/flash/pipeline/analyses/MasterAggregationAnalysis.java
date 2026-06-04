@@ -577,12 +577,12 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
             } catch (IOException e) {
                 IJ.log("Warning: could not write START_HERE.html: " + e.getMessage());
             }
-            if (!suppressDialogs) {
-                IJ.showMessage("Master Aggregation Analysis",
-                        "Aggregation complete.\n"
-                        + (didObjects ? "Objects master saved.\n" : "")
-                        + (didIntensities ? "Intensities master saved." : ""));
-            }
+            // Non-blocking completion signal. A modal dialog here would stall
+            // unattended batch runs until a human clicked OK.
+            IJ.log("Master Aggregation Analysis complete."
+                    + (didObjects ? " Objects master saved." : "")
+                    + (didIntensities ? " Intensities master saved." : ""));
+            IJ.showStatus("Master Aggregation Analysis finished.");
         } else {
             IJ.log("Master Aggregation Analysis: No data directories found to aggregate.");
             if (canShowGuiDialog(suppressDialogs, configFromCli, GraphicsEnvironment.isHeadless())) {

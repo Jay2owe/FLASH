@@ -1299,7 +1299,9 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             IJ.log("3D Object Analysis complete. Total time: " + formatDuration(totalTime));
         }
 
-        if (!suppressDialogs) IJ.showMessage("3D Object Analysis", "Finished.");
+        // Non-blocking completion signal. A modal "Finished" dialog here would
+        // stall unattended batch runs until a human clicked OK.
+        IJ.showStatus("3D Object Analysis finished.");
     }
 
     BinConfig loadBinConfig(String directory) {

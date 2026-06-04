@@ -357,11 +357,10 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
 
         IJ.log("Statistical analysis complete: " + tested + " metrics tested, "
                 + skipped + " skipped (insufficient group size).");
-        if (canShowGuiDialog(suppressDialogs, cliConfig, GraphicsEnvironment.isHeadless())) {
-            IJ.showMessage("Statistical Analysis",
-                    "Complete.\n" + tested + " metrics tested.\n"
-                    + "Saved: " + outFile.getName() + " and " + superPlotFile.getName());
-        }
+        // Non-blocking completion signal. A modal dialog here would stall
+        // unattended batch runs until a human clicked OK.
+        IJ.log("Statistical Analysis saved: " + outFile.getName() + " and " + superPlotFile.getName());
+        IJ.showStatus("Statistical Analysis finished.");
     }
 
     // (Statistical computation delegated to MetricStatisticsEngine)

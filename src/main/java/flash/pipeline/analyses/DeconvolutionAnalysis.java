@@ -1669,9 +1669,10 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
         }
         AsyncImageSaver.waitForAll();
 
-        if (!suppressDialogs && !headless) {
-            JOptionPane.showMessageDialog(null, "3D deconvolution finished.", TITLE, JOptionPane.INFORMATION_MESSAGE);
-        }
+        // Non-blocking completion signal. A modal dialog here would stall
+        // unattended batch runs until a human clicked OK.
+        IJ.log("3D deconvolution finished.");
+        IJ.showStatus("3D deconvolution finished.");
     }
 
     protected List<SeriesJob> listSeriesJobs(String directory) throws Exception {

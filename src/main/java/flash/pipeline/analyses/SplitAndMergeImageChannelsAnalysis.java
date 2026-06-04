@@ -561,7 +561,9 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis, RunRecordAw
         IJ.log("==========================================================");
 
         closeAllWindowsExceptLog();
-        if (!suppressDialogs) showOrLog("Split/Merge", "Finished.");
+        // Non-blocking completion signal. A modal "Finished" dialog here would
+        // stall unattended batch runs until a human clicked OK.
+        IJ.showStatus("Split/Merge finished.");
     }
 
     BinConfig loadBinConfig(String directory) {

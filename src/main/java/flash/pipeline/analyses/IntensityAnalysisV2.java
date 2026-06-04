@@ -982,7 +982,9 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         } else {
             IJ.log("Intensity Analysis complete. Total time: " + formatDuration(totalTime));
         }
-        if (!suppressDialogs) IJ.showMessage("Intensity Analysis", "Finished.");
+        // Non-blocking completion signal. A modal "Finished" dialog here would
+        // stall unattended batch runs until a human clicked OK.
+        IJ.showStatus("Intensity Analysis finished.");
     }
 
     BinConfig loadBinConfig(String directory) {

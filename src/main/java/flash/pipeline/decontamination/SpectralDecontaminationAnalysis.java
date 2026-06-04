@@ -2045,11 +2045,7 @@ public class SpectralDecontaminationAnalysis implements Analysis, RunRecordAware
                                             BatchRunResult batchResult,
                                             PreviewRunResult previewResult) {
         if (batchResult == null) {
-            if (suppressDialogs) {
-                IJ.log("Spectral Decontamination: batch run did not produce a result.");
-            } else {
-                IJ.showMessage(TITLE, "Batch run did not produce a result.");
-            }
+            IJ.log("Spectral Decontamination: batch run did not produce a result.");
             return;
         }
 
@@ -2095,11 +2091,10 @@ public class SpectralDecontaminationAnalysis implements Analysis, RunRecordAware
             message.append("\n\n").append(batchResult.message.trim());
         }
 
-        if (suppressDialogs) {
-            IJ.log("Spectral Decontamination completed:\n" + message);
-        } else {
-            IJ.showMessage(TITLE, message.toString());
-        }
+        // Non-blocking completion summary. A modal dialog here would stall
+        // unattended batch runs until a human clicked OK.
+        IJ.log("Spectral Decontamination completed:\n" + message);
+        IJ.showStatus("Spectral Decontamination finished.");
     }
 
     private void logFeatureStackStatus(SpectralDecontaminationConfig config, BinConfig binConfig) {
