@@ -46,7 +46,7 @@ public final class CLIArgumentParser {
      * Returns null if the directory is missing.
      */
     public static CLIConfig parse(String macroOptions) {
-        return parse(macroOptions, new DeconvPresetIO());
+        return parse(macroOptions, null);
     }
 
     static CLIConfig parse(String macroOptions, DeconvPresetIO presetIO) {
@@ -79,11 +79,13 @@ public final class CLIArgumentParser {
         }
         cfg.directory = canonicalizeExistingDirectoryArgument(cfg.directory);
         File dirFile = new File(cfg.directory);
-        dirFile = new File(cfg.directory);
         if (!dirFile.exists()) {
             IJ.log("[CLI] Warning: Directory does not exist: " + cfg.directory);
         } else if (!dirFile.isDirectory()) {
             IJ.log("[CLI] Warning: Path is not a directory: " + cfg.directory);
+        }
+        if (presetIO == null) {
+            presetIO = new DeconvPresetIO(dirFile);
         }
 
         String[] flagNames = {

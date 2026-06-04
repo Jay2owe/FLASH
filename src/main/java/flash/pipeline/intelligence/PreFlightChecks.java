@@ -1,5 +1,6 @@
 package flash.pipeline.intelligence;
 
+import flash.pipeline.io.FlashProjectLayout;
 import ij.IJ;
 
 import javax.swing.JOptionPane;
@@ -33,9 +34,17 @@ import java.util.Set;
  */
 public final class PreFlightChecks {
 
-    /** Output sub-folder names that indicate a previous run produced outputs here. */
+    /** Top-level project folder names that may contain previous run outputs. */
     private static final Set<String> OUTPUT_FOLDER_NAMES = new HashSet<String>(
-            Arrays.asList("FLASH"));
+            Arrays.asList(FlashProjectLayout.FLASH_DIR));
+
+    /** Files written while bootstrapping a project, before analyses produce output. */
+    private static final Set<String> PROJECT_BOOTSTRAP_RESULT_FILES = new HashSet<String>(
+            Arrays.asList(
+                    FlashProjectLayout.CONDITIONS_FILENAME,
+                    FlashProjectLayout.ORIENTATION_MANIFEST_FILENAME));
+
+    private static final int OUTPUT_ARTIFACT_SEARCH_DEPTH = 8;
 
     /** Extensions that should not be scanned for truncation (only raw microscopy). */
     private static final Set<String> RAW_IMAGE_EXTS = new HashSet<String>(
@@ -80,7 +89,7 @@ public final class PreFlightChecks {
         }
     }
 
-    /** Non-interactive scan. Returns which output-suffix folders exist as siblings. */
+    /** Non-interactive scan. Returns which output folders contain prior run artifacts. */
     public static OutputFolderResult detectOutputFolder(String directory) {
         if (directory == null || directory.isEmpty()) {
             return new OutputFolderResult(false, Collections.<String>emptyList());
@@ -93,13 +102,37 @@ public final class PreFlightChecks {
 
         List<String> found = new ArrayList<String>();
         for (File child : children) {
-            if (child.isDirectory() && OUTPUT_FOLDER_NAMES.contains(child.getName())) {
-                found.add(child.getName());
+            if (child.isDirectory()
+                    && OUTPUT_FOLDER_NAMES.contains(child.getName())
+                    && containsPriorRunArtifacts(child)) {
+                found.add(child.getName() + File.separator + FlashProjectLayout.RESULTS_DIR);
             }
         }
-        // The current results tree is rooted under FLASH; older sibling-folder heuristics are obsolete.
-        boolean likely = found.contains("FLASH");
+        boolean likely = !found.isEmpty();
         return new OutputFolderResult(likely, found);
+    }
+
+    private static boolean containsPriorRunArtifacts(File flashDir) {
+        File resultsDir = new File(flashDir, FlashProjectLayout.RESULTS_DIR);
+        return containsPriorRunArtifacts(resultsDir, OUTPUT_ARTIFACT_SEARCH_DEPTH);
+    }
+
+    private static boolean containsPriorRunArtifacts(File directory, int depthRemaining) {
+        if (directory == null || !directory.isDirectory() || depthRemaining < 0) {
+            return false;
+        }
+        File[] children = JunkFileFilter.listCleanChildren(directory);
+        for (File child : children) {
+            if (child.isFile()) {
+                if (!PROJECT_BOOTSTRAP_RESULT_FILES.contains(child.getName())) {
+                    return true;
+                }
+            } else if (child.isDirectory()
+                    && containsPriorRunArtifacts(child, depthRemaining - 1)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

@@ -303,7 +303,7 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
     private RunSettings showConfigurationDialog(String directory, String[] channelNames, SeriesJob representative) {
         PipelineDialog dialog = new PipelineDialog(TITLE, PipelineDialog.Phase.SETUP);
         final DialogBindings bindings = new DialogBindings();
-        final DeconvPresetIO presetIO = new DeconvPresetIO();
+        final DeconvPresetIO presetIO = new DeconvPresetIO(new File(directory));
         final PreviewState previewState = new PreviewState();
         final Runnable markPreviewStale = new Runnable() {
             @Override public void run() { previewState.clear(); }

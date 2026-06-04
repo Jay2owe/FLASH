@@ -154,20 +154,6 @@ public final class DeconvolutionAnalysisCommand implements Command {
         if (useTifCache != null && useTifCache.booleanValue()) appendFlag(options, "tif_cache");
         if (skipExisting != null) appendValue(options, "overwrite", skipExisting.booleanValue() ? "skip" : "auto");
 
-        if (preset != null) {
-            appendValue(options, "deconv.engine", preset.getEngineKey());
-            appendValue(options, "deconv.algorithm", preset.getAlgorithm().name());
-            appendValue(options, "deconv.psf", preset.getPsfModel().name());
-            appendValue(options, "deconv.iterations", String.valueOf(preset.getIterations()));
-            appendValue(options, "deconv.regularization", String.valueOf(preset.getRegularization()));
-            appendValue(options, "deconv.scopeModality", preset.getScopeModality().name());
-            if (preset.getPinholeAU() != null) {
-                appendValue(options, "deconv.pinholeAU", String.valueOf(preset.getPinholeAU()));
-            }
-            if (preset.getSampleRI() != null) {
-                appendValue(options, "deconv.sampleRI", String.valueOf(preset.getSampleRI()));
-            }
-        }
         if (hasText(deconvPreset) && presetJson == null) appendValue(options, "deconv.preset", deconvPreset);
         appendValue(options, "deconv.engine", engine);
         appendValue(options, "deconv.algorithm", algorithm);
@@ -182,6 +168,20 @@ public final class DeconvolutionAnalysisCommand implements Command {
         if (strictNyquist != null) appendValue(options, "deconv.strictNyquist", String.valueOf(strictNyquist.booleanValue()));
         if (useCache != null) appendValue(options, "deconv.useCache", String.valueOf(useCache.booleanValue()));
         appendValue(options, "deconv.skipPreview", String.valueOf(skipPreview == null || skipPreview.booleanValue()));
+        if (preset != null) {
+            appendValue(options, "deconv.engine", preset.getEngineKey());
+            appendValue(options, "deconv.algorithm", preset.getAlgorithm().name());
+            appendValue(options, "deconv.psf", preset.getPsfModel().name());
+            appendValue(options, "deconv.iterations", String.valueOf(preset.getIterations()));
+            appendValue(options, "deconv.regularization", String.valueOf(preset.getRegularization()));
+            appendValue(options, "deconv.scopeModality", preset.getScopeModality().name());
+            if (preset.getPinholeAU() != null) {
+                appendValue(options, "deconv.pinholeAU", String.valueOf(preset.getPinholeAU()));
+            }
+            if (preset.getSampleRI() != null) {
+                appendValue(options, "deconv.sampleRI", String.valueOf(preset.getSampleRI()));
+            }
+        }
 
         CLIConfig parsed = CLIArgumentParser.parse(options.toString());
         if (parsed == null) {
@@ -215,10 +215,35 @@ public final class DeconvolutionAnalysisCommand implements Command {
         put(common, "use_cache", useCache);
         put(common, "skip_preview", skipPreview == null ? Boolean.TRUE : skipPreview);
         if (preset != null) {
-            return ParameterSnapshot.merged(common,
-                    ParameterSnapshot.fromAnalysisPresetMap("DeconvolutionAnalysis", preset.toJsonObject()));
+            Map<String, Object> effectivePreset =
+                    ParameterSnapshot.fromAnalysisPresetMap("DeconvolutionAnalysis", preset.toJsonObject());
+            applyEffectiveDeconvParameters(effectivePreset, cliConfig);
+            return ParameterSnapshot.merged(effectivePreset, common);
         }
-        return ParameterSnapshot.merged(ParameterSnapshot.fromCliConfig(cliConfig), common);
+        Map<String, Object> effectiveDeconv = new LinkedHashMap<String, Object>();
+        applyEffectiveDeconvParameters(effectiveDeconv, cliConfig);
+        return ParameterSnapshot.merged(ParameterSnapshot.fromCliConfig(cliConfig), effectiveDeconv, common);
+    }
+
+    private static void applyEffectiveDeconvParameters(Map<String, Object> target, CLIConfig cliConfig) {
+        if (target == null || cliConfig == null || cliConfig.getDeconv() == null) {
+            return;
+        }
+        CLIConfig.DeconvConfig deconv = cliConfig.getDeconv();
+        put(target, "engineKey", deconv.getEngine());
+        if (deconv.getAlgorithm() != null) {
+            target.put("algorithm", deconv.getAlgorithm().name());
+        }
+        if (deconv.getPsfModel() != null) {
+            target.put("psfModel", deconv.getPsfModel().name());
+        }
+        target.put("iterations", Integer.valueOf(deconv.getIterations()));
+        target.put("regularization", Double.valueOf(deconv.getRegularization()));
+        if (deconv.getScopeModality() != null) {
+            target.put("scopeModality", deconv.getScopeModality().name());
+        }
+        put(target, "pinholeAU", deconv.getPinholeAiryUnits());
+        put(target, "sampleRI", deconv.getSampleRI());
     }
 
     private static DeconvPreset parsePresetJson(String json) {
