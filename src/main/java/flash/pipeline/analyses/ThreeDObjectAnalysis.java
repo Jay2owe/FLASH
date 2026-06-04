@@ -133,7 +133,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
     private static final Pattern MULTICOLOC_INTERACTION_COUNT_PATTERN =
             Pattern.compile("(\\d+)\\s+(convergent|interaction)");
 
-    private enum NoRoiDecision {
+    enum NoRoiDecision {
         DRAW_ROIS,
         ANALYSE_FULL_IMAGE,
         CANCEL
@@ -148,6 +148,43 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
 
     interface ExistingObjectDataPrompt {
         ExistingObjectDataMode choose(File outputDir, List<File> existingCsvs);
+    }
+
+    interface NoRoiDecisionPrompt {
+        NoRoiDecision choose();
+    }
+
+    interface RoiDrawingWorkflowLauncher {
+        void launch(String directory);
+    }
+
+    private static final class RoiSetSelection {
+        final List<File> roiZips;
+        final String[] roiSetNames;
+        final boolean analyseFullImagesWithoutRois;
+
+        private RoiSetSelection(List<File> roiZips, String[] roiSetNames,
+                                boolean analyseFullImagesWithoutRois) {
+            this.roiZips = roiZips == null
+                    ? Collections.<File>emptyList()
+                    : new ArrayList<File>(roiZips);
+            this.roiSetNames = roiSetNames == null
+                    ? new String[0]
+                    : Arrays.copyOf(roiSetNames, roiSetNames.length);
+            this.analyseFullImagesWithoutRois = analyseFullImagesWithoutRois;
+        }
+
+        static RoiSetSelection saved(List<File> roiZips, String[] roiSetNames) {
+            return new RoiSetSelection(roiZips, roiSetNames, false);
+        }
+
+        static RoiSetSelection fullImages() {
+            return new RoiSetSelection(Collections.<File>emptyList(), new String[0], true);
+        }
+
+        boolean hasSavedRois() {
+            return roiZips != null && !roiZips.isEmpty();
+        }
     }
 
     /** Root for segmentation-related images: label maps, masked images, and filtered inputs. */
@@ -241,6 +278,20 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             DEFAULT_SPATIAL_OPTIONS_DIALOG_LAUNCHER;
     private ExistingObjectDataPrompt existingObjectDataPrompt =
             DEFAULT_EXISTING_OBJECT_DATA_PROMPT;
+    private Boolean guiDecisionDialogsAvailableForTest = null;
+    private NoRoiDecisionPrompt noRoiDecisionPrompt = new NoRoiDecisionPrompt() {
+        @Override
+        public NoRoiDecision choose() {
+            return showNoRoiDecisionDialog();
+        }
+    };
+    private RoiDrawingWorkflowLauncher roiDrawingWorkflowLauncher =
+            new RoiDrawingWorkflowLauncher() {
+                @Override
+                public void launch(String directory) {
+                    launchRoiDrawingWorkflowDirect(directory);
+                }
+            };
     private static final String OBJECT_PRESET_PLACEHOLDER = "(choose preset)";
     private final AtomicBoolean calibrationWritten = new AtomicBoolean(false);
     private boolean useDeconvolvedInput = true;
@@ -452,6 +503,32 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         this.existingObjectDataPrompt = prompt == null
                 ? DEFAULT_EXISTING_OBJECT_DATA_PROMPT
                 : prompt;
+    }
+
+    void setNoRoiDecisionPromptForTest(NoRoiDecisionPrompt prompt) {
+        this.noRoiDecisionPrompt = prompt == null
+                ? new NoRoiDecisionPrompt() {
+                    @Override
+                    public NoRoiDecision choose() {
+                        return showNoRoiDecisionDialog();
+                    }
+                }
+                : prompt;
+    }
+
+    void setRoiDrawingWorkflowLauncherForTest(RoiDrawingWorkflowLauncher launcher) {
+        this.roiDrawingWorkflowLauncher = launcher == null
+                ? new RoiDrawingWorkflowLauncher() {
+                    @Override
+                    public void launch(String directory) {
+                        launchRoiDrawingWorkflowDirect(directory);
+                    }
+                }
+                : launcher;
+    }
+
+    void setGuiDecisionDialogsAvailableForTest(Boolean available) {
+        this.guiDecisionDialogsAvailableForTest = available;
     }
 
     private static boolean gateStarDistFeature(String featureDisplayName) {
@@ -706,6 +783,14 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             return;
         }
 
+        RoiSetSelection roiSelection = resolveRoiSetsForRun(directory);
+        if (roiSelection == null) {
+            return;
+        }
+        List<File> roiZips = roiSelection.roiZips;
+        String[] roiSetNames = roiSelection.roiSetNames;
+        boolean analyseFullImagesWithoutRois = roiSelection.analyseFullImagesWithoutRois;
+
         BinSetupDispatcher.Outcome outcome = BinSetupDispatcher.ensure(
                 directory, "3D Object Analysis", requiredBinFields(),
                 benefitsFromRois(), suppressDialogs, cliConfig);
@@ -745,44 +830,6 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             return;
         }
         IJ.log("Channels: " + String.join(", ", cfg.channelNames));
-
-        // --- Scan for existing ROI sets ---
-        List<File> roiZips;
-        try {
-            roiZips = RoiIO.listRoiZipFiles(new File(directory));
-        } catch (NoClassDefFoundError e) {
-            if (PluginInstallGuard.reportMissingInternalClass("3D Object Analysis", e)) return;
-            throw e;
-        }
-        String[] roiSetNames = new String[roiZips.size()];
-        for (int r = 0; r < roiZips.size(); r++) {
-            String roiSetName = roiZips.get(r).getName()
-                    .replace(" ROIs.zip", "")
-                    .replace("ROIs.zip", "")
-                    .replace(".zip", "")
-                    .trim();
-            roiSetNames[r] = roiSetName;
-        }
-        IJ.log("ROI sets found: " + roiZips.size());
-        for (String roiSetName : roiSetNames) {
-            IJ.log("  - " + roiSetName);
-        }
-        boolean analyseFullImagesWithoutRois = false;
-        if (roiZips.isEmpty()) {
-            NoRoiDecision decision = promptForNoRoiDecision();
-            if (decision == NoRoiDecision.DRAW_ROIS) {
-                launchRoiDrawingWorkflow(directory);
-                return;
-            }
-            if (decision == NoRoiDecision.CANCEL) {
-                String message = "[FLASH] 3D Object Analysis cancelled because no ROI sets were found.";
-                IJ.log(message);
-                recordWarn(message);
-                return;
-            }
-            analyseFullImagesWithoutRois = true;
-            IJ.log("[FLASH] No ROI sets found. 3D Object Analysis will analyse each full image stack.");
-        }
 
         ChannelIdentities channelIdentities = ChannelConfigIO.readChannelIdentities(
                 FlashProjectLayout.forDirectory(directory).configurationWriteDir());
@@ -1098,7 +1145,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             String message = "3D Object Analysis: " + e.getMessage();
             IJ.log(message);
             recordWarn(message);
-            if (canShowGuiDecisionDialog(suppressDialogs, cliConfig, GraphicsEnvironment.isHeadless())) {
+            if (canShowGuiDecisionDialog()) {
                 IJ.showMessage("3D Object Analysis", e.getMessage());
             }
             IJ.showProgress(1.0);
@@ -1357,14 +1404,32 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
     }
 
     private boolean canPromptForExistingObjectData() {
-        return canShowGuiDecisionDialog(
-                suppressDialogs, cliConfig, GraphicsEnvironment.isHeadless());
+        return canShowGuiDecisionDialog();
+    }
+
+    private boolean canShowGuiDecisionDialog() {
+        return canShowGuiDecisionDialog(suppressDialogs, cliConfig,
+                GraphicsEnvironment.isHeadless(), imageJUiAvailableForDecisionDialog());
+    }
+
+    private boolean imageJUiAvailableForDecisionDialog() {
+        return guiDecisionDialogsAvailableForTest == null
+                ? IJ.getInstance() != null
+                : guiDecisionDialogsAvailableForTest.booleanValue();
     }
 
     static boolean canShowGuiDecisionDialog(boolean suppressDialogs,
                                             CLIConfig cliConfig,
                                             boolean runtimeHeadless) {
-        return !suppressDialogs && cliConfig == null && !runtimeHeadless;
+        return canShowGuiDecisionDialog(suppressDialogs, cliConfig, runtimeHeadless,
+                IJ.getInstance() != null);
+    }
+
+    static boolean canShowGuiDecisionDialog(boolean suppressDialogs,
+                                            CLIConfig cliConfig,
+                                            boolean runtimeHeadless,
+                                            boolean imageJUiAvailable) {
+        return !suppressDialogs && cliConfig == null && !runtimeHeadless && imageJUiAvailable;
     }
 
     private static String existingObjectDataPromptMessage(File outputDir, List<File> existingCsvs) {
@@ -1392,8 +1457,89 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         return message.toString();
     }
 
+    private RoiSetSelection resolveRoiSetsForRun(String directory) {
+        RoiSetSelection selection = discoverSavedRoiSets(directory);
+        if (selection == null) {
+            return null;
+        }
+        logRoiSets(selection);
+        if (selection.hasSavedRois()) {
+            return selection;
+        }
+
+        NoRoiDecision decision = promptForNoRoiDecision();
+        if (decision == NoRoiDecision.DRAW_ROIS) {
+            launchRoiDrawingWorkflow(directory);
+            selection = discoverSavedRoiSets(directory);
+            if (selection == null) {
+                return null;
+            }
+            logRoiSets(selection);
+            if (selection.hasSavedRois()) {
+                return selection;
+            }
+            String message = "[FLASH] 3D Object Analysis cancelled because no ROI sets "
+                    + "were saved after Draw and Save ROIs.";
+            IJ.log(message);
+            recordWarn(message);
+            return null;
+        }
+        if (decision == null || decision == NoRoiDecision.CANCEL) {
+            String message = "[FLASH] 3D Object Analysis cancelled because no ROI sets were found.";
+            IJ.log(message);
+            recordWarn(message);
+            return null;
+        }
+
+        IJ.log("[FLASH] No ROI sets found. 3D Object Analysis will analyse each full image stack.");
+        return RoiSetSelection.fullImages();
+    }
+
+    private RoiSetSelection discoverSavedRoiSets(String directory) {
+        List<File> roiZips;
+        try {
+            roiZips = RoiIO.listRoiZipFiles(new File(directory));
+        } catch (NoClassDefFoundError e) {
+            if (PluginInstallGuard.reportMissingInternalClass("3D Object Analysis", e)) {
+                return null;
+            }
+            throw e;
+        }
+        String[] roiSetNames = new String[roiZips.size()];
+        for (int r = 0; r < roiZips.size(); r++) {
+            roiSetNames[r] = roiSetNameForZip(roiZips.get(r));
+        }
+        return RoiSetSelection.saved(roiZips, roiSetNames);
+    }
+
+    private static String roiSetNameForZip(File roiZip) {
+        if (roiZip == null) {
+            return "";
+        }
+        return roiZip.getName()
+                .replace(" ROIs.zip", "")
+                .replace("ROIs.zip", "")
+                .replace(".zip", "")
+                .trim();
+    }
+
+    private static void logRoiSets(RoiSetSelection selection) {
+        int count = selection == null || selection.roiZips == null ? 0 : selection.roiZips.size();
+        IJ.log("ROI sets found: " + count);
+        if (selection == null || selection.roiSetNames == null) {
+            return;
+        }
+        for (String roiSetName : selection.roiSetNames) {
+            IJ.log("  - " + roiSetName);
+        }
+    }
+
     private NoRoiDecision promptForNoRoiDecision() {
-        if (!canShowGuiDecisionDialog(suppressDialogs, cliConfig, GraphicsEnvironment.isHeadless())) {
+        return noRoiDecisionPrompt.choose();
+    }
+
+    private NoRoiDecision showNoRoiDecisionDialog() {
+        if (!canShowGuiDecisionDialog()) {
             return NoRoiDecision.ANALYSE_FULL_IMAGE;
         }
 
@@ -1417,6 +1563,10 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
     }
 
     private void launchRoiDrawingWorkflow(String directory) {
+        roiDrawingWorkflowLauncher.launch(directory);
+    }
+
+    private void launchRoiDrawingWorkflowDirect(String directory) {
         IJ.log("[FLASH] Opening Draw and Save ROIs before 3D Object Analysis.");
         DrawAndSaveROIsAnalysis roiAnalysis = new DrawAndSaveROIsAnalysis();
         roiAnalysis.setSuppressDialogs(false);
@@ -1532,7 +1682,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
     private void handleSaveThreeDObjectPreset(String directory,
                                               BinConfig cfg,
                                               ThreeDObjectDialogBindings bindings) {
-        if (!canShowGuiDecisionDialog(suppressDialogs, cliConfig, GraphicsEnvironment.isHeadless())) return;
+        if (!canShowGuiDecisionDialog()) return;
         if (bindings == null) {
             IJ.showMessage("3D Object Analysis", "Could not save preset: dialog options are not available.");
             return;
@@ -1683,8 +1833,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         }
         // The analysis-level headless flag means "hide image windows", not "skip setup UI".
         // Only suppress the pre-run Spatial options dialog for genuinely non-interactive runs.
-        if (wizardSpatialConfig != null || suppressDialogs || cliConfig != null
-                || GraphicsEnvironment.isHeadless()) {
+        if (wizardSpatialConfig != null || !canShowGuiDecisionDialog()) {
             return true;
         }
         SpatialSetupConfig.DerivedConfig spatialConfig =
@@ -1692,7 +1841,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                         directory, channelNames, markerThresholds, doVolumetric, doCpc);
         if (spatialConfig == null) {
             IJ.log("[FLASH] 3D Object Analysis cancelled because Spatial Analysis options were cancelled.");
-            if (!suppressDialogs && cliConfig == null && !GraphicsEnvironment.isHeadless()) {
+            if (canShowGuiDecisionDialog()) {
                 IJ.showMessage("3D Object Analysis",
                         "Spatial Analysis options were cancelled.\n3D Object Analysis has not started.");
             }

@@ -13,6 +13,7 @@ import flash.pipeline.analyses.wizard.ThreeDObjectPreset;
 import flash.pipeline.analyses.wizard.ThreeDObjectPresetIO;
 import flash.pipeline.analyses.wizard.ThreeDObjectSetupConfig;
 import flash.pipeline.cli.CLIConfig;
+import flash.pipeline.roi.RoiIO;
 import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.DependencyService;
 import flash.pipeline.runtime.DependencyStatus;
@@ -80,10 +81,68 @@ public class ThreeDObjectAnalysisTest {
         AtomicInteger chooserCalls = new AtomicInteger(0);
         installDispatcherChoice(BinSetupChooser.Choice.CANCELLED, chooserCalls);
 
-        new ThreeDObjectAnalysis().execute(dir.getAbsolutePath());
+        ThreeDObjectAnalysis analysis = new ThreeDObjectAnalysis();
+        analysis.setNoRoiDecisionPromptForTest(new ThreeDObjectAnalysis.NoRoiDecisionPrompt() {
+            @Override
+            public ThreeDObjectAnalysis.NoRoiDecision choose() {
+                return ThreeDObjectAnalysis.NoRoiDecision.ANALYSE_FULL_IMAGE;
+            }
+        });
+        analysis.execute(dir.getAbsolutePath());
 
         assertEquals(1, chooserCalls.get());
         assertFalse(new File(dir, "Data Analysis").exists());
+    }
+
+    @Test
+    public void drawRoisHandoffContinuesToThreeDConfigurationChooser() throws Exception {
+        installAllDependenciesPresentForGate();
+        final File dir = temp.newFolder("roi-handoff");
+        final AtomicInteger stage = new AtomicInteger(0);
+
+        setDispatcherHook("setHeadlessProbeForTest",
+                "flash.pipeline.bin.BinSetupDispatcher$HeadlessProbe",
+                new InvocationResult() {
+                    @Override public Object invoke(Method method, Object[] args) {
+                        return Boolean.FALSE;
+                    }
+                });
+        setDispatcherHook("setChooserForTest",
+                "flash.pipeline.bin.BinSetupDispatcher$Chooser",
+                new InvocationResult() {
+                    @Override public Object invoke(Method method, Object[] args) {
+                        assertEquals(2, stage.getAndIncrement());
+                        assertEquals("3D Object Analysis", args[0]);
+                        return BinSetupChooser.Choice.CANCELLED;
+                    }
+                });
+
+        ThreeDObjectAnalysis analysis = new ThreeDObjectAnalysis();
+        analysis.setNoRoiDecisionPromptForTest(new ThreeDObjectAnalysis.NoRoiDecisionPrompt() {
+            @Override
+            public ThreeDObjectAnalysis.NoRoiDecision choose() {
+                assertEquals(0, stage.getAndIncrement());
+                return ThreeDObjectAnalysis.NoRoiDecision.DRAW_ROIS;
+            }
+        });
+        analysis.setRoiDrawingWorkflowLauncherForTest(new ThreeDObjectAnalysis.RoiDrawingWorkflowLauncher() {
+            @Override
+            public void launch(String directory) {
+                assertEquals(1, stage.getAndIncrement());
+                try {
+                    File roiDir = RoiIO.roiSetWriteDir(new File(directory));
+                    assertTrue(roiDir.isDirectory() || roiDir.mkdirs());
+                    Files.write(new File(roiDir, "SCN ROIs.zip").toPath(), new byte[]{1, 2, 3});
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        });
+
+        analysis.execute(dir.getAbsolutePath());
+
+        assertEquals(3, stage.get());
+        assertEquals(BinSetupDispatcher.Outcome.CANCELLED, BinSetupDispatcher.getLastOutcome());
     }
 
     @Test
@@ -180,6 +239,7 @@ public class ThreeDObjectAnalysisTest {
     @Test
     public void interactiveSpatialHandoffLaunchesFullSpatialOptionsAndStoresConfig() throws Exception {
         ThreeDObjectAnalysis analysis = new ThreeDObjectAnalysis();
+        analysis.setGuiDecisionDialogsAvailableForTest(Boolean.TRUE);
         final SpatialSetupConfig.DerivedConfig expected = new SpatialSetupConfig.DerivedConfig();
         expected.doHeatmaps = true;
         final AtomicInteger launches = new AtomicInteger(0);
@@ -220,6 +280,7 @@ public class ThreeDObjectAnalysisTest {
     @Test
     public void interactiveSpatialHandoffPassesOnlySelectedObjectColocalizationLocks() throws Exception {
         ThreeDObjectAnalysis analysis = new ThreeDObjectAnalysis();
+        analysis.setGuiDecisionDialogsAvailableForTest(Boolean.TRUE);
         setField(analysis, "doVolumetric", Boolean.FALSE);
         setField(analysis, "doCpc", Boolean.TRUE);
         final AtomicReference<Boolean> lockVolumetric = new AtomicReference<Boolean>();
@@ -249,6 +310,7 @@ public class ThreeDObjectAnalysisTest {
     @Test
     public void cancelledSpatialOptionsCancelsObjectAnalysisBeforeProcessing() throws Exception {
         ThreeDObjectAnalysis analysis = new ThreeDObjectAnalysis();
+        analysis.setGuiDecisionDialogsAvailableForTest(Boolean.TRUE);
         final AtomicInteger launches = new AtomicInteger(0);
         analysis.setSpatialOptionsDialogLauncherForTest(new ThreeDObjectAnalysis.SpatialOptionsDialogLauncher() {
             @Override
@@ -275,6 +337,7 @@ public class ThreeDObjectAnalysisTest {
     public void hideImageWindowsStillLaunchesInteractiveSpatialHandoffBeforeProcessing() throws Exception {
         ThreeDObjectAnalysis analysis = new ThreeDObjectAnalysis();
         analysis.setHeadless(true);
+        analysis.setGuiDecisionDialogsAvailableForTest(Boolean.TRUE);
         final AtomicInteger launches = new AtomicInteger(0);
         analysis.setSpatialOptionsDialogLauncherForTest(countingSpatialOptionsLauncher(launches));
 
@@ -291,10 +354,30 @@ public class ThreeDObjectAnalysisTest {
 
     @Test
     public void hideImageWindowsStillAllowsGuiDecisionDialogs() {
-        assertTrue(ThreeDObjectAnalysis.canShowGuiDecisionDialog(false, null, false));
-        assertFalse(ThreeDObjectAnalysis.canShowGuiDecisionDialog(true, null, false));
-        assertFalse(ThreeDObjectAnalysis.canShowGuiDecisionDialog(false, new CLIConfig(), false));
-        assertFalse(ThreeDObjectAnalysis.canShowGuiDecisionDialog(false, null, true));
+        assertTrue(ThreeDObjectAnalysis.canShowGuiDecisionDialog(false, null, false, true));
+        assertFalse(ThreeDObjectAnalysis.canShowGuiDecisionDialog(true, null, false, true));
+        assertFalse(ThreeDObjectAnalysis.canShowGuiDecisionDialog(false, new CLIConfig(), false, true));
+        assertFalse(ThreeDObjectAnalysis.canShowGuiDecisionDialog(false, null, true, true));
+    }
+
+    @Test
+    public void noImageJUiSuppressesGuiDecisionDialogsInUnitTests() {
+        assertFalse(ThreeDObjectAnalysis.canShowGuiDecisionDialog(false, null, false, false));
+    }
+
+    @Test
+    public void missingImageJUiSuppressesInteractiveSpatialHandoff() throws Exception {
+        ThreeDObjectAnalysis analysis = new ThreeDObjectAnalysis();
+        analysis.setGuiDecisionDialogsAvailableForTest(Boolean.FALSE);
+        final AtomicInteger launches = new AtomicInteger(0);
+        analysis.setSpatialOptionsDialogLauncherForTest(countingSpatialOptionsLauncher(launches));
+
+        assertTrue(analysis.prepareSpatialHandoffBeforeAnalysis(
+                temp.newFolder("spatial-no-ui").getAbsolutePath(),
+                dapiIba1AbetaConfig().channelNames,
+                true));
+
+        assertEquals(0, launches.get());
     }
 
     @Test
