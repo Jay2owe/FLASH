@@ -674,8 +674,8 @@ public final class CellposeRuntime {
             }
             pd.addStringField("Existing Python Executable", pythonPath, 36);
             pd.addHelpText("Examples:<br>"
-                    + "<code>C:\\Users\\&lt;you&gt;\\miniforge3\\envs\\cellpose-3\\python.exe</code><br>"
-                    + "<code>C:\\Users\\&lt;you&gt;\\project\\.venv\\Scripts\\python.exe</code>");
+                    + "<code>%USERPROFILE%\\miniforge3\\envs\\cellpose-3\\python.exe</code><br>"
+                    + "<code>%USERPROFILE%\\project\\.venv\\Scripts\\python.exe</code>");
             pd.addHelpText("Suggested commands for an existing install:<br>"
                     + "<code>python -m venv .venv</code><br>"
                     + "<code>.venv\\Scripts\\python -m pip install \"" + SUPPORTED_CELLPOSE_PIP_SPEC + "\"</code><br>"
