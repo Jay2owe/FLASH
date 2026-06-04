@@ -460,7 +460,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
             }
 
             restoreExcludedFields(cfg, original, fields);
-            writeBinConfigFiles(binFolder, cfg);
+            writeFilteredChannelConfig(binFolder, cfg, fields);
         } catch (Exception e) {
             recordError("Set Up Configuration filtered update failed", e);
             IJ.handleException(e);
@@ -818,6 +818,91 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
             cfg.zSliceSelections.clear();
             cfg.zSliceSelections.putAll(original.zSliceSelections);
         }
+    }
+
+    private void writeFilteredChannelConfig(File binFolder, BinUserConfig cfg,
+                                            Set<BinField> fields) throws IOException {
+        File settingsDir = channelConfigSettingsDir(binFolder);
+        ChannelConfig existing = ChannelConfigIO.read(settingsDir);
+        ChannelConfig cc = mergeIntoExisting(
+                binFolder, cfg, null, -1, "Partial setup",
+                -1, null, ChannelConfig.PropertyStatus.CONFIGURED);
+        applyPartialFieldStatuses(cc, existing, fields);
+        cc.complete = null;
+        cc.complete = Boolean.valueOf(ChannelConfigIO.isComplete(cc));
+        ChannelConfigIO.write(settingsDir, cc);
+        recordOutput(new File(settingsDir, ChannelConfigIO.FILE_NAME), "json");
+    }
+
+    private static void applyPartialFieldStatuses(ChannelConfig cfg, ChannelConfig existing,
+                                                  Set<BinField> fields) {
+        if (cfg == null || cfg.channels == null) return;
+        Set<String> requested = requestedChannelProperties(fields);
+        boolean sameChannelCount = existing != null
+                && existing.channels != null
+                && existing.channels.size() == cfg.channels.size();
+        for (int i = 0; i < cfg.channels.size(); i++) {
+            ChannelConfig.Channel channel = cfg.channels.get(i);
+            ChannelConfig.Channel old = sameChannelCount ? channelAt(existing, i) : null;
+            for (String key : CHANNEL_CONFIG_PROPERTIES) {
+                ChannelConfig.PropertyStatus status = requested.contains(key)
+                        ? configuredStatusAfterPartial(old, key)
+                        : previousOrPendingStatus(old, key);
+                setStatus(channel, key, status);
+            }
+        }
+    }
+
+    private static Set<String> requestedChannelProperties(Set<BinField> fields) {
+        Set<String> out = new HashSet<String>();
+        if (fields == null) return out;
+        for (BinField field : fields) {
+            switch (field) {
+                case CHANNEL_NAMES:
+                    out.add(ChannelConfig.P_NAME);
+                    out.add(ChannelConfig.P_MARKER);
+                    break;
+                case CHANNEL_COLORS:
+                    out.add(ChannelConfig.P_COLOR);
+                    break;
+                case OBJECT_THRESHOLDS:
+                    out.add(ChannelConfig.P_THRESHOLD);
+                    break;
+                case PARTICLE_SIZES:
+                    out.add(ChannelConfig.P_SIZE);
+                    break;
+                case DISPLAY_MIN_MAX:
+                    out.add(ChannelConfig.P_MINMAX);
+                    break;
+                case INTENSITY_THRESHOLDS:
+                    out.add(ChannelConfig.P_INTENSITY);
+                    break;
+                case SEGMENTATION_METHODS:
+                    out.add(ChannelConfig.P_SEGMENTATION);
+                    break;
+                case FILTER_PRESETS:
+                    out.add(ChannelConfig.P_FILTER);
+                    break;
+                case Z_SLICE:
+                default:
+                    break;
+            }
+        }
+        return out;
+    }
+
+    private static ChannelConfig.PropertyStatus configuredStatusAfterPartial(
+            ChannelConfig.Channel old, String propertyKey) {
+        return previousOrPendingStatus(old, propertyKey) == ChannelConfig.PropertyStatus.COMMITTED
+                ? ChannelConfig.PropertyStatus.COMMITTED
+                : ChannelConfig.PropertyStatus.CONFIGURED;
+    }
+
+    private static ChannelConfig.PropertyStatus previousOrPendingStatus(
+            ChannelConfig.Channel old, String propertyKey) {
+        return old == null
+                ? ChannelConfig.PropertyStatus.PENDING
+                : old.statusOf(propertyKey);
     }
 
     private static void replaceListIfPresent(List<String> target, List<String> source) {

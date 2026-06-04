@@ -55,9 +55,10 @@ public class AnalysisStatusScanner {
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory.getAbsolutePath());
         File channelConfig = new File(layout.configurationWriteDir(), ChannelConfigIO.FILE_NAME);
         String currentBinHash = statusRelevantBinHash(channelConfig);
+        AnalysisStatus setupFallback = setupConfigurationStatus(layout.configurationWriteDir());
 
         put(out, FLASH_Pipeline.IDX_CREATE_BIN,
-                sidecarStatus(directory, CREATE_BIN_ID, currentBinHash, channelConfig.isFile()),
+                sidecarStatus(directory, CREATE_BIN_ID, currentBinHash, setupFallback),
                 "Set Up Configuration");
         boolean roiOutputs = hasRoiOutputs(layout);
         boolean orientationManifest = OrientationManifestIO.getExistingFile(directory.getAbsolutePath()) != null;
@@ -93,9 +94,11 @@ public class AnalysisStatusScanner {
                 "Fluorescence Intensity Analysis");
         put(out, FLASH_Pipeline.IDX_AGGREGATION,
                 sidecarStatus(directory, AGGREGATION_ID, currentBinHash,
-                        hasFile(layout.projectSummaryWriteFile(FlashProjectLayout.MASTER_OBJECTS_FILENAME))
-                                || hasFile(layout.projectSummaryWriteFile(
-                                        FlashProjectLayout.MASTER_INTENSITIES_FILENAME))),
+                        fallbackStatus(directory,
+                                hasFile(layout.projectSummaryWriteFile(
+                                        FlashProjectLayout.MASTER_OBJECTS_FILENAME))
+                                        || hasFile(layout.projectSummaryWriteFile(
+                                                FlashProjectLayout.MASTER_INTENSITIES_FILENAME)))),
                 "Master Aggregation");
         put(out, FLASH_Pipeline.IDX_STATISTICS,
                 fallbackStatus(directory,
@@ -198,11 +201,21 @@ public class AnalysisStatusScanner {
         }
     }
 
-    private AnalysisStatus sidecarStatus(File directory, String analysisId, String currentBinHash, boolean fallbackDone) {
+    private AnalysisStatus sidecarStatus(File directory, String analysisId, String currentBinHash,
+                                         AnalysisStatus fallbackStatus) {
         Map<String, Object> status = Collections.emptyMap();
         try {
             status = ProjectStatusStore.readAnalysisStatus(directory, analysisId);
         } catch (IOException ignored) {
+        }
+        if (CREATE_BIN_ID.equals(analysisId)) {
+            FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory.getAbsolutePath());
+            AnalysisStatus setupStatus = setupConfigurationStatus(layout.configurationWriteDir());
+            if (setupStatus != AnalysisStatus.DONE) {
+                tooltips.put(Integer.valueOf(FLASH_Pipeline.IDX_CREATE_BIN),
+                        setupConfigurationTooltip(layout.configurationWriteDir(), setupStatus));
+                return setupStatus;
+            }
         }
         if (!status.isEmpty()) {
             SidecarStatus data = readSidecar(status);
@@ -217,11 +230,39 @@ public class AnalysisStatusScanner {
             }
             return AnalysisStatus.DONE;
         }
-        return fallbackDone ? AnalysisStatus.DONE : AnalysisStatus.NOT_STARTED;
+        return fallbackStatus == null ? AnalysisStatus.NOT_STARTED : fallbackStatus;
     }
 
     private AnalysisStatus fallbackStatus(File directory, boolean outputExists) {
         return outputExists ? AnalysisStatus.DONE : AnalysisStatus.NOT_STARTED;
+    }
+
+    private AnalysisStatus setupConfigurationStatus(File settingsDir) {
+        ChannelConfigIO.ReadResult result = ChannelConfigIO.readResult(settingsDir);
+        if (result.state == ChannelConfigIO.ReadState.OK) {
+            return AnalysisStatus.DONE;
+        }
+        if (result.state == ChannelConfigIO.ReadState.ABSENT) {
+            return AnalysisStatus.NOT_STARTED;
+        }
+        return AnalysisStatus.STALE;
+    }
+
+    private String setupConfigurationTooltip(File settingsDir, AnalysisStatus status) {
+        ChannelConfigIO.ReadResult result = ChannelConfigIO.readResult(settingsDir);
+        if (result.state == ChannelConfigIO.ReadState.INCOMPLETE) {
+            return "Set Up Configuration is partially saved; finish setup to make it complete";
+        }
+        if (result.state == ChannelConfigIO.ReadState.CORRUPT) {
+            return "Set Up Configuration file is damaged; run setup again";
+        }
+        if (result.state == ChannelConfigIO.ReadState.NEWER_VERSION) {
+            return "Set Up Configuration was saved by a newer FLASH version";
+        }
+        if (status == AnalysisStatus.NOT_STARTED) {
+            return "Not run on this folder";
+        }
+        return "Set Up Configuration needs attention";
     }
 
     private String roiTooltip(boolean roiOutputs, boolean orientationManifest) {

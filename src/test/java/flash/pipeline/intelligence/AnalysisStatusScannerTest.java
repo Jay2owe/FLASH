@@ -137,6 +137,36 @@ public class AnalysisStatusScannerTest {
     }
 
     @Test
+    public void scan_marksPartiallySavedSetupAsStale() throws Exception {
+        File dir = temp.newFolder("partial-setup-status");
+        ChannelConfig cfg = new ChannelConfig();
+        cfg.complete = Boolean.FALSE;
+        ChannelConfig.Channel channel = new ChannelConfig.Channel();
+        channel.index = 0;
+        channel.name = "DAPI";
+        channel.color = "Blue";
+        channel.minmax = "10-200";
+        channel.status.put(ChannelConfig.P_NAME, ChannelConfig.PropertyStatus.CONFIGURED);
+        channel.status.put(ChannelConfig.P_COLOR, ChannelConfig.PropertyStatus.CONFIGURED);
+        channel.status.put(ChannelConfig.P_MARKER, ChannelConfig.PropertyStatus.CONFIGURED);
+        channel.status.put(ChannelConfig.P_MINMAX, ChannelConfig.PropertyStatus.CONFIGURED);
+        channel.status.put(ChannelConfig.P_THRESHOLD, ChannelConfig.PropertyStatus.PENDING);
+        channel.status.put(ChannelConfig.P_SIZE, ChannelConfig.PropertyStatus.PENDING);
+        channel.status.put(ChannelConfig.P_INTENSITY, ChannelConfig.PropertyStatus.PENDING);
+        channel.status.put(ChannelConfig.P_SEGMENTATION, ChannelConfig.PropertyStatus.PENDING);
+        channel.status.put(ChannelConfig.P_FILTER, ChannelConfig.PropertyStatus.PENDING);
+        cfg.channels.add(channel);
+        ChannelConfigIO.write(TestConfigFiles.settingsDir(dir), cfg);
+
+        AnalysisStatusScanner scanner = new AnalysisStatusScanner();
+        Map<Integer, AnalysisStatus> statuses = scanner.scan(dir);
+
+        assertEquals(AnalysisStatus.STALE,
+                statuses.get(Integer.valueOf(FLASH_Pipeline.IDX_CREATE_BIN)));
+        assertTrue(scanner.tooltipFor(FLASH_Pipeline.IDX_CREATE_BIN).contains("partially saved"));
+    }
+
+    @Test
     public void scan_marksSetupStaleWhenAnalysisRelevantConfigChanges() throws Exception {
         File dir = temp.newFolder("setup-relevant-change");
         TestConfigFiles.writeChannelConfig(dir, TestConfigFiles.basicBinConfig("DAPI", "GFAP"));

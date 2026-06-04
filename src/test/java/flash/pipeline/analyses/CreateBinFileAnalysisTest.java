@@ -489,9 +489,20 @@ public class CreateBinFileAnalysisTest {
         assertEquals(Arrays.asList("100-Infinity", "100-Infinity"), updated.channelSizes);
         assertEquals(Arrays.asList("None", "None"), updated.channelMinMax);
         assertEquals(Arrays.asList("default", "default"), updated.channelIntensityThresholds);
-        assertEquals(Arrays.asList("classical", "classical"), updated.segmentationMethods);
+        assertEquals(Arrays.asList("classical:otsu", "classical:otsu"), updated.segmentationMethods);
         assertEquals(Arrays.asList("Default", "Default"), updated.channelFilterPresets);
         assertFalse(new File(bin, "C1_Filters.ijm").exists());
+
+        ChannelConfig saved = ChannelConfigIO.read(bin);
+        assertEquals(Boolean.FALSE, saved.complete);
+        assertEquals(ChannelConfig.PropertyStatus.CONFIGURED,
+                saved.channels.get(0).statusOf(ChannelConfig.P_NAME));
+        assertEquals(ChannelConfig.PropertyStatus.CONFIGURED,
+                saved.channels.get(0).statusOf(ChannelConfig.P_COLOR));
+        assertEquals(ChannelConfig.PropertyStatus.PENDING,
+                saved.channels.get(0).statusOf(ChannelConfig.P_THRESHOLD));
+        assertEquals(ChannelConfig.PropertyStatus.PENDING,
+                saved.channels.get(0).statusOf(ChannelConfig.P_FILTER));
     }
 
     @Test
