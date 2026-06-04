@@ -141,6 +141,34 @@ public class ThreeDObjectSetupConfigTest {
     }
 
     @Test
+    public void stockColocPresetsEnableIntensityColocalization() throws Exception {
+        ThreeDObjectPresetIO io = new ThreeDObjectPresetIO(temp.newFolder("coloc-presets"));
+        List<ThreeDObjectPreset> presets = io.listAll();
+
+        for (ThreeDObjectPreset preset : presets) {
+            if (preset.getName().startsWith("Count + Coloc")
+                    || "Full workflow".equals(preset.getName())) {
+                ThreeDObjectSetupConfig.DerivedConfig derived = ThreeDObjectSetupConfig.fromPreset(
+                        dapiIba1AbetaConfig(), dapiIba1AbetaIdentities(), preset);
+
+                assertTrue(preset.getName(), derived.doVolumetric);
+                assertTrue(preset.getName(), derived.doCpc);
+                assertTrue(preset.getName(), derived.doIntensityColoc);
+            }
+        }
+    }
+
+    @Test
+    public void fullWorkflowStockPresetRunsSpatialAnalysis() throws Exception {
+        ThreeDObjectPresetIO io = new ThreeDObjectPresetIO(temp.newFolder("full-workflow"));
+
+        ThreeDObjectSetupConfig.DerivedConfig derived = ThreeDObjectSetupConfig.fromPreset(
+                dapiIba1AbetaConfig(), dapiIba1AbetaIdentities(), io.load("Full workflow"));
+
+        assertTrue(derived.runSpatial);
+    }
+
+    @Test
     public void explicitPresetWithCentroidRoiFilteringOffIsRespected() {
         ThreeDObjectPreset preset = new ThreeDObjectPreset(
                 "User preset",

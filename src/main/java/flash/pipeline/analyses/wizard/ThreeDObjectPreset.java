@@ -157,19 +157,44 @@ public final class ThreeDObjectPreset implements Preset<ThreeDObjectPreset> {
         if (root == null) {
             throw new IOException("Preset JSON object is required.");
         }
+        String name = stringOr(root.get("name"), "3D Object Preset");
+        boolean doVolumetric = JsonIO.booleanValue(root.get("doVolumetric"), false);
+        boolean doCpc = JsonIO.booleanValue(root.get("doCpc"), false);
+        boolean doIntensityColoc = JsonIO.booleanValue(root.get("doIntensityColoc"), false);
+        boolean extractProcessLength = JsonIO.booleanValue(root.get("extractProcessLength"), false);
+        boolean runSpatial = JsonIO.booleanValue(root.get("runSpatial"), false);
+        if (isBuiltInColocPresetName(name) && doVolumetric && doCpc) {
+            doIntensityColoc = true;
+        }
+        if (isBuiltInFullWorkflowPresetName(name) && doVolumetric && doCpc && extractProcessLength) {
+            doIntensityColoc = true;
+            runSpatial = true;
+        }
         return new ThreeDObjectPreset(
-                stringOr(root.get("name"), "3D Object Preset"),
+                name,
                 JsonIO.stringValue(root.get("description")),
                 stringOr(root.get("libraryVersion"), CURRENT_LIBRARY_VERSION),
-                JsonIO.booleanValue(root.get("doVolumetric"), false),
-                JsonIO.booleanValue(root.get("doCpc"), false),
-                JsonIO.booleanValue(root.get("doIntensityColoc"), false),
-                JsonIO.booleanValue(root.get("extractProcessLength"), false),
-                JsonIO.booleanValue(root.get("runSpatial"), false),
+                doVolumetric,
+                doCpc,
+                doIntensityColoc,
+                extractProcessLength,
+                runSpatial,
                 JsonIO.booleanValue(root.get("classicalCentroidFiltering"), false),
                 doubleValue(root.get("colocThresholdPercent"), 30.0),
                 strings(root.get("processMarkerHints")),
                 strings(root.get("nuclearMarkerHints")));
+    }
+
+    private static boolean isBuiltInColocPresetName(String name) {
+        String value = name == null ? "" : name.trim();
+        return value.equals("Count + Coloc Loose")
+                || value.equals("Count + Coloc Standard")
+                || value.equals("Count + Coloc Strict")
+                || isBuiltInFullWorkflowPresetName(value);
+    }
+
+    private static boolean isBuiltInFullWorkflowPresetName(String name) {
+        return "Full workflow".equals(name == null ? "" : name.trim());
     }
 
     private static List<String> strings(Object value) {

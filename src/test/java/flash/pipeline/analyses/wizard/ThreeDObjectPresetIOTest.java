@@ -95,6 +95,46 @@ public class ThreeDObjectPresetIOTest {
     }
 
     @Test
+    public void legacyStockColocPresetJsonMigratesIntensityColocalization() throws Exception {
+        String json = "{"
+                + "\"name\":\"Count + Coloc Standard\","
+                + "\"libraryVersion\":\"1\","
+                + "\"doVolumetric\":true,"
+                + "\"doCpc\":true,"
+                + "\"doIntensityColoc\":false,"
+                + "\"extractProcessLength\":false,"
+                + "\"runSpatial\":false,"
+                + "\"classicalCentroidFiltering\":true,"
+                + "\"colocThresholdPercent\":30"
+                + "}";
+
+        ThreeDObjectPreset loaded = ThreeDObjectPreset.fromJson(json);
+
+        assertTrue(loaded.isDoIntensityColoc());
+        assertFalse(loaded.isRunSpatial());
+    }
+
+    @Test
+    public void legacyFullWorkflowPresetJsonMigratesSpatialAnalysis() throws Exception {
+        String json = "{"
+                + "\"name\":\"Full workflow\","
+                + "\"libraryVersion\":\"1\","
+                + "\"doVolumetric\":true,"
+                + "\"doCpc\":true,"
+                + "\"doIntensityColoc\":false,"
+                + "\"extractProcessLength\":true,"
+                + "\"runSpatial\":false,"
+                + "\"classicalCentroidFiltering\":true,"
+                + "\"colocThresholdPercent\":30"
+                + "}";
+
+        ThreeDObjectPreset loaded = ThreeDObjectPreset.fromJson(json);
+
+        assertTrue(loaded.isDoIntensityColoc());
+        assertTrue(loaded.isRunSpatial());
+    }
+
+    @Test
     public void atomicWriteLeavesOriginalOnFailedMove() throws Exception {
         CrashyThreeDObjectPresetIO io = new CrashyThreeDObjectPresetIO(temp.newFolder("atomic"));
         io.save(preset("Crash Test", 10.0));

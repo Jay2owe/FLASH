@@ -1,9 +1,10 @@
 {
   "name": "Count + Coloc Strict",
-  "description": "Count objects and use stricter colocalization for puncta-like signals.",
+  "description": "Count objects and use stricter volumetric, CPC, and intensity colocalization for puncta-like signals.",
   "libraryVersion": "1",
   "doVolumetric": true,
   "doCpc": true,
+  "doIntensityColoc": true,
   "extractProcessLength": false,
   "runSpatial": false,
   "classicalCentroidFiltering": true,
