@@ -7,78 +7,93 @@ import org.junit.Assume;
 import org.junit.Test;
 
 import java.awt.GraphicsEnvironment;
-import java.io.File;
-import java.io.IOException;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 public class DeconvolutionLab2EngineTest {
 
     @Test
-    public void macroFallbackFindsGeneratedImageThroughInjectedRunner() throws Exception {
-        final TrackableImagePlus leaked = trackableVolume("leaked", 4, 4, 2, 1.5f);
-        final TrackableImagePlus generated = trackableVolume("generated", 4, 4, 2, 2.0f);
-        DeconvolutionLab2Engine engine = new DeconvolutionLab2Engine(
-                new DeconvolutionLab2Engine.AvailabilityProbe() {
-                    @Override
-                    public boolean isAvailable() {
-                        return true;
-                    }
-                },
-                new DeconvolutionLab2Engine.ImageJRunner() {
-                    private boolean runComplete = false;
-
-                    @Override
-                    public void run(String command, String options) {
-                        runComplete = true;
-                    }
-
-                    @Override
-                    public int[] getWindowIds() {
-                        return runComplete ? new int[]{11, 33, 22} : new int[]{11};
-                    }
-
-                    @Override
-                    public ImagePlus getImage(int id) {
-                        if (id == 22) return generated;
-                        if (id == 33) return leaked;
-                        return null;
-                    }
-
-                    @Override
-                    public ImagePlus getImage(String title) {
-                        return null;
-                    }
-
-                    @Override
-                    public void saveTiffStack(ImagePlus image, File target) throws IOException {}
-                },
-                null
-        );
-
+    public void delegatesToSynchronousStrategyAndPreservesMetadata() throws Exception {
         ImagePlus stack = syntheticVolume("stack", 4, 4, 2, 1.0f);
         ImagePlus psf = syntheticVolume("psf", 3, 3, 1, 1.0f);
+        final ImagePlus produced = syntheticVolume("raw-output", 4, 4, 2, 2.0f);
+        final String[] commandSeen = new String[1];
+        DeconvolutionLab2Engine engine = new DeconvolutionLab2Engine(
+                availableProbe(),
+                new DeconvolutionLab2Engine.LabApiStrategy() {
+                    @Override
+                    public ImagePlus run(ImagePlus s, ImagePlus p, DeconvParams params) {
+                        commandSeen[0] = DeconvolutionLab2Engine.buildApiCommand(params);
+                        return produced;
+                    }
+                });
+
         ImagePlus result = null;
         try {
-            result = engine.deconvolve(stack, psf, DeconvParams.builder(Algorithm.RL).build());
+            result = engine.deconvolve(stack, psf, DeconvParams.builder(Algorithm.RL).iterations(7).build());
 
             assertNotNull(result);
-            assertEquals(stack.getWidth(), result.getWidth());
-            assertEquals(stack.getHeight(), result.getHeight());
+            assertSame("engine returns the strategy result in memory; no window round-trip", produced, result);
+            assertEquals("stack-deconv-dl2", result.getTitle());
             assertEquals(stack.getStackSize(), result.getStackSize());
-            assertTrue("primary DeconvolutionLab2 output window should be closed after detach",
-                    generated.closed);
-            assertTrue("extra DeconvolutionLab2 output window should be closed",
-                    leaked.closed);
+            // Monitor and console output must be suppressed so no dialogs are left open.
+            assertTrue("command must disable the monitor dialog",
+                    commandSeen[0].contains("-monitor no"));
+            assertTrue("command must mute console verbosity",
+                    commandSeen[0].contains("-verbose mute"));
+            assertTrue("command must not request any displayed/saved output window",
+                    !commandSeen[0].contains("-out"));
+            assertTrue(commandSeen[0].contains("-algorithm RL 7"));
         } finally {
             close(result);
             close(stack);
             close(psf);
-            close(generated);
-            close(leaked);
         }
+    }
+
+    @Test(expected = DeconvolutionException.class)
+    public void reportsFailureWhenStrategyProducesNoOutput() throws Exception {
+        ImagePlus stack = syntheticVolume("stack", 4, 4, 2, 1.0f);
+        ImagePlus psf = syntheticVolume("psf", 3, 3, 1, 1.0f);
+        DeconvolutionLab2Engine engine = new DeconvolutionLab2Engine(
+                availableProbe(),
+                new DeconvolutionLab2Engine.LabApiStrategy() {
+                    @Override
+                    public ImagePlus run(ImagePlus s, ImagePlus p, DeconvParams params) {
+                        return null;
+                    }
+                });
+        try {
+            engine.deconvolve(stack, psf, DeconvParams.builder(Algorithm.RL).build());
+        } finally {
+            close(stack);
+            close(psf);
+        }
+    }
+
+    @Test(expected = EnginePluginMissingException.class)
+    public void reportsMissingApiWhenStrategyUnavailable() throws Exception {
+        ImagePlus stack = syntheticVolume("stack", 4, 4, 2, 1.0f);
+        ImagePlus psf = syntheticVolume("psf", 3, 3, 1, 1.0f);
+        DeconvolutionLab2Engine engine = new DeconvolutionLab2Engine(availableProbe(), null);
+        try {
+            engine.deconvolve(stack, psf, DeconvParams.builder(Algorithm.RL).build());
+        } finally {
+            close(stack);
+            close(psf);
+        }
+    }
+
+    private static DeconvolutionLab2Engine.AvailabilityProbe availableProbe() {
+        return new DeconvolutionLab2Engine.AvailabilityProbe() {
+            @Override
+            public boolean isAvailable() {
+                return true;
+            }
+        };
     }
 
     @Test
@@ -160,25 +175,6 @@ public class DeconvolutionLab2EngineTest {
             stack.addSlice(new FloatProcessor(width, height, pixels, null));
         }
         return new ImagePlus(title, stack);
-    }
-
-    private static TrackableImagePlus trackableVolume(String title, int width, int height, int depth, float value) {
-        ImagePlus image = syntheticVolume(title, width, height, depth, value);
-        return new TrackableImagePlus(title, image.getStack());
-    }
-
-    private static final class TrackableImagePlus extends ImagePlus {
-        private boolean closed;
-
-        private TrackableImagePlus(String title, ImageStack stack) {
-            super(title, stack);
-        }
-
-        @Override
-        public void close() {
-            closed = true;
-            super.close();
-        }
     }
 
     private static ImagePlus blurredPoint(String title,

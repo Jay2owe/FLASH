@@ -181,6 +181,8 @@ public final class BinSetupDispatcher {
                                                EnumSet<BinField> missing,
                                                CLIConfig cli) {
         CLIConfig resolved = resolveCliConfig(cli);
+        File settingsDir = FlashProjectLayout.forDirectory(directory).configurationWriteDir();
+        ChannelConfig rawExisting = ChannelConfigIO.read(settingsDir);
         for (BinField field : missing) {
             if (resolved == null || !resolved.hasBinField(field)) {
                 throw missingParameter(analysisDisplayName, field);
@@ -188,13 +190,133 @@ public final class BinSetupDispatcher {
             applyCliValue(analysisDisplayName, cfg, field, resolved.getBinFieldValue(field));
         }
         try {
-            File settingsDir = FlashProjectLayout.forDirectory(directory).configurationWriteDir();
-            ChannelConfigIO.write(settingsDir, ChannelConfigIO.fromBinConfig(cfg));
-            BinConfigIO.writeFilterMacrosFromConfig(settingsDir, cfg);
+            ChannelConfigIO.write(settingsDir, headlessPartialConfig(cfg, rawExisting, missing));
+            if (missing.contains(BinField.FILTER_PRESETS)) {
+                BinConfigIO.writeFilterMacrosFromConfig(settingsDir, cfg);
+            }
         } catch (IOException e) {
             throw new IllegalStateException("Cannot run " + cleanAnalysisName(analysisDisplayName)
                     + ": failed to write channel_config.json: " + e.getMessage(), e);
         }
+    }
+
+    private static ChannelConfig headlessPartialConfig(BinConfig cfg,
+                                                       ChannelConfig rawExisting,
+                                                       Set<BinField> supplied) {
+        ChannelConfig next = ChannelConfigIO.fromBinConfig(cfg);
+        next.complete = Boolean.FALSE;
+        boolean preserveZSlice = supplied == null || !supplied.contains(BinField.Z_SLICE);
+        if (preserveZSlice && rawExisting != null) {
+            next.zSliceMode = rawExisting.zSliceMode;
+            next.zSliceSelections.clear();
+            if (rawExisting.zSliceSelections != null) {
+                next.zSliceSelections.putAll(rawExisting.zSliceSelections);
+            }
+        }
+        if (next.channels == null) return next;
+        for (int i = 0; i < next.channels.size(); i++) {
+            ChannelConfig.Channel channel = next.channels.get(i);
+            ChannelConfig.Channel old = channelAt(rawExisting, i);
+            preserveUnrequestedValues(channel, old, supplied);
+            channel.status.clear();
+            if (old != null && old.status != null) {
+                channel.status.putAll(old.status);
+            }
+            seedMissingStatuses(channel);
+            markSuppliedFields(channel, supplied);
+        }
+        return next;
+    }
+
+    private static void preserveUnrequestedValues(ChannelConfig.Channel channel,
+                                                  ChannelConfig.Channel old,
+                                                  Set<BinField> supplied) {
+        if (channel == null || old == null) return;
+        channel.markerId = old.markerId;
+        channel.markerShape = old.markerShape;
+        channel.markerCrowdingSensitive = old.markerCrowdingSensitive;
+        if (!hasSupplied(supplied, BinField.CHANNEL_NAMES)) channel.name = old.name;
+        if (!hasSupplied(supplied, BinField.CHANNEL_COLORS)) channel.color = old.color;
+        if (!hasSupplied(supplied, BinField.OBJECT_THRESHOLDS)) channel.threshold = old.threshold;
+        if (!hasSupplied(supplied, BinField.PARTICLE_SIZES)) channel.size = old.size;
+        if (!hasSupplied(supplied, BinField.DISPLAY_MIN_MAX)) channel.minmax = old.minmax;
+        if (!hasSupplied(supplied, BinField.INTENSITY_THRESHOLDS)) {
+            channel.intensityThreshold = old.intensityThreshold;
+        }
+        if (!hasSupplied(supplied, BinField.SEGMENTATION_METHODS)) {
+            channel.segmentationMethod = old.segmentationMethod;
+        }
+        if (!hasSupplied(supplied, BinField.FILTER_PRESETS)) channel.filterPreset = old.filterPreset;
+    }
+
+    private static boolean hasSupplied(Set<BinField> supplied, BinField field) {
+        return supplied != null && supplied.contains(field);
+    }
+
+    private static void seedMissingStatuses(ChannelConfig.Channel channel) {
+        if (channel == null) return;
+        seedStatus(channel, ChannelConfig.P_NAME);
+        seedStatus(channel, ChannelConfig.P_COLOR);
+        seedStatus(channel, ChannelConfig.P_MARKER);
+        seedStatus(channel, ChannelConfig.P_THRESHOLD);
+        seedStatus(channel, ChannelConfig.P_SIZE);
+        seedStatus(channel, ChannelConfig.P_MINMAX);
+        seedStatus(channel, ChannelConfig.P_INTENSITY);
+        seedStatus(channel, ChannelConfig.P_SEGMENTATION);
+        seedStatus(channel, ChannelConfig.P_FILTER);
+    }
+
+    private static void seedStatus(ChannelConfig.Channel channel, String property) {
+        if (!channel.status.containsKey(property)) {
+            channel.status.put(property, ChannelConfig.PropertyStatus.PENDING);
+        }
+    }
+
+    private static void markSuppliedFields(ChannelConfig.Channel channel, Set<BinField> supplied) {
+        if (channel == null || supplied == null) return;
+        for (BinField field : supplied) {
+            markSuppliedField(channel, field);
+        }
+    }
+
+    private static void markSuppliedField(ChannelConfig.Channel channel, BinField field) {
+        switch (field) {
+            case CHANNEL_NAMES:
+                channel.status.put(ChannelConfig.P_NAME, ChannelConfig.PropertyStatus.CONFIGURED);
+                break;
+            case CHANNEL_COLORS:
+                channel.status.put(ChannelConfig.P_COLOR, ChannelConfig.PropertyStatus.CONFIGURED);
+                break;
+            case OBJECT_THRESHOLDS:
+                channel.status.put(ChannelConfig.P_THRESHOLD, ChannelConfig.PropertyStatus.CONFIGURED);
+                break;
+            case PARTICLE_SIZES:
+                channel.status.put(ChannelConfig.P_SIZE, ChannelConfig.PropertyStatus.CONFIGURED);
+                break;
+            case DISPLAY_MIN_MAX:
+                channel.status.put(ChannelConfig.P_MINMAX, ChannelConfig.PropertyStatus.CONFIGURED);
+                break;
+            case INTENSITY_THRESHOLDS:
+                channel.status.put(ChannelConfig.P_INTENSITY, ChannelConfig.PropertyStatus.CONFIGURED);
+                break;
+            case SEGMENTATION_METHODS:
+                channel.status.put(ChannelConfig.P_SEGMENTATION, ChannelConfig.PropertyStatus.CONFIGURED);
+                break;
+            case FILTER_PRESETS:
+                channel.status.put(ChannelConfig.P_FILTER, ChannelConfig.PropertyStatus.CONFIGURED);
+                break;
+            case Z_SLICE:
+            default:
+                break;
+        }
+    }
+
+    private static ChannelConfig.Channel channelAt(ChannelConfig cfg, int channelIndex) {
+        if (cfg == null || cfg.channels == null || channelIndex < 0
+                || channelIndex >= cfg.channels.size()) {
+            return null;
+        }
+        return cfg.channels.get(channelIndex);
     }
 
     private static CLIConfig resolveCliConfig(CLIConfig cli) {

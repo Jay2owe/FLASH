@@ -162,10 +162,15 @@ public final class ImageSourceDispatcher {
         }
         ProjectFile project = ProjectFileIO.read(settingsDir);
         if (project == null || project.items == null) {
-            return null;
+            throw new IllegalArgumentException(
+                    "Could not read project.json at "
+                            + new File(settingsDir, ProjectFileIO.FILE_NAME).getAbsolutePath()
+                            + ". FLASH will not fall back to scanning "
+                            + outputRoot.getAbsolutePath()
+                            + " because that can use the wrong source file.");
         }
         ProjectPathResolver.relocateForLoad(project,
-                new File(settingsDir, ProjectFileIO.FILE_NAME), outputRoot);
+                new File(settingsDir, ProjectFileIO.FILE_NAME), outputRoot, false);
         List<File> containers = new ArrayList<File>();
         List<List<Integer>> includes = new ArrayList<List<Integer>>();
         List<File> tiffs = new ArrayList<File>();
@@ -174,8 +179,10 @@ public final class ImageSourceDispatcher {
             if (item.path == null || item.path.trim().isEmpty()) continue;
             File source = new File(item.path);
             if (!source.isFile()) {
-                IJ.log("[FLASH] project.json refers to missing source, skipping: " + source.getAbsolutePath());
-                continue;
+                throw new IllegalArgumentException(
+                        "project.json at " + outputRoot.getAbsolutePath()
+                                + " refers to a missing included source file: "
+                                + source.getAbsolutePath());
             }
             if (isContainerExtension(source.getName())) {
                 containers.add(source);
@@ -280,6 +287,42 @@ public final class ImageSourceDispatcher {
     }
 
     /**
+     * Returns included project container files from {@code project.json}, or an
+     * empty list when the directory is not a saved project or has no container
+     * sources. The returned paths have already been relocated for this machine.
+     */
+    public static List<File> projectContainerFiles(String directory) {
+        File dir = requireDirectory(directory);
+        ProjectSources projectSources = tryReadProjectSources(dir);
+        if (projectSources == null || !projectSources.hasContainers()) {
+            return Collections.emptyList();
+        }
+        return new ArrayList<File>(projectSources.containers);
+    }
+
+    /**
+     * Returns included project TIFF files from {@code project.json}, or an
+     * empty list when the directory is not a saved project or has no TIFF
+     * sources. The returned paths have already been relocated for this machine.
+     */
+    public static List<File> projectTiffFiles(String directory) {
+        File dir = requireDirectory(directory);
+        ProjectSources projectSources = tryReadProjectSources(dir);
+        if (projectSources == null || !projectSources.hasTiffs()) {
+            return Collections.emptyList();
+        }
+        return new ArrayList<File>(projectSources.tiffs);
+    }
+
+    /** True when {@code directory} has a saved FLASH {@code project.json}. */
+    public static boolean hasProjectManifest(String directory) {
+        File dir = requireDirectory(directory);
+        File settingsDir = FlashProjectLayout.forDirectory(dir.getAbsolutePath())
+                .configurationWriteDir();
+        return ProjectFileIO.exists(settingsDir);
+    }
+
+    /**
      * Returns per-series metadata for {@code directory}. CONTAINER mode
      * delegates to {@link LifIO#readAllSeriesMetadata(File)}; TIFF modes call
      * {@link DeferredImageSupplier#readTiffFolderMetadata(List, String)}.
@@ -298,9 +341,9 @@ public final class ImageSourceDispatcher {
                 File container = projectSources.containers.get(c);
                 List<SeriesMeta> perContainer = LifIO.readAllSeriesMetadata(container);
                 List<Integer> include = projectSources.includedSeriesPerContainer.get(c);
-                boolean includeAll = include == null || include.isEmpty();
-                for (SeriesMeta meta : perContainer) {
-                    if (!includeAll && !include.contains(Integer.valueOf(meta.index))) continue;
+                List<SeriesMeta> ordered =
+                        selectedSeriesMetadataInProjectOrder(perContainer, include, container);
+                for (SeriesMeta meta : ordered) {
                     out.add(meta.withIndex(globalOffset++));
                 }
             }
@@ -323,6 +366,41 @@ public final class ImageSourceDispatcher {
             default:
                 throw new IllegalStateException("Unhandled SourceMode: " + mode);
         }
+    }
+
+    static List<SeriesMeta> selectedSeriesMetadataInProjectOrder(
+            List<SeriesMeta> perContainer,
+            List<Integer> include,
+            File container) {
+        List<SeriesMeta> ordered = new ArrayList<SeriesMeta>();
+        boolean includeAll = include == null || include.isEmpty();
+        if (includeAll) {
+            if (perContainer != null) {
+                ordered.addAll(perContainer);
+            }
+            return ordered;
+        }
+        for (Integer localIndex : include) {
+            if (localIndex == null) continue;
+            ordered.add(findSeriesMeta(perContainer, localIndex.intValue(), container));
+        }
+        return ordered;
+    }
+
+    private static SeriesMeta findSeriesMeta(List<SeriesMeta> metas,
+                                             int localIndex,
+                                             File container) {
+        if (metas != null) {
+            for (SeriesMeta meta : metas) {
+                if (meta != null && meta.index == localIndex) {
+                    return meta;
+                }
+            }
+        }
+        throw new IllegalArgumentException(
+                "project.json selects series index " + localIndex
+                        + " outside metadata for "
+                        + (container == null ? "container source" : container.getAbsolutePath()));
     }
 
     /**

@@ -129,6 +129,58 @@ public class BinSetupDispatcherTest {
     }
 
     @Test
+    public void intensityPartialConfigDoesNotSatisfyThreeDObjectRequirements() throws Exception {
+        File dir = temp.newFolder("intensityPartial");
+        writeIntensityPartialConfig(dir);
+        BinSetupDispatcher.setHeadlessProbeForTest(new BinSetupDispatcher.HeadlessProbe() {
+            @Override public boolean isHeadlessOrMacro() {
+                return false;
+            }
+        });
+
+        final AtomicInteger chooserCalls = new AtomicInteger(0);
+        BinSetupDispatcher.setChooserForTest(new BinSetupDispatcher.Chooser() {
+            @Override public BinSetupChooser.Choice show(String analysisDisplayName,
+                                                         Set<BinField> missing,
+                                                         boolean showRoiTip) {
+                chooserCalls.incrementAndGet();
+                return BinSetupChooser.Choice.CANCELLED;
+            }
+        });
+
+        assertEquals(BinSetupDispatcher.Outcome.COMPLETED, BinSetupDispatcher.ensure(
+                dir.getAbsolutePath(), "Intensity Analysis",
+                EnumSet.of(BinField.CHANNEL_NAMES, BinField.INTENSITY_THRESHOLDS, BinField.Z_SLICE),
+                true));
+        assertEquals(0, chooserCalls.get());
+
+        BinSetupDispatcher.setChooserForTest(new BinSetupDispatcher.Chooser() {
+            @Override public BinSetupChooser.Choice show(String analysisDisplayName,
+                                                         Set<BinField> missing,
+                                                         boolean showRoiTip) {
+                chooserCalls.incrementAndGet();
+                assertEquals("3D Object Analysis", analysisDisplayName);
+                assertEquals(EnumSet.of(BinField.OBJECT_THRESHOLDS,
+                                BinField.PARTICLE_SIZES,
+                                BinField.SEGMENTATION_METHODS,
+                                BinField.FILTER_PRESETS),
+                        missing);
+                return BinSetupChooser.Choice.CANCELLED;
+            }
+        });
+
+        assertEquals(BinSetupDispatcher.Outcome.CANCELLED, BinSetupDispatcher.ensure(
+                dir.getAbsolutePath(), "3D Object Analysis",
+                EnumSet.of(BinField.CHANNEL_NAMES, BinField.CHANNEL_COLORS,
+                        BinField.OBJECT_THRESHOLDS, BinField.PARTICLE_SIZES,
+                        BinField.SEGMENTATION_METHODS, BinField.FILTER_PRESETS,
+                        BinField.Z_SLICE),
+                true));
+        assertEquals(1, chooserCalls.get());
+    }
+
+
+    @Test
     public void headlessModeWritesMissingFieldsFromCliWithoutChooser() throws Exception {
         File dir = temp.newFolder("macro");
         final AtomicInteger chooserCalls = new AtomicInteger(0);
@@ -164,6 +216,44 @@ public class BinSetupDispatcherTest {
         assertEquals(java.util.Arrays.asList("DAPI", "GFP"), written.channelNames);
         assertEquals(java.util.Arrays.asList("default", "500"), written.channelIntensityThresholds);
         assertEquals(flash.pipeline.zslice.ZSliceMode.FULL, written.zSliceMode);
+        assertFalse(written.hasChannelThresholds());
+        assertFalse(written.hasChannelSizes());
+        assertFalse(written.hasSegmentationMethods());
+        ChannelConfig raw = ChannelConfigIO.read(configurationDir(dir));
+        assertEquals(Boolean.FALSE, raw.complete);
+        assertEquals(ChannelConfig.PropertyStatus.CONFIGURED,
+                raw.channels.get(0).statusOf(ChannelConfig.P_INTENSITY));
+        assertEquals(ChannelConfig.PropertyStatus.PENDING,
+                raw.channels.get(0).statusOf(ChannelConfig.P_THRESHOLD));
+
+        BinSetupDispatcher.setHeadlessProbeForTest(new BinSetupDispatcher.HeadlessProbe() {
+            @Override public boolean isHeadlessOrMacro() {
+                return false;
+            }
+        });
+        BinSetupDispatcher.setChooserForTest(new BinSetupDispatcher.Chooser() {
+            @Override public BinSetupChooser.Choice show(String analysisDisplayName,
+                                                         Set<BinField> missing,
+                                                         boolean showRoiTip) {
+                chooserCalls.incrementAndGet();
+                assertEquals(EnumSet.of(BinField.CHANNEL_COLORS,
+                                BinField.OBJECT_THRESHOLDS,
+                                BinField.PARTICLE_SIZES,
+                                BinField.SEGMENTATION_METHODS,
+                                BinField.FILTER_PRESETS),
+                        missing);
+                return BinSetupChooser.Choice.CANCELLED;
+            }
+        });
+
+        assertEquals(BinSetupDispatcher.Outcome.CANCELLED, BinSetupDispatcher.ensure(
+                dir.getAbsolutePath(), "3D Object Analysis",
+                EnumSet.of(BinField.CHANNEL_NAMES, BinField.CHANNEL_COLORS,
+                        BinField.OBJECT_THRESHOLDS, BinField.PARTICLE_SIZES,
+                        BinField.SEGMENTATION_METHODS, BinField.FILTER_PRESETS,
+                        BinField.Z_SLICE),
+                true));
+        assertEquals(1, chooserCalls.get());
     }
 
     @Test
@@ -407,6 +497,27 @@ public class BinSetupDispatcherTest {
         channel.status.put(ChannelConfig.P_THRESHOLD, ChannelConfig.PropertyStatus.PENDING);
         channel.status.put(ChannelConfig.P_SIZE, ChannelConfig.PropertyStatus.PENDING);
         channel.status.put(ChannelConfig.P_INTENSITY, ChannelConfig.PropertyStatus.PENDING);
+        channel.status.put(ChannelConfig.P_SEGMENTATION, ChannelConfig.PropertyStatus.PENDING);
+        channel.status.put(ChannelConfig.P_FILTER, ChannelConfig.PropertyStatus.PENDING);
+        cfg.channels.add(channel);
+        ChannelConfigIO.write(configurationDir(dir), cfg);
+    }
+
+    private static void writeIntensityPartialConfig(File dir) throws IOException {
+        ChannelConfig cfg = new ChannelConfig();
+        cfg.complete = Boolean.FALSE;
+        ChannelConfig.Channel channel = new ChannelConfig.Channel();
+        channel.index = 0;
+        channel.name = "DAPI";
+        channel.color = "Blue";
+        channel.intensityThreshold = "120";
+        channel.status.put(ChannelConfig.P_NAME, ChannelConfig.PropertyStatus.CONFIGURED);
+        channel.status.put(ChannelConfig.P_COLOR, ChannelConfig.PropertyStatus.CONFIGURED);
+        channel.status.put(ChannelConfig.P_MARKER, ChannelConfig.PropertyStatus.CONFIGURED);
+        channel.status.put(ChannelConfig.P_THRESHOLD, ChannelConfig.PropertyStatus.PENDING);
+        channel.status.put(ChannelConfig.P_SIZE, ChannelConfig.PropertyStatus.PENDING);
+        channel.status.put(ChannelConfig.P_MINMAX, ChannelConfig.PropertyStatus.PENDING);
+        channel.status.put(ChannelConfig.P_INTENSITY, ChannelConfig.PropertyStatus.CONFIGURED);
         channel.status.put(ChannelConfig.P_SEGMENTATION, ChannelConfig.PropertyStatus.PENDING);
         channel.status.put(ChannelConfig.P_FILTER, ChannelConfig.PropertyStatus.PENDING);
         cfg.channels.add(channel);

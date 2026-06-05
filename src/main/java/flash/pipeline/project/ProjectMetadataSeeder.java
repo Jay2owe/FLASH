@@ -1,6 +1,7 @@
 package flash.pipeline.project;
 
 import flash.pipeline.io.ImageSourceDispatcher;
+import flash.pipeline.io.LifIO;
 import flash.pipeline.io.OrientationManifestIO;
 import flash.pipeline.naming.ImageNameParser;
 import flash.pipeline.naming.OrientationManifestRow;
@@ -47,15 +48,21 @@ public final class ProjectMetadataSeeder {
         if (project == null || project.items == null) {
             return rows;
         }
+        int globalSeriesIndex = 0;
         for (ProjectFile.Item item : project.items) {
             if (item == null || !item.include) continue;
             if (item.path == null || item.path.trim().isEmpty()) continue;
-            if (item.seriesMeta == null || item.seriesMeta.isEmpty()) continue;
             String fileName = new File(item.path).getName();
             if (!isContainerExtension(fileName)) continue;
+            if (item.seriesMeta == null || item.seriesMeta.isEmpty()) {
+                globalSeriesIndex += includedContainerSeriesCount(item);
+                continue;
+            }
 
-            for (ProjectFile.SeriesItem series : item.seriesMeta) {
-                if (series == null || !series.include) continue;
+            for (ProjectFile.SeriesItem series : includedSeriesInProjectOrder(item)) {
+                int oneBasedSeriesIndex = globalSeriesIndex + 1;
+                globalSeriesIndex++;
+                if (series == null) continue;
                 String animal = trimToEmpty(series.animalId);
                 String region = trimToEmpty(series.region);
                 OrientationManifestRow.Hemisphere hemisphere =
@@ -65,8 +72,7 @@ public final class ProjectMetadataSeeder {
                         || hemisphere != OrientationManifestRow.Hemisphere.UNKNOWN;
                 if (!hasIdentity) continue;
 
-                String originalName = trimToEmpty(series.name);
-                int oneBasedSeriesIndex = series.index + 1;
+                String originalName = metadataOriginalName(fileName, series.name);
                 String imageKey = OrientationManifestRow.buildImageKey(
                         "CONTAINER", fileName, oneBasedSeriesIndex, originalName);
                 String displayName = ImageNameParser.extractBioFormatsSeriesName(originalName);
@@ -92,6 +98,62 @@ public final class ProjectMetadataSeeder {
             }
         }
         return rows;
+    }
+
+    private static List<ProjectFile.SeriesItem> includedSeriesInProjectOrder(ProjectFile.Item item) {
+        List<ProjectFile.SeriesItem> ordered = new ArrayList<ProjectFile.SeriesItem>();
+        if (item == null || item.seriesMeta == null || item.seriesMeta.isEmpty()) {
+            return ordered;
+        }
+        if (item.series != null && !item.series.isEmpty()) {
+            LinkedHashMap<Integer, ProjectFile.SeriesItem> byIndex =
+                    new LinkedHashMap<Integer, ProjectFile.SeriesItem>();
+            for (ProjectFile.SeriesItem series : item.seriesMeta) {
+                if (series == null) continue;
+                byIndex.put(Integer.valueOf(series.index), series);
+            }
+            for (Integer included : item.series) {
+                if (included == null) continue;
+                ProjectFile.SeriesItem series = byIndex.get(included);
+                ordered.add(series);
+            }
+            return ordered;
+        }
+        for (ProjectFile.SeriesItem series : item.seriesMeta) {
+            if (series != null && series.include) ordered.add(series);
+        }
+        return ordered;
+    }
+
+    private static int includedContainerSeriesCount(ProjectFile.Item item) {
+        if (item == null) return 0;
+        if (item.series != null && !item.series.isEmpty()) {
+            return explicitIncludedSeriesCount(item.series);
+        }
+        File source = item.path == null ? null : new File(item.path);
+        if (source == null || !source.isFile()) return 0;
+        try {
+            return Math.max(0, LifIO.getSeriesCount(source));
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    static int explicitIncludedSeriesCount(List<Integer> series) {
+        if (series == null || series.isEmpty()) return 0;
+        int count = 0;
+        for (Integer ignored : series) {
+            if (ignored != null) count++;
+        }
+        return count;
+    }
+
+    private static String metadataOriginalName(String fileName, String seriesName) {
+        String name = trimToEmpty(seriesName);
+        if (name.isEmpty()) return trimToEmpty(fileName);
+        if (name.indexOf(" - ") >= 0) return name;
+        String container = trimToEmpty(fileName);
+        return container.isEmpty() ? name : container + " - " + name;
     }
 
     /**

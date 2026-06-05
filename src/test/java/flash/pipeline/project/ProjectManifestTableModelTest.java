@@ -245,6 +245,52 @@ public class ProjectManifestTableModelTest {
     }
 
     @Test
+    public void seriesRowsParseBareSeriesNameWithContainerContext() throws Exception {
+        ProjectManifestTableModel model = new ProjectManifestTableModel();
+        File stainingDir = temp.newFolder("IgG.Iba1.Cas3");
+        File source = new File(stainingDir, "Cas3.All.Time.Points.lif");
+        assertTrue(source.createNewFile());
+        int idx = model.addFile(source);
+
+        model.setSeriesEntries(idx, Arrays.asList(
+                new ProjectManifestTableModel.SeriesEntry(0, "hAPP1Week2_LH_SCN")));
+        model.setExpanded(0, true);
+
+        assertEquals("hAPP1Week2", model.getValueAt(1, ProjectManifestTableModel.COL_ANIMAL));
+        assertEquals("LH", model.getValueAt(1, ProjectManifestTableModel.COL_HEMISPHERE));
+        assertEquals("SCN", model.getValueAt(1, ProjectManifestTableModel.COL_REGION));
+        assertEquals("hAPPWeek2", model.getValueAt(1, ProjectManifestTableModel.COL_CONDITION));
+    }
+
+    @Test
+    public void loadFromProjectFileRepairsOldUnparsedSeriesMetadata() throws Exception {
+        File stainingDir = temp.newFolder("IgG.Iba1.Cas3");
+        File source = new File(stainingDir, "Cas3.All.Time.Points.lif");
+        assertTrue(source.createNewFile());
+        ProjectFile project = new ProjectFile();
+        ProjectFile.Item item = new ProjectFile.Item();
+        item.path = source.getAbsolutePath();
+        item.condition = "IgG.Iba1.Cas3";
+        ProjectFile.SeriesItem series = new ProjectFile.SeriesItem();
+        series.index = 0;
+        series.include = true;
+        series.name = "hAPP1Week2_LH_SCN";
+        series.animalId = "hAPP1Week2_LH_SCN";
+        series.condition = "IgG.Iba1.Cas3";
+        item.seriesMeta.add(series);
+        project.items.add(item);
+
+        ProjectManifestTableModel model = new ProjectManifestTableModel();
+        model.loadFromProjectFile(project);
+        model.setExpanded(0, true);
+
+        assertEquals("hAPP1Week2", model.getValueAt(1, ProjectManifestTableModel.COL_ANIMAL));
+        assertEquals("LH", model.getValueAt(1, ProjectManifestTableModel.COL_HEMISPHERE));
+        assertEquals("SCN", model.getValueAt(1, ProjectManifestTableModel.COL_REGION));
+        assertEquals("hAPPWeek2", model.getValueAt(1, ProjectManifestTableModel.COL_CONDITION));
+    }
+
+    @Test
     public void editingSeriesRowDoesNotTouchSiblingsOrFile() throws Exception {
         ProjectManifestTableModel model = new ProjectManifestTableModel();
         int idx = model.addFile(touch("slide.lif"));
@@ -345,11 +391,86 @@ public class ProjectManifestTableModelTest {
         assertFalse(row.series.get(1).include);
     }
 
+    @Test
+    public void setSeriesEntriesPreservesLoadedExplicitSelectionOrder() throws Exception {
+        ProjectFile project = new ProjectFile();
+        ProjectFile.Item item = new ProjectFile.Item();
+        item.path = touch("slide.lif").getAbsolutePath();
+        item.series.add(Integer.valueOf(5));
+        item.series.add(Integer.valueOf(2));
+        project.items.add(item);
+
+        ProjectManifestTableModel model = new ProjectManifestTableModel();
+        model.loadFromProjectFile(project);
+        model.setSeriesEntries(0, Arrays.asList(
+                new ProjectManifestTableModel.SeriesEntry(0, "s0"),
+                new ProjectManifestTableModel.SeriesEntry(2, "s2"),
+                new ProjectManifestTableModel.SeriesEntry(5, "s5")));
+
+        assertFalse(model.getFile(0).series.get(0).include);
+        assertTrue(model.getFile(0).series.get(1).include);
+        assertTrue(model.getFile(0).series.get(2).include);
+
+        ProjectFile.Item saved = model.toProjectFile("P", "D:/out", "FLASH-test").items.get(0);
+        assertEquals(Arrays.asList(Integer.valueOf(5), Integer.valueOf(2)), saved.series);
+        assertEquals(3, saved.seriesMeta.size());
+    }
+
+    @Test
+    public void loadSavePreservesExplicitSelectionWhenSeriesMetaOnlyContainsSelectedRows() throws Exception {
+        ProjectFile project = new ProjectFile();
+        ProjectFile.Item item = new ProjectFile.Item();
+        item.path = touch("slide.lif").getAbsolutePath();
+        item.series.add(Integer.valueOf(5));
+        item.series.add(Integer.valueOf(2));
+        item.seriesMeta.add(seriesMeta(5, "s5", true));
+        item.seriesMeta.add(seriesMeta(2, "s2", true));
+        project.items.add(item);
+
+        ProjectManifestTableModel model = new ProjectManifestTableModel();
+        model.loadFromProjectFile(project);
+
+        ProjectFile.Item saved = model.toProjectFile("P", "D:/out", "FLASH-test").items.get(0);
+        assertEquals(Arrays.asList(Integer.valueOf(5), Integer.valueOf(2)), saved.series);
+        assertEquals(2, saved.seriesMeta.size());
+    }
+
+    @Test
+    public void loadFromProjectFileExplicitSelectionOverridesStaleSeriesMetaIncludes() throws Exception {
+        ProjectFile project = new ProjectFile();
+        ProjectFile.Item item = new ProjectFile.Item();
+        item.path = touch("slide.lif").getAbsolutePath();
+        item.series.add(Integer.valueOf(5));
+        item.series.add(Integer.valueOf(2));
+        item.seriesMeta.add(seriesMeta(0, "s0", true));
+        item.seriesMeta.add(seriesMeta(2, "s2", true));
+        item.seriesMeta.add(seriesMeta(5, "s5", true));
+        project.items.add(item);
+
+        ProjectManifestTableModel model = new ProjectManifestTableModel();
+        model.loadFromProjectFile(project);
+
+        assertFalse(model.getFile(0).series.get(0).include);
+        assertTrue(model.getFile(0).series.get(1).include);
+        assertTrue(model.getFile(0).series.get(2).include);
+
+        ProjectFile.Item saved = model.toProjectFile("P", "D:/out", "FLASH-test").items.get(0);
+        assertEquals(Arrays.asList(Integer.valueOf(5), Integer.valueOf(2)), saved.series);
+    }
+
     private File touch(String name) throws Exception {
         File file = new File(temp.getRoot(), name);
         if (!file.exists()) {
             assertTrue(file.createNewFile());
         }
         return file;
+    }
+
+    private static ProjectFile.SeriesItem seriesMeta(int index, String name, boolean include) {
+        ProjectFile.SeriesItem series = new ProjectFile.SeriesItem();
+        series.index = index;
+        series.name = name;
+        series.include = include;
+        return series;
     }
 }

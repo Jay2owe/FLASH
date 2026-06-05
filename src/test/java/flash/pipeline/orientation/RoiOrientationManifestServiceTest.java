@@ -4,6 +4,9 @@ import flash.pipeline.io.OrientationManifestIO;
 import flash.pipeline.naming.ImageOrientationResolver;
 import flash.pipeline.naming.OrientationManifestRow;
 import flash.pipeline.naming.ResolvedImageMetadata;
+import flash.pipeline.io.FlashProjectLayout;
+import flash.pipeline.project.ProjectFile;
+import flash.pipeline.project.ProjectFileIO;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -36,6 +39,31 @@ public class RoiOrientationManifestServiceTest {
         assertEquals(
                 OrientationManifestRow.buildImageKey(
                         "CONTAINER", "Experiment.lif", 2, "Experiment.lif - Mouse1_LH_SCN"),
+                identity.imageKey);
+    }
+
+    @Test
+    public void identityForProjectContainerUsesManifestSourceOutsideOutputRoot() throws Exception {
+        File outputRoot = temp.newFolder("project-output");
+        File sourceRoot = temp.newFolder("project-source");
+        File lif = new File(sourceRoot, "Experiment.lif");
+        assertTrue(lif.createNewFile());
+        ProjectFile project = new ProjectFile();
+        ProjectFile.Item item = new ProjectFile.Item();
+        item.path = lif.getAbsolutePath();
+        item.include = true;
+        project.items.add(item);
+        ProjectFileIO.write(
+                FlashProjectLayout.forDirectory(outputRoot.getAbsolutePath()).configurationWriteDir(),
+                project);
+
+        OrientationImageIdentity identity = OrientationImageIdentity.fromProjectSeries(
+                outputRoot.getAbsolutePath(), 0, "Experiment.lif - Mouse1_LH_SCN");
+
+        assertEquals("Experiment.lif", identity.sourceFile);
+        assertEquals(
+                OrientationManifestRow.buildImageKey(
+                        "CONTAINER", "Experiment.lif", 1, "Experiment.lif - Mouse1_LH_SCN"),
                 identity.imageKey);
     }
 

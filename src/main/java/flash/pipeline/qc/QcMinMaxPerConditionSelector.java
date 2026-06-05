@@ -3,6 +3,7 @@ package flash.pipeline.qc;
 import ij.IJ;
 import flash.pipeline.io.ConditionManifestIO;
 import flash.pipeline.io.CsvSupport;
+import flash.pipeline.io.DeferredImageSupplier;
 import flash.pipeline.io.LifIO;
 import flash.pipeline.io.OrientationManifestIO;
 import flash.pipeline.io.SeriesMeta;
@@ -70,11 +71,16 @@ public final class QcMinMaxPerConditionSelector {
     private static final String KEY_ORIENTATION_MODIFIED = "orientation.modified";
     private static final String KEY_QC_CHANNEL_SIGNATURE = "qc.channels";
     private static final String KEY_Z_SLICE_SIGNATURE = "zslice.signature";
+    private static final String KEY_SOURCE_SERIES_SIGNATURE = "source.series.signature";
+    private static final String KEY_SELECTION_SCOPE = "selection.scope";
+    private static final String SELECTION_SCOPE_PER_CONDITION = "per_condition";
+    private static final String SELECTION_SCOPE_OVERALL = "overall";
 
     private QcMinMaxPerConditionSelector() {}
 
     public static final class SelectionResult {
         public final List<Integer> selectedSeriesIndexes;
+        public final List<SelectedSeries> selectedSeries;
         public final File scoresFile;
         public final File cacheFile;
         public final boolean usedCache;
@@ -83,12 +89,48 @@ public final class QcMinMaxPerConditionSelector {
 
         SelectionResult(List<Integer> selectedSeriesIndexes, File scoresFile, File cacheFile,
                         boolean usedCache, boolean recomputed, String message) {
-            this.selectedSeriesIndexes = selectedSeriesIndexes;
+            this(selectedSeriesIndexes, null, scoresFile, cacheFile, usedCache, recomputed, message);
+        }
+
+        SelectionResult(List<Integer> selectedSeriesIndexes, List<SelectedSeries> selectedSeries,
+                        File scoresFile, File cacheFile,
+                        boolean usedCache, boolean recomputed, String message) {
+            this.selectedSeriesIndexes = selectedSeriesIndexes == null
+                    ? new ArrayList<Integer>()
+                    : new ArrayList<Integer>(selectedSeriesIndexes);
+            this.selectedSeries = selectedSeries == null
+                    ? new ArrayList<SelectedSeries>()
+                    : new ArrayList<SelectedSeries>(selectedSeries);
             this.scoresFile = scoresFile;
             this.cacheFile = cacheFile;
             this.usedCache = usedCache;
             this.recomputed = recomputed;
             this.message = message;
+        }
+    }
+
+    public static final class SelectedSeries {
+        public final int seriesIndex;
+        public final int seriesNumber;
+        public final String seriesName;
+        public final String animalName;
+        public final String conditionName;
+        public final String selectedRole;
+
+        SelectedSeries(ScoreRecord record) {
+            this(record, null);
+        }
+
+        SelectedSeries(ScoreRecord record, String selectedRoleOverride) {
+            QcSelectionCandidate candidate = record == null ? null : record.candidate;
+            this.seriesIndex = candidate == null ? -1 : candidate.seriesIndex;
+            this.seriesNumber = candidate == null ? 0 : candidate.seriesNumber;
+            this.seriesName = candidate == null ? "" : safe(candidate.seriesName);
+            this.animalName = candidate == null ? "" : safe(candidate.animalName);
+            this.conditionName = candidate == null ? "" : safe(candidate.conditionName);
+            this.selectedRole = selectedRoleOverride == null
+                    ? (record == null ? "" : safe(record.selectedRole))
+                    : safe(selectedRoleOverride);
         }
     }
 
@@ -125,6 +167,33 @@ public final class QcMinMaxPerConditionSelector {
         }
     }
 
+    private static final class ConditionSelection {
+        final String conditionName;
+        final ScoreRecord min;
+        final ScoreRecord max;
+        final double maxBrightness;
+
+        ConditionSelection(String conditionName, ScoreRecord min, ScoreRecord max) {
+            this.conditionName = safe(conditionName);
+            this.min = min;
+            this.max = max;
+            this.maxBrightness = brightestFiniteChannelScore(max == null ? min : max);
+        }
+    }
+
+    private enum SelectionScope {
+        PER_CONDITION(SELECTION_SCOPE_PER_CONDITION, "min/max per condition"),
+        OVERALL(SELECTION_SCOPE_OVERALL, "overall min/max");
+
+        final String cacheValue;
+        final String logLabel;
+
+        SelectionScope(String cacheValue, String logLabel) {
+            this.cacheValue = cacheValue;
+            this.logLabel = logLabel;
+        }
+    }
+
     public static SelectionResult selectMinMaxPerCondition(String directory, File binFolder,
                                                            File lifFile,
                                                            List<QcSelectionChannel> qcChannels,
@@ -143,18 +212,93 @@ public final class QcMinMaxPerConditionSelector {
                                                            int parallelThreads,
                                                            Map<Integer, MetadataAssignment> reviewedMetadata)
             throws Exception {
+        List<SeriesMeta> metas = LifIO.readAllSeriesMetadata(lifFile);
+        return selectMinMaxPerCondition(
+                directory, binFolder, lifFile, null, metas, qcChannels, zSliceConfig,
+                forceRecompute, parallelThreads, reviewedMetadata);
+    }
+
+    public static SelectionResult selectMinMaxPerCondition(String directory, File binFolder,
+                                                           File lifFile,
+                                                           DeferredImageSupplier supplier,
+                                                           List<SeriesMeta> metas,
+                                                           List<QcSelectionChannel> qcChannels,
+                                                           ZSliceConfig zSliceConfig,
+                                                           boolean forceRecompute,
+                                                           int parallelThreads,
+                                                           Map<Integer, MetadataAssignment> reviewedMetadata)
+            throws Exception {
+        return selectMinMax(
+                SelectionScope.PER_CONDITION, directory, binFolder, lifFile, supplier, metas,
+                qcChannels, zSliceConfig, forceRecompute, parallelThreads, reviewedMetadata);
+    }
+
+    public static SelectionResult selectMinMaxOverall(String directory, File binFolder,
+                                                      File lifFile,
+                                                      List<QcSelectionChannel> qcChannels,
+                                                      ZSliceConfig zSliceConfig,
+                                                      boolean forceRecompute,
+                                                      int parallelThreads) throws Exception {
+        return selectMinMaxOverall(directory, binFolder, lifFile, qcChannels, zSliceConfig,
+                forceRecompute, parallelThreads, null);
+    }
+
+    public static SelectionResult selectMinMaxOverall(String directory, File binFolder,
+                                                      File lifFile,
+                                                      List<QcSelectionChannel> qcChannels,
+                                                      ZSliceConfig zSliceConfig,
+                                                      boolean forceRecompute,
+                                                      int parallelThreads,
+                                                      Map<Integer, MetadataAssignment> reviewedMetadata)
+            throws Exception {
+        List<SeriesMeta> metas = LifIO.readAllSeriesMetadata(lifFile);
+        return selectMinMaxOverall(
+                directory, binFolder, lifFile, null, metas, qcChannels, zSliceConfig,
+                forceRecompute, parallelThreads, reviewedMetadata);
+    }
+
+    public static SelectionResult selectMinMaxOverall(String directory, File binFolder,
+                                                      File lifFile,
+                                                      DeferredImageSupplier supplier,
+                                                      List<SeriesMeta> metas,
+                                                      List<QcSelectionChannel> qcChannels,
+                                                      ZSliceConfig zSliceConfig,
+                                                      boolean forceRecompute,
+                                                      int parallelThreads,
+                                                      Map<Integer, MetadataAssignment> reviewedMetadata)
+            throws Exception {
+        return selectMinMax(
+                SelectionScope.OVERALL, directory, binFolder, lifFile, supplier, metas,
+                qcChannels, zSliceConfig, forceRecompute, parallelThreads, reviewedMetadata);
+    }
+
+    private static SelectionResult selectMinMax(SelectionScope scope,
+                                                String directory, File binFolder,
+                                                File lifFile,
+                                                DeferredImageSupplier supplier,
+                                                List<SeriesMeta> metas,
+                                                List<QcSelectionChannel> qcChannels,
+                                                ZSliceConfig zSliceConfig,
+                                                boolean forceRecompute,
+                                                int parallelThreads,
+                                                Map<Integer, MetadataAssignment> reviewedMetadata)
+            throws Exception {
+        if (scope == null) scope = SelectionScope.PER_CONDITION;
         if (binFolder != null && !binFolder.isDirectory()) {
             flash.pipeline.io.IoUtils.mustMkdirs(binFolder);
         }
 
         File scoresFile = new File(binFolder, SCORES_FILE_NAME);
         File cacheFile = new File(binFolder, CACHE_FILE_NAME);
-        List<SeriesMeta> metas = LifIO.readAllSeriesMetadata(lifFile);
+        if (metas == null) {
+            metas = LifIO.readAllSeriesMetadata(lifFile);
+        }
+        String sourceSeriesSignature = sourceSeriesSignature(lifFile, supplier, metas);
         List<QcSelectionCandidate> candidates = buildCandidates(directory, metas, reviewedMetadata);
         if (candidates.isEmpty()) {
             return new SelectionResult(new ArrayList<Integer>(), scoresFile, cacheFile,
                     false, false,
-                    "Min and max per condition could not find any series with usable condition metadata.\n"
+                    "Min/max QC could not find any usable image series.\n"
                             + "No QC images will be opened.");
         }
 
@@ -166,34 +310,45 @@ public final class QcMinMaxPerConditionSelector {
                     "No QC-active channels were available for min/max assessment.");
         }
 
-        if (!forceRecompute && isCacheValid(directory, lifFile, activeChannels, zSliceConfig, cacheFile, scoresFile)) {
+        if (!forceRecompute && isCacheValid(directory, lifFile, activeChannels, zSliceConfig,
+                sourceSeriesSignature, scope.cacheValue, cacheFile, scoresFile)) {
             List<ScoreRecord> cached = readScoresCsv(scoresFile);
             if (!cached.isEmpty()) {
-                List<Integer> selected = selectedSeriesIndexes(cached);
+                List<SelectedSeries> selectedSeries = assignAndSelectSeries(cached, activeChannels, scope);
+                List<Integer> selected = selectedSeriesIndexesFromSelection(selectedSeries);
                 if (!selected.isEmpty()) {
-                    logSelectionSummary(cached, activeChannels, true);
-                    String message = "Using cached min/max per condition selection.\n"
+                    logSelectionSummary(cached, activeChannels, true, scope);
+                    String message = "Using cached " + scope.logLabel + " selection.\n"
                             + "Cache: " + scoresFile.getAbsolutePath();
-                    return new SelectionResult(selected, scoresFile, cacheFile,
+                    return new SelectionResult(selected, selectedSeries, scoresFile, cacheFile,
                             true, false, message);
                 }
             }
             IJ.log("QC min/max cache was present but unusable. Recomputing.");
         }
 
-        IJ.log("QC min/max per condition: scanning sampled planes from .lif");
-        List<ScoreRecord> scored = scoreCandidates(lifFile, candidates, activeChannels, zSliceConfig, parallelThreads);
-        assignSelectionRoles(scored, activeChannels);
-        logSelectionSummary(scored, activeChannels, false);
+        IJ.log("QC " + scope.logLabel + ": scanning sampled planes from .lif");
+        List<ScoreRecord> scored = scoreCandidates(
+                lifFile, supplier, candidates, activeChannels, zSliceConfig, parallelThreads);
+        List<SelectedSeries> selectedSeries = assignAndSelectSeries(scored, activeChannels, scope);
+        logSelectionSummary(scored, activeChannels, false, scope);
         writeScoresCsv(scoresFile, scored, activeChannels);
-        writeCacheProperties(directory, lifFile, activeChannels, zSliceConfig, cacheFile);
+        writeCacheProperties(directory, lifFile, activeChannels, zSliceConfig,
+                sourceSeriesSignature, scope.cacheValue, cacheFile);
 
-        List<Integer> selected = selectedSeriesIndexes(scored);
-        int nConditions = countSelectedConditions(scored);
-        String message = "Computed min/max per condition for " + nConditions + " condition"
-                + (nConditions == 1 ? "" : "s") + ".\n"
-                + "Saved cache: " + scoresFile.getAbsolutePath();
-        return new SelectionResult(selected, scoresFile, cacheFile,
+        List<Integer> selected = selectedSeriesIndexesFromSelection(selectedSeries);
+        String message;
+        if (scope == SelectionScope.OVERALL) {
+            message = "Computed overall min/max selection (" + selected.size() + " image"
+                    + (selected.size() == 1 ? "" : "s") + ").\n"
+                    + "Saved cache: " + scoresFile.getAbsolutePath();
+        } else {
+            int nConditions = countSelectedConditions(scored);
+            message = "Computed min/max per condition for " + nConditions + " condition"
+                    + (nConditions == 1 ? "" : "s") + ".\n"
+                    + "Saved cache: " + scoresFile.getAbsolutePath();
+        }
+        return new SelectionResult(selected, selectedSeries, scoresFile, cacheFile,
                 false, true, message);
     }
 
@@ -295,14 +450,11 @@ public final class QcMinMaxPerConditionSelector {
 
     static void assignSelectionRoles(List<ScoreRecord> records, List<QcSelectionChannel> qcChannels) {
         if (records == null) return;
+        resetSelectionRoles(records);
 
         LinkedHashMap<String, List<ScoreRecord>> byCondition = new LinkedHashMap<String, List<ScoreRecord>>();
         for (ScoreRecord record : records) {
             if (record == null || record.candidate == null) continue;
-            record.compositeRank = Double.NaN;
-            record.selectedRole = "";
-            record.rankSum = 0.0;
-            record.rankCount = 0;
             List<ScoreRecord> group = byCondition.get(record.candidate.conditionName);
             if (group == null) {
                 group = new ArrayList<ScoreRecord>();
@@ -311,7 +463,36 @@ public final class QcMinMaxPerConditionSelector {
             group.add(record);
         }
 
-        for (List<ScoreRecord> group : byCondition.values()) {
+        assignSelectionRolesForGroups(new ArrayList<List<ScoreRecord>>(byCondition.values()), qcChannels);
+    }
+
+    static void assignOverallSelectionRoles(List<ScoreRecord> records, List<QcSelectionChannel> qcChannels) {
+        if (records == null) return;
+        resetSelectionRoles(records);
+        List<ScoreRecord> group = new ArrayList<ScoreRecord>();
+        for (ScoreRecord record : records) {
+            if (record != null && record.candidate != null) group.add(record);
+        }
+        assignSelectionRolesForGroups(
+                Collections.singletonList(group),
+                qcChannels);
+    }
+
+    private static void resetSelectionRoles(List<ScoreRecord> records) {
+        if (records == null) return;
+        for (ScoreRecord record : records) {
+            if (record == null) continue;
+            record.compositeRank = Double.NaN;
+            record.selectedRole = "";
+            record.rankSum = 0.0;
+            record.rankCount = 0;
+        }
+    }
+
+    private static void assignSelectionRolesForGroups(List<List<ScoreRecord>> groups,
+                                                      List<QcSelectionChannel> qcChannels) {
+        if (groups == null || qcChannels == null) return;
+        for (List<ScoreRecord> group : groups) {
             if (group == null || group.isEmpty()) continue;
 
             for (QcSelectionChannel channel : qcChannels) {
@@ -370,6 +551,65 @@ public final class QcMinMaxPerConditionSelector {
     }
 
     static List<Integer> selectedSeriesIndexes(List<ScoreRecord> records) {
+        return selectedSeriesIndexesFromSelection(selectedSeries(records));
+    }
+
+    static List<SelectedSeries> selectedSeries(List<ScoreRecord> records) {
+        List<ConditionSelection> orderedConditions = orderedConditionSelections(records);
+        List<SelectedSeries> selected = new ArrayList<SelectedSeries>();
+        LinkedHashSet<Integer> seen = new LinkedHashSet<Integer>();
+        for (ConditionSelection condition : orderedConditions) {
+            addSelectedSeries(selected, seen, condition.max);
+            addSelectedSeries(selected, seen, condition.min);
+        }
+        return selected;
+    }
+
+    static List<SelectedSeries> selectedSeriesOverall(List<ScoreRecord> records,
+                                                      List<QcSelectionChannel> qcChannels) {
+        assignOverallSelectionRoles(records, qcChannels);
+        return overallSelectedSeriesFromAssignedRoles(records);
+    }
+
+    private static List<SelectedSeries> assignAndSelectSeries(List<ScoreRecord> records,
+                                                              List<QcSelectionChannel> qcChannels,
+                                                              SelectionScope scope) {
+        if (scope == SelectionScope.OVERALL) {
+            return selectedSeriesOverall(records, qcChannels);
+        }
+        assignSelectionRoles(records, qcChannels);
+        return selectedSeries(records);
+    }
+
+    private static List<SelectedSeries> overallSelectedSeriesFromAssignedRoles(List<ScoreRecord> records) {
+        ScoreRecord min = null;
+        ScoreRecord max = null;
+        if (records != null) {
+            for (ScoreRecord record : records) {
+                if (record == null || record.candidate == null) continue;
+                if ("MIN_MAX".equals(record.selectedRole)) {
+                    min = record;
+                    max = record;
+                } else if ("MIN".equals(record.selectedRole)) {
+                    min = record;
+                } else if ("MAX".equals(record.selectedRole)) {
+                    max = record;
+                }
+            }
+        }
+
+        List<SelectedSeries> selected = new ArrayList<SelectedSeries>();
+        LinkedHashSet<Integer> seen = new LinkedHashSet<Integer>();
+        if (min != null && min == max) {
+            addSelectedSeries(selected, seen, max, "OVERALL_MIN_MAX");
+        } else {
+            addSelectedSeries(selected, seen, max, "OVERALL_MAX");
+            addSelectedSeries(selected, seen, min, "OVERALL_MIN");
+        }
+        return selected;
+    }
+
+    private static List<ConditionSelection> orderedConditionSelections(List<ScoreRecord> records) {
         LinkedHashMap<String, List<ScoreRecord>> byCondition = new LinkedHashMap<String, List<ScoreRecord>>();
         for (ScoreRecord record : records) {
             if (record == null || record.candidate == null) continue;
@@ -381,18 +621,88 @@ public final class QcMinMaxPerConditionSelector {
             group.add(record);
         }
 
-        LinkedHashSet<Integer> selected = new LinkedHashSet<Integer>();
-        for (List<ScoreRecord> group : byCondition.values()) {
+        List<ConditionSelection> selections = new ArrayList<ConditionSelection>();
+        for (Map.Entry<String, List<ScoreRecord>> entry : byCondition.entrySet()) {
             ScoreRecord min = null;
             ScoreRecord max = null;
-            for (ScoreRecord record : group) {
+            for (ScoreRecord record : entry.getValue()) {
                 if ("MIN".equals(record.selectedRole) || "MIN_MAX".equals(record.selectedRole)) min = record;
                 if ("MAX".equals(record.selectedRole) || "MIN_MAX".equals(record.selectedRole)) max = record;
             }
-            if (min != null) selected.add(min.candidate.seriesIndex);
-            if (max != null) selected.add(max.candidate.seriesIndex);
+            if (min != null || max != null) {
+                selections.add(new ConditionSelection(entry.getKey(), min, max));
+            }
         }
-        return new ArrayList<Integer>(selected);
+        Collections.sort(selections, new Comparator<ConditionSelection>() {
+            @Override
+            public int compare(ConditionSelection a, ConditionSelection b) {
+                int brightness = compareBrightnessDescending(a.maxBrightness, b.maxBrightness);
+                if (brightness != 0) return brightness;
+                int condition = a.conditionName.compareToIgnoreCase(b.conditionName);
+                if (condition != 0) return condition;
+                return Integer.compare(selectionSeriesIndex(a), selectionSeriesIndex(b));
+            }
+        });
+        return selections;
+    }
+
+    private static int compareBrightnessDescending(double left, double right) {
+        boolean leftValid = !Double.isNaN(left) && !Double.isInfinite(left);
+        boolean rightValid = !Double.isNaN(right) && !Double.isInfinite(right);
+        if (leftValid && rightValid) return Double.compare(right, left);
+        if (leftValid) return -1;
+        if (rightValid) return 1;
+        return 0;
+    }
+
+    private static int selectionSeriesIndex(ConditionSelection selection) {
+        if (selection == null) return Integer.MAX_VALUE;
+        ScoreRecord record = selection.max == null ? selection.min : selection.max;
+        return record == null || record.candidate == null
+                ? Integer.MAX_VALUE
+                : record.candidate.seriesIndex;
+    }
+
+    private static double brightestFiniteChannelScore(ScoreRecord record) {
+        if (record == null || record.channelScores == null || record.channelScores.isEmpty()) {
+            return Double.NaN;
+        }
+        double brightest = Double.NaN;
+        for (Double score : record.channelScores.values()) {
+            if (score == null || score.isNaN() || score.isInfinite()) continue;
+            if (Double.isNaN(brightest) || score.doubleValue() > brightest) {
+                brightest = score.doubleValue();
+            }
+        }
+        return brightest;
+    }
+
+    private static void addSelectedSeries(List<SelectedSeries> selected,
+                                          Set<Integer> seen,
+                                          ScoreRecord record) {
+        addSelectedSeries(selected, seen, record, null);
+    }
+
+    private static void addSelectedSeries(List<SelectedSeries> selected,
+                                          Set<Integer> seen,
+                                          ScoreRecord record,
+                                          String selectedRoleOverride) {
+        if (record == null || record.candidate == null || seen == null) return;
+        Integer key = Integer.valueOf(record.candidate.seriesIndex);
+        if (seen.add(key)) {
+            selected.add(new SelectedSeries(record, selectedRoleOverride));
+        }
+    }
+
+    private static List<Integer> selectedSeriesIndexesFromSelection(List<SelectedSeries> selectedSeries) {
+        List<Integer> selected = new ArrayList<Integer>();
+        if (selectedSeries == null) return selected;
+        for (SelectedSeries selectedItem : selectedSeries) {
+            if (selectedItem != null && selectedItem.seriesIndex >= 0) {
+                selected.add(Integer.valueOf(selectedItem.seriesIndex));
+            }
+        }
+        return selected;
     }
 
     static double meanOfBrightestFraction(float[] values, double fraction) {
@@ -479,37 +789,22 @@ public final class QcMinMaxPerConditionSelector {
     static List<String> buildSelectionLogLines(List<ScoreRecord> records,
                                                List<QcSelectionChannel> qcChannels) {
         List<String> lines = new ArrayList<String>();
-        LinkedHashMap<String, List<ScoreRecord>> byCondition = new LinkedHashMap<String, List<ScoreRecord>>();
-        for (ScoreRecord record : records) {
-            if (record == null || record.candidate == null) continue;
-            List<ScoreRecord> group = byCondition.get(record.candidate.conditionName);
-            if (group == null) {
-                group = new ArrayList<ScoreRecord>();
-                byCondition.put(record.candidate.conditionName, group);
-            }
-            group.add(record);
-        }
-
-        for (Map.Entry<String, List<ScoreRecord>> entry : byCondition.entrySet()) {
-            ScoreRecord min = null;
-            ScoreRecord max = null;
-            for (ScoreRecord record : entry.getValue()) {
-                if ("MIN".equals(record.selectedRole) || "MIN_MAX".equals(record.selectedRole)) min = record;
-                if ("MAX".equals(record.selectedRole) || "MIN_MAX".equals(record.selectedRole)) max = record;
-            }
+        for (ConditionSelection selection : orderedConditionSelections(records)) {
+            ScoreRecord min = selection.min;
+            ScoreRecord max = selection.max;
             if (min == null && max == null) continue;
 
             StringBuilder line = new StringBuilder();
-            line.append("  ").append(entry.getKey()).append(" -> ");
+            line.append("  ").append(selection.conditionName).append(" -> ");
             if (min != null && max != null && min == max) {
                 line.append("MIN/MAX: ").append(describeRecord(min, qcChannels));
             } else {
-                if (min != null) {
-                    line.append("MIN: ").append(describeRecord(min, qcChannels));
-                }
                 if (max != null) {
-                    if (min != null) line.append(" | ");
                     line.append("MAX: ").append(describeRecord(max, qcChannels));
+                }
+                if (min != null) {
+                    if (max != null) line.append(" | ");
+                    line.append("MIN: ").append(describeRecord(min, qcChannels));
                 }
             }
             lines.add(line.toString());
@@ -517,14 +812,61 @@ public final class QcMinMaxPerConditionSelector {
         return lines;
     }
 
+    static List<String> buildOverallSelectionLogLines(List<ScoreRecord> records,
+                                                      List<QcSelectionChannel> qcChannels) {
+        List<String> lines = new ArrayList<String>();
+        ScoreRecord min = null;
+        ScoreRecord max = null;
+        if (records != null) {
+            for (ScoreRecord record : records) {
+                if (record == null || record.candidate == null) continue;
+                if ("MIN_MAX".equals(record.selectedRole)) {
+                    min = record;
+                    max = record;
+                } else if ("MIN".equals(record.selectedRole)) {
+                    min = record;
+                } else if ("MAX".equals(record.selectedRole)) {
+                    max = record;
+                }
+            }
+        }
+        if (min == null && max == null) return lines;
+
+        StringBuilder line = new StringBuilder();
+        line.append("  Overall -> ");
+        if (min != null && max != null && min == max) {
+            line.append("MIN/MAX: ").append(describeRecordWithCondition(min, qcChannels));
+        } else {
+            if (max != null) {
+                line.append("MAX: ").append(describeRecordWithCondition(max, qcChannels));
+            }
+            if (min != null) {
+                if (max != null) line.append(" | ");
+                line.append("MIN: ").append(describeRecordWithCondition(min, qcChannels));
+            }
+        }
+        lines.add(line.toString());
+        return lines;
+    }
+
     private static void logSelectionSummary(List<ScoreRecord> records,
                                             List<QcSelectionChannel> qcChannels,
                                             boolean fromCache) {
-        List<String> lines = buildSelectionLogLines(records, qcChannels);
+        logSelectionSummary(records, qcChannels, fromCache, SelectionScope.PER_CONDITION);
+    }
+
+    private static void logSelectionSummary(List<ScoreRecord> records,
+                                            List<QcSelectionChannel> qcChannels,
+                                            boolean fromCache,
+                                            SelectionScope scope) {
+        List<String> lines = scope == SelectionScope.OVERALL
+                ? buildOverallSelectionLogLines(records, qcChannels)
+                : buildSelectionLogLines(records, qcChannels);
         if (lines.isEmpty()) return;
-        IJ.log(fromCache
-                ? "QC min/max per condition: cached selection summary"
-                : "QC min/max per condition: computed selection summary");
+        String label = scope == SelectionScope.OVERALL ? "overall min/max" : "min/max per condition";
+        IJ.log("QC " + label + ": "
+                + (fromCache ? "cached" : "computed")
+                + " selection summary");
         for (String line : lines) {
             IJ.log(line);
         }
@@ -549,18 +891,31 @@ public final class QcMinMaxPerConditionSelector {
         return sb.toString();
     }
 
+    private static String describeRecordWithCondition(ScoreRecord record, List<QcSelectionChannel> qcChannels) {
+        String text = describeRecord(record, qcChannels);
+        String condition = record == null || record.candidate == null
+                ? ""
+                : safe(record.candidate.conditionName).trim();
+        return condition.isEmpty() ? text : text + ", condition=" + condition;
+    }
+
     private static List<ScoreRecord> scoreCandidates(File lifFile,
+                                                     DeferredImageSupplier supplier,
                                                      List<QcSelectionCandidate> candidates,
                                                      List<QcSelectionChannel> qcChannels,
                                                      ZSliceConfig zSliceConfig,
                                                      int parallelThreads) throws Exception {
+        final Map<Integer, Integer> localSeriesIndexes =
+                localSeriesIndexMap(lifFile, supplier, candidates);
         int requestedThreads = Math.max(1, parallelThreads);
         requestedThreads = Math.min(requestedThreads, Math.max(1, candidates.size()));
-        int safeThreads = computeSafeTotalThreads(lifFile, qcChannels, requestedThreads);
+        int safeThreads = computeSafeTotalThreads(
+                lifFile, qcChannels, requestedThreads,
+                firstLocalSeriesIndex(candidates, localSeriesIndexes));
 
         if (safeThreads <= 1 || candidates.size() <= 1) {
             IJ.log("QC min/max selector: sequential scan");
-            return scoreSequential(lifFile, candidates, qcChannels, zSliceConfig);
+            return scoreSequential(lifFile, localSeriesIndexes, candidates, qcChannels, zSliceConfig);
         }
 
         int loaderThreads = Math.max(1, (int) Math.round(safeThreads * 0.8));
@@ -598,7 +953,9 @@ public final class QcMinMaxPerConditionSelector {
                             try {
                                 IJ.log("QC Loader " + loaderNum + ": sampling " + candidate.seriesName
                                         + " [" + (idx + 1) + "/" + candidates.size() + "]");
-                                queue.put(loadCandidate(reader, candidate, qcChannels, zSliceConfig));
+                                queue.put(loadCandidate(reader, candidate,
+                                        localSeriesIndex(localSeriesIndexes, candidate.seriesIndex),
+                                        qcChannels, zSliceConfig));
                             } catch (Exception e) {
                                 IJ.log("Warning: QC loader failed for " + candidate.seriesName
                                         + ": " + e.getMessage());
@@ -660,7 +1017,57 @@ public final class QcMinMaxPerConditionSelector {
         return ordered;
     }
 
+    private static Map<Integer, Integer> localSeriesIndexMap(
+            File lifFile,
+            DeferredImageSupplier supplier,
+            List<QcSelectionCandidate> candidates) {
+        LinkedHashMap<Integer, Integer> indexes =
+                new LinkedHashMap<Integer, Integer>();
+        if (supplier == null || candidates == null) {
+            return indexes;
+        }
+        for (QcSelectionCandidate candidate : candidates) {
+            if (candidate == null) continue;
+            int globalIndex = candidate.seriesIndex;
+            File source = supplier.getContainerFileForSeries(globalIndex);
+            if (lifFile != null && source != null && !sameFile(lifFile, source)) {
+                throw new IllegalArgumentException(
+                        "Min/max QC currently supports one container source at a time. "
+                                + "Series " + (globalIndex + 1) + " maps to "
+                                + source.getName() + " instead of " + lifFile.getName() + ".");
+            }
+            indexes.put(Integer.valueOf(globalIndex),
+                    Integer.valueOf(supplier.getLocalSeriesIndexForSeries(globalIndex)));
+        }
+        return indexes;
+    }
+
+    private static int localSeriesIndex(Map<Integer, Integer> localSeriesIndexes,
+                                        int globalSeriesIndex) {
+        if (localSeriesIndexes == null) return globalSeriesIndex;
+        Integer local = localSeriesIndexes.get(Integer.valueOf(globalSeriesIndex));
+        return local == null ? globalSeriesIndex : local.intValue();
+    }
+
+    private static int firstLocalSeriesIndex(List<QcSelectionCandidate> candidates,
+                                             Map<Integer, Integer> localSeriesIndexes) {
+        if (candidates == null || candidates.isEmpty()) return 0;
+        QcSelectionCandidate first = candidates.get(0);
+        return first == null ? 0 : localSeriesIndex(localSeriesIndexes, first.seriesIndex);
+    }
+
+    private static boolean sameFile(File left, File right) {
+        if (left == right) return true;
+        if (left == null || right == null) return false;
+        try {
+            return left.getCanonicalFile().equals(right.getCanonicalFile());
+        } catch (IOException e) {
+            return left.getAbsoluteFile().equals(right.getAbsoluteFile());
+        }
+    }
+
     private static List<ScoreRecord> scoreSequential(File lifFile,
+                                                     Map<Integer, Integer> localSeriesIndexes,
                                                      List<QcSelectionCandidate> candidates,
                                                      List<QcSelectionChannel> qcChannels,
                                                      ZSliceConfig zSliceConfig) throws Exception {
@@ -668,7 +1075,9 @@ public final class QcMinMaxPerConditionSelector {
         try (Memoizer reader = new Memoizer(new ImageReader())) {
             reader.setId(lifFile.getAbsolutePath());
             for (QcSelectionCandidate candidate : candidates) {
-                LoadedCandidate loaded = loadCandidate(reader, candidate, qcChannels, zSliceConfig);
+                LoadedCandidate loaded = loadCandidate(reader, candidate,
+                        localSeriesIndex(localSeriesIndexes, candidate.seriesIndex),
+                        qcChannels, zSliceConfig);
                 records.add(scoreLoadedCandidate(loaded));
             }
         }
@@ -677,10 +1086,11 @@ public final class QcMinMaxPerConditionSelector {
 
     private static LoadedCandidate loadCandidate(Memoizer reader,
                                                  QcSelectionCandidate candidate,
+                                                 int localSeriesIndex,
                                                  List<QcSelectionChannel> qcChannels,
                                                  ZSliceConfig zSliceConfig) throws Exception {
         LinkedHashMap<Integer, float[]> projections = new LinkedHashMap<Integer, float[]>();
-        reader.setSeries(candidate.seriesIndex);
+        reader.setSeries(localSeriesIndex);
         int sizeZ = Math.max(1, reader.getSizeZ());
         int sizeC = Math.max(1, reader.getSizeC());
         List<Integer> sampledZ = resolveSampledZIndices(zSliceConfig, candidate.seriesIndex, sizeZ);
@@ -804,12 +1214,19 @@ public final class QcMinMaxPerConditionSelector {
     private static int computeSafeTotalThreads(File lifFile,
                                                List<QcSelectionChannel> qcChannels,
                                                int requestedThreads) {
+        return computeSafeTotalThreads(lifFile, qcChannels, requestedThreads, 0);
+    }
+
+    private static int computeSafeTotalThreads(File lifFile,
+                                               List<QcSelectionChannel> qcChannels,
+                                               int requestedThreads,
+                                               int estimateSeriesIndex) {
         if (requestedThreads <= 1) return 1;
 
         long bytesPerTask;
         try (Memoizer reader = new Memoizer(new ImageReader())) {
             reader.setId(lifFile.getAbsolutePath());
-            reader.setSeries(0);
+            reader.setSeries(Math.max(0, estimateSeriesIndex));
             int sizeX = Math.max(1, reader.getSizeX());
             int sizeY = Math.max(1, reader.getSizeY());
             bytesPerTask = (long) sizeX * sizeY * 4L * Math.max(1, qcChannels.size());
@@ -837,6 +1254,25 @@ public final class QcMinMaxPerConditionSelector {
                                         List<QcSelectionChannel> qcChannels,
                                         ZSliceConfig zSliceConfig,
                                         File cacheFile, File scoresFile) {
+        return isCacheValid(directory, lifFile, qcChannels, zSliceConfig,
+                "", SELECTION_SCOPE_PER_CONDITION, cacheFile, scoresFile);
+    }
+
+    private static boolean isCacheValid(String directory, File lifFile,
+                                        List<QcSelectionChannel> qcChannels,
+                                        ZSliceConfig zSliceConfig,
+                                        String sourceSeriesSignature,
+                                        File cacheFile, File scoresFile) {
+        return isCacheValid(directory, lifFile, qcChannels, zSliceConfig,
+                sourceSeriesSignature, SELECTION_SCOPE_PER_CONDITION, cacheFile, scoresFile);
+    }
+
+    private static boolean isCacheValid(String directory, File lifFile,
+                                        List<QcSelectionChannel> qcChannels,
+                                        ZSliceConfig zSliceConfig,
+                                        String sourceSeriesSignature,
+                                        String selectionScope,
+                                        File cacheFile, File scoresFile) {
         if (cacheFile == null || !cacheFile.isFile()) return false;
         if (scoresFile == null || !scoresFile.isFile()) return false;
 
@@ -857,6 +1293,9 @@ public final class QcMinMaxPerConditionSelector {
         if (!String.valueOf(lifFile.lastModified()).equals(props.getProperty(KEY_LIF_MODIFIED))) return false;
         if (!channelSignature(qcChannels).equals(props.getProperty(KEY_QC_CHANNEL_SIGNATURE))) return false;
         if (!ZSliceConfigIO.signature(zSliceConfig).equals(props.getProperty(KEY_Z_SLICE_SIGNATURE, "zslice:full"))) return false;
+        if (!safe(sourceSeriesSignature).equals(props.getProperty(KEY_SOURCE_SERIES_SIGNATURE, ""))) return false;
+        if (!selectionScopeOrDefault(selectionScope).equals(
+                props.getProperty(KEY_SELECTION_SCOPE, SELECTION_SCOPE_PER_CONDITION))) return false;
 
         File conditionFile = ConditionManifestIO.getExistingFile(directory);
         boolean conditionExists = conditionFile != null && conditionFile.isFile();
@@ -880,6 +1319,25 @@ public final class QcMinMaxPerConditionSelector {
                                              List<QcSelectionChannel> qcChannels,
                                              ZSliceConfig zSliceConfig,
                                              File cacheFile) throws IOException {
+        writeCacheProperties(directory, lifFile, qcChannels, zSliceConfig,
+                "", SELECTION_SCOPE_PER_CONDITION, cacheFile);
+    }
+
+    private static void writeCacheProperties(String directory, File lifFile,
+                                             List<QcSelectionChannel> qcChannels,
+                                             ZSliceConfig zSliceConfig,
+                                             String sourceSeriesSignature,
+                                             File cacheFile) throws IOException {
+        writeCacheProperties(directory, lifFile, qcChannels, zSliceConfig,
+                sourceSeriesSignature, SELECTION_SCOPE_PER_CONDITION, cacheFile);
+    }
+
+    private static void writeCacheProperties(String directory, File lifFile,
+                                             List<QcSelectionChannel> qcChannels,
+                                             ZSliceConfig zSliceConfig,
+                                             String sourceSeriesSignature,
+                                             String selectionScope,
+                                             File cacheFile) throws IOException {
         Properties props = new Properties();
         props.setProperty(KEY_CACHE_VERSION, CACHE_VERSION);
         props.setProperty(KEY_SCORE_METHOD, SCORE_METHOD);
@@ -889,6 +1347,8 @@ public final class QcMinMaxPerConditionSelector {
         props.setProperty(KEY_LIF_MODIFIED, String.valueOf(lifFile.lastModified()));
         props.setProperty(KEY_QC_CHANNEL_SIGNATURE, channelSignature(qcChannels));
         props.setProperty(KEY_Z_SLICE_SIGNATURE, ZSliceConfigIO.signature(zSliceConfig));
+        props.setProperty(KEY_SOURCE_SERIES_SIGNATURE, safe(sourceSeriesSignature));
+        props.setProperty(KEY_SELECTION_SCOPE, selectionScopeOrDefault(selectionScope));
 
         File conditionFile = ConditionManifestIO.getExistingFile(directory);
         boolean conditionExists = conditionFile != null && conditionFile.isFile();
@@ -911,7 +1371,7 @@ public final class QcMinMaxPerConditionSelector {
         try {
             PrintWriter pw = new PrintWriter(temp, StandardCharsets.UTF_8.name());
             try {
-                props.store(pw, "QC min/max per condition cache");
+                props.store(pw, "QC min/max cache");
             } finally {
                 pw.close();
             }
@@ -930,6 +1390,58 @@ public final class QcMinMaxPerConditionSelector {
             parts.add(channel.channelNumber + ":" + channel.channelName);
         }
         return String.join("|", parts);
+    }
+
+    private static String selectionScopeOrDefault(String selectionScope) {
+        String value = safe(selectionScope).trim();
+        return value.isEmpty() ? SELECTION_SCOPE_PER_CONDITION : value;
+    }
+
+    private static String sourceSeriesSignature(File lifFile,
+                                                DeferredImageSupplier supplier,
+                                                List<SeriesMeta> metas) {
+        StringBuilder sb = new StringBuilder("source-series:v1");
+        if (metas == null) return sb.toString();
+        for (SeriesMeta meta : metas) {
+            if (meta == null) continue;
+            int globalIndex = meta.index;
+            int localIndex = globalIndex;
+            String sourceName = lifFile == null ? "" : lifFile.getName();
+            if (supplier != null) {
+                try {
+                    localIndex = supplier.getLocalSeriesIndexForSeries(globalIndex);
+                    File source = supplier.getContainerFileForSeries(globalIndex);
+                    if (source != null) {
+                        sourceName = source.getName();
+                    }
+                } catch (RuntimeException e) {
+                    sourceName = sourceName + "?";
+                }
+            }
+            sb.append('|')
+                    .append(globalIndex)
+                    .append(':')
+                    .append(localIndex)
+                    .append(':')
+                    .append(cacheToken(sourceName))
+                    .append(':')
+                    .append(cacheToken(meta.name))
+                    .append(':')
+                    .append(meta.width)
+                    .append('x')
+                    .append(meta.height)
+                    .append('z')
+                    .append(meta.nSlices)
+                    .append('c')
+                    .append(meta.nChannels);
+        }
+        return sb.toString();
+    }
+
+    private static String cacheToken(String value) {
+        return safe(value).replace("\\", "\\\\")
+                .replace("|", "\\p")
+                .replace(":", "\\c");
     }
 
     private static void writeScoresCsv(File scoresFile, List<ScoreRecord> records,
@@ -1000,6 +1512,10 @@ public final class QcMinMaxPerConditionSelector {
 
     private static String cell(String[] row, int index) {
         return index >= 0 && index < row.length ? row[index] : "";
+    }
+
+    private static String safe(String value) {
+        return value == null ? "" : value;
     }
 
     private static int parseInt(String text, int fallback) {

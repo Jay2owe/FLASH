@@ -13,6 +13,8 @@ import org.junit.rules.TemporaryFolder;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.List;
 
@@ -207,6 +209,116 @@ public class ImageSourceDispatcherTest {
                 supplier.getContainerFileForSeries(0).getAbsolutePath());
         assertEquals(beta.getAbsolutePath(),
                 supplier.getContainerFileForSeries(1).getAbsolutePath());
+    }
+
+    @Test
+    public void projectSourceAccessorsExposeManifestSourcesOutsideOutputRoot() throws Exception {
+        File outputRoot = temp.newFolder("manifest-accessor-output");
+        File sourceRoot = temp.newFolder("manifest-accessor-sources");
+        File lif = new File(sourceRoot, "alpha.lif");
+        File tiff = new File(sourceRoot, "beta.tif");
+        assertTrue(lif.createNewFile());
+        assertTrue(tiff.createNewFile());
+
+        ProjectFile containerProject = new ProjectFile();
+        containerProject.items.add(projectItem(lif));
+        writeProject(outputRoot, containerProject);
+
+        assertEquals(lif.getAbsolutePath(),
+                ImageSourceDispatcher.projectContainerFiles(outputRoot.getAbsolutePath())
+                        .get(0).getAbsolutePath());
+        assertTrue(ImageSourceDispatcher.projectTiffFiles(outputRoot.getAbsolutePath()).isEmpty());
+
+        ProjectFile tiffProject = new ProjectFile();
+        tiffProject.items.add(projectItem(tiff));
+        writeProject(outputRoot, tiffProject);
+
+        assertEquals(tiff.getAbsolutePath(),
+                ImageSourceDispatcher.projectTiffFiles(outputRoot.getAbsolutePath())
+                        .get(0).getAbsolutePath());
+        assertTrue(ImageSourceDispatcher.projectContainerFiles(outputRoot.getAbsolutePath()).isEmpty());
+    }
+
+    @Test
+    public void selectedSeriesMetadataPreservesManifestIncludeOrder() {
+        List<SeriesMeta> metas = Arrays.asList(
+                new SeriesMeta(0, "s0", 10, 1.0, 1.0, 1.0, "pixel"),
+                new SeriesMeta(2, "s2", 10, 1.0, 1.0, 1.0, "pixel"),
+                new SeriesMeta(5, "s5", 10, 1.0, 1.0, 1.0, "pixel"));
+
+        List<SeriesMeta> ordered = ImageSourceDispatcher.selectedSeriesMetadataInProjectOrder(
+                metas,
+                Arrays.asList(Integer.valueOf(5), Integer.valueOf(2)),
+                new File("source.lif"));
+
+        assertEquals(2, ordered.size());
+        assertEquals(5, ordered.get(0).index);
+        assertEquals("s5", ordered.get(0).name);
+        assertEquals(2, ordered.get(1).index);
+        assertEquals("s2", ordered.get(1).name);
+    }
+
+    @Test
+    public void projectJsonMissingIncludedSourceThrowsInsteadOfFallingBackToFolderScan() throws Exception {
+        File outputRoot = temp.newFolder("manifest-missing-output");
+        assertTrue(new File(outputRoot, "stale-root.lif").createNewFile());
+
+        ProjectFile project = new ProjectFile();
+        ProjectFile.Item item = new ProjectFile.Item();
+        item.path = new File(temp.getRoot(), "missing-source.lif").getAbsolutePath();
+        item.include = true;
+        project.items.add(item);
+        writeProject(outputRoot, project);
+
+        try {
+            ImageSourceDispatcher.detectMode(outputRoot.getAbsolutePath());
+            fail("Expected missing project source to throw");
+        } catch (IllegalArgumentException e) {
+            assertTrue(e.getMessage().contains("missing included source file"));
+            assertTrue(e.getMessage().contains("missing-source.lif"));
+        }
+    }
+
+    @Test
+    public void projectJsonMissingSameNamedSourceDoesNotRelocateToStaleRootLif() throws Exception {
+        File outputRoot = temp.newFolder("manifest-same-name-output");
+        assertTrue(new File(outputRoot, "slide.lif").createNewFile());
+
+        ProjectFile project = new ProjectFile();
+        ProjectFile.Item item = new ProjectFile.Item();
+        item.path = new File(temp.getRoot(), "missing-source-folder/slide.lif").getAbsolutePath();
+        item.include = true;
+        project.items.add(item);
+        writeProject(outputRoot, project);
+
+        try {
+            ImageSourceDispatcher.detectMode(outputRoot.getAbsolutePath());
+            fail("Expected missing same-named project source to throw");
+        } catch (IllegalArgumentException e) {
+            assertTrue(e.getMessage().contains("missing included source file"));
+            assertTrue(e.getMessage().contains("missing-source-folder"));
+            assertTrue(e.getMessage().contains("slide.lif"));
+        }
+    }
+
+    @Test
+    public void unreadableProjectJsonThrowsInsteadOfFallingBackToFolderScan() throws Exception {
+        File outputRoot = temp.newFolder("manifest-corrupt-output");
+        assertTrue(new File(outputRoot, "stale-root.lif").createNewFile());
+        File settingsDir = FlashProjectLayout.forDirectory(outputRoot.getAbsolutePath())
+                .configurationWriteDir();
+        assertTrue(settingsDir.mkdirs());
+        Files.write(new File(settingsDir, ProjectFileIO.FILE_NAME).toPath(),
+                Arrays.asList("{not valid json"),
+                StandardCharsets.UTF_8);
+
+        try {
+            ImageSourceDispatcher.detectMode(outputRoot.getAbsolutePath());
+            fail("Expected corrupt project.json to throw");
+        } catch (IllegalArgumentException e) {
+            assertTrue(e.getMessage().contains("Could not read project.json"));
+            assertTrue(e.getMessage().contains("will not fall back"));
+        }
     }
 
     @Test

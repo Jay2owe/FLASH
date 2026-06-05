@@ -132,6 +132,19 @@ public final class ProjectPathResolver {
      * that can be inferred safely.
      */
     public static ProjectFile relocateForLoad(ProjectFile project, File projectJson, File fallbackOutputRoot) {
+        return relocateForLoad(project, projectJson, fallbackOutputRoot, true);
+    }
+
+    /**
+     * Adjust a decoded project so paths point at files on this machine.
+     *
+     * <p>Set {@code allowSourceNameSearch} to false for runtime image loading,
+     * where accepting a same-named file under the output root can silently
+     * process stale data instead of the manifest source.
+     */
+    public static ProjectFile relocateForLoad(ProjectFile project, File projectJson,
+                                              File fallbackOutputRoot,
+                                              boolean allowSourceNameSearch) {
         if (project == null) {
             return null;
         }
@@ -146,7 +159,8 @@ public final class ProjectPathResolver {
 
         if (project.items != null) {
             for (ProjectFile.Item item : project.items) {
-                File source = resolveSource(item, storedOutputRoot, actualOutputRoot);
+                File source = resolveSource(item, storedOutputRoot, actualOutputRoot,
+                        allowSourceNameSearch);
                 if (source != null) {
                     item.path = source.getAbsolutePath();
                 }
@@ -254,7 +268,9 @@ public final class ProjectPathResolver {
         return storedOutputRoot == null ? null : storedOutputRoot.getAbsoluteFile();
     }
 
-    private static File resolveSource(ProjectFile.Item item, File storedOutputRoot, File actualOutputRoot) {
+    private static File resolveSource(ProjectFile.Item item, File storedOutputRoot,
+                                      File actualOutputRoot,
+                                      boolean allowSourceNameSearch) {
         if (item == null || blank(item.path)) {
             return null;
         }
@@ -282,6 +298,9 @@ public final class ProjectPathResolver {
             }
         }
 
+        if (!allowSourceNameSearch) {
+            return null;
+        }
         File uniqueByName = findUniqueByName(actualOutputRoot, storedSource.getName(), SOURCE_NAME_SEARCH_DEPTH);
         return uniqueByName == null ? null : uniqueByName.getAbsoluteFile();
     }

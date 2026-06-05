@@ -40,11 +40,13 @@ public class ProjectMetadataSeederTest {
         // The excluded series is not emitted.
         assertEquals(2, rows.size());
         OrientationManifestRow row0 = rows.get(0);
-        assertEquals(OrientationManifestRow.buildImageKey("CONTAINER", "slide.lif", 1, "Mouse3_LH_CA1"),
+        assertEquals(OrientationManifestRow.buildImageKey(
+                        "CONTAINER", "slide.lif", 1, "slide.lif - Mouse3_LH_CA1"),
                 row0.imageKey);
         assertEquals("slide.lif", row0.sourceFile);
         assertEquals(1, row0.seriesIndex);
-        assertEquals("Mouse3_LH_CA1", row0.originalName);
+        assertEquals("slide.lif - Mouse3_LH_CA1", row0.originalName);
+        assertEquals("Mouse3_LH_CA1", row0.displayName);
         assertEquals("Mouse3", row0.animalName);
         assertEquals(OrientationManifestRow.Hemisphere.LH, row0.hemisphere);
         assertEquals("CA1", row0.region);
@@ -112,7 +114,87 @@ public class ProjectMetadataSeederTest {
                 OrientationManifestIO.readByImageKeyIfExists(dir);
         assertTrue(byKey.containsKey(existing.imageKey));
         assertTrue(byKey.containsKey(
-                OrientationManifestRow.buildImageKey("CONTAINER", "slide.lif", 1, "Mouse3_LH_CA1")));
+                OrientationManifestRow.buildImageKey(
+                        "CONTAINER", "slide.lif", 1, "slide.lif - Mouse3_LH_CA1")));
+    }
+
+    @Test
+    public void narrowedContainerSeriesUseProjectGlobalIndexesAndPrefixedNames() throws Exception {
+        File root = temp.newFolder("narrowed-project");
+        ProjectFile project = new ProjectFile();
+        ProjectFile.Item item = new ProjectFile.Item();
+        item.path = "D:/raw/Cas3.All.Time.Points.lif";
+        item.include = true;
+        item.series.add(Integer.valueOf(5));
+        item.series.add(Integer.valueOf(2));
+        item.seriesMeta.add(series(0, "ignored_LH_SCN", "Ignored", "LH", "SCN", "WT", false));
+        item.seriesMeta.add(series(2, "hAPP1Week2_LH_SCN", "hAPP1Week2", "LH", "SCN", "hAPPWeek2", true));
+        item.seriesMeta.add(series(5, "hAPP2Week2_RH_SCN", "hAPP2Week2", "RH", "SCN", "hAPPWeek2", true));
+        project.items.add(item);
+
+        List<OrientationManifestRow> rows = ProjectMetadataSeeder.orientationRowsFor(project);
+
+        assertEquals(2, rows.size());
+        assertEquals(1, rows.get(0).seriesIndex);
+        assertEquals("Cas3.All.Time.Points.lif - hAPP2Week2_RH_SCN", rows.get(0).originalName);
+        assertEquals(OrientationManifestRow.buildImageKey(
+                        "CONTAINER", "Cas3.All.Time.Points.lif", 1,
+                        "Cas3.All.Time.Points.lif - hAPP2Week2_RH_SCN"),
+                rows.get(0).imageKey);
+        assertEquals(2, rows.get(1).seriesIndex);
+        assertEquals("Cas3.All.Time.Points.lif - hAPP1Week2_LH_SCN", rows.get(1).originalName);
+
+        ProjectMetadataSeeder.seedOrientationManifest(root, project);
+        ResolvedImageMetadata resolved = ImageOrientationResolver.resolve(
+                root.getAbsolutePath(), "hAPP2Week2_RH_SCN", 1);
+        assertEquals(ResolvedImageMetadata.Source.SAVED_MANIFEST, resolved.source);
+        assertEquals("hAPP2Week2", resolved.animalName);
+        assertEquals("RH", resolved.hemisphere);
+        assertEquals("SCN", resolved.region);
+    }
+
+    @Test
+    public void precedingUnexpandedExplicitContainerAdvancesProjectGlobalOffset() {
+        ProjectFile project = new ProjectFile();
+        ProjectFile.Item first = new ProjectFile.Item();
+        first.path = "D:/raw/first.lif";
+        first.include = true;
+        first.series.add(Integer.valueOf(0));
+        first.series.add(Integer.valueOf(2));
+        first.series.add(Integer.valueOf(4));
+        project.items.add(first);
+
+        ProjectFile.Item second = new ProjectFile.Item();
+        second.path = "D:/raw/second.lif";
+        second.include = true;
+        second.seriesMeta.add(series(0, "MouseA_LH_SCN", "MouseA", "LH", "SCN", "WT", true));
+        project.items.add(second);
+
+        List<OrientationManifestRow> rows = ProjectMetadataSeeder.orientationRowsFor(project);
+
+        assertEquals(1, rows.size());
+        assertEquals(4, rows.get(0).seriesIndex);
+        assertEquals(OrientationManifestRow.buildImageKey(
+                        "CONTAINER", "second.lif", 4, "second.lif - MouseA_LH_SCN"),
+                rows.get(0).imageKey);
+    }
+
+    @Test
+    public void explicitIncludedSeriesWithoutMetadataStillAdvancesProjectOffset() {
+        ProjectFile project = new ProjectFile();
+        ProjectFile.Item item = new ProjectFile.Item();
+        item.path = "D:/raw/slide.lif";
+        item.include = true;
+        item.series.add(Integer.valueOf(9));
+        item.series.add(Integer.valueOf(2));
+        item.seriesMeta.add(series(2, "MouseB_RH_SCN", "MouseB", "RH", "SCN", "WT", true));
+        project.items.add(item);
+
+        List<OrientationManifestRow> rows = ProjectMetadataSeeder.orientationRowsFor(project);
+
+        assertEquals(1, rows.size());
+        assertEquals(2, rows.get(0).seriesIndex);
+        assertEquals("slide.lif - MouseB_RH_SCN", rows.get(0).originalName);
     }
 
     @Test

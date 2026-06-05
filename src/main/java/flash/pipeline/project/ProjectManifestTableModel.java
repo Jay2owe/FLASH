@@ -1,5 +1,6 @@
 package flash.pipeline.project;
 
+import flash.pipeline.naming.ConditionNameParser;
 import flash.pipeline.naming.ImageNameParser;
 import flash.pipeline.naming.NameParts;
 
@@ -288,6 +289,9 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
                 SeriesRow series = new SeriesRow(entry.index);
                 series.name = entry.name == null ? "" : entry.name;
                 seedSeriesFromName(row, series);
+                if (!row.selectedSeries.isEmpty()) {
+                    series.include = row.selectedSeries.contains(Integer.valueOf(series.index));
+                }
                 row.series.add(series);
             }
             if (!entries.isEmpty()) {
@@ -299,18 +303,38 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
     }
 
     private static void seedSeriesFromName(Row file, SeriesRow series) {
-        NameParts parts = ImageNameParser.parse(series.name);
+        NameParts parts = parseSeriesName(file, series);
         if (parts.strictMatch) {
             series.animalId = firstNonEmpty(parts.animal, file.animalId);
             series.hemisphere = firstNonEmpty(parts.hemisphere, file.hemisphere);
             series.region = firstNonEmpty(parts.region, file.region);
-            series.condition = firstNonEmpty(parts.condition, file.condition);
+            series.condition = firstNonEmpty(parts.condition,
+                    ConditionNameParser.detectCondition(series.animalId));
         } else {
             series.animalId = firstNonEmpty(parts.animal, file.animalId);
             series.hemisphere = file.hemisphere;
             series.region = file.region;
             series.condition = file.condition;
         }
+    }
+
+    private static NameParts parseSeriesName(Row file, SeriesRow series) {
+        String name = series == null ? "" : nullToEmpty(series.name).trim();
+        NameParts direct = ImageNameParser.parse(name);
+        if (direct.strictMatch || name.isEmpty() || name.indexOf(" - ") >= 0) {
+            return direct;
+        }
+        return ImageNameParser.parse(seriesParseSeed(file, series));
+    }
+
+    private static String seriesParseSeed(Row file, SeriesRow series) {
+        String name = series == null ? "" : nullToEmpty(series.name).trim();
+        if (name.isEmpty() || name.indexOf(" - ") >= 0) {
+            return name;
+        }
+        File source = file == null ? null : file.source;
+        String container = source == null ? "" : nullToEmpty(source.getName()).trim();
+        return container.isEmpty() ? name : container + " - " + name;
     }
 
     /** Expand or collapse a file's per-series rows. */
@@ -363,6 +387,7 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
                 item.series.addAll(row.selectedSeries);
             } else {
                 List<Integer> included = new ArrayList<Integer>();
+                List<Integer> includedInSavedOrder = includedSeriesIndexesInSavedOrder(row);
                 for (SeriesRow s : row.series) {
                     ProjectFile.SeriesItem meta = new ProjectFile.SeriesItem();
                     meta.index = s.index;
@@ -377,14 +402,54 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
                     if (s.include) included.add(Integer.valueOf(s.index));
                 }
                 // Collapse "all included" to the empty "include all" sentinel.
-                if (included.size() != row.series.size()) {
-                    item.series.addAll(included);
+                if (!row.selectedSeries.isEmpty() || included.size() != row.series.size()) {
+                    item.series.addAll(includedInSavedOrder.isEmpty()
+                            ? included
+                            : includedInSavedOrder);
                 }
             }
             project.items.add(item);
         }
         ProjectPathResolver.addRelativePathHints(project, new File(project.outputRoot));
         return project;
+    }
+
+    private static List<Integer> includedSeriesIndexesInSavedOrder(Row row) {
+        List<Integer> ordered = new ArrayList<Integer>();
+        if (row == null || row.series == null || row.series.isEmpty()) return ordered;
+        if (row.selectedSeries != null && !row.selectedSeries.isEmpty()) {
+            for (Integer saved : row.selectedSeries) {
+                if (saved == null) continue;
+                SeriesRow series = findSeriesByIndex(row.series, saved.intValue());
+                if (series != null && series.include) {
+                    ordered.add(Integer.valueOf(series.index));
+                }
+            }
+            for (SeriesRow series : row.series) {
+                if (series == null || !series.include) continue;
+                Integer index = Integer.valueOf(series.index);
+                if (!ordered.contains(index)) {
+                    ordered.add(index);
+                }
+            }
+            return ordered;
+        }
+        for (SeriesRow series : row.series) {
+            if (series != null && series.include) {
+                ordered.add(Integer.valueOf(series.index));
+            }
+        }
+        return ordered;
+    }
+
+    private static SeriesRow findSeriesByIndex(List<SeriesRow> seriesRows, int index) {
+        if (seriesRows == null) return null;
+        for (SeriesRow series : seriesRows) {
+            if (series != null && series.index == index) {
+                return series;
+            }
+        }
+        return null;
     }
 
     /** Populate the model from a previously saved {@link ProjectFile}. */
@@ -404,16 +469,20 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
                     row.selectedSeries.addAll(item.series);
                 }
                 if (item.seriesMeta != null && !item.seriesMeta.isEmpty()) {
+                    boolean hasExplicitSeriesSelection = !row.selectedSeries.isEmpty();
                     for (ProjectFile.SeriesItem meta : item.seriesMeta) {
                         if (meta == null) continue;
                         SeriesRow series = new SeriesRow(meta.index);
-                        series.include = meta.include;
+                        series.include = hasExplicitSeriesSelection
+                                ? row.selectedSeries.contains(Integer.valueOf(meta.index))
+                                : meta.include;
                         series.name = nullToEmpty(meta.name);
                         series.animalId = nullToEmpty(meta.animalId);
                         series.hemisphere = nullToEmpty(meta.hemisphere);
                         series.region = nullToEmpty(meta.region);
                         series.condition = nullToEmpty(meta.condition);
                         series.notes = nullToEmpty(meta.notes);
+                        repairLoadedSeriesMetadata(row, series);
                         row.series.add(series);
                     }
                     row.seriesCount = row.series.size();
@@ -423,6 +492,48 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
         }
         rebuildVisible();
         fireTableDataChanged();
+    }
+
+    private static void repairLoadedSeriesMetadata(Row file, SeriesRow series) {
+        if (file == null || series == null) return;
+        String name = nullToEmpty(series.name).trim();
+        if (name.isEmpty()) return;
+
+        String existingAnimal = nullToEmpty(series.animalId).trim();
+        String existingHemisphere = nullToEmpty(series.hemisphere).trim();
+        String existingRegion = nullToEmpty(series.region).trim();
+        String extractedSeriesName = ImageNameParser.extractBioFormatsSeriesName(name);
+        boolean looksLikeOldUnparsedSeries =
+                existingHemisphere.isEmpty()
+                        && existingRegion.isEmpty()
+                        && (existingAnimal.isEmpty()
+                        || existingAnimal.equals(name)
+                        || existingAnimal.equals(extractedSeriesName));
+        if (!looksLikeOldUnparsedSeries) return;
+
+        SeriesRow parsed = new SeriesRow(series.index);
+        parsed.name = name;
+        seedSeriesFromName(file, parsed);
+        if (parsed.hemisphere.isEmpty() && parsed.region.isEmpty()) return;
+
+        if (existingAnimal.isEmpty()
+                || existingAnimal.equals(name)
+                || existingAnimal.equals(extractedSeriesName)) {
+            series.animalId = parsed.animalId;
+        }
+        if (existingHemisphere.isEmpty()) {
+            series.hemisphere = parsed.hemisphere;
+        }
+        if (existingRegion.isEmpty()) {
+            series.region = parsed.region;
+        }
+
+        String existingCondition = nullToEmpty(series.condition).trim();
+        String fileCondition = nullToEmpty(file.condition).trim();
+        if (existingCondition.isEmpty()
+                || (!fileCondition.isEmpty() && existingCondition.equals(fileCondition))) {
+            series.condition = parsed.condition;
+        }
     }
 
     public List<Row> rowsView() {

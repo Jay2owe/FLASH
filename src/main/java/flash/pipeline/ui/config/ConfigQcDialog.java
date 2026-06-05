@@ -96,6 +96,7 @@ public final class ConfigQcDialog {
     private final JLabel stageLabel = new JLabel(" ");
     private final JLabel channelLabel = new JLabel(" ");
     private final JLabel progressLabel = new JLabel(" ");
+    private final JLabel imageWarningLabel = new JLabel(" ");
     private final JLabel statusLabel = new JLabel(" ");
     private final JLabel savedStatusLabel = new JLabel(" ");
     private final JButton stageHelpButton = HelpButton.question("Stage help is not available yet.");
@@ -254,6 +255,8 @@ public final class ConfigQcDialog {
         stageBreadcrumbPanel.setOpaque(false);
         channelLabel.setForeground(HEADER_COLOR);
         progressLabel.setForeground(HELP_COLOR);
+        imageWarningLabel.setForeground(FlashTheme.WARNING_FG);
+        imageWarningLabel.setVisible(false);
 
         JPanel left = new JPanel();
         left.setOpaque(false);
@@ -269,8 +272,10 @@ public final class ConfigQcDialog {
         right.setLayout(new BoxLayout(right, BoxLayout.Y_AXIS));
         channelLabel.setAlignmentX(JComponent.RIGHT_ALIGNMENT);
         progressLabel.setAlignmentX(JComponent.RIGHT_ALIGNMENT);
+        imageWarningLabel.setAlignmentX(JComponent.RIGHT_ALIGNMENT);
         right.add(channelLabel);
         right.add(progressLabel);
+        right.add(imageWarningLabel);
 
         header.add(left, BorderLayout.CENTER);
         header.add(right, BorderLayout.EAST);
@@ -431,7 +436,11 @@ public final class ConfigQcDialog {
         channelLabel.setText(context.getChannelLabel());
         currentImageDisplayName = context.getCurrentImageDisplayName();
         String imageName = context.getCurrentImageShortDisplayName();
-        progressLabel.setText(imageProgressHeaderText(imageName));
+        String headerImageName = context.getCurrentImageHeaderDisplayName();
+        progressLabel.setText(imageProgressHeaderText(headerImageName));
+        String warning = context.getCurrentImageWarning();
+        imageWarningLabel.setText(warning == null || warning.trim().isEmpty() ? " " : warning);
+        imageWarningLabel.setVisible(warning != null && !warning.trim().isEmpty());
         refreshSavedStatus();
         previewPair.setOriginalPreviewTitle("Original Image - " + imageName);
         previewPair.setAdjustedPreviewTitle("Adjusted / output preview");
@@ -1127,6 +1136,10 @@ public final class ConfigQcDialog {
 
     String statusTextForTest() {
         return statusLabel.getText();
+    }
+
+    String imageWarningTextForTest() {
+        return imageWarningLabel.getText();
     }
 
     JButton defaultButtonForTest() {

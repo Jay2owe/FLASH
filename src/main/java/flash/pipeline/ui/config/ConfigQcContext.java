@@ -26,11 +26,20 @@ public final class ConfigQcContext {
         private final int seriesIndex;
         private final String seriesName;
         private final ImagePlus image;
+        private final String reviewLabel;
+        private final String warning;
 
         public ConfigQcImage(int seriesIndex, String seriesName, ImagePlus image) {
+            this(seriesIndex, seriesName, image, "", "");
+        }
+
+        public ConfigQcImage(int seriesIndex, String seriesName, ImagePlus image,
+                             String reviewLabel, String warning) {
             this.seriesIndex = seriesIndex;
             this.seriesName = safe(seriesName);
             this.image = image;
+            this.reviewLabel = safe(reviewLabel).trim();
+            this.warning = safe(warning).trim();
         }
 
         public int getSeriesIndex() {
@@ -43,6 +52,14 @@ public final class ConfigQcContext {
 
         public ImagePlus getImage() {
             return image;
+        }
+
+        public String getReviewLabel() {
+            return reviewLabel;
+        }
+
+        public String getWarning() {
+            return warning;
         }
 
         public String getDisplayName() {
@@ -204,6 +221,22 @@ public final class ConfigQcContext {
         return shortDisplayName(getCurrentImageDisplayName());
     }
 
+    public String getCurrentImageReviewLabel() {
+        ConfigQcImage current = getCurrentImage();
+        return current == null ? "" : current.getReviewLabel();
+    }
+
+    public String getCurrentImageWarning() {
+        ConfigQcImage current = getCurrentImage();
+        return current == null ? "" : current.getWarning();
+    }
+
+    public String getCurrentImageHeaderDisplayName() {
+        String imageName = getCurrentImageShortDisplayName();
+        String review = getCurrentImageReviewLabel();
+        return review.isEmpty() ? imageName : review + " - " + imageName;
+    }
+
     public String getImageProgressText() {
         if (images.isEmpty()) {
             return "No images";
@@ -216,7 +249,7 @@ public final class ConfigQcContext {
             return "No images remain.";
         }
         return "Moved to image " + (currentImageIndex + 1) + " / " + images.size()
-                + ": " + getCurrentImageDisplayName();
+                + ": " + getCurrentImageHeaderDisplayName();
     }
 
     public String getCurrentImageMovedBackStatusText() {
@@ -224,7 +257,7 @@ public final class ConfigQcContext {
             return "No images remain.";
         }
         return "Moved back to image " + (currentImageIndex + 1) + " / " + images.size()
-                + ": " + getCurrentImageDisplayName();
+                + ": " + getCurrentImageHeaderDisplayName();
     }
 
     public int getChannelIndex() {

@@ -66,6 +66,9 @@ public class DeferredImageSupplierMultiContainerTest {
         assertSame(A, s.getContainerFileForSeries(0));
         assertSame(A, s.getContainerFileForSeries(1));
         assertSame(B, s.getContainerFileForSeries(2));
+        assertEquals(0, s.getLocalSeriesIndexForSeries(0));
+        assertEquals(2, s.getLocalSeriesIndexForSeries(1));
+        assertEquals(1, s.getLocalSeriesIndexForSeries(2));
     }
 
     @Test

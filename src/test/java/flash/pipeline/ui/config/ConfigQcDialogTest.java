@@ -104,6 +104,30 @@ public class ConfigQcDialogTest {
     }
 
     @Test
+    public void headerText_includesMinMaxConditionLabelAndNonBlockingWarning() {
+        RecordingStage stage = new RecordingStage("Display range");
+        ConfigQcContext context = new ConfigQcContext(
+                null,
+                null,
+                null,
+                Arrays.asList(new ConfigQcContext.ConfigQcImage(
+                        3,
+                        "MouseA_LH_SCN",
+                        stack("MouseA_LH_SCN", 3),
+                        "Control - MIN",
+                        "Z-slice warning: saved range 11-30 does not fit this image (19 slices); showing the full stack.")),
+                Arrays.asList("DAPI"),
+                0);
+
+        ConfigQcDialog dialog = ConfigQcDialog.createForTest(context, Arrays.asList(stage));
+
+        assertEquals("Image 1 / 1    - Control - MIN - MouseA_LH_SCN",
+                dialog.progressTextForTest());
+        assertEquals("Z-slice warning: saved range 11-30 does not fit this image (19 slices); showing the full stack.",
+                dialog.imageWarningTextForTest());
+    }
+
+    @Test
     public void footer_doesNotContainLargeView_orAdjustBcButtons() {
         RecordingStage stage = new RecordingStage("Display range");
         ConfigQcDialog dialog = ConfigQcDialog.createForTest(contextWithTwoImages(), Arrays.asList(stage));

@@ -57,8 +57,21 @@ public final class OrientationImageIdentity {
             File dir = new File(directory);
             ImageSourceDispatcher.SourceMode mode = ImageSourceDispatcher.detectMode(directory);
             if (mode == ImageSourceDispatcher.SourceMode.CONTAINER) {
-                File container = ImageSourceDispatcher.selectContainer(dir);
+                List<File> projectContainers = ImageSourceDispatcher.projectContainerFiles(directory);
+                File container;
+                if (projectContainers.size() == 1) {
+                    container = projectContainers.get(0);
+                } else if (projectContainers.size() > 1) {
+                    throw new IllegalArgumentException(
+                            "Orientation identity cannot be resolved for a project with multiple container files.");
+                } else {
+                    container = ImageSourceDispatcher.selectContainer(dir);
+                }
                 return new SourceContext("CONTAINER", container.getName(), null, "");
+            }
+            List<File> projectTiffs = ImageSourceDispatcher.projectTiffFiles(directory);
+            if (!projectTiffs.isEmpty()) {
+                return new SourceContext("TIFF", "", projectTiffs, "");
             }
             if (mode == ImageSourceDispatcher.SourceMode.TIFF_INPUT_SUBFOLDER) {
                 return new SourceContext(

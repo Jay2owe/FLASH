@@ -393,6 +393,24 @@ public class DeferredImageSupplier {
         return containerFiles.get(seriesRefs.get(globalSeriesIndex).containerIndex);
     }
 
+    /**
+     * Returns the source-local series index backing a global series index.
+     * For project-backed container suppliers this maps the project/included
+     * series numbering back to Bio-Formats' original series number inside the
+     * source file. TIFF folder entries are single-series files, so their local
+     * index is always 0.
+     */
+    public int getLocalSeriesIndexForSeries(int globalSeriesIndex) {
+        if (globalSeriesIndex < 0 || globalSeriesIndex >= totalSeries) {
+            throw new IllegalArgumentException(
+                    "Series index " + globalSeriesIndex + " out of range [0, " + totalSeries + ")");
+        }
+        if (mode == Mode.TIFF_FOLDER) {
+            return 0;
+        }
+        return seriesRefs.get(globalSeriesIndex).localSeriesIndex;
+    }
+
     /** Returns the display name used for synthesised series titles. */
     public String getContainerDisplayName() {
         return containerDisplayName;

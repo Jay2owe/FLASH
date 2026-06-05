@@ -1,7 +1,7 @@
 package flash.pipeline.qc;
 
 import flash.pipeline.io.ConditionManifestIO;
-import flash.pipeline.io.LifIO;
+import flash.pipeline.io.DeferredImageSupplier;
 import flash.pipeline.io.OrientationManifestIO;
 import flash.pipeline.io.SeriesMeta;
 import flash.pipeline.naming.OrientationManifestRow;
@@ -106,6 +106,94 @@ public class QcMinMaxPerConditionSelectorTest {
     }
 
     @Test
+    public void sourceSeriesSignatureIncludesProjectLocalSeriesMapping() throws Exception {
+        File lif = new File("Cas3.All.Time.Points.lif");
+        DeferredImageSupplier supplier = testSupplier(
+                Arrays.asList(lif),
+                new int[]{8},
+                Arrays.<List<Integer>>asList(
+                        Arrays.asList(Integer.valueOf(2), Integer.valueOf(5))));
+        List<SeriesMeta> metas = Arrays.asList(
+                new SeriesMeta(0, "hAPP1Week2_LH_SCN", 12, 1.0, 1.0, 1.0, "pixel"),
+                new SeriesMeta(1, "hAPP2Week2_RH_SCN", 12, 1.0, 1.0, 1.0, "pixel"));
+
+        Method signatureMethod = QcMinMaxPerConditionSelector.class.getDeclaredMethod(
+                "sourceSeriesSignature", File.class, DeferredImageSupplier.class, List.class);
+        signatureMethod.setAccessible(true);
+        String signature = (String) signatureMethod.invoke(null, lif, supplier, metas);
+
+        assertTrue(signature.contains("|0:2:Cas3.All.Time.Points.lif:hAPP1Week2_LH_SCN"));
+        assertTrue(signature.contains("|1:5:Cas3.All.Time.Points.lif:hAPP2Week2_RH_SCN"));
+    }
+
+    @Test
+    public void cacheInvalidatesWhenProjectSourceSeriesSignatureChanges() throws Exception {
+        File dir = temp.newFolder("cache-source-project");
+        File lif = temp.newFile("source.lif");
+        File cache = temp.newFile("source-cache.properties");
+        File scores = temp.newFile("source-scores.csv");
+        List<QcSelectionChannel> qcChannels = Arrays.asList(
+                new QcSelectionChannel(0, "DAPI", true, false, false));
+
+        Method write = QcMinMaxPerConditionSelector.class.getDeclaredMethod(
+                "writeCacheProperties", String.class, File.class, List.class,
+                flash.pipeline.zslice.ZSliceConfig.class, String.class, File.class);
+        write.setAccessible(true);
+        write.invoke(null, dir.getAbsolutePath(), lif, qcChannels, null,
+                "source-series:v1|0:2:source.lif:hAPP1Week2_LH_SCN:0x0z12c0",
+                cache);
+
+        Method valid = QcMinMaxPerConditionSelector.class.getDeclaredMethod(
+                "isCacheValid", String.class, File.class, List.class,
+                flash.pipeline.zslice.ZSliceConfig.class, String.class, File.class, File.class);
+        valid.setAccessible(true);
+
+        assertEquals(Boolean.TRUE,
+                valid.invoke(null, dir.getAbsolutePath(), lif, qcChannels, null,
+                        "source-series:v1|0:2:source.lif:hAPP1Week2_LH_SCN:0x0z12c0",
+                        cache, scores));
+        assertEquals(Boolean.FALSE,
+                valid.invoke(null, dir.getAbsolutePath(), lif, qcChannels, null,
+                        "source-series:v1|0:5:source.lif:hAPP2Week2_RH_SCN:0x0z12c0",
+                        cache, scores));
+    }
+
+    @Test
+    public void cacheInvalidatesWhenSelectionScopeChanges() throws Exception {
+        File dir = temp.newFolder("cache-scope-project");
+        File lif = temp.newFile("scope-source.lif");
+        File cache = temp.newFile("scope-cache.properties");
+        File scores = temp.newFile("scope-scores.csv");
+        List<QcSelectionChannel> qcChannels = Arrays.asList(
+                new QcSelectionChannel(0, "DAPI", true, false, false));
+
+        Method write = QcMinMaxPerConditionSelector.class.getDeclaredMethod(
+                "writeCacheProperties", String.class, File.class, List.class,
+                flash.pipeline.zslice.ZSliceConfig.class, String.class, String.class, File.class);
+        write.setAccessible(true);
+        write.invoke(null, dir.getAbsolutePath(), lif, qcChannels, null,
+                "source-series:v1|0:0:scope-source.lif:MouseA_LH_SCN:0x0z12c0",
+                "overall",
+                cache);
+
+        Method valid = QcMinMaxPerConditionSelector.class.getDeclaredMethod(
+                "isCacheValid", String.class, File.class, List.class,
+                flash.pipeline.zslice.ZSliceConfig.class, String.class, String.class, File.class, File.class);
+        valid.setAccessible(true);
+
+        assertEquals(Boolean.TRUE,
+                valid.invoke(null, dir.getAbsolutePath(), lif, qcChannels, null,
+                        "source-series:v1|0:0:scope-source.lif:MouseA_LH_SCN:0x0z12c0",
+                        "overall",
+                        cache, scores));
+        assertEquals(Boolean.FALSE,
+                valid.invoke(null, dir.getAbsolutePath(), lif, qcChannels, null,
+                        "source-series:v1|0:0:scope-source.lif:MouseA_LH_SCN:0x0z12c0",
+                        "per_condition",
+                        cache, scores));
+    }
+
+    @Test
     public void selectSampledZIndices_spreadsEvenlyAcrossStack() {
         assertEquals(Arrays.asList(0, 2, 3, 5, 6, 8, 9, 11, 12, 14),
                 QcMinMaxPerConditionSelector.selectSampledZIndices(15, 10));
@@ -130,6 +218,87 @@ public class QcMinMaxPerConditionSelectorTest {
         assertEquals("MIN", records.get(0).selectedRole);
         assertEquals("MAX", records.get(2).selectedRole);
         assertEquals(2.0, records.get(1).compositeRank, 0.0001);
+    }
+
+    @Test
+    public void selectedSeries_ordersConditionsByHighestMaxThenOpensMaxBeforeMin() {
+        List<QcMinMaxPerConditionSelector.ScoreRecord> records =
+                new ArrayList<QcMinMaxPerConditionSelector.ScoreRecord>();
+        QcMinMaxPerConditionSelector.ScoreRecord lowMin = record("Low", 7, 10, 20);
+        lowMin.selectedRole = "MIN";
+        records.add(lowMin);
+        QcMinMaxPerConditionSelector.ScoreRecord lowMax = record("Low", 2, 30, 40);
+        lowMax.selectedRole = "MAX";
+        records.add(lowMax);
+        QcMinMaxPerConditionSelector.ScoreRecord highMin = record("High", 9, 5, 15);
+        highMin.selectedRole = "MIN";
+        records.add(highMin);
+        QcMinMaxPerConditionSelector.ScoreRecord highMax = record("High", 4, 80, 90);
+        highMax.selectedRole = "MAX";
+        records.add(highMax);
+        QcMinMaxPerConditionSelector.ScoreRecord middleMinMax = record("Middle", 5, 50, 60);
+        middleMinMax.selectedRole = "MIN_MAX";
+        records.add(middleMinMax);
+
+        List<QcMinMaxPerConditionSelector.SelectedSeries> selected =
+                QcMinMaxPerConditionSelector.selectedSeries(records);
+
+        assertEquals(5, selected.size());
+        assertEquals(4, selected.get(0).seriesIndex);
+        assertEquals("High", selected.get(0).conditionName);
+        assertEquals("MAX", selected.get(0).selectedRole);
+        assertEquals(9, selected.get(1).seriesIndex);
+        assertEquals("MIN", selected.get(1).selectedRole);
+        assertEquals(5, selected.get(2).seriesIndex);
+        assertEquals("Middle", selected.get(2).conditionName);
+        assertEquals("MIN_MAX", selected.get(2).selectedRole);
+        assertEquals(2, selected.get(3).seriesIndex);
+        assertEquals("Low", selected.get(3).conditionName);
+        assertEquals("MAX", selected.get(3).selectedRole);
+        assertEquals(7, selected.get(4).seriesIndex);
+        assertEquals("MIN", selected.get(4).selectedRole);
+    }
+
+    @Test
+    public void selectedSeriesOverall_returnsOnlyGlobalMaxThenMin() {
+        List<QcSelectionChannel> qcChannels = Arrays.asList(
+                new QcSelectionChannel(0, "DAPI", true, false, false),
+                new QcSelectionChannel(1, "Marker", false, true, false));
+        List<QcMinMaxPerConditionSelector.ScoreRecord> records =
+                new ArrayList<QcMinMaxPerConditionSelector.ScoreRecord>();
+        records.add(record("Low", 1, 10, 20));
+        records.add(record("Middle", 2, 50, 60));
+        records.add(record("High", 3, 90, 95));
+        records.add(record("SecondHigh", 4, 80, 85));
+
+        List<QcMinMaxPerConditionSelector.SelectedSeries> selected =
+                QcMinMaxPerConditionSelector.selectedSeriesOverall(records, qcChannels);
+
+        assertEquals(2, selected.size());
+        assertEquals(3, selected.get(0).seriesIndex);
+        assertEquals("High", selected.get(0).conditionName);
+        assertEquals("OVERALL_MAX", selected.get(0).selectedRole);
+        assertEquals(1, selected.get(1).seriesIndex);
+        assertEquals("Low", selected.get(1).conditionName);
+        assertEquals("OVERALL_MIN", selected.get(1).selectedRole);
+    }
+
+    @Test
+    public void selectedSeriesOverall_collapsesSingleSeriesToMinMax() {
+        List<QcSelectionChannel> qcChannels = Arrays.asList(
+                new QcSelectionChannel(0, "DAPI", true, false, false),
+                new QcSelectionChannel(1, "Marker", false, true, false));
+        List<QcMinMaxPerConditionSelector.ScoreRecord> records =
+                new ArrayList<QcMinMaxPerConditionSelector.ScoreRecord>();
+        records.add(record("Only", 6, 42, 43));
+
+        List<QcMinMaxPerConditionSelector.SelectedSeries> selected =
+                QcMinMaxPerConditionSelector.selectedSeriesOverall(records, qcChannels);
+
+        assertEquals(1, selected.size());
+        assertEquals(6, selected.get(0).seriesIndex);
+        assertEquals("Only", selected.get(0).conditionName);
+        assertEquals("OVERALL_MIN_MAX", selected.get(0).selectedRole);
     }
 
     @Test
@@ -232,10 +401,38 @@ public class QcMinMaxPerConditionSelectorTest {
         List<String> lines = QcMinMaxPerConditionSelector.buildSelectionLogLines(records, qcChannels);
 
         assertEquals(1, lines.size());
-        assertTrue(lines.get(0).contains("CondA -> MIN:"));
+        assertTrue(lines.get(0).contains("CondA -> MAX:"));
+        assertTrue(lines.get(0).contains("MIN:"));
         assertTrue(lines.get(0).contains("MAX:"));
         assertTrue(lines.get(0).contains("Series 1"));
         assertTrue(lines.get(0).contains("Series 2"));
+    }
+
+    @Test
+    public void buildOverallSelectionLogLines_reportsGlobalMinAndMax() {
+        List<QcSelectionChannel> qcChannels = Arrays.asList(
+                new QcSelectionChannel(0, "DAPI", true, false, false),
+                new QcSelectionChannel(1, "Marker", false, true, false));
+        List<QcMinMaxPerConditionSelector.ScoreRecord> records =
+                new ArrayList<QcMinMaxPerConditionSelector.ScoreRecord>();
+
+        QcMinMaxPerConditionSelector.ScoreRecord min = record("Low", 0, 10, 20);
+        min.selectedRole = "MIN";
+        min.compositeRank = 1.0;
+        records.add(min);
+
+        QcMinMaxPerConditionSelector.ScoreRecord max = record("High", 1, 40, 50);
+        max.selectedRole = "MAX";
+        max.compositeRank = 2.0;
+        records.add(max);
+
+        List<String> lines = QcMinMaxPerConditionSelector.buildOverallSelectionLogLines(records, qcChannels);
+
+        assertEquals(1, lines.size());
+        assertTrue(lines.get(0).contains("Overall -> MAX:"));
+        assertTrue(lines.get(0).contains("condition=High"));
+        assertTrue(lines.get(0).contains("MIN:"));
+        assertTrue(lines.get(0).contains("condition=Low"));
     }
 
     private static QcMinMaxPerConditionSelector.ScoreRecord record(String condition, int seriesIndex,
@@ -267,5 +464,15 @@ public class QcMinMaxPerConditionSelectorTest {
                 OrientationManifestRow.DecisionSource.MANUAL,
                 OrientationManifestRow.ConfirmationState.YES,
                 "");
+    }
+
+    private static DeferredImageSupplier testSupplier(
+            List<File> containers,
+            int[] seriesCounts,
+            List<List<Integer>> includedSeries) throws Exception {
+        Method factory = DeferredImageSupplier.class.getDeclaredMethod(
+                "multiContainerForTests", List.class, int[].class, List.class);
+        factory.setAccessible(true);
+        return (DeferredImageSupplier) factory.invoke(null, containers, seriesCounts, includedSeries);
     }
 }

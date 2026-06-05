@@ -7,8 +7,13 @@ import flash.pipeline.bin.ChannelConfig;
 import flash.pipeline.bin.ChannelConfigIO;
 import flash.pipeline.cli.CLIConfig;
 import flash.pipeline.image.NamedFilterLoader;
+import flash.pipeline.io.DeferredImageSupplier;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.SeriesMeta;
+import flash.pipeline.naming.ImageNameParser;
+import flash.pipeline.naming.NameParts;
+import flash.pipeline.project.ProjectFile;
+import flash.pipeline.project.ProjectFileIO;
 import flash.pipeline.runtime.DependencyService;
 import flash.pipeline.runtime.FeatureDependencyGate;
 import flash.pipeline.ui.CancelConfirmationDialog;
@@ -29,6 +34,7 @@ import flash.pipeline.zslice.ZSliceMode;
 import flash.pipeline.zslice.ZSliceRange;
 import flash.pipeline.zslice.ZSliceSelection;
 import ij.ImagePlus;
+import ij.ImageStack;
 import ij.process.ByteProcessor;
 import ij.process.ImageProcessor;
 import org.junit.After;
@@ -52,8 +58,10 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.EnumSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
@@ -246,6 +254,103 @@ public class CreateBinFileAnalysisTest {
     }
 
     @Test
+    public void prepareQcImageOpen_preservesSelectedSeriesOrder() throws Exception {
+        File dir = temp.newFolder("ordered");
+        File lifFile = new File(dir, "experiment.lif");
+        lifFile.createNewFile();
+
+        CreateBinFileAnalysis.QcOpenPreparation result =
+                CreateBinFileAnalysis.prepareQcImageOpen(
+                        dir.getAbsolutePath(),
+                        Arrays.asList(Integer.valueOf(5), Integer.valueOf(1), Integer.valueOf(5)),
+                        false);
+
+        assertEquals(CreateBinFileAnalysis.QcOpenStatus.READY, result.status);
+        assertEquals(lifFile.getAbsolutePath(), result.lifFile.getAbsolutePath());
+        assertEquals(Arrays.asList(Integer.valueOf(5), Integer.valueOf(1)), result.selectedSeriesIndexes);
+    }
+
+    @Test
+    public void prepareQcImageOpen_usesProjectJsonContainerOutsideOutputRoot() throws Exception {
+        File outputRoot = temp.newFolder("project-output");
+        File stainingDir = new File(outputRoot, "IgG.Iba1.Cas3");
+        assertTrue(stainingDir.mkdirs());
+        File lifFile = new File(stainingDir, "Cas3.All.Time.Points.lif");
+        assertTrue(lifFile.createNewFile());
+
+        ProjectFile project = new ProjectFile();
+        project.outputRoot = outputRoot.getAbsolutePath();
+        ProjectFile.Item item = new ProjectFile.Item();
+        item.path = lifFile.getAbsolutePath();
+        item.include = true;
+        project.items.add(item);
+        ProjectFileIO.write(
+                FlashProjectLayout.forDirectory(outputRoot.getAbsolutePath()).configurationWriteDir(),
+                project);
+
+        CreateBinFileAnalysis.QcOpenPreparation result =
+                CreateBinFileAnalysis.prepareQcImageOpen(
+                        outputRoot.getAbsolutePath(),
+                        Collections.singletonList(Integer.valueOf(0)),
+                        false);
+
+        assertEquals(CreateBinFileAnalysis.QcOpenStatus.READY, result.status);
+        assertEquals(lifFile.getAbsolutePath(), result.lifFile.getAbsolutePath());
+    }
+
+    @Test
+    public void prepareQcImageOpen_projectMissingSourceDoesNotFallBackToRootLif() throws Exception {
+        File outputRoot = temp.newFolder("project-missing-source-output");
+        assertTrue(new File(outputRoot, "stale-root.lif").createNewFile());
+
+        ProjectFile project = new ProjectFile();
+        ProjectFile.Item item = new ProjectFile.Item();
+        item.path = new File(temp.getRoot(), "missing-source.lif").getAbsolutePath();
+        item.include = true;
+        project.items.add(item);
+        ProjectFileIO.write(
+                FlashProjectLayout.forDirectory(outputRoot.getAbsolutePath()).configurationWriteDir(),
+                project);
+
+        CreateBinFileAnalysis.QcOpenPreparation result =
+                CreateBinFileAnalysis.prepareQcImageOpen(
+                        outputRoot.getAbsolutePath(),
+                        Collections.singletonList(Integer.valueOf(0)),
+                        false);
+
+        assertEquals(CreateBinFileAnalysis.QcOpenStatus.CANCEL, result.status);
+        assertTrue(result.message.contains("missing included source file"));
+        assertTrue(result.message.contains("missing-source.lif"));
+    }
+
+    @Test
+    public void prepareQcImageOpen_tiffProjectDoesNotFallBackToRootLif() throws Exception {
+        File outputRoot = temp.newFolder("project-tiff-output");
+        assertTrue(new File(outputRoot, "stale-root.lif").createNewFile());
+        File sourceRoot = temp.newFolder("project-tiff-sources");
+        File tiff = new File(sourceRoot, "section.tif");
+        assertTrue(tiff.createNewFile());
+
+        ProjectFile project = new ProjectFile();
+        ProjectFile.Item item = new ProjectFile.Item();
+        item.path = tiff.getAbsolutePath();
+        item.include = true;
+        project.items.add(item);
+        ProjectFileIO.write(
+                FlashProjectLayout.forDirectory(outputRoot.getAbsolutePath()).configurationWriteDir(),
+                project);
+
+        CreateBinFileAnalysis.QcOpenPreparation result =
+                CreateBinFileAnalysis.prepareQcImageOpen(
+                        outputRoot.getAbsolutePath(),
+                        Collections.singletonList(Integer.valueOf(0)),
+                        false);
+
+        assertEquals(CreateBinFileAnalysis.QcOpenStatus.CANCEL, result.status);
+        assertTrue(result.message.contains("Project contains TIFF sources"));
+    }
+
+    @Test
     public void zSliceContextImagesUseMetadataPlaceholders() {
         File lifFile = new File("Experiment_Mouse3.lif");
         List<SeriesMeta> metas = Arrays.asList(
@@ -261,6 +366,22 @@ public class CreateBinFileAnalysisTest {
         assertEquals(5, images.get(1).getSeriesIndex());
         assertEquals("Experiment_Mouse3.lif :: Series 6", images.get(1).getSeriesName());
         assertEquals(null, images.get(0).getImage());
+    }
+
+    @Test
+    public void metadataOriginalNamePrefixesBareSeriesForConventionParsing() throws Exception {
+        File lifFile = new File("Cas3.All.Time.Points.lif");
+        SeriesMeta meta = new SeriesMeta(
+                0, "hAPP1Week2_LH_SCN", 12, 1.0, 1.0, 1.0, "pixel");
+
+        String originalName = invokeMetadataOriginalName(lifFile, meta);
+        NameParts parsed = ImageNameParser.parse(originalName);
+
+        assertEquals("Cas3.All.Time.Points.lif - hAPP1Week2_LH_SCN", originalName);
+        assertTrue(parsed.strictMatch);
+        assertEquals("hAPP1Week2", parsed.animal);
+        assertEquals("LH", parsed.hemisphere);
+        assertEquals("SCN", parsed.region);
     }
 
     @Test
@@ -280,6 +401,51 @@ public class CreateBinFileAnalysisTest {
         assertEquals(ZSliceMode.SAME_ABSOLUTE, cfg.zSliceMode);
         assertEquals(3, cfg.zSliceSelections.size());
         assertEquals("1-19", cfg.zSliceSelections.get(Integer.valueOf(0)).range.toToken());
+    }
+
+    @Test
+    public void minMaxSelectionModeRecognizesOverallAndPerCondition() throws Exception {
+        assertTrue(invokeIsMinMaxSelectionMode("Min and max overall"));
+        assertTrue(invokeIsMinMaxSelectionMode("Min and max per condition"));
+        assertFalse(invokeIsMinMaxSelectionMode("Randomly select images"));
+        assertFalse(invokeIsMinMaxSelectionMode("Manually select images"));
+    }
+
+    @Test
+    public void minMaxRoleLabelMapsOverallRolesForHeader() throws Exception {
+        CreateBinFileAnalysis analysis = new CreateBinFileAnalysis();
+
+        assertEquals("Overall MAX", invokeMinMaxRoleLabel(analysis, "OVERALL_MAX"));
+        assertEquals("Overall MIN", invokeMinMaxRoleLabel(analysis, "OVERALL_MIN"));
+        assertEquals("Overall MIN/MAX", invokeMinMaxRoleLabel(analysis, "OVERALL_MIN_MAX"));
+        assertEquals("MAX", invokeMinMaxRoleLabel(analysis, "MAX"));
+    }
+
+    @Test
+    public void openQcSelectionsAddsNonBlockingZSliceWarningForInvalidSavedRange() throws Exception {
+        CreateBinFileAnalysis analysis = new CreateBinFileAnalysis();
+        CreateBinFileAnalysis.BinUserConfig cfg = oneChannelConfig("Default");
+        cfg.zSliceMode = ZSliceMode.PER_IMAGE;
+        cfg.zSliceSelections.put(Integer.valueOf(4),
+                new ZSliceSelection(4, "MouseA_LH_SCN", 30, new ZSliceRange(11, 30)));
+
+        ImagePlus opened = stackWithSlices("MouseA_LH_SCN", 19);
+        LinkedHashMap<Integer, ImagePlus> openedBySeries = new LinkedHashMap<Integer, ImagePlus>();
+        openedBySeries.put(Integer.valueOf(4), opened);
+        List<?> selections = invokeOpenQcSelections(
+                analysis,
+                new StubDeferredImageSupplier(openedBySeries),
+                new File("experiment.lif"),
+                Collections.singletonList(Integer.valueOf(4)),
+                cfg);
+
+        assertEquals(1, selections.size());
+        Object selection = selections.get(0);
+        assertEquals(Integer.valueOf(4), selectionField(selection, "seriesIndex"));
+        assertEquals("Z-slice warning: saved range 11-30 does not fit this image (19 slices); showing the full stack.",
+                selectionField(selection, "warning"));
+        ImagePlus resultImage = (ImagePlus) selectionField(selection, "image");
+        assertEquals(19, resultImage.getNSlices());
     }
 
     @Test
@@ -519,33 +685,184 @@ public class CreateBinFileAnalysisTest {
     }
 
     @Test
+    public void executeFiltered_filterPresetsRouteThroughEmbeddedQcNotDropdownPage() throws Exception {
+        File dir = temp.newFolder("filtered-filter-presets");
+        ChannelConfigIO.write(configurationDir(dir), existingFilteredConfig("IBA1"));
+        RecordingFilteredAnalysis analysis = new RecordingFilteredAnalysis();
+
+        analysis.executeFiltered(dir.getAbsolutePath(),
+                EnumSet.of(BinField.FILTER_PRESETS));
+
+        assertEquals(Collections.singletonList("qc"), analysis.visited);
+        assertEquals(EnumSet.of(BinField.FILTER_PRESETS), analysis.qcFields);
+        File bin = configurationDir(dir);
+        assertTrue(new File(bin, "defaultFilter.ijm").isFile());
+        assertTrue(new File(bin, "C1_Filters.ijm").isFile());
+    }
+
+    @Test
+    public void executeFiltered_segmentationPartialDoesNotOverwriteExistingIntensityThreshold() throws Exception {
+        File dir = temp.newFolder("filtered-segmentation-preserves-intensity");
+        ChannelConfigIO.write(configurationDir(dir), existingFilteredConfig("IBA1"));
+        CreateBinFileAnalysis analysis = new RecordingFilteredAnalysis() {
+            @Override
+            protected boolean showFilteredQcPages(String directory, File binFolder,
+                                                  BinUserConfig cfg, Set<BinField> fields) {
+                super.showFilteredQcPages(directory, binFolder, cfg, fields);
+                cfg.objectThresholds.set(0, "999");
+                cfg.intensityThresholds.set(0, "999");
+                return true;
+            }
+        };
+
+        analysis.executeFiltered(dir.getAbsolutePath(), EnumSet.of(BinField.SEGMENTATION_METHODS));
+
+        BinConfig updated = ChannelConfigIO.toBinConfig(ChannelConfigIO.read(configurationDir(dir)));
+        assertEquals(Collections.singletonList("999"), updated.channelThresholds);
+        assertEquals(Collections.singletonList("30"), updated.channelIntensityThresholds);
+    }
+
+    @Test
+    public void executeFiltered_segmentationPartialPreservesPendingRawIntensityThreshold() throws Exception {
+        File dir = temp.newFolder("filtered-segmentation-preserves-pending-intensity");
+        ChannelConfig seed = oneChannelDraftWithPendingThresholds("IBA1", "100", "222");
+        ChannelConfigIO.write(configurationDir(dir), seed);
+        CreateBinFileAnalysis analysis = new RecordingFilteredAnalysis() {
+            @Override
+            protected boolean showFilteredQcPages(String directory, File binFolder,
+                                                  BinUserConfig cfg, Set<BinField> fields) {
+                super.showFilteredQcPages(directory, binFolder, cfg, fields);
+                cfg.objectThresholds.set(0, "999");
+                cfg.intensityThresholds.set(0, "999");
+                return true;
+            }
+        };
+
+        analysis.executeFiltered(dir.getAbsolutePath(), EnumSet.of(BinField.SEGMENTATION_METHODS));
+
+        ChannelConfig saved = ChannelConfigIO.read(configurationDir(dir));
+        assertEquals("999", saved.channels.get(0).threshold);
+        assertEquals("222", saved.channels.get(0).intensityThreshold);
+        assertEquals(ChannelConfig.PropertyStatus.PENDING,
+                saved.channels.get(0).statusOf(ChannelConfig.P_INTENSITY));
+    }
+
+    @Test
+    public void executeFiltered_intensityPartialPreservesPendingRawObjectThreshold() throws Exception {
+        File dir = temp.newFolder("filtered-intensity-preserves-pending-object");
+        ChannelConfig seed = oneChannelDraftWithPendingThresholds("IBA1", "321", "222");
+        ChannelConfigIO.write(configurationDir(dir), seed);
+        CreateBinFileAnalysis analysis = new RecordingFilteredAnalysis() {
+            @Override
+            protected boolean showFilteredQcPages(String directory, File binFolder,
+                                                  BinUserConfig cfg, Set<BinField> fields) {
+                super.showFilteredQcPages(directory, binFolder, cfg, fields);
+                cfg.objectThresholds.set(0, "999");
+                cfg.intensityThresholds.set(0, "888");
+                return true;
+            }
+        };
+
+        analysis.executeFiltered(dir.getAbsolutePath(), EnumSet.of(BinField.INTENSITY_THRESHOLDS));
+
+        ChannelConfig saved = ChannelConfigIO.read(configurationDir(dir));
+        assertEquals("321", saved.channels.get(0).threshold);
+        assertEquals("888", saved.channels.get(0).intensityThreshold);
+        assertEquals(ChannelConfig.PropertyStatus.PENDING,
+                saved.channels.get(0).statusOf(ChannelConfig.P_THRESHOLD));
+        assertEquals(ChannelConfig.PropertyStatus.CONFIGURED,
+                saved.channels.get(0).statusOf(ChannelConfig.P_INTENSITY));
+    }
+
+    @Test
     public void autoSelectedFilteredSettings_ticksRequiredSettingsForEveryChannel() {
         // The partial path skips the Settings Mode toggle screen and auto-selects
         // the analysis's required settings for every channel. Matrix rows mirror
-        // the private SETTINGS_* constants: 1=min-max, 2=ROI/intensity threshold,
-        // 3=object threshold, 4=object size filter, 5=segmentation method.
+        // the private SETTINGS_* constants: 0=filter parameters, 1=min-max,
+        // 2=ROI/intensity threshold, 3=object threshold, 4=object size filter,
+        // 5=segmentation method.
         CreateBinFileAnalysis analysis = new CreateBinFileAnalysis();
         CreateBinFileAnalysis.BinUserConfig cfg = twoChannelConfig();
         cfg.segmentationMethods.clear();
         cfg.segmentationMethods.addAll(Arrays.asList("classical", "stardist:0.5:0.4"));
 
+        boolean[][] filterParameters = analysis.autoSelectedFilteredSettings(
+                cfg, true, false, false, false, false, false);
+        assertTrue(filterParameters[0][0]);
+        assertTrue(filterParameters[0][1]);
+        assertFalse(filterParameters[1][0]);
+        assertFalse(filterParameters[2][0]);
+
         // Object analysis (segmentation method + particle size) for both channels.
-        boolean[][] object = analysis.autoSelectedFilteredSettings(cfg, false, false, true, true);
+        boolean[][] object = analysis.autoSelectedFilteredSettings(
+                cfg, false, false, true, false, true, true);
         for (int ch = 0; ch < 2; ch++) {
             assertTrue(object[5][ch]);
             assertTrue(object[3][ch]);
             assertTrue(object[4][ch]);
+            assertFalse(object[2][ch]);
             assertFalse(object[1][ch]);
         }
 
-        // Threshold only: classical channels mirror into the object-threshold slot,
-        // StarDist/Cellpose channels only take the ROI/intensity threshold.
-        boolean[][] threshold = analysis.autoSelectedFilteredSettings(cfg, false, true, false, false);
-        assertTrue(threshold[2][0]);
-        assertTrue(threshold[3][0]);
-        assertTrue(threshold[2][1]);
-        assertFalse(threshold[3][1]);
-        assertFalse(threshold[5][0]);
+        // Intensity threshold only must not route classical channels into object segmentation.
+        boolean[][] intensity = analysis.autoSelectedFilteredSettings(
+                cfg, false, false, false, true, false, false);
+        assertTrue(intensity[2][0]);
+        assertFalse(intensity[3][0]);
+        assertTrue(intensity[2][1]);
+        assertFalse(intensity[3][1]);
+        assertFalse(intensity[5][0]);
+
+        // Object threshold only remains an object-segmentation setting for classical channels.
+        boolean[][] objectThreshold = analysis.autoSelectedFilteredSettings(
+                cfg, false, false, true, false, false, false);
+        assertFalse(objectThreshold[2][0]);
+        assertTrue(objectThreshold[3][0]);
+        assertFalse(objectThreshold[2][1]);
+        assertFalse(objectThreshold[3][1]);
+        assertFalse(objectThreshold[5][0]);
+    }
+
+    @Test
+    public void intensityThresholdOnlyPartialSetupUsesChannelThresholdQcNotObjectSegmentation() throws Exception {
+        CreateBinFileAnalysis.BinUserConfig cfg = twoChannelConfig();
+        boolean[][] customSettings = new CreateBinFileAnalysis()
+                .autoSelectedFilteredSettings(cfg, false, false, false, true, false, false);
+
+        assertEquals(Arrays.asList(
+                "CHANNEL_THRESHOLD:0",
+                "CHANNEL_THRESHOLD:1"),
+                invokeInteractiveQcStepPlan(new CreateBinFileAnalysis(), cfg, customSettings));
+    }
+
+    @Test
+    public void intensityOnlyChannelThresholdStageDoesNotMutateObjectThreshold() throws Exception {
+        File binFolder = temp.newFolder("intensity-only-threshold-stage");
+        Files.write(new File(binFolder, "C1_Filters.ijm").toPath(), new byte[0]);
+        CreateBinFileAnalysis analysis = new CreateBinFileAnalysis();
+        CreateBinFileAnalysis.BinUserConfig cfg = oneChannelConfig("Default");
+        cfg.objectThresholds.set(0, "100");
+        cfg.intensityThresholds.set(0, "30");
+        ConfigQcContext context = ConfigQcContext.fromImages(
+                temp.getRoot(),
+                binFolder,
+                cfg,
+                Arrays.asList(byteImage("threshold intensity only")),
+                cfg.names,
+                0);
+        ChannelThresholdStage stage = invokeCreateChannelThresholdStage(
+                analysis, cfg, binFolder, 0, false);
+
+        stage.buildControls(context, new NoopConfigQcActions());
+        stage.onEnter(context, new PreviewPairPanel("Original", "Adjusted"));
+        invokeStageTestMethod(stage, "setThresholdForTest",
+                new Class<?>[]{double.class, double.class},
+                new Object[]{Double.valueOf(44.0), Double.valueOf(255.0)});
+        assertTrue(stage.lockIn(context));
+        stage.onLeave(context);
+
+        assertEquals("100", cfg.objectThresholds.get(0));
+        assertFalse("30".equals(cfg.intensityThresholds.get(0)));
     }
 
     @Test
@@ -968,7 +1285,7 @@ public class CreateBinFileAnalysisTest {
         File binFolder = temp.newFolder("embedded-qc-back-history");
         CreateBinFileAnalysis.BinUserConfig cfg = oneChannelConfig("Default");
         List<?> images = privateQcSelections(byteImage("embedded back route"));
-        boolean[][] customSettings = new boolean[5][1];
+        boolean[][] customSettings = new boolean[6][1];
         customSettings[1][0] = true; // display range
         customSettings[2][0] = true; // unified threshold
         customSettings[3][0] = true; // classical object threshold mirror
@@ -1068,6 +1385,177 @@ public class CreateBinFileAnalysisTest {
 
         assertEquals(Collections.singletonList("SEGMENTATION_OBJECT:1"),
                 invokeInteractiveQcStepPlan(new CreateBinFileAnalysis(), cfg, customSettings));
+    }
+
+    @Test
+    public void segmentationObjectIncrementalSaveDoesNotPersistUnrequestedIntensityThreshold() throws Exception {
+        File project = temp.newFolder("segmentation-incremental-preserves-intensity");
+        File binFolder = configurationDir(project);
+        ChannelConfigIO.write(binFolder, existingFilteredConfig("IBA1"));
+        CreateBinFileAnalysis.BinUserConfig cfg = oneChannelConfig("Default");
+        cfg.names.set(0, "IBA1");
+        cfg.objectThresholds.set(0, "999");
+        cfg.intensityThresholds.set(0, "999");
+        cfg.sizes.set(0, "12-34");
+        boolean[][] customSettings = new boolean[6][1];
+        customSettings[5][0] = true; // object segmentation only; no ROI/intensity threshold
+        Object step = firstInteractiveQcStep(new CreateBinFileAnalysis(), cfg, customSettings);
+
+        invokePersistInteractiveQcStep(new CreateBinFileAnalysis(), binFolder, cfg, customSettings, step);
+
+        ChannelConfig saved = ChannelConfigIO.read(binFolder);
+        ChannelConfig.Channel channel = saved.channels.get(0);
+        assertEquals("999", channel.threshold);
+        assertEquals("12-34", channel.size);
+        assertEquals("30", channel.intensityThreshold);
+        assertEquals(ChannelConfig.PropertyStatus.CONFIGURED,
+                channel.statusOf(ChannelConfig.P_THRESHOLD));
+        assertEquals(ChannelConfig.PropertyStatus.CONFIGURED,
+                channel.statusOf(ChannelConfig.P_SIZE));
+        assertEquals(ChannelConfig.PropertyStatus.CONFIGURED,
+                channel.statusOf(ChannelConfig.P_SEGMENTATION));
+        assertEquals(ChannelConfig.PropertyStatus.COMMITTED,
+                channel.statusOf(ChannelConfig.P_INTENSITY));
+    }
+
+    @Test
+    public void segmentationObjectIncrementalSavePreservesPendingRawIntensityThreshold() throws Exception {
+        File project = temp.newFolder("segmentation-incremental-preserves-pending-intensity");
+        File binFolder = configurationDir(project);
+        ChannelConfigIO.write(binFolder, oneChannelDraftWithPendingThresholds("IBA1", "100", "222"));
+        CreateBinFileAnalysis.BinUserConfig cfg = oneChannelConfig("Default");
+        cfg.names.set(0, "IBA1");
+        cfg.objectThresholds.set(0, "999");
+        cfg.intensityThresholds.set(0, "999");
+        cfg.sizes.set(0, "12-34");
+        boolean[][] customSettings = new boolean[6][1];
+        customSettings[5][0] = true; // object segmentation only; no ROI/intensity threshold
+        Object step = firstInteractiveQcStep(new CreateBinFileAnalysis(), cfg, customSettings);
+
+        invokePersistInteractiveQcStep(new CreateBinFileAnalysis(), binFolder, cfg, customSettings, step);
+
+        ChannelConfig saved = ChannelConfigIO.read(binFolder);
+        ChannelConfig.Channel channel = saved.channels.get(0);
+        assertEquals("999", channel.threshold);
+        assertEquals("222", channel.intensityThreshold);
+        assertEquals(ChannelConfig.PropertyStatus.CONFIGURED,
+                channel.statusOf(ChannelConfig.P_THRESHOLD));
+        assertEquals(ChannelConfig.PropertyStatus.PENDING,
+                channel.statusOf(ChannelConfig.P_INTENSITY));
+    }
+
+    @Test
+    public void segmentationObjectIncrementalSavePreservesPendingRawValuesOnOtherChannels() throws Exception {
+        File project = temp.newFolder("segmentation-incremental-preserves-other-channel");
+        File binFolder = configurationDir(project);
+        ChannelConfigIO.write(binFolder, twoChannelDraftWithPendingThresholds(
+                new String[]{"IBA1", "GFAP"},
+                new String[]{"100", "200"},
+                new String[]{"222", "333"}));
+        CreateBinFileAnalysis.BinUserConfig cfg = twoChannelConfig();
+        cfg.names.set(0, "IBA1");
+        cfg.names.set(1, "GFAP");
+        cfg.objectThresholds.set(0, "999");
+        cfg.objectThresholds.set(1, "777");
+        cfg.intensityThresholds.set(0, "999");
+        cfg.intensityThresholds.set(1, "777");
+        cfg.sizes.set(0, "12-34");
+        cfg.sizes.set(1, "56-78");
+        boolean[][] customSettings = new boolean[6][2];
+        customSettings[5][0] = true; // object segmentation only on C1
+        Object step = firstInteractiveQcStep(new CreateBinFileAnalysis(), cfg, customSettings);
+
+        invokePersistInteractiveQcStep(new CreateBinFileAnalysis(), binFolder, cfg, customSettings, step);
+
+        ChannelConfig saved = ChannelConfigIO.read(binFolder);
+        ChannelConfig.Channel c1 = saved.channels.get(0);
+        ChannelConfig.Channel c2 = saved.channels.get(1);
+        assertEquals("999", c1.threshold);
+        assertEquals("222", c1.intensityThreshold);
+        assertEquals("200", c2.threshold);
+        assertEquals("333", c2.intensityThreshold);
+        assertEquals("100-Infinity", c2.size);
+        assertEquals(ChannelConfig.PropertyStatus.PENDING, c2.statusOf(ChannelConfig.P_THRESHOLD));
+        assertEquals(ChannelConfig.PropertyStatus.PENDING, c2.statusOf(ChannelConfig.P_INTENSITY));
+        assertEquals(ChannelConfig.PropertyStatus.PENDING, c2.statusOf(ChannelConfig.P_SIZE));
+    }
+
+    @Test
+    public void channelThresholdIncrementalSaveDoesNotPersistUnrequestedObjectThreshold() throws Exception {
+        File project = temp.newFolder("threshold-incremental-preserves-object");
+        File binFolder = configurationDir(project);
+        ChannelConfig seed = new ChannelConfig();
+        seed.complete = Boolean.FALSE;
+        ChannelConfig.Channel seededChannel = new ChannelConfig.Channel();
+        seededChannel.index = 0;
+        seededChannel.name = "IBA1";
+        seededChannel.color = "Green";
+        seededChannel.threshold = "321";
+        seededChannel.status.put(ChannelConfig.P_NAME, ChannelConfig.PropertyStatus.CONFIGURED);
+        seededChannel.status.put(ChannelConfig.P_COLOR, ChannelConfig.PropertyStatus.CONFIGURED);
+        seededChannel.status.put(ChannelConfig.P_MARKER, ChannelConfig.PropertyStatus.CONFIGURED);
+        seededChannel.status.put(ChannelConfig.P_THRESHOLD, ChannelConfig.PropertyStatus.PENDING);
+        seededChannel.status.put(ChannelConfig.P_SIZE, ChannelConfig.PropertyStatus.PENDING);
+        seededChannel.status.put(ChannelConfig.P_MINMAX, ChannelConfig.PropertyStatus.PENDING);
+        seededChannel.status.put(ChannelConfig.P_INTENSITY, ChannelConfig.PropertyStatus.PENDING);
+        seededChannel.status.put(ChannelConfig.P_SEGMENTATION, ChannelConfig.PropertyStatus.PENDING);
+        seededChannel.status.put(ChannelConfig.P_FILTER, ChannelConfig.PropertyStatus.PENDING);
+        seed.channels.add(seededChannel);
+        ChannelConfigIO.write(binFolder, seed);
+        CreateBinFileAnalysis.BinUserConfig cfg = oneChannelConfig("Default");
+        cfg.names.set(0, "IBA1");
+        cfg.objectThresholds.set(0, "999");
+        cfg.intensityThresholds.set(0, "888");
+        boolean[][] customSettings = new boolean[6][1];
+        customSettings[2][0] = true; // ROI/intensity threshold only; no object threshold
+        Object step = firstInteractiveQcStep(new CreateBinFileAnalysis(), cfg, customSettings);
+
+        invokePersistInteractiveQcStep(new CreateBinFileAnalysis(), binFolder, cfg, customSettings, step);
+
+        ChannelConfig saved = ChannelConfigIO.read(binFolder);
+        ChannelConfig.Channel channel = saved.channels.get(0);
+        assertEquals("321", channel.threshold);
+        assertEquals("888", channel.intensityThreshold);
+        assertEquals(ChannelConfig.PropertyStatus.PENDING,
+                channel.statusOf(ChannelConfig.P_THRESHOLD));
+        assertEquals(ChannelConfig.PropertyStatus.CONFIGURED,
+                channel.statusOf(ChannelConfig.P_INTENSITY));
+    }
+
+    @Test
+    public void channelThresholdIncrementalSavePreservesPendingRawValuesOnOtherChannels() throws Exception {
+        File project = temp.newFolder("threshold-incremental-preserves-other-channel");
+        File binFolder = configurationDir(project);
+        ChannelConfigIO.write(binFolder, twoChannelDraftWithPendingThresholds(
+                new String[]{"IBA1", "GFAP"},
+                new String[]{"100", "200"},
+                new String[]{"222", "333"}));
+        CreateBinFileAnalysis.BinUserConfig cfg = twoChannelConfig();
+        cfg.names.set(0, "IBA1");
+        cfg.names.set(1, "GFAP");
+        cfg.objectThresholds.set(0, "999");
+        cfg.objectThresholds.set(1, "777");
+        cfg.intensityThresholds.set(0, "888");
+        cfg.intensityThresholds.set(1, "666");
+        boolean[][] customSettings = new boolean[6][2];
+        customSettings[2][0] = true; // ROI/intensity threshold only on C1
+        Object step = firstInteractiveQcStep(new CreateBinFileAnalysis(), cfg, customSettings);
+
+        invokePersistInteractiveQcStep(new CreateBinFileAnalysis(), binFolder, cfg, customSettings, step);
+
+        ChannelConfig saved = ChannelConfigIO.read(binFolder);
+        ChannelConfig.Channel c1 = saved.channels.get(0);
+        ChannelConfig.Channel c2 = saved.channels.get(1);
+        assertEquals("100", c1.threshold);
+        assertEquals("888", c1.intensityThreshold);
+        assertEquals("200", c2.threshold);
+        assertEquals("333", c2.intensityThreshold);
+        assertEquals("100-Infinity", c2.size);
+        assertEquals(ChannelConfig.PropertyStatus.PENDING, c1.statusOf(ChannelConfig.P_THRESHOLD));
+        assertEquals(ChannelConfig.PropertyStatus.CONFIGURED, c1.statusOf(ChannelConfig.P_INTENSITY));
+        assertEquals(ChannelConfig.PropertyStatus.PENDING, c2.statusOf(ChannelConfig.P_THRESHOLD));
+        assertEquals(ChannelConfig.PropertyStatus.PENDING, c2.statusOf(ChannelConfig.P_INTENSITY));
+        assertEquals(ChannelConfig.PropertyStatus.PENDING, c2.statusOf(ChannelConfig.P_SIZE));
     }
 
     @Test
@@ -1182,6 +1670,64 @@ public class CreateBinFileAnalysisTest {
         assertEquals(77, result.getProcessor().get(0, 0));
     }
 
+    @Test
+    public void setupPreviewExtractsConfiguredThirdChannelFromUnderReportedStack() throws Exception {
+        File binFolder = temp.newFolder("third-channel-preview");
+        CreateBinFileAnalysis analysis = new CreateBinFileAnalysis();
+        CreateBinFileAnalysis.BinUserConfig cfg = threeChannelConfig();
+        ConfigQcContext context = ConfigQcContext.fromImages(
+                temp.getRoot(),
+                binFolder,
+                cfg,
+                Arrays.asList(underReportedThreeChannelStack("interleaved")),
+                cfg.names,
+                2);
+
+        ImagePlus extracted = invokeDuplicateCurrentChannel(analysis, context, 3);
+
+        assertEquals(1, extracted.getNChannels());
+        assertEquals(1, extracted.getStackSize());
+        assertEquals(33, extracted.getProcessor().get(0, 0));
+        assertEquals(34, extracted.getProcessor().get(1, 0));
+
+        ImagePlus firstChannel = invokeDuplicateCurrentChannel(analysis, context, 1);
+        assertEquals(1, firstChannel.getNChannels());
+        assertEquals(1, firstChannel.getStackSize());
+        assertEquals(11, firstChannel.getProcessor().get(0, 0));
+        assertEquals(12, firstChannel.getProcessor().get(1, 0));
+
+        Files.write(new File(binFolder, "C3_Filters.ijm").toPath(), new byte[0]);
+        ClassicalSegmentationStage stage = analysis.createClassicalSegmentationStage(cfg, binFolder, 2);
+        stage.buildControls(context, new NoopConfigQcActions());
+        stage.onEnter(context, new PreviewPairPanel("Original", "Objects"));
+        invokeStageTestMethod(stage, "setThresholdForTest",
+                new Class<?>[]{double.class, double.class},
+                new Object[]{Double.valueOf(20.0), Double.valueOf(255.0)});
+        assertTrue(stage.lockIn(context));
+        stage.onLeave(context);
+    }
+
+    @Test
+    public void setupPreviewFailsLoudlyWhenConfiguredChannelCannotBeExtracted() throws Exception {
+        CreateBinFileAnalysis analysis = new CreateBinFileAnalysis();
+        CreateBinFileAnalysis.BinUserConfig cfg = threeChannelConfig();
+        ConfigQcContext context = ConfigQcContext.fromImages(
+                temp.getRoot(),
+                temp.getRoot(),
+                cfg,
+                Arrays.asList(twoPlaneUnderReportedStack("bad interleaving")),
+                cfg.names,
+                2);
+
+        try {
+            invokeDuplicateCurrentChannel(analysis, context, 3);
+            assertTrue("Expected channel extraction to fail.", false);
+        } catch (java.lang.reflect.InvocationTargetException e) {
+            assertTrue(e.getCause() instanceof IllegalStateException);
+            assertTrue(e.getCause().getMessage().contains("Cannot extract C3"));
+        }
+    }
+
     private static File configurationDir(File dir) {
         return new File(dir, "FLASH/Config/.settings");
     }
@@ -1244,6 +1790,48 @@ public class CreateBinFileAnalysisTest {
         return ChannelConfigIO.fromBinConfig(cfg);
     }
 
+    private static ChannelConfig oneChannelDraftWithPendingThresholds(String name,
+                                                                      String objectThreshold,
+                                                                      String intensityThreshold) {
+        return twoChannelDraftWithPendingThresholds(
+                new String[]{name},
+                new String[]{objectThreshold},
+                new String[]{intensityThreshold});
+    }
+
+    private static ChannelConfig twoChannelDraftWithPendingThresholds(String[] names,
+                                                                      String[] objectThresholds,
+                                                                      String[] intensityThresholds) {
+        ChannelConfig cfg = new ChannelConfig();
+        cfg.complete = Boolean.FALSE;
+        int n = names == null ? 0 : names.length;
+        for (int i = 0; i < n; i++) {
+            ChannelConfig.Channel channel = new ChannelConfig.Channel();
+            channel.index = i;
+            channel.name = names[i];
+            channel.color = i == 0 ? "Green" : "Red";
+            channel.threshold = objectThresholds == null || i >= objectThresholds.length
+                    ? "default" : objectThresholds[i];
+            channel.intensityThreshold = intensityThresholds == null || i >= intensityThresholds.length
+                    ? "default" : intensityThresholds[i];
+            channel.size = "100-Infinity";
+            channel.minmax = "None";
+            channel.segmentationMethod = "classical";
+            channel.filterPreset = "Default";
+            channel.status.put(ChannelConfig.P_NAME, ChannelConfig.PropertyStatus.CONFIGURED);
+            channel.status.put(ChannelConfig.P_COLOR, ChannelConfig.PropertyStatus.CONFIGURED);
+            channel.status.put(ChannelConfig.P_MARKER, ChannelConfig.PropertyStatus.CONFIGURED);
+            channel.status.put(ChannelConfig.P_THRESHOLD, ChannelConfig.PropertyStatus.PENDING);
+            channel.status.put(ChannelConfig.P_SIZE, ChannelConfig.PropertyStatus.PENDING);
+            channel.status.put(ChannelConfig.P_MINMAX, ChannelConfig.PropertyStatus.PENDING);
+            channel.status.put(ChannelConfig.P_INTENSITY, ChannelConfig.PropertyStatus.PENDING);
+            channel.status.put(ChannelConfig.P_SEGMENTATION, ChannelConfig.PropertyStatus.PENDING);
+            channel.status.put(ChannelConfig.P_FILTER, ChannelConfig.PropertyStatus.PENDING);
+            cfg.channels.add(channel);
+        }
+        return cfg;
+    }
+
     private static CreateBinFileAnalysis.BinUserConfig twoChannelConfig() {
         return new CreateBinFileAnalysis.BinUserConfig(
                 new ArrayList<String>(Arrays.asList("Channel1", "Channel2")),
@@ -1253,6 +1841,47 @@ public class CreateBinFileAnalysisTest {
                 new ArrayList<String>(Arrays.asList("None", "None")),
                 new ArrayList<String>(Arrays.asList("Default", "Default")),
                 new ArrayList<String>(Arrays.asList("default", "default")));
+    }
+
+    private static CreateBinFileAnalysis.BinUserConfig threeChannelConfig() {
+        return new CreateBinFileAnalysis.BinUserConfig(
+                new ArrayList<String>(Arrays.asList("Channel1", "Channel2", "Channel3")),
+                new ArrayList<String>(Arrays.asList("Blue", "Green", "Magenta")),
+                new ArrayList<String>(Arrays.asList("default", "default", "default")),
+                new ArrayList<String>(Arrays.asList("100-Infinity", "100-Infinity", "100-Infinity")),
+                new ArrayList<String>(Arrays.asList("None", "None", "None")),
+                new ArrayList<String>(Arrays.asList("Default", "Default", "Default")),
+                new ArrayList<String>(Arrays.asList("default", "default", "default")));
+    }
+
+    private static ImagePlus underReportedThreeChannelStack(String title) {
+        ImageStack stack = new ImageStack(2, 1);
+        stack.addSlice("C1", byteSlice(11, 12));
+        stack.addSlice("C2", byteSlice(22, 23));
+        stack.addSlice("C3", byteSlice(33, 34));
+        return new ImagePlus(title, stack);
+    }
+
+    private static ImagePlus twoPlaneUnderReportedStack(String title) {
+        ImageStack stack = new ImageStack(2, 1);
+        stack.addSlice("Plane 1", byteSlice(11, 12));
+        stack.addSlice("Plane 2", byteSlice(22, 23));
+        return new ImagePlus(title, stack);
+    }
+
+    private static ImagePlus stackWithSlices(String title, int nSlices) {
+        ImageStack stack = new ImageStack(2, 1);
+        for (int i = 0; i < nSlices; i++) {
+            stack.addSlice("Z" + (i + 1), byteSlice(10 + i, 20 + i));
+        }
+        return new ImagePlus(title, stack);
+    }
+
+    private static ByteProcessor byteSlice(int first, int second) {
+        ByteProcessor processor = new ByteProcessor(2, 1);
+        processor.set(0, 0, first);
+        processor.set(1, 0, second);
+        return processor;
     }
 
     private static void markAllPending(ChannelConfig.Channel channel) {
@@ -1319,6 +1948,48 @@ public class CreateBinFileAnalysisTest {
                 "qcSelectionSettings", boolean[][].class, CreateBinFileAnalysis.BinUserConfig.class);
         method.setAccessible(true);
         return (boolean[][]) method.invoke(analysis, customSettings, cfg);
+    }
+
+    private static boolean invokeIsMinMaxSelectionMode(String mode) throws Exception {
+        Method method = CreateBinFileAnalysis.class.getDeclaredMethod(
+                "isMinMaxSelectionMode", String.class);
+        method.setAccessible(true);
+        return ((Boolean) method.invoke(null, mode)).booleanValue();
+    }
+
+    private static String invokeMinMaxRoleLabel(CreateBinFileAnalysis analysis, String role) throws Exception {
+        Method method = CreateBinFileAnalysis.class.getDeclaredMethod(
+                "minMaxRoleLabel", String.class);
+        method.setAccessible(true);
+        return (String) method.invoke(analysis, role);
+    }
+
+    private static List<?> invokeOpenQcSelections(CreateBinFileAnalysis analysis,
+                                                  DeferredImageSupplier supplier,
+                                                  File lifFile,
+                                                  List<Integer> selectedSeriesIndexes,
+                                                  CreateBinFileAnalysis.BinUserConfig cfg) throws Exception {
+        Method method = CreateBinFileAnalysis.class.getDeclaredMethod(
+                "openQcSelections",
+                DeferredImageSupplier.class,
+                File.class,
+                List.class,
+                CreateBinFileAnalysis.BinUserConfig.class,
+                Map.class);
+        method.setAccessible(true);
+        return (List<?>) method.invoke(
+                analysis,
+                supplier,
+                lifFile,
+                selectedSeriesIndexes,
+                cfg,
+                Collections.emptyMap());
+    }
+
+    private static Object selectionField(Object selection, String fieldName) throws Exception {
+        Field field = selection.getClass().getDeclaredField(fieldName);
+        field.setAccessible(true);
+        return field.get(selection);
     }
 
     private static String[] invokeFilterPresetOptions(CreateBinFileAnalysis analysis, File binFolder,
@@ -1443,6 +2114,13 @@ public class CreateBinFileAnalysisTest {
         return (String) method.invoke(analysis, cfg);
     }
 
+    private static String invokeMetadataOriginalName(File lifFile, SeriesMeta meta) throws Exception {
+        Method method = CreateBinFileAnalysis.class.getDeclaredMethod(
+                "metadataOriginalName", File.class, SeriesMeta.class);
+        method.setAccessible(true);
+        return (String) method.invoke(null, lifFile, meta);
+    }
+
     private static String invokeInteractiveSegmentationObjectQc(CreateBinFileAnalysis analysis,
                                                                 List<?> images,
                                                                 CreateBinFileAnalysis.BinUserConfig cfg,
@@ -1481,11 +2159,7 @@ public class CreateBinFileAnalysisTest {
     private static List<String> invokeInteractiveQcStepPlan(CreateBinFileAnalysis analysis,
                                                             CreateBinFileAnalysis.BinUserConfig cfg,
                                                             boolean[][] customSettings) throws Exception {
-        Method method = CreateBinFileAnalysis.class.getDeclaredMethod(
-                "buildInteractiveQcSteps", CreateBinFileAnalysis.BinUserConfig.class,
-                boolean[][].class);
-        method.setAccessible(true);
-        List<?> steps = (List<?>) method.invoke(analysis, cfg, customSettings);
+        List<?> steps = invokeInteractiveQcSteps(analysis, cfg, customSettings);
         List<String> names = new ArrayList<String>();
         for (Object step : steps) {
             Field stageField = step.getClass().getDeclaredField("stage");
@@ -1498,6 +2172,39 @@ public class CreateBinFileAnalysisTest {
         return names;
     }
 
+    private static List<?> invokeInteractiveQcSteps(CreateBinFileAnalysis analysis,
+                                                    CreateBinFileAnalysis.BinUserConfig cfg,
+                                                    boolean[][] customSettings) throws Exception {
+        Method method = CreateBinFileAnalysis.class.getDeclaredMethod(
+                "buildInteractiveQcSteps", CreateBinFileAnalysis.BinUserConfig.class,
+                boolean[][].class);
+        method.setAccessible(true);
+        return (List<?>) method.invoke(analysis, cfg, customSettings);
+    }
+
+    private static Object firstInteractiveQcStep(CreateBinFileAnalysis analysis,
+                                                 CreateBinFileAnalysis.BinUserConfig cfg,
+                                                 boolean[][] customSettings) throws Exception {
+        List<?> steps = invokeInteractiveQcSteps(analysis, cfg, customSettings);
+        assertFalse(steps.isEmpty());
+        return steps.get(0);
+    }
+
+    private static void invokePersistInteractiveQcStep(CreateBinFileAnalysis analysis,
+                                                       File binFolder,
+                                                       CreateBinFileAnalysis.BinUserConfig cfg,
+                                                       boolean[][] customSettings,
+                                                       Object step) throws Exception {
+        Method method = CreateBinFileAnalysis.class.getDeclaredMethod(
+                "persistInteractiveQcStep",
+                File.class,
+                CreateBinFileAnalysis.BinUserConfig.class,
+                boolean[][].class,
+                step.getClass());
+        method.setAccessible(true);
+        method.invoke(analysis, binFolder, cfg, customSettings, step);
+    }
+
     private static void invokeStageTestMethod(Object target,
                                               String methodName,
                                               Class<?>[] parameterTypes,
@@ -1505,6 +2212,36 @@ public class CreateBinFileAnalysisTest {
         Method method = target.getClass().getDeclaredMethod(methodName, parameterTypes);
         method.setAccessible(true);
         method.invoke(target, args);
+    }
+
+    private static ImagePlus invokeDuplicateCurrentChannel(CreateBinFileAnalysis analysis,
+                                                          ConfigQcContext context,
+                                                          int channelNum) throws Exception {
+        Method method = CreateBinFileAnalysis.class.getDeclaredMethod(
+                "duplicateCurrentChannel", ConfigQcContext.class, int.class);
+        method.setAccessible(true);
+        return (ImagePlus) method.invoke(analysis, context, Integer.valueOf(channelNum));
+    }
+
+    private static ChannelThresholdStage invokeCreateChannelThresholdStage(
+            CreateBinFileAnalysis analysis,
+            CreateBinFileAnalysis.BinUserConfig cfg,
+            File binFolder,
+            int channelIndex,
+            boolean mirrorObjectThreshold) throws Exception {
+        Method method = CreateBinFileAnalysis.class.getDeclaredMethod(
+                "createChannelThresholdStage",
+                CreateBinFileAnalysis.BinUserConfig.class,
+                File.class,
+                int.class,
+                boolean.class);
+        method.setAccessible(true);
+        return (ChannelThresholdStage) method.invoke(
+                analysis,
+                cfg,
+                binFolder,
+                Integer.valueOf(channelIndex),
+                Boolean.valueOf(mirrorObjectThreshold));
     }
 
     private static List<?> privateQcSelections(ImagePlus image) throws Exception {
@@ -1696,6 +2433,22 @@ public class CreateBinFileAnalysisTest {
         }
     }
 
+    private static final class StubDeferredImageSupplier extends DeferredImageSupplier {
+        private final Map<Integer, ImagePlus> images;
+
+        StubDeferredImageSupplier(Map<Integer, ImagePlus> images) {
+            super(Collections.singletonList(new File("stub.tif")), "stub");
+            this.images = images == null
+                    ? Collections.<Integer, ImagePlus>emptyMap()
+                    : images;
+        }
+
+        @Override
+        public ImagePlus openSeries(int seriesIndex) {
+            return images.get(Integer.valueOf(seriesIndex));
+        }
+    }
+
     private static final class ExposedEmbeddedDialogAnalysis extends CreateBinFileAnalysis {
         ConfigQcResult showForTest(ConfigQcContext context, List<ConfigQcStage> stages) {
             return super.showEmbeddedConfigQcDialog(context, stages);
@@ -1757,7 +2510,7 @@ public class CreateBinFileAnalysisTest {
         }
     }
 
-    private static final class RecordingFilteredAnalysis extends CreateBinFileAnalysis {
+    private static class RecordingFilteredAnalysis extends CreateBinFileAnalysis {
         final List<String> visited = new ArrayList<String>();
         Set<BinField> qcFields = Collections.emptySet();
 
@@ -1775,13 +2528,6 @@ public class CreateBinFileAnalysisTest {
                 c.colors.addAll(Arrays.asList("Grays", "Grays"));
             }
             return c;
-        }
-
-        @Override
-        protected boolean showFilteredFilterPresetsPage(String directory, File binFolder,
-                                                        BinUserConfig cfg) {
-            visited.add("filters");
-            return true;
         }
 
         @Override

@@ -1,32 +1,35 @@
 package flash.pipeline.deconv.engine;
 
 import flash.pipeline.deconv.DeconvolutionAvailability;
-import flash.pipeline.image.WindowManagerLock;
-import ij.IJ;
 import ij.ImagePlus;
-import ij.WindowManager;
-import ij.io.FileSaver;
+import ij.ImageStack;
 import ij.measure.Calibration;
+import ij.process.FloatProcessor;
 
-import java.io.File;
-import java.io.IOException;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.SimpleFileVisitor;
-import java.nio.file.attribute.BasicFileAttributes;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Set;
-import java.util.UUID;
 
+/**
+ * Drives DeconvolutionLab2 through its synchronous Java API
+ * ({@code deconvolution.Deconvolution.deconvolve(RealSignal, RealSignal)}).
+ *
+ * <p>The earlier implementation invoked the {@code "DeconvolutionLab2 Run"} macro command via
+ * {@link ij.IJ#run(String, String)}. That command launches the deconvolution on a background
+ * thread and opens DeconvolutionLab2's own "Monitor of run" table window. Because the macro call
+ * returned before the worker finished, the engine checked the ImageJ window list too early and
+ * reported "did not produce an output image", while the real output appeared later as an orphaned
+ * window and the monitor dialogs were left open. Calling the Java API directly is synchronous,
+ * needs no temporary files, opens no windows, and — with {@code -monitor no} — never creates the
+ * monitor dialogs.</p>
+ */
 public final class DeconvolutionLab2Engine implements DeconvolutionEngine {
 
-    private static final String COMMAND_NAME = "DeconvolutionLab2 Run";
     private static final List<Algorithm> SUPPORTED_ALGORITHMS = Collections.unmodifiableList(
             Arrays.asList(
                     Algorithm.RL,
@@ -39,7 +42,6 @@ public final class DeconvolutionLab2Engine implements DeconvolutionEngine {
     private static final LabApiStrategy DETECTED_LAB_API = detectLabApiStrategy();
 
     private final AvailabilityProbe availabilityProbe;
-    private final ImageJRunner imageJRunner;
     private final LabApiStrategy labApiStrategy;
 
     public DeconvolutionLab2Engine() {
@@ -50,53 +52,15 @@ public final class DeconvolutionLab2Engine implements DeconvolutionEngine {
                         return DeconvolutionAvailability.isDL2Available();
                     }
                 },
-                new ImageJRunner() {
-                    @Override
-                    public void run(String command, String options) {
-                        IJ.run(command, options);
-                    }
-
-                    @Override
-                    public int[] getWindowIds() {
-                        return WindowManager.getIDList();
-                    }
-
-                    @Override
-                    public ImagePlus getImage(int id) {
-                        return WindowManager.getImage(id);
-                    }
-
-                    @Override
-                    public ImagePlus getImage(String title) {
-                        return WindowManager.getImage(title);
-                    }
-
-                    @Override
-                    public void saveTiffStack(ImagePlus image, File target) throws IOException {
-                        FileSaver saver = new FileSaver(image);
-                        boolean ok = image.getStackSize() > 1
-                                ? saver.saveAsTiffStack(target.getAbsolutePath())
-                                : saver.saveAsTiff(target.getAbsolutePath());
-                        if (!ok) {
-                            throw new IOException("Failed to write TIFF stack to " + target.getAbsolutePath());
-                        }
-                    }
-                },
                 DETECTED_LAB_API
         );
     }
 
-    DeconvolutionLab2Engine(AvailabilityProbe availabilityProbe,
-                            ImageJRunner imageJRunner,
-                            LabApiStrategy labApiStrategy) {
+    DeconvolutionLab2Engine(AvailabilityProbe availabilityProbe, LabApiStrategy labApiStrategy) {
         if (availabilityProbe == null) {
             throw new IllegalArgumentException("availabilityProbe is required.");
         }
-        if (imageJRunner == null) {
-            throw new IllegalArgumentException("imageJRunner is required.");
-        }
         this.availabilityProbe = availabilityProbe;
-        this.imageJRunner = imageJRunner;
         this.labApiStrategy = labApiStrategy;
     }
 
@@ -134,36 +98,29 @@ public final class DeconvolutionLab2Engine implements DeconvolutionEngine {
         if (!isAvailable()) {
             throw new EnginePluginMissingException(displayName() + " is not available in this runtime.");
         }
+        if (labApiStrategy == null) {
+            throw new EnginePluginMissingException(
+                    "DeconvolutionLab2 is installed but its synchronous Java API "
+                            + "(deconvolution.Deconvolution / imagej.IJImager) could not be initialised in this runtime.");
+        }
 
-        Throwable apiFailure = null;
-        ImagePlus result = null;
-        if (labApiStrategy != null) {
-            try {
-                result = labApiStrategy.run(stack, psf, params);
-            } catch (Throwable t) {
-                apiFailure = t;
-                result = null;
+        ImagePlus result;
+        try {
+            result = labApiStrategy.run(stack, psf, params);
+        } catch (DeconvolutionException e) {
+            throw e;
+        } catch (Throwable t) {
+            if (isMissingDependencyFailure(t)) {
+                throw new EnginePluginMissingException(
+                        "DeconvolutionLab2 runtime classes are missing or unusable for " + displayName() + '.',
+                        t
+                );
             }
+            throw new DeconvolutionException("DeconvolutionLab2 deconvolution failed.", t);
         }
 
         if (result == null) {
-            try {
-                result = runMacroFallback(stack, psf, params);
-            } catch (Throwable t) {
-                if (apiFailure != null) {
-                    t.addSuppressed(apiFailure);
-                }
-                if (isMissingDependencyFailure(t)) {
-                    throw new EnginePluginMissingException(
-                            "DeconvolutionLab2 runtime classes are missing or unusable for " + displayName() + '.',
-                            t
-                    );
-                }
-                if (t instanceof DeconvolutionException) {
-                    throw (DeconvolutionException) t;
-                }
-                throw new DeconvolutionException("DeconvolutionLab2 deconvolution failed.", t);
-            }
+            throw new DeconvolutionException("DeconvolutionLab2 did not produce an output image.");
         }
 
         preserveMetadata(stack, result, stack.getShortTitle() + "-deconv-dl2");
@@ -171,60 +128,14 @@ public final class DeconvolutionLab2Engine implements DeconvolutionEngine {
         return result;
     }
 
-    private ImagePlus runMacroFallback(ImagePlus stack, ImagePlus psf, DeconvParams params)
-            throws DeconvolutionException {
-        File tempDir = new File(
-                System.getProperty("java.io.tmpdir"),
-                "ihf-deconv-" + UUID.randomUUID().toString()
-        );
-        File stackFile = new File(tempDir, "stack.tif");
-        File psfFile = new File(tempDir, "psf.tif");
-
-        try {
-            if (!tempDir.mkdirs() && !tempDir.isDirectory()) {
-                throw new IOException("Could not create temporary directory " + tempDir.getAbsolutePath());
-            }
-            imageJRunner.saveTiffStack(stack, stackFile);
-            imageJRunner.saveTiffStack(psf, psfFile);
-
-            WindowManagerLock.LOCK.lock();
-            int[] beforeIds = null;
-            try {
-                beforeIds = imageJRunner.getWindowIds();
-                imageJRunner.run(COMMAND_NAME, buildMacroOptions(stackFile, psfFile, params));
-                ImagePlus generated = findGeneratedImage(beforeIds, imageJRunner.getWindowIds(), imageJRunner);
-                if (generated == null) {
-                    throw new DeconvolutionException("DeconvolutionLab2 did not produce an output image.");
-                }
-                ImagePlus detached = generated.duplicate();
-                detached.setTitle(generated.getTitle());
-                disposeImage(generated);
-                return detached;
-            } finally {
-                closeNewImages(beforeIds, imageJRunner);
-                WindowManagerLock.LOCK.unlock();
-            }
-        } catch (IOException e) {
-            throw new DeconvolutionException("DeconvolutionLab2 temporary-file setup failed.", e);
-        } catch (DeconvolutionException e) {
-            throw e;
-        } catch (Throwable t) {
-            if (isMissingDependencyFailure(t)) {
-                throw new EnginePluginMissingException(
-                        "DeconvolutionLab2 is no longer available during macro execution.",
-                        t
-                );
-            }
-            throw new DeconvolutionException("DeconvolutionLab2 macro execution failed.", t);
-        } finally {
-            deleteRecursively(tempDir.toPath());
-        }
-    }
-
-    private static String buildMacroOptions(File stackFile, File psfFile, DeconvParams params) {
-        return "-image file " + macroPath(stackFile)
-                + " -psf file " + macroPath(psfFile)
-                + " -algorithm " + buildAlgorithmSpec(params);
+    /**
+     * Builds the DeconvolutionLab2 command string for an API run. No {@code -image}/{@code -psf}
+     * (the signals are passed directly) and no {@code -out} (the result is returned in memory), so
+     * nothing is read from or written to disk and no image window is shown. {@code -monitor no}
+     * suppresses the "Monitor of run" table window; {@code -verbose mute} silences console logging.
+     */
+    static String buildApiCommand(DeconvParams params) {
+        return "-algorithm " + buildAlgorithmSpec(params) + " -monitor no -verbose mute";
     }
 
     private static String buildAlgorithmSpec(DeconvParams params) {
@@ -242,10 +153,6 @@ public final class DeconvolutionLab2Engine implements DeconvolutionEngine {
             default:
                 throw new IllegalArgumentException("Unsupported algorithm for DL2: " + params.getAlgorithm());
         }
-    }
-
-    private static String macroPath(File file) {
-        return file.getAbsolutePath().replace('\\', '/');
     }
 
     private static void validateInputs(ImagePlus stack, ImagePlus psf, DeconvParams params) {
@@ -284,70 +191,8 @@ public final class DeconvolutionLab2Engine implements DeconvolutionEngine {
         }
     }
 
-    private static ImagePlus findGeneratedImage(int[] beforeIds, int[] afterIds, ImageJRunner imageJRunner) {
-        if (afterIds == null || afterIds.length == 0) return null;
-        Set<Integer> seen = new HashSet<Integer>();
-        if (beforeIds != null) {
-            for (int id : beforeIds) {
-                seen.add(Integer.valueOf(id));
-            }
-        }
-        for (int i = afterIds.length - 1; i >= 0; i--) {
-            int id = afterIds[i];
-            if (seen.contains(Integer.valueOf(id))) continue;
-            ImagePlus image = imageJRunner.getImage(id);
-            if (image != null) return image;
-        }
-        return null;
-    }
-
-    private static void closeNewImages(int[] beforeIds, ImageJRunner imageJRunner) {
-        if (beforeIds == null || imageJRunner == null) return;
-        Set<Integer> seen = new HashSet<Integer>();
-        for (int id : beforeIds) {
-            seen.add(Integer.valueOf(id));
-        }
-        int[] afterIds = imageJRunner.getWindowIds();
-        if (afterIds == null) return;
-        for (int id : afterIds) {
-            if (seen.contains(Integer.valueOf(id))) continue;
-            disposeImage(imageJRunner.getImage(id));
-        }
-    }
-
-    private static void disposeImage(ImagePlus image) {
-        if (image == null) return;
-        image.changes = false;
-        try {
-            image.close();
-        } finally {
-            image.flush();
-        }
-    }
-
     private static String formatDouble(double value) {
         return String.format(Locale.ROOT, "%.6f", value);
-    }
-
-    private static void deleteRecursively(Path root) {
-        if (root == null || !Files.exists(root)) return;
-        try {
-            Files.walkFileTree(root, new SimpleFileVisitor<Path>() {
-                @Override
-                public java.nio.file.FileVisitResult visitFile(Path file, BasicFileAttributes attrs)
-                        throws IOException {
-                    Files.deleteIfExists(file);
-                    return java.nio.file.FileVisitResult.CONTINUE;
-                }
-
-                @Override
-                public java.nio.file.FileVisitResult postVisitDirectory(Path dir, IOException exc)
-                        throws IOException {
-                    Files.deleteIfExists(dir);
-                    return java.nio.file.FileVisitResult.CONTINUE;
-                }
-            });
-        } catch (IOException ignored) {}
     }
 
     private static boolean isMissingDependencyFailure(Throwable t) {
@@ -367,174 +212,118 @@ public final class DeconvolutionLab2Engine implements DeconvolutionEngine {
         boolean isAvailable();
     }
 
-    interface ImageJRunner {
-        void run(String command, String options);
-        int[] getWindowIds();
-        ImagePlus getImage(int id);
-        ImagePlus getImage(String title);
-        void saveTiffStack(ImagePlus image, File target) throws IOException;
-    }
-
     interface LabApiStrategy {
         ImagePlus run(ImagePlus stack, ImagePlus psf, DeconvParams params) throws Exception;
     }
 
     private static LabApiStrategy detectLabApiStrategy() {
-        try {
-            Class<?> labClass = Class.forName("deconvolutionlab.Lab", false, lookupClassLoader());
-            for (Method method : labClass.getMethods()) {
-                if (!"run".equals(method.getName())) continue;
-                if (!Modifier.isStatic(method.getModifiers())) continue;
-                Class<?>[] parameterTypes = method.getParameterTypes();
-                if (parameterTypes.length == 3
-                        && ImagePlus.class.isAssignableFrom(parameterTypes[0])
-                        && ImagePlus.class.isAssignableFrom(parameterTypes[1])
-                        && parameterTypes[2] == String.class) {
-                    method.setAccessible(true);
-                    return new ImagePlusLabApiStrategy(method);
-                }
-                if (parameterTypes.length == 3
-                        && parameterTypes[0] == String.class
-                        && parameterTypes[1] == String.class
-                        && parameterTypes[2] == String.class) {
-                    method.setAccessible(true);
-                    return new PathLabApiStrategy(method);
-                }
-            }
-        } catch (Throwable ignored) {}
-        return null;
+        return DeconvolutionRunnerStrategy.tryCreate();
     }
 
-    private static final class ImagePlusLabApiStrategy implements LabApiStrategy {
-        private final Method method;
+    /**
+     * Reflective bridge to DeconvolutionLab2's synchronous Java API. DeconvolutionLab2 ships as a
+     * Fiji runtime plugin and is not on the Maven compile classpath, so every call is made through
+     * reflection. All referenced classes ({@code imagej.IJImager}, {@code deconvolution.Deconvolution},
+     * {@code signal.RealSignal}) live in the same jar as {@code deconvolutionlab.Lab}, which the
+     * availability probe already requires, so they resolve together or not at all.
+     */
+    private static final class DeconvolutionRunnerStrategy implements LabApiStrategy {
+        private final Method createSignal;      // static signal.RealSignal imagej.IJImager.create(ImagePlus)
+        private final Constructor<?> deconCtor; // deconvolution.Deconvolution(String name, String command)
+        private final Method deconvolveSignals; // signal.RealSignal deconvolve(RealSignal image, RealSignal psf)
+        private final Method getXY;             // float[] signal.RealSignal.getXY(int z)
+        private final Field nxField;
+        private final Field nyField;
+        private final Field nzField;
 
-        private ImagePlusLabApiStrategy(Method method) {
-            this.method = method;
+        private DeconvolutionRunnerStrategy(Method createSignal,
+                                            Constructor<?> deconCtor,
+                                            Method deconvolveSignals,
+                                            Method getXY,
+                                            Field nxField,
+                                            Field nyField,
+                                            Field nzField) {
+            this.createSignal = createSignal;
+            this.deconCtor = deconCtor;
+            this.deconvolveSignals = deconvolveSignals;
+            this.getXY = getXY;
+            this.nxField = nxField;
+            this.nyField = nyField;
+            this.nzField = nzField;
+        }
+
+        static DeconvolutionRunnerStrategy tryCreate() {
+            try {
+                ClassLoader loader = lookupClassLoader();
+                Class<?> imagerClass = Class.forName("imagej.IJImager", false, loader);
+                Class<?> deconClass = Class.forName("deconvolution.Deconvolution", false, loader);
+                Class<?> signalClass = Class.forName("signal.RealSignal", false, loader);
+
+                Method create = imagerClass.getMethod("create", ImagePlus.class);
+                if (!Modifier.isStatic(create.getModifiers())
+                        || !signalClass.isAssignableFrom(create.getReturnType())) {
+                    return null;
+                }
+                Constructor<?> ctor = deconClass.getConstructor(String.class, String.class);
+                Method deconvolve = deconClass.getMethod("deconvolve", signalClass, signalClass);
+                if (!signalClass.isAssignableFrom(deconvolve.getReturnType())) {
+                    return null;
+                }
+                Method getXY = signalClass.getMethod("getXY", int.class);
+                Field nx = signalClass.getField("nx");
+                Field ny = signalClass.getField("ny");
+                Field nz = signalClass.getField("nz");
+
+                create.setAccessible(true);
+                deconvolve.setAccessible(true);
+                getXY.setAccessible(true);
+                return new DeconvolutionRunnerStrategy(create, ctor, deconvolve, getXY, nx, ny, nz);
+            } catch (Throwable ignored) {
+                return null;
+            }
         }
 
         @Override
         public ImagePlus run(ImagePlus stack, ImagePlus psf, DeconvParams params) throws Exception {
-            ImagePlus stackCopy = stack.duplicate();
-            ImagePlus psfCopy = psf.duplicate();
-            Object raw = null;
-            ImagePlus rawImage = null;
-            int[] beforeIds = snapshotWindowIds();
-            try {
-                raw = method.invoke(null, stackCopy, psfCopy, buildAlgorithmSpec(params));
-                rawImage = coerceImagePlus(raw);
-                if (rawImage == null) return null;
-                ImagePlus detached = rawImage.duplicate();
-                detached.setTitle(rawImage.getTitle());
-                return detached;
-            } finally {
-                if (rawImage != null && rawImage != stackCopy && rawImage != psfCopy) {
-                    disposeImage(rawImage);
-                }
-                if (stackCopy != rawImage) {
-                    disposeImage(stackCopy);
-                }
-                if (psfCopy != rawImage) {
-                    disposeImage(psfCopy);
-                }
-                closeNewImages(beforeIds);
+            String title = stack.getShortTitle() + "-deconv-dl2";
+            Object imageSignal = createSignal.invoke(null, stack);
+            Object psfSignal = createSignal.invoke(null, psf);
+            Object decon = deconCtor.newInstance(title, buildApiCommand(params));
+            Object output = deconvolveSignals.invoke(decon, imageSignal, psfSignal);
+            if (output == null) {
+                return null;
             }
-        }
-    }
-
-    private static final class PathLabApiStrategy implements LabApiStrategy {
-        private final Method method;
-
-        private PathLabApiStrategy(Method method) {
-            this.method = method;
+            return signalToImagePlus(output, title);
         }
 
-        @Override
-        public ImagePlus run(ImagePlus stack, ImagePlus psf, DeconvParams params) throws Exception {
-            File tempDir = new File(
-                    System.getProperty("java.io.tmpdir"),
-                    "ihf-deconv-" + UUID.randomUUID().toString()
-            );
-            File stackFile = new File(tempDir, "stack.tif");
-            File psfFile = new File(tempDir, "psf.tif");
-            int[] beforeIds = null;
-            try {
-                if (!tempDir.mkdirs() && !tempDir.isDirectory()) {
-                    throw new IOException("Could not create temporary directory " + tempDir.getAbsolutePath());
+        /**
+         * Converts a DeconvolutionLab2 {@code RealSignal} back into an in-memory float ImagePlus.
+         * {@code IJImager.create} populates the signal via {@code setXY(z, processor.getPixels())},
+         * so each {@code getXY(z)} slice is already in ImageJ's row-major float layout and maps
+         * directly onto a {@link FloatProcessor}. No window is shown.
+         */
+        private ImagePlus signalToImagePlus(Object signal, String title) throws Exception {
+            int nx = nxField.getInt(signal);
+            int ny = nyField.getInt(signal);
+            int nz = nzField.getInt(signal);
+            if (nx <= 0 || ny <= 0 || nz <= 0) {
+                return null;
+            }
+            int planeSize = nx * ny;
+            ImageStack stack = new ImageStack(nx, ny);
+            for (int z = 0; z < nz; z++) {
+                Object raw = getXY.invoke(signal, Integer.valueOf(z));
+                float[] pixels = raw instanceof float[] ? (float[]) raw : null;
+                if (pixels == null || pixels.length != planeSize) {
+                    float[] resized = new float[planeSize];
+                    if (pixels != null) {
+                        System.arraycopy(pixels, 0, resized, 0, Math.min(pixels.length, planeSize));
+                    }
+                    pixels = resized;
                 }
-                saveTiff(stack, stackFile, "stack");
-                saveTiff(psf, psfFile, "PSF");
-                beforeIds = snapshotWindowIds();
-                Object raw = method.invoke(
-                        null,
-                        stackFile.getAbsolutePath(),
-                        psfFile.getAbsolutePath(),
-                        buildAlgorithmSpec(params)
-                );
-                ImagePlus image = coerceImagePlus(raw);
-                if (image == null) return null;
-                ImagePlus detached = image.duplicate();
-                detached.setTitle(image.getTitle());
-                if (detached != image) {
-                    disposeImage(image);
-                }
-                return detached;
-            } finally {
-                closeNewImages(beforeIds);
-                deleteRecursively(tempDir.toPath());
+                stack.addSlice(new FloatProcessor(nx, ny, pixels, null));
             }
-        }
-    }
-
-    private static void saveTiff(ImagePlus image, File target, String label) throws IOException {
-        FileSaver saver = new FileSaver(image);
-        boolean ok = image.getStackSize() > 1
-                ? saver.saveAsTiffStack(target.getAbsolutePath())
-                : saver.saveAsTiff(target.getAbsolutePath());
-        if (!ok) {
-            throw new IOException("Failed to write " + label + " TIFF for DeconvolutionLab2.");
-        }
-    }
-
-    private static ImagePlus coerceImagePlus(Object raw) {
-        if (raw == null) return null;
-        if (raw instanceof ImagePlus) {
-            return (ImagePlus) raw;
-        }
-        if (raw instanceof String) {
-            ImagePlus byTitle = WindowManager.getImage((String) raw);
-            if (byTitle != null) return byTitle;
-            File maybeFile = new File((String) raw);
-            if (maybeFile.isFile()) {
-                return IJ.openImage(maybeFile.getAbsolutePath());
-            }
-            return null;
-        }
-        try {
-            Method getImagePlus = raw.getClass().getMethod("getImagePlus");
-            Object value = getImagePlus.invoke(raw);
-            if (value instanceof ImagePlus) {
-                return (ImagePlus) value;
-            }
-        } catch (Throwable ignored) {}
-        return null;
-    }
-
-    private static int[] snapshotWindowIds() {
-        int[] ids = WindowManager.getIDList();
-        return ids == null ? new int[0] : ids;
-    }
-
-    private static void closeNewImages(int[] beforeIds) {
-        if (beforeIds == null) return;
-        Set<Integer> seen = new HashSet<Integer>();
-        for (int id : beforeIds) {
-            seen.add(Integer.valueOf(id));
-        }
-        int[] afterIds = WindowManager.getIDList();
-        if (afterIds == null) return;
-        for (int id : afterIds) {
-            if (seen.contains(Integer.valueOf(id))) continue;
-            disposeImage(WindowManager.getImage(id));
+            return new ImagePlus(title, stack);
         }
     }
 
