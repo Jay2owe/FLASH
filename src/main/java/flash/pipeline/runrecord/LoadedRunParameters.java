@@ -73,6 +73,9 @@ public final class LoadedRunParameters {
             "channels", "object_thresholds", "particle_sizes",
             "segmentation_methods", "filter_presets");
 
+    public static final Set<String> LINE_DISTANCE_KEYS = keys(
+            "line_sets", "draw_new", "landmark", "custom_name", "draw_on_subset");
+
     private LoadedRunParameters() {
     }
 
@@ -240,6 +243,66 @@ public final class LoadedRunParameters {
             }
         }
         return new Result(applied, ignored);
+    }
+
+    /**
+     * Parses a Line Distance run's stored parameters into the dialog selections
+     * it should restore. {@code line_sets} accepts either a {@code List} (as the
+     * GUI capture writes) or a single comma-separated {@code String} (as
+     * {@code LineDistanceAnalysisCommand} writes), so both record shapes load.
+     * Unknown/missing keys default safely and never throw.
+     */
+    public static ValueLoad<LineDistanceSelections> lineDistanceSelections(Map<String, Object> parameters) {
+        List<String> sets = stringListOrCsv(parameters == null ? null : parameters.get("line_sets"));
+        boolean drawNew = booleanValue(parameters == null ? null : parameters.get("draw_new"), false);
+        boolean drawOnSubset = booleanValue(parameters == null ? null : parameters.get("draw_on_subset"), false);
+        String landmark = trimmedOrNull(parameters == null ? null : parameters.get("landmark"));
+        String customName = trimmedOrNull(parameters == null ? null : parameters.get("custom_name"));
+        LineDistanceSelections value = new LineDistanceSelections(
+                sets, drawNew, landmark, customName, drawOnSubset);
+        return new ValueLoad<LineDistanceSelections>(value,
+                resultForKnownKeys(parameters, LINE_DISTANCE_KEYS));
+    }
+
+    private static List<String> stringListOrCsv(Object value) {
+        List<String> out = new ArrayList<String>();
+        if (value == null) {
+            return out;
+        }
+        if (value instanceof List<?> || value.getClass().isArray()) {
+            for (Object item : asList(value)) {
+                if (item == null) continue;
+                String token = String.valueOf(item).trim();
+                if (!token.isEmpty()) out.add(token);
+            }
+            return out;
+        }
+        for (String part : String.valueOf(value).split(",")) {
+            String token = part == null ? "" : part.trim();
+            if (!token.isEmpty()) out.add(token);
+        }
+        return out;
+    }
+
+    private static boolean booleanValue(Object value, boolean fallback) {
+        if (value instanceof Boolean) {
+            return ((Boolean) value).booleanValue();
+        }
+        if (value == null) {
+            return fallback;
+        }
+        String text = String.valueOf(value).trim();
+        if (text.equalsIgnoreCase("true")) return true;
+        if (text.equalsIgnoreCase("false")) return false;
+        return fallback;
+    }
+
+    private static String trimmedOrNull(Object value) {
+        if (value == null) {
+            return null;
+        }
+        String text = String.valueOf(value).trim();
+        return text.isEmpty() ? null : text;
     }
 
     public static Set<String> keys(String... names) {
@@ -483,6 +546,28 @@ public final class LoadedRunParameters {
         public ValueLoad(T value, Result result) {
             this.value = value;
             this.result = result == null ? Result.empty() : result;
+        }
+    }
+
+    /** Restorable Line Distance dialog selections parsed from a run record. */
+    public static final class LineDistanceSelections {
+        public final List<String> selectedSets;
+        public final boolean drawNew;
+        public final String landmark;
+        public final String customName;
+        public final boolean drawOnSubset;
+
+        public LineDistanceSelections(List<String> selectedSets, boolean drawNew,
+                                      String landmark, String customName, boolean drawOnSubset) {
+            List<String> copy = new ArrayList<String>();
+            if (selectedSets != null) {
+                copy.addAll(selectedSets);
+            }
+            this.selectedSets = Collections.unmodifiableList(copy);
+            this.drawNew = drawNew;
+            this.landmark = landmark;
+            this.customName = customName;
+            this.drawOnSubset = drawOnSubset;
         }
     }
 

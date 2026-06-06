@@ -224,15 +224,19 @@ public class LineDistanceAnalysis implements Analysis, RunRecordAware {
         pd.addHeader("Line Set Selection");
 
         final List<ToggleSwitch> existingToggles = new ArrayList<ToggleSwitch>();
+        ToggleSwitch drawNewToggleLocal = null;
         if (hasExisting) {
             pd.addMessage("Existing line sets found:");
             for (String name : existingSetNames) {
                 existingToggles.add(pd.addToggle(name, true));
             }
-            pd.addToggle("Draw New Line Set", false);
+            drawNewToggleLocal = pd.addToggle("Draw New Line Set", false);
         } else {
             pd.addMessage("No existing line sets found. A new set will be drawn.");
         }
+        // Effectively-final handle so the "Load settings from previous run"
+        // applier (below) can re-tick this toggle. Only present when hasExisting.
+        final ToggleSwitch drawNewToggle = drawNewToggleLocal;
 
         pd.addHeader("New Line Set Name");
         final JComboBox<String> vocabCombo = pd.addChoice(
@@ -310,6 +314,8 @@ public class LineDistanceAnalysis implements Analysis, RunRecordAware {
         String resolvedName = resolveTargetName(vocabCombo, customField);
         boolean drawOnSubset = zSliceSourceChoice != null
                 && "Configured analysis subset".equals(zSliceSourceChoice.getSelectedItem());
+
+        recordLineDistanceRunParameters(selectedSets, drawNew, vocabCombo, customField, drawOnSubset);
 
         // ── Step 1: Draw Lines (if toggled on) ───────────────────────
         // REGRESSION GUARD: selecting "Draw New Line Set" must start the drawing handoff before measurement.
@@ -394,6 +400,46 @@ public class LineDistanceAnalysis implements Analysis, RunRecordAware {
                 parameters, Collections.<String>emptySet());
         LoadedRunParameters.rememberLastResult(result);
         return result;
+    }
+
+    /**
+     * Capture the confirmed Line Distance dialog selections into the run record
+     * so a later "Load settings from previous run" can restore them. Keys mirror
+     * {@code LoadedRunParameters.LINE_DISTANCE_KEYS}. No-op when no run-record
+     * context is active (CLI/headless/command runs record via the command).
+     */
+    private void recordLineDistanceRunParameters(List<String> selectedSets, boolean drawNew,
+                                                 JComboBox<String> vocabCombo, JTextField customField,
+                                                 boolean drawOnSubset) {
+        if (runRecordContext == null) {
+            return;
+        }
+        try {
+            Map<String, Object> params = new LinkedHashMap<String, Object>();
+            params.put("line_sets", new ArrayList<String>(
+                    selectedSets == null ? Collections.<String>emptyList() : selectedSets));
+            params.put("draw_new", Boolean.valueOf(drawNew));
+            String landmark = selectedComboLabel(vocabCombo);
+            if (landmark != null) {
+                params.put("landmark", landmark);
+            }
+            if (customField != null && customField.getText() != null
+                    && !customField.getText().trim().isEmpty()) {
+                params.put("custom_name", customField.getText().trim());
+            }
+            params.put("draw_on_subset", Boolean.valueOf(drawOnSubset));
+            runRecordContext.recordParameters(params);
+        } catch (RuntimeException e) {
+            IJ.log("[FLASH] Could not capture Line Distance run parameters: " + e.getMessage());
+        }
+    }
+
+    private static String selectedComboLabel(JComboBox<String> combo) {
+        if (combo == null || combo.getSelectedItem() == null) {
+            return null;
+        }
+        String text = String.valueOf(combo.getSelectedItem()).trim();
+        return text.isEmpty() ? null : text;
     }
 
     /**
