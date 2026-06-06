@@ -12,7 +12,9 @@ import flash.pipeline.naming.ImageOrientationResolver;
 import flash.pipeline.naming.NameParts;
 import flash.pipeline.naming.OrientationManifestRow;
 import flash.pipeline.naming.ResolvedImageMetadata;
+import flash.pipeline.orientation.OrientationBatchController;
 import flash.pipeline.orientation.OrientationImageIdentity;
+import flash.pipeline.orientation.OrientationPresetStore;
 import flash.pipeline.orientation.OrientationTransformState;
 import flash.pipeline.orientation.RoiOrientationManifestService;
 import flash.pipeline.results.CsvAppend;
@@ -289,6 +291,9 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
         ResultsTable roiProps = new ResultsTable();
         RoiOrientationManifestService orientationManifestService =
                 new RoiOrientationManifestService(directory);
+        OrientationPresetStore presetStore = new OrientationPresetStore(directory);
+        OrientationBatchController orientationController =
+                new OrientationBatchController(presetStore, totalImages);
 
         RoiSeriesRange range = RoiSeriesRange.forMode(createNew, rm.getCount(), totalImages);
         if (range.imageCountToProcess == 0) {
@@ -343,6 +348,8 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
                 continue;
             }
             if (prep == null) continue;
+            orientationController.bindCurrent(currentImageFor(prep), i);
+            orientationController.applyActiveRuleOnOpen();
 
             // Queue next images for preparation
             for (int k = i + 1; k < Math.min(i + 1 + lookahead, totalImages); k++) {
@@ -368,7 +375,8 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
             placeRoiImageWindowNearImageJ(prep.maxProjection, imageJWindow);
             RoiOrientationPanel drawDialog =
                     new RoiOrientationPanel(imageJWindow, createOrientationTarget(prep),
-                            "Image " + (i + 1) + "/" + totalImages, imgTitle);
+                            "Image " + (i + 1) + "/" + totalImages, imgTitle,
+                            orientationController);
 
             try {
                 // Auto-select freehand tool and open ROI Manager
@@ -629,6 +637,40 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
         IJ.run("Close All");
     }
 
+    OrientationBatchController.CurrentImage currentImageFor(final PreparedImage prep) {
+        return new OrientationBatchController.CurrentImage() {
+            @Override
+            public OrientationManifestRow.Hemisphere hemisphere() {
+                return hemisphereFor(prep);
+            }
+
+            @Override
+            public OrientationTransformState state() {
+                return prep == null || prep.transformState == null
+                        ? OrientationTransformState.identity()
+                        : prep.transformState;
+            }
+
+            @Override
+            public void applyState(OrientationTransformState next) {
+                if (prep == null) return;
+                OrientationTransformState safeNext = next == null
+                        ? OrientationTransformState.identity()
+                        : next;
+                if (sameTransformState(prep.transformState, safeNext)) {
+                    return;
+                }
+                clearUnsavedRoiAfterOrientationChange(prep);
+                prep.transformState = safeNext;
+                if (isPreparedImageShown(prep)) {
+                    rebuildDisplayedImages(prep);
+                } else {
+                    renderPreparedForState(prep, safeNext);
+                }
+            }
+        };
+    }
+
     private RoiOrientationPanel.OrientationActionTarget createOrientationTarget(
             final PreparedImage prep) {
         return new RoiOrientationPanel.OrientationActionTarget() {
@@ -653,13 +695,7 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
 
             @Override
             public void clearUnsavedRoiAfterOrientationChange() {
-                ImagePlus max = prep == null ? null : prep.maxProjection;
-                if (max != null && max.getRoi() != null) {
-                    max.deleteRoi();
-                    max.updateAndDraw();
-                    IJ.log("[DrawROIs] Orientation changed after ROI drawing; "
-                            + "cleared unsaved ROI so it can be redrawn.");
-                }
+                DrawAndSaveROIsAnalysis.clearUnsavedRoiAfterOrientationChange(prep);
             }
 
             @Override
@@ -696,18 +732,37 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
 
     private void rebuildDisplayedImages(PreparedImage prep) {
         if (prep == null) return;
-        ImagePlus source = prep.original == null ? prep.roiStack : prep.original;
-        if (source == null) return;
 
         ImagePlus oldMax = prep.maxProjection;
-        ImagePlus oldStack = prep.roiStack;
         Point windowLocation = imageWindowLocation(oldMax);
+        if (!renderPreparedForState(prep, prep.transformState)) {
+            return;
+        }
+
+        prep.maxProjection.show();
+        if (windowLocation != null && prep.maxProjection.getWindow() != null) {
+            prep.maxProjection.getWindow().setLocation(windowLocation);
+        }
+        IJ.setTool(Toolbar.FREEROI);
+    }
+
+    static boolean renderPreparedForState(PreparedImage prep,
+                                          OrientationTransformState state) {
+        if (prep == null || prep.original == null) return false;
+        ImagePlus oldMax = prep.maxProjection;
+        ImagePlus oldStack = prep.roiStack;
         double displayMin = oldMax == null ? Double.NaN : oldMax.getDisplayRangeMin();
         double displayMax = oldMax == null ? Double.NaN : oldMax.getDisplayRangeMax();
 
-        ImagePlus nextStack = ImageOps.duplicateThreadSafe(source);
-        if (nextStack == null) return;
+        OrientationTransformState safeState = state == null
+                ? OrientationTransformState.identity()
+                : state;
+        ImagePlus nextStack = ImageOps.duplicateThreadSafe(prep.original, 1, 1,
+                1, Math.max(1, prep.original.getNSlices()),
+                1, Math.max(1, prep.original.getNFrames()));
+        if (nextStack == null) return false;
         nextStack.setTitle("delete");
+        prep.transformState = safeState;
         prep.applyCurrentTransformTo(nextStack);
         ImagePlus nextMax = ZProjector.run(nextStack, "max");
         nextMax.setTitle("MAX_delete");
@@ -720,18 +775,50 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
         }
         applyRoiDisplayLut(nextMax, effectiveRoiLutName(prep));
 
-        closeImageNoPrompt(oldMax);
-        if (oldStack != source) {
-            closeImageNoPrompt(oldStack);
-        }
-
         prep.roiStack = nextStack;
         prep.maxProjection = nextMax;
-        nextMax.show();
-        if (windowLocation != null && nextMax.getWindow() != null) {
-            nextMax.getWindow().setLocation(windowLocation);
+        closeImageNoPrompt(oldMax);
+        if (oldStack != null && oldStack != prep.original) {
+            closeImageNoPrompt(oldStack);
         }
-        IJ.setTool(Toolbar.FREEROI);
+        return true;
+    }
+
+    static OrientationManifestRow.Hemisphere hemisphereFor(PreparedImage prep) {
+        if (prep == null) return OrientationManifestRow.Hemisphere.UNKNOWN;
+        String value = "";
+        if (prep.parts != null && prep.parts.hemisphere != null
+                && !prep.parts.hemisphere.trim().isEmpty()) {
+            value = prep.parts.hemisphere;
+        } else if (prep.seedMetadata != null) {
+            value = prep.seedMetadata.hemisphere;
+        }
+        return OrientationManifestRow.Hemisphere.fromCsv(value);
+    }
+
+    private static boolean isPreparedImageShown(PreparedImage prep) {
+        return prep != null
+                && prep.maxProjection != null
+                && prep.maxProjection.getWindow() != null;
+    }
+
+    private static void clearUnsavedRoiAfterOrientationChange(PreparedImage prep) {
+        ImagePlus max = prep == null ? null : prep.maxProjection;
+        if (max != null && max.getRoi() != null) {
+            max.deleteRoi();
+            max.updateAndDraw();
+            IJ.log("[DrawROIs] Orientation changed after ROI drawing; "
+                    + "cleared unsaved ROI so it can be redrawn.");
+        }
+    }
+
+    private static boolean sameTransformState(OrientationTransformState a,
+                                              OrientationTransformState b) {
+        if (a == b) return true;
+        if (a == null || b == null) return false;
+        return a.rotateDegrees == b.rotateDegrees
+                && a.flipHorizontal == b.flipHorizontal
+                && a.flipVertical == b.flipVertical;
     }
 
     static OrientationManifestRow saveOrientationDecision(
@@ -1209,28 +1296,11 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
             OrientationTransformState transformState =
                     OrientationTransformState.fromMetadata(metadata);
 
-            // Since we only loaded one channel, we duplicate from channel 1
-            ImagePlus roiStack = ImageOps.duplicateThreadSafe(imp, 1, 1,
-                    1, imp.getNSlices(), 1, imp.getNFrames());
-            roiStack.setTitle("delete");
-            OrientationOps.applyTransform(
-                    roiStack,
-                    transformState.rotateDegrees.degrees(),
-                    transformState.flipHorizontal,
-                    transformState.flipVertical,
-                    metadata.hemisphere,
-                    OrientationManifestRow.ViewPolicy.MANUAL_ONLY);
-            ImagePlus max = ZProjector.run(roiStack, "max");
-            max.setTitle("MAX_delete");
-
-            if ("Automatic".equals(imageProcessing)) {
-                IJ.run(max, "Enhance Contrast", "saturated=1");
-            }
             String roiLutName = roiChannelLutName(roiBinCfg, roiChannel);
-            applyRoiDisplayLut(max, roiLutName);
-
-            PreparedImage prepared = buildPreparedImage(directory, seriesIndex, imp, max, roiStack, parts, metadata,
+            PreparedImage prepared = buildPreparedImage(directory, seriesIndex, imp,
+                    null, null, parts, metadata,
                     imageProcessing, roiLutName);
+            renderPreparedForState(prepared, transformState);
             recordInputEnd(inputHandle, "processed", started);
             return prepared;
         } catch (Exception e) {

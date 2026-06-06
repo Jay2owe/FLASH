@@ -9,6 +9,9 @@ import flash.pipeline.io.OrientationManifestIO;
 import flash.pipeline.naming.NameParts;
 import flash.pipeline.naming.OrientationManifestRow;
 import flash.pipeline.naming.ResolvedImageMetadata;
+import flash.pipeline.orientation.BroadcastScope;
+import flash.pipeline.orientation.OrientationBatchController;
+import flash.pipeline.orientation.OrientationPresetStore;
 import flash.pipeline.orientation.OrientationTransformState;
 import flash.pipeline.orientation.RoiOrientationManifestService;
 import flash.pipeline.roi.RoiIO;
@@ -34,6 +37,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 public class DrawAndSaveROIsAnalysisTest {
@@ -330,6 +335,61 @@ public class DrawAndSaveROIsAnalysisTest {
     }
 
     @Test
+    public void currentImageAdapterRendersStateBeforeFirstShowWithoutOpeningWindow()
+            throws Exception {
+        File dir = temp.newFolder("currentImageAdapter");
+        DrawAndSaveROIsAnalysis analysis = new DrawAndSaveROIsAnalysis();
+        DrawAndSaveROIsAnalysis.PreparedImage prepared =
+                preparedImage(dir, "Exp-Mouse_LH_SCN", "LH", "Red");
+
+        OrientationBatchController.CurrentImage current =
+                analysis.currentImageFor(prepared);
+        OrientationTransformState next =
+                OrientationTransformState.fromCsv("90", true, false);
+
+        current.applyState(next);
+
+        assertEquals(OrientationManifestRow.Hemisphere.LH, current.hemisphere());
+        assertEquals(OrientationManifestRow.RotationDegrees.DEG_90,
+                prepared.transformState.rotateDegrees);
+        assertTrue(prepared.transformState.flipHorizontal);
+        assertFalse(prepared.transformState.flipVertical);
+        assertNotNull(prepared.roiStack);
+        assertNotNull(prepared.maxProjection);
+        assertEquals("delete", prepared.roiStack.getTitle());
+        assertEquals("MAX_delete", prepared.maxProjection.getTitle());
+        assertNull(prepared.maxProjection.getWindow());
+        assertEquals("Red", DrawAndSaveROIsAnalysis.effectiveRoiLutName(prepared));
+    }
+
+    @Test
+    public void activeRuleOnOpenRendersPrefetchedImageBeforeShow() throws Exception {
+        File dir = temp.newFolder("activeRuleOnOpen");
+        DrawAndSaveROIsAnalysis analysis = new DrawAndSaveROIsAnalysis();
+        OrientationBatchController controller = new OrientationBatchController(
+                new OrientationPresetStore(dir.getAbsolutePath()), 4);
+        DrawAndSaveROIsAnalysis.PreparedImage source =
+                preparedImage(dir, "Exp-Source_LH_SCN", "LH", "Grays");
+        source.transformState = OrientationTransformState.fromCsv("90", true, false);
+        controller.bindCurrent(analysis.currentImageFor(source), 0);
+        controller.setRule(BroadcastScope.ALL_LITERAL);
+
+        DrawAndSaveROIsAnalysis.PreparedImage target =
+                preparedImage(dir, "Exp-Target_RH_SCN", "RH", "Grays");
+        controller.bindCurrent(analysis.currentImageFor(target), 2);
+
+        assertTrue(controller.applyActiveRuleOnOpen());
+        assertEquals(OrientationManifestRow.RotationDegrees.DEG_90,
+                target.transformState.rotateDegrees);
+        assertTrue(target.transformState.flipHorizontal);
+        assertFalse(target.transformState.flipVertical);
+        assertNotNull(target.roiStack);
+        assertNotNull(target.maxProjection);
+        assertNull(target.maxProjection.getWindow());
+        assertTrue(controller.ruleStatusText().contains("1 remaining"));
+    }
+
+    @Test
     public void saveOrientationDecisionWritesPreparedTransformAsManualRow() throws Exception {
         File dir = temp.newFolder("saveOrientation");
         assertTrue(new File(dir, "ImageA.tif").createNewFile());
@@ -482,6 +542,29 @@ public class DrawAndSaveROIsAnalysisTest {
         Method reset = BinSetupDispatcher.class.getDeclaredMethod("resetForTest");
         reset.setAccessible(true);
         reset.invoke(null);
+    }
+
+    private static DrawAndSaveROIsAnalysis.PreparedImage preparedImage(
+            File dir, String title, String hemisphere, String roiLutName)
+            throws Exception {
+        assertTrue(new File(dir, title + ".tif").createNewFile());
+        ImagePlus original = new ImagePlus(title, new ByteProcessor(4, 3));
+        ResolvedImageMetadata seed = new ResolvedImageMetadata(
+                "",
+                title,
+                title,
+                "Mouse",
+                hemisphere,
+                "SCN",
+                OrientationManifestRow.RotationDegrees.DEG_0,
+                false,
+                false,
+                OrientationManifestRow.ViewPolicy.MANUAL_ONLY,
+                ResolvedImageMetadata.Source.FILENAME_FALLBACK);
+        return DrawAndSaveROIsAnalysis.buildPreparedImage(
+                dir.getAbsolutePath(), 0, original, null, null,
+                new NameParts("Exp", "Mouse", hemisphere, "SCN", true),
+                seed, "", roiLutName);
     }
 
     private interface InvocationResult {

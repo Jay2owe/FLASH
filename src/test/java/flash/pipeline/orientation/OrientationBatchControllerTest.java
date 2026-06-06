@@ -137,6 +137,21 @@ public class OrientationBatchControllerTest {
         assertTrue(target.appliedStates.isEmpty());
     }
 
+    @Test
+    public void ruleStatusUsesAbsoluteCurrentIndexForAppendRuns() throws Exception {
+        OrientationBatchController controller = controller("append-count", 5);
+        FakeImage source = image(LH, transform(DEG_90, false, false));
+        controller.bindCurrent(source, 2);
+        controller.setRule(ALL_LITERAL);
+
+        assertTrue(controller.ruleStatusText().contains("2 remaining"));
+
+        FakeImage finalImage = image(RH, OrientationTransformState.identity());
+        controller.bindCurrent(finalImage, 4);
+
+        assertTrue(controller.ruleStatusText().contains("0 remaining"));
+    }
+
     private OrientationBatchController controller(String folderName, int totalImages)
             throws Exception {
         File projectDir = temp.newFolder(folderName);
