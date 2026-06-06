@@ -288,7 +288,33 @@ public class LineDistanceAnalysis implements Analysis, RunRecordAware {
                 new LoadedRunParameterApplier() {
                     @Override public LoadedRunParameters.Result applyLoadedParameters(
                             Map<String, Object> parameters) {
-                        return applyLoadedParameters(parameters);
+                        LoadedRunParameters.ValueLoad<LoadedRunParameters.LineDistanceSelections> load =
+                                LoadedRunParameters.lineDistanceSelections(parameters);
+                        LoadedRunParameters.LineDistanceSelections sel = load.value;
+                        // Name fields first: setting them fires the selectMatching
+                        // listener (which only re-ticks). Apply the toggle states
+                        // LAST so the loaded selection is authoritative.
+                        if (sel.landmark != null) {
+                            vocabCombo.setSelectedItem(sel.landmark);
+                        }
+                        if (sel.customName != null) {
+                            customField.setText(sel.customName);
+                        }
+                        if (zSliceSourceChoice != null) {
+                            zSliceSourceChoice.setSelectedItem(sel.drawOnSubset
+                                    ? "Configured analysis subset" : "Full image");
+                        }
+                        if (hasExisting) {
+                            for (int i = 0; i < existingSetNames.size(); i++) {
+                                existingToggles.get(i).setSelected(
+                                        containsIgnoreCase(sel.selectedSets, existingSetNames.get(i)));
+                            }
+                            if (drawNewToggle != null) {
+                                drawNewToggle.setSelected(sel.drawNew);
+                            }
+                        }
+                        LoadedRunParameters.rememberLastResult(load.result);
+                        return load.result;
                     }
                 });
 
@@ -395,9 +421,14 @@ public class LineDistanceAnalysis implements Analysis, RunRecordAware {
         }
     }
 
+    /**
+     * Programmatic / headless entry for the run-record adapter. Reports which
+     * keys Line Distance recognises (see {@code LINE_DISTANCE_KEYS}); the live
+     * dialog restore is done by the applier installed in the options dialog.
+     */
     public LoadedRunParameters.Result applyLoadedParameters(Map<String, Object> parameters) {
-        LoadedRunParameters.Result result = LoadedRunParameters.resultForKnownKeys(
-                parameters, Collections.<String>emptySet());
+        LoadedRunParameters.Result result =
+                LoadedRunParameters.lineDistanceSelections(parameters).result;
         LoadedRunParameters.rememberLastResult(result);
         return result;
     }
