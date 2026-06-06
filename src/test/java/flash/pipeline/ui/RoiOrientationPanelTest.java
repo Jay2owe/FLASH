@@ -117,6 +117,7 @@ public class RoiOrientationPanelTest {
         assertTrue(html.contains("saved preset"));
         assertTrue(html.contains("apply-to buttons"));
         assertTrue(html.contains("all later images"));
+        assertTrue(html.contains("same hemisphere"));
         assertTrue(html.contains("mirror later LH/RH images"));
     }
 
