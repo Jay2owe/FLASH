@@ -529,6 +529,32 @@ public class CreateBinFileAnalysisTest {
     }
 
     @Test
+    public void qcContextImages_useMinMaxOrderForRequestedChannel() throws Exception {
+        CreateBinFileAnalysis analysis = new CreateBinFileAnalysis();
+        List<?> selections = privateQcSelectionsWithChannelOrders();
+        Method method = CreateBinFileAnalysis.class.getDeclaredMethod(
+                "filterParameterContextImages", List.class, int.class);
+        method.setAccessible(true);
+
+        @SuppressWarnings("unchecked")
+        List<ConfigQcContext.ConfigQcImage> c1 =
+                (List<ConfigQcContext.ConfigQcImage>) method.invoke(
+                        analysis, selections, Integer.valueOf(0));
+        @SuppressWarnings("unchecked")
+        List<ConfigQcContext.ConfigQcImage> c2 =
+                (List<ConfigQcContext.ConfigQcImage>) method.invoke(
+                        analysis, selections, Integer.valueOf(1));
+
+        assertEquals("Alpha", c1.get(0).getSeriesName());
+        assertEquals("Beta", c1.get(1).getSeriesName());
+        assertEquals("Gamma", c1.get(2).getSeriesName());
+
+        assertEquals("Beta", c2.get(0).getSeriesName());
+        assertEquals("Gamma", c2.get(1).getSeriesName());
+        assertEquals("Alpha", c2.get(2).getSeriesName());
+    }
+
+    @Test
     public void customFilterPlaceholderRoutesThroughStandardFilterQcStage() throws Exception {
         CreateBinFileAnalysis.BinUserConfig cfg = oneChannelConfig("Custom");
         boolean[][] noSelectedSettings = new boolean[6][1];
@@ -831,6 +857,20 @@ public class CreateBinFileAnalysisTest {
 
         assertEquals(Arrays.asList(
                 "CHANNEL_THRESHOLD:0",
+                "CHANNEL_THRESHOLD:1"),
+                invokeInteractiveQcStepPlan(new CreateBinFileAnalysis(), cfg, customSettings));
+    }
+
+    @Test
+    public void intensityPartialSetupUsesFilterQcBeforeChannelThresholdQc() throws Exception {
+        CreateBinFileAnalysis.BinUserConfig cfg = twoChannelConfig();
+        boolean[][] customSettings = new CreateBinFileAnalysis()
+                .autoSelectedFilteredSettings(cfg, true, false, false, true, false, false);
+
+        assertEquals(Arrays.asList(
+                "FILTER_PARAMETERS:0",
+                "CHANNEL_THRESHOLD:0",
+                "FILTER_PARAMETERS:1",
                 "CHANNEL_THRESHOLD:1"),
                 invokeInteractiveQcStepPlan(new CreateBinFileAnalysis(), cfg, customSettings));
     }
@@ -2251,6 +2291,33 @@ public class CreateBinFileAnalysisTest {
         constructor.setAccessible(true);
         return Collections.singletonList(constructor.newInstance(
                 Integer.valueOf(0), image == null ? "" : image.getTitle(), image));
+    }
+
+    private static List<?> privateQcSelectionsWithChannelOrders() throws Exception {
+        Class<?> type = Class.forName(
+                "flash.pipeline.analyses.CreateBinFileAnalysis$QcImageSelection");
+        Constructor<?> constructor = type.getDeclaredConstructor(
+                int.class, String.class, ImagePlus.class, String.class, String.class, Map.class);
+        constructor.setAccessible(true);
+
+        List<Object> selections = new ArrayList<Object>();
+        selections.add(constructor.newInstance(
+                Integer.valueOf(0), "Alpha", byteImage("Alpha"), "", "",
+                orderMap(0, 2)));
+        selections.add(constructor.newInstance(
+                Integer.valueOf(1), "Beta", byteImage("Beta"), "", "",
+                orderMap(1, 0)));
+        selections.add(constructor.newInstance(
+                Integer.valueOf(2), "Gamma", byteImage("Gamma"), "", "",
+                orderMap(2, 1)));
+        return selections;
+    }
+
+    private static Map<Integer, Integer> orderMap(int c1Order, int c2Order) {
+        LinkedHashMap<Integer, Integer> order = new LinkedHashMap<Integer, Integer>();
+        order.put(Integer.valueOf(1), Integer.valueOf(c1Order));
+        order.put(Integer.valueOf(2), Integer.valueOf(c2Order));
+        return order;
     }
 
     private static ImagePlus byteImage(String title) {

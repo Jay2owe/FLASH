@@ -13,6 +13,7 @@ import flash.pipeline.intensity.spatial.IntensitySpatialOutputMode;
 import flash.pipeline.io.CsvTableIO;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.naming.NameParts;
+import flash.pipeline.roi.RoiIO;
 import ij.IJ;
 import ij.ImagePlus;
 import ij.gui.Roi;
@@ -70,6 +71,7 @@ public class IntensityAnalysisV2Test {
 
         assertEquals(EnumSet.of(
                 BinField.CHANNEL_NAMES,
+                BinField.FILTER_PRESETS,
                 BinField.INTENSITY_THRESHOLDS,
                 BinField.Z_SLICE),
                 analysis.requiredBinFields());
@@ -88,6 +90,57 @@ public class IntensityAnalysisV2Test {
         assertEquals(1, chooserCalls.get());
         assertFalse(new File(dir, "FLASH/Results/Tables/Intensity").exists());
         assertFalse(new File(dir, "FLASH/Results/Analysis Images/Intensity Overlays").exists());
+    }
+
+    @Test
+    public void drawRoisHandoffContinuesToIntensityConfigurationChooser() throws Exception {
+        installAllDependenciesPresentForGate();
+        final File dir = temp.newFolder("roi-handoff");
+        final AtomicInteger stage = new AtomicInteger(0);
+
+        setDispatcherHook("setHeadlessProbeForTest",
+                "flash.pipeline.bin.BinSetupDispatcher$HeadlessProbe",
+                new InvocationResult() {
+                    @Override public Object invoke(Method method, Object[] args) {
+                        return Boolean.FALSE;
+                    }
+                });
+        setDispatcherHook("setChooserForTest",
+                "flash.pipeline.bin.BinSetupDispatcher$Chooser",
+                new InvocationResult() {
+                    @Override public Object invoke(Method method, Object[] args) {
+                        assertEquals(2, stage.getAndIncrement());
+                        assertEquals("Intensity Analysis", args[0]);
+                        return BinSetupChooser.Choice.CANCELLED;
+                    }
+                });
+
+        IntensityAnalysisV2 analysis = new IntensityAnalysisV2();
+        analysis.setNoRoiDecisionPromptForTest(new IntensityAnalysisV2.NoRoiDecisionPrompt() {
+            @Override
+            public IntensityAnalysisV2.NoRoiDecision choose() {
+                assertEquals(0, stage.getAndIncrement());
+                return IntensityAnalysisV2.NoRoiDecision.DRAW_ROIS;
+            }
+        });
+        analysis.setRoiDrawingWorkflowLauncherForTest(new IntensityAnalysisV2.RoiDrawingWorkflowLauncher() {
+            @Override
+            public void launch(String directory) {
+                assertEquals(1, stage.getAndIncrement());
+                try {
+                    File roiDir = RoiIO.roiSetWriteDir(new File(directory));
+                    assertTrue(roiDir.isDirectory() || roiDir.mkdirs());
+                    Files.write(new File(roiDir, "SCN ROIs.zip").toPath(), new byte[]{1, 2, 3});
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        });
+
+        analysis.execute(dir.getAbsolutePath());
+
+        assertEquals(3, stage.get());
+        assertEquals(BinSetupDispatcher.Outcome.CANCELLED, BinSetupDispatcher.getLastOutcome());
     }
 
     @Test
@@ -387,7 +440,7 @@ public class IntensityAnalysisV2Test {
     }
 
     @Test
-    public void channelNamesOnlyBinPromptsOnlyForIntensityThresholdsAndZSlice() throws Exception {
+    public void channelNamesOnlyBinPromptsForIntensityThresholdsAndFilters() throws Exception {
         File dir = temp.newFolder("partial");
         writeChannelNamesOnlyConfig(dir, "DAPI", "GFAP");
         final AtomicReference<Set<BinField>> missingFields = new AtomicReference<Set<BinField>>();
@@ -400,7 +453,7 @@ public class IntensityAnalysisV2Test {
                 analysis.requiredBinFields(), analysis.benefitsFromRois());
 
         assertEquals(BinSetupDispatcher.Outcome.CANCELLED, outcome);
-        assertEquals(EnumSet.of(BinField.INTENSITY_THRESHOLDS),
+        assertEquals(EnumSet.of(BinField.FILTER_PRESETS, BinField.INTENSITY_THRESHOLDS),
                 missingFields.get());
     }
 

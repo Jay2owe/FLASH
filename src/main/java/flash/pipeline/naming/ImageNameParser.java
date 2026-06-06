@@ -112,9 +112,12 @@ public final class ImageNameParser {
             exp = lhs.trim();
             rhs = "";
         } else {
-            // No experiment hyphen and no Bio-Formats series — the convention
-            // (Experiment-Animal_Hemisphere_Region) is not satisfied.
-            return new NameParts("", "", "", "", false, imageTitleOrFilename);
+            // Bio-Formats series names are often exposed without the outer
+            // experiment/container prefix. Treat Animal_LH_Region as a valid
+            // series-level alias so project-backed runs do not lose orientation
+            // metadata when they see the bare internal series name.
+            exp = "";
+            rhs = lhs.trim();
         }
 
         // Bio-Formats series name takes precedence as the animal/region token.
@@ -201,11 +204,70 @@ public final class ImageNameParser {
             fallbackName = stripped == null ? "" : stripped.trim();
         }
 
-        IJ.log("  [INFO] Filename does not match expected convention "
-                + "(Experiment-Animal_Hemisphere_Region). "
+        IJ.log("  [INFO] Filename/series name did not provide usable orientation metadata. "
+                + "Input=\"" + imageTitleOrFilename + "\"; "
+                + "series=\"" + extractBioFormatsSeriesName(imageTitleOrFilename) + "\"; "
+                + "reason=" + mismatchReason(imageTitleOrFilename) + ". "
                 + "Using \"" + fallbackName + "\" as the sample identifier.");
 
         return new NameParts("", fallbackName, "", "", false, imageTitleOrFilename);
+    }
+
+    private static String mismatchReason(String imageTitleOrFilename) {
+        if (imageTitleOrFilename == null) {
+            return "input was null";
+        }
+        String trimmed = imageTitleOrFilename.trim();
+        if (trimmed.isEmpty()) {
+            return "input was empty";
+        }
+
+        String tokenSource = tokenSourceForDiagnostics(trimmed);
+        if (tokenSource == null || tokenSource.trim().isEmpty()) {
+            return "no animal/hemisphere token section was found";
+        }
+        String[] toks = tokenSource.split("_");
+        if (toks.length < 2) {
+            return "expected at least Animal_Hemisphere, found "
+                    + toks.length + " underscore token(s)";
+        }
+
+        String checked = checkedHemisphereTokens(toks);
+        return "expected an LH or RH hemisphere token near the end of \""
+                + tokenSource + "\"; checked " + checked;
+    }
+
+    private static String tokenSourceForDiagnostics(String imageTitleOrFilename) {
+        String containerLhs;
+        String seriesPart = null;
+        int sepIdx = imageTitleOrFilename.lastIndexOf(BF_SERIES_SEPARATOR);
+        if (sepIdx >= 0) {
+            containerLhs = imageTitleOrFilename.substring(0, sepIdx);
+            seriesPart = imageTitleOrFilename.substring(sepIdx + BF_SERIES_SEPARATOR.length()).trim();
+            seriesPart = stripExtension(seriesPart);
+        } else {
+            containerLhs = imageTitleOrFilename;
+        }
+        if (seriesPart != null && !seriesPart.isEmpty()) {
+            return seriesPart;
+        }
+        String lhs = stripExtension(containerLhs);
+        if (lhs == null) {
+            return "";
+        }
+        int hyphen = lhs.lastIndexOf('-');
+        return hyphen >= 0 ? lhs.substring(hyphen + 1).trim() : lhs.trim();
+    }
+
+    private static String checkedHemisphereTokens(String[] toks) {
+        StringBuilder sb = new StringBuilder();
+        int start = Math.max(0, toks.length - 3);
+        for (int i = start; i < toks.length; i++) {
+            if (sb.length() > 0) sb.append(", ");
+            String token = toks[i] == null ? "" : toks[i].trim();
+            sb.append(i + 1).append("=\"").append(token).append("\"");
+        }
+        return sb.toString();
     }
 
     private static boolean isKnownHemisphere(String value) {

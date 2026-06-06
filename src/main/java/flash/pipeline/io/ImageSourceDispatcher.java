@@ -4,12 +4,14 @@ import ij.IJ;
 import flash.pipeline.intelligence.JunkFileFilter;
 import flash.pipeline.project.ProjectFile;
 import flash.pipeline.project.ProjectFileIO;
+import flash.pipeline.project.ProjectMetadataSeeder;
 import flash.pipeline.project.ProjectPathResolver;
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.ToggleSwitch;
 
 import javax.swing.JComboBox;
 import java.io.File;
+import java.io.IOException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -67,6 +69,8 @@ public final class ImageSourceDispatcher {
             + "will be in pixel units, not microns.";
 
     private static final Set<String> WARNED =
+            Collections.synchronizedSet(new HashSet<String>());
+    private static final Set<String> LOGGED_PROJECT_MANIFESTS =
             Collections.synchronizedSet(new HashSet<String>());
     private static final Map<String, String> CONTAINER_CHOICE_CACHE =
             Collections.synchronizedMap(new HashMap<String, String>());
@@ -154,23 +158,35 @@ public final class ImageSourceDispatcher {
         }
     }
 
-    private static ProjectSources tryReadProjectSources(File outputRoot) {
-        File settingsDir = FlashProjectLayout.forDirectory(outputRoot.getAbsolutePath())
-                .configurationWriteDir();
-        if (!ProjectFileIO.exists(settingsDir)) {
+    private static final class ProjectLocation {
+        final File projectRoot;
+        final File settingsDir;
+
+        ProjectLocation(File projectRoot, File settingsDir) {
+            this.projectRoot = projectRoot;
+            this.settingsDir = settingsDir;
+        }
+    }
+
+    private static ProjectSources tryReadProjectSources(File selectedDirectory) {
+        ProjectLocation projectLocation = findProjectManifestLocation(selectedDirectory);
+        if (projectLocation == null) {
             return null;
         }
+        File outputRoot = projectLocation.projectRoot;
+        File settingsDir = projectLocation.settingsDir;
         ProjectFile project = ProjectFileIO.read(settingsDir);
         if (project == null || project.items == null) {
             throw new IllegalArgumentException(
                     "Could not read project.json at "
                             + new File(settingsDir, ProjectFileIO.FILE_NAME).getAbsolutePath()
                             + ". FLASH will not fall back to scanning "
-                            + outputRoot.getAbsolutePath()
+                            + selectedDirectory.getAbsolutePath()
                             + " because that can use the wrong source file.");
         }
         ProjectPathResolver.relocateForLoad(project,
                 new File(settingsDir, ProjectFileIO.FILE_NAME), outputRoot, false);
+        syncProjectOrientationMetadata(outputRoot, settingsDir, project);
         List<File> containers = new ArrayList<File>();
         List<List<Integer>> includes = new ArrayList<List<Integer>>();
         List<File> tiffs = new ArrayList<File>();
@@ -205,7 +221,120 @@ public final class ImageSourceDispatcher {
                             + " mixes multi-series container files and bare TIFF files. "
                             + "FLASH currently requires those source types to be opened as separate projects.");
         }
+        logProjectManifestUse(outputRoot, settingsDir, containers, includes, tiffs);
         return new ProjectSources(containers, includes, tiffs, projectDisplayName(project, outputRoot));
+    }
+
+    private static ProjectLocation findProjectManifestLocation(File selectedDirectory) {
+        ProjectLocation fromConfig = projectLocationFromConfigurationSelection(selectedDirectory);
+        if (fromConfig != null && ProjectFileIO.exists(fromConfig.settingsDir)) {
+            return fromConfig;
+        }
+
+        ProjectLocation fromFlash = projectLocationFromFlashSelection(selectedDirectory);
+        if (fromFlash != null && ProjectFileIO.exists(fromFlash.settingsDir)) {
+            return fromFlash;
+        }
+
+        ProjectLocation fromRoot = new ProjectLocation(
+                selectedDirectory,
+                FlashProjectLayout.forDirectory(selectedDirectory.getAbsolutePath())
+                        .configurationWriteDir());
+        return ProjectFileIO.exists(fromRoot.settingsDir) ? fromRoot : null;
+    }
+
+    private static ProjectLocation projectLocationFromConfigurationSelection(File selectedDirectory) {
+        File projectRoot = FlashProjectLayout.projectRootForConfigurationDir(selectedDirectory);
+        if (projectRoot == null) {
+            return null;
+        }
+        File settingsDir;
+        if (FlashProjectLayout.SETTINGS_DIR.equals(selectedDirectory.getName())) {
+            settingsDir = selectedDirectory;
+        } else {
+            settingsDir = new File(selectedDirectory, FlashProjectLayout.SETTINGS_DIR);
+        }
+        return new ProjectLocation(projectRoot, settingsDir);
+    }
+
+    private static ProjectLocation projectLocationFromFlashSelection(File selectedDirectory) {
+        if (selectedDirectory == null
+                || !FlashProjectLayout.FLASH_DIR.equals(selectedDirectory.getName())) {
+            return null;
+        }
+        File projectRoot = selectedDirectory.getParentFile();
+        if (projectRoot == null) {
+            return null;
+        }
+        File settingsDir = new File(
+                new File(selectedDirectory, FlashProjectLayout.CONFIGURATION_DIR),
+                FlashProjectLayout.SETTINGS_DIR);
+        return new ProjectLocation(projectRoot, settingsDir);
+    }
+
+    private static void syncProjectOrientationMetadata(File outputRoot,
+                                                       File settingsDir,
+                                                       ProjectFile project) {
+        try {
+            ProjectMetadataSeeder.seedOrientationManifest(outputRoot, project);
+        } catch (IOException e) {
+            IJ.log("[FLASH Project] Could not sync image orientation metadata from "
+                    + new File(settingsDir, ProjectFileIO.FILE_NAME).getAbsolutePath()
+                    + ": " + e.getMessage());
+        }
+    }
+
+    private static void logProjectManifestUse(File outputRoot,
+                                              File settingsDir,
+                                              List<File> containers,
+                                              List<List<Integer>> includes,
+                                              List<File> tiffs) {
+        File projectJson = new File(settingsDir, ProjectFileIO.FILE_NAME);
+        String key = projectJson.getAbsolutePath();
+        if (!LOGGED_PROJECT_MANIFESTS.add(key)) {
+            return;
+        }
+
+        IJ.log("[FLASH Project] Reading project manifest: " + key);
+        IJ.log("[FLASH Project] Output root: "
+                + (outputRoot == null ? "(unknown)" : outputRoot.getAbsolutePath()));
+        IJ.log("[FLASH Project] Included sources from project.json: "
+                + (containers == null ? 0 : containers.size()) + " container(s), "
+                + (tiffs == null ? 0 : tiffs.size()) + " TIFF file(s).");
+
+        if (containers != null) {
+            for (int i = 0; i < containers.size(); i++) {
+                List<Integer> selected = includes == null || i >= includes.size()
+                        ? Collections.<Integer>emptyList()
+                        : includes.get(i);
+                IJ.log("  [FLASH Project] Container source: "
+                        + containers.get(i).getAbsolutePath()
+                        + " | series=" + seriesSelectionLabel(selected));
+            }
+        }
+        if (tiffs != null) {
+            int shown = Math.min(10, tiffs.size());
+            for (int i = 0; i < shown; i++) {
+                IJ.log("  [FLASH Project] TIFF source: " + tiffs.get(i).getAbsolutePath());
+            }
+            if (tiffs.size() > shown) {
+                IJ.log("  [FLASH Project] ... and " + (tiffs.size() - shown)
+                        + " more TIFF source(s).");
+            }
+        }
+    }
+
+    private static String seriesSelectionLabel(List<Integer> selected) {
+        if (selected == null || selected.isEmpty()) {
+            return "all";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < selected.size(); i++) {
+            if (i > 0) sb.append(',');
+            Integer index = selected.get(i);
+            sb.append(index == null ? "null" : index.toString());
+        }
+        return sb.toString();
     }
 
     private static boolean isContainerExtension(String name) {
@@ -317,9 +446,7 @@ public final class ImageSourceDispatcher {
     /** True when {@code directory} has a saved FLASH {@code project.json}. */
     public static boolean hasProjectManifest(String directory) {
         File dir = requireDirectory(directory);
-        File settingsDir = FlashProjectLayout.forDirectory(dir.getAbsolutePath())
-                .configurationWriteDir();
-        return ProjectFileIO.exists(settingsDir);
+        return findProjectManifestLocation(dir) != null;
     }
 
     /**
@@ -615,6 +742,11 @@ public final class ImageSourceDispatcher {
             throw new IllegalArgumentException("Directory path is null or empty");
         }
         File dir = new File(directory);
+        if (dir.isFile()
+                && ProjectFileIO.FILE_NAME.equalsIgnoreCase(dir.getName())
+                && dir.getParentFile() != null) {
+            return dir.getParentFile();
+        }
         if (!dir.isDirectory()) {
             throw new IllegalArgumentException("Not a directory: " + directory);
         }

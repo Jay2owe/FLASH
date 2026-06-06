@@ -23,6 +23,7 @@ import org.junit.rules.TemporaryFolder;
 import java.awt.Dimension;
 import java.awt.Point;
 import java.awt.Rectangle;
+import java.awt.image.IndexColorModel;
 import java.io.File;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
@@ -184,6 +185,84 @@ public class DrawAndSaveROIsAnalysisTest {
 
         cfg.zSliceMode = ZSliceMode.SAME_COUNT;
         assertTrue(DrawAndSaveROIsAnalysis.shouldShowZSliceSourceChoice(cfg));
+    }
+
+    @Test
+    public void roiChannelLutName_usesSelectedChannelColorAndDefaultsToGrays() {
+        BinConfig cfg = new BinConfig();
+        cfg.channelColors.add("Blue");
+        cfg.channelColors.add("Green");
+
+        assertEquals("Green", DrawAndSaveROIsAnalysis.roiChannelLutName(cfg, 2));
+        assertEquals("Grays", DrawAndSaveROIsAnalysis.roiChannelLutName(cfg, 3));
+        assertEquals("Grays", DrawAndSaveROIsAnalysis.roiChannelLutName(null, 1));
+    }
+
+    @Test
+    public void applyRoiDisplayLut_appliesSelectedColorAndGreyFallback() {
+        ImagePlus green = new ImagePlus("green", new ByteProcessor(1, 1));
+        DrawAndSaveROIsAnalysis.applyRoiDisplayLut(green, "Green");
+
+        IndexColorModel greenModel = (IndexColorModel) green.getProcessor().getColorModel();
+        assertEquals(0, greenModel.getRed(255));
+        assertEquals(255, greenModel.getGreen(255));
+        assertEquals(0, greenModel.getBlue(255));
+
+        ImagePlus gray = new ImagePlus("gray", new ByteProcessor(1, 1));
+        DrawAndSaveROIsAnalysis.applyRoiDisplayLut(gray, null);
+
+        IndexColorModel grayModel = (IndexColorModel) gray.getProcessor().getColorModel();
+        assertEquals(255, grayModel.getRed(255));
+        assertEquals(255, grayModel.getGreen(255));
+        assertEquals(255, grayModel.getBlue(255));
+    }
+
+    @Test
+    public void toggleRoiDisplayLut_switchesBetweenGreyAndSelectedChannelLut() throws Exception {
+        File dir = temp.newFolder("roiLutToggle");
+        assertTrue(new File(dir, "ImageA.tif").createNewFile());
+        ImagePlus original = new ImagePlus("ImageA", new ByteProcessor(1, 1));
+        ImagePlus max = new ImagePlus("MAX_delete", new ByteProcessor(1, 1));
+        ImagePlus roiStack = new ImagePlus("delete", new ByteProcessor(1, 1));
+        ResolvedImageMetadata seed = new ResolvedImageMetadata(
+                "",
+                "ImageA",
+                "ImageA",
+                "Mouse",
+                "LH",
+                "SCN",
+                OrientationManifestRow.RotationDegrees.DEG_0,
+                false,
+                false,
+                OrientationManifestRow.ViewPolicy.MANUAL_ONLY,
+                ResolvedImageMetadata.Source.FILENAME_FALLBACK);
+
+        DrawAndSaveROIsAnalysis.PreparedImage prepared =
+                DrawAndSaveROIsAnalysis.buildPreparedImage(
+                        dir.getAbsolutePath(), 0, original, max, roiStack,
+                        new NameParts("Exp", "Mouse", "LH", "SCN", true),
+                        seed, "", "Red");
+
+        assertEquals("Red", DrawAndSaveROIsAnalysis.effectiveRoiLutName(prepared));
+        assertEquals("Grey LUT", DrawAndSaveROIsAnalysis.roiLutToggleButtonText(prepared));
+
+        DrawAndSaveROIsAnalysis.toggleRoiDisplayLut(prepared);
+
+        assertEquals("Grays", DrawAndSaveROIsAnalysis.effectiveRoiLutName(prepared));
+        assertEquals("Red LUT", DrawAndSaveROIsAnalysis.roiLutToggleButtonText(prepared));
+        IndexColorModel grayModel = (IndexColorModel) max.getProcessor().getColorModel();
+        assertEquals(255, grayModel.getRed(255));
+        assertEquals(255, grayModel.getGreen(255));
+        assertEquals(255, grayModel.getBlue(255));
+
+        DrawAndSaveROIsAnalysis.toggleRoiDisplayLut(prepared);
+
+        assertEquals("Red", DrawAndSaveROIsAnalysis.effectiveRoiLutName(prepared));
+        assertEquals("Grey LUT", DrawAndSaveROIsAnalysis.roiLutToggleButtonText(prepared));
+        IndexColorModel redModel = (IndexColorModel) max.getProcessor().getColorModel();
+        assertEquals(255, redModel.getRed(255));
+        assertEquals(0, redModel.getGreen(255));
+        assertEquals(0, redModel.getBlue(255));
     }
 
     @Test

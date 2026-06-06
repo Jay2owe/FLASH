@@ -25,13 +25,13 @@ import static org.junit.Assert.assertTrue;
 
 /**
  * Stage 01 coverage: the extracted {@code renderPreviewContent} must produce raw/deconvolved
- * projections from the configured crop without closing the returned images, while releasing all
+ * stacks from the configured crop without closing the returned images, while releasing all
  * other temporary stacks.
  */
 public class DeconvolutionAnalysisPreviewTest {
 
     @Test
-    public void renderPreviewContentProducesOpenProjectionsAtRequestedCrop() throws Exception {
+    public void renderPreviewContentProducesOpenStacksAtRequestedCrop() throws Exception {
         ImagePlus blurred = gaussianPointSource("blurred", 64, 64, 8, 2.6, 1.6, 100.0);
         ImagePlus psf = gaussianPointSource("psf", 9, 9, 5, 1.2, 1.0, 1.0);
         DeconvolutionEngine engine = mockEngine();
@@ -47,20 +47,20 @@ public class DeconvolutionAnalysisPreviewTest {
         try {
             assertNotNull("preview content must be produced for valid inputs", content);
 
-            // Both projections must remain open (not flushed) so the modal dialog can show them.
-            assertNotNull("raw projection must stay open", content.rawProjection.getProcessor());
-            assertNotNull("raw projection pixels must stay valid", content.rawProjection.getProcessor().getPixels());
-            assertNotNull("deconvolved projection must stay open", content.deconvolvedProjection.getProcessor());
-            assertNotNull("deconvolved projection pixels must stay valid",
-                    content.deconvolvedProjection.getProcessor().getPixels());
+            // Both stacks must remain open (not flushed) so the modal dialog can show them.
+            assertNotNull("raw stack must stay open", content.rawStack.getProcessor());
+            assertNotNull("raw stack pixels must stay valid", content.rawStack.getProcessor().getPixels());
+            assertNotNull("deconvolved stack must stay open", content.deconvolvedStack.getProcessor());
+            assertNotNull("deconvolved stack pixels must stay valid",
+                    content.deconvolvedStack.getProcessor().getPixels());
 
-            // Center crop is capped at the requested 32x32 and max-projected to a single slice.
-            assertEquals(32, content.rawProjection.getWidth());
-            assertEquals(32, content.rawProjection.getHeight());
-            assertEquals(1, content.rawProjection.getStackSize());
-            assertEquals(32, content.deconvolvedProjection.getWidth());
-            assertEquals(32, content.deconvolvedProjection.getHeight());
-            assertEquals(1, content.deconvolvedProjection.getStackSize());
+            // Center crop is capped at the requested 32x32, while the Z stack remains navigable.
+            assertEquals(32, content.rawStack.getWidth());
+            assertEquals(32, content.rawStack.getHeight());
+            assertEquals(8, content.rawStack.getStackSize());
+            assertEquals(32, content.deconvolvedStack.getWidth());
+            assertEquals(32, content.deconvolvedStack.getHeight());
+            assertEquals(8, content.deconvolvedStack.getStackSize());
 
             assertEquals("Raw", content.rawLabel);
             assertTrue("deconvolved label should name the engine",
@@ -70,8 +70,8 @@ public class DeconvolutionAnalysisPreviewTest {
             assertTrue("deconvolved label should name the PSF model",
                     content.deconvolvedLabel.contains(PsfModel.GIBSON_LANNI.displayName()));
         } finally {
-            close(content == null ? null : content.rawProjection);
-            close(content == null ? null : content.deconvolvedProjection);
+            close(content == null ? null : content.rawStack);
+            close(content == null ? null : content.deconvolvedStack);
             close(blurred);
             close(psf);
         }
@@ -93,11 +93,12 @@ public class DeconvolutionAnalysisPreviewTest {
 
         try {
             assertNotNull(content);
-            assertEquals(48, content.rawProjection.getWidth());
-            assertEquals(40, content.rawProjection.getHeight());
+            assertEquals(48, content.rawStack.getWidth());
+            assertEquals(40, content.rawStack.getHeight());
+            assertEquals(6, content.rawStack.getStackSize());
         } finally {
-            close(content == null ? null : content.rawProjection);
-            close(content == null ? null : content.deconvolvedProjection);
+            close(content == null ? null : content.rawStack);
+            close(content == null ? null : content.deconvolvedStack);
             close(blurred);
             close(psf);
         }
@@ -247,7 +248,7 @@ public class DeconvolutionAnalysisPreviewTest {
 
         @Override
         protected void writePsfPreview(ImagePlus psf, PsfSpec spec, PsfModel model, File outputDir) {
-            // No-op: this test only inspects the returned preview projections.
+            // No-op: this test only inspects the returned preview stacks.
         }
     }
 }

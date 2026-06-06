@@ -5,6 +5,7 @@ import flash.pipeline.image.WindowManagerLock;
 import ij.IJ;
 import ij.ImagePlus;
 import ij.WindowManager;
+import ij.macro.Interpreter;
 import ij.measure.Calibration;
 
 import java.util.Arrays;
@@ -110,9 +111,12 @@ public final class IterativeDeconvolve3DEngine implements DeconvolutionEngine {
         ImagePlus psfCopy = null;
         ImagePlus rawResult = null;
         int[] beforeIds = null;
+        boolean previousBatchMode = false;
 
         WindowManagerLock.LOCK.lock();
         try {
+            previousBatchMode = Interpreter.batchMode;
+            Interpreter.batchMode = true;
             stackCopy = stack.duplicate();
             psfCopy = psf.duplicate();
             stackCopy.setTitle(stackTitle);
@@ -147,13 +151,17 @@ public final class IterativeDeconvolve3DEngine implements DeconvolutionEngine {
             }
             throw new DeconvolutionException("Iterative Deconvolve 3D deconvolution failed.", t);
         } finally {
-            disposeDistinct(rawResult, stackCopy, psfCopy);
-            ImagePlus leftover = imageJRunner.getImage(outputTitle);
-            if (leftover != null && leftover != rawResult) {
-                disposeImage(leftover);
+            try {
+                disposeDistinct(rawResult, stackCopy, psfCopy);
+                ImagePlus leftover = imageJRunner.getImage(outputTitle);
+                if (leftover != null && leftover != rawResult) {
+                    disposeImage(leftover);
+                }
+                closeNewImages(beforeIds, imageJRunner);
+            } finally {
+                Interpreter.batchMode = previousBatchMode;
+                WindowManagerLock.LOCK.unlock();
             }
-            closeNewImages(beforeIds, imageJRunner);
-            WindowManagerLock.LOCK.unlock();
         }
     }
 

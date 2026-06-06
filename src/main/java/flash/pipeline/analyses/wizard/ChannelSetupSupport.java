@@ -2,6 +2,8 @@ package flash.pipeline.analyses.wizard;
 
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.intelligence.MetadataDiagnostics;
+import flash.pipeline.io.ImageSourceDispatcher;
+import flash.pipeline.io.SeriesMeta;
 import flash.pipeline.marker.MarkerLibrary;
 import flash.pipeline.ui.wizard.SegmentationEnginePicker;
 import flash.pipeline.zslice.ZSliceMode;
@@ -163,11 +165,51 @@ public final class ChannelSetupSupport {
     public static MetadataDiagnostics.SeriesInfo firstSeriesInfo(String directory) {
         try {
             List<MetadataDiagnostics.SeriesInfo> all = MetadataDiagnostics.scanDirectory(directory);
-            return all.isEmpty() ? null : all.get(0);
+            MetadataDiagnostics.SeriesInfo info = firstUsableSeriesInfo(all);
+            if (info != null) {
+                return info;
+            }
         } catch (RuntimeException e) {
             IJ.log("WARNING: Could not read image metadata for Channel Setup: " + e.getMessage());
+        }
+        try {
+            List<SeriesMeta> all = ImageSourceDispatcher.readAllMetadata(directory);
+            for (SeriesMeta meta : all) {
+                MetadataDiagnostics.SeriesInfo info = fromSeriesMeta(meta);
+                if (info != null && info.sizeC > 0) {
+                    return info;
+                }
+            }
+        } catch (Exception e) {
+            IJ.log("WARNING: Could not read project source metadata for Channel Setup: " + e.getMessage());
             return null;
         }
+        return null;
+    }
+
+    private static MetadataDiagnostics.SeriesInfo firstUsableSeriesInfo(List<MetadataDiagnostics.SeriesInfo> all) {
+        if (all == null) return null;
+        for (MetadataDiagnostics.SeriesInfo info : all) {
+            if (info != null && info.sizeC > 0) {
+                return info;
+            }
+        }
+        return null;
+    }
+
+    private static MetadataDiagnostics.SeriesInfo fromSeriesMeta(SeriesMeta meta) {
+        if (meta == null) return null;
+        MetadataDiagnostics.SeriesInfo info = new MetadataDiagnostics.SeriesInfo();
+        info.file = meta.name;
+        info.seriesIndex = meta.index;
+        info.imageName = meta.name;
+        info.sizeX = meta.width;
+        info.sizeY = meta.height;
+        info.sizeZ = meta.nSlices;
+        info.sizeC = meta.nChannels;
+        info.pixelSizeXUm = meta.pixelWidth;
+        info.pixelSizeZUm = meta.pixelDepth;
+        return info;
     }
 
     private static void applyZSlice(MetadataDiagnostics.SeriesInfo info,

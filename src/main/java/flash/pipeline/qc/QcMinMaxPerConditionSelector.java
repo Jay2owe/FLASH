@@ -81,6 +81,7 @@ public final class QcMinMaxPerConditionSelector {
     public static final class SelectionResult {
         public final List<Integer> selectedSeriesIndexes;
         public final List<SelectedSeries> selectedSeries;
+        public final Map<Integer, List<SelectedSeries>> selectedSeriesByChannelNumber;
         public final File scoresFile;
         public final File cacheFile;
         public final boolean usedCache;
@@ -95,12 +96,22 @@ public final class QcMinMaxPerConditionSelector {
         SelectionResult(List<Integer> selectedSeriesIndexes, List<SelectedSeries> selectedSeries,
                         File scoresFile, File cacheFile,
                         boolean usedCache, boolean recomputed, String message) {
+            this(selectedSeriesIndexes, selectedSeries, null, scoresFile, cacheFile,
+                    usedCache, recomputed, message);
+        }
+
+        SelectionResult(List<Integer> selectedSeriesIndexes, List<SelectedSeries> selectedSeries,
+                        Map<Integer, List<SelectedSeries>> selectedSeriesByChannelNumber,
+                        File scoresFile, File cacheFile,
+                        boolean usedCache, boolean recomputed, String message) {
             this.selectedSeriesIndexes = selectedSeriesIndexes == null
                     ? new ArrayList<Integer>()
                     : new ArrayList<Integer>(selectedSeriesIndexes);
             this.selectedSeries = selectedSeries == null
                     ? new ArrayList<SelectedSeries>()
                     : new ArrayList<SelectedSeries>(selectedSeries);
+            this.selectedSeriesByChannelNumber =
+                    copySelectedSeriesByChannelNumber(selectedSeriesByChannelNumber);
             this.scoresFile = scoresFile;
             this.cacheFile = cacheFile;
             this.usedCache = usedCache;
@@ -174,10 +185,33 @@ public final class QcMinMaxPerConditionSelector {
         final double maxBrightness;
 
         ConditionSelection(String conditionName, ScoreRecord min, ScoreRecord max) {
+            this(conditionName, min, max, null);
+        }
+
+        ConditionSelection(String conditionName, ScoreRecord min, ScoreRecord max,
+                           Integer channelNumber) {
             this.conditionName = safe(conditionName);
             this.min = min;
             this.max = max;
-            this.maxBrightness = brightestFiniteChannelScore(max == null ? min : max);
+            ScoreRecord sortRecord = max == null ? min : max;
+            this.maxBrightness = channelNumber == null
+                    ? brightestFiniteChannelScore(sortRecord)
+                    : brightestSelectedChannelScore(min, max, channelNumber.intValue());
+        }
+    }
+
+    private static final class SelectionBundle {
+        final List<SelectedSeries> selectedSeries;
+        final Map<Integer, List<SelectedSeries>> selectedSeriesByChannelNumber;
+
+        SelectionBundle(List<SelectedSeries> selectedSeries,
+                        Map<Integer, List<SelectedSeries>> selectedSeriesByChannelNumber) {
+            this.selectedSeries = selectedSeries == null
+                    ? new ArrayList<SelectedSeries>()
+                    : selectedSeries;
+            this.selectedSeriesByChannelNumber = selectedSeriesByChannelNumber == null
+                    ? new LinkedHashMap<Integer, List<SelectedSeries>>()
+                    : selectedSeriesByChannelNumber;
         }
     }
 
@@ -314,13 +348,14 @@ public final class QcMinMaxPerConditionSelector {
                 sourceSeriesSignature, scope.cacheValue, cacheFile, scoresFile)) {
             List<ScoreRecord> cached = readScoresCsv(scoresFile);
             if (!cached.isEmpty()) {
-                List<SelectedSeries> selectedSeries = assignAndSelectSeries(cached, activeChannels, scope);
-                List<Integer> selected = selectedSeriesIndexesFromSelection(selectedSeries);
+                SelectionBundle selectionBundle = assignAndSelectSeries(cached, activeChannels, scope);
+                List<Integer> selected = selectedSeriesIndexesFromSelection(selectionBundle.selectedSeries);
                 if (!selected.isEmpty()) {
                     logSelectionSummary(cached, activeChannels, true, scope);
                     String message = "Using cached " + scope.logLabel + " selection.\n"
                             + "Cache: " + scoresFile.getAbsolutePath();
-                    return new SelectionResult(selected, selectedSeries, scoresFile, cacheFile,
+                    return new SelectionResult(selected, selectionBundle.selectedSeries,
+                            selectionBundle.selectedSeriesByChannelNumber, scoresFile, cacheFile,
                             true, false, message);
                 }
             }
@@ -330,13 +365,13 @@ public final class QcMinMaxPerConditionSelector {
         IJ.log("QC " + scope.logLabel + ": scanning sampled planes from .lif");
         List<ScoreRecord> scored = scoreCandidates(
                 lifFile, supplier, candidates, activeChannels, zSliceConfig, parallelThreads);
-        List<SelectedSeries> selectedSeries = assignAndSelectSeries(scored, activeChannels, scope);
+        SelectionBundle selectionBundle = assignAndSelectSeries(scored, activeChannels, scope);
         logSelectionSummary(scored, activeChannels, false, scope);
         writeScoresCsv(scoresFile, scored, activeChannels);
         writeCacheProperties(directory, lifFile, activeChannels, zSliceConfig,
                 sourceSeriesSignature, scope.cacheValue, cacheFile);
 
-        List<Integer> selected = selectedSeriesIndexesFromSelection(selectedSeries);
+        List<Integer> selected = selectedSeriesIndexesFromSelection(selectionBundle.selectedSeries);
         String message;
         if (scope == SelectionScope.OVERALL) {
             message = "Computed overall min/max selection (" + selected.size() + " image"
@@ -348,7 +383,8 @@ public final class QcMinMaxPerConditionSelector {
                     + (nConditions == 1 ? "" : "s") + ".\n"
                     + "Saved cache: " + scoresFile.getAbsolutePath();
         }
-        return new SelectionResult(selected, selectedSeries, scoresFile, cacheFile,
+        return new SelectionResult(selected, selectionBundle.selectedSeries,
+                selectionBundle.selectedSeriesByChannelNumber, scoresFile, cacheFile,
                 false, true, message);
     }
 
@@ -565,20 +601,51 @@ public final class QcMinMaxPerConditionSelector {
         return selected;
     }
 
+    static Map<Integer, List<SelectedSeries>> selectedSeriesByChannelNumber(
+            List<ScoreRecord> records,
+            List<QcSelectionChannel> qcChannels) {
+        LinkedHashMap<Integer, List<SelectedSeries>> byChannel =
+                new LinkedHashMap<Integer, List<SelectedSeries>>();
+        if (qcChannels == null) return byChannel;
+        for (QcSelectionChannel channel : qcChannels) {
+            if (channel == null) continue;
+            byChannel.put(Integer.valueOf(channel.channelNumber),
+                    selectedSeriesForChannel(records, channel.channelNumber));
+        }
+        return byChannel;
+    }
+
+    private static List<SelectedSeries> selectedSeriesForChannel(List<ScoreRecord> records,
+                                                                 int channelNumber) {
+        List<ConditionSelection> orderedConditions =
+                orderedConditionSelections(records, Integer.valueOf(channelNumber));
+        List<SelectedSeries> selected = new ArrayList<SelectedSeries>();
+        LinkedHashSet<Integer> seen = new LinkedHashSet<Integer>();
+        for (ConditionSelection condition : orderedConditions) {
+            addSelectedSeries(selected, seen, condition.max);
+            addSelectedSeries(selected, seen, condition.min);
+        }
+        return selected;
+    }
+
     static List<SelectedSeries> selectedSeriesOverall(List<ScoreRecord> records,
                                                       List<QcSelectionChannel> qcChannels) {
         assignOverallSelectionRoles(records, qcChannels);
         return overallSelectedSeriesFromAssignedRoles(records);
     }
 
-    private static List<SelectedSeries> assignAndSelectSeries(List<ScoreRecord> records,
-                                                              List<QcSelectionChannel> qcChannels,
-                                                              SelectionScope scope) {
+    private static SelectionBundle assignAndSelectSeries(List<ScoreRecord> records,
+                                                         List<QcSelectionChannel> qcChannels,
+                                                         SelectionScope scope) {
         if (scope == SelectionScope.OVERALL) {
-            return selectedSeriesOverall(records, qcChannels);
+            return new SelectionBundle(
+                    selectedSeriesOverall(records, qcChannels),
+                    null);
         }
         assignSelectionRoles(records, qcChannels);
-        return selectedSeries(records);
+        return new SelectionBundle(
+                selectedSeries(records),
+                selectedSeriesByChannelNumber(records, qcChannels));
     }
 
     private static List<SelectedSeries> overallSelectedSeriesFromAssignedRoles(List<ScoreRecord> records) {
@@ -610,6 +677,11 @@ public final class QcMinMaxPerConditionSelector {
     }
 
     private static List<ConditionSelection> orderedConditionSelections(List<ScoreRecord> records) {
+        return orderedConditionSelections(records, null);
+    }
+
+    private static List<ConditionSelection> orderedConditionSelections(List<ScoreRecord> records,
+                                                                       Integer channelNumber) {
         LinkedHashMap<String, List<ScoreRecord>> byCondition = new LinkedHashMap<String, List<ScoreRecord>>();
         for (ScoreRecord record : records) {
             if (record == null || record.candidate == null) continue;
@@ -630,7 +702,7 @@ public final class QcMinMaxPerConditionSelector {
                 if ("MAX".equals(record.selectedRole) || "MIN_MAX".equals(record.selectedRole)) max = record;
             }
             if (min != null || max != null) {
-                selections.add(new ConditionSelection(entry.getKey(), min, max));
+                selections.add(new ConditionSelection(entry.getKey(), min, max, channelNumber));
             }
         }
         Collections.sort(selections, new Comparator<ConditionSelection>() {
@@ -677,6 +749,26 @@ public final class QcMinMaxPerConditionSelector {
         return brightest;
     }
 
+    private static double finiteChannelScore(ScoreRecord record, int channelNumber) {
+        if (record == null || record.channelScores == null) return Double.NaN;
+        Double score = record.channelScores.get(Integer.valueOf(channelNumber));
+        if (score == null || score.isNaN() || score.isInfinite()) return Double.NaN;
+        return score.doubleValue();
+    }
+
+    private static double brightestSelectedChannelScore(ScoreRecord min,
+                                                        ScoreRecord max,
+                                                        int channelNumber) {
+        double minScore = finiteChannelScore(min, channelNumber);
+        double maxScore = finiteChannelScore(max, channelNumber);
+        boolean minValid = !Double.isNaN(minScore) && !Double.isInfinite(minScore);
+        boolean maxValid = !Double.isNaN(maxScore) && !Double.isInfinite(maxScore);
+        if (minValid && maxValid) return Math.max(minScore, maxScore);
+        if (minValid) return minScore;
+        if (maxValid) return maxScore;
+        return Double.NaN;
+    }
+
     private static void addSelectedSeries(List<SelectedSeries> selected,
                                           Set<Integer> seen,
                                           ScoreRecord record) {
@@ -703,6 +795,21 @@ public final class QcMinMaxPerConditionSelector {
             }
         }
         return selected;
+    }
+
+    private static Map<Integer, List<SelectedSeries>> copySelectedSeriesByChannelNumber(
+            Map<Integer, List<SelectedSeries>> source) {
+        LinkedHashMap<Integer, List<SelectedSeries>> copy =
+                new LinkedHashMap<Integer, List<SelectedSeries>>();
+        if (source == null) return copy;
+        for (Map.Entry<Integer, List<SelectedSeries>> entry : source.entrySet()) {
+            if (entry == null || entry.getKey() == null) continue;
+            List<SelectedSeries> values = entry.getValue();
+            copy.put(entry.getKey(), values == null
+                    ? new ArrayList<SelectedSeries>()
+                    : new ArrayList<SelectedSeries>(values));
+        }
+        return copy;
     }
 
     static double meanOfBrightestFraction(float[] values, double fraction) {

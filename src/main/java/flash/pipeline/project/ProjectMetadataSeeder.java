@@ -5,6 +5,7 @@ import flash.pipeline.io.LifIO;
 import flash.pipeline.io.OrientationManifestIO;
 import flash.pipeline.naming.ImageNameParser;
 import flash.pipeline.naming.OrientationManifestRow;
+import ij.IJ;
 
 import java.io.File;
 import java.io.IOException;
@@ -79,6 +80,7 @@ public final class ProjectMetadataSeeder {
                 if (displayName == null || displayName.trim().isEmpty()) {
                     displayName = originalName;
                 }
+                OrientationDefaults defaults = orientationDefaults(hemisphere);
                 rows.add(new OrientationManifestRow(
                         imageKey,
                         fileName,
@@ -88,8 +90,8 @@ public final class ProjectMetadataSeeder {
                         animal,
                         hemisphere,
                         region,
-                        OrientationManifestRow.RotationDegrees.DEG_0,
-                        false,
+                        defaults.rotateDegrees,
+                        defaults.flipHorizontal,
                         false,
                         OrientationManifestRow.ViewPolicy.MANUAL_ONLY,
                         OrientationManifestRow.DecisionSource.MANUAL,
@@ -158,9 +160,9 @@ public final class ProjectMetadataSeeder {
 
     /**
      * Merge the project's per-series orientation rows into the existing
-     * {@code Image Orientation.csv} (preserving unrelated rows; overwriting by
-     * image key) and write it back. No-op when the project has no per-series
-     * identity to seed.
+     * {@code Image Orientation.csv}. Existing manual ROI decisions are
+     * preserved; rows previously generated from Project Builder metadata are
+     * refreshed when project identity/default orientation changes.
      */
     public static void seedOrientationManifest(File outputRoot, ProjectFile project) throws IOException {
         if (outputRoot == null) {
@@ -173,10 +175,75 @@ public final class ProjectMetadataSeeder {
         String directory = outputRoot.getAbsolutePath();
         LinkedHashMap<String, OrientationManifestRow> byKey =
                 OrientationManifestIO.readByImageKeyIfExists(directory);
+        boolean changed = false;
         for (OrientationManifestRow row : seeded) {
-            byKey.put(row.imageKey, row);
+            OrientationManifestRow existing = byKey.get(row.imageKey);
+            if (existing == null) {
+                byKey.put(row.imageKey, row);
+                changed = true;
+            } else if (isProjectBuilderSeed(existing) && !sameRow(existing, row)) {
+                byKey.put(row.imageKey, row);
+                changed = true;
+            }
+        }
+        if (!changed) {
+            return;
         }
         OrientationManifestIO.saveRows(directory, new ArrayList<OrientationManifestRow>(byKey.values()));
+        IJ.log("[FLASH Project] Synced " + seeded.size()
+                + " project image metadata row(s) into "
+                + OrientationManifestIO.getFile(directory).getAbsolutePath());
+    }
+
+    private static boolean isProjectBuilderSeed(OrientationManifestRow row) {
+        return row != null
+                && row.decisionSource == OrientationManifestRow.DecisionSource.MANUAL
+                && DECISION_NOTE.equals(row.notes);
+    }
+
+    private static boolean sameRow(OrientationManifestRow a, OrientationManifestRow b) {
+        if (a == b) return true;
+        if (a == null || b == null) return false;
+        return same(a.imageKey, b.imageKey)
+                && same(a.sourceFile, b.sourceFile)
+                && a.seriesIndex == b.seriesIndex
+                && same(a.originalName, b.originalName)
+                && same(a.displayName, b.displayName)
+                && same(a.animalName, b.animalName)
+                && a.hemisphere == b.hemisphere
+                && same(a.region, b.region)
+                && a.rotateDegrees == b.rotateDegrees
+                && a.flipHorizontal == b.flipHorizontal
+                && a.flipVertical == b.flipVertical
+                && a.viewPolicy == b.viewPolicy
+                && a.decisionSource == b.decisionSource
+                && a.confirmed == b.confirmed
+                && same(a.notes, b.notes);
+    }
+
+    private static boolean same(String a, String b) {
+        return trimToEmpty(a).equals(trimToEmpty(b));
+    }
+
+    private static OrientationDefaults orientationDefaults(
+            OrientationManifestRow.Hemisphere hemisphere) {
+        boolean known = hemisphere == OrientationManifestRow.Hemisphere.LH
+                || hemisphere == OrientationManifestRow.Hemisphere.RH;
+        return new OrientationDefaults(
+                known ? OrientationManifestRow.RotationDegrees.DEG_270
+                        : OrientationManifestRow.RotationDegrees.DEG_0,
+                hemisphere == OrientationManifestRow.Hemisphere.RH);
+    }
+
+    private static final class OrientationDefaults {
+        final OrientationManifestRow.RotationDegrees rotateDegrees;
+        final boolean flipHorizontal;
+
+        OrientationDefaults(OrientationManifestRow.RotationDegrees rotateDegrees,
+                            boolean flipHorizontal) {
+            this.rotateDegrees = rotateDegrees;
+            this.flipHorizontal = flipHorizontal;
+        }
     }
 
     private static boolean isContainerExtension(String name) {

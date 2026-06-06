@@ -41,6 +41,8 @@ public final class RoiOrientationPanel {
     private final JDialog dialog;
     private final OrientationActionTarget target;
     private final JLabel statusLabel;
+    private final JButton lutToggleButton;
+    private final JButton brightnessContrastButton;
     private final Object resultLock = new Object();
     private DrawDialogResult result;
     private SecondaryLoop waitLoop;
@@ -64,6 +66,13 @@ public final class RoiOrientationPanel {
         void redrawFromState();
         void clearUnsavedRoiAfterOrientationChange();
         String statusText();
+        default boolean displayControlsAvailable() { return false; }
+        default String lutToggleButtonText() { return "Grey LUT"; }
+        default String lutToggleButtonToolTipText() {
+            return "Toggle between grey and the selected channel LUT.";
+        }
+        default void toggleDisplayLut() {}
+        default void adjustBrightnessContrast() {}
     }
 
     public RoiOrientationPanel(Window owner, OrientationActionTarget target) {
@@ -76,6 +85,8 @@ public final class RoiOrientationPanel {
         if (GraphicsEnvironment.isHeadless()) {
             this.dialog = null;
             this.statusLabel = null;
+            this.lutToggleButton = null;
+            this.brightnessContrastButton = null;
             return;
         }
 
@@ -111,6 +122,28 @@ public final class RoiOrientationPanel {
         buttonRow.add(button("Flip vertical", OrientationAction.FLIP_VERTICAL));
         buttonRow.add(button("Reset", OrientationAction.RESET));
 
+        JPanel displayRow = null;
+        JButton nextLutToggleButton = null;
+        JButton nextBrightnessContrastButton = null;
+        if (target != null && target.displayControlsAvailable()) {
+            displayRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+            displayRow.setAlignmentX(JPanel.LEFT_ALIGNMENT);
+            displayRow.setOpaque(false);
+
+            nextLutToggleButton = new JButton(displayLutToggleText());
+            nextLutToggleButton.setFocusPainted(false);
+            nextLutToggleButton.setToolTipText(displayLutToggleToolTipText());
+            nextLutToggleButton.addActionListener(e -> performDisplayLutToggle());
+            displayRow.add(nextLutToggleButton);
+
+            nextBrightnessContrastButton = new JButton("Adjust Brightness/Contrast");
+            nextBrightnessContrastButton.setFocusPainted(false);
+            nextBrightnessContrastButton.addActionListener(e -> performBrightnessContrastAction());
+            displayRow.add(nextBrightnessContrastButton);
+        }
+        this.lutToggleButton = nextLutToggleButton;
+        this.brightnessContrastButton = nextBrightnessContrastButton;
+
         statusLabel = new JLabel(statusText());
         statusLabel.setForeground(STATUS_COLOR);
         statusLabel.setFont(statusLabel.getFont().deriveFont(11f));
@@ -133,6 +166,10 @@ public final class RoiOrientationPanel {
         body.add(instructionLabel);
         body.add(Box.createVerticalStrut(8));
         body.add(buttonRow);
+        if (displayRow != null) {
+            body.add(Box.createVerticalStrut(6));
+            body.add(displayRow);
+        }
         body.add(Box.createVerticalStrut(6));
         body.add(statusLabel);
         body.add(Box.createVerticalStrut(10));
@@ -161,6 +198,7 @@ public final class RoiOrientationPanel {
             dialog.setLocationByPlatform(true);
         }
         refreshStatus();
+        refreshDisplayButtons();
         dialog.setVisible(true);
         dialog.toFront();
     }
@@ -179,6 +217,19 @@ public final class RoiOrientationPanel {
     void performOrientationAction(OrientationAction action) {
         applyAction(target, action);
         refreshStatus();
+    }
+
+    void performDisplayLutToggle() {
+        if (target != null) {
+            target.toggleDisplayLut();
+        }
+        refreshDisplayButtons();
+    }
+
+    void performBrightnessContrastAction() {
+        if (target != null) {
+            target.adjustBrightnessContrast();
+        }
     }
 
     static String instructionHtml(String imageProgress, String imageTitle) {
@@ -245,6 +296,28 @@ public final class RoiOrientationPanel {
         if (statusLabel != null) {
             statusLabel.setText(statusText());
         }
+    }
+
+    private void refreshDisplayButtons() {
+        if (lutToggleButton != null) {
+            lutToggleButton.setText(displayLutToggleText());
+            lutToggleButton.setToolTipText(displayLutToggleToolTipText());
+        }
+        if (brightnessContrastButton != null) {
+            brightnessContrastButton.setEnabled(target == null || target.displayControlsAvailable());
+        }
+    }
+
+    private String displayLutToggleText() {
+        String text = target == null ? null : target.lutToggleButtonText();
+        return text == null || text.trim().isEmpty() ? "Grey LUT" : text;
+    }
+
+    private String displayLutToggleToolTipText() {
+        String text = target == null ? null : target.lutToggleButtonToolTipText();
+        return text == null || text.trim().isEmpty()
+                ? "Toggle between grey and the selected channel LUT."
+                : text;
     }
 
     private String statusText() {

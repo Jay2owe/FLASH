@@ -3,8 +3,15 @@ package flash.pipeline.analyses.wizard;
 import flash.pipeline.intelligence.MetadataDiagnostics;
 import flash.pipeline.marker.MarkerLibrary;
 import flash.pipeline.ui.wizard.SegmentationEnginePicker;
+import ij.ImagePlus;
+import ij.ImageStack;
+import ij.io.FileSaver;
+import ij.process.ByteProcessor;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 
+import java.io.File;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -13,6 +20,9 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class ChannelSetupSupportTest {
+
+    @Rule
+    public TemporaryFolder temp = new TemporaryFolder();
 
     private static final String[] TWELVE_MARKERS = {
             "nuclei_dapi",
@@ -96,12 +106,38 @@ public class ChannelSetupSupportTest {
         assertEquals("default", derived.objectThresholds.get(1));
     }
 
+    @Test
+    public void firstSeriesInfoReadsChannelCountFromInputSubfolderMetadata() throws Exception {
+        File project = temp.newFolder("input-subfolder-metadata");
+        File input = new File(project, "input");
+        assertTrue(input.mkdirs());
+        File imageFile = new File(input, "three-channel.tif");
+
+        assertTrue(new FileSaver(threeChannelImage()).saveAsTiffStack(imageFile.getAbsolutePath()));
+
+        MetadataDiagnostics.SeriesInfo info =
+                ChannelSetupSupport.firstSeriesInfo(project.getAbsolutePath());
+
+        assertTrue(info != null);
+        assertEquals(3, info.sizeC);
+    }
+
     private static Map<String, Object> oneChannel(String markerId, String signal) {
         Map<String, Object> answers = new LinkedHashMap<String, Object>();
         answers.put("channelCount", Integer.valueOf(1));
         answers.put("channel1.markerId", markerId);
         answers.put("channel1.signal", signal);
         return answers;
+    }
+
+    private static ImagePlus threeChannelImage() {
+        ImageStack stack = new ImageStack(2, 2);
+        stack.addSlice(new ByteProcessor(2, 2));
+        stack.addSlice(new ByteProcessor(2, 2));
+        stack.addSlice(new ByteProcessor(2, 2));
+        ImagePlus image = new ImagePlus("three-channel", stack);
+        image.setDimensions(3, 1, 1);
+        return image;
     }
 
     private static MetadataDiagnostics.SeriesInfo seriesInfo(int channels, int z, String pixelType, String name) {

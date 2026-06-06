@@ -1,5 +1,6 @@
 package flash.pipeline.project;
 
+import flash.pipeline.io.ImageSourceDispatcher;
 import flash.pipeline.naming.ConditionNameParser;
 import flash.pipeline.naming.ImageNameParser;
 import flash.pipeline.naming.NameParts;
@@ -9,6 +10,7 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Backing JTable model for the Project Builder dialog. Holds one
@@ -151,7 +153,7 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
         rebuildVisible();
     }
 
-    /** Add a file, parsing its name for animal/hemisphere/region/condition. */
+    /** Add a file, parsing sample files for animal/hemisphere/region/condition. */
     public int addFile(File source) {
         Row row = new Row(source);
         applyParsedName(source, row);
@@ -163,6 +165,9 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
     }
 
     private static void applyParsedName(File source, Row row) {
+        if (isContainerSource(source)) {
+            return;
+        }
         NameParts parts = ImageNameParser.parse(source.getName());
         if (parts.strictMatch) {
             row.animalId = nullToEmpty(parts.animal);
@@ -358,6 +363,9 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
                 series.condition = value;
             } else {
                 Row row = rows.get(fileIndexAt(idx));
+                if (isContainerSource(row.source)) {
+                    continue;
+                }
                 row.condition = value;
                 for (SeriesRow s : row.series) {
                     s.condition = value;
@@ -378,10 +386,17 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
             ProjectFile.Item item = new ProjectFile.Item();
             item.path = row.source == null ? "" : row.source.getAbsolutePath();
             item.include = row.include;
-            item.animalId = row.animalId;
-            item.hemisphere = row.hemisphere;
-            item.region = row.region;
-            item.condition = row.condition;
+            if (!isContainerSource(row.source)) {
+                item.animalId = row.animalId;
+                item.hemisphere = row.hemisphere;
+                item.region = row.region;
+                item.condition = row.condition;
+            } else {
+                item.animalId = "";
+                item.hemisphere = "";
+                item.region = "";
+                item.condition = "";
+            }
             item.notes = row.notes;
             if (row.series.isEmpty()) {
                 item.series.addAll(row.selectedSeries);
@@ -460,16 +475,19 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
                 if (item == null || item.path == null || item.path.isEmpty()) continue;
                 Row row = new Row(new File(item.path));
                 row.include = item.include;
-                row.animalId = nullToEmpty(item.animalId);
-                row.hemisphere = nullToEmpty(item.hemisphere);
-                row.region = nullToEmpty(item.region);
-                row.condition = nullToEmpty(item.condition);
+                if (!isContainerSource(row.source)) {
+                    row.animalId = nullToEmpty(item.animalId);
+                    row.hemisphere = nullToEmpty(item.hemisphere);
+                    row.region = nullToEmpty(item.region);
+                    row.condition = nullToEmpty(item.condition);
+                }
                 row.notes = nullToEmpty(item.notes);
                 if (item.series != null) {
                     row.selectedSeries.addAll(item.series);
                 }
                 if (item.seriesMeta != null && !item.seriesMeta.isEmpty()) {
                     boolean hasExplicitSeriesSelection = !row.selectedSeries.isEmpty();
+                    String loadedFileCondition = nullToEmpty(item.condition);
                     for (ProjectFile.SeriesItem meta : item.seriesMeta) {
                         if (meta == null) continue;
                         SeriesRow series = new SeriesRow(meta.index);
@@ -482,7 +500,7 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
                         series.region = nullToEmpty(meta.region);
                         series.condition = nullToEmpty(meta.condition);
                         series.notes = nullToEmpty(meta.notes);
-                        repairLoadedSeriesMetadata(row, series);
+                        repairLoadedSeriesMetadata(row, series, loadedFileCondition);
                         row.series.add(series);
                     }
                     row.seriesCount = row.series.size();
@@ -494,7 +512,8 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
         fireTableDataChanged();
     }
 
-    private static void repairLoadedSeriesMetadata(Row file, SeriesRow series) {
+    private static void repairLoadedSeriesMetadata(Row file, SeriesRow series,
+                                                   String loadedFileCondition) {
         if (file == null || series == null) return;
         String name = nullToEmpty(series.name).trim();
         if (name.isEmpty()) return;
@@ -529,7 +548,7 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
         }
 
         String existingCondition = nullToEmpty(series.condition).trim();
-        String fileCondition = nullToEmpty(file.condition).trim();
+        String fileCondition = firstNonEmpty(file.condition, loadedFileCondition).trim();
         if (existingCondition.isEmpty()
                 || (!fileCondition.isEmpty() && existingCondition.equals(fileCondition))) {
             series.condition = parsed.condition;
@@ -590,6 +609,12 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
 
     @Override
     public boolean isCellEditable(int rowIndex, int columnIndex) {
+        if (!isSeriesRow(rowIndex)) {
+            Row row = rows.get(fileIndexAt(rowIndex));
+            if (isContainerSource(row.source) && isIdentityColumn(columnIndex)) {
+                return false;
+            }
+        }
         switch (columnIndex) {
             case COL_INCLUDE:
             case COL_ANIMAL:
@@ -646,6 +671,9 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
             return;
         }
         Row row = rows.get(fileIndexAt(rowIndex));
+        if (isContainerSource(row.source) && isIdentityColumn(columnIndex)) {
+            return;
+        }
         boolean cascade = !row.series.isEmpty();
         switch (columnIndex) {
             case COL_INCLUDE:
@@ -718,6 +746,22 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
 
     private static String nullToEmpty(String value) {
         return value == null ? "" : value;
+    }
+
+    private static boolean isIdentityColumn(int columnIndex) {
+        return columnIndex == COL_ANIMAL
+                || columnIndex == COL_HEMISPHERE
+                || columnIndex == COL_REGION
+                || columnIndex == COL_CONDITION;
+    }
+
+    private static boolean isContainerSource(File source) {
+        if (source == null || source.getName() == null) return false;
+        String lower = source.getName().toLowerCase(Locale.ROOT);
+        for (String ext : ImageSourceDispatcher.CONTAINER_EXTENSIONS) {
+            if (lower.endsWith(ext)) return true;
+        }
+        return false;
     }
 
     private static String canonicalise(File file) {

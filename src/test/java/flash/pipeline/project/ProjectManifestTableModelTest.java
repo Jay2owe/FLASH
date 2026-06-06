@@ -21,7 +21,7 @@ public class ProjectManifestTableModelTest {
     @Test
     public void addFile_parsesNameAndPrefillsMetadata() throws Exception {
         ProjectManifestTableModel model = new ProjectManifestTableModel();
-        File source = touch("MyExp-Mouse5_LH_Cortex_WT.lif");
+        File source = touch("MyExp-Mouse5_LH_Cortex_WT.tif");
 
         int idx = model.addFile(source);
 
@@ -37,7 +37,7 @@ public class ProjectManifestTableModelTest {
     public void addFile_conditionFallsBackToParentFolder() throws Exception {
         ProjectManifestTableModel model = new ProjectManifestTableModel();
         File wtDir = temp.newFolder("WT");
-        File source = new File(wtDir, "MyExp-Mouse5_LH_Cortex.lif");
+        File source = new File(wtDir, "MyExp-Mouse5_LH_Cortex.tif");
         assertTrue(source.createNewFile());
 
         int idx = model.addFile(source);
@@ -46,10 +46,54 @@ public class ProjectManifestTableModelTest {
     }
 
     @Test
+    public void addFile_containerSourceKeepsFileRowIdentityBlank() throws Exception {
+        ProjectManifestTableModel model = new ProjectManifestTableModel();
+        File conditionDir = temp.newFolder("IgG.Iba1.Cas3");
+        File source = new File(conditionDir, "Cas3.All.Time.Points.lif");
+        assertTrue(source.createNewFile());
+
+        int idx = model.addFile(source);
+        ProjectManifestTableModel.Row row = model.get(idx);
+
+        assertEquals("", row.animalId);
+        assertEquals("", row.hemisphere);
+        assertEquals("", row.region);
+        assertEquals("", row.condition);
+        assertFalse(model.isCellEditable(idx, ProjectManifestTableModel.COL_ANIMAL));
+        assertFalse(model.isCellEditable(idx, ProjectManifestTableModel.COL_HEMISPHERE));
+        assertFalse(model.isCellEditable(idx, ProjectManifestTableModel.COL_REGION));
+        assertFalse(model.isCellEditable(idx, ProjectManifestTableModel.COL_CONDITION));
+
+        model.setValueAt("ShouldNotStick", idx, ProjectManifestTableModel.COL_ANIMAL);
+        assertEquals("", row.animalId);
+
+        model.setSeriesEntries(idx, Arrays.asList(
+                new ProjectManifestTableModel.SeriesEntry(0, "hAPP5Week2_LH_SCN")));
+        model.setExpanded(idx, true);
+        assertEquals("hAPP5Week2", model.getValueAt(1, ProjectManifestTableModel.COL_ANIMAL));
+        assertEquals("LH", model.getValueAt(1, ProjectManifestTableModel.COL_HEMISPHERE));
+        assertEquals("SCN", model.getValueAt(1, ProjectManifestTableModel.COL_REGION));
+        assertEquals("hAPPWeek2", model.getValueAt(1, ProjectManifestTableModel.COL_CONDITION));
+
+        model.setValueAt("ShouldNotCascade", idx, ProjectManifestTableModel.COL_CONDITION);
+        assertEquals("", row.condition);
+        assertEquals("hAPPWeek2", model.getValueAt(1, ProjectManifestTableModel.COL_CONDITION));
+
+        ProjectFile.Item saved = model.toProjectFile("P", "D:/out", "FLASH-test").items.get(0);
+        assertEquals("", saved.animalId);
+        assertEquals("", saved.hemisphere);
+        assertEquals("", saved.region);
+        assertEquals("", saved.condition);
+        assertEquals("hAPP5Week2", saved.seriesMeta.get(0).animalId);
+        assertEquals("LH", saved.seriesMeta.get(0).hemisphere);
+        assertEquals("SCN", saved.seriesMeta.get(0).region);
+    }
+
+    @Test
     public void addFile_conventionTokenWinsOverParentFolder() throws Exception {
         ProjectManifestTableModel model = new ProjectManifestTableModel();
         File koDir = temp.newFolder("KO");
-        File source = new File(koDir, "MyExp-Mouse5_LH_Cortex_WT.lif");
+        File source = new File(koDir, "MyExp-Mouse5_LH_Cortex_WT.tif");
         assertTrue(source.createNewFile());
 
         int idx = model.addFile(source);
@@ -74,18 +118,18 @@ public class ProjectManifestTableModelTest {
     @Test
     public void containsSource_detectsDuplicates() throws Exception {
         ProjectManifestTableModel model = new ProjectManifestTableModel();
-        File source = touch("Exp-A_LH_X.lif");
+        File source = touch("Exp-A_LH_X.tif");
 
         model.addFile(source);
 
         assertTrue(model.containsSource(source));
-        assertFalse(model.containsSource(touch("Other-B_RH_Y.lif")));
+        assertFalse(model.containsSource(touch("Other-B_RH_Y.tif")));
     }
 
     @Test
     public void seriesDisplay_reflectsCountAndSelection() throws Exception {
         ProjectManifestTableModel model = new ProjectManifestTableModel();
-        File source = touch("Exp-A_LH_X.lif");
+        File source = touch("Exp-A_LH_X.tif");
         int idx = model.addFile(source);
 
         assertEquals("", model.getValueAt(idx, ProjectManifestTableModel.COL_SERIES));
@@ -103,7 +147,7 @@ public class ProjectManifestTableModelTest {
     @Test
     public void setValueAt_persistsEditsAndFiresUpdate() throws Exception {
         ProjectManifestTableModel model = new ProjectManifestTableModel();
-        model.addFile(touch("Exp-A_LH_X.lif"));
+        model.addFile(touch("Exp-A_LH_X.tif"));
 
         model.setValueAt("renamed", 0, ProjectManifestTableModel.COL_ANIMAL);
         model.setValueAt(Boolean.FALSE, 0, ProjectManifestTableModel.COL_INCLUDE);
@@ -116,7 +160,7 @@ public class ProjectManifestTableModelTest {
     @Test
     public void regionTableEditorCommitsCanonicalAtlasTextToModel() throws Exception {
         ProjectManifestTableModel model = new ProjectManifestTableModel();
-        model.addFile(touch("Exp-A_LH_X.lif"));
+        model.addFile(touch("Exp-A_LH_X.tif"));
         JTable table = new JTable(model);
         table.getColumnModel().getColumn(ProjectManifestTableModel.COL_REGION)
                 .setCellEditor(new RegionTableCellEditor());
@@ -132,7 +176,7 @@ public class ProjectManifestTableModelTest {
     @Test
     public void isCellEditable_columnRules() throws Exception {
         ProjectManifestTableModel model = new ProjectManifestTableModel();
-        model.addFile(touch("Exp-A_LH_X.lif"));
+        model.addFile(touch("Exp-A_LH_X.tif"));
 
         assertTrue(model.isCellEditable(0, ProjectManifestTableModel.COL_INCLUDE));
         assertTrue(model.isCellEditable(0, ProjectManifestTableModel.COL_ANIMAL));
@@ -144,9 +188,9 @@ public class ProjectManifestTableModelTest {
     @Test
     public void setConditionForRows_bulkAssign() throws Exception {
         ProjectManifestTableModel model = new ProjectManifestTableModel();
-        model.addFile(touch("Exp-A_LH_X.lif"));
-        model.addFile(touch("Exp-B_RH_Y.lif"));
-        model.addFile(touch("Exp-C_LH_Z.lif"));
+        model.addFile(touch("Exp-A_LH_X.tif"));
+        model.addFile(touch("Exp-B_RH_Y.tif"));
+        model.addFile(touch("Exp-C_LH_Z.tif"));
         String row1Original = model.get(1).condition;
 
         model.setConditionForRows(new int[]{0, 2}, "KO");
@@ -158,9 +202,29 @@ public class ProjectManifestTableModelTest {
     }
 
     @Test
+    public void setConditionForRows_containerHeaderDoesNotAssignOrCascade() throws Exception {
+        ProjectManifestTableModel model = new ProjectManifestTableModel();
+        int idx = model.addFile(touch("Container.lif"));
+        model.setSeriesEntries(idx, Arrays.asList(
+                new ProjectManifestTableModel.SeriesEntry(0, "hAPP5Week2_LH_SCN")));
+        model.setExpanded(idx, true);
+        String seriesCondition = String.valueOf(
+                model.getValueAt(1, ProjectManifestTableModel.COL_CONDITION));
+
+        model.setConditionForRows(new int[]{0}, "KO");
+
+        assertEquals("", model.get(idx).condition);
+        assertEquals(seriesCondition,
+                model.getValueAt(1, ProjectManifestTableModel.COL_CONDITION));
+
+        model.setConditionForRows(new int[]{1}, "KO");
+        assertEquals("KO", model.getValueAt(1, ProjectManifestTableModel.COL_CONDITION));
+    }
+
+    @Test
     public void toProjectFile_writesAllRowsAndMetadata() throws Exception {
         ProjectManifestTableModel model = new ProjectManifestTableModel();
-        int idx = model.addFile(touch("Exp-A_LH_X_WT.lif"));
+        int idx = model.addFile(touch("Exp-A_LH_X_WT.tif"));
         model.setSeriesCount(idx, 4);
         model.setSelectedSeries(idx, Arrays.asList(Integer.valueOf(0), Integer.valueOf(2)));
         model.setValueAt("note", idx, ProjectManifestTableModel.COL_NOTES);
@@ -184,7 +248,7 @@ public class ProjectManifestTableModelTest {
     public void loadFromProjectFile_restoresAllFields() throws Exception {
         ProjectFile project = new ProjectFile();
         ProjectFile.Item item = new ProjectFile.Item();
-        item.path = touch("Exp-A_LH_X.lif").getAbsolutePath();
+        item.path = touch("Exp-A_LH_X.tif").getAbsolutePath();
         item.include = false;
         item.animalId = "A";
         item.hemisphere = "LH";
@@ -207,8 +271,8 @@ public class ProjectManifestTableModelTest {
     @Test
     public void removeRow_removesAndShiftsIndexes() throws Exception {
         ProjectManifestTableModel model = new ProjectManifestTableModel();
-        model.addFile(touch("Exp-A_LH_X.lif"));
-        model.addFile(touch("Exp-B_RH_Y.lif"));
+        model.addFile(touch("Exp-A_LH_X.tif"));
+        model.addFile(touch("Exp-B_RH_Y.tif"));
 
         model.removeRow(0);
 
@@ -219,7 +283,7 @@ public class ProjectManifestTableModelTest {
     @Test
     public void expandRevealsPerSeriesRowsPrefilledFromSeriesNames() throws Exception {
         ProjectManifestTableModel model = new ProjectManifestTableModel();
-        int idx = model.addFile(touch("slide.lif"));
+        int idx = model.addFile(touch("slide.tif"));
         model.setSeriesEntries(idx, Arrays.asList(
                 new ProjectManifestTableModel.SeriesEntry(0, "Exp-Mouse3_LH_CA1_WT"),
                 new ProjectManifestTableModel.SeriesEntry(1, "Exp-Mouse4_RH_DG_KO")));
@@ -291,9 +355,36 @@ public class ProjectManifestTableModelTest {
     }
 
     @Test
+    public void loadFromProjectFile_containerFileLevelIdentityIsIgnored() throws Exception {
+        File source = touch("Cas3.All.Time.Points.lif");
+        ProjectFile project = new ProjectFile();
+        ProjectFile.Item item = new ProjectFile.Item();
+        item.path = source.getAbsolutePath();
+        item.animalId = "Cas3.All.Time.Points";
+        item.hemisphere = "LH";
+        item.region = "SCN";
+        item.condition = "ContainerCondition";
+        item.seriesMeta.add(seriesMeta(0, "hAPP5Week2_LH_SCN", true));
+        project.items.add(item);
+
+        ProjectManifestTableModel model = new ProjectManifestTableModel();
+        model.loadFromProjectFile(project);
+
+        ProjectManifestTableModel.Row row = model.getFile(0);
+        assertEquals("", row.animalId);
+        assertEquals("", row.hemisphere);
+        assertEquals("", row.region);
+        assertEquals("", row.condition);
+        assertEquals("hAPP5Week2", row.series.get(0).animalId);
+        assertEquals("LH", row.series.get(0).hemisphere);
+        assertEquals("SCN", row.series.get(0).region);
+    }
+
+
+    @Test
     public void editingSeriesRowDoesNotTouchSiblingsOrFile() throws Exception {
         ProjectManifestTableModel model = new ProjectManifestTableModel();
-        int idx = model.addFile(touch("slide.lif"));
+        int idx = model.addFile(touch("slide.tif"));
         model.setSeriesEntries(idx, Arrays.asList(
                 new ProjectManifestTableModel.SeriesEntry(0, "s0"),
                 new ProjectManifestTableModel.SeriesEntry(1, "s1")));
@@ -313,7 +404,7 @@ public class ProjectManifestTableModelTest {
     @Test
     public void editingFileRowCascadesToSeriesRows() throws Exception {
         ProjectManifestTableModel model = new ProjectManifestTableModel();
-        int idx = model.addFile(touch("slide.lif"));
+        int idx = model.addFile(touch("slide.tif"));
         model.setSeriesEntries(idx, Arrays.asList(
                 new ProjectManifestTableModel.SeriesEntry(0, "s0"),
                 new ProjectManifestTableModel.SeriesEntry(1, "s1")));

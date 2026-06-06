@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
 
@@ -52,6 +53,12 @@ public class ProjectMetadataSeederTest {
         assertEquals("CA1", row0.region);
         assertTrue(row0.isConfirmed());
         assertEquals(OrientationManifestRow.DecisionSource.MANUAL, row0.decisionSource);
+        assertEquals(OrientationManifestRow.RotationDegrees.DEG_270, row0.rotateDegrees);
+        assertFalse(row0.flipHorizontal);
+
+        OrientationManifestRow row1 = rows.get(1);
+        assertEquals(OrientationManifestRow.RotationDegrees.DEG_270, row1.rotateDegrees);
+        assertTrue(row1.flipHorizontal);
     }
 
     @Test
@@ -69,11 +76,15 @@ public class ProjectMetadataSeederTest {
         assertEquals("Mouse3", first.animalName);
         assertEquals("LH", first.hemisphere);
         assertEquals("CA1", first.region);
+        assertEquals(OrientationManifestRow.RotationDegrees.DEG_270, first.rotateDegrees);
+        assertFalse(first.flipHorizontal);
 
         ResolvedImageMetadata second = ImageOrientationResolver.resolve(dir, "Mouse4_RH_DG", 2);
         assertEquals("Mouse4", second.animalName);
         assertEquals("RH", second.hemisphere);
         assertEquals("DG", second.region);
+        assertEquals(OrientationManifestRow.RotationDegrees.DEG_270, second.rotateDegrees);
+        assertTrue(second.flipHorizontal);
     }
 
     @Test
@@ -116,6 +127,51 @@ public class ProjectMetadataSeederTest {
         assertTrue(byKey.containsKey(
                 OrientationManifestRow.buildImageKey(
                         "CONTAINER", "slide.lif", 1, "slide.lif - Mouse3_LH_CA1")));
+    }
+
+    @Test
+    public void seedingRefreshesProjectBuilderRowsButPreservesManualRoiRows() throws Exception {
+        File root = temp.newFolder("refresh-builder-rows");
+        String dir = root.getAbsolutePath();
+        String projectKey = OrientationManifestRow.buildImageKey(
+                "CONTAINER", "slide.lif", 1, "slide.lif - Mouse3_LH_CA1");
+        String manualKey = OrientationManifestRow.buildImageKey(
+                "CONTAINER", "slide.lif", 2, "slide.lif - Mouse4_RH_DG");
+        OrientationManifestRow staleProjectBuilder = new OrientationManifestRow(
+                projectKey,
+                "slide.lif", 1, "slide.lif - Mouse3_LH_CA1", "Mouse3_LH_CA1", "Mouse3",
+                OrientationManifestRow.Hemisphere.LH, "CA1",
+                OrientationManifestRow.RotationDegrees.DEG_0, false, false,
+                OrientationManifestRow.ViewPolicy.MANUAL_ONLY,
+                OrientationManifestRow.DecisionSource.MANUAL,
+                OrientationManifestRow.ConfirmationState.YES, "Assigned in Project Builder");
+        OrientationManifestRow manualRoiDecision = new OrientationManifestRow(
+                manualKey,
+                "slide.lif", 2, "slide.lif - Mouse4_RH_DG", "Mouse4_RH_DG", "Mouse4",
+                OrientationManifestRow.Hemisphere.RH, "DG",
+                OrientationManifestRow.RotationDegrees.DEG_90, false, true,
+                OrientationManifestRow.ViewPolicy.MANUAL_ONLY,
+                OrientationManifestRow.DecisionSource.MANUAL,
+                OrientationManifestRow.ConfirmationState.YES, "Saved during Draw and Save ROIs");
+        OrientationManifestIO.saveRows(dir, Arrays.asList(staleProjectBuilder, manualRoiDecision));
+
+        ProjectFile project = projectWithContainer("slide.lif",
+                series(0, "Mouse3_LH_CA1", "Mouse3", "LH", "CA1", "WT", true),
+                series(1, "Mouse4_RH_DG", "Mouse4", "RH", "DG", "KO", true));
+
+        ProjectMetadataSeeder.seedOrientationManifest(root, project);
+
+        Map<String, OrientationManifestRow> byKey =
+                OrientationManifestIO.readByImageKeyIfExists(dir);
+        OrientationManifestRow refreshed = byKey.get(projectKey);
+        assertEquals(OrientationManifestRow.RotationDegrees.DEG_270, refreshed.rotateDegrees);
+        assertFalse(refreshed.flipHorizontal);
+
+        OrientationManifestRow preserved = byKey.get(manualKey);
+        assertEquals(OrientationManifestRow.RotationDegrees.DEG_90, preserved.rotateDegrees);
+        assertFalse(preserved.flipHorizontal);
+        assertTrue(preserved.flipVertical);
+        assertEquals("Saved during Draw and Save ROIs", preserved.notes);
     }
 
     @Test

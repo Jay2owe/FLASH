@@ -46,11 +46,11 @@ public class ImageNameParserTest {
 
     @Test
     public void parse_noDash_withValidHemisphere() {
-        // No experiment-dash and no Bio-Formats " - " separator: the
-        // convention (Experiment-Animal_Hemisphere_Region) is not satisfied,
-        // so the parse falls back regardless of how the underscore tokens look.
         NameParts np = ImageNameParser.parse("Mouse5_LH_Cortex");
-        assertFalse(np.strictMatch);
+        assertTrue(np.strictMatch);
+        assertEquals("Mouse5", np.animal);
+        assertEquals("LH", np.hemisphere);
+        assertEquals("Cortex", np.region);
     }
 
     @Test

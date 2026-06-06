@@ -150,7 +150,8 @@ public class BinSetupDispatcherTest {
 
         assertEquals(BinSetupDispatcher.Outcome.COMPLETED, BinSetupDispatcher.ensure(
                 dir.getAbsolutePath(), "Intensity Analysis",
-                EnumSet.of(BinField.CHANNEL_NAMES, BinField.INTENSITY_THRESHOLDS, BinField.Z_SLICE),
+                EnumSet.of(BinField.CHANNEL_NAMES, BinField.FILTER_PRESETS,
+                        BinField.INTENSITY_THRESHOLDS, BinField.Z_SLICE),
                 true));
         assertEquals(0, chooserCalls.get());
 
@@ -162,8 +163,7 @@ public class BinSetupDispatcherTest {
                 assertEquals("3D Object Analysis", analysisDisplayName);
                 assertEquals(EnumSet.of(BinField.OBJECT_THRESHOLDS,
                                 BinField.PARTICLE_SIZES,
-                                BinField.SEGMENTATION_METHODS,
-                                BinField.FILTER_PRESETS),
+                                BinField.SEGMENTATION_METHODS),
                         missing);
                 return BinSetupChooser.Choice.CANCELLED;
             }
@@ -199,10 +199,12 @@ public class BinSetupDispatcherTest {
         });
 
         CLIConfig cli = CLIArgumentParser.parse("dir=[" + dir.getAbsolutePath() + "] "
-                + "channel_names=DAPI,GFP intensity_thresholds=default,500 z_slice_mode=full");
+                + "channel_names=DAPI,GFP intensity_thresholds=default,500 "
+                + "filter_presets=Default,Default z_slice_mode=full");
         BinSetupDispatcher.Outcome outcome = BinSetupDispatcher.ensure(
                 dir.getAbsolutePath(), "Intensity Analysis",
-                EnumSet.of(BinField.CHANNEL_NAMES, BinField.INTENSITY_THRESHOLDS, BinField.Z_SLICE),
+                EnumSet.of(BinField.CHANNEL_NAMES, BinField.FILTER_PRESETS,
+                        BinField.INTENSITY_THRESHOLDS, BinField.Z_SLICE),
                 false, false, cli);
 
         assertEquals(BinSetupDispatcher.Outcome.COMPLETED, outcome);
@@ -211,10 +213,13 @@ public class BinSetupDispatcherTest {
                 BinSetupDispatcher.getLastFieldSources().get(BinField.CHANNEL_NAMES));
         assertEquals(BinSetupDispatcher.SOURCE_CLI_ARGUMENT,
                 BinSetupDispatcher.getLastFieldSources().get(BinField.INTENSITY_THRESHOLDS));
+        assertEquals(BinSetupDispatcher.SOURCE_CLI_ARGUMENT,
+                BinSetupDispatcher.getLastFieldSources().get(BinField.FILTER_PRESETS));
 
         BinConfig written = BinConfigIO.readPartialFromDirectory(dir.getAbsolutePath());
         assertEquals(java.util.Arrays.asList("DAPI", "GFP"), written.channelNames);
         assertEquals(java.util.Arrays.asList("default", "500"), written.channelIntensityThresholds);
+        assertEquals(java.util.Arrays.asList("Default", "Default"), written.channelFilterPresets);
         assertEquals(flash.pipeline.zslice.ZSliceMode.FULL, written.zSliceMode);
         assertFalse(written.hasChannelThresholds());
         assertFalse(written.hasChannelSizes());
@@ -223,6 +228,8 @@ public class BinSetupDispatcherTest {
         assertEquals(Boolean.FALSE, raw.complete);
         assertEquals(ChannelConfig.PropertyStatus.CONFIGURED,
                 raw.channels.get(0).statusOf(ChannelConfig.P_INTENSITY));
+        assertEquals(ChannelConfig.PropertyStatus.CONFIGURED,
+                raw.channels.get(0).statusOf(ChannelConfig.P_FILTER));
         assertEquals(ChannelConfig.PropertyStatus.PENDING,
                 raw.channels.get(0).statusOf(ChannelConfig.P_THRESHOLD));
 
@@ -239,8 +246,7 @@ public class BinSetupDispatcherTest {
                 assertEquals(EnumSet.of(BinField.CHANNEL_COLORS,
                                 BinField.OBJECT_THRESHOLDS,
                                 BinField.PARTICLE_SIZES,
-                                BinField.SEGMENTATION_METHODS,
-                                BinField.FILTER_PRESETS),
+                                BinField.SEGMENTATION_METHODS),
                         missing);
                 return BinSetupChooser.Choice.CANCELLED;
             }
@@ -268,7 +274,8 @@ public class BinSetupDispatcherTest {
         try {
             BinSetupDispatcher.ensure(
                     dir.getAbsolutePath(), "Intensity Analysis",
-                    EnumSet.of(BinField.CHANNEL_NAMES, BinField.INTENSITY_THRESHOLDS, BinField.Z_SLICE),
+                    EnumSet.of(BinField.CHANNEL_NAMES, BinField.FILTER_PRESETS,
+                            BinField.INTENSITY_THRESHOLDS, BinField.Z_SLICE),
                     false, true);
             fail("Expected missing channel_names");
         } catch (IllegalArgumentException e) {
@@ -293,6 +300,7 @@ public class BinSetupDispatcherTest {
                                                          boolean showRoiTip) {
                 chooserCalls.incrementAndGet();
                 assertEquals(EnumSet.of(BinField.CHANNEL_NAMES,
+                                BinField.FILTER_PRESETS,
                                 BinField.INTENSITY_THRESHOLDS,
                                 BinField.Z_SLICE),
                         missing);
@@ -302,7 +310,8 @@ public class BinSetupDispatcherTest {
 
         BinSetupDispatcher.Outcome outcome = BinSetupDispatcher.ensure(
                 dir.getAbsolutePath(), "Intensity Analysis",
-                EnumSet.of(BinField.CHANNEL_NAMES, BinField.INTENSITY_THRESHOLDS, BinField.Z_SLICE),
+                EnumSet.of(BinField.CHANNEL_NAMES, BinField.FILTER_PRESETS,
+                        BinField.INTENSITY_THRESHOLDS, BinField.Z_SLICE),
                 false, true);
 
         assertEquals(BinSetupDispatcher.Outcome.CANCELLED, outcome);
@@ -511,6 +520,7 @@ public class BinSetupDispatcherTest {
         channel.name = "DAPI";
         channel.color = "Blue";
         channel.intensityThreshold = "120";
+        channel.filterPreset = "Default";
         channel.status.put(ChannelConfig.P_NAME, ChannelConfig.PropertyStatus.CONFIGURED);
         channel.status.put(ChannelConfig.P_COLOR, ChannelConfig.PropertyStatus.CONFIGURED);
         channel.status.put(ChannelConfig.P_MARKER, ChannelConfig.PropertyStatus.CONFIGURED);
@@ -519,7 +529,7 @@ public class BinSetupDispatcherTest {
         channel.status.put(ChannelConfig.P_MINMAX, ChannelConfig.PropertyStatus.PENDING);
         channel.status.put(ChannelConfig.P_INTENSITY, ChannelConfig.PropertyStatus.CONFIGURED);
         channel.status.put(ChannelConfig.P_SEGMENTATION, ChannelConfig.PropertyStatus.PENDING);
-        channel.status.put(ChannelConfig.P_FILTER, ChannelConfig.PropertyStatus.PENDING);
+        channel.status.put(ChannelConfig.P_FILTER, ChannelConfig.PropertyStatus.CONFIGURED);
         cfg.channels.add(channel);
         ChannelConfigIO.write(configurationDir(dir), cfg);
     }

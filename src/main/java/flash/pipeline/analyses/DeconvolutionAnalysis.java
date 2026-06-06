@@ -46,7 +46,6 @@ import ij.ImageStack;
 import ij.io.FileSaver;
 import ij.io.Opener;
 import ij.plugin.RGBStackMerge;
-import ij.plugin.ZProjector;
 import ij.process.ImageProcessor;
 
 import javax.swing.BorderFactory;
@@ -1168,16 +1167,16 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
         try {
             return DeconvPreviewDialog.show(content, false);
         } finally {
-            // Ownership of the returned projections transfers here. The dialog is
-            // modal, so the projections stay valid until show(...) returns.
-            closeQuietly(content.deconvolvedProjection);
-            closeQuietly(content.rawProjection);
+            // Ownership of the returned stacks transfers here. The dialog is
+            // modal, so the stacks stay valid until show(...) returns.
+            closeQuietly(content.deconvolvedStack);
+            closeQuietly(content.rawStack);
         }
     }
 
     /**
      * Renders a raw/deconvolved representative preview using the same engine, PSF, crop,
-     * and metadata code as the batch. The returned projections are owned by the caller and
+     * and metadata code as the batch. The returned stacks are owned by the caller and
      * must not be closed here; every other temporary {@link ImagePlus} is released before
      * returning. Returns {@code null} when any required input cannot be produced.
      */
@@ -1192,8 +1191,6 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
         ImagePlus rawCrop = null;
         ImagePlus psf = null;
         ImagePlus deconvolved = null;
-        ImagePlus rawProjection = null;
-        ImagePlus deconvolvedProjection = null;
         try {
             rawChannel = openSeriesChannel(directory, job.seriesIndex, channelIndex);
             if (rawChannel == null) {
@@ -1225,25 +1222,23 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
             }
 
             double[] rawRange = stackDisplayRange(rawCrop);
-            rawProjection = maxProject(rawCrop, "Raw");
-            deconvolvedProjection = maxProject(deconvolved, "Deconvolved");
-            applyDisplayRange(rawProjection, rawRange[0], rawRange[1]);
-            applyDisplayRange(deconvolvedProjection, rawRange[0], rawRange[1]);
+            rawCrop.setTitle("Raw Preview");
+            deconvolved.setTitle("Deconvolved Preview");
+            applyDisplayRange(rawCrop, rawRange[0], rawRange[1]);
+            applyDisplayRange(deconvolved, rawRange[0], rawRange[1]);
 
             String deconvolvedLabel = "Deconvolved (" + engine.displayName()
                     + ", " + settings.iterations + " iter, "
                     + settings.psfModel.displayName() + ")";
 
             // Ownership transfer: null the local references so the finally block does not
-            // close the projections that the caller/dialog still needs to display.
-            ImagePlus rawOut = rawProjection;
-            ImagePlus deconvOut = deconvolvedProjection;
-            rawProjection = null;
-            deconvolvedProjection = null;
+            // close the stacks that the caller/dialog still needs to display.
+            ImagePlus rawOut = rawCrop;
+            ImagePlus deconvOut = deconvolved;
+            rawCrop = null;
+            deconvolved = null;
             return new DeconvPreviewDialog.PreviewContent(rawOut, deconvOut, "Raw", deconvolvedLabel);
         } finally {
-            closeQuietly(deconvolvedProjection);
-            closeQuietly(rawProjection);
             closeQuietly(deconvolved);
             closeQuietly(psf);
             closeQuietly(rawCrop);
@@ -1282,21 +1277,6 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
             result.setCalibration(image.getCalibration().copy());
         }
         return result;
-    }
-
-    private static ImagePlus maxProject(ImagePlus image, String title) {
-        if (image == null) return null;
-        ZProjector projector = new ZProjector(image);
-        projector.setMethod(ZProjector.MAX_METHOD);
-        projector.doProjection();
-        ImagePlus projection = projector.getProjection();
-        if (projection != null) {
-            projection.setTitle(title);
-            if (image.getCalibration() != null) {
-                projection.setCalibration(image.getCalibration().copy());
-            }
-        }
-        return projection;
     }
 
     private static double[] stackDisplayRange(ImagePlus image) {

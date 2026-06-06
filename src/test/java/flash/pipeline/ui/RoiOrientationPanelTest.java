@@ -90,6 +90,21 @@ public class RoiOrientationPanelTest {
     }
 
     @Test
+    public void displayActionsDelegateThroughInstanceHandler() {
+        DisplayTarget target = new DisplayTarget(OrientationTransformState.identity());
+        RoiOrientationPanel panel = new RoiOrientationPanel(
+                null, target, "Image 1/3", "Mouse");
+
+        panel.performDisplayLutToggle();
+        panel.performBrightnessContrastAction();
+
+        assertEquals(1, target.lutToggleCount);
+        assertEquals(1, target.brightnessContrastCount);
+
+        panel.close();
+    }
+
+    @Test
     public void dialogLocationNearImageUsesSameScreenRightSideWhenThereIsRoom() {
         Point location = RoiOrientationPanel.dialogLocationNearImage(
                 new Rectangle(100, 50, 300, 200),
@@ -109,7 +124,7 @@ public class RoiOrientationPanelTest {
         assertEquals(new Point(438, 580), location);
     }
 
-    private static final class FakeTarget
+    private static class FakeTarget
             implements RoiOrientationPanel.OrientationActionTarget {
         private OrientationTransformState state;
         private int clearCount;
@@ -142,6 +157,35 @@ public class RoiOrientationPanelTest {
         @Override
         public String statusText() {
             return "";
+        }
+    }
+
+    private static final class DisplayTarget extends FakeTarget {
+        private int lutToggleCount;
+        private int brightnessContrastCount;
+
+        DisplayTarget(OrientationTransformState state) {
+            super(state);
+        }
+
+        @Override
+        public boolean displayControlsAvailable() {
+            return true;
+        }
+
+        @Override
+        public String lutToggleButtonText() {
+            return "Red LUT";
+        }
+
+        @Override
+        public void toggleDisplayLut() {
+            lutToggleCount++;
+        }
+
+        @Override
+        public void adjustBrightnessContrast() {
+            brightnessContrastCount++;
         }
     }
 }

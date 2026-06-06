@@ -144,6 +144,7 @@ import java.nio.file.Path;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.EnumSet;
 import java.util.HashMap;
@@ -3014,6 +3015,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         final ImagePlus image;
         final String reviewLabel;
         final String warning;
+        final Map<Integer, Integer> minMaxOrderByChannelNumber;
 
         QcImageSelection(int seriesIndex, String seriesName, ImagePlus image) {
             this(seriesIndex, seriesName, image, "", "");
@@ -3021,11 +3023,25 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
 
         QcImageSelection(int seriesIndex, String seriesName, ImagePlus image,
                          String reviewLabel, String warning) {
+            this(seriesIndex, seriesName, image, reviewLabel, warning, null);
+        }
+
+        QcImageSelection(int seriesIndex, String seriesName, ImagePlus image,
+                         String reviewLabel, String warning,
+                         Map<Integer, Integer> minMaxOrderByChannelNumber) {
             this.seriesIndex = seriesIndex;
             this.seriesName = seriesName == null ? "" : seriesName;
             this.image = image;
             this.reviewLabel = reviewLabel == null ? "" : reviewLabel.trim();
             this.warning = warning == null ? "" : warning.trim();
+            this.minMaxOrderByChannelNumber = minMaxOrderByChannelNumber == null
+                    ? new LinkedHashMap<Integer, Integer>()
+                    : new LinkedHashMap<Integer, Integer>(minMaxOrderByChannelNumber);
+        }
+
+        int minMaxOrderForChannel(int channelNumber) {
+            Integer order = minMaxOrderByChannelNumber.get(Integer.valueOf(channelNumber));
+            return order == null ? Integer.MAX_VALUE : order.intValue();
         }
     }
 
@@ -4570,6 +4586,8 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
             List<Integer> selectedSeriesIndexes;
             Map<Integer, QcMinMaxPerConditionSelector.SelectedSeries> minMaxSelectionBySeries =
                     new LinkedHashMap<Integer, QcMinMaxPerConditionSelector.SelectedSeries>();
+            Map<Integer, Map<Integer, Integer>> minMaxOrderBySeriesAndChannel =
+                    new LinkedHashMap<Integer, Map<Integer, Integer>>();
             boolean selectionCanceled = false;
             String resultMessage = "";
             if (QC_SELECTION_MODE_MANUAL.equals(mode)) {
@@ -4609,6 +4627,8 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                 resultMessage = selection.message;
                 selectedSeriesIndexes = selection.selectedSeriesIndexes;
                 minMaxSelectionBySeries = selectedSeriesByIndex(selection.selectedSeries);
+                minMaxOrderBySeriesAndChannel =
+                        selectedSeriesOrderBySeriesAndChannel(selection.selectedSeriesByChannelNumber);
             } else {
                 selectedSeriesIndexes = chooseRandomSeriesIndexes(qcSeriesMetas, randomCount);
             }
@@ -4628,7 +4648,8 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
             List<QcImageSelection> images =
                     openQcSelections(qcSupplier, preparation.lifFile,
                             preparation.selectedSeriesIndexes, cfg,
-                            minMaxSelectionBySeries);
+                            minMaxSelectionBySeries,
+                            minMaxOrderBySeriesAndChannel);
             if (images.size() != preparation.selectedSeriesIndexes.size()) {
                 cleanupImages(images);
                 return QcImageOpenResult.cancel(
@@ -4985,7 +5006,8 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
     private List<QcImageSelection> openQcSelections(File lifFile, List<Integer> selectedSeriesIndexes,
                                                     BinUserConfig cfg) throws Exception {
         return openQcSelections(lifFile, selectedSeriesIndexes, cfg,
-                Collections.<Integer, QcMinMaxPerConditionSelector.SelectedSeries>emptyMap());
+                Collections.<Integer, QcMinMaxPerConditionSelector.SelectedSeries>emptyMap(),
+                Collections.<Integer, Map<Integer, Integer>>emptyMap());
     }
 
     private List<QcImageSelection> openQcSelections(
@@ -4993,8 +5015,20 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
             List<Integer> selectedSeriesIndexes,
             BinUserConfig cfg,
             Map<Integer, QcMinMaxPerConditionSelector.SelectedSeries> minMaxSelectionBySeries) throws Exception {
+        return openQcSelections(lifFile, selectedSeriesIndexes, cfg,
+                minMaxSelectionBySeries,
+                Collections.<Integer, Map<Integer, Integer>>emptyMap());
+    }
+
+    private List<QcImageSelection> openQcSelections(
+            File lifFile,
+            List<Integer> selectedSeriesIndexes,
+            BinUserConfig cfg,
+            Map<Integer, QcMinMaxPerConditionSelector.SelectedSeries> minMaxSelectionBySeries,
+            Map<Integer, Map<Integer, Integer>> minMaxOrderBySeriesAndChannel) throws Exception {
         return openQcSelections(new DeferredImageSupplier(lifFile), lifFile,
-                selectedSeriesIndexes, cfg, minMaxSelectionBySeries);
+                selectedSeriesIndexes, cfg, minMaxSelectionBySeries,
+                minMaxOrderBySeriesAndChannel);
     }
 
     private List<QcImageSelection> openQcSelections(
@@ -5002,7 +5036,8 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
             File lifFile,
             List<Integer> selectedSeriesIndexes,
             BinUserConfig cfg,
-            Map<Integer, QcMinMaxPerConditionSelector.SelectedSeries> minMaxSelectionBySeries) throws Exception {
+            Map<Integer, QcMinMaxPerConditionSelector.SelectedSeries> minMaxSelectionBySeries,
+            Map<Integer, Map<Integer, Integer>> minMaxOrderBySeriesAndChannel) throws Exception {
         List<Integer> orderedIndexes = new ArrayList<Integer>();
         if (selectedSeriesIndexes != null) {
             LinkedHashSet<Integer> unique = new LinkedHashSet<Integer>();
@@ -5027,14 +5062,30 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                     minMaxSelectionBySeries == null
                             ? null
                             : minMaxSelectionBySeries.get(Integer.valueOf(seriesIndex));
+            Map<Integer, Integer> orderByChannel =
+                    minMaxOrderBySeriesAndChannel == null
+                            ? null
+                            : minMaxOrderBySeriesAndChannel.get(Integer.valueOf(seriesIndex));
             selections.add(new QcImageSelection(
                     seriesIndex,
                     finalImp == null ? "" : finalImp.getTitle(),
                     finalImp,
                     minMaxReviewLabel(selected),
-                    warning));
+                    warning,
+                    orderByChannel));
         }
         return selections;
+    }
+
+    private List<QcImageSelection> openQcSelections(
+            DeferredImageSupplier supplier,
+            File lifFile,
+            List<Integer> selectedSeriesIndexes,
+            BinUserConfig cfg,
+            Map<Integer, QcMinMaxPerConditionSelector.SelectedSeries> minMaxSelectionBySeries) throws Exception {
+        return openQcSelections(supplier, lifFile, selectedSeriesIndexes, cfg,
+                minMaxSelectionBySeries,
+                Collections.<Integer, Map<Integer, Integer>>emptyMap());
     }
 
     private ImagePlus applyQcZSliceSubset(BinUserConfig cfg, int seriesIndex, ImagePlus imp) {
@@ -5135,6 +5186,32 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
             }
         }
         return byIndex;
+    }
+
+    private Map<Integer, Map<Integer, Integer>> selectedSeriesOrderBySeriesAndChannel(
+            Map<Integer, List<QcMinMaxPerConditionSelector.SelectedSeries>> selectedSeriesByChannelNumber) {
+        LinkedHashMap<Integer, Map<Integer, Integer>> bySeries =
+                new LinkedHashMap<Integer, Map<Integer, Integer>>();
+        if (selectedSeriesByChannelNumber == null) return bySeries;
+        for (Map.Entry<Integer, List<QcMinMaxPerConditionSelector.SelectedSeries>> entry
+                : selectedSeriesByChannelNumber.entrySet()) {
+            if (entry == null || entry.getKey() == null) continue;
+            Integer channelNumber = entry.getKey();
+            List<QcMinMaxPerConditionSelector.SelectedSeries> selectedSeries = entry.getValue();
+            if (selectedSeries == null) continue;
+            for (int i = 0; i < selectedSeries.size(); i++) {
+                QcMinMaxPerConditionSelector.SelectedSeries selected = selectedSeries.get(i);
+                if (selected == null || selected.seriesIndex < 0) continue;
+                Integer seriesIndex = Integer.valueOf(selected.seriesIndex);
+                Map<Integer, Integer> orderByChannel = bySeries.get(seriesIndex);
+                if (orderByChannel == null) {
+                    orderByChannel = new LinkedHashMap<Integer, Integer>();
+                    bySeries.put(seriesIndex, orderByChannel);
+                }
+                orderByChannel.put(channelNumber, Integer.valueOf(i));
+            }
+        }
+        return bySeries;
     }
 
     private String minMaxReviewLabel(QcMinMaxPerConditionSelector.SelectedSeries selected) {
@@ -7502,7 +7579,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                 projectRootForConfigurationDir(binFolder),
                 binFolder,
                 cfg,
-                filterParameterContextImages(images),
+                filterParameterContextImages(images, channelIndex),
                 cfg.names,
                 channelIndex,
                 setupFilteredStackCache);
@@ -7823,7 +7900,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                 projectRootForConfigurationDir(binFolder),
                 binFolder,
                 cfg,
-                filterParameterContextImages(images),
+                filterParameterContextImages(images, channelIndex),
                 cfg.names,
                 channelIndex,
                 setupFilteredStackCache);
@@ -7964,7 +8041,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                 projectRootForConfigurationDir(binFolder),
                 binFolder,
                 cfg,
-                filterParameterContextImages(images),
+                filterParameterContextImages(images, channelIndex),
                 cfg.names,
                 channelIndex,
                 setupFilteredStackCache);
@@ -8240,7 +8317,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                 projectRootForConfigurationDir(binFolder),
                 binFolder,
                 cfg,
-                filterParameterContextImages(images),
+                filterParameterContextImages(images, channelIndex),
                 cfg.names,
                 channelIndex,
                 setupFilteredStackCache);
@@ -8388,7 +8465,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                 projectRootForConfigurationDir(binFolder),
                 binFolder,
                 cfg,
-                filterParameterContextImages(images),
+                filterParameterContextImages(images, channelIndex),
                 cfg.names,
                 channelIndex,
                 setupFilteredStackCache);
@@ -8492,7 +8569,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                 projectRootForConfigurationDir(binFolder),
                 binFolder,
                 cfg,
-                filterParameterContextImages(images),
+                filterParameterContextImages(images, channelIndex),
                 cfg.names,
                 channelIndex,
                 setupFilteredStackCache);
@@ -8672,7 +8749,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                 projectRootForConfigurationDir(binFolder),
                 binFolder,
                 cfg,
-                filterParameterContextImages(images),
+                filterParameterContextImages(images, channelIndex),
                 cfg.names,
                 channelIndex,
                 setupFilteredStackCache);
@@ -8688,22 +8765,44 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         return "cancel";
     }
 
-    private List<ConfigQcContext.ConfigQcImage> filterParameterContextImages(List<QcImageSelection> images) {
+    private List<ConfigQcContext.ConfigQcImage> filterParameterContextImages(
+            List<QcImageSelection> images,
+            int channelIndex) {
         List<ConfigQcContext.ConfigQcImage> contextImages =
                 new ArrayList<ConfigQcContext.ConfigQcImage>();
-        if (images != null) {
-            for (int i = 0; i < images.size(); i++) {
-                QcImageSelection selection = images.get(i);
-                if (selection == null) continue;
-                contextImages.add(new ConfigQcContext.ConfigQcImage(
-                        selection.seriesIndex,
-                        selection.seriesName,
-                        selection.image,
-                        selection.reviewLabel,
-                        selection.warning));
-            }
+        List<QcImageSelection> orderedImages = orderQcSelectionsForChannel(images, channelIndex);
+        for (int i = 0; i < orderedImages.size(); i++) {
+            QcImageSelection selection = orderedImages.get(i);
+            if (selection == null) continue;
+            contextImages.add(new ConfigQcContext.ConfigQcImage(
+                    selection.seriesIndex,
+                    selection.seriesName,
+                    selection.image,
+                    selection.reviewLabel,
+                    selection.warning));
         }
         return contextImages;
+    }
+
+    private List<QcImageSelection> orderQcSelectionsForChannel(List<QcImageSelection> images,
+                                                               int channelIndex) {
+        List<QcImageSelection> ordered = new ArrayList<QcImageSelection>();
+        if (images == null) return ordered;
+        for (int i = 0; i < images.size(); i++) {
+            QcImageSelection selection = images.get(i);
+            if (selection != null) ordered.add(selection);
+        }
+        final int channelNumber = channelIndex + 1;
+        Collections.sort(ordered, new Comparator<QcImageSelection>() {
+            @Override public int compare(QcImageSelection left, QcImageSelection right) {
+                int leftOrder = left == null ? Integer.MAX_VALUE
+                        : left.minMaxOrderForChannel(channelNumber);
+                int rightOrder = right == null ? Integer.MAX_VALUE
+                        : right.minMaxOrderForChannel(channelNumber);
+                return Integer.compare(leftOrder, rightOrder);
+            }
+        });
+        return ordered;
     }
 
     FilterParameterStage createFilterParameterStage(final List<QcImageSelection> images,

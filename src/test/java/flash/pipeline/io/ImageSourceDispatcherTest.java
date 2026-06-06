@@ -2,6 +2,7 @@ package flash.pipeline.io;
 
 import flash.pipeline.project.ProjectFile;
 import flash.pipeline.project.ProjectFileIO;
+import flash.pipeline.naming.OrientationManifestRow;
 import ij.IJ;
 import ij.ImagePlus;
 import org.junit.After;
@@ -17,6 +18,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -209,6 +211,85 @@ public class ImageSourceDispatcherTest {
                 supplier.getContainerFileForSeries(0).getAbsolutePath());
         assertEquals(beta.getAbsolutePath(),
                 supplier.getContainerFileForSeries(1).getAbsolutePath());
+    }
+
+    @Test
+    public void projectJsonSelectionVariantsUseManifestInsteadOfNestedScanning() throws Exception {
+        File outputRoot = temp.newFolder("manifest-selection-output");
+        File sourceRoot = temp.newFolder("manifest-selection-sources");
+        File alpha = new File(sourceRoot, "alpha.tif");
+        assertTrue(alpha.createNewFile());
+
+        ProjectFile project = new ProjectFile();
+        project.name = "Manifest Selection";
+        project.outputRoot = outputRoot.getAbsolutePath();
+        project.items.add(projectItem(alpha));
+        writeProject(outputRoot, project);
+
+        File flashDir = new File(outputRoot, FlashProjectLayout.FLASH_DIR);
+        File configDir = new File(flashDir, FlashProjectLayout.CONFIGURATION_DIR);
+        File settingsDir = FlashProjectLayout.forDirectory(outputRoot.getAbsolutePath())
+                .configurationWriteDir();
+        File projectJson = new File(settingsDir, ProjectFileIO.FILE_NAME);
+        String[] selections = new String[]{
+                outputRoot.getAbsolutePath(),
+                flashDir.getAbsolutePath(),
+                configDir.getAbsolutePath(),
+                settingsDir.getAbsolutePath(),
+                projectJson.getAbsolutePath()
+        };
+
+        for (String selection : selections) {
+            assertTrue("Expected project manifest for " + selection,
+                    ImageSourceDispatcher.hasProjectManifest(selection));
+            assertEquals("Expected TIFF manifest mode for " + selection,
+                    ImageSourceDispatcher.SourceMode.TIFF_LOOSE,
+                    ImageSourceDispatcher.detectMode(selection));
+
+            DeferredImageSupplier supplier = ImageSourceDispatcher.createSupplier(selection);
+            assertEquals("Expected manifest TIFF supplier for " + selection,
+                    DeferredImageSupplier.Mode.TIFF_FOLDER, supplier.getMode());
+            assertEquals(alpha.getAbsolutePath(),
+                    supplier.getContainerFileForSeries(0).getAbsolutePath());
+        }
+    }
+
+    @Test
+    public void projectJsonDetectionSyncsProjectBuilderOrientationRows() throws Exception {
+        File outputRoot = temp.newFolder("manifest-orientation-output");
+        File sourceRoot = temp.newFolder("manifest-orientation-sources");
+        File lif = new File(sourceRoot, "slide.lif");
+        assertTrue(lif.createNewFile());
+
+        ProjectFile project = new ProjectFile();
+        project.name = "Manifest Orientation";
+        project.outputRoot = outputRoot.getAbsolutePath();
+        ProjectFile.Item item = projectItem(lif);
+        item.seriesMeta.add(seriesMeta(0, "Mouse3_LH_CA1", "Mouse3", "LH", "CA1"));
+        project.items.add(item);
+        writeProject(outputRoot, project);
+
+        String dir = outputRoot.getAbsolutePath();
+        String imageKey = OrientationManifestRow.buildImageKey(
+                "CONTAINER", "slide.lif", 1, "slide.lif - Mouse3_LH_CA1");
+        OrientationManifestRow staleProjectBuilder = new OrientationManifestRow(
+                imageKey,
+                "slide.lif", 1, "slide.lif - Mouse3_LH_CA1", "Mouse3_LH_CA1", "Mouse3",
+                OrientationManifestRow.Hemisphere.LH, "CA1",
+                OrientationManifestRow.RotationDegrees.DEG_0, false, false,
+                OrientationManifestRow.ViewPolicy.MANUAL_ONLY,
+                OrientationManifestRow.DecisionSource.MANUAL,
+                OrientationManifestRow.ConfirmationState.YES, "Assigned in Project Builder");
+        OrientationManifestIO.saveRows(dir, Arrays.asList(staleProjectBuilder));
+
+        assertEquals(ImageSourceDispatcher.SourceMode.CONTAINER,
+                ImageSourceDispatcher.detectMode(dir));
+
+        Map<String, OrientationManifestRow> byKey =
+                OrientationManifestIO.readByImageKeyIfExists(dir);
+        OrientationManifestRow synced = byKey.get(imageKey);
+        assertEquals(OrientationManifestRow.RotationDegrees.DEG_270, synced.rotateDegrees);
+        assertFalse(synced.flipHorizontal);
     }
 
     @Test
@@ -569,6 +650,20 @@ public class ImageSourceDispatcherTest {
         item.path = source.getAbsolutePath();
         item.include = true;
         return item;
+    }
+
+    private static ProjectFile.SeriesItem seriesMeta(int index, String name,
+                                                     String animal,
+                                                     String hemisphere,
+                                                     String region) {
+        ProjectFile.SeriesItem series = new ProjectFile.SeriesItem();
+        series.index = index;
+        series.include = true;
+        series.name = name;
+        series.animalId = animal;
+        series.hemisphere = hemisphere;
+        series.region = region;
+        return series;
     }
 
     private static void writeProject(File outputRoot, ProjectFile project) throws Exception {

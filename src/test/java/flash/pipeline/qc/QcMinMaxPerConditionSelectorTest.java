@@ -260,6 +260,52 @@ public class QcMinMaxPerConditionSelectorTest {
     }
 
     @Test
+    public void selectedSeriesByChannel_ordersConditionsByThatChannelMax() {
+        List<QcSelectionChannel> qcChannels = Arrays.asList(
+                new QcSelectionChannel(0, "DAPI", true, false, false),
+                new QcSelectionChannel(1, "Marker", true, false, false));
+        List<QcMinMaxPerConditionSelector.ScoreRecord> records =
+                new ArrayList<QcMinMaxPerConditionSelector.ScoreRecord>();
+
+        QcMinMaxPerConditionSelector.ScoreRecord alphaMin = record("Alpha", 0, 1, 60);
+        alphaMin.selectedRole = "MIN";
+        records.add(alphaMin);
+        QcMinMaxPerConditionSelector.ScoreRecord alphaMax = record("Alpha", 1, 100, 10);
+        alphaMax.selectedRole = "MAX";
+        records.add(alphaMax);
+
+        QcMinMaxPerConditionSelector.ScoreRecord betaMin = record("Beta", 2, 2, 2);
+        betaMin.selectedRole = "MIN";
+        records.add(betaMin);
+        QcMinMaxPerConditionSelector.ScoreRecord betaMax = record("Beta", 3, 80, 200);
+        betaMax.selectedRole = "MAX";
+        records.add(betaMax);
+
+        QcMinMaxPerConditionSelector.ScoreRecord gammaMinMax = record("Gamma", 4, 50, 50);
+        gammaMinMax.selectedRole = "MIN_MAX";
+        records.add(gammaMinMax);
+
+        Map<Integer, List<QcMinMaxPerConditionSelector.SelectedSeries>> byChannel =
+                QcMinMaxPerConditionSelector.selectedSeriesByChannelNumber(records, qcChannels);
+        List<QcMinMaxPerConditionSelector.SelectedSeries> c1 =
+                byChannel.get(Integer.valueOf(1));
+        List<QcMinMaxPerConditionSelector.SelectedSeries> c2 =
+                byChannel.get(Integer.valueOf(2));
+
+        assertEquals(5, c1.size());
+        assertEquals("Alpha", c1.get(0).conditionName);
+        assertEquals("MAX", c1.get(0).selectedRole);
+        assertEquals("Beta", c1.get(2).conditionName);
+        assertEquals("Gamma", c1.get(4).conditionName);
+
+        assertEquals(5, c2.size());
+        assertEquals("Beta", c2.get(0).conditionName);
+        assertEquals("MAX", c2.get(0).selectedRole);
+        assertEquals("Alpha", c2.get(2).conditionName);
+        assertEquals("Gamma", c2.get(4).conditionName);
+    }
+
+    @Test
     public void selectedSeriesOverall_returnsOnlyGlobalMaxThenMin() {
         List<QcSelectionChannel> qcChannels = Arrays.asList(
                 new QcSelectionChannel(0, "DAPI", true, false, false),

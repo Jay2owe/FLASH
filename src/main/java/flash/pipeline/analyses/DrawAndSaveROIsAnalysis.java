@@ -43,6 +43,7 @@ import ij.plugin.ZProjector;
 import ij.plugin.frame.RoiManager;
 import ij.measure.ResultsTable;
 import ij.gui.Roi;
+import ij.process.LUT;
 
 import java.awt.Color;
 import java.awt.Component;
@@ -90,6 +91,8 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
 
     static final String FULL_IMAGE_SOURCE = "Full image";
     static final String CONFIGURED_SUBSET_SOURCE = "Configured analysis subset";
+    private static final String[] BRIGHTNESS_CONTRAST_WINDOW_TITLES =
+            new String[]{"B&C", "Brightness/Contrast"};
     private boolean suppressDialogs = false;
     private boolean headless = false;
     private boolean commandMode = false;
@@ -663,6 +666,31 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
             public String statusText() {
                 return orientationStatusText(getState());
             }
+
+            @Override
+            public boolean displayControlsAvailable() {
+                return prep != null && prep.maxProjection != null;
+            }
+
+            @Override
+            public String lutToggleButtonText() {
+                return roiLutToggleButtonText(prep);
+            }
+
+            @Override
+            public String lutToggleButtonToolTipText() {
+                return roiLutToggleToolTipText(prep);
+            }
+
+            @Override
+            public void toggleDisplayLut() {
+                toggleRoiDisplayLut(prep);
+            }
+
+            @Override
+            public void adjustBrightnessContrast() {
+                adjustRoiBrightnessContrast(prep);
+            }
         };
     }
 
@@ -690,6 +718,7 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
                 && displayMax > displayMin) {
             nextMax.setDisplayRange(displayMin, displayMax);
         }
+        applyRoiDisplayLut(nextMax, effectiveRoiLutName(prep));
 
         closeImageNoPrompt(oldMax);
         if (oldStack != source) {
@@ -1003,6 +1032,122 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
         return cfg != null && cfg.zSliceMode != null && cfg.zSliceMode != ZSliceMode.FULL;
     }
 
+    static String roiChannelLutName(BinConfig cfg, int roiChannel) {
+        int index = Math.max(1, roiChannel) - 1;
+        if (cfg != null && cfg.channelColors != null
+                && index >= 0 && index < cfg.channelColors.size()) {
+            return normalizeLutName(cfg.channelColors.get(index));
+        }
+        return "Grays";
+    }
+
+    static String normalizeLutName(String color) {
+        if (color == null) return "Grays";
+        String normalized = color.trim().toUpperCase(Locale.ROOT);
+        if ("RED".equals(normalized)) return "Red";
+        if ("GREEN".equals(normalized)) return "Green";
+        if ("BLUE".equals(normalized)) return "Blue";
+        if ("CYAN".equals(normalized)) return "Cyan";
+        if ("MAGENTA".equals(normalized)) return "Magenta";
+        if ("YELLOW".equals(normalized)) return "Yellow";
+        if ("GRAY".equals(normalized) || "GREY".equals(normalized)
+                || "GRAYS".equals(normalized) || "GREYS".equals(normalized)) {
+            return "Grays";
+        }
+        return "Grays";
+    }
+
+    static void applyRoiDisplayLut(ImagePlus imp, String colorName) {
+        if (imp == null) return;
+        String normalized = normalizeLutName(colorName);
+        byte[] r = new byte[256];
+        byte[] g = new byte[256];
+        byte[] b = new byte[256];
+        boolean addR = "Red".equals(normalized) || "Magenta".equals(normalized)
+                || "Yellow".equals(normalized) || "Grays".equals(normalized);
+        boolean addG = "Green".equals(normalized) || "Cyan".equals(normalized)
+                || "Yellow".equals(normalized) || "Grays".equals(normalized);
+        boolean addB = "Blue".equals(normalized) || "Cyan".equals(normalized)
+                || "Magenta".equals(normalized) || "Grays".equals(normalized);
+        for (int i = 0; i < 256; i++) {
+            if (addR) r[i] = (byte) i;
+            if (addG) g[i] = (byte) i;
+            if (addB) b[i] = (byte) i;
+        }
+        imp.getProcessor().setLut(new LUT(r, g, b));
+        imp.updateAndDraw();
+    }
+
+    static String effectiveRoiLutName(PreparedImage prep) {
+        return prep == null || prep.usingGreyLut ? "Grays" : prep.roiLutName;
+    }
+
+    static String roiLutToggleButtonText(PreparedImage prep) {
+        if (prep == null) return "Grey LUT";
+        return prep.usingGreyLut ? normalizeLutName(prep.roiLutName) + " LUT" : "Grey LUT";
+    }
+
+    static String roiLutToggleToolTipText(PreparedImage prep) {
+        if (prep != null && prep.usingGreyLut) {
+            return "Show ROI image with the selected channel LUT.";
+        }
+        return "Show ROI image in grey.";
+    }
+
+    static void toggleRoiDisplayLut(PreparedImage prep) {
+        if (prep == null) return;
+        prep.usingGreyLut = !prep.usingGreyLut;
+        applyRoiDisplayLut(prep.maxProjection, effectiveRoiLutName(prep));
+    }
+
+    private void adjustRoiBrightnessContrast(PreparedImage prep) {
+        if (prep == null || prep.maxProjection == null) return;
+        ImagePlus image = prep.maxProjection;
+        if (image.getWindow() != null) {
+            image.getWindow().toFront();
+        }
+        IJ.run(image, "Brightness/Contrast...", "");
+        positionToolWindowNextToImage(image, BRIGHTNESS_CONTRAST_WINDOW_TITLES);
+    }
+
+    private static void positionToolWindowNextToImage(ImagePlus image, String... toolWindowTitles) {
+        java.awt.Frame frame = findToolWindow(toolWindowTitles);
+        if (frame == null) return;
+        Window imageWindow = image == null ? null : image.getWindow();
+        if (imageWindow != null) {
+            frame.setLocation(imageWindow.getX() + imageWindow.getWidth() + 10,
+                    imageWindow.getY() + 210);
+        } else {
+            Dimension screen = Toolkit.getDefaultToolkit().getScreenSize();
+            frame.setLocation(screen.width - frame.getWidth() - 20, 260);
+        }
+    }
+
+    private static java.awt.Frame findToolWindow(String... toolWindowTitles) {
+        java.awt.Frame[] frames = WindowManager.getNonImageWindows();
+        if (frames == null) return null;
+        for (java.awt.Frame frame : frames) {
+            if (frame != null && matchesToolWindowTitle(frame.getTitle(), toolWindowTitles)) {
+                return frame;
+            }
+        }
+        return null;
+    }
+
+    private static boolean matchesToolWindowTitle(String actualTitle, String... candidateTitles) {
+        if (actualTitle == null || candidateTitles == null) return false;
+        String normalizedActual = actualTitle.trim();
+        for (String candidate : candidateTitles) {
+            if (candidate == null) continue;
+            String normalizedCandidate = candidate.trim();
+            if (normalizedActual.equalsIgnoreCase(normalizedCandidate)
+                    || normalizedActual.startsWith(normalizedCandidate + " ")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static boolean isNuclearBoundaryChannel(String name) {
         if (name == null) return false;
         String normalized = name.toLowerCase(java.util.Locale.ROOT)
@@ -1081,9 +1226,11 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
             if ("Automatic".equals(imageProcessing)) {
                 IJ.run(max, "Enhance Contrast", "saturated=1");
             }
+            String roiLutName = roiChannelLutName(roiBinCfg, roiChannel);
+            applyRoiDisplayLut(max, roiLutName);
 
             PreparedImage prepared = buildPreparedImage(directory, seriesIndex, imp, max, roiStack, parts, metadata,
-                    imageProcessing);
+                    imageProcessing, roiLutName);
             recordInputEnd(inputHandle, "processed", started);
             return prepared;
         } catch (Exception e) {
@@ -1129,6 +1276,20 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
                                             ResolvedImageMetadata seedMetadata,
                                             String imageProcessing)
             throws Exception {
+        return buildPreparedImage(directory, seriesIndex, original, maxProjection, roiStack,
+                parts, seedMetadata, imageProcessing, "Grays");
+    }
+
+    static PreparedImage buildPreparedImage(String directory,
+                                            int seriesIndex,
+                                            ImagePlus original,
+                                            ImagePlus maxProjection,
+                                            ImagePlus roiStack,
+                                            NameParts parts,
+                                            ResolvedImageMetadata seedMetadata,
+                                            String imageProcessing,
+                                            String roiLutName)
+            throws Exception {
         OrientationImageIdentity identity =
                 OrientationImageIdentity.fromProjectSeries(
                         directory, seriesIndex, original == null ? "" : original.getTitle());
@@ -1136,7 +1297,7 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
                 OrientationTransformState.fromMetadata(seedMetadata);
         return new PreparedImage(
                 seriesIndex, original, maxProjection, roiStack, parts,
-                identity, seedMetadata, transformState, imageProcessing);
+                identity, seedMetadata, transformState, imageProcessing, roiLutName);
     }
 
     static final class RoiSeriesRange {
@@ -1174,6 +1335,8 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
         final OrientationImageIdentity identity;
         final ResolvedImageMetadata seedMetadata;
         final String imageProcessing;
+        final String roiLutName;
+        boolean usingGreyLut;
         OrientationTransformState transformState;
 
         PreparedImage(int seriesIndex,
@@ -1197,6 +1360,20 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
                       ResolvedImageMetadata seedMetadata,
                       OrientationTransformState transformState,
                       String imageProcessing) {
+            this(seriesIndex, original, maxProjection, roiStack, parts, identity,
+                    seedMetadata, transformState, imageProcessing, "Grays");
+        }
+
+        PreparedImage(int seriesIndex,
+                      ImagePlus original,
+                      ImagePlus maxProjection,
+                      ImagePlus roiStack,
+                      NameParts parts,
+                      OrientationImageIdentity identity,
+                      ResolvedImageMetadata seedMetadata,
+                      OrientationTransformState transformState,
+                      String imageProcessing,
+                      String roiLutName) {
             this.seriesIndex = seriesIndex;
             this.original = original;
             this.maxProjection = maxProjection;
@@ -1205,6 +1382,7 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
             this.identity = identity;
             this.seedMetadata = seedMetadata;
             this.imageProcessing = imageProcessing == null ? "" : imageProcessing;
+            this.roiLutName = normalizeLutName(roiLutName);
             this.transformState = transformState == null
                     ? OrientationTransformState.identity()
                     : transformState;
