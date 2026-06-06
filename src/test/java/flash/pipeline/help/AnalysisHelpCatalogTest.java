@@ -248,6 +248,10 @@ public class AnalysisHelpCatalogTest {
         assertContains(topic.summary, "rotate/flip controls");
         assertContains(topic.setup, "always-available orientation panel");
         assertContains(topic.setup, "if you do nothing, FLASH keeps the current orientation");
+        assertContains(topic.setup, "Repeat last");
+        assertContains(topic.setup, "saved preset");
+        assertContains(topic.setup, "apply-to buttons");
+        assertContains(topic.setup, "mirror it across LH/RH images");
         assertContains(topic.workflow, "saved transforms");
         assertContains(topic.outputs, "Image Orientation.csv");
         assertContains(topic.pitfalls, "Changing orientation after drawing an unsaved ROI");

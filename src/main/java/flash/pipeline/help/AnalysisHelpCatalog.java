@@ -245,6 +245,8 @@ public final class AnalysisHelpCatalog {
                         "Open a representative image and pick the display channel that makes the region boundary easiest to see.",
                         "When each ROI image opens, the orientation buttons are available beside the image.",
                         "Use the always-available orientation panel only if the image needs rotating or flipping; if you do nothing, FLASH keeps the current orientation.",
+                        "Use Repeat last or a saved preset when the same rotate/flip transform recurs across images.",
+                        "Use the apply-to buttons to keep the current orientation on this image only, apply it to all later images, restrict it to the same hemisphere, or mirror it across LH/RH images.",
                         "Draw each anatomical region carefully and name it consistently.",
                         "Save the ROI set for the image, then repeat or append until all required images have ROI files."),
                 list(

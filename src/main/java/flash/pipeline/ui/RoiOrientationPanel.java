@@ -357,6 +357,9 @@ public final class RoiOrientationPanel {
         html.append("Draw or edit the ROI in ImageJ. Use orientation buttons ")
                 .append("if needed, then click <b>Finish drawing</b> to lock ")
                 .append("in this image's ROI.");
+        html.append("<br><br>Use <b>Repeat last</b> or a saved preset to reuse ")
+                .append("an orientation. The apply-to buttons can keep this image ")
+                .append("only, apply to all later images, or mirror later LH/RH images.");
         html.append("</body></html>");
         return html.toString();
     }

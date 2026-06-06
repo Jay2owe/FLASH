@@ -12,6 +12,7 @@ import java.util.List;
 
 import static flash.pipeline.naming.OrientationManifestRow.Hemisphere.LH;
 import static flash.pipeline.naming.OrientationManifestRow.Hemisphere.RH;
+import static flash.pipeline.naming.OrientationManifestRow.Hemisphere.UNKNOWN;
 import static flash.pipeline.naming.OrientationManifestRow.RotationDegrees.DEG_180;
 import static flash.pipeline.naming.OrientationManifestRow.RotationDegrees.DEG_270;
 import static flash.pipeline.naming.OrientationManifestRow.RotationDegrees.DEG_90;
@@ -40,6 +41,25 @@ public class OrientationBatchControllerTest {
         assertTrue(controller.applyActiveRuleOnOpen());
         assertTransform(DEG_90, true, false, target.state());
         assertEquals(1, target.appliedStates.size());
+    }
+
+    @Test
+    public void allLiteralRuleFromUnknownHemisphereAppliesLiterallyToKnownTargets()
+            throws Exception {
+        OrientationBatchController controller = controller("unknown-all-literal", 3);
+        FakeImage source = image(UNKNOWN, transform(DEG_90, true, false));
+        controller.bindCurrent(source, 0);
+        controller.setRule(ALL_LITERAL);
+
+        FakeImage lhTarget = image(LH, OrientationTransformState.identity());
+        controller.bindCurrent(lhTarget, 1);
+        assertTrue(controller.applyActiveRuleOnOpen());
+        assertTransform(DEG_90, true, false, lhTarget.state());
+
+        FakeImage rhTarget = image(RH, OrientationTransformState.identity());
+        controller.bindCurrent(rhTarget, 2);
+        assertTrue(controller.applyActiveRuleOnOpen());
+        assertTransform(DEG_90, true, false, rhTarget.state());
     }
 
     @Test
@@ -75,6 +95,39 @@ public class OrientationBatchControllerTest {
         controller.bindCurrent(lhTarget, 2);
         assertTrue(controller.applyActiveRuleOnOpen());
         assertTransform(DEG_180, false, true, lhTarget.state());
+    }
+
+    @Test
+    public void settingSecondRuleReplacesFirstRuleAndStatus() throws Exception {
+        OrientationBatchController controller = controller("replace-rule", 4);
+        FakeImage source = image(LH, transform(DEG_90, false, false));
+        controller.bindCurrent(source, 0);
+        controller.setRule(SAME_HEMISPHERE);
+
+        assertEquals(SAME_HEMISPHERE, controller.activeRule().scope);
+        assertTrue(controller.ruleStatusText().contains("all LH images"));
+
+        controller.setRule(ALL_LITERAL);
+
+        assertEquals(ALL_LITERAL, controller.activeRule().scope);
+        assertTrue(controller.ruleStatusText().contains("all images"));
+        assertFalse(controller.ruleStatusText().contains("all LH images"));
+    }
+
+    @Test
+    public void manualStateAfterMirroredRuleDoesNotMutateStoredRule() throws Exception {
+        OrientationBatchController controller = controller("manual-after-mirror", 2);
+        FakeImage source = image(LH, transform(DEG_90, false, false));
+        controller.bindCurrent(source, 0);
+        controller.setRule(ALL_MIRRORED);
+
+        controller.noteManualState(transform(DEG_180, true, true));
+
+        FakeImage target = image(RH, OrientationTransformState.identity());
+        controller.bindCurrent(target, 1);
+
+        assertTrue(controller.applyActiveRuleOnOpen());
+        assertTransform(DEG_90, true, false, target.state());
     }
 
     @Test

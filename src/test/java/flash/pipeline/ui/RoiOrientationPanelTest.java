@@ -110,6 +110,17 @@ public class RoiOrientationPanelTest {
     }
 
     @Test
+    public void instructionHtmlMentionsReuseAndBroadcastControls() {
+        String html = RoiOrientationPanel.instructionHtml("Image 1/3", "Mouse");
+
+        assertTrue(html.contains("Repeat last"));
+        assertTrue(html.contains("saved preset"));
+        assertTrue(html.contains("apply-to buttons"));
+        assertTrue(html.contains("all later images"));
+        assertTrue(html.contains("mirror later LH/RH images"));
+    }
+
+    @Test
     public void displayActionsDelegateThroughInstanceHandler() {
         DisplayTarget target = new DisplayTarget(OrientationTransformState.identity());
         RoiOrientationPanel panel = new RoiOrientationPanel(
