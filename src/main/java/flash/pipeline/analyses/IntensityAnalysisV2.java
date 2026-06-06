@@ -88,8 +88,10 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
+import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JOptionPane;
+import javax.swing.JPanel;
 import javax.swing.JTextField;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -99,6 +101,20 @@ import java.util.concurrent.atomic.AtomicInteger;
  * Output: FLASH/Results/Tables/Intensity/&lt;channel&gt;.csv and intensity-analysis details.
  */
 public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
+
+    enum NoRoiDecision {
+        DRAW_ROIS,
+        ANALYSE_FULL_IMAGE,
+        CANCEL
+    }
+
+    interface NoRoiDecisionPrompt {
+        NoRoiDecision choose();
+    }
+
+    interface RoiDrawingWorkflowLauncher {
+        void launch(String directory);
+    }
 
     private boolean headless = false;
     private boolean suppressDialogs = false;
@@ -118,10 +134,27 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
     private IntensitySpatialConfig intensitySpatialConfig = IntensitySpatialConfig.disabled();
     private IntensitySetupConfig.DerivedConfig configuredOptions = null;
     private AnalysisRunContext runRecordContext = null;
+    private NoRoiDecisionPrompt noRoiDecisionPrompt = new NoRoiDecisionPrompt() {
+        @Override
+        public NoRoiDecision choose() {
+            return showNoRoiDecisionDialog();
+        }
+    };
+    private RoiDrawingWorkflowLauncher roiDrawingWorkflowLauncher =
+            new RoiDrawingWorkflowLauncher() {
+                @Override
+                public void launch(String directory) {
+                    launchRoiDrawingWorkflowDirect(directory);
+                }
+            };
     private final AtomicBoolean stalePluginWarningShown = new AtomicBoolean(false);
+
+    private static final String INTENSITY_PRESET_PLACEHOLDER = "(choose preset)";
 
     /** Live references to the primary-dialog controls, used by the preset row. */
     private static final class IntensityPresetBindings {
+        boolean programmaticChange;
+        JComboBox<String> presetCombo;
         ToggleSwitch useDeconvToggle;
         ToggleSwitch roiAnalysisToggle;
         ToggleSwitch intensitySpatialToggle;
@@ -184,6 +217,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
     public Set<BinField> requiredBinFields() {
         return EnumSet.of(
                 BinField.CHANNEL_NAMES,
+                BinField.FILTER_PRESETS,
                 BinField.INTENSITY_THRESHOLDS,
                 BinField.Z_SLICE);
     }
@@ -281,6 +315,28 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                 : launcher;
     }
 
+    void setNoRoiDecisionPromptForTest(NoRoiDecisionPrompt prompt) {
+        this.noRoiDecisionPrompt = prompt == null
+                ? new NoRoiDecisionPrompt() {
+                    @Override
+                    public NoRoiDecision choose() {
+                        return showNoRoiDecisionDialog();
+                    }
+                }
+                : prompt;
+    }
+
+    void setRoiDrawingWorkflowLauncherForTest(RoiDrawingWorkflowLauncher launcher) {
+        this.roiDrawingWorkflowLauncher = launcher == null
+                ? new RoiDrawingWorkflowLauncher() {
+                    @Override
+                    public void launch(String directory) {
+                        launchRoiDrawingWorkflowDirect(directory);
+                    }
+                }
+                : launcher;
+    }
+
     @Override
     public void setRunRecordContext(AnalysisRunContext context) {
         this.runRecordContext = context;
@@ -291,6 +347,10 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         if (!FeatureDependencyGate.gate(DependencyId.BIO_FORMATS_RUNTIME,
                 "Fluorescence Intensity Analysis", "Bio-Formats image loading")) {
             recordWarn("Fluorescence Intensity Analysis blocked by missing Bio-Formats runtime dependency.");
+            return;
+        }
+
+        if (!resolveRoiSetsBeforeConfiguration(directory)) {
             return;
         }
 
@@ -412,6 +472,9 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                 gd.addAnalysisHelpHeader("Fluorescence Intensity Analysis", FLASH_Pipeline.IDX_INTENSITY);
 
                 final IntensityPresetBindings pb = new IntensityPresetBindings();
+                addIntensitySetupControls(gd, directory, cfg, channelIdentities, roiSetNameList,
+                        binarization, thresholds, filterSources, roiZipSelected, channelNames,
+                        anyRois, pb);
 
                 gd.addSubHeader("Analysis Options");
                 final ToggleSwitch useDeconvToggle =
@@ -3513,6 +3576,221 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         }
     }
 
+    /**
+     * Builds the preset row (chooser + Save + Manage) shown at the top of the
+     * primary Intensity dialog. Mirrors the Spatial and 3D Object analyses:
+     * selecting a saved/stock preset loads it and writes the selections into the
+     * live dialog controls via {@link #applyIntensityPresetToStep0}.
+     */
+    private void addIntensitySetupControls(final PipelineDialog dialog,
+                                           final String directory,
+                                           final BinConfig cfg,
+                                           final ChannelIdentities identities,
+                                           final List<String> roiSetNames,
+                                           final boolean[] binarization,
+                                           final String[] thresholds,
+                                           final String[] filterSources,
+                                           final boolean[] roiZipSelected,
+                                           final String[] channelNames,
+                                           final boolean anyRois,
+                                           final IntensityPresetBindings bindings) {
+        final JComboBox<String> presetCombo =
+                new JComboBox<String>(listIntensityPresetNames(directory));
+        presetCombo.setMaximumSize(new java.awt.Dimension(260, 24));
+        if (bindings != null) {
+            bindings.presetCombo = presetCombo;
+        }
+        JButton savePreset = new JButton("Save as preset...");
+        flash.pipeline.ui.FlashIcons.apply(savePreset, flash.pipeline.ui.FlashIcons.save());
+        savePreset.setToolTipText("Save the current Fluorescence Intensity options as a named preset.");
+        savePreset.addActionListener(e -> handleSaveIntensityPreset(directory, channelNames,
+                roiSetNames, binarization, thresholds, filterSources, roiZipSelected, bindings));
+        JButton managePreset = new JButton("Manage...");
+        managePreset.setToolTipText("Delete saved Fluorescence Intensity presets.");
+        managePreset.addActionListener(e -> {
+            boolean changed = flash.pipeline.ui.config.PresetManagerDialog.manage(
+                    presetCombo, new IntensityPresetIO(new File(directory)), "Manage Intensity Presets");
+            if (changed) {
+                refreshIntensityPresetChoice(directory, bindings, INTENSITY_PRESET_PLACEHOLDER);
+            }
+        });
+        JPanel row = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 6, 0));
+        row.setOpaque(false);
+        row.add(presetCombo);
+        row.add(savePreset);
+        row.add(managePreset);
+        presetCombo.addActionListener(e -> {
+            if (bindings != null && bindings.programmaticChange) {
+                return;
+            }
+            Object selected = presetCombo.getSelectedItem();
+            if (selected != null && !INTENSITY_PRESET_PLACEHOLDER.equals(String.valueOf(selected))) {
+                IntensitySetupConfig.DerivedConfig derived = loadIntensityPresetConfig(
+                        directory, cfg, identities, roiSetNames, String.valueOf(selected));
+                if (derived != null) {
+                    applyIntensityPresetToStep0(derived, bindings, binarization, thresholds,
+                            filterSources, roiZipSelected, channelNames, cfg, anyRois);
+                }
+            }
+        });
+        dialog.addComponent(row);
+    }
+
+    private String[] listIntensityPresetNames(String directory) {
+        List<String> labels = new ArrayList<String>();
+        labels.add(INTENSITY_PRESET_PLACEHOLDER);
+        try {
+            List<IntensityPreset> presets = new IntensityPresetIO(new File(directory)).listAll();
+            for (IntensityPreset preset : presets) {
+                labels.add(preset.getName());
+            }
+        } catch (IOException e) {
+            IJ.log("WARNING: Could not list Intensity presets: " + e.getMessage());
+        }
+        return labels.toArray(new String[labels.size()]);
+    }
+
+    private void refreshIntensityPresetChoice(String directory,
+                                              IntensityPresetBindings bindings,
+                                              String selectedName) {
+        if (bindings == null || bindings.presetCombo == null) {
+            return;
+        }
+        bindings.programmaticChange = true;
+        try {
+            bindings.presetCombo.removeAllItems();
+            for (String presetName : listIntensityPresetNames(directory)) {
+                bindings.presetCombo.addItem(presetName);
+            }
+            bindings.presetCombo.setSelectedItem(selectedName == null
+                    ? INTENSITY_PRESET_PLACEHOLDER
+                    : selectedName);
+        } finally {
+            bindings.programmaticChange = false;
+        }
+    }
+
+    private void handleSaveIntensityPreset(String directory,
+                                           String[] channelNames,
+                                           List<String> roiSetNames,
+                                           boolean[] binarization,
+                                           String[] thresholds,
+                                           String[] filterSources,
+                                           boolean[] roiZipSelected,
+                                           IntensityPresetBindings bindings) {
+        if (headless || suppressDialogs) {
+            return;
+        }
+        if (bindings == null) {
+            IJ.showMessage("Intensity Analysis", "Could not save preset: dialog options are not available.");
+            return;
+        }
+        String name = JOptionPane.showInputDialog(
+                bindings.presetCombo,
+                "Preset name:",
+                "Save Intensity Preset",
+                JOptionPane.PLAIN_MESSAGE);
+        if (name == null) {
+            return;
+        }
+        String trimmed = name.trim();
+        if (trimmed.isEmpty()) {
+            IJ.showMessage("Intensity Analysis", "Preset name cannot be empty.");
+            return;
+        }
+        try {
+            IntensityPreset preset = buildIntensityPresetFromBindings(trimmed, channelNames,
+                    roiSetNames, binarization, thresholds, filterSources, roiZipSelected, bindings);
+            new IntensityPresetIO(new File(directory)).save(preset);
+            IJ.log("Saved Intensity preset: " + trimmed);
+            refreshIntensityPresetChoice(directory, bindings, preset.getName());
+        } catch (IOException e) {
+            IJ.showMessage("Intensity Analysis", "Could not save preset: " + e.getMessage());
+        } catch (IllegalArgumentException e) {
+            IJ.showMessage("Intensity Analysis", "Could not save preset: " + e.getMessage());
+        }
+    }
+
+    private IntensityPreset buildIntensityPresetFromBindings(String name,
+                                                             String[] channelNames,
+                                                             List<String> roiSetNames,
+                                                             boolean[] binarization,
+                                                             String[] thresholds,
+                                                             String[] filterSources,
+                                                             boolean[] roiZipSelected,
+                                                             IntensityPresetBindings bindings) {
+        Map<String, String> channelModes = new LinkedHashMap<String, String>();
+        Map<String, String> thresholdMap = new LinkedHashMap<String, String>();
+        Map<String, String> filterSourceMap = new LinkedHashMap<String, String>();
+        for (int c = 0; c < channelNames.length; c++) {
+            boolean binarize = bindings != null && bindings.binarizeToggles != null
+                    && c < bindings.binarizeToggles.size()
+                    ? isSelected(bindings.binarizeToggles.get(c))
+                    : c < binarization.length && binarization[c];
+            channelModes.put(channelNames[c], binarize
+                    ? IntensitySetupConfig.MODE_THRESHOLD_MEAN
+                    : IntensitySetupConfig.MODE_WHOLE_ROI_MEAN);
+            if (c < thresholds.length && thresholds[c] != null && !thresholds[c].trim().isEmpty()) {
+                thresholdMap.put(channelNames[c], thresholds[c].trim());
+            }
+            filterSourceMap.put(channelNames[c], selectedFilterSource(bindings, c, filterSources));
+        }
+
+        ToggleSwitch roiToggle = bindings == null ? null : bindings.roiAnalysisToggle;
+        String maskHint = null;
+        if (isSelected(roiToggle)
+                && cliConfiguredMaskIndex1Based > 0
+                && cliConfiguredMaskIndex1Based <= channelNames.length) {
+            maskHint = channelNames[cliConfiguredMaskIndex1Based - 1];
+        }
+
+        List<String> roiHints = new ArrayList<String>();
+        if (isSelected(roiToggle) && roiSetNames != null) {
+            for (int i = 0; i < roiSetNames.size() && i < roiZipSelected.length; i++) {
+                if (roiZipSelected[i]) {
+                    roiHints.add(roiSetNames.get(i));
+                }
+            }
+        }
+
+        return new IntensityPreset(
+                name,
+                "Saved from Intensity Analysis dialog",
+                IntensityPreset.CURRENT_LIBRARY_VERSION,
+                "custom",
+                IntensitySetupConfig.MODE_WHOLE_ROI_MEAN,
+                channelModes,
+                thresholdMap,
+                maskHint,
+                roiHints,
+                intensitySpatialConfig == null
+                        ? IntensitySpatialConfig.disabled()
+                        : intensitySpatialConfig,
+                filterSourceMap);
+    }
+
+    private static String selectedFilterSource(IntensityPresetBindings bindings,
+                                                int channelIndex,
+                                                String[] filterSources) {
+        if (bindings != null && bindings.filterSourceChoices != null
+                && channelIndex < bindings.filterSourceChoices.size()) {
+            Object selected = bindings.filterSourceChoices.get(channelIndex).getSelectedItem();
+            return IntensitySetupConfig.FILTER_BASIC.equals(selected)
+                    ? IntensitySetupConfig.FILTER_BASIC
+                    : IntensitySetupConfig.FILTER_BIN;
+        }
+        if (filterSources != null && channelIndex < filterSources.length) {
+            return IntensitySetupConfig.FILTER_BASIC.equals(filterSources[channelIndex])
+                    ? IntensitySetupConfig.FILTER_BASIC
+                    : IntensitySetupConfig.FILTER_BIN;
+        }
+        return IntensitySetupConfig.FILTER_BIN;
+    }
+
+    private static boolean isSelected(ToggleSwitch toggle) {
+        return toggle != null && toggle.isSelected();
+    }
+
     private void applyCliIntensityConfiguration(String directory,
                                                 BinConfig cfg,
                                                 ChannelIdentities identities,
@@ -3947,6 +4225,101 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                                     CLIConfig cliConfig,
                                     boolean runtimeHeadless) {
         return !suppressDialogs && cliConfig == null && !runtimeHeadless;
+    }
+
+    private boolean resolveRoiSetsBeforeConfiguration(String directory) {
+        List<File> roiZips = discoverSavedRoiSets(directory);
+        if (roiZips == null) {
+            return false;
+        }
+        if (!roiZips.isEmpty()) {
+            return true;
+        }
+
+        NoRoiDecision decision = promptForNoRoiDecision();
+        if (decision == NoRoiDecision.DRAW_ROIS) {
+            launchRoiDrawingWorkflow(directory);
+            roiZips = discoverSavedRoiSets(directory);
+            if (roiZips == null) {
+                return false;
+            }
+            if (!roiZips.isEmpty()) {
+                return true;
+            }
+            String message = "[FLASH] Intensity Analysis cancelled because no ROI sets "
+                    + "were saved after Draw and Save ROIs.";
+            IJ.log(message);
+            recordWarn(message);
+            return false;
+        }
+        if (decision == null || decision == NoRoiDecision.CANCEL) {
+            String message = "[FLASH] Intensity Analysis cancelled because no ROI sets were found.";
+            IJ.log(message);
+            recordWarn(message);
+            return false;
+        }
+
+        IJ.log("[FLASH] No ROI sets found. Intensity Analysis will measure full images.");
+        return true;
+    }
+
+    private List<File> discoverSavedRoiSets(String directory) {
+        try {
+            return RoiIO.listRoiZipFiles(new File(directory));
+        } catch (NoClassDefFoundError e) {
+            if (PluginInstallGuard.reportMissingInternalClass("Intensity Analysis", e)) {
+                return null;
+            }
+            throw e;
+        }
+    }
+
+    private NoRoiDecision promptForNoRoiDecision() {
+        return noRoiDecisionPrompt.choose();
+    }
+
+    private NoRoiDecision showNoRoiDecisionDialog() {
+        if (!canShowGuiDecisionDialog()) {
+            return NoRoiDecision.ANALYSE_FULL_IMAGE;
+        }
+
+        Object[] options = new Object[]{"Define ROI Sets", "Analyse Full Images"};
+        int choice = JOptionPane.showOptionDialog(
+                null,
+                "No saved ROI sets were found for this project.\n\n"
+                        + "Fluorescence Intensity Analysis can measure the full image for each image, "
+                        + "but intensity values will not be restricted to a drawn region.\n\n"
+                        + "To restrict measurements to regions of interest, define ROI sets before running this analysis.",
+                "Fluorescence Intensity Analysis - No ROI Sets Found",
+                JOptionPane.DEFAULT_OPTION,
+                JOptionPane.WARNING_MESSAGE,
+                null,
+                options,
+                options[0]);
+
+        if (choice == 0) return NoRoiDecision.DRAW_ROIS;
+        if (choice == 1) return NoRoiDecision.ANALYSE_FULL_IMAGE;
+        return NoRoiDecision.CANCEL;
+    }
+
+    private boolean canShowGuiDecisionDialog() {
+        return !suppressDialogs
+                && cliConfig == null
+                && !GraphicsEnvironment.isHeadless()
+                && IJ.getInstance() != null;
+    }
+
+    private void launchRoiDrawingWorkflow(String directory) {
+        roiDrawingWorkflowLauncher.launch(directory);
+    }
+
+    private void launchRoiDrawingWorkflowDirect(String directory) {
+        IJ.log("[FLASH] Opening Draw and Save ROIs before Intensity Analysis.");
+        DrawAndSaveROIsAnalysis roiAnalysis = new DrawAndSaveROIsAnalysis();
+        roiAnalysis.setSuppressDialogs(false);
+        roiAnalysis.setHeadless(false);
+        roiAnalysis.setCliConfig(cliConfig);
+        roiAnalysis.execute(directory);
     }
 
     /** Closes all image windows and non-Log text windows, leaving the Log window visible. */
