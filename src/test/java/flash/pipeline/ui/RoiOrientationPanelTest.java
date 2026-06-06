@@ -1,18 +1,38 @@
 package flash.pipeline.ui;
 
 import flash.pipeline.naming.OrientationManifestRow;
+import flash.pipeline.orientation.BroadcastScope;
+import flash.pipeline.orientation.OrientationBatchController;
+import flash.pipeline.orientation.OrientationPresetStore;
 import flash.pipeline.orientation.OrientationTransformState;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 
 import java.awt.Dimension;
+import java.awt.GraphicsEnvironment;
 import java.awt.Point;
 import java.awt.Rectangle;
+import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
 
+import javax.swing.JButton;
+
+import static flash.pipeline.naming.OrientationManifestRow.Hemisphere.LH;
+import static flash.pipeline.naming.OrientationManifestRow.Hemisphere.RH;
+import static flash.pipeline.naming.OrientationManifestRow.Hemisphere.UNKNOWN;
+import static flash.pipeline.naming.OrientationManifestRow.RotationDegrees.DEG_90;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assume.assumeFalse;
 
 public class RoiOrientationPanelTest {
+    @Rule
+    public TemporaryFolder temp = new TemporaryFolder();
 
     @Test
     public void applyActionRotatesAndRequestsRedraw() {
@@ -124,6 +144,138 @@ public class RoiOrientationPanelTest {
         assertEquals(new Point(438, 580), location);
     }
 
+    @Test
+    public void batchHemisphereButtonUsesCurrentHemisphereLabel() throws Exception {
+        assumeUiAvailable();
+
+        BatchFixture lh = batchFixture(LH, OrientationTransformState.identity(), 2);
+        RoiOrientationPanel lhPanel = batchPanel(lh, "Saved");
+        assertEquals("All LH images", lhPanel.hemisphereRuleButtonForTests().getText());
+        lhPanel.close();
+
+        BatchFixture rh = batchFixture(RH, OrientationTransformState.identity(), 2);
+        RoiOrientationPanel rhPanel = batchPanel(rh, "Saved");
+        assertEquals("All RH images", rhPanel.hemisphereRuleButtonForTests().getText());
+        rhPanel.close();
+    }
+
+    @Test
+    public void batchHemisphereScopedButtonsDisableForUnknownHemisphere() throws Exception {
+        assumeUiAvailable();
+        BatchFixture fixture = batchFixture(UNKNOWN, OrientationTransformState.identity(), 2);
+        RoiOrientationPanel panel = batchPanel(fixture, "Saved");
+
+        assertFalse(panel.hemisphereRuleButtonForTests().isEnabled());
+        assertFalse(panel.mirrorRuleButtonForTests().isEnabled());
+        assertTrue(panel.allImagesButtonForTests().isEnabled());
+
+        panel.close();
+    }
+
+    @Test
+    public void repeatLastStartsDisabledAndEnablesAfterManualAction() throws Exception {
+        assumeUiAvailable();
+        BatchFixture fixture = batchFixture(LH, OrientationTransformState.identity(), 2);
+        RoiOrientationPanel panel = batchPanel(fixture, "Saved");
+
+        assertFalse(panel.repeatLastButtonForTests().isEnabled());
+
+        panel.performOrientationAction(RoiOrientationPanel.OrientationAction.ROTATE_RIGHT);
+
+        assertTrue(panel.repeatLastButtonForTests().isEnabled());
+        assertEquals(DEG_90, fixture.target.getState().rotateDegrees);
+
+        panel.close();
+    }
+
+    @Test
+    public void presetButtonAppliesPresetAndSaveAddsButtonImmediately() throws Exception {
+        assumeUiAvailable();
+        BatchFixture fixture = batchFixture(
+                LH, transform(DEG_90, true, false), 2);
+        fixture.controller.savePreset("Sideways slides");
+        fixture.target.setState(OrientationTransformState.identity());
+        RoiOrientationPanel panel = batchPanel(fixture, "Fresh preset");
+
+        JButton presetButton = panel.presetButtonForTests("Sideways slides");
+        assertNotNull(presetButton);
+        presetButton.doClick();
+
+        assertEquals(DEG_90, fixture.target.getState().rotateDegrees);
+        assertTrue(fixture.target.getState().flipHorizontal);
+
+        panel.savePresetButtonForTests().doClick();
+
+        assertNotNull(panel.presetButtonForTests("Fresh preset"));
+        assertEquals(2, fixture.controller.presets().size());
+
+        panel.close();
+    }
+
+    @Test
+    public void allImagesRuleAndClearButtonsUpdateControllerRule() throws Exception {
+        assumeUiAvailable();
+        BatchFixture fixture = batchFixture(
+                LH, transform(DEG_90, false, false), 3);
+        RoiOrientationPanel panel = batchPanel(fixture, "Saved");
+
+        panel.allImagesButtonForTests().doClick();
+
+        assertNotNull(fixture.controller.activeRule());
+        assertEquals(BroadcastScope.ALL_LITERAL, fixture.controller.activeRule().scope);
+        assertTrue(panel.ruleStatusLabelForTests().getText().contains("Rule active"));
+
+        panel.thisImageButtonForTests().doClick();
+        assertNull(fixture.controller.activeRule());
+
+        panel.allImagesButtonForTests().doClick();
+        panel.clearRuleButtonForTests().doClick();
+        assertNull(fixture.controller.activeRule());
+
+        panel.close();
+    }
+
+    private static void assumeUiAvailable() {
+        assumeFalse("RoiOrientationPanel Swing rows are not built in headless mode.",
+                GraphicsEnvironment.isHeadless());
+    }
+
+    private RoiOrientationPanel batchPanel(BatchFixture fixture, final String promptName) {
+        return new RoiOrientationPanel(null, fixture.target,
+                "Image 1/2", "Mouse", fixture.controller,
+                suggestion -> promptName);
+    }
+
+    private BatchFixture batchFixture(OrientationManifestRow.Hemisphere hemisphere,
+                                      OrientationTransformState state,
+                                      int totalImages) throws Exception {
+        File projectDir = temp.newFolder();
+        OrientationBatchController controller = new OrientationBatchController(
+                new OrientationPresetStore(projectDir.getAbsolutePath()),
+                totalImages);
+        BatchTarget target = new BatchTarget(hemisphere, state);
+        controller.bindCurrent(target, 0);
+        return new BatchFixture(controller, target);
+    }
+
+    private static OrientationTransformState transform(
+            OrientationManifestRow.RotationDegrees rotateDegrees,
+            boolean flipHorizontal,
+            boolean flipVertical) {
+        return new OrientationTransformState(
+                rotateDegrees, flipHorizontal, flipVertical);
+    }
+
+    private static final class BatchFixture {
+        private final OrientationBatchController controller;
+        private final BatchTarget target;
+
+        BatchFixture(OrientationBatchController controller, BatchTarget target) {
+            this.controller = controller;
+            this.target = target;
+        }
+    }
+
     private static class FakeTarget
             implements RoiOrientationPanel.OrientationActionTarget {
         private OrientationTransformState state;
@@ -157,6 +309,38 @@ public class RoiOrientationPanelTest {
         @Override
         public String statusText() {
             return "";
+        }
+    }
+
+    private static final class BatchTarget extends FakeTarget
+            implements OrientationBatchController.CurrentImage {
+        private final OrientationManifestRow.Hemisphere hemisphere;
+        private final List<OrientationTransformState> appliedStates =
+                new ArrayList<OrientationTransformState>();
+
+        BatchTarget(OrientationManifestRow.Hemisphere hemisphere,
+                    OrientationTransformState state) {
+            super(state);
+            this.hemisphere = hemisphere;
+        }
+
+        @Override
+        public OrientationManifestRow.Hemisphere hemisphere() {
+            return hemisphere;
+        }
+
+        @Override
+        public OrientationTransformState state() {
+            return getState();
+        }
+
+        @Override
+        public void applyState(OrientationTransformState next) {
+            OrientationTransformState safeNext = next == null
+                    ? OrientationTransformState.identity()
+                    : next;
+            appliedStates.add(safeNext);
+            setState(safeNext);
         }
     }
 
