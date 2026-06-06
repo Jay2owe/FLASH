@@ -38,6 +38,7 @@ public final class RecentProjectCard extends JPanel {
             FLASH_Pipeline.IDX_DECONVOLUTION,
             FLASH_Pipeline.IDX_SPECTRAL_DECONTAMINATION,
             FLASH_Pipeline.IDX_SPLIT_MERGE,
+            FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE,
             FLASH_Pipeline.IDX_INTENSITY,
             FLASH_Pipeline.IDX_3D_OBJECT,
             FLASH_Pipeline.IDX_SPATIAL,
@@ -347,6 +348,7 @@ public final class RecentProjectCard extends JPanel {
         if (analysisIndex == FLASH_Pipeline.IDX_DRAW_ROIS) return "ROIs";
         if (analysisIndex == FLASH_Pipeline.IDX_DECONVOLUTION) return "Deconvolution";
         if (analysisIndex == FLASH_Pipeline.IDX_SPLIT_MERGE) return "Presentation Images";
+        if (analysisIndex == FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE) return "Representative Figure";
         if (analysisIndex == FLASH_Pipeline.IDX_3D_OBJECT) return "3D Objects";
         if (analysisIndex == FLASH_Pipeline.IDX_SPATIAL) return "Spatial";
         if (analysisIndex == FLASH_Pipeline.IDX_LINE_DISTANCE) return "Line Distance";

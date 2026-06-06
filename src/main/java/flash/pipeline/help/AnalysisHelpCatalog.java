@@ -56,6 +56,7 @@ public final class AnalysisHelpCatalog {
         put(topics, deconvolutionTopic());
         put(topics, spectralDecontaminationTopic());
         put(topics, splitAndMergeTopic());
+        put(topics, representativeFigureTopic());
         put(topics, intensityTopic());
         put(topics, threeDObjectTopic());
         put(topics, spatialTopic());
@@ -569,6 +570,39 @@ public final class AnalysisHelpCatalog {
                         image("setup.png", "Aggregation setup", "Condition assignments, grouping granularity, and raw or normalized output choices are reviewed before combining results."),
                         image("workflow.png", "Aggregation workflow", "Per-analysis CSV folders are scanned, metadata are attached, compatible rows are combined, and master tables are written."),
                         image("example-output.png", "Master table output", "3D Objects.csv and Image Intensities.csv are saved under FLASH/Results/Tables/Project Summary.")));
+    }
+
+    private static AnalysisHelpTopic representativeFigureTopic() {
+        return new AnalysisHelpTopic(
+                FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE,
+                "representative-figure",
+                "Make Representative Image Figure",
+                "Build a figure panel from representative image series chosen per condition, using consistent display ranges and a PNG export.",
+                list(
+                        "Use this when presentation images exist and you need a figure-ready montage that shows one selected image series per condition.",
+                        "Use it after quantitative outputs help identify which images best represent each condition.",
+                        "Skip it when you only need batch presentation PNGs without condition-level figure layout."),
+                list(
+                        "A selected project folder with FLASH image inputs.",
+                        "Presentation images from Make Presentation Images when available, or source images that can be previewed.",
+                        "Condition assignments and quantitative tables from upstream analysis when later workflow stages are enabled."),
+                list(
+                        "Open the representative figure workflow and choose the statistic that should guide image selection.",
+                        "Pick one image series per condition from the preview grid.",
+                        "Review display ranges, condition rows, tile labels, and export settings before rendering."),
+                list(
+                        "The analysis shell is registered now so later stages can attach the statistic picker, preview cache, display-range setup, layout controls, and PNG renderer.",
+                        "When the full workflow is implemented, it will reuse presentation PNGs when possible and generate preview-grade split MIPs only as needed.",
+                        "The final renderer will write a PNG figure under the current FLASH Results layout."),
+                list(
+                        "Later stages will write the representative figure PNG and its run details under FLASH/Results/.",
+                        "Saved selections and display ranges will be handled by the representative figure persistence stage.",
+                        "This stage only registers the top-level analysis and replay hook."),
+                list(
+                        "A representative figure is for visual comparison, not a replacement for the quantitative CSV outputs.",
+                        "Display ranges affect the appearance of the figure but must not be interpreted as new intensity measurements.",
+                        "Condition layout is assigned by the user rather than parsed from condition names."),
+                Collections.<AnalysisHelpTopic.HelpImage>emptyList());
     }
 
     private static AnalysisHelpTopic statisticsTopic() {

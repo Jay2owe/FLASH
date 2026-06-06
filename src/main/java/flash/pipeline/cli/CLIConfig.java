@@ -24,7 +24,7 @@ import java.util.Set;
  */
 public class CLIConfig {
 
-    static final int ANALYSIS_COUNT = 12;
+    static final int ANALYSIS_COUNT = 13;
 
     String directory = null;
     boolean[] selectedAnalyses = new boolean[ANALYSIS_COUNT];

@@ -18,6 +18,7 @@ import static flash.pipeline.FLASH_Pipeline.IDX_DRAW_ROIS;
 import static flash.pipeline.FLASH_Pipeline.IDX_EXCEL_EXPORT;
 import static flash.pipeline.FLASH_Pipeline.IDX_INTENSITY;
 import static flash.pipeline.FLASH_Pipeline.IDX_LINE_DISTANCE;
+import static flash.pipeline.FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE;
 import static flash.pipeline.FLASH_Pipeline.IDX_SPATIAL;
 import static flash.pipeline.FLASH_Pipeline.IDX_SPECTRAL_DECONTAMINATION;
 import static flash.pipeline.FLASH_Pipeline.IDX_SPLIT_MERGE;
@@ -47,6 +48,7 @@ public final class PipelineRecipe {
         keys.put("Statistics", Integer.valueOf(IDX_STATISTICS));
         keys.put("Excel", Integer.valueOf(IDX_EXCEL_EXPORT));
         keys.put("Spectral", Integer.valueOf(IDX_SPECTRAL_DECONTAMINATION));
+        keys.put("RepresentativeFigure", Integer.valueOf(IDX_REPRESENTATIVE_FIGURE));
         KEY_TO_IDX = Collections.unmodifiableMap(keys);
 
         Map<Integer, String> indexes = new HashMap<Integer, String>();
@@ -62,6 +64,7 @@ public final class PipelineRecipe {
         indexes.put(Integer.valueOf(IDX_STATISTICS), "Statistics");
         indexes.put(Integer.valueOf(IDX_EXCEL_EXPORT), "Excel");
         indexes.put(Integer.valueOf(IDX_SPECTRAL_DECONTAMINATION), "Spectral");
+        indexes.put(Integer.valueOf(IDX_REPRESENTATIVE_FIGURE), "RepresentativeFigure");
         IDX_TO_KEY = Collections.unmodifiableMap(indexes);
     }
 

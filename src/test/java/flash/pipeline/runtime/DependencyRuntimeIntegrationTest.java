@@ -69,7 +69,7 @@ public class DependencyRuntimeIntegrationTest {
         invokeInitAnalyses(pipeline);
         Map<Integer, Analysis> analysisMap = analysisMap(pipeline);
 
-        assertEquals(12, analysisMap.size());
+        assertEquals(13, analysisMap.size());
         assertNotNull(analysisMap.get(FLASH_Pipeline.IDX_EXCEL_EXPORT));
         assertEquals(DependencyStatus.State.MISSING,
                 service.getStatus(DependencyId.APACHE_POI_RUNTIME).getState());

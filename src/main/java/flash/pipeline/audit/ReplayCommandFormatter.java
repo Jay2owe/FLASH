@@ -65,6 +65,7 @@ public final class ReplayCommandFormatter {
             case 9: return "run_statistics";
             case 10: return "run_excel";
             case 11: return "run_spectral_decontamination";
+            case 12: return "run_repfig";
             default: return "";
         }
     }

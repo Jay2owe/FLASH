@@ -1,5 +1,6 @@
 package flash.pipeline.cli;
 
+import flash.pipeline.FLASH_Pipeline;
 import flash.pipeline.bin.BinField;
 import flash.pipeline.analyses.wizard.IntensitySpatialConfig;
 import org.junit.Test;
@@ -180,27 +181,46 @@ public class CLIArgumentParserTest {
         assertFalse("run_excel should be off", sel[10]);
     }
 
+    @Test
+    public void parse_runRepresentativeFigureFlag() {
+        CLIConfig cfg = CLIArgumentParser.parse("dir=[/tmp] run_repfig");
+        assertNotNull(cfg);
+        boolean[] sel = cfg.getSelectedAnalyses();
+        assertTrue("run_repfig -> representative figure index",
+                sel[FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE]);
+        assertFalse("run_split should be off", sel[FLASH_Pipeline.IDX_SPLIT_MERGE]);
+    }
+
     // ── parse: analyses list ──
 
     @Test
     public void parse_analysesList() {
-        CLIConfig cfg = CLIArgumentParser.parse("dir=[/tmp] analyses=0,2,6,11");
+        CLIConfig cfg = CLIArgumentParser.parse("dir=[/tmp] analyses=0,2,6,11,12");
         assertNotNull(cfg);
         boolean[] sel = cfg.getSelectedAnalyses();
-        assertEquals("analysis selection length", 12, sel.length);
+        assertEquals("analysis selection length", 13, sel.length);
         assertTrue(sel[0]);
         assertTrue(sel[2]);
         assertTrue(sel[6]);
         assertTrue("index 11 -> spectral decontamination", sel[11]);
+        assertTrue("index 12 -> representative figure", sel[12]);
         assertFalse(sel[1]);
     }
 
     @Test
-    public void parse_rejectsRemovedOrientationSetupIndex() {
-        assertNull("analysisIndex=12 used to select hidden orientation setup and must now be invalid",
-                CLIArgumentParser.parse("dir=[/tmp] analysisIndex=12"));
-        assertNull("analyses=12 used to select hidden orientation setup and must now be invalid",
-                CLIArgumentParser.parse("dir=[/tmp] analyses=12"));
+    public void parse_acceptsRepresentativeIndexAndRejectsNextOutOfRangeIndex() {
+        CLIConfig byIndex = CLIArgumentParser.parse("dir=[/tmp] analysisIndex=12");
+        assertNotNull(byIndex);
+        assertTrue(byIndex.getSelectedAnalyses()[FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE]);
+
+        CLIConfig byList = CLIArgumentParser.parse("dir=[/tmp] analyses=12");
+        assertNotNull(byList);
+        assertTrue(byList.getSelectedAnalyses()[FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE]);
+
+        assertNull("analysisIndex=13 should be out of range",
+                CLIArgumentParser.parse("dir=[/tmp] analysisIndex=13"));
+        assertNull("analyses=13 should be out of range",
+                CLIArgumentParser.parse("dir=[/tmp] analyses=13"));
     }
 
     @Test

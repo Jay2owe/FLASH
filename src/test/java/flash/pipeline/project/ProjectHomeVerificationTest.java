@@ -26,11 +26,12 @@ public class ProjectHomeVerificationTest {
     @Test
     public void saveReadRecipeRoundTripRestoresSameSelections() throws Exception {
         File project = temp.newFolder("recipe-round-trip");
-        boolean[] selections = new boolean[FLASH_Pipeline.IDX_SPECTRAL_DECONTAMINATION + 1];
+        boolean[] selections = new boolean[FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE + 1];
         selections[FLASH_Pipeline.IDX_CREATE_BIN] = true;
         selections[FLASH_Pipeline.IDX_SPATIAL] = true;
         selections[FLASH_Pipeline.IDX_INTENSITY] = true;
         selections[FLASH_Pipeline.IDX_EXCEL_EXPORT] = true;
+        selections[FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE] = true;
 
         FLASH_Pipeline pipeline = new FLASH_Pipeline();
         Field directory = FLASH_Pipeline.class.getDeclaredField("directory");

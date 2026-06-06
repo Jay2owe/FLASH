@@ -35,15 +35,18 @@ public class PipelineRecipeTest {
         java.util.List<String> analyses = new java.util.ArrayList<String>();
         analyses.add("CreateBin");
         analyses.add("Intensity");
+        analyses.add("RepresentativeFigure");
         analyses.add("UnknownAnalysis");
         PipelineRecipe recipe = new PipelineRecipe(
                 "Restore", "Test recipe", PipelineRecipe.CURRENT_FLASH_VERSION,
                 analyses, Collections.<String, String>emptyMap());
 
-        boolean[] selections = recipe.toSelections(flash.pipeline.FLASH_Pipeline.IDX_EXCEL_EXPORT + 1);
+        boolean[] selections = recipe.toSelections(
+                flash.pipeline.FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE + 1);
 
         assertTrue(selections[flash.pipeline.FLASH_Pipeline.IDX_CREATE_BIN]);
         assertTrue(selections[flash.pipeline.FLASH_Pipeline.IDX_INTENSITY]);
+        assertTrue(selections[flash.pipeline.FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE]);
         assertFalse(selections[flash.pipeline.FLASH_Pipeline.IDX_DRAW_ROIS]);
     }
 

@@ -8,6 +8,7 @@ import flash.pipeline.analyses.DrawAndSaveROIsAnalysis;
 import flash.pipeline.analyses.IntensityAnalysisV2;
 import flash.pipeline.analyses.LineDistanceAnalysis;
 import flash.pipeline.analyses.MasterAggregationAnalysis;
+import flash.pipeline.analyses.RepresentativeFigureAnalysis;
 import flash.pipeline.analyses.SpatialAnalysis;
 import flash.pipeline.analyses.SplitAndMergeImageChannelsAnalysis;
 import flash.pipeline.analyses.StatisticalAnalysis;
@@ -70,7 +71,10 @@ public enum AnalysisRegistry {
     SPECTRAL_DECONTAMINATION("SpectralDecontaminationAnalysis", FLASH_Pipeline.IDX_SPECTRAL_DECONTAMINATION,
             "Spectral Decontamination (Experimental)", "run_spectral_decontamination",
             SpectralDecontaminationAnalysis.class, false,
-            "Registered experimental analysis; parameters are applied inside its wizard, not on the analysis wrapper.");
+            "Registered experimental analysis; parameters are applied inside its wizard, not on the analysis wrapper."),
+    REPRESENTATIVE_FIGURE("RepresentativeFigureAnalysis", FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE,
+            "Make Representative Image Figure", "run_repfig", RepresentativeFigureAnalysis.class, true,
+            "Registered representative image figure analysis.");
 
     private static final Map<String, AnalysisRegistry> BY_KEY = new LinkedHashMap<String, AnalysisRegistry>();
     private static final Map<Integer, AnalysisRegistry> BY_INDEX = new LinkedHashMap<Integer, AnalysisRegistry>();

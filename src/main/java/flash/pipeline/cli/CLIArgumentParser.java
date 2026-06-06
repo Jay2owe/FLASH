@@ -91,7 +91,7 @@ public final class CLIArgumentParser {
         String[] flagNames = {
                 "run_bin", "run_roi", "run_deconv", "run_split", "run_3d", "run_spatial",
                 "run_distance", "run_intensity", "run_aggregate",
-                "run_statistics", "run_excel", "run_spectral_decontamination"
+                "run_statistics", "run_excel", "run_spectral_decontamination", "run_repfig"
         };
         for (int i = 0; i < flagNames.length; i++) {
             if (hasBooleanFlag(macroOptions, flagNames[i])) {
@@ -205,6 +205,7 @@ public final class CLIArgumentParser {
                 + "  run_statistics        Statistical Analysis (9)\n"
                 + "  run_excel             Excel Summary Export (10)\n"
                 + "  run_spectral_decontamination  Spectral Decontamination (Experimental) (11)\n"
+                + "  run_repfig            Make Representative Image Figure (12)\n"
                 + "\n"
                 + "  Or use: analyses=0,2,4,7  or analysisIndex=2\n"
                 + "\n"

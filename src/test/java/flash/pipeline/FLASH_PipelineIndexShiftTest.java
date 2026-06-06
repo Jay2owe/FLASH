@@ -7,6 +7,7 @@ import flash.pipeline.analyses.DrawAndSaveROIsAnalysis;
 import flash.pipeline.analyses.IntensityAnalysisV2;
 import flash.pipeline.analyses.LineDistanceAnalysis;
 import flash.pipeline.analyses.MasterAggregationAnalysis;
+import flash.pipeline.analyses.RepresentativeFigureAnalysis;
 import flash.pipeline.analyses.SpatialAnalysis;
 import flash.pipeline.analyses.SplitAndMergeImageChannelsAnalysis;
 import flash.pipeline.analyses.StatisticalAnalysis;
@@ -31,7 +32,7 @@ public class FLASH_PipelineIndexShiftTest {
         invokeInitAnalyses(pipeline);
         Map<Integer, Analysis> analysisMap = analysisMap(pipeline);
 
-        assertEquals(12, analysisMap.size());
+        assertEquals(13, analysisMap.size());
         assertTrue(analysisMap.get(FLASH_Pipeline.IDX_CREATE_BIN) instanceof CreateBinFileAnalysis);
         assertTrue(analysisMap.get(FLASH_Pipeline.IDX_DRAW_ROIS) instanceof DrawAndSaveROIsAnalysis);
         assertTrue(analysisMap.get(FLASH_Pipeline.IDX_DECONVOLUTION) instanceof DeconvolutionAnalysis);
@@ -44,6 +45,7 @@ public class FLASH_PipelineIndexShiftTest {
         assertTrue(analysisMap.get(FLASH_Pipeline.IDX_STATISTICS) instanceof StatisticalAnalysis);
         assertNotNull(analysisMap.get(FLASH_Pipeline.IDX_EXCEL_EXPORT));
         assertTrue(analysisMap.get(FLASH_Pipeline.IDX_SPECTRAL_DECONTAMINATION) instanceof SpectralDecontaminationAnalysis);
+        assertTrue(analysisMap.get(FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE) instanceof RepresentativeFigureAnalysis);
     }
 
     @Test
@@ -52,12 +54,13 @@ public class FLASH_PipelineIndexShiftTest {
         analysesField.setAccessible(true);
         String[] analyses = (String[]) analysesField.get(new FLASH_Pipeline());
 
-        assertEquals(12, analyses.length);
+        assertEquals(13, analyses.length);
         assertEquals("Set Up Configuration", analyses[FLASH_Pipeline.IDX_CREATE_BIN]);
         assertEquals("Draw and Save ROIs", analyses[FLASH_Pipeline.IDX_DRAW_ROIS]);
         assertEquals("3D Deconvolution", analyses[FLASH_Pipeline.IDX_DECONVOLUTION]);
         assertEquals("Make Presentation Images", analyses[FLASH_Pipeline.IDX_SPLIT_MERGE]);
         assertEquals("Spectral Decontamination (Experimental)", analyses[FLASH_Pipeline.IDX_SPECTRAL_DECONTAMINATION]);
+        assertEquals("Make Representative Image Figure", analyses[FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE]);
     }
 
     @Test
@@ -66,12 +69,14 @@ public class FLASH_PipelineIndexShiftTest {
         orderField.setAccessible(true);
         int[] visibleOrder = (int[]) orderField.get(null);
 
-        assertEquals(11, visibleOrder.length);
+        assertEquals(12, visibleOrder.length);
         assertFalse(contains(visibleOrder, FLASH_Pipeline.IDX_LINE_DISTANCE));
         assertTrue(indexOf(visibleOrder, FLASH_Pipeline.IDX_CREATE_BIN)
                 < indexOf(visibleOrder, FLASH_Pipeline.IDX_DRAW_ROIS));
         assertTrue(indexOf(visibleOrder, FLASH_Pipeline.IDX_DECONVOLUTION)
                 < indexOf(visibleOrder, FLASH_Pipeline.IDX_SPECTRAL_DECONTAMINATION));
+        assertEquals(indexOf(visibleOrder, FLASH_Pipeline.IDX_SPLIT_MERGE) + 1,
+                indexOf(visibleOrder, FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE));
         assertTrue(indexOf(visibleOrder, FLASH_Pipeline.IDX_INTENSITY)
                 < indexOf(visibleOrder, FLASH_Pipeline.IDX_3D_OBJECT));
         assertTrue(indexOf(visibleOrder, FLASH_Pipeline.IDX_AGGREGATION)

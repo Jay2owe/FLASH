@@ -83,6 +83,7 @@ public class ReplayCommandFormatterTest {
         assertReplayFlagSelectsIndex(9, "run_statistics");
         assertReplayFlagSelectsIndex(10, "run_excel");
         assertReplayFlagSelectsIndex(11, "run_spectral_decontamination");
+        assertReplayFlagSelectsIndex(12, "run_repfig");
     }
 
     private static void assertReplayFlagSelectsIndex(int analysisIndex, String expectedFlag) {

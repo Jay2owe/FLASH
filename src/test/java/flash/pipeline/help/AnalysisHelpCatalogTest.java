@@ -128,6 +128,8 @@ public class AnalysisHelpCatalogTest {
                 AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_SPECTRAL_DECONTAMINATION).key);
         assertEquals("split-merge",
                 AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_SPLIT_MERGE).key);
+        assertEquals("representative-figure",
+                AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE).key);
         assertEquals("intensity",
                 AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_INTENSITY).key);
         assertEquals("three-d-object",
@@ -348,7 +350,7 @@ public class AnalysisHelpCatalogTest {
     private static String[] analysisLabels() throws Exception {
         FLASH_Pipeline pipeline = new FLASH_Pipeline();
         int[] visibleOrder = FLASH_Pipeline.visibleAnalysisOrderForTests();
-        String[] labels = new String[FLASH_Pipeline.IDX_SPECTRAL_DECONTAMINATION + 1];
+        String[] labels = new String[FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE + 1];
         for (int i = 0; i < visibleOrder.length; i++) {
             labels[visibleOrder[i]] = pipeline.analysisLabelForTests(visibleOrder[i]);
         }

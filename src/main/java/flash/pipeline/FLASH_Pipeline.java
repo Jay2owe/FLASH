@@ -7,6 +7,7 @@ import flash.pipeline.analyses.DrawAndSaveROIsAnalysis;
 import flash.pipeline.analyses.IntensityAnalysisV2;
 import flash.pipeline.analyses.LineDistanceAnalysis;
 import flash.pipeline.analyses.MasterAggregationAnalysis;
+import flash.pipeline.analyses.RepresentativeFigureAnalysis;
 import flash.pipeline.analyses.SpatialAnalysis;
 import flash.pipeline.analyses.SplitAndMergeImageChannelsAnalysis;
 import flash.pipeline.analyses.StatisticalAnalysis;
@@ -141,7 +142,8 @@ public class FLASH_Pipeline implements PlugIn {
             "Combine results per condition / animal",
             "Statistical Analysis",
             "Excel Summary Export",
-            "Spectral Decontamination (Experimental)"
+            "Spectral Decontamination (Experimental)",
+            "Make Representative Image Figure"
     };
 
     private static final String[] DESCRIPTIONS = {
@@ -156,7 +158,8 @@ public class FLASH_Pipeline implements PlugIn {
             "Aggregates all per-image CSVs into master summary tables (Master Data Aggregation).",
             "Group comparisons - t-tests, ANOVA, Tukey / Dunn's post-hoc.",
             "Make a publication-ready .xlsx workbook from the master CSVs.",
-            "Remove channel bleed-through / autofluorescence (placeholder)."
+            "Remove channel bleed-through / autofluorescence (placeholder).",
+            "Choose representative image series per condition and export a tiled PNG figure."
     };
 
     /** Analysis indices. Keep in sync with {@link #analyses}. */
@@ -172,6 +175,7 @@ public class FLASH_Pipeline implements PlugIn {
     public static final int IDX_STATISTICS = 9;
     public static final int IDX_EXCEL_EXPORT = 10;
     public static final int IDX_SPECTRAL_DECONTAMINATION = 11;
+    public static final int IDX_REPRESENTATIVE_FIGURE = 12;
 
     private static final int[] VISIBLE_ANALYSIS_ORDER = {
             IDX_CREATE_BIN,
@@ -179,6 +183,7 @@ public class FLASH_Pipeline implements PlugIn {
             IDX_DECONVOLUTION,
             IDX_SPECTRAL_DECONTAMINATION,
             IDX_SPLIT_MERGE,
+            IDX_REPRESENTATIVE_FIGURE,
             IDX_INTENSITY,
             IDX_3D_OBJECT,
             IDX_SPATIAL,
@@ -546,7 +551,7 @@ public class FLASH_Pipeline implements PlugIn {
             if (s) { anySelected = true; break; }
         }
         if (!anySelected) {
-            IJ.log("[CLI] No analyses selected. Use run_deconv, run_3d, run_intensity, etc. or analyses=2,4,7");
+            IJ.log("[CLI] No analyses selected. Use run_deconv, run_3d, run_intensity, run_repfig, etc. or analyses=2,4,7,12");
             IJ.log("[CLI] " + CLIArgumentParser.usage());
             return;
         }
@@ -843,7 +848,8 @@ public class FLASH_Pipeline implements PlugIn {
             }, pendingIcon, statusRowsByAnalysis, nextStatusRow, togglesByAnalysis);
 
             addAnalysisSection(pd, "Display", new int[]{
-                    IDX_SPLIT_MERGE
+                    IDX_SPLIT_MERGE,
+                    IDX_REPRESENTATIVE_FIGURE
             }, pendingIcon, statusRowsByAnalysis, nextStatusRow, togglesByAnalysis);
 
             addAnalysisSection(pd, "Image Analysis", new int[]{
@@ -2248,6 +2254,7 @@ public class FLASH_Pipeline implements PlugIn {
         analysisMap.put(IDX_STATISTICS, new StatisticalAnalysis());
         analysisMap.put(IDX_EXCEL_EXPORT, createExcelExportAnalysis());
         analysisMap.put(IDX_SPECTRAL_DECONTAMINATION, new SpectralDecontaminationAnalysis());
+        analysisMap.put(IDX_REPRESENTATIVE_FIGURE, new RepresentativeFigureAnalysis());
     }
 
     private Analysis createExcelExportAnalysis() {

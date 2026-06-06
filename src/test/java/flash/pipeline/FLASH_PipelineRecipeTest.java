@@ -43,7 +43,7 @@ public class FLASH_PipelineRecipeTest {
     @Test
     public void fullRecipeHoverSummaryDoesNotMention3DDeconvolution() throws Exception {
         PipelineRecipe recipe = PipelineRecipeIO.loadFromResources("full-pipeline");
-        String[] labels = new String[FLASH_Pipeline.IDX_SPECTRAL_DECONTAMINATION + 1];
+        String[] labels = new String[FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE + 1];
         labels[FLASH_Pipeline.IDX_CREATE_BIN] = "Create Bin File";
         labels[FLASH_Pipeline.IDX_DRAW_ROIS] = "Draw and Save ROIs";
         labels[FLASH_Pipeline.IDX_DECONVOLUTION] = "3D Deconvolution";
@@ -55,6 +55,7 @@ public class FLASH_PipelineRecipeTest {
         labels[FLASH_Pipeline.IDX_AGGREGATION] = "Combine results per condition / animal";
         labels[FLASH_Pipeline.IDX_STATISTICS] = "Statistical Analysis";
         labels[FLASH_Pipeline.IDX_EXCEL_EXPORT] = "Excel Summary Export";
+        labels[FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE] = "Make Representative Image Figure";
 
         String summary = FLASH_Pipeline.buildRecipeSelectionSummary(recipe, labels);
 
@@ -108,7 +109,7 @@ public class FLASH_PipelineRecipeTest {
 
         PipelineDialog dialog = new PipelineDialog("Recipes");
         try {
-            ToggleSwitch[] toggles = new ToggleSwitch[FLASH_Pipeline.IDX_SPECTRAL_DECONTAMINATION + 1];
+            ToggleSwitch[] toggles = new ToggleSwitch[FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE + 1];
             JPanel quickStart = quickStartPanel(pipeline, dialog, toggles);
             toggles[FLASH_Pipeline.IDX_SPLIT_MERGE] = new ToggleSwitch(false);
             toggles[FLASH_Pipeline.IDX_STATISTICS] = new ToggleSwitch(false);
@@ -152,7 +153,7 @@ public class FLASH_PipelineRecipeTest {
         ProjectStatusStore.writeLastRunRecipe(project.getAbsolutePath(), recipe);
 
         boolean[] selections = FLASH_Pipeline.readLastRunRecipeSelections(
-                project.getAbsolutePath(), FLASH_Pipeline.IDX_SPECTRAL_DECONTAMINATION + 1);
+                project.getAbsolutePath(), FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE + 1);
 
         assertTrue(selections[FLASH_Pipeline.IDX_SPLIT_MERGE]);
         assertTrue(selections[FLASH_Pipeline.IDX_STATISTICS]);
@@ -161,7 +162,7 @@ public class FLASH_PipelineRecipeTest {
 
     private static JPanel quickStartPanel(FLASH_Pipeline pipeline, PipelineDialog dialog) throws Exception {
         return quickStartPanel(pipeline, dialog,
-                new ToggleSwitch[FLASH_Pipeline.IDX_SPECTRAL_DECONTAMINATION + 1]);
+                new ToggleSwitch[FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE + 1]);
     }
 
     private static JPanel quickStartPanel(FLASH_Pipeline pipeline,

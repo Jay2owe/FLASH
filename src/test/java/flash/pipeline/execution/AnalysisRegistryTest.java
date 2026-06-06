@@ -17,7 +17,7 @@ public class AnalysisRegistryTest {
 
     @Test
     public void everyRegisteredIndexHasStableKeyLabelAndCliFlag() {
-        for (int i = 0; i <= FLASH_Pipeline.IDX_SPECTRAL_DECONTAMINATION; i++) {
+        for (int i = 0; i <= FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE; i++) {
             AnalysisRegistry entry = AnalysisRegistry.forIndex(i);
             assertNotNull("missing registry entry for index " + i, entry);
             assertFalse(entry.analysisKey().trim().isEmpty());
@@ -55,7 +55,17 @@ public class AnalysisRegistryTest {
             assertTrue("duplicate index " + entry.analysisIndex(),
                     indexes.add(Integer.valueOf(entry.analysisIndex())));
         }
-        assertEquals(12, indexes.size());
+        assertEquals(13, indexes.size());
+    }
+
+    @Test
+    public void representativeFigureIsRegisteredForReplayAndCli() {
+        AnalysisRegistry rep = AnalysisRegistry.forIndex(FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE);
+
+        assertEquals("RepresentativeFigureAnalysis", rep.analysisKey());
+        assertEquals("Make Representative Image Figure", rep.label());
+        assertEquals("run_repfig", rep.cliFlag());
+        assertTrue(rep.hasReplayParameterAdapter());
     }
 
     private static String join(List<String> lines) {

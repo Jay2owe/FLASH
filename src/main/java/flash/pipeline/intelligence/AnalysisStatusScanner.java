@@ -73,6 +73,9 @@ public class AnalysisStatusScanner {
         put(out, FLASH_Pipeline.IDX_SPLIT_MERGE,
                 fallbackStatus(directory, hasAnyFile(layout.presentationImagesDir())),
                 "Split and Merge Image Channels");
+        put(out, FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE,
+                fallbackStatus(directory, false),
+                "Representative Image Figure");
         put(out, FLASH_Pipeline.IDX_3D_OBJECT,
                 fallbackStatus(directory, hasCsv(
                         java.util.Collections.singletonList(layout.tablesObjectsWriteDir()))),

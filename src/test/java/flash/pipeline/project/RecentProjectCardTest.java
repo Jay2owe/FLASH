@@ -36,6 +36,7 @@ public class RecentProjectCardTest {
         statuses.put(Integer.valueOf(FLASH_Pipeline.IDX_DECONVOLUTION), AnalysisStatus.DONE);
         statuses.put(Integer.valueOf(FLASH_Pipeline.IDX_SPECTRAL_DECONTAMINATION), AnalysisStatus.DONE);
         statuses.put(Integer.valueOf(FLASH_Pipeline.IDX_SPLIT_MERGE), AnalysisStatus.DONE);
+        statuses.put(Integer.valueOf(FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE), AnalysisStatus.DONE);
         statuses.put(Integer.valueOf(FLASH_Pipeline.IDX_INTENSITY), AnalysisStatus.DONE);
         statuses.put(Integer.valueOf(FLASH_Pipeline.IDX_3D_OBJECT), AnalysisStatus.DONE);
         statuses.put(Integer.valueOf(FLASH_Pipeline.IDX_SPATIAL), AnalysisStatus.NOT_STARTED);
