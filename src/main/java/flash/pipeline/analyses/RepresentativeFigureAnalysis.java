@@ -63,6 +63,8 @@ public class RepresentativeFigureAnalysis implements Analysis {
 
             IJ.log("[Representative Figure] Loaded statistic source: "
                     + choice.statistic.label() + " (" + statTableSummary(config.statTable) + ").");
+            // TODO(representative-image-figure stage 05): call RepresentativePreviewRenderer.render()
+            // and pass the returned RepresentativeSeries list into the selection grid.
             // TODO(representative-image-figure stage 05): pass config.statTable into the selection grid.
             // TODO(representative-image-figure stage 06): hide the quantification side-panel when statistic is NONE.
         } catch (Exception e) {
