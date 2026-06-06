@@ -1,6 +1,7 @@
 package flash.pipeline.analyses;
 
 import flash.pipeline.report.QualityReport;
+import flash.pipeline.representative.RepresentativeStatistic;
 import flash.pipeline.runrecord.LoadedRunParameters;
 import org.junit.Test;
 
@@ -8,6 +9,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
@@ -40,6 +42,9 @@ public class RepresentativeFigureAnalysisTest {
         analysis.setSuppressDialogs(true);
         analysis.setCliConfig(null);
         analysis.execute("C:/tmp/flash");
+
+        assertEquals(RepresentativeStatistic.NONE, analysis.configForTests().statistic);
+        assertTrue(analysis.configForTests().statTable.isEmpty());
     }
 
     @Test
