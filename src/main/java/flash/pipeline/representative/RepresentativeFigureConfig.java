@@ -8,4 +8,5 @@ public class RepresentativeFigureConfig {
     public RepresentativeStatistic statistic = RepresentativeStatistic.QUICK;
     public RepresentativeStatLoader.ExistingResultOption existingResult = null;
     public RepresentativeStatTable statTable = new RepresentativeStatTable();
+    public RepresentativeSelection selection = null;
 }

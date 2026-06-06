@@ -4,9 +4,13 @@ import flash.pipeline.bin.BinField;
 import flash.pipeline.cli.CLIConfig;
 import flash.pipeline.io.ImageCache;
 import flash.pipeline.representative.RepresentativeFigureConfig;
+import flash.pipeline.representative.RepresentativePreviewRenderer;
+import flash.pipeline.representative.RepresentativeSelection;
+import flash.pipeline.representative.RepresentativeSelectionPanel;
 import flash.pipeline.representative.RepresentativeStatLoader;
 import flash.pipeline.representative.RepresentativeStatTable;
 import flash.pipeline.representative.RepresentativeStatistic;
+import flash.pipeline.representative.RepresentativeSeries;
 import flash.pipeline.report.QualityReport;
 import flash.pipeline.runrecord.LoadedRunParameters;
 import flash.pipeline.ui.PipelineDialog;
@@ -63,13 +67,34 @@ public class RepresentativeFigureAnalysis implements Analysis {
 
             IJ.log("[Representative Figure] Loaded statistic source: "
                     + choice.statistic.label() + " (" + statTableSummary(config.statTable) + ").");
-            // TODO(representative-image-figure stage 05): call RepresentativePreviewRenderer.render()
-            // and pass the returned RepresentativeSeries list into the selection grid.
-            // TODO(representative-image-figure stage 05): pass config.statTable into the selection grid.
+
+            List<RepresentativeSeries> previewSeries = RepresentativePreviewRenderer.render(
+                    directory, config, imageCache, parallelThreads, useTifCache);
+            if (previewSeries.isEmpty()) {
+                IJ.log("[Representative Figure] No image series were available for representative selection.");
+                IJ.error("Representative Figure",
+                        "No image series were available for representative selection.");
+                return;
+            }
+
+            RepresentativeSelection selection = showSelectionGrid(previewSeries);
+            if (selection == null) {
+                IJ.log("[Representative Figure] Representative selection cancelled.");
+                return;
+            }
+
+            config.selection = selection;
+            IJ.log("[Representative Figure] Locked representatives for "
+                    + selection.size() + " condition"
+                    + (selection.size() == 1 ? "" : "s") + ".");
+            // TODO(representative-image-figure stage 06): register the quantification
+            // side-panel with RepresentativeSelectionPanel.addSelectionListener(...).
             // TODO(representative-image-figure stage 06): hide the quantification side-panel when statistic is NONE.
         } catch (Exception e) {
-            IJ.log("[Representative Figure] Could not load guiding statistic: " + e.getMessage());
-            IJ.error("Representative Figure", "Could not load guiding statistic:\n" + e.getMessage());
+            IJ.log("[Representative Figure] Could not prepare representative selection: "
+                    + e.getMessage());
+            IJ.error("Representative Figure",
+                    "Could not prepare representative selection:\n" + e.getMessage());
         }
     }
 
@@ -205,6 +230,34 @@ public class RepresentativeFigureAnalysis implements Analysis {
         }
         return table.rowCount() + " series, " + table.channelNames().size() + " channel"
                 + (table.channelNames().size() == 1 ? "" : "s");
+    }
+
+    private RepresentativeSelection showSelectionGrid(List<RepresentativeSeries> previewSeries) {
+        PipelineDialog dialog = new PipelineDialog(
+                "Representative Image Figure - Select Images", PipelineDialog.Phase.EXPORT);
+        dialog.addHeader("Select Representatives");
+        final RepresentativeSelectionPanel selectionPanel =
+                new RepresentativeSelectionPanel(previewSeries);
+        dialog.addComponent(selectionPanel);
+        dialog.setPrimaryButtonText("Lock in");
+        dialog.setPrimaryButtonEnabled(selectionPanel.hasCompleteSelection());
+        selectionPanel.addSelectionListener(
+                new RepresentativeSelectionPanel.SelectionListener() {
+                    @Override
+                    public void selectionChanged(
+                            RepresentativeSelectionPanel.SelectionEvent event) {
+                        dialog.setPrimaryButtonEnabled(event.isComplete());
+                    }
+                });
+
+        try {
+            if (!dialog.showDialog()) {
+                return null;
+            }
+            return selectionPanel.createSelection();
+        } finally {
+            selectionPanel.dispose();
+        }
     }
 
     private static final class StatisticChoice {
