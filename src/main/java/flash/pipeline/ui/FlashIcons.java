@@ -53,6 +53,9 @@ public final class FlashIcons {
     public static Icon bolt(int size, Color color)         { return load("bolt",          size, color); }
     public static Icon chartBar(int size, Color color)     { return load("chart-bar",     size, color); }
     public static Icon settings(int size, Color color)     { return load("settings",      size, color); }
+    public static Icon dotsFull(int size, Color color)     { return load("dots-full",     size, color); }
+    public static Icon dotsPartial(int size, Color color)  { return load("dots-partial",  size, color); }
+    public static Icon pencil(int size, Color color)       { return load("pencil",        size, color); }
 
     public static Icon save()        { return save(DEFAULT_ACTION_SIZE, DEFAULT_ACTION_COLOR); }
     public static Icon folderOpen()  { return folderOpen(DEFAULT_ACTION_SIZE, DEFAULT_ACTION_COLOR); }

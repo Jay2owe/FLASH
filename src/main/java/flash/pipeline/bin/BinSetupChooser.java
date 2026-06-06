@@ -1,8 +1,11 @@
 package flash.pipeline.bin;
 
+import flash.pipeline.help.SetupHelpTopic;
 import flash.pipeline.ui.PipelineDialog;
 
-import javax.swing.JButton;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Set;
 
 /** Three-way chooser for missing channel configuration. */
@@ -14,66 +17,62 @@ public final class BinSetupChooser {
     public static Choice show(String analysisDisplayName, Set<BinField> missing, boolean showRoiTip) {
         String analysis = cleanAnalysisName(analysisDisplayName);
         PipelineDialog dialog = new PipelineDialog("Pipeline configuration required");
-        dialog.setDefaultButtonsVisible(false);
 
-        dialog.addHeader("Pipeline configuration required");
-        dialog.addMessage("Running " + analysis + " requires channel parameters that have "
-                + "not yet been configured for this folder. Choose how you would like "
-                + "to set them up:");
+        // Header carries the "?" helper explaining why configuration matters and
+        // how the three choices differ.
+        dialog.addSetupHelpHeader("Pipeline configuration required", helpTopic(analysis));
+        dialog.addMessage(analysis + " needs channel settings for this folder before it can run. "
+                + "Pick how to set them up, then press OK.");
 
-        addChoiceButton(dialog,
-                "Run full configuration setup (recommended)",
-                "Launches the complete configuration workflow. Every parameter is "
-                        + "set with live preview against your own images, so you can verify "
-                        + "each choice before committing. Produces a complete, reusable "
-                        + "configuration that all subsequent analyses on this folder will "
-                        + "reuse without prompting.",
-                "full");
+        BinSetupChoicePanel choices = new BinSetupChoicePanel(analysis);
+        dialog.addComponent(choices);
 
-        addChoiceButton(dialog,
-                "Run partial configuration setup for this analysis only",
-                "Launches only the configuration steps that " + analysis + " needs, "
-                        + "skipping the rest. Same live image previews and validation as the "
-                        + "full setup, with fewer steps. Other analyses will prompt for their "
-                        + "own parameters when you run them later.",
-                "partial");
-
-        addChoiceButton(dialog,
-                "Enter parameters directly without previews (expert-only)",
-                "Opens a plain input dialog with FLASH's defaults pre-filled for "
-                        + "the parameters this analysis needs. No image previews, no "
-                        + "validation. Recommended only when reproducing a previous run or "
-                        + "transferring known-good settings between similar datasets.",
-                "bypass");
-
-        dialog.addMessage("Tip: parameters set here are saved to the Configuration folder and "
-                + "reused automatically the next time you run an analysis on this folder.");
+        dialog.addHelpText("Whatever you choose is saved to the Configuration folder and reused "
+                + "automatically next time you run an analysis on this folder.");
 
         if (showRoiTip) {
-            dialog.addMessage("Tip: " + analysis + " can be restricted to regions of interest (ROIs) "
-                    + "that you draw on each image — for example, a single hemisphere or "
-                    + "anatomical subregion — to limit the measurement to those areas. No "
-                    + "ROIs have been saved for this folder yet. Consider running "
-                    + "Draw and Save ROIs first if you want this analysis to operate on "
-                    + "specific regions rather than whole images.");
+            dialog.addHelpText(analysis + " can be limited to regions you draw on each image, "
+                    + "such as a single hemisphere. No regions have been saved for this folder yet "
+                    + "— run Draw and Save ROIs first if you want that.");
         }
 
-        JButton cancel = dialog.addRightFooterButton("Cancel");
-        cancel.addActionListener(e -> dialog.closeWithAction("cancel"));
+        dialog.setDefaultButtonsVisible(true);
+        dialog.focusPrimaryButtonOnShow();
 
-        dialog.showDialog();
-        String action = dialog.getActionCommand();
-        if ("full".equals(action)) return Choice.FULL;
-        if ("partial".equals(action)) return Choice.PARTIAL;
-        if ("bypass".equals(action)) return Choice.BYPASS;
-        return Choice.CANCELLED;
+        boolean confirmed = dialog.showDialog();
+        return confirmed ? choices.getSelectedChoice() : Choice.CANCELLED;
     }
 
-    private static void addChoiceButton(PipelineDialog dialog, String buttonText,
-                                        String helpText, final String action) {
-        JButton button = dialog.addButton(buttonText);
-        button.addActionListener(e -> dialog.closeWithAction(action));
-        dialog.addHelpText(helpText);
+    private static SetupHelpTopic helpTopic(String analysis) {
+        String summary = "FLASH measures each fluorescence channel using a small set of settings: "
+                + "which marker the channel shows, how it is displayed, the threshold that separates "
+                + "signal from background, and how objects are segmented. These are saved once per "
+                + "folder and reused by every analysis, so consistent settings give consistent, "
+                + "reproducible measurements across your whole dataset. Until they are set, an "
+                + "analysis has nothing to measure against, which is why you are being asked now.";
+
+        List<SetupHelpTopic.Section> sections = new ArrayList<SetupHelpTopic.Section>();
+        sections.add(new SetupHelpTopic.Section("Full setup (recommended)", Arrays.asList(
+                "Walks through every channel parameter: marker, colour, display range, detection "
+                        + "threshold, particle size, segmentation method and filters.",
+                "Every choice is made against a live preview of your own images, so you see the "
+                        + "effect before committing.",
+                "Saved once and reused by every analysis on this folder, so you are not asked again.",
+                "Best for a new folder or the first time you analyse this dataset.")));
+        sections.add(new SetupHelpTopic.Section("Partial setup", Arrays.asList(
+                "Runs only the steps " + analysis + " actually needs and skips the rest.",
+                "Same live previews and validation as the full setup, just fewer screens.",
+                "Other analyses will prompt for their own parameters when you run them later.",
+                "Best when you only want to run this one analysis right now.")));
+        sections.add(new SetupHelpTopic.Section("Manual entry", Arrays.asList(
+                "Opens a plain form with FLASH's default values pre-filled for the parameters this "
+                        + "analysis needs.",
+                "No image previews and no validation — you are trusted to enter sensible values.",
+                "Best for reproducing a previous run or copying known-good settings between similar "
+                        + "datasets.",
+                "You can run the full setup later to verify the values visually.")));
+
+        return new SetupHelpTopic("bin-setup-config", "Channel configuration", summary, sections);
     }
 
     private static String cleanAnalysisName(String analysisDisplayName) {
