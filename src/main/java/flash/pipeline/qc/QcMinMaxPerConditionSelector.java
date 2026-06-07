@@ -1461,25 +1461,36 @@ public final class QcMinMaxPerConditionSelector {
 
     private static void quickSelect(float[] values, int left, int right, int kth) {
         while (left < right) {
-            int pivotIndex = partition(values, left, right, (left + right) >>> 1);
-            if (kth == pivotIndex) return;
-            if (kth < pivotIndex) right = pivotIndex - 1;
-            else left = pivotIndex + 1;
+            int[] equalRange = partitionThreeWay(values, left, right, (left + right) >>> 1);
+            if (kth < equalRange[0]) {
+                right = equalRange[0] - 1;
+            } else if (kth > equalRange[1]) {
+                left = equalRange[1] + 1;
+            } else {
+                return;
+            }
         }
     }
 
-    private static int partition(float[] values, int left, int right, int pivotIndex) {
+    private static int[] partitionThreeWay(float[] values, int left, int right, int pivotIndex) {
         float pivotValue = values[pivotIndex];
-        swap(values, pivotIndex, right);
-        int store = left;
-        for (int i = left; i < right; i++) {
-            if (values[i] < pivotValue) {
-                swap(values, store, i);
-                store++;
+        int less = left;
+        int i = left;
+        int greater = right;
+        while (i <= greater) {
+            int cmp = Float.compare(values[i], pivotValue);
+            if (cmp < 0) {
+                swap(values, less, i);
+                less++;
+                i++;
+            } else if (cmp > 0) {
+                swap(values, i, greater);
+                greater--;
+            } else {
+                i++;
             }
         }
-        swap(values, right, store);
-        return store;
+        return new int[]{less, greater};
     }
 
     private static void swap(float[] values, int a, int b) {
@@ -1517,8 +1528,7 @@ public final class QcMinMaxPerConditionSelector {
         long availMem = maxMem - usedMem - MIN_FREE_BYTES;
         if (availMem <= 0 || bytesPerTask <= 0) return 1;
 
-        int bufferSize = Math.min(4, Math.max(2, Math.max(1, requestedThreads / 5)));
-        int maxThreads = (int) Math.max(1, (availMem / bytesPerTask) - bufferSize);
+        int maxThreads = (int) Math.max(1, availMem / bytesPerTask);
         int safe = Math.max(1, Math.min(requestedThreads, maxThreads));
         if (safe < requestedThreads) {
             IJ.log("QC min/max selector: reduced threads from " + requestedThreads

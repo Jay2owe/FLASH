@@ -423,6 +423,19 @@ public class QcMinMaxPerConditionSelectorTest {
     }
 
     @Test
+    public void meanOfBrightestFraction_handlesDuplicateHeavyValues() {
+        float[] values = new float[1000];
+        Arrays.fill(values, 0.0f);
+        values[997] = 50.0f;
+        values[998] = 50.0f;
+        values[999] = 100.0f;
+
+        assertEquals(20.0,
+                QcMinMaxPerConditionSelector.meanOfBrightestFraction(values, 0.01),
+                0.0001);
+    }
+
+    @Test
     public void scoresCsv_roundTripsSelectionRoles() throws Exception {
         File csv = temp.newFile("scores.csv");
         List<QcSelectionChannel> qcChannels = Arrays.asList(
