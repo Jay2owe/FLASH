@@ -67,6 +67,7 @@ public final class RepresentativePreviewRenderer {
     private static final double AUTO_SATURATION = 0.35;
     private static final String MERGE_NAME = "Merge";
     private static final String CACHE_VERSION = "representative-preview-v1";
+    private static final Object ORIGINAL_TIF_CACHE_LOCK = new Object();
 
     private RepresentativePreviewRenderer() {
     }
@@ -107,7 +108,8 @@ public final class RepresentativePreviewRenderer {
         List<PresentationTileRecord> presentationRecords =
                 readPresentationManifest(layout);
 
-        SourceAccess sourceAccess = new SourceAccess(directory, imageCache, useTifCache);
+        SourceAccess sourceAccess = new SourceAccess(
+                directory, imageCache, useTifCache, false);
         try {
             MetadataResolver metadataResolver = new MetadataResolver(directory);
             List<WorkItem> items = buildWorkItems(
@@ -155,7 +157,8 @@ public final class RepresentativePreviewRenderer {
         BinConfig binConfig = BinConfigIO.readPartialFromDirectory(directory);
         List<SeriesMeta> effectiveMetas =
                 metas == null ? ImageSourceDispatcher.readAllMetadata(directory) : metas;
-        SourceAccess sourceAccess = new SourceAccess(directory, imageCache, useTifCache);
+        SourceAccess sourceAccess = new SourceAccess(
+                directory, imageCache, useTifCache, true);
         try {
             MetadataResolver metadataResolver = new MetadataResolver(directory);
             List<WorkItem> items = buildFinalWorkItems(
@@ -273,7 +276,8 @@ public final class RepresentativePreviewRenderer {
         WorkItem item = workItemForSeries(series, null, binConfig, sourcePath, directory);
         RenderContext context = RenderContext.finalRender(binConfig,
                 config == null ? new RepresentativeFigureConfig() : config);
-        return renderFinalItem(item, context, SourceAccess.fixed(source));
+        return renderFinalItem(item, context,
+                SourceAccess.fixed(source, directory, true));
     }
 
     private static List<PresentationTileRecord> readPresentationManifest(FlashProjectLayout layout) {
@@ -1507,6 +1511,12 @@ public final class RepresentativePreviewRenderer {
         return safe(a).equalsIgnoreCase(safe(b));
     }
 
+    private static boolean isReadableTif(File file) {
+        if (file == null || !file.isFile()) return false;
+        String name = file.getName().toLowerCase(Locale.ROOT);
+        return name.endsWith(".tif") || name.endsWith(".tiff");
+    }
+
     private static String safe(String value) {
         return value == null ? "" : value.trim();
     }
@@ -2086,37 +2096,51 @@ public final class RepresentativePreviewRenderer {
         private final String directory;
         private final ImageCache imageCache;
         private final boolean useTifCache;
+        private final boolean cacheMissingOriginalTifs;
         private final DeferredImageSupplier supplier;
         private final boolean canUseSessionCache;
         private boolean sessionCacheAttempted = false;
         private List<ImagePlus> sessionImages = null;
         private final ImagePlus fixedImage;
 
-        SourceAccess(String directory, ImageCache imageCache, boolean useTifCache)
+        SourceAccess(String directory,
+                     ImageCache imageCache,
+                     boolean useTifCache,
+                     boolean cacheMissingOriginalTifs)
                 throws Exception {
             this.directory = directory;
             this.imageCache = imageCache;
             this.useTifCache = useTifCache;
+            this.cacheMissingOriginalTifs = cacheMissingOriginalTifs;
             this.supplier = ImageSourceDispatcher.createSupplier(directory);
             this.canUseSessionCache = imageCache != null && canUseSessionImageCache(directory);
             this.fixedImage = null;
         }
 
-        private SourceAccess(ImagePlus fixedImage) {
-            this.directory = "";
+        private SourceAccess(ImagePlus fixedImage,
+                             String directory,
+                             boolean cacheMissingOriginalTifs) {
+            this.directory = directory == null ? "" : directory;
             this.imageCache = null;
             this.useTifCache = false;
+            this.cacheMissingOriginalTifs = cacheMissingOriginalTifs;
             this.supplier = null;
             this.canUseSessionCache = false;
             this.fixedImage = fixedImage;
         }
 
         static SourceAccess none() {
-            return new SourceAccess((ImagePlus) null);
+            return new SourceAccess((ImagePlus) null, "", false);
         }
 
         static SourceAccess fixed(ImagePlus image) {
-            return new SourceAccess(image);
+            return new SourceAccess(image, "", false);
+        }
+
+        static SourceAccess fixed(ImagePlus image,
+                                  String directory,
+                                  boolean cacheMissingOriginalTifs) {
+            return new SourceAccess(image, directory, cacheMissingOriginalTifs);
         }
 
         File sourcePath(int seriesIndex) {
@@ -2131,13 +2155,16 @@ public final class RepresentativePreviewRenderer {
         ImagePlus openImage(WorkItem item) throws Exception {
             if (fixedImage != null) {
                 synchronized (fixedImage) {
-                    return ImageOps.duplicateThreadSafe(fixedImage);
+                    ImagePlus duplicate = ImageOps.duplicateThreadSafe(fixedImage);
+                    ensureOriginalTifForExport(item, duplicate);
+                    return duplicate;
                 }
             }
             ImagePlus cached = openSessionCachedImage(item.seriesIndex);
             if (cached != null) {
                 IJ.log("[Representative Figure] Opened series " + item.seriesNumber
                         + " from the in-session image cache.");
+                ensureOriginalTifForExport(item, cached);
                 return cached;
             }
             if (useTifCache && directory != null && !directory.isEmpty()
@@ -2152,7 +2179,29 @@ public final class RepresentativePreviewRenderer {
             if (supplier == null) return null;
             IJ.log("[Representative Figure] Opening source series " + item.seriesNumber
                     + " (" + safe(item.seriesName) + ").");
-            return supplier.openSeriesMaterialized(item.seriesIndex);
+            ImagePlus opened = supplier.openSeriesMaterialized(item.seriesIndex);
+            ensureOriginalTifForExport(item, opened);
+            return opened;
+        }
+
+        private void ensureOriginalTifForExport(WorkItem item, ImagePlus source)
+                throws IOException {
+            if (!cacheMissingOriginalTifs || source == null || item == null) return;
+            if (directory == null || directory.trim().isEmpty()) return;
+            if (item.seriesIndex < 0) return;
+            if (isReadableTif(item.sourcePath)) return;
+            synchronized (ORIGINAL_TIF_CACHE_LOCK) {
+                File existing = TifCache.cachedFileForSeries(directory, item.seriesIndex);
+                if (isReadableTif(existing)) return;
+                IJ.log("[Representative Figure] Saving original TIFF for series "
+                        + item.seriesNumber + " to the TIFF cache for export.");
+                TifCache.saveToCache(directory, source, item.seriesIndex);
+                File saved = TifCache.cachedFileForSeries(directory, item.seriesIndex);
+                if (!isReadableTif(saved)) {
+                    throw new IOException("Could not save original TIFF for representative series "
+                            + item.seriesNumber + " (" + safe(item.seriesName) + ").");
+                }
+            }
         }
 
         void close() {

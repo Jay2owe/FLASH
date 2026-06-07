@@ -3,6 +3,7 @@ package flash.pipeline.representative;
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.io.OrientationManifestIO;
 import flash.pipeline.io.SeriesMeta;
+import flash.pipeline.io.TifCache;
 import flash.pipeline.naming.OrientationManifestRow;
 import flash.pipeline.presentation.PresentationTileRecord;
 import flash.pipeline.qc.QcSelectionCandidate;
@@ -238,6 +239,29 @@ public class RepresentativePreviewRendererTest {
         assertEquals(4, rendered.channels().get(0).image().getHeight());
         assertEquals(2, rendered.mergeImage().getWidth());
         assertEquals(4, rendered.mergeImage().getHeight());
+    }
+
+    @Test
+    public void finalRenderCachesMaterializedContainerOriginalForExport() throws Exception {
+        File project = temp.newFolder("final-container-cache-project");
+        File sourcePath = new File(project, "source.lif");
+        BinConfig cfg = configuredOneChannelBinConfig("0-255");
+        RepresentativeFigureConfig config = new RepresentativeFigureConfig();
+        config.setCustomDisplayRangeForChannel(0, "0-255");
+
+        RepresentativePreviewRenderer.RenderedFinalSeries rendered =
+                RepresentativePreviewRenderer.renderFinalSeriesForTests(
+                        project.getAbsolutePath(),
+                        cfg,
+                        config,
+                        oneChannelRepresentativeSeries(0, "Control", sourcePath),
+                        oneChannelGradientImage(4, 2),
+                        sourcePath);
+
+        File cached = TifCache.cachedFileForSeries(project.getAbsolutePath(), 0);
+        assertTrue("materialized container source should be cached as a TIFF",
+                cached != null && cached.isFile());
+        assertEquals(sourcePath, rendered.sourcePath());
     }
 
     @Test

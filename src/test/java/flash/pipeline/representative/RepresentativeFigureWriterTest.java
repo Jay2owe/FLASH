@@ -17,6 +17,7 @@ import java.util.Map;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class RepresentativeFigureWriterTest {
@@ -191,6 +192,39 @@ public class RepresentativeFigureWriterTest {
 
         assertTrue(original.isFile());
         assertArrayEquals(sourceBytes, Files.readAllBytes(original.toPath()));
+    }
+
+    @Test
+    public void clearsStaleIndividualImagesBeforeWritingCurrentRun() throws Exception {
+        File project = temp.newFolder("project-with-repeated-individuals");
+        PresentationTileConfig tileConfig = PresentationTileConfig.builder()
+                .createOverviewTile(true)
+                .annotateOverviewTile(false)
+                .scaleBarEnabled(false)
+                .labelMode(PresentationTileConfig.LabelMode.NONE)
+                .channelOrder(Arrays.asList("DAPI", "Merge"))
+                .cellSizePx(50)
+                .build();
+
+        RepresentativeFigureWriter.writeRenderedFigureForTests(
+                project.getAbsolutePath(),
+                configFor(Collections.singletonList("Control"), tileConfig),
+                Collections.singletonList(
+                        renderedSeries(0, "Control", Color.RED, Color.CYAN)));
+        File individualRoot = new File(project,
+                "FLASH/Results/Presentation Images/Representative Figures/"
+                        + "Individual Images");
+        assertTrue(new File(individualRoot, "Control").isDirectory());
+
+        RepresentativeFigureWriter.writeRenderedFigureForTests(
+                project.getAbsolutePath(),
+                configFor(Collections.singletonList("Treatment"), tileConfig),
+                Collections.singletonList(
+                        renderedSeries(0, "Treatment", Color.GREEN, Color.YELLOW)));
+
+        assertFalse("old condition folder should be removed before the next run",
+                new File(individualRoot, "Control").exists());
+        assertTrue(new File(individualRoot, "Treatment").isDirectory());
     }
 
     private static RepresentativeFigureConfig configFor(Iterable<String> conditions,

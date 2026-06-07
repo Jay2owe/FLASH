@@ -101,7 +101,7 @@ public final class RepresentativeFigureWriter {
             List<RepresentativePreviewRenderer.RenderedFinalSeries> rendered)
             throws IOException {
         File root = new File(representativeFiguresDir, INDIVIDUAL_IMAGES_DIR);
-        IoUtils.mustMkdirs(root);
+        prepareCleanIndividualImagesRoot(root, representativeFiguresDir);
         int pngCount = 0;
         int originalTifCount = 0;
         for (RepresentativePreviewRenderer.RenderedFinalSeries series : rendered) {
@@ -136,6 +136,42 @@ public final class RepresentativeFigureWriter {
                 + root.getAbsolutePath() + " (" + pngCount + " PNG"
                 + (pngCount == 1 ? "" : "s") + ", " + originalTifCount
                 + " original TIFF" + (originalTifCount == 1 ? "" : "s") + ").");
+    }
+
+    private static void prepareCleanIndividualImagesRoot(File root, File expectedParent)
+            throws IOException {
+        if (root != null && root.exists()) {
+            assertIndividualImagesRoot(root, expectedParent);
+            deleteRecursively(root);
+        }
+        IoUtils.mustMkdirs(root);
+    }
+
+    private static void assertIndividualImagesRoot(File root, File expectedParent)
+            throws IOException {
+        File canonicalRoot = root.getCanonicalFile();
+        File canonicalParent = expectedParent.getCanonicalFile();
+        if (!INDIVIDUAL_IMAGES_DIR.equals(canonicalRoot.getName())
+                || !sameFile(canonicalRoot.getParentFile(), canonicalParent)) {
+            throw new IOException("Refusing to clean unexpected individual images folder: "
+                    + root.getAbsolutePath());
+        }
+    }
+
+    private static void deleteRecursively(File file) throws IOException {
+        if (file == null || !file.exists()) return;
+        if (file.isDirectory()) {
+            File[] children = file.listFiles();
+            if (children != null) {
+                for (int i = 0; i < children.length; i++) {
+                    deleteRecursively(children[i]);
+                }
+            }
+        }
+        if (!file.delete() && file.exists()) {
+            throw new IOException("Could not delete stale representative image output: "
+                    + file.getAbsolutePath());
+        }
     }
 
     static BufferedImage renderFigureImage(
