@@ -5420,6 +5420,12 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                 + " T" + Math.max(1, image.getNFrames());
     }
 
+    private static String sourceTitle(ImagePlus image) {
+        if (image == null) return "no source";
+        String title = image.getTitle();
+        return title == null || title.trim().isEmpty() ? "untitled source" : title.trim();
+    }
+
     private Map<Integer, QcMinMaxPerConditionSelector.SelectedSeries> selectedSeriesByIndex(
             List<QcMinMaxPerConditionSelector.SelectedSeries> selectedSeries) {
         LinkedHashMap<Integer, QcMinMaxPerConditionSelector.SelectedSeries> byIndex =
@@ -8868,8 +8874,13 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                         if (filteredSource == null) return null;
                         ImagePlus input = filteredSource.duplicate();
                         input.setTitle("StarDist preview input | " + chLabel);
+                        long started = System.currentTimeMillis();
+                        IJ.log("Set Up QC StarDist preview running: " + chLabel
+                                + " | " + sourceTitle(filteredSource)
+                                + " | prob=" + parameters.probabilityThreshold
+                                + " | nms=" + parameters.nmsThreshold);
                         try {
-                            return StarDist3DRunner.run(input,
+                            ImagePlus result = StarDist3DRunner.run(input,
                                     parameters.probabilityThreshold,
                                     parameters.nmsThreshold,
                                     cfg.names.get(channelIndex),
@@ -8882,6 +8893,10 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                                     parameters.intensityMin,
                                     parameters.modelKey,
                                     projectRootForConfigurationDir(binFolder));
+                            IJ.log("Set Up QC StarDist preview complete: " + chLabel
+                                    + " | objects=" + StarDist3DRunner.countLabels(result)
+                                    + " | " + (System.currentTimeMillis() - started) + " ms.");
+                            return result;
                         } finally {
                             closeImageQuietly(input);
                         }
@@ -8989,8 +9004,14 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                         if (companion != null) {
                             companion.setTitle("Cellpose preview companion | " + chLabel);
                         }
+                        long started = System.currentTimeMillis();
+                        IJ.log("Set Up QC Cellpose preview running: " + chLabel
+                                + " | " + sourceTitle(filteredSource)
+                                + " | model=" + parameters.modelToken
+                                + " | diameter=" + parameters.diameter
+                                + " | gpu=" + parameters.useGpu);
                         try {
-                            return Cellpose3DRunner.run(input, companion,
+                            ImagePlus result = Cellpose3DRunner.run(input, companion,
                                     parameters.modelToken,
                                     parameters.diameter,
                                     parameters.flowThreshold,
@@ -8999,6 +9020,10 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                                     cfg.names.get(channelIndex),
                                     projectRootForConfigurationDir(binFolder),
                                     parameters.dumpCellprob);
+                            IJ.log("Set Up QC Cellpose preview complete: " + chLabel
+                                    + " | objects=" + Cellpose3DRunner.countLabels(result)
+                                    + " | " + (System.currentTimeMillis() - started) + " ms.");
+                            return result;
                         } finally {
                             closeImageQuietly(input);
                             closeImageQuietly(companion);
