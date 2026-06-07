@@ -1,6 +1,11 @@
 package flash.pipeline.intelligence;
 
 import flash.pipeline.deconv.RefractiveIndexEstimator;
+import flash.pipeline.io.FlashProjectLayout;
+import flash.pipeline.project.ProjectFile;
+import flash.pipeline.project.ProjectFileIO;
+import ij.IJ;
+import ij.ImagePlus;
 import loci.formats.meta.MetadataRetrieve;
 import ome.units.UNITS;
 import ome.units.quantity.Length;
@@ -41,6 +46,49 @@ public class MetadataDiagnosticsTest {
 
         assertEquals(1, candidates.size());
         assertEquals("cohort.lif", candidates.get(0).getName());
+    }
+
+    @Test
+    public void scanDirectoryUsesProjectManifestSourceOutsideOutputRoot() throws Exception {
+        File outputRoot = temp.newFolder("manifest-output");
+        File sourceRoot = temp.newFolder("manifest-source");
+        File staleRootTiff = new File(outputRoot, "stale-root.tif");
+        File manifestTiff = new File(sourceRoot, "manifest-source.tif");
+        writeSyntheticTiff(staleRootTiff, "stale", 3, 2, 1);
+        writeSyntheticTiff(manifestTiff, "manifest", 7, 5, 1);
+
+        ProjectFile project = new ProjectFile();
+        project.outputRoot = outputRoot.getAbsolutePath();
+        project.items.add(projectItem(manifestTiff));
+        writeProject(outputRoot, project);
+
+        List<MetadataDiagnostics.SeriesInfo> series =
+                MetadataDiagnostics.scanDirectory(outputRoot.getAbsolutePath());
+
+        assertEquals(1, series.size());
+        assertEquals("manifest-source.tif", series.get(0).file);
+        assertEquals(7, series.get(0).sizeX);
+        assertEquals(5, series.get(0).sizeY);
+    }
+
+    @Test
+    public void readOneSeriesInfoStringUsesProjectManifestSource() throws Exception {
+        File outputRoot = temp.newFolder("one-series-output");
+        File sourceRoot = temp.newFolder("one-series-source");
+        File manifestTiff = new File(sourceRoot, "one-source.tif");
+        writeSyntheticTiff(manifestTiff, "one-source", 9, 4, 1);
+
+        ProjectFile project = new ProjectFile();
+        project.outputRoot = outputRoot.getAbsolutePath();
+        project.items.add(projectItem(manifestTiff));
+        writeProject(outputRoot, project);
+
+        MetadataDiagnostics.SeriesInfo info =
+                MetadataDiagnostics.readOneSeriesInfo(outputRoot.getAbsolutePath(), 0);
+
+        assertEquals("one-source.tif", info.file);
+        assertEquals(9, info.sizeX);
+        assertEquals(4, info.sizeY);
     }
 
     @Test
@@ -124,6 +172,30 @@ public class MetadataDiagnosticsTest {
         info.acquisitionDate = acquisitionDate;
         info.extension = "lif";
         return info;
+    }
+
+    private static ProjectFile.Item projectItem(File source) {
+        ProjectFile.Item item = new ProjectFile.Item();
+        item.path = source.getAbsolutePath();
+        item.include = true;
+        return item;
+    }
+
+    private static void writeProject(File outputRoot, ProjectFile project) throws Exception {
+        ProjectFileIO.write(
+                FlashProjectLayout.forDirectory(outputRoot.getAbsolutePath()).configurationWriteDir(),
+                project);
+    }
+
+    private static void writeSyntheticTiff(File target, String title,
+                                           int width, int height, int slices) {
+        ImagePlus image = IJ.createImage(title, "8-bit ramp", width, height, slices);
+        try {
+            IJ.saveAsTiff(image, target.getAbsolutePath());
+        } finally {
+            image.close();
+            image.flush();
+        }
     }
 
     private static MetadataDiagnostics.SeriesInfo instrumentSeries(String file,

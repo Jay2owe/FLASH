@@ -3,6 +3,9 @@ package flash.pipeline.intelligence;
 import flash.pipeline.deconv.RefractiveIndexEstimator;
 import flash.pipeline.deconv.psf.ScopeModality;
 import flash.pipeline.io.ConditionManifestIO;
+import flash.pipeline.io.DeferredImageSupplier;
+import flash.pipeline.io.ImageSourceDispatcher;
+import flash.pipeline.io.SeriesMeta;
 import flash.pipeline.naming.ConditionNameParser;
 import flash.pipeline.naming.ImageNameParser;
 
@@ -76,6 +79,10 @@ public final class MetadataDiagnostics {
         File dir = new File(directory == null ? "" : directory);
         if (!dir.isDirectory()) return out;
 
+        if (ImageSourceDispatcher.hasProjectManifest(directory)) {
+            return scanProjectDirectory(directory, out);
+        }
+
         for (File f : listCandidateFilesForMetadataScan(dir)) {
             try {
                 readOne(f, out);
@@ -89,6 +96,83 @@ public final class MetadataDiagnostics {
             }
         }
         return out;
+    }
+
+    private static List<SeriesInfo> scanProjectDirectory(String directory, List<SeriesInfo> out) {
+        try {
+            DeferredImageSupplier supplier = ImageSourceDispatcher.createSupplier(directory);
+            List<SeriesMeta> metas = ImageSourceDispatcher.readAllMetadata(directory);
+            if (metas == null) {
+                return out;
+            }
+            for (SeriesMeta meta : metas) {
+                if (meta == null || ImageNameParser.isPreviewSeriesName(meta.name)) {
+                    continue;
+                }
+                File source = sourceFileForSeries(supplier, meta.index);
+                int sourceSeriesIndex = sourceSeriesIndexForSeries(supplier, meta.index);
+                try {
+                    SeriesInfo info = readOneSeriesInfo(source, sourceSeriesIndex);
+                    if (info != null) {
+                        if (info.imageName == null || info.imageName.trim().isEmpty()) {
+                            info.imageName = meta.name;
+                        }
+                        out.add(info);
+                    }
+                } catch (Exception e) {
+                    out.add(failedProjectSeriesInfo(source, meta, sourceSeriesIndex, e));
+                }
+            }
+        } catch (Exception e) {
+            SeriesInfo s = new SeriesInfo();
+            s.file = "project.json";
+            s.seriesIndex = 0;
+            s.imageName = "(failed: " + e.getClass().getSimpleName() + ")";
+            out.add(s);
+        }
+        return out;
+    }
+
+    private static File sourceFileForSeries(DeferredImageSupplier supplier, int seriesIndex) {
+        if (supplier == null) {
+            return null;
+        }
+        try {
+            return supplier.getContainerFileForSeries(seriesIndex);
+        } catch (RuntimeException e) {
+            return supplier.getContainerFile();
+        }
+    }
+
+    private static int sourceSeriesIndexForSeries(DeferredImageSupplier supplier, int seriesIndex) {
+        if (supplier == null) {
+            return seriesIndex;
+        }
+        try {
+            return supplier.getLocalSeriesIndexForSeries(seriesIndex);
+        } catch (RuntimeException e) {
+            return seriesIndex;
+        }
+    }
+
+    private static SeriesInfo failedProjectSeriesInfo(File source, SeriesMeta meta,
+                                                      int sourceSeriesIndex, Exception e) {
+        SeriesInfo s = new SeriesInfo();
+        s.file = source == null ? "" : source.getName();
+        s.seriesIndex = sourceSeriesIndex;
+        s.imageName = "(failed: " + e.getClass().getSimpleName() + ")";
+        s.extension = source == null ? "" : extension(source.getName());
+        if (meta != null) {
+            s.sizeX = meta.width;
+            s.sizeY = meta.height;
+            s.sizeZ = meta.nSlices;
+            s.sizeC = meta.nChannels;
+            if (meta.isCalibrated()) {
+                s.pixelSizeXUm = Double.valueOf(meta.pixelWidth);
+                s.pixelSizeZUm = Double.valueOf(meta.pixelDepth);
+            }
+        }
+        return s;
     }
 
     /**
@@ -174,7 +258,14 @@ public final class MetadataDiagnostics {
     }
 
     public static SeriesInfo readOneSeriesInfo(String directory, int seriesIndex) throws Exception {
-        return readOneSeriesInfo(flash.pipeline.io.LifIO.requireSingleLifFile(directory), seriesIndex);
+        DeferredImageSupplier supplier = ImageSourceDispatcher.createSupplier(directory);
+        try {
+            return readOneSeriesInfo(
+                    sourceFileForSeries(supplier, seriesIndex),
+                    sourceSeriesIndexForSeries(supplier, seriesIndex));
+        } finally {
+            supplier.shutdownPrefetch();
+        }
     }
 
     static List<File> listCandidateFilesForMetadataScan(File dir) {

@@ -7,6 +7,8 @@ import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.ImageSourceDispatcher;
 import flash.pipeline.io.OrientationManifestIO;
 import flash.pipeline.io.ProjectStatusStore;
+import flash.pipeline.io.SeriesMeta;
+import flash.pipeline.naming.ImageNameParser;
 import flash.pipeline.roi.RoiIO;
 import flash.pipeline.zslice.ZSliceRange;
 
@@ -188,6 +190,22 @@ public class AnalysisStatusScanner {
         if (directory == null || directory.trim().isEmpty()) return 0;
         File root = new File(directory);
         if (!root.isDirectory()) return 0;
+        if (ImageSourceDispatcher.hasProjectManifest(directory)) {
+            try {
+                List<SeriesMeta> metas = ImageSourceDispatcher.readAllMetadata(directory);
+                int count = 0;
+                if (metas != null) {
+                    for (SeriesMeta meta : metas) {
+                        if (meta != null && !ImageNameParser.isPreviewSeriesName(meta.name)) {
+                            count++;
+                        }
+                    }
+                }
+                return count;
+            } catch (Exception e) {
+                return 0;
+            }
+        }
         int tiffs = ImageSourceDispatcher.listTiffs(root).size();
         File input = new File(root, "input");
         if (input.isDirectory()) {

@@ -5,6 +5,9 @@ import flash.pipeline.bin.BinConfigIO;
 import flash.pipeline.bin.ChannelConfigIO;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.ImageSourceDispatcher;
+import flash.pipeline.io.SeriesMeta;
+import flash.pipeline.naming.ImageNameParser;
+import flash.pipeline.project.ProjectFileIO;
 import flash.pipeline.recipes.PipelineRecipe;
 import flash.pipeline.recipes.PipelineRecipeIO;
 import loci.formats.ImageReader;
@@ -78,7 +81,7 @@ public final class AnalysisAdvisor {
                     new int[0]);
         }
 
-        DimensionSniff sniff = sniffFirstImageDimensions(firstImage);
+        DimensionSniff sniff = sniffFirstImageDimensions(directory, firstImage);
         if (!sniff.hasImage) {
             return new AdvisorResult(
                     "I don't see any images in this folder.",
@@ -143,6 +146,22 @@ public final class AnalysisAdvisor {
     }
 
     private static File firstImageFile(File directory) {
+        if (directory != null && ImageSourceDispatcher.hasProjectManifest(directory.getAbsolutePath())) {
+            try {
+                List<File> projectContainers = ImageSourceDispatcher.projectContainerFiles(directory.getAbsolutePath());
+                if (!projectContainers.isEmpty()) {
+                    return projectContainers.get(0);
+                }
+                List<File> projectTiffs = ImageSourceDispatcher.projectTiffFiles(directory.getAbsolutePath());
+                if (!projectTiffs.isEmpty()) {
+                    return projectTiffs.get(0);
+                }
+            } catch (RuntimeException e) {
+                return null;
+            }
+            return null;
+        }
+
         List<File> containers = ImageSourceDispatcher.listContainers(directory);
         if (!containers.isEmpty()) {
             return containers.get(0);
@@ -186,8 +205,8 @@ public final class AnalysisAdvisor {
         return false;
     }
 
-    private static DimensionSniff sniffFirstImageDimensions(final File imageFile) {
-        String key = imageFile.getAbsolutePath() + "|" + imageFile.lastModified() + "|" + imageFile.length();
+    private static DimensionSniff sniffFirstImageDimensions(final File directory, final File imageFile) {
+        String key = dimensionCacheKey(directory, imageFile);
         DimensionSniff cached = DIMENSION_CACHE.get(key);
         if (cached != null) {
             return cached;
@@ -202,7 +221,7 @@ public final class AnalysisAdvisor {
         });
         Future<DimensionSniff> future = executor.submit(new Callable<DimensionSniff>() {
             @Override public DimensionSniff call() {
-                return readDimensions(imageFile);
+                return readDimensions(directory, imageFile);
             }
         });
 
@@ -219,7 +238,56 @@ public final class AnalysisAdvisor {
         return result;
     }
 
-    private static DimensionSniff readDimensions(File imageFile) {
+    private static String dimensionCacheKey(File directory, File imageFile) {
+        StringBuilder sb = new StringBuilder();
+        if (directory != null) {
+            sb.append(directory.getAbsolutePath())
+                    .append('|').append(directory.lastModified());
+            File projectJson = new File(
+                    FlashProjectLayout.forDirectory(directory.getAbsolutePath()).configurationWriteDir(),
+                    ProjectFileIO.FILE_NAME);
+            if (projectJson.isFile()) {
+                sb.append("|project=")
+                        .append(projectJson.lastModified())
+                        .append(':')
+                        .append(projectJson.length());
+            }
+        }
+        if (imageFile != null) {
+            sb.append("|image=")
+                    .append(imageFile.getAbsolutePath())
+                    .append(':')
+                    .append(imageFile.lastModified())
+                    .append(':')
+                    .append(imageFile.length());
+        }
+        return sb.toString();
+    }
+
+    private static DimensionSniff readDimensions(File directory, File imageFile) {
+        if (directory != null && ImageSourceDispatcher.hasProjectManifest(directory.getAbsolutePath())) {
+            return readProjectDimensions(directory);
+        }
+        return readFileDimensions(imageFile);
+    }
+
+    private static DimensionSniff readProjectDimensions(File directory) {
+        try {
+            List<SeriesMeta> metas = ImageSourceDispatcher.readAllMetadata(directory.getAbsolutePath());
+            if (metas != null) {
+                for (SeriesMeta meta : metas) {
+                    if (meta != null && !ImageNameParser.isPreviewSeriesName(meta.name)) {
+                        return DimensionSniff.confident(meta.nSlices);
+                    }
+                }
+            }
+            return DimensionSniff.noImage();
+        } catch (Throwable t) {
+            return DimensionSniff.uncertain();
+        }
+    }
+
+    private static DimensionSniff readFileDimensions(File imageFile) {
         if (imageFile == null || !imageFile.isFile()) {
             return DimensionSniff.noImage();
         }

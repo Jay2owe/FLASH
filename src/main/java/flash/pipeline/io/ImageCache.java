@@ -21,7 +21,7 @@ public class ImageCache {
      * Returns the cached images for the given directory, loading them if needed.
      * The returned list is the shared cache — callers MUST duplicate before modifying.
      *
-     * @param directory the directory containing the .lif file
+     * @param directory the project/input directory
      * @return the list of loaded images, or null if loading failed
      */
     public List<ImagePlus> getImages(String directory) {
@@ -33,11 +33,11 @@ public class ImageCache {
         // Directory changed — release old cache
         release();
 
-        IJ.showStatus("Opening .lif file...");
+        IJ.showStatus("Opening source images...");
         IJ.showProgress(0);
         long t0 = System.currentTimeMillis();
         try {
-            cached = LifIO.openAllSeries(directory, false);
+            cached = openAllMaterialized(directory);
         } catch (Exception e) {
             IJ.log("WARNING: " + e.getMessage());
             return null;
@@ -48,6 +48,21 @@ public class ImageCache {
         IJ.showStatus("Loaded " + cached.size() + " images");
         IJ.showProgress(1.0);
         return cached;
+    }
+
+    private List<ImagePlus> openAllMaterialized(String directory) throws Exception {
+        DeferredImageSupplier supplier = ImageSourceDispatcher.createSupplier(directory);
+        List<ImagePlus> images = new ArrayList<ImagePlus>();
+        try {
+            int total = supplier.getTotalSeries();
+            for (int series = 0; series < total; series++) {
+                IJ.showProgress(series, Math.max(1, total));
+                images.add(supplier.openSeriesMaterialized(series));
+            }
+        } finally {
+            supplier.shutdownPrefetch();
+        }
+        return images;
     }
 
     /**

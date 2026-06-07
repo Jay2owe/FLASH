@@ -1,12 +1,16 @@
 package flash.pipeline.help;
 
 import flash.pipeline.TestConfigFiles;
+import flash.pipeline.io.FlashProjectLayout;
+import flash.pipeline.project.ProjectFile;
+import flash.pipeline.project.ProjectFileIO;
 import ij.IJ;
 import ij.ImagePlus;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
@@ -17,7 +21,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -59,9 +65,52 @@ public class AnalysisAdvisorMemoizerTest {
         }
     }
 
+    @Test
+    public void recommendUsesProjectManifestSourceForDimensions() throws Exception {
+        Path outputRoot = Files.createDirectories(tmp.resolve("advisor-output"));
+        Path sourceRoot = Files.createDirectories(tmp.resolve("advisor-sources"));
+        Path staleRootTiff = outputRoot.resolve("stale-root.tif");
+        Path manifestTiff = sourceRoot.resolve("manifest-source.tif");
+        createTiff(staleRootTiff, 1, 4);
+        createTiff(manifestTiff, 3, 4);
+        TestConfigFiles.writeChannelConfig(outputRoot.toFile(),
+                TestConfigFiles.basicBinConfig("DAPI", "GFP", "RFP", "CY5"));
+
+        ProjectFile project = new ProjectFile();
+        project.outputRoot = outputRoot.toString();
+        project.items.add(projectItem(manifestTiff.toFile()));
+        writeProject(outputRoot.toFile(), project);
+
+        AdvisorResult result = new AnalysisAdvisor().recommend(outputRoot.toFile());
+
+        assertEquals("standard-3d-intensity", result.suggestedRecipe());
+    }
+
+    @Test
+    public void recommendDoesNotScanOutputRootWhenManifestHasNoSources() throws Exception {
+        Path outputRoot = Files.createDirectories(tmp.resolve("advisor-empty-output"));
+        Path staleRootTiff = outputRoot.resolve("stale-root.tif");
+        createTiff(staleRootTiff, 3, 4);
+        TestConfigFiles.writeChannelConfig(outputRoot.toFile(),
+                TestConfigFiles.basicBinConfig("DAPI", "GFP", "RFP", "CY5"));
+
+        ProjectFile project = new ProjectFile();
+        project.outputRoot = outputRoot.toString();
+        writeProject(outputRoot.toFile(), project);
+
+        AdvisorResult result = new AnalysisAdvisor().recommend(outputRoot.toFile());
+
+        assertEquals("I don't see any images in this folder.", result.title());
+        assertNull(result.suggestedRecipe());
+    }
+
     private static void createTinyTiff(Path target) throws IOException {
+        createTiff(target, 1, 2);
+    }
+
+    private static void createTiff(Path target, int slices, int channels) throws IOException {
         ImagePlus imp = IJ.createImage(target.getFileName().toString(),
-                "16-bit", 8, 8, 1, 2, 1);
+                "16-bit", 8, 8, channels, slices, 1);
         try {
             IJ.saveAsTiff(imp, target.toString());
             assertTrue("synthesised TIFF must exist: " + target,
@@ -69,6 +118,19 @@ public class AnalysisAdvisorMemoizerTest {
         } finally {
             imp.close();
         }
+    }
+
+    private static ProjectFile.Item projectItem(File source) {
+        ProjectFile.Item item = new ProjectFile.Item();
+        item.path = source.getAbsolutePath();
+        item.include = true;
+        return item;
+    }
+
+    private static void writeProject(File outputRoot, ProjectFile project) throws Exception {
+        ProjectFileIO.write(
+                FlashProjectLayout.forDirectory(outputRoot.getAbsolutePath()).configurationWriteDir(),
+                project);
     }
 
     private static List<Path> findBfmemoFiles(Path root) throws IOException {

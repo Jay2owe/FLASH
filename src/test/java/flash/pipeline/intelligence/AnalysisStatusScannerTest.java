@@ -8,6 +8,10 @@ import flash.pipeline.bin.ChannelConfigIO;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.OrientationManifestIO;
 import flash.pipeline.io.ProjectStatusStore;
+import flash.pipeline.project.ProjectFile;
+import flash.pipeline.project.ProjectFileIO;
+import ij.IJ;
+import ij.ImagePlus;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -100,6 +104,41 @@ public class AnalysisStatusScannerTest {
         assertEquals(3, ((Number) createBin.get("imageCount")).intValue());
         assertEquals(false, new File(dir, ".flash-status/createBin.json").exists());
         assertEquals(false, new File(dir, "FLASH/Status").exists());
+    }
+
+    @Test
+    public void estimateImageCountUsesProjectManifestSourcesOutsideOutputRoot() throws Exception {
+        File outputRoot = temp.newFolder("status-manifest-output");
+        File sourceRoot = temp.newFolder("status-manifest-source");
+        File first = new File(sourceRoot, "first.tif");
+        File second = new File(sourceRoot, "second.tif");
+        writeSyntheticTiff(first, "first", 3, 2, 1);
+        writeSyntheticTiff(second, "second", 4, 3, 1);
+
+        ProjectFile project = new ProjectFile();
+        project.outputRoot = outputRoot.getAbsolutePath();
+        project.items.add(projectItem(first));
+        project.items.add(projectItem(second));
+        ProjectFileIO.write(
+                FlashProjectLayout.forDirectory(outputRoot.getAbsolutePath()).configurationWriteDir(),
+                project);
+
+        assertEquals(2, AnalysisStatusScanner.estimateImageCount(outputRoot.getAbsolutePath()));
+    }
+
+    @Test
+    public void estimateImageCountDoesNotScanOutputRootWhenManifestHasNoSources() throws Exception {
+        File outputRoot = temp.newFolder("status-empty-manifest-output");
+        File staleRootTiff = new File(outputRoot, "stale-root.tif");
+        writeSyntheticTiff(staleRootTiff, "stale", 3, 2, 1);
+
+        ProjectFile project = new ProjectFile();
+        project.outputRoot = outputRoot.getAbsolutePath();
+        ProjectFileIO.write(
+                FlashProjectLayout.forDirectory(outputRoot.getAbsolutePath()).configurationWriteDir(),
+                project);
+
+        assertEquals(0, AnalysisStatusScanner.estimateImageCount(outputRoot.getAbsolutePath()));
     }
 
     @Test
@@ -223,6 +262,24 @@ public class AnalysisStatusScannerTest {
             out.closeEntry();
         } finally {
             out.close();
+        }
+    }
+
+    private static ProjectFile.Item projectItem(File source) {
+        ProjectFile.Item item = new ProjectFile.Item();
+        item.path = source.getAbsolutePath();
+        item.include = true;
+        return item;
+    }
+
+    private static void writeSyntheticTiff(File target, String title,
+                                           int width, int height, int slices) {
+        ImagePlus image = IJ.createImage(title, "8-bit ramp", width, height, slices);
+        try {
+            IJ.saveAsTiff(image, target.getAbsolutePath());
+        } finally {
+            image.close();
+            image.flush();
         }
     }
 }

@@ -25,8 +25,8 @@ import flash.pipeline.image.HeapBudget;
 import flash.pipeline.intelligence.MetadataDiagnostics;
 import flash.pipeline.io.AsyncImageSaver;
 import flash.pipeline.io.DeferredImageSupplier;
+import flash.pipeline.io.ImageSourceDispatcher;
 import flash.pipeline.io.IoUtils;
-import flash.pipeline.io.LifIO;
 import flash.pipeline.io.SeriesMeta;
 import flash.pipeline.naming.ImageNameParser;
 import flash.pipeline.report.QualityReport;
@@ -1826,21 +1826,26 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
     }
 
     protected List<SeriesJob> listSeriesJobs(String directory) throws Exception {
-        File lifFile = LifIO.requireSingleLifFile(directory);
-        List<SeriesMeta> metas = readAllSeriesMetadata(lifFile);
+        DeferredImageSupplier supplier = createImageSupplier(directory);
+        List<SeriesMeta> metas = readAllInputMetadata(directory);
         List<SeriesJob> jobs = new ArrayList<SeriesJob>();
         for (SeriesMeta meta : metas) {
+            if (meta == null) {
+                continue;
+            }
             if (ImageNameParser.isPreviewSeriesName(meta.name)) {
                 continue;
             }
+            File sourceFile = sourceFileForSeries(supplier, meta.index);
+            int sourceSeriesIndex = sourceSeriesIndexForSeries(supplier, meta.index);
             MetadataDiagnostics.SeriesInfo info;
             try {
-                info = readSeriesInfo(lifFile, meta.index);
+                info = readSeriesInfo(sourceFile, sourceSeriesIndex);
             } catch (Exception e) {
-                IJ.log(TITLE + ": detailed metadata unavailable for series " + (meta.index + 1)
+                IJ.log(TITLE + ": detailed metadata unavailable for series " + (sourceSeriesIndex + 1)
                         + " (" + nullToEmpty(meta.name) + "). Manual deconvolution fields will be requested. "
                         + e.getMessage());
-                info = fallbackSeriesInfo(lifFile, meta);
+                info = fallbackSeriesInfo(sourceFile, meta.withIndex(sourceSeriesIndex));
             }
             if (info == null) continue;
             if (info.imageName == null || info.imageName.trim().isEmpty()) {
@@ -1848,15 +1853,41 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
             }
             String baseName = ImageNameParser.extractBioFormatsSeriesName(info.imageName);
             if (baseName == null || baseName.trim().isEmpty()) {
-                baseName = "Series_" + (meta.index + 1);
+                baseName = "Series_" + (sourceSeriesIndex + 1);
             }
-            jobs.add(new SeriesJob(lifFile, meta.index, baseName.trim(), info));
+            jobs.add(new SeriesJob(sourceFile, meta.index, sourceSeriesIndex, baseName.trim(), info));
         }
         return jobs;
     }
 
-    protected List<SeriesMeta> readAllSeriesMetadata(File lifFile) throws Exception {
-        return LifIO.readAllSeriesMetadata(lifFile);
+    protected DeferredImageSupplier createImageSupplier(String directory) throws Exception {
+        return ImageSourceDispatcher.createSupplier(directory);
+    }
+
+    protected List<SeriesMeta> readAllInputMetadata(String directory) throws Exception {
+        return ImageSourceDispatcher.readAllMetadata(directory);
+    }
+
+    protected File sourceFileForSeries(DeferredImageSupplier supplier, int seriesIndex) {
+        if (supplier == null) {
+            return null;
+        }
+        try {
+            return supplier.getContainerFileForSeries(seriesIndex);
+        } catch (RuntimeException e) {
+            return supplier.getContainerFile();
+        }
+    }
+
+    protected int sourceSeriesIndexForSeries(DeferredImageSupplier supplier, int seriesIndex) {
+        if (supplier == null) {
+            return seriesIndex;
+        }
+        try {
+            return supplier.getLocalSeriesIndexForSeries(seriesIndex);
+        } catch (RuntimeException e) {
+            return seriesIndex;
+        }
     }
 
     protected MetadataDiagnostics.SeriesInfo readSeriesInfo(File lifFile, int seriesIndex) throws Exception {
@@ -1888,7 +1919,7 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
     }
 
     protected ImagePlus openSeriesChannel(String directory, int seriesIndex, int channelIndex) throws Exception {
-        DeferredImageSupplier supplier = LifIO.createDeferredSupplier(directory);
+        DeferredImageSupplier supplier = createImageSupplier(directory);
         File source = null;
         try {
             source = supplier.getContainerFileForSeries(seriesIndex);
@@ -2340,6 +2371,9 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
         sb.append("Image: ").append(job.displayName).append('\n');
         sb.append("Source File: ").append(job.sourceFile == null ? "" : job.sourceFile.getAbsolutePath()).append('\n');
         sb.append("Series Index: ").append(job.seriesIndex).append('\n');
+        if (job.sourceSeriesIndex != job.seriesIndex) {
+            sb.append("Source Series Index: ").append(job.sourceSeriesIndex).append('\n');
+        }
         sb.append("Engine: ").append(settings.engineKey).append('\n');
         sb.append("Algorithm: ").append(settings.algorithm == null ? "" : settings.algorithm.name()).append('\n');
         sb.append("Iterations: ").append(settings.iterations).append('\n');
@@ -2995,10 +3029,17 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
         final String displayName;
         final String baseName;
         final MetadataDiagnostics.SeriesInfo seriesInfo;
+        final int sourceSeriesIndex;
 
         SeriesJob(File sourceFile, int seriesIndex, String baseName, MetadataDiagnostics.SeriesInfo seriesInfo) {
+            this(sourceFile, seriesIndex, seriesIndex, baseName, seriesInfo);
+        }
+
+        SeriesJob(File sourceFile, int seriesIndex, int sourceSeriesIndex,
+                  String baseName, MetadataDiagnostics.SeriesInfo seriesInfo) {
             this.sourceFile = sourceFile;
             this.seriesIndex = seriesIndex;
+            this.sourceSeriesIndex = sourceSeriesIndex;
             this.baseName = baseName;
             this.seriesInfo = seriesInfo;
             this.displayName = ImageNameParser.buildMultiSeriesDisplayLabel(

@@ -4,6 +4,8 @@ import flash.pipeline.cli.CLIArgumentParser;
 import flash.pipeline.cli.CLIConfig;
 import flash.pipeline.deconv.DeconvolutionIO;
 import flash.pipeline.io.FlashProjectLayout;
+import flash.pipeline.io.DeferredImageSupplier;
+import flash.pipeline.io.ImageSourceDispatcher;
 import flash.pipeline.deconv.engine.Algorithm;
 import flash.pipeline.deconv.engine.DeconvParams;
 import flash.pipeline.deconv.engine.DeconvolutionEngine;
@@ -12,6 +14,8 @@ import flash.pipeline.deconv.psf.PsfModel;
 import flash.pipeline.deconv.psf.PsfSpec;
 import flash.pipeline.intelligence.MetadataDiagnostics;
 import flash.pipeline.io.SeriesMeta;
+import flash.pipeline.project.ProjectFile;
+import flash.pipeline.project.ProjectFileIO;
 import ij.ImagePlus;
 import ij.ImageStack;
 import ij.io.Opener;
@@ -122,7 +126,7 @@ public class DeconvolutionAnalysisTest {
         File source = new File(root, "partial.lif");
         Files.write(source.toPath(), "lif".getBytes(StandardCharsets.UTF_8));
 
-        MetadataFallbackAnalysis analysis = new MetadataFallbackAnalysis();
+        MetadataFallbackAnalysis analysis = new MetadataFallbackAnalysis(source);
         List<DeconvolutionAnalysis.SeriesJob> jobs = analysis.listSeriesJobs(root.getAbsolutePath());
 
         assertEquals(1, jobs.size());
@@ -138,6 +142,53 @@ public class DeconvolutionAnalysisTest {
         assertEquals(0.20, info.pixelSizeXUm.doubleValue(), 1e-12);
         assertEquals(0.60, info.pixelSizeZUm.doubleValue(), 1e-12);
         assertEquals(3, info.emissionWavelengthNm.length);
+    }
+
+    @Test
+    public void listSeriesJobsReadsProjectManifestSourceWhenOutputRootHasNoLif() throws Exception {
+        File outputRoot = temp.newFolder("deconvolution-project-output");
+        File sourceRoot = temp.newFolder("deconvolution-project-source");
+        File source = new File(sourceRoot, "slide.lif");
+        Files.write(source.toPath(), "lif".getBytes(StandardCharsets.UTF_8));
+        ProjectFile project = new ProjectFile();
+        project.outputRoot = outputRoot.getAbsolutePath();
+        project.items.add(projectItem(source));
+        writeProject(outputRoot, project);
+
+        ProjectManifestAnalysis analysis = new ProjectManifestAnalysis(0);
+        List<DeconvolutionAnalysis.SeriesJob> jobs =
+                analysis.listSeriesJobs(outputRoot.getAbsolutePath());
+
+        assertEquals(1, jobs.size());
+        assertEquals(source.getAbsolutePath(), jobs.get(0).sourceFile.getAbsolutePath());
+        assertEquals(source.getAbsolutePath(), analysis.readInfoFile.getAbsolutePath());
+        assertEquals(0, jobs.get(0).seriesIndex);
+        assertEquals(0, jobs.get(0).sourceSeriesIndex);
+        assertEquals("Mouse1_LH_CA1", jobs.get(0).baseName);
+    }
+
+    @Test
+    public void listSeriesJobsReadsDetailedMetadataWithSourceLocalSeriesIndex() throws Exception {
+        File outputRoot = temp.newFolder("deconvolution-project-selected-output");
+        File sourceRoot = temp.newFolder("deconvolution-project-selected-source");
+        File source = new File(sourceRoot, "slide.lif");
+        Files.write(source.toPath(), "lif".getBytes(StandardCharsets.UTF_8));
+        ProjectFile project = new ProjectFile();
+        project.outputRoot = outputRoot.getAbsolutePath();
+        ProjectFile.Item item = projectItem(source);
+        item.series.add(Integer.valueOf(5));
+        project.items.add(item);
+        writeProject(outputRoot, project);
+
+        ProjectManifestAnalysis analysis = new ProjectManifestAnalysis(5);
+        List<DeconvolutionAnalysis.SeriesJob> jobs =
+                analysis.listSeriesJobs(outputRoot.getAbsolutePath());
+
+        assertEquals(1, jobs.size());
+        assertEquals(0, jobs.get(0).seriesIndex);
+        assertEquals(5, jobs.get(0).sourceSeriesIndex);
+        assertEquals(5, analysis.readInfoSeriesIndex);
+        assertEquals(5, jobs.get(0).seriesInfo.seriesIndex);
     }
 
     @Test
@@ -356,6 +407,19 @@ public class DeconvolutionAnalysisTest {
         return false;
     }
 
+    private static ProjectFile.Item projectItem(File source) {
+        ProjectFile.Item item = new ProjectFile.Item();
+        item.path = source.getAbsolutePath();
+        item.include = true;
+        return item;
+    }
+
+    private static void writeProject(File outputRoot, ProjectFile project) throws Exception {
+        ProjectFileIO.write(
+                FlashProjectLayout.forDirectory(outputRoot.getAbsolutePath()).configurationWriteDir(),
+                project);
+    }
+
     private static final class TestDeconvolutionAnalysis extends DeconvolutionAnalysis {
         private final File sourceFile;
         private final ImagePlus blurred;
@@ -434,8 +498,19 @@ public class DeconvolutionAnalysisTest {
     }
 
     private static final class MetadataFallbackAnalysis extends DeconvolutionAnalysis {
+        private final File sourceFile;
+
+        private MetadataFallbackAnalysis(File sourceFile) {
+            this.sourceFile = sourceFile;
+        }
+
         @Override
-        protected List<SeriesMeta> readAllSeriesMetadata(File lifFile) {
+        protected DeferredImageSupplier createImageSupplier(String directory) {
+            return null;
+        }
+
+        @Override
+        protected List<SeriesMeta> readAllInputMetadata(String directory) {
             return Collections.singletonList(new SeriesMeta(
                     2,
                     "Sample_A",
@@ -450,8 +525,82 @@ public class DeconvolutionAnalysisTest {
         }
 
         @Override
+        protected File sourceFileForSeries(DeferredImageSupplier supplier, int seriesIndex) {
+            return sourceFile;
+        }
+
+        @Override
+        protected int sourceSeriesIndexForSeries(DeferredImageSupplier supplier, int seriesIndex) {
+            return seriesIndex;
+        }
+
+        @Override
         protected MetadataDiagnostics.SeriesInfo readSeriesInfo(File lifFile, int seriesIndex) throws Exception {
             throw new IOException("OME objective metadata unavailable");
+        }
+    }
+
+    private static final class ProjectManifestAnalysis extends DeconvolutionAnalysis {
+        private final int sourceSeriesIndex;
+        private List<File> manifestSources = Collections.emptyList();
+        private File readInfoFile;
+        private int readInfoSeriesIndex = -1;
+
+        private ProjectManifestAnalysis(int sourceSeriesIndex) {
+            this.sourceSeriesIndex = sourceSeriesIndex;
+        }
+
+        @Override
+        protected DeferredImageSupplier createImageSupplier(String directory) {
+            return null;
+        }
+
+        @Override
+        protected List<SeriesMeta> readAllInputMetadata(String directory) {
+            manifestSources = ImageSourceDispatcher.projectContainerFiles(directory);
+            return Collections.singletonList(new SeriesMeta(
+                    0,
+                    "slide.lif - Mouse1_LH_CA1",
+                    64,
+                    48,
+                    12,
+                    3,
+                    0.20,
+                    0.20,
+                    0.60,
+                    "micron"));
+        }
+
+        @Override
+        protected File sourceFileForSeries(DeferredImageSupplier supplier, int seriesIndex) {
+            return manifestSources.isEmpty() ? null : manifestSources.get(0);
+        }
+
+        @Override
+        protected int sourceSeriesIndexForSeries(DeferredImageSupplier supplier, int seriesIndex) {
+            return sourceSeriesIndex;
+        }
+
+        @Override
+        protected MetadataDiagnostics.SeriesInfo readSeriesInfo(File imageFile, int seriesIndex) {
+            readInfoFile = imageFile;
+            readInfoSeriesIndex = seriesIndex;
+            MetadataDiagnostics.SeriesInfo info = new MetadataDiagnostics.SeriesInfo();
+            info.file = imageFile == null ? "" : imageFile.getName();
+            info.extension = "lif";
+            info.seriesIndex = seriesIndex;
+            info.imageName = "slide.lif - Mouse1_LH_CA1";
+            info.sizeX = 64;
+            info.sizeY = 48;
+            info.sizeZ = 12;
+            info.sizeC = 3;
+            info.pixelSizeXUm = Double.valueOf(0.20);
+            info.pixelSizeZUm = Double.valueOf(0.60);
+            info.objectiveNA = Double.valueOf(1.30);
+            info.objectiveImmersion = "oil";
+            info.sampleRefractiveIndex = Double.valueOf(1.33);
+            info.emissionWavelengthNm = new double[]{488.0, 568.0, 647.0};
+            return info;
         }
     }
 }
