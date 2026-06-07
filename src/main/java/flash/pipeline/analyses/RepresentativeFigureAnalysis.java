@@ -12,6 +12,8 @@ import flash.pipeline.io.SeriesMeta;
 import flash.pipeline.naming.ImageNameParser;
 import flash.pipeline.project.ProjectFile;
 import flash.pipeline.project.ProjectFileIO;
+import flash.pipeline.qc.QcMinMaxPerConditionSelector;
+import flash.pipeline.qc.QcSelectionCandidate;
 import flash.pipeline.representative.ConditionLayoutChooser;
 import flash.pipeline.representative.RepresentativeFigureConfig;
 import flash.pipeline.representative.RepresentativeFigureWriter;
@@ -89,28 +91,46 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
                 IJ.log("[Representative Figure] Statistic chooser cancelled.");
                 return;
             }
-            if (!reviewConditionAssignments(directory)) {
+            List<SeriesMeta> metas = loadSourceMetadata(directory);
+            LinkedHashSet<String> reviewAnimals = conditionReviewAnimals(metas);
+            IJ.log("[Representative Figure] Reviewing condition assignments for "
+                    + reviewAnimals.size() + " animal"
+                    + (reviewAnimals.size() == 1 ? "" : "s") + ".");
+            if (!reviewConditionAssignments(directory, metas)) {
                 IJ.log("[Representative Figure] Condition assignment review cancelled.");
                 return;
             }
 
             config.statistic = choice.statistic;
             config.existingResult = choice.existingResult;
+            IJ.log("[Representative Figure] Loading statistic source: "
+                    + choice.statistic.label() + ".");
+            long statStart = System.currentTimeMillis();
             config.statTable = RepresentativeStatLoader.load(
-                    directory, choice.statistic, choice.existingResult, parallelThreads);
+                    directory, choice.statistic, choice.existingResult, parallelThreads, metas);
 
             IJ.log("[Representative Figure] Loaded statistic source: "
-                    + choice.statistic.label() + " (" + statTableSummary(config.statTable) + ").");
+                    + choice.statistic.label() + " (" + statTableSummary(config.statTable)
+                    + ") in " + elapsed(statStart) + ".");
 
+            IJ.log("[Representative Figure] Building representative candidate list.");
+            List<QcSelectionCandidate> candidates =
+                    QcMinMaxPerConditionSelector.buildCandidates(directory, metas);
+            IJ.log("[Representative Figure] Candidate list ready: "
+                    + candidates.size() + " image series.");
+            long previewStart = System.currentTimeMillis();
             List<RepresentativeSeries> previewSeries = RepresentativePreviewRenderer.render(
-                    directory, config, imageCache, parallelThreads, useTifCache);
+                    directory, config, imageCache, parallelThreads, useTifCache, metas, candidates);
             if (previewSeries.isEmpty()) {
                 IJ.log("[Representative Figure] No image series were available for representative selection.");
                 IJ.error("Representative Figure",
                         "No image series were available for representative selection.");
                 return;
             }
+            IJ.log("[Representative Figure] Representative preview grid ready in "
+                    + elapsed(previewStart) + ".");
 
+            IJ.log("[Representative Figure] Opening representative selection dialog.");
             RepresentativeSelection selection = showSelectionGrid(previewSeries);
             if (selection == null) {
                 IJ.log("[Representative Figure] Representative selection cancelled.");
@@ -130,6 +150,7 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
             }
             if (rangeChoice.adjustNow) {
                 RepresentativeRangeStage rangeStage = new RepresentativeRangeStage();
+                IJ.log("[Representative Figure] Opening display-range adjustment workflow.");
                 if (!rangeStage.run(directory, config, setupConfig, imageCache, useTifCache)) {
                     IJ.log("[Representative Figure] Display-range adjustment cancelled.");
                     return;
@@ -144,6 +165,7 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
                 IJ.log("[Representative Figure] Using remembered representative display ranges.");
             }
 
+            IJ.log("[Representative Figure] Opening condition layout chooser.");
             ConditionLayoutChooser.Result layoutResult =
                     new ConditionLayoutChooser().show(config);
             if (layoutResult == null) {
@@ -157,10 +179,12 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
                     + (config.layout.rowCount() == 1 ? "" : "s")
                     + " and " + config.layout.conditionCount() + " condition"
                     + (config.layout.conditionCount() == 1 ? "" : "s") + ".");
+            long writeStart = System.currentTimeMillis();
             File output = new RepresentativeFigureWriter().write(
-                    directory, config, imageCache, parallelThreads, useTifCache);
+                    directory, config, imageCache, parallelThreads, useTifCache, metas);
             IJ.log("[Representative Figure] Representative figure written: "
-                    + output.getAbsolutePath());
+                    + output.getAbsolutePath()
+                    + " (" + elapsed(writeStart) + ").");
             persistCompletedRun(directory, setupConfig, output);
         } catch (Exception e) {
             IJ.log("[Representative Figure] Could not prepare representative selection: "
@@ -256,6 +280,31 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
 
     void setConditionReviewDialogForTests(ConditionReviewDialog dialog) {
         conditionReviewDialog = dialog;
+    }
+
+    private List<SeriesMeta> loadSourceMetadata(String directory) throws Exception {
+        long start = System.currentTimeMillis();
+        IJ.log("[Representative Figure] Reading source image metadata.");
+        List<SeriesMeta> metas = ImageSourceDispatcher.readAllMetadata(directory);
+        int usable = usableSeriesCount(metas);
+        IJ.log("[Representative Figure] Source metadata ready: "
+                + usable + " usable image series"
+                + (metas == null ? "" : " (" + metas.size() + " metadata series)")
+                + " in " + elapsed(start) + ".");
+        return metas;
+    }
+
+    private static int usableSeriesCount(List<SeriesMeta> metas) {
+        int count = 0;
+        if (metas == null) {
+            return count;
+        }
+        for (SeriesMeta meta : metas) {
+            if (meta != null && !ImageNameParser.isPreviewSeriesName(meta.name)) {
+                count++;
+            }
+        }
+        return count;
     }
 
     void persistCompletedRun(String directory, BinConfig setupConfig, File output) throws Exception {
@@ -570,6 +619,14 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
 
     private static String clean(String value) {
         return value == null ? "" : value.trim();
+    }
+
+    private static String elapsed(long startMillis) {
+        long elapsed = Math.max(0L, System.currentTimeMillis() - startMillis);
+        if (elapsed < 1000L) {
+            return elapsed + " ms";
+        }
+        return String.format(java.util.Locale.ROOT, "%.1f s", elapsed / 1000.0);
     }
 
     boolean reviewConditionAssignments(String directory) throws Exception {

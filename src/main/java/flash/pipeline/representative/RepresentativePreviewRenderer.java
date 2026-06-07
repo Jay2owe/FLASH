@@ -9,10 +9,10 @@ import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.ImageCache;
 import flash.pipeline.io.ImageSourceDispatcher;
 import flash.pipeline.io.IoUtils;
+import flash.pipeline.io.OrientationManifestIO;
 import flash.pipeline.io.SeriesMeta;
 import flash.pipeline.io.TifCache;
 import flash.pipeline.naming.ChannelFilenameCodec;
-import flash.pipeline.naming.ImageOrientationResolver;
 import flash.pipeline.naming.ImageNameParser;
 import flash.pipeline.naming.NameParts;
 import flash.pipeline.naming.OrientationManifestRow;
@@ -83,23 +83,47 @@ public final class RepresentativePreviewRenderer {
                                                     ImageCache imageCache,
                                                     int parallelThreads,
                                                     boolean useTifCache) throws Exception {
+        return render(directory, config, imageCache, parallelThreads, useTifCache, null, null);
+    }
+
+    public static List<RepresentativeSeries> render(String directory,
+                                                    RepresentativeFigureConfig config,
+                                                    ImageCache imageCache,
+                                                    int parallelThreads,
+                                                    boolean useTifCache,
+                                                    List<SeriesMeta> metas,
+                                                    List<QcSelectionCandidate> candidates)
+            throws Exception {
+        long start = System.currentTimeMillis();
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
         BinConfig binConfig = BinConfigIO.readPartialFromDirectory(directory);
         RepresentativeFigureConfig safeConfig =
                 config == null ? new RepresentativeFigureConfig() : config;
-        List<SeriesMeta> metas = ImageSourceDispatcher.readAllMetadata(directory);
-        List<QcSelectionCandidate> candidates =
-                QcMinMaxPerConditionSelector.buildCandidates(directory, metas);
+        List<SeriesMeta> effectiveMetas =
+                metas == null ? ImageSourceDispatcher.readAllMetadata(directory) : metas;
+        List<QcSelectionCandidate> effectiveCandidates = candidates == null
+                ? QcMinMaxPerConditionSelector.buildCandidates(directory, effectiveMetas)
+                : candidates;
         List<PresentationTileRecord> presentationRecords =
                 readPresentationManifest(layout);
 
         SourceAccess sourceAccess = new SourceAccess(directory, imageCache, useTifCache);
         try {
+            MetadataResolver metadataResolver = new MetadataResolver(directory);
             List<WorkItem> items = buildWorkItems(
-                    directory, metas, candidates, binConfig, presentationRecords, sourceAccess);
+                    directory, effectiveMetas, effectiveCandidates, binConfig,
+                    presentationRecords, sourceAccess, metadataResolver);
             RenderContext context = new RenderContext(
                     previewCacheDir(layout), binConfig, safeConfig, DEFAULT_THUMBNAIL_LONG_EDGE);
-            return renderItems(items, context, sourceAccess, parallelThreads);
+            IJ.log("[Representative Figure] Preparing preview thumbnails for "
+                    + items.size() + " image series"
+                    + " (" + presentationRecords.size() + " presentation manifest record"
+                    + (presentationRecords.size() == 1 ? "" : "s") + ").");
+            List<RepresentativeSeries> rendered =
+                    renderItems(items, context, sourceAccess, parallelThreads);
+            IJ.log("[Representative Figure] Preview thumbnails ready in "
+                    + elapsed(start) + ": " + previewSummary(rendered) + ".");
+            return rendered;
         } finally {
             sourceAccess.close();
         }
@@ -110,6 +134,17 @@ public final class RepresentativePreviewRenderer {
                                                         ImageCache imageCache,
                                                         int parallelThreads,
                                                         boolean useTifCache) throws Exception {
+        return renderFinal(directory, config, imageCache, parallelThreads, useTifCache, null);
+    }
+
+    public static List<RenderedFinalSeries> renderFinal(String directory,
+                                                        RepresentativeFigureConfig config,
+                                                        ImageCache imageCache,
+                                                        int parallelThreads,
+                                                        boolean useTifCache,
+                                                        List<SeriesMeta> metas)
+            throws Exception {
+        long start = System.currentTimeMillis();
         RepresentativeFigureConfig safeConfig =
                 config == null ? new RepresentativeFigureConfig() : config;
         RepresentativeSelection selection = safeConfig.selection;
@@ -118,13 +153,22 @@ public final class RepresentativePreviewRenderer {
         }
 
         BinConfig binConfig = BinConfigIO.readPartialFromDirectory(directory);
-        List<SeriesMeta> metas = ImageSourceDispatcher.readAllMetadata(directory);
+        List<SeriesMeta> effectiveMetas =
+                metas == null ? ImageSourceDispatcher.readAllMetadata(directory) : metas;
         SourceAccess sourceAccess = new SourceAccess(directory, imageCache, useTifCache);
         try {
+            MetadataResolver metadataResolver = new MetadataResolver(directory);
             List<WorkItem> items = buildFinalWorkItems(
-                    directory, selection, binConfig, metas, sourceAccess);
+                    directory, selection, binConfig, effectiveMetas, sourceAccess,
+                    metadataResolver);
             RenderContext context = RenderContext.finalRender(binConfig, safeConfig);
-            return renderFinalItems(items, context, sourceAccess, parallelThreads);
+            IJ.log("[Representative Figure] Rendering final full-resolution representatives for "
+                    + items.size() + " condition" + (items.size() == 1 ? "" : "s") + ".");
+            List<RenderedFinalSeries> rendered =
+                    renderFinalItems(items, context, sourceAccess, parallelThreads);
+            IJ.log("[Representative Figure] Final representative images rendered in "
+                    + elapsed(start) + ".");
+            return rendered;
         } finally {
             sourceAccess.close();
         }
@@ -254,10 +298,14 @@ public final class RepresentativePreviewRenderer {
             return Collections.emptyList();
         }
         int threads = Math.max(1, Math.min(Math.max(1, parallelThreads), items.size()));
+        IJ.log("[Representative Figure] Rendering preview thumbnails with "
+                + threadLabel(threads) + ".");
         if (threads == 1) {
             List<RepresentativeSeries> out = new ArrayList<RepresentativeSeries>();
             for (WorkItem item : items) {
-                out.add(renderItem(item, context, sourceAccess));
+                RepresentativeSeries rendered = renderItem(item, context, sourceAccess);
+                out.add(rendered);
+                logPreviewProgress(out.size(), items.size(), rendered);
             }
             return out;
         }
@@ -277,7 +325,9 @@ public final class RepresentativePreviewRenderer {
 
             List<RepresentativeSeries> out = new ArrayList<RepresentativeSeries>();
             for (Future<RepresentativeSeries> future : futures) {
-                out.add(future.get());
+                RepresentativeSeries rendered = future.get();
+                out.add(rendered);
+                logPreviewProgress(out.size(), items.size(), rendered);
             }
             return out;
         } finally {
@@ -293,10 +343,14 @@ public final class RepresentativePreviewRenderer {
             return Collections.emptyList();
         }
         int threads = Math.max(1, Math.min(Math.max(1, parallelThreads), items.size()));
+        IJ.log("[Representative Figure] Rendering final images with "
+                + threadLabel(threads) + ".");
         if (threads == 1) {
             List<RenderedFinalSeries> out = new ArrayList<RenderedFinalSeries>();
             for (WorkItem item : items) {
-                out.add(renderFinalItem(item, context, sourceAccess));
+                RenderedFinalSeries rendered = renderFinalItem(item, context, sourceAccess);
+                out.add(rendered);
+                logFinalProgress(out.size(), items.size(), rendered);
             }
             return out;
         }
@@ -316,7 +370,9 @@ public final class RepresentativePreviewRenderer {
 
             List<RenderedFinalSeries> out = new ArrayList<RenderedFinalSeries>();
             for (Future<RenderedFinalSeries> future : futures) {
-                out.add(future.get());
+                RenderedFinalSeries rendered = future.get();
+                out.add(rendered);
+                logFinalProgress(out.size(), items.size(), rendered);
             }
             return out;
         } finally {
@@ -335,6 +391,12 @@ public final class RepresentativePreviewRenderer {
             return cached;
         }
 
+        IJ.log("[Representative Figure] Rendering preview for series "
+                + item.seriesNumber + " (" + safe(item.seriesName) + ") from "
+                + (item.presentationCoverage.covers()
+                        ? "presentation images"
+                        : "source image")
+                + ".");
         RenderedPreviews previews = item.presentationCoverage.covers()
                 ? renderFromPresentation(item, plan)
                 : renderFromSource(item, plan.longEdge, context, sourceAccess);
@@ -350,6 +412,10 @@ public final class RepresentativePreviewRenderer {
                                                        RenderContext context,
                                                        SourceAccess sourceAccess)
             throws Exception {
+        IJ.log("[Representative Figure] Rendering final image for "
+                + RepresentativeSelection.conditionLabel(item.condition)
+                + " from series " + item.seriesNumber
+                + " (" + safe(item.seriesName) + ").");
         RenderedPreviews rendered = renderFromSource(item, context.longEdge,
                 context, sourceAccess);
         return buildFinalSeries(item, rendered);
@@ -648,12 +714,100 @@ public final class RepresentativePreviewRenderer {
         }
     }
 
+    private static void logPreviewProgress(int done,
+                                           int total,
+                                           RepresentativeSeries series) {
+        if (!shouldLogProgress(done, total)) {
+            return;
+        }
+        IJ.log("[Representative Figure] Preview thumbnails "
+                + done + "/" + total
+                + " (" + previewSourceLabel(series) + ").");
+    }
+
+    private static void logFinalProgress(int done,
+                                         int total,
+                                         RenderedFinalSeries series) {
+        if (!shouldLogProgress(done, total)) {
+            return;
+        }
+        String condition = series == null ? "" : series.condition();
+        IJ.log("[Representative Figure] Final images "
+                + done + "/" + total
+                + (condition.isEmpty() ? "" : " (" + condition + ")")
+                + ".");
+    }
+
+    private static boolean shouldLogProgress(int done, int total) {
+        if (total <= 0) return false;
+        if (done <= 0 || done == total) return true;
+        if (total <= 20) return true;
+        int interval = Math.max(1, total / 10);
+        return done % interval == 0;
+    }
+
+    private static String previewSummary(List<RepresentativeSeries> rendered) {
+        int total = rendered == null ? 0 : rendered.size();
+        int cache = 0;
+        int presentation = 0;
+        int generated = 0;
+        if (rendered != null) {
+            for (RepresentativeSeries series : rendered) {
+                if (series == null) continue;
+                if (series.cacheHit()
+                        || series.previewSource() == RepresentativeSeries.PreviewSource.CACHE) {
+                    cache++;
+                } else if (series.previewSource()
+                        == RepresentativeSeries.PreviewSource.PRESENTATION) {
+                    presentation++;
+                } else if (series.previewSource()
+                        == RepresentativeSeries.PreviewSource.GENERATED) {
+                    generated++;
+                }
+            }
+        }
+        return total + " series (" + cache + " cache hit"
+                + (cache == 1 ? "" : "s")
+                + ", " + presentation + " presentation"
+                + ", " + generated + " generated)";
+    }
+
+    private static String previewSourceLabel(RepresentativeSeries series) {
+        if (series == null) {
+            return "unknown";
+        }
+        if (series.cacheHit()
+                || series.previewSource() == RepresentativeSeries.PreviewSource.CACHE) {
+            return "cache";
+        }
+        if (series.previewSource() == RepresentativeSeries.PreviewSource.PRESENTATION) {
+            return "presentation";
+        }
+        if (series.previewSource() == RepresentativeSeries.PreviewSource.GENERATED) {
+            return "generated";
+        }
+        return "unknown";
+    }
+
+    private static String elapsed(long startMillis) {
+        long elapsed = Math.max(0L, System.currentTimeMillis() - startMillis);
+        if (elapsed < 1000L) {
+            return elapsed + " ms";
+        }
+        return String.format(Locale.ROOT, "%.1f s", elapsed / 1000.0);
+    }
+
+    private static String threadLabel(int threads) {
+        return threads + " thread" + (threads == 1 ? "" : "s");
+    }
+
     private static List<WorkItem> buildWorkItems(String directory,
                                                  List<SeriesMeta> metas,
                                                  List<QcSelectionCandidate> candidates,
                                                  BinConfig cfg,
                                                  List<PresentationTileRecord> records,
-                                                 SourceAccess sourceAccess) {
+                                                 SourceAccess sourceAccess,
+                                                 MetadataResolver metadataResolver) {
         Map<Integer, QcSelectionCandidate> byIndex =
                 new LinkedHashMap<Integer, QcSelectionCandidate>();
         if (candidates != null) {
@@ -670,8 +824,10 @@ public final class RepresentativePreviewRenderer {
             QcSelectionCandidate candidate = byIndex.get(Integer.valueOf(meta.index));
             File sourcePath = sourceAccess == null ? null : sourceAccess.sourcePath(meta.index);
             List<PresentationTileRecord> matching =
-                    matchingPresentationRecords(directory, meta, candidate, sourcePath, records);
-            items.add(workItemFor(directory, meta, candidate, cfg, matching, sourcePath));
+                    matchingPresentationRecords(directory, meta, candidate, sourcePath,
+                            records, metadataResolver);
+            items.add(workItemFor(directory, meta, candidate, cfg, matching, sourcePath,
+                    metadataResolver));
         }
         return items;
     }
@@ -680,7 +836,8 @@ public final class RepresentativePreviewRenderer {
                                                       RepresentativeSelection selection,
                                                       BinConfig cfg,
                                                       List<SeriesMeta> metas,
-                                                      SourceAccess sourceAccess) {
+                                                      SourceAccess sourceAccess,
+                                                      MetadataResolver metadataResolver) {
         Map<Integer, SeriesMeta> metasByIndex =
                 new LinkedHashMap<Integer, SeriesMeta>();
         if (metas != null) {
@@ -701,7 +858,8 @@ public final class RepresentativePreviewRenderer {
                     ? series.sourcePath()
                     : sourceAccess.sourcePath(series.seriesIndex());
             if (sourcePath == null) sourcePath = series.sourcePath();
-            items.add(workItemForSeries(series, meta, cfg, sourcePath, directory));
+            items.add(workItemForSeries(series, meta, cfg, sourcePath, directory,
+                    metadataResolver));
         }
         return items;
     }
@@ -712,13 +870,25 @@ public final class RepresentativePreviewRenderer {
                                         BinConfig cfg,
                                         List<PresentationTileRecord> matchingRecords,
                                         File sourcePath) {
+        return workItemFor(directory, meta, candidate, cfg, matchingRecords, sourcePath,
+                new MetadataResolver(directory));
+    }
+
+    private static WorkItem workItemFor(String directory,
+                                        SeriesMeta meta,
+                                        QcSelectionCandidate candidate,
+                                        BinConfig cfg,
+                                        List<PresentationTileRecord> matchingRecords,
+                                        File sourcePath,
+                                        MetadataResolver metadataResolver) {
         int seriesIndex = meta == null ? -1 : meta.index;
         int seriesNumber = seriesIndex + 1;
         String seriesName = candidate != null && !candidate.seriesName.trim().isEmpty()
                 ? candidate.seriesName
                 : (meta == null ? "" : safe(meta.name));
-        ResolvedImageMetadata resolved = resolveMetadata(
-                directory, seriesName, seriesNumber, sourcePath);
+        MetadataResolver resolver = metadataResolver == null
+                ? new MetadataResolver(directory) : metadataResolver;
+        ResolvedImageMetadata resolved = resolver.resolve(seriesName, seriesNumber, sourcePath);
         NameParts parts = resolved == null
                 ? ImageNameParser.parse(seriesName)
                 : resolved.toNameParts();
@@ -768,6 +938,16 @@ public final class RepresentativePreviewRenderer {
                                               BinConfig cfg,
                                               File sourcePath,
                                               String directory) {
+        return workItemForSeries(series, meta, cfg, sourcePath, directory,
+                new MetadataResolver(directory));
+    }
+
+    private static WorkItem workItemForSeries(RepresentativeSeries series,
+                                              SeriesMeta meta,
+                                              BinConfig cfg,
+                                              File sourcePath,
+                                              String directory,
+                                              MetadataResolver metadataResolver) {
         if (series == null) {
             throw new IllegalArgumentException("Representative series is required.");
         }
@@ -790,8 +970,10 @@ public final class RepresentativePreviewRenderer {
         }
         List<ChannelSpec> channels = channelSpecs(cfg, effectiveMeta, null);
         File effectiveSourcePath = sourcePath == null ? series.sourcePath() : sourcePath;
-        ResolvedImageMetadata orientationMetadata = resolveMetadata(
-                directory, series.seriesName(), series.seriesNumber(), effectiveSourcePath);
+        MetadataResolver resolver = metadataResolver == null
+                ? new MetadataResolver(directory) : metadataResolver;
+        ResolvedImageMetadata orientationMetadata = resolver.resolve(
+                series.seriesName(), series.seriesNumber(), effectiveSourcePath);
         return new WorkItem(
                 series.id(),
                 series.seriesIndex(),
@@ -844,16 +1026,19 @@ public final class RepresentativePreviewRenderer {
             SeriesMeta meta,
             QcSelectionCandidate candidate,
             File sourcePath,
-            List<PresentationTileRecord> records) {
+            List<PresentationTileRecord> records,
+            MetadataResolver metadataResolver) {
         if (records == null || records.isEmpty()) {
             return Collections.emptyList();
         }
         LinkedHashSet<String> sourceIds = candidateSourceIds(
-                directory, meta, candidate, sourcePath);
+                directory, meta, candidate, sourcePath, metadataResolver);
         String seriesName = candidate != null && !candidate.seriesName.trim().isEmpty()
                 ? candidate.seriesName
                 : (meta == null ? "" : safe(meta.name));
-        ResolvedImageMetadata resolved = resolveMetadata(directory, seriesName,
+        MetadataResolver resolver = metadataResolver == null
+                ? new MetadataResolver(directory) : metadataResolver;
+        ResolvedImageMetadata resolved = resolver.resolve(seriesName,
                 (candidate == null ? (meta == null ? -1 : meta.index) : candidate.seriesIndex) + 1,
                 sourcePath);
         NameParts parts = resolved == null
@@ -887,15 +1072,17 @@ public final class RepresentativePreviewRenderer {
     private static LinkedHashSet<String> candidateSourceIds(String directory,
                                                             SeriesMeta meta,
                                                             QcSelectionCandidate candidate,
-                                                            File sourcePath) {
+                                                            File sourcePath,
+                                                            MetadataResolver metadataResolver) {
         int index = candidate == null ? (meta == null ? -1 : meta.index) : candidate.seriesIndex;
         int seriesNumber = index + 1;
         String seriesName = candidate != null && !candidate.seriesName.trim().isEmpty()
                 ? candidate.seriesName
                 : (meta == null ? "" : safe(meta.name));
         LinkedHashSet<String> ids = new LinkedHashSet<String>();
-        ResolvedImageMetadata resolved = resolveMetadata(
-                directory, seriesName, seriesNumber, sourcePath);
+        MetadataResolver resolver = metadataResolver == null
+                ? new MetadataResolver(directory) : metadataResolver;
+        ResolvedImageMetadata resolved = resolver.resolve(seriesName, seriesNumber, sourcePath);
         if (resolved != null && !resolved.imageKey.isEmpty()) {
             ids.add(resolved.imageKey);
         }
@@ -978,30 +1165,123 @@ public final class RepresentativePreviewRenderer {
         return out;
     }
 
-    private static ResolvedImageMetadata resolveMetadata(String directory,
-                                                        String seriesName,
-                                                        int seriesNumber,
-                                                        File sourcePath) {
-        if (directory == null || directory.trim().isEmpty()) {
-            return null;
+    private static final class MetadataResolver {
+        private final String directory;
+        private final List<OrientationManifestRow> manifestRows;
+        private final Map<String, ResolvedImageMetadata> cache =
+                new LinkedHashMap<String, ResolvedImageMetadata>();
+
+        MetadataResolver(String directory) {
+            this.directory = safe(directory);
+            this.manifestRows = readManifestRows(this.directory);
         }
-        List<String> titles = metadataTitleCandidates(seriesName, sourcePath);
-        for (String title : titles) {
-            try {
+
+        ResolvedImageMetadata resolve(String seriesName, int seriesNumber, File sourcePath) {
+            if (directory.isEmpty()) {
+                return null;
+            }
+            String key = safe(seriesName) + "\n" + seriesNumber + "\n"
+                    + (sourcePath == null ? "" : sourcePath.getAbsolutePath());
+            if (cache.containsKey(key)) {
+                return cache.get(key);
+            }
+            ResolvedImageMetadata resolved = resolveUncached(seriesName, seriesNumber, sourcePath);
+            cache.put(key, resolved);
+            return resolved;
+        }
+
+        private ResolvedImageMetadata resolveUncached(String seriesName,
+                                                      int seriesNumber,
+                                                      File sourcePath) {
+            List<String> titles = metadataTitleCandidates(seriesName, sourcePath);
+            for (String title : titles) {
                 Optional<OrientationManifestRow> row =
-                        ImageOrientationResolver.findConfirmed(directory, title, seriesNumber);
+                        findConfirmed(title, seriesNumber);
                 if (row.isPresent()) {
                     return ResolvedImageMetadata.fromManifest(row.get());
                 }
+            }
+            String fallbackTitle = titles.isEmpty() ? seriesName : titles.get(0);
+            NameParts parts = ImageNameParser.parse(fallbackTitle);
+            ResolvedImageMetadata.Source source = parts.strictMatch
+                    ? ResolvedImageMetadata.Source.STRICT_FILENAME
+                    : ResolvedImageMetadata.Source.FILENAME_FALLBACK;
+            return ResolvedImageMetadata.fromNameParts(parts, source);
+        }
+
+        private Optional<OrientationManifestRow> findConfirmed(String imageTitle,
+                                                               int seriesNumber) {
+            int normalizedSeriesIndex = normalizeSeriesIndex(seriesNumber);
+            OrientationManifestRow uniqueTitleMatch = null;
+            boolean ambiguousTitleMatch = false;
+            for (OrientationManifestRow row : manifestRows) {
+                if (!isUsable(row)) continue;
+                if (matches(row, imageTitle, normalizedSeriesIndex)) {
+                    return Optional.of(row);
+                }
+                if (matchesTitle(row, imageTitle)) {
+                    if (uniqueTitleMatch == null && !ambiguousTitleMatch) {
+                        uniqueTitleMatch = row;
+                    } else {
+                        uniqueTitleMatch = null;
+                        ambiguousTitleMatch = true;
+                    }
+                }
+            }
+            if (uniqueTitleMatch != null) {
+                return Optional.of(uniqueTitleMatch);
+            }
+            return Optional.empty();
+        }
+
+        private static List<OrientationManifestRow> readManifestRows(String directory) {
+            if (directory == null || directory.trim().isEmpty()) {
+                return Collections.emptyList();
+            }
+            try {
+                return OrientationManifestIO.readIfExists(directory);
             } catch (RuntimeException e) {
-                return null;
+                return Collections.emptyList();
             }
         }
-        String fallbackTitle = titles.isEmpty() ? seriesName : titles.get(0);
-        try {
-            return ImageOrientationResolver.resolve(directory, fallbackTitle, seriesNumber);
-        } catch (RuntimeException e) {
-            return null;
+
+        private static boolean isUsable(OrientationManifestRow row) {
+            return row != null
+                    && row.isConfirmed()
+                    && !row.animalName.isEmpty()
+                    && (row.hemisphere == OrientationManifestRow.Hemisphere.LH
+                        || row.hemisphere == OrientationManifestRow.Hemisphere.RH
+                        || hasManualTransform(row));
+        }
+
+        private static boolean hasManualTransform(OrientationManifestRow row) {
+            return row.rotateDegrees != OrientationManifestRow.RotationDegrees.DEG_0
+                    || row.flipHorizontal
+                    || row.flipVertical;
+        }
+
+        private static boolean matches(OrientationManifestRow row,
+                                       String imageTitle,
+                                       int seriesIndex) {
+            if (row.seriesIndex != seriesIndex) return false;
+            return matchesTitle(row, imageTitle);
+        }
+
+        private static boolean matchesTitle(OrientationManifestRow row,
+                                            String imageTitle) {
+            String title = safe(imageTitle);
+            if (title.isEmpty()) return false;
+
+            if (title.equals(row.originalName)) return true;
+            if (title.equals(row.displayName)) return true;
+            if (title.equals(row.sourceFile)) return true;
+
+            String keySuffix = "|" + title;
+            return row.imageKey.endsWith(keySuffix);
+        }
+
+        private static int normalizeSeriesIndex(int seriesIndex) {
+            return seriesIndex < 1 ? 1 : seriesIndex;
         }
     }
 
@@ -1855,13 +2135,23 @@ public final class RepresentativePreviewRenderer {
                 }
             }
             ImagePlus cached = openSessionCachedImage(item.seriesIndex);
-            if (cached != null) return cached;
+            if (cached != null) {
+                IJ.log("[Representative Figure] Opened series " + item.seriesNumber
+                        + " from the in-session image cache.");
+                return cached;
+            }
             if (useTifCache && directory != null && !directory.isEmpty()
                     && TifCache.cacheExists(directory)) {
                 ImagePlus tif = TifCache.loadSingle(directory, item.seriesIndex);
-                if (tif != null) return tif;
+                if (tif != null) {
+                    IJ.log("[Representative Figure] Opened series " + item.seriesNumber
+                            + " from the TIFF cache.");
+                    return tif;
+                }
             }
             if (supplier == null) return null;
+            IJ.log("[Representative Figure] Opening source series " + item.seriesNumber
+                    + " (" + safe(item.seriesName) + ").");
             return supplier.openSeriesMaterialized(item.seriesIndex);
         }
 

@@ -3,10 +3,13 @@ package flash.pipeline.representative;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.ImageCache;
 import flash.pipeline.io.IoUtils;
+import flash.pipeline.io.SeriesMeta;
+import flash.pipeline.io.TifCache;
 import flash.pipeline.naming.ChannelFilenameCodec;
 import flash.pipeline.presentation.PresentationTileConfig;
 import flash.pipeline.presentation.PresentationTileRecord;
 import flash.pipeline.presentation.PresentationTileWriter;
+import ij.IJ;
 
 import java.awt.Color;
 import java.awt.Font;
@@ -16,11 +19,14 @@ import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -37,16 +43,26 @@ public final class RepresentativeFigureWriter {
     private static final int CONDITION_GAP = 12;
     private static final int ROW_GAP = 8;
     private static final String MERGE_NAME = "Merge";
+    private static final String INDIVIDUAL_IMAGES_DIR = "Individual Images";
 
     public File write(String directory,
                       RepresentativeFigureConfig config,
                       ImageCache imageCache,
                       int parallelThreads,
                       boolean useTifCache) throws Exception {
+        return write(directory, config, imageCache, parallelThreads, useTifCache, null);
+    }
+
+    public File write(String directory,
+                      RepresentativeFigureConfig config,
+                      ImageCache imageCache,
+                      int parallelThreads,
+                      boolean useTifCache,
+                      List<SeriesMeta> metas) throws Exception {
         RepresentativeFigureConfig safeConfig = requireCompleteConfig(config);
         List<RepresentativePreviewRenderer.RenderedFinalSeries> rendered =
                 RepresentativePreviewRenderer.renderFinal(
-                        directory, safeConfig, imageCache, parallelThreads, useTifCache);
+                        directory, safeConfig, imageCache, parallelThreads, useTifCache, metas);
         return writeRenderedFigure(directory, safeConfig, rendered);
     }
 
@@ -75,7 +91,51 @@ public final class RepresentativeFigureWriter {
         BufferedImage figure = renderFigureImage(config, rendered);
         File output = uniqueOutputFile(outDir, baseNameFor(config.layout) + ".png");
         PresentationTileWriter.writePngAtomically(figure, output);
+        writeIndividualImages(directory, outDir, rendered);
         return output;
+    }
+
+    private static void writeIndividualImages(
+            String directory,
+            File representativeFiguresDir,
+            List<RepresentativePreviewRenderer.RenderedFinalSeries> rendered)
+            throws IOException {
+        File root = new File(representativeFiguresDir, INDIVIDUAL_IMAGES_DIR);
+        IoUtils.mustMkdirs(root);
+        int pngCount = 0;
+        int originalTifCount = 0;
+        for (RepresentativePreviewRenderer.RenderedFinalSeries series : rendered) {
+            if (series == null) continue;
+            File conditionDir = new File(root, conditionFolderName(series));
+            IoUtils.mustMkdirs(conditionDir);
+            List<RepresentativePreviewRenderer.RenderedFinalChannel> channels =
+                    series.channels();
+            for (int i = 0; i < channels.size(); i++) {
+                RepresentativePreviewRenderer.RenderedFinalChannel channel = channels.get(i);
+                if (channel == null || channel.image() == null) continue;
+                File output = new File(conditionDir, channelFileName(channel));
+                PresentationTileWriter.writePngAtomically(channel.image(), output);
+                pngCount++;
+            }
+            if (series.mergeImage() != null) {
+                PresentationTileWriter.writePngAtomically(
+                        series.mergeImage(), new File(conditionDir, MERGE_NAME + ".png"));
+                pngCount++;
+            }
+            File original = originalTifSource(directory, series);
+            if (original != null) {
+                copyFileAtomically(original, new File(conditionDir, originalTifName(series)));
+                originalTifCount++;
+            } else {
+                IJ.log("[Representative Figure] Original TIFF not available for "
+                        + RepresentativeSelection.conditionLabel(series.condition())
+                        + " (series " + series.seriesNumber() + ").");
+            }
+        }
+        IJ.log("[Representative Figure] Saved individual images to "
+                + root.getAbsolutePath() + " (" + pngCount + " PNG"
+                + (pngCount == 1 ? "" : "s") + ", " + originalTifCount
+                + " original TIFF" + (originalTifCount == 1 ? "" : "s") + ").");
     }
 
     static BufferedImage renderFigureImage(
@@ -421,6 +481,83 @@ public final class RepresentativeFigureWriter {
         if (!cleanKey.isEmpty()) map.put(cleanKey, value);
     }
 
+    private static String conditionFolderName(
+            RepresentativePreviewRenderer.RenderedFinalSeries series) {
+        String condition = RepresentativeSelection.conditionLabel(series.condition());
+        if (condition.isEmpty()) condition = series.animal();
+        if (condition.isEmpty()) condition = series.id();
+        return safeFileBase(condition, "Condition");
+    }
+
+    private static String channelFileName(
+            RepresentativePreviewRenderer.RenderedFinalChannel channel) {
+        int channelNumber = Math.max(1, channel.channelIndex() + 1);
+        return "C" + channelNumber + "_"
+                + safeFileBase(channel.channelName(), "Channel") + ".png";
+    }
+
+    private static String originalTifName(
+            RepresentativePreviewRenderer.RenderedFinalSeries series) {
+        String name = series.seriesName();
+        if (clean(name).isEmpty()) name = series.id();
+        return "Original_" + safeFileBase(name, "Series") + ".tif";
+    }
+
+    private static File originalTifSource(
+            String directory,
+            RepresentativePreviewRenderer.RenderedFinalSeries series) {
+        if (series == null) return null;
+        File source = series.sourcePath();
+        if (isTifFile(source)) return source;
+        if (directory != null && !directory.trim().isEmpty()
+                && series.seriesIndex() >= 0) {
+            File cached = TifCache.cachedFileForSeries(directory, series.seriesIndex());
+            if (isTifFile(cached)) return cached;
+        }
+        return null;
+    }
+
+    private static boolean isTifFile(File file) {
+        if (file == null || !file.isFile()) return false;
+        String name = file.getName().toLowerCase(Locale.ROOT);
+        return name.endsWith(".tif") || name.endsWith(".tiff");
+    }
+
+    private static void copyFileAtomically(File source, File target) throws IOException {
+        if (source == null || target == null) return;
+        if (sameFile(source, target)) return;
+        File parent = target.getParentFile();
+        if (parent != null) IoUtils.mustMkdirs(parent);
+        File temp = File.createTempFile(tempPrefix(target), ".tmp",
+                parent == null ? new File(".") : parent);
+        boolean moved = false;
+        try {
+            Files.copy(source.toPath(), temp.toPath(),
+                    StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.COPY_ATTRIBUTES);
+            IoUtils.moveReplacing(temp.toPath(), target.toPath());
+            moved = true;
+        } finally {
+            if (!moved) {
+                Files.deleteIfExists(temp.toPath());
+            }
+        }
+    }
+
+    private static boolean sameFile(File left, File right) {
+        try {
+            return left.getCanonicalFile().equals(right.getCanonicalFile());
+        } catch (IOException e) {
+            return left.getAbsoluteFile().equals(right.getAbsoluteFile());
+        }
+    }
+
+    private static String tempPrefix(File target) {
+        String name = target == null ? "tmp" : clean(target.getName());
+        String prefix = name.length() < 3 ? "tmp" + name : name;
+        return prefix.length() > 32 ? prefix.substring(0, 32) : prefix;
+    }
+
     private static String fitSingleLine(String text, FontMetrics fm, int width) {
         String clean = clean(text);
         if (width <= 0 || clean.isEmpty()) return "";
@@ -443,8 +580,14 @@ public final class RepresentativeFigureWriter {
     }
 
     private static String safeFileName(String value) {
+        return safeFileBase(value, "Condition");
+    }
+
+    private static String safeFileBase(String value, String fallback) {
         String safe = ChannelFilenameCodec.toSafe(clean(value));
-        return safe.isEmpty() ? "Condition" : safe;
+        if (safe == null || safe.isEmpty()) safe = clean(fallback);
+        if (safe.isEmpty()) safe = "File";
+        return safe.length() > 140 ? safe.substring(0, 140) : safe;
     }
 
     private static String clean(String value) {

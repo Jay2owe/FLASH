@@ -162,7 +162,7 @@ public final class ConditionLayoutChooser {
 
             applyLayout(conditionNames, layout);
             list.setVisibleRowCount(Math.min(8, Math.max(3, model.getSize())));
-            list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+            list.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
             list.setCellRenderer(new ConditionRowRenderer());
             if (model.getSize() > 0) {
                 list.setSelectedIndex(0);
@@ -259,22 +259,99 @@ public final class ConditionLayoutChooser {
         }
 
         private void moveSelected(int delta) {
-            int index = list.getSelectedIndex();
-            int next = index + delta;
-            if (index < 0 || next < 0 || next >= model.getSize()) return;
-            ConditionRow row = model.getElementAt(index);
-            model.removeElementAt(index);
-            model.add(next, row);
-            list.setSelectedIndex(next);
+            int[] selected = list.getSelectedIndices();
+            if (selected.length == 0 || delta == 0) return;
+            List<ConditionRow> selectedRows = selectedRows(selected);
+            if (delta < 0) {
+                moveSelectedUp(selected);
+            } else {
+                moveSelectedDown(selected);
+            }
+            restoreSelection(selectedRows);
         }
 
         private void adjustSelectedRow(int delta) {
-            int index = list.getSelectedIndex();
-            if (index < 0 || index >= model.getSize()) return;
-            ConditionRow current = model.getElementAt(index);
-            int rowNumber = Math.max(1, current.rowNumber + delta);
-            model.setElementAt(new ConditionRow(current.condition, rowNumber), index);
+            int[] selected = list.getSelectedIndices();
+            if (selected.length == 0) return;
+            for (int i = 0; i < selected.length; i++) {
+                int index = selected[i];
+                if (index < 0 || index >= model.getSize()) continue;
+                ConditionRow current = model.getElementAt(index);
+                int rowNumber = Math.max(1, current.rowNumber + delta);
+                model.setElementAt(new ConditionRow(current.condition, rowNumber), index);
+            }
+            list.setSelectedIndices(selected);
             list.repaint();
+        }
+
+        private void moveSelectedUp(int[] selected) {
+            int intervalStart = -1;
+            int previous = -2;
+            for (int i = 0; i <= selected.length; i++) {
+                int current = i < selected.length ? selected[i] : -1;
+                boolean continueInterval = i < selected.length && current == previous + 1;
+                if (intervalStart >= 0 && !continueInterval) {
+                    moveIntervalUp(intervalStart, previous);
+                }
+                if (i < selected.length && !continueInterval) {
+                    intervalStart = current;
+                }
+                previous = current;
+            }
+        }
+
+        private void moveSelectedDown(int[] selected) {
+            int intervalEnd = -1;
+            int previous = -2;
+            for (int i = selected.length - 1; i >= -1; i--) {
+                int current = i >= 0 ? selected[i] : -1;
+                boolean continueInterval = i >= 0 && current == previous - 1;
+                if (intervalEnd >= 0 && !continueInterval) {
+                    moveIntervalDown(previous, intervalEnd);
+                }
+                if (i >= 0 && !continueInterval) {
+                    intervalEnd = current;
+                }
+                previous = current;
+            }
+        }
+
+        private void moveIntervalUp(int start, int end) {
+            if (start <= 0 || start > end || end >= model.getSize()) return;
+            ConditionRow displaced = model.getElementAt(start - 1);
+            model.removeElementAt(start - 1);
+            model.add(end, displaced);
+        }
+
+        private void moveIntervalDown(int start, int end) {
+            if (start < 0 || start > end || end >= model.getSize() - 1) return;
+            ConditionRow displaced = model.getElementAt(end + 1);
+            model.removeElementAt(end + 1);
+            model.add(start, displaced);
+        }
+
+        private List<ConditionRow> selectedRows(int[] selected) {
+            List<ConditionRow> rows = new ArrayList<ConditionRow>();
+            for (int i = 0; i < selected.length; i++) {
+                int index = selected[i];
+                if (index >= 0 && index < model.getSize()) {
+                    rows.add(model.getElementAt(index));
+                }
+            }
+            return rows;
+        }
+
+        private void restoreSelection(List<ConditionRow> selectedRows) {
+            list.clearSelection();
+            for (int i = 0; i < model.getSize(); i++) {
+                ConditionRow row = model.getElementAt(i);
+                for (int s = 0; s < selectedRows.size(); s++) {
+                    if (row == selectedRows.get(s)) {
+                        list.addSelectionInterval(i, i);
+                        break;
+                    }
+                }
+            }
         }
 
         private void setAllInOneRow() {
@@ -292,11 +369,37 @@ public final class ConditionLayoutChooser {
             }
             list.repaint();
         }
+
+        int selectionModeForTest() {
+            return list.getSelectionMode();
+        }
+
+        void selectRangeForTest(int start, int end) {
+            list.setSelectionInterval(start, end);
+        }
+
+        void selectIndicesForTest(int... indices) {
+            list.clearSelection();
+            if (indices == null) return;
+            for (int i = 0; i < indices.length; i++) {
+                int index = indices[i];
+                if (index >= 0 && index < model.getSize()) {
+                    list.addSelectionInterval(index, index);
+                }
+            }
+        }
+
+        void moveSelectedForTest(int delta) {
+            moveSelected(delta);
+        }
+
+        void adjustSelectedRowForTest(int delta) {
+            adjustSelectedRow(delta);
+        }
     }
 
     static final class TileOptionsPanel {
         final JPanel panel;
-        private final ToggleSwitch createTileToggle;
         private final JComboBox<String> tileGroupBox;
         private final TileOrderPanel tileOrderPanel;
         private final JTextField tileCellSizeField;
@@ -322,7 +425,6 @@ public final class ConditionLayoutChooser {
             panel.setOpaque(false);
             panel.setBorder(BorderFactory.createEmptyBorder(0, 16, 6, 4));
 
-            createTileToggle = new ToggleSwitch(initial.createOverviewTile());
             tileGroupBox = new JComboBox<String>(new String[]{"Condition", "Animal"});
             tileGroupBox.setSelectedItem(groupLabel(initial.groupRowsBy()));
             tileOrderPanel = new TileOrderPanel(initialOrder);
@@ -346,7 +448,6 @@ public final class ConditionLayoutChooser {
             labelPositionBox.setSelectedItem(positionLabel(initial.labelPosition()));
 
             panel.add(compactRow(
-                    labelledToggle("Create tile", createTileToggle),
                     labelled("Rows by", tileGroupBox),
                     labelled("Cell px", tileCellSizeField)));
             panel.add(compactRow(
@@ -375,10 +476,9 @@ public final class ConditionLayoutChooser {
 
         PresentationTileConfig buildConfig() {
             boolean annotateIndividual = annotateIndividualToggle.isSelected();
-            boolean createTile = createTileToggle.isSelected() || annotateIndividual;
             boolean annotateOverview = annotateOverviewToggle.isSelected() || annotateIndividual;
             return PresentationTileConfig.builder()
-                    .createOverviewTile(createTile)
+                    .createOverviewTile(true)
                     .annotateOverviewTile(annotateOverview)
                     .annotateIndividualImages(annotateIndividual)
                     .groupRowsBy("Animal".equals(selectedText(tileGroupBox))
@@ -402,10 +502,8 @@ public final class ConditionLayoutChooser {
         private void updateForcedAnnotationState() {
             boolean forceTileAnnotations = annotateIndividualToggle.isSelected();
             if (forceTileAnnotations) {
-                createTileToggle.setSelected(true);
                 annotateOverviewToggle.setSelected(true);
             }
-            createTileToggle.setEnabled(!forceTileAnnotations);
             annotateOverviewToggle.setEnabled(!forceTileAnnotations);
         }
     }

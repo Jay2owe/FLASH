@@ -9,11 +9,13 @@ import javax.imageio.ImageIO;
 import java.awt.Color;
 import java.awt.image.BufferedImage;
 import java.io.File;
+import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
@@ -86,6 +88,111 @@ public class RepresentativeFigureWriterTest {
                         figure.getHeight() - 8));
     }
 
+    @Test
+    public void writesIndividualImagesAndOriginalTifPerCondition() throws Exception {
+        File project = temp.newFolder("project-with-individuals");
+        File source = temp.newFile("Exp-Mouse1_LH_SCN.tif");
+        byte[] tifBytes = new byte[]{1, 2, 3, 4, 5};
+        Files.write(source.toPath(), tifBytes);
+        RepresentativeFigureConfig config = configFor(
+                Collections.singletonList("Control"),
+                PresentationTileConfig.builder()
+                        .createOverviewTile(true)
+                        .annotateOverviewTile(false)
+                        .scaleBarEnabled(false)
+                        .labelMode(PresentationTileConfig.LabelMode.NONE)
+                        .channelOrder(Arrays.asList("DAPI", "Merge"))
+                        .cellSizePx(50)
+                        .build());
+
+        RepresentativeFigureWriter.writeRenderedFigureForTests(
+                project.getAbsolutePath(),
+                config,
+                Collections.singletonList(
+                        renderedSeries(0, "Control", Color.RED, Color.CYAN, source)));
+
+        File conditionDir = new File(project,
+                "FLASH/Results/Presentation Images/Representative Figures/"
+                        + "Individual Images/Control");
+        File channel = new File(conditionDir, "C1_DAPI.png");
+        File merge = new File(conditionDir, "Merge.png");
+        File original = new File(conditionDir, "Original_Exp-Mouse1_LH_SCN.tif");
+
+        assertTrue(channel.isFile());
+        assertTrue(merge.isFile());
+        assertTrue(original.isFile());
+        assertArrayEquals(tifBytes, Files.readAllBytes(original.toPath()));
+    }
+
+    @Test
+    public void writesOriginalTifFromSeriesCacheWhenSourceIsContainer() throws Exception {
+        File project = temp.newFolder("project-with-cache");
+        File cacheDir = new File(project, "FLASH/Cache/TIF");
+        assertTrue(cacheDir.mkdirs());
+        File cachedTif = new File(cacheDir, "0000_Exp-Mouse1_LH_SCN.tif");
+        byte[] tifBytes = new byte[]{9, 8, 7, 6};
+        Files.write(cachedTif.toPath(), tifBytes);
+        File container = temp.newFile("source.lif");
+        RepresentativeFigureConfig config = configFor(
+                Collections.singletonList("Control"),
+                PresentationTileConfig.builder()
+                        .createOverviewTile(true)
+                        .annotateOverviewTile(false)
+                        .scaleBarEnabled(false)
+                        .labelMode(PresentationTileConfig.LabelMode.NONE)
+                        .channelOrder(Arrays.asList("DAPI", "Merge"))
+                        .cellSizePx(50)
+                        .build());
+
+        RepresentativeFigureWriter.writeRenderedFigureForTests(
+                project.getAbsolutePath(),
+                config,
+                Collections.singletonList(
+                        renderedSeries(0, "Control", Color.RED, Color.CYAN, container)));
+
+        File original = new File(project,
+                "FLASH/Results/Presentation Images/Representative Figures/"
+                        + "Individual Images/Control/Original_Exp-Mouse1_LH_SCN.tif");
+
+        assertTrue(original.isFile());
+        assertArrayEquals(tifBytes, Files.readAllBytes(original.toPath()));
+    }
+
+    @Test
+    public void prefersDirectSourceTifOverSeriesCacheForOriginalCopy() throws Exception {
+        File project = temp.newFolder("project-with-direct-source-and-cache");
+        File source = temp.newFile("Exp-Mouse1_LH_SCN.tif");
+        byte[] sourceBytes = new byte[]{1, 2, 3, 4};
+        Files.write(source.toPath(), sourceBytes);
+        File cacheDir = new File(project, "FLASH/Cache/TIF");
+        assertTrue(cacheDir.mkdirs());
+        File cachedTif = new File(cacheDir, "0000_stale.tif");
+        Files.write(cachedTif.toPath(), new byte[]{9, 9, 9, 9});
+        RepresentativeFigureConfig config = configFor(
+                Collections.singletonList("Control"),
+                PresentationTileConfig.builder()
+                        .createOverviewTile(true)
+                        .annotateOverviewTile(false)
+                        .scaleBarEnabled(false)
+                        .labelMode(PresentationTileConfig.LabelMode.NONE)
+                        .channelOrder(Arrays.asList("DAPI", "Merge"))
+                        .cellSizePx(50)
+                        .build());
+
+        RepresentativeFigureWriter.writeRenderedFigureForTests(
+                project.getAbsolutePath(),
+                config,
+                Collections.singletonList(
+                        renderedSeries(0, "Control", Color.RED, Color.CYAN, source)));
+
+        File original = new File(project,
+                "FLASH/Results/Presentation Images/Representative Figures/"
+                        + "Individual Images/Control/Original_Exp-Mouse1_LH_SCN.tif");
+
+        assertTrue(original.isFile());
+        assertArrayEquals(sourceBytes, Files.readAllBytes(original.toPath()));
+    }
+
     private static RepresentativeFigureConfig configFor(Iterable<String> conditions,
                                                         PresentationTileConfig tileConfig) {
         RepresentativeFigureConfig config = new RepresentativeFigureConfig();
@@ -128,6 +235,15 @@ public class RepresentativeFigureWriterTest {
             String condition,
             Color dapi,
             Color merge) {
+        return renderedSeries(index, condition, dapi, merge, null);
+    }
+
+    private static RepresentativePreviewRenderer.RenderedFinalSeries renderedSeries(
+            int index,
+            String condition,
+            Color dapi,
+            Color merge,
+            File sourcePath) {
         return new RepresentativePreviewRenderer.RenderedFinalSeries(
                 RepresentativeStatTable.seriesIdForIndex(index),
                 index,
@@ -137,7 +253,7 @@ public class RepresentativeFigureWriterTest {
                 condition,
                 "LH",
                 "SCN",
-                null,
+                sourcePath,
                 Collections.singletonList(
                         new RepresentativePreviewRenderer.RenderedFinalChannel(
                                 0, "DAPI", "Red", solid(dapi))),

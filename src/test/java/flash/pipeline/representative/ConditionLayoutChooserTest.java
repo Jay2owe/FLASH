@@ -3,7 +3,11 @@ package flash.pipeline.representative;
 import flash.pipeline.presentation.PresentationTileConfig;
 import org.junit.Test;
 
+import javax.swing.JLabel;
+import javax.swing.ListSelectionModel;
 import java.awt.Color;
+import java.awt.Component;
+import java.awt.Container;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.util.Arrays;
@@ -67,6 +71,49 @@ public class ConditionLayoutChooserTest {
     }
 
     @Test
+    public void conditionLayoutSupportsShiftRangeSelection() {
+        ConditionLayoutChooser.LayoutAssignmentPanel panel = layoutPanel();
+
+        assertEquals(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION,
+                panel.selectionModeForTest());
+    }
+
+    @Test
+    public void selectedConditionRangeMovesAsBlock() {
+        ConditionLayoutChooser.LayoutAssignmentPanel panel = layoutPanel();
+
+        panel.selectRangeForTest(1, 2);
+        panel.moveSelectedForTest(-1);
+
+        assertEquals(Collections.singletonList(Arrays.asList("B", "C", "A", "D")),
+                panel.createLayout().rows());
+    }
+
+    @Test
+    public void selectedConditionsAdjustRowsTogether() {
+        ConditionLayoutChooser.LayoutAssignmentPanel panel = layoutPanel();
+
+        panel.selectRangeForTest(1, 3);
+        panel.adjustSelectedRowForTest(1);
+
+        assertEquals(Arrays.asList(
+                        Collections.singletonList("A"),
+                        Arrays.asList("B", "C", "D")),
+                panel.createLayout().rows());
+    }
+
+    @Test
+    public void separatedSelectedConditionsMoveWithoutLosingOrder() {
+        ConditionLayoutChooser.LayoutAssignmentPanel panel = layoutPanel();
+
+        panel.selectIndicesForTest(1, 3);
+        panel.moveSelectedForTest(1);
+
+        assertEquals(Collections.singletonList(Arrays.asList("A", "C", "B", "D")),
+                panel.createLayout().rows());
+    }
+
+    @Test
     public void tileOptionsPanelPreservesExistingConfigAndAddsMissingDefaultChannels() {
         PresentationTileConfig initial = PresentationTileConfig.builder()
                 .createOverviewTile(false)
@@ -92,7 +139,7 @@ public class ConditionLayoutChooserTest {
 
         PresentationTileConfig config = panel.buildConfig();
 
-        assertFalse(config.createOverviewTile());
+        assertTrue(config.createOverviewTile());
         assertFalse(config.annotateOverviewTile());
         assertEquals(PresentationTileConfig.GroupRowsBy.ANIMAL, config.groupRowsBy());
         assertEquals(Arrays.asList("DAPI", "GFAP", "Merge"), config.channelOrder());
@@ -106,6 +153,18 @@ public class ConditionLayoutChooserTest {
         assertEquals("{condition}", config.customLabelTemplate());
         assertEquals(24, config.labelFontSizePx());
         assertEquals(PresentationTileConfig.Position.BOTTOM_LEFT, config.labelPosition());
+    }
+
+    @Test
+    public void tileOptionsPanelDoesNotExposeCreateTileToggle() {
+        ConditionLayoutChooser.TileOptionsPanel panel =
+                new ConditionLayoutChooser.TileOptionsPanel(
+                        Arrays.asList("DAPI", "GFAP", "Merge"),
+                        ConditionLayoutChooser.defaultTileConfig(
+                                Arrays.asList("DAPI", "GFAP", "Merge")));
+
+        assertFalse(containsLabel(panel.panel, "Create tile"));
+        assertTrue(panel.buildConfig().createOverviewTile());
     }
 
     private static RepresentativeSelection selection() {
@@ -137,6 +196,29 @@ public class ConditionLayoutChooserTest {
                 null,
                 RepresentativeSeries.PreviewSource.GENERATED,
                 false);
+    }
+
+    private static ConditionLayoutChooser.LayoutAssignmentPanel layoutPanel() {
+        List<String> conditions = Arrays.asList("A", "B", "C", "D");
+        return new ConditionLayoutChooser.LayoutAssignmentPanel(
+                conditions,
+                RepresentativeLayout.allInOneRow(conditions));
+    }
+
+    private static boolean containsLabel(Component component, String text) {
+        if (component instanceof JLabel
+                && text.equals(((JLabel) component).getText())) {
+            return true;
+        }
+        if (component instanceof Container) {
+            Component[] children = ((Container) component).getComponents();
+            for (int i = 0; i < children.length; i++) {
+                if (containsLabel(children[i], text)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private static RepresentativeSeries.ChannelThumbnail thumbnail(int index, String name) {

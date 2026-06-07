@@ -173,7 +173,7 @@ public final class RepresentativeRangeStage {
         return new ConfigQcContext(
                 new File(directory),
                 FlashProjectLayout.forDirectory(directory).configurationWriteDir(),
-                config,
+                setupConfig,
                 images,
                 channelNamesForContext(setupConfig, channelsForSelection(selection, setupConfig)),
                 channel.channelIndex);

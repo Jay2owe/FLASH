@@ -50,6 +50,14 @@ public final class RepresentativeStatLoader {
                                                RepresentativeStatistic statistic,
                                                ExistingResultOption existingResult,
                                                int parallelThreads) throws Exception {
+        return load(directory, statistic, existingResult, parallelThreads, null);
+    }
+
+    public static RepresentativeStatTable load(String directory,
+                                               RepresentativeStatistic statistic,
+                                               ExistingResultOption existingResult,
+                                               int parallelThreads,
+                                               List<SeriesMeta> metas) throws Exception {
         RepresentativeStatistic mode = statistic == null
                 ? RepresentativeStatistic.QUICK
                 : statistic;
@@ -57,39 +65,62 @@ public final class RepresentativeStatLoader {
             return new RepresentativeStatTable();
         }
         if (mode == RepresentativeStatistic.EXISTING_RESULT) {
-            return loadExistingResult(directory, existingResult);
+            return loadExistingResult(directory, existingResult,
+                    metas == null ? ImageSourceDispatcher.readAllMetadata(directory) : metas);
         }
-        return loadQuick(directory, parallelThreads);
+        return loadQuick(directory, parallelThreads, metas);
     }
 
     public static RepresentativeStatTable loadQuick(String directory,
                                                     int parallelThreads) throws Exception {
+        return loadQuick(directory, parallelThreads, null);
+    }
+
+    public static RepresentativeStatTable loadQuick(String directory,
+                                                    int parallelThreads,
+                                                    List<SeriesMeta> metas) throws Exception {
+        long start = System.currentTimeMillis();
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
         File container = resolveQuickContainerFile(directory);
         DeferredImageSupplier supplier = ImageSourceDispatcher.createSupplier(directory);
-        List<SeriesMeta> metas = ImageSourceDispatcher.readAllMetadata(directory);
+        try {
+            List<SeriesMeta> effectiveMetas =
+                    metas == null ? ImageSourceDispatcher.readAllMetadata(directory) : metas;
 
-        BinConfig cfg = BinConfigIO.readPartialFromDirectory(directory);
-        List<QcSelectionChannel> channels = buildAllChannels(cfg, metas);
-        if (channels.isEmpty()) {
-            throw new IOException("No image channels were found for quick representative scoring. "
-                    + "Run Set Up Configuration or check the source image metadata.");
+            BinConfig cfg = BinConfigIO.readPartialFromDirectory(directory);
+            List<QcSelectionChannel> channels = buildAllChannels(cfg, effectiveMetas);
+            if (channels.isEmpty()) {
+                throw new IOException("No image channels were found for quick representative scoring. "
+                        + "Run Set Up Configuration or check the source image metadata.");
+            }
+
+            IJ.log("[Representative Figure] Quick statistic scoring "
+                    + effectiveMetas.size() + " metadata series across "
+                    + channels.size() + " channel"
+                    + (channels.size() == 1 ? "" : "s")
+                    + " using " + Math.max(1, parallelThreads) + " thread"
+                    + (Math.max(1, parallelThreads) == 1 ? "" : "s") + ".");
+            QcMinMaxPerConditionSelector.SelectionResult result =
+                    QcMinMaxPerConditionSelector.selectMinMaxPerCondition(
+                            directory,
+                            layout.configurationWriteDir(),
+                            container,
+                            supplier,
+                            effectiveMetas,
+                            channels,
+                            cfg.getZSliceConfig(),
+                            false,
+                            Math.max(1, parallelThreads),
+                            null);
+            IJ.log("[Representative Figure] Quick statistic scores "
+                    + (result.usedCache ? "loaded from cache" : "computed")
+                    + " in " + elapsed(start) + ": "
+                    + result.scoresFile.getAbsolutePath());
+
+            return loadQuickScoresCsv(result.scoresFile, channelLabelsByNumber(channels));
+        } finally {
+            supplier.shutdownPrefetch();
         }
-
-        QcMinMaxPerConditionSelector.SelectionResult result =
-                QcMinMaxPerConditionSelector.selectMinMaxPerCondition(
-                        directory,
-                        layout.configurationWriteDir(),
-                        container,
-                        supplier,
-                        metas,
-                        channels,
-                        cfg.getZSliceConfig(),
-                        false,
-                        Math.max(1, parallelThreads),
-                        null);
-
-        return loadQuickScoresCsv(result.scoresFile, channelLabelsByNumber(channels));
     }
 
     public static RepresentativeStatTable loadQuickScoresCsv(File scoresFile) throws IOException {
@@ -552,6 +583,14 @@ public final class RepresentativeStatLoader {
             }
         }
         return sb.toString();
+    }
+
+    private static String elapsed(long startMillis) {
+        long elapsed = Math.max(0L, System.currentTimeMillis() - startMillis);
+        if (elapsed < 1000L) {
+            return elapsed + " ms";
+        }
+        return String.format(Locale.ROOT, "%.1f s", elapsed / 1000.0);
     }
 
     private static String normalizeKeyPart(String value) {

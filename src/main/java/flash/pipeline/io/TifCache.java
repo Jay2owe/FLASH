@@ -133,6 +133,19 @@ public class TifCache {
     }
 
     /**
+     * Returns the cached TIFF file for a source series, without opening it.
+     *
+     * @param directory the working directory
+     * @param index     zero-based source series index
+     * @return the cached TIFF file, or null if no matching cache entry exists
+     */
+    public static File cachedFileForSeries(String directory, int index) {
+        File cacheDir = firstExistingCacheDir(directory);
+        File[] tifs = listTifs(cacheDir);
+        return findTifForSeries(tifs, index);
+    }
+
+    /**
      * Returns true only when every requested source series has a matching
      * zero-padded cached TIFF. A raw file count is not enough because
      * skip-existing runs may request sparse series indices.
