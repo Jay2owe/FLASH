@@ -2,7 +2,11 @@ package flash.pipeline.representative;
 
 import org.junit.Test;
 
+import javax.swing.JLabel;
+import javax.swing.JScrollPane;
 import javax.swing.SwingUtilities;
+import java.awt.Component;
+import java.awt.Container;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.util.ArrayList;
@@ -153,6 +157,54 @@ public class RepresentativeSelectionPanelTest {
         });
     }
 
+    @Test
+    public void cachedPreviewRowsDoNotShowInternalCacheSourceText()
+            throws Exception {
+        final RepresentativeSeries cached = series("0", "Control", "Control-A",
+                RepresentativeSeries.PreviewSource.CACHE, true);
+
+        runOnEdt(new Runnable() {
+            @Override
+            public void run() {
+                RepresentativeSelectionPanel panel = new RepresentativeSelectionPanel(
+                        Collections.singletonList(cached));
+                try {
+                    List<String> labels = labelTexts(panel);
+
+                    assertFalse(labels.contains("cache cache"));
+                    assertFalse(labels.contains("cache"));
+                } finally {
+                    panel.dispose();
+                }
+            }
+        });
+    }
+
+    @Test
+    public void imageGridPreferredHeightAllowsVerticalScrollingForManyRows()
+            throws Exception {
+        final List<RepresentativeSeries> rows = new ArrayList<RepresentativeSeries>();
+        for (int i = 0; i < 12; i++) {
+            rows.add(series(String.valueOf(i), "Control", "Control-" + i));
+        }
+
+        runOnEdt(new Runnable() {
+            @Override
+            public void run() {
+                RepresentativeSelectionPanel panel = new RepresentativeSelectionPanel(rows);
+                try {
+                    JScrollPane scroll = findFirst(panel, JScrollPane.class);
+
+                    assertNotNull(scroll);
+                    assertTrue(scroll.getViewport().getView().getPreferredSize().height
+                            > scroll.getPreferredSize().height);
+                } finally {
+                    panel.dispose();
+                }
+            }
+        });
+    }
+
     private static void runOnEdt(final Runnable task) throws Exception {
         if (SwingUtilities.isEventDispatchThread()) {
             task.run();
@@ -177,15 +229,56 @@ public class RepresentativeSelectionPanelTest {
         }
     }
 
+    private static List<String> labelTexts(Component root) {
+        List<String> out = new ArrayList<String>();
+        collectLabelTexts(root, out);
+        return out;
+    }
+
+    private static void collectLabelTexts(Component component, List<String> out) {
+        if (component instanceof JLabel) {
+            out.add(((JLabel) component).getText());
+        }
+        if (component instanceof Container) {
+            Component[] children = ((Container) component).getComponents();
+            for (int i = 0; i < children.length; i++) {
+                collectLabelTexts(children[i], out);
+            }
+        }
+    }
+
+    private static <T extends Component> T findFirst(Component root, Class<T> type) {
+        if (type.isInstance(root)) {
+            return type.cast(root);
+        }
+        if (root instanceof Container) {
+            Component[] children = ((Container) root).getComponents();
+            for (int i = 0; i < children.length; i++) {
+                T found = findFirst(children[i], type);
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
     private static RepresentativeSeries series(String id,
                                                String condition,
                                                String name) {
+        return series(id, condition, name,
+                RepresentativeSeries.PreviewSource.GENERATED, false);
+    }
+
+    private static RepresentativeSeries series(String id,
+                                               String condition,
+                                               String name,
+                                               RepresentativeSeries.PreviewSource previewSource,
+                                               boolean cacheHit) {
         BufferedImage image = new BufferedImage(20, 12, BufferedImage.TYPE_INT_RGB);
         return new RepresentativeSeries(id, Integer.parseInt(id),
                 Integer.parseInt(id) + 1, name, name, condition,
                 "LH", "SCN", new File(name + ".lif"),
                 Collections.singletonList(new RepresentativeSeries.ChannelThumbnail(
                         0, "DAPI", image, null)),
-                image, null, RepresentativeSeries.PreviewSource.GENERATED, false);
+                image, null, previewSource, cacheHit);
     }
 }

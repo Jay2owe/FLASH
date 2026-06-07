@@ -19,6 +19,7 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
+import javax.swing.JComboBox;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -85,6 +86,33 @@ public class RepresentativeFigureAnalysisTest {
                 analysis.configForTests().layout.flattenedConditions());
         LoadedRunParameters.Result empty = analysis.applyLoadedParameters(Collections.<String, Object>emptyMap());
         assertFalse(empty.hasIgnoredKeys());
+    }
+
+    @Test
+    public void existingResultChoiceOnlyEnablesForExistingResultStatistic() {
+        JComboBox<String> statisticChoice =
+                new JComboBox<String>(RepresentativeStatistic.labels());
+        JComboBox<String> existingChoice =
+                new JComboBox<String>(new String[]{"Result.csv - Mean"});
+
+        statisticChoice.setSelectedItem(RepresentativeStatistic.QUICK.label());
+        RepresentativeFigureAnalysis.updateExistingResultChoiceEnabled(
+                statisticChoice, existingChoice, true);
+        assertFalse(existingChoice.isEnabled());
+
+        statisticChoice.setSelectedItem(RepresentativeStatistic.NONE.label());
+        RepresentativeFigureAnalysis.updateExistingResultChoiceEnabled(
+                statisticChoice, existingChoice, true);
+        assertFalse(existingChoice.isEnabled());
+
+        statisticChoice.setSelectedItem(RepresentativeStatistic.EXISTING_RESULT.label());
+        RepresentativeFigureAnalysis.updateExistingResultChoiceEnabled(
+                statisticChoice, existingChoice, true);
+        assertTrue(existingChoice.isEnabled());
+
+        RepresentativeFigureAnalysis.updateExistingResultChoiceEnabled(
+                statisticChoice, existingChoice, false);
+        assertFalse(existingChoice.isEnabled());
     }
 
     @Test

@@ -29,6 +29,8 @@ import ij.IJ;
 
 import javax.swing.JComboBox;
 import java.awt.GraphicsEnvironment;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
 import java.io.File;
 import java.io.IOException;
 import java.util.Collections;
@@ -373,12 +375,21 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
                 "Representative Image Figure - Statistic", PipelineDialog.Phase.EXPORT);
         dialog.addHeader("Guiding Statistic");
         dialog.addMessage("Choose how FLASH should compute the statistic shown beside images during representative selection.");
-        dialog.addChoice("Statistic source",
+        final JComboBox<String> statisticChoice = dialog.addChoice("Statistic source",
                 RepresentativeStatistic.labels(),
                 config.statistic == null ? RepresentativeStatistic.QUICK.label() : config.statistic.label());
-        JComboBox<String> existingChoice = dialog.addChoice(
+        final JComboBox<String> existingChoice = dialog.addChoice(
                 "Existing result column", existingLabels, defaultExistingLabel);
-        existingChoice.setEnabled(!existingOptions.isEmpty());
+        final boolean hasExistingOptions = !existingOptions.isEmpty();
+        updateExistingResultChoiceEnabled(
+                statisticChoice, existingChoice, hasExistingOptions);
+        statisticChoice.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                updateExistingResultChoiceEnabled(
+                        statisticChoice, existingChoice, hasExistingOptions);
+            }
+        });
         dialog.addHelpText("Existing result is only used when Statistic source is set to Existing result.");
         dialog.setPrimaryButtonText("Continue");
 
@@ -394,6 +405,20 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
             throw new IllegalStateException("No numeric existing result column is available.");
         }
         return new StatisticChoice(statistic, existing);
+    }
+
+    static void updateExistingResultChoiceEnabled(JComboBox<String> statisticChoice,
+                                                  JComboBox<String> existingChoice,
+                                                  boolean hasExistingOptions) {
+        if (existingChoice == null) {
+            return;
+        }
+        RepresentativeStatistic statistic = RepresentativeStatistic.fromLabel(
+                statisticChoice == null || statisticChoice.getSelectedItem() == null
+                        ? null
+                        : statisticChoice.getSelectedItem().toString());
+        existingChoice.setEnabled(
+                hasExistingOptions && statistic == RepresentativeStatistic.EXISTING_RESULT);
     }
 
     private String defaultExistingResultLabel(

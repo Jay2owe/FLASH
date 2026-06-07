@@ -3,6 +3,7 @@ package flash.pipeline.representative;
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinConfigIO;
 import flash.pipeline.image.ImageOps;
+import flash.pipeline.image.OrientationOps;
 import flash.pipeline.io.DeferredImageSupplier;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.ImageCache;
@@ -11,8 +12,11 @@ import flash.pipeline.io.IoUtils;
 import flash.pipeline.io.SeriesMeta;
 import flash.pipeline.io.TifCache;
 import flash.pipeline.naming.ChannelFilenameCodec;
+import flash.pipeline.naming.ImageOrientationResolver;
 import flash.pipeline.naming.ImageNameParser;
 import flash.pipeline.naming.NameParts;
+import flash.pipeline.naming.OrientationManifestRow;
+import flash.pipeline.naming.ResolvedImageMetadata;
 import flash.pipeline.presentation.PresentationTileRecord;
 import flash.pipeline.presentation.PresentationTileWriter;
 import flash.pipeline.qc.QcMinMaxPerConditionSelector;
@@ -28,6 +32,8 @@ import ij.plugin.ZProjector;
 import ij.process.ImageProcessor;
 
 import javax.imageio.ImageIO;
+import javax.imageio.ImageReader;
+import javax.imageio.stream.ImageInputStream;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
@@ -42,6 +48,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Iterator;
+import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -114,7 +122,7 @@ public final class RepresentativePreviewRenderer {
         SourceAccess sourceAccess = new SourceAccess(directory, imageCache, useTifCache);
         try {
             List<WorkItem> items = buildFinalWorkItems(
-                    selection, binConfig, metas, sourceAccess);
+                    directory, selection, binConfig, metas, sourceAccess);
             RenderContext context = RenderContext.finalRender(binConfig, safeConfig);
             return renderFinalItems(items, context, sourceAccess, parallelThreads);
         } finally {
@@ -141,9 +149,34 @@ public final class RepresentativePreviewRenderer {
                                                                  RepresentativeFigureConfig config,
                                                                  List<PresentationTileRecord> records)
             throws Exception {
+        return renderPresentationSeriesForTests(
+                null, cacheDir, meta, candidate, binConfig, config, records);
+    }
+
+    static RepresentativeSeries renderPresentationSeriesForTests(String directory,
+                                                                 File cacheDir,
+                                                                 SeriesMeta meta,
+                                                                 QcSelectionCandidate candidate,
+                                                                 BinConfig binConfig,
+                                                                 RepresentativeFigureConfig config,
+                                                                 List<PresentationTileRecord> records)
+            throws Exception {
+        return renderPresentationSeriesForTests(
+                directory, cacheDir, meta, candidate, binConfig, config, records, null);
+    }
+
+    static RepresentativeSeries renderPresentationSeriesForTests(String directory,
+                                                                 File cacheDir,
+                                                                 SeriesMeta meta,
+                                                                 QcSelectionCandidate candidate,
+                                                                 BinConfig binConfig,
+                                                                 RepresentativeFigureConfig config,
+                                                                 List<PresentationTileRecord> records,
+                                                                 File sourcePath)
+            throws Exception {
         List<PresentationTileRecord> safeRecords =
                 records == null ? Collections.<PresentationTileRecord>emptyList() : records;
-        WorkItem item = workItemFor(null, meta, candidate, binConfig, safeRecords, null);
+        WorkItem item = workItemFor(directory, meta, candidate, binConfig, safeRecords, sourcePath);
         RenderContext context = new RenderContext(cacheDir, binConfig,
                 config == null ? new RepresentativeFigureConfig() : config,
                 DEFAULT_THUMBNAIL_LONG_EDGE);
@@ -157,8 +190,21 @@ public final class RepresentativePreviewRenderer {
                                                               RepresentativeFigureConfig config,
                                                               ImagePlus source)
             throws Exception {
-        WorkItem item = workItemFor(null, meta, candidate, binConfig,
-                Collections.<PresentationTileRecord>emptyList(), null);
+        return renderGeneratedSeriesForTests(
+                null, cacheDir, meta, candidate, binConfig, config, source, null);
+    }
+
+    static RepresentativeSeries renderGeneratedSeriesForTests(String directory,
+                                                              File cacheDir,
+                                                              SeriesMeta meta,
+                                                              QcSelectionCandidate candidate,
+                                                              BinConfig binConfig,
+                                                              RepresentativeFigureConfig config,
+                                                              ImagePlus source,
+                                                              File sourcePath)
+            throws Exception {
+        WorkItem item = workItemFor(directory, meta, candidate, binConfig,
+                Collections.<PresentationTileRecord>emptyList(), sourcePath);
         RenderContext context = new RenderContext(cacheDir, binConfig,
                 config == null ? new RepresentativeFigureConfig() : config,
                 DEFAULT_THUMBNAIL_LONG_EDGE);
@@ -170,7 +216,17 @@ public final class RepresentativePreviewRenderer {
                                                          RepresentativeSeries series,
                                                          ImagePlus source)
             throws Exception {
-        WorkItem item = workItemForSeries(series, null, binConfig, null);
+        return renderFinalSeriesForTests(null, binConfig, config, series, source, null);
+    }
+
+    static RenderedFinalSeries renderFinalSeriesForTests(String directory,
+                                                         BinConfig binConfig,
+                                                         RepresentativeFigureConfig config,
+                                                         RepresentativeSeries series,
+                                                         ImagePlus source,
+                                                         File sourcePath)
+            throws Exception {
+        WorkItem item = workItemForSeries(series, null, binConfig, sourcePath, directory);
         RenderContext context = RenderContext.finalRender(binConfig,
                 config == null ? new RepresentativeFigureConfig() : config);
         return renderFinalItem(item, context, SourceAccess.fixed(source));
@@ -420,6 +476,7 @@ public final class RepresentativePreviewRenderer {
         List<ImagePlus> projected = new ArrayList<ImagePlus>();
         try {
             working = applyConfiguredZSliceSubset(context.binConfig, item, source);
+            OrientationOps.applyTransform(working, item.orientationMetadata);
             double pixelWidthUm = calibratedPixelWidthUm(working, true);
             double pixelHeightUm = calibratedPixelWidthUm(working, false);
             split = ChannelSplitter.split(working);
@@ -611,15 +668,16 @@ public final class RepresentativePreviewRenderer {
                 continue;
             }
             QcSelectionCandidate candidate = byIndex.get(Integer.valueOf(meta.index));
-            List<PresentationTileRecord> matching =
-                    matchingPresentationRecords(meta, candidate, records);
             File sourcePath = sourceAccess == null ? null : sourceAccess.sourcePath(meta.index);
+            List<PresentationTileRecord> matching =
+                    matchingPresentationRecords(directory, meta, candidate, sourcePath, records);
             items.add(workItemFor(directory, meta, candidate, cfg, matching, sourcePath));
         }
         return items;
     }
 
-    private static List<WorkItem> buildFinalWorkItems(RepresentativeSelection selection,
+    private static List<WorkItem> buildFinalWorkItems(String directory,
+                                                      RepresentativeSelection selection,
                                                       BinConfig cfg,
                                                       List<SeriesMeta> metas,
                                                       SourceAccess sourceAccess) {
@@ -643,7 +701,7 @@ public final class RepresentativePreviewRenderer {
                     ? series.sourcePath()
                     : sourceAccess.sourcePath(series.seriesIndex());
             if (sourcePath == null) sourcePath = series.sourcePath();
-            items.add(workItemForSeries(series, meta, cfg, sourcePath));
+            items.add(workItemForSeries(series, meta, cfg, sourcePath, directory));
         }
         return items;
     }
@@ -659,14 +717,36 @@ public final class RepresentativePreviewRenderer {
         String seriesName = candidate != null && !candidate.seriesName.trim().isEmpty()
                 ? candidate.seriesName
                 : (meta == null ? "" : safe(meta.name));
-        NameParts parts = ImageNameParser.parse(seriesName);
-        String animal = candidate != null && !candidate.animalName.trim().isEmpty()
-                ? candidate.animalName
-                : parts.animal;
+        ResolvedImageMetadata resolved = resolveMetadata(
+                directory, seriesName, seriesNumber, sourcePath);
+        NameParts parts = resolved == null
+                ? ImageNameParser.parse(seriesName)
+                : resolved.toNameParts();
+        String animal = !parts.animal.isEmpty()
+                ? parts.animal
+                : (candidate != null && !candidate.animalName.trim().isEmpty()
+                        ? candidate.animalName
+                        : parts.animal);
         String condition = candidate == null ? "" : safe(candidate.conditionName);
         if (condition.isEmpty()) condition = animal;
-        List<ChannelSpec> channels = channelSpecs(cfg, meta, matchingRecords);
-        ManifestCoverage coverage = ManifestCoverage.from(matchingRecords, channels);
+        List<PresentationTileRecord> effectiveRecords = matchingRecords == null
+                ? Collections.<PresentationTileRecord>emptyList()
+                : matchingRecords;
+        List<ChannelSpec> channels = channelSpecs(cfg, meta, effectiveRecords);
+        ManifestCoverage coverage = ManifestCoverage.from(effectiveRecords, channels);
+        if (!coverage.covers()) {
+            List<PresentationTileRecord> fallbackRecords = savedPresentationPngRecords(
+                    directory, parts, sourceImageId(resolved, seriesName, seriesNumber),
+                    channels, meta);
+            ManifestCoverage fallbackCoverage = ManifestCoverage.from(fallbackRecords, channels);
+            if (fallbackCoverage.covers()) {
+                effectiveRecords = fallbackRecords;
+                coverage = fallbackCoverage;
+            }
+        }
+        ResolvedImageMetadata orientationMetadata = resolved == null
+                ? null
+                : resolved;
         return new WorkItem(
                 RepresentativeStatTable.seriesIdForIndex(seriesIndex),
                 seriesIndex,
@@ -679,13 +759,15 @@ public final class RepresentativePreviewRenderer {
                 sourcePath,
                 channels,
                 coverage,
-                sourceFingerprint(sourcePath, meta));
+                sourceFingerprint(sourcePath, meta, orientationMetadata),
+                orientationMetadata);
     }
 
     private static WorkItem workItemForSeries(RepresentativeSeries series,
                                               SeriesMeta meta,
                                               BinConfig cfg,
-                                              File sourcePath) {
+                                              File sourcePath,
+                                              String directory) {
         if (series == null) {
             throw new IllegalArgumentException("Representative series is required.");
         }
@@ -708,6 +790,8 @@ public final class RepresentativePreviewRenderer {
         }
         List<ChannelSpec> channels = channelSpecs(cfg, effectiveMeta, null);
         File effectiveSourcePath = sourcePath == null ? series.sourcePath() : sourcePath;
+        ResolvedImageMetadata orientationMetadata = resolveMetadata(
+                directory, series.seriesName(), series.seriesNumber(), effectiveSourcePath);
         return new WorkItem(
                 series.id(),
                 series.seriesIndex(),
@@ -720,7 +804,8 @@ public final class RepresentativePreviewRenderer {
                 effectiveSourcePath,
                 channels,
                 ManifestCoverage.empty(),
-                sourceFingerprint(effectiveSourcePath, effectiveMeta));
+                sourceFingerprint(effectiveSourcePath, effectiveMeta, orientationMetadata),
+                orientationMetadata);
     }
 
     private static List<ChannelSpec> channelSpecs(BinConfig cfg,
@@ -755,20 +840,30 @@ public final class RepresentativePreviewRenderer {
     }
 
     private static List<PresentationTileRecord> matchingPresentationRecords(
+            String directory,
             SeriesMeta meta,
             QcSelectionCandidate candidate,
+            File sourcePath,
             List<PresentationTileRecord> records) {
         if (records == null || records.isEmpty()) {
             return Collections.emptyList();
         }
-        LinkedHashSet<String> sourceIds = candidateSourceIds(meta, candidate);
+        LinkedHashSet<String> sourceIds = candidateSourceIds(
+                directory, meta, candidate, sourcePath);
         String seriesName = candidate != null && !candidate.seriesName.trim().isEmpty()
                 ? candidate.seriesName
                 : (meta == null ? "" : safe(meta.name));
-        NameParts parts = ImageNameParser.parse(seriesName);
-        String animal = candidate != null && !candidate.animalName.trim().isEmpty()
-                ? candidate.animalName
-                : parts.animal;
+        ResolvedImageMetadata resolved = resolveMetadata(directory, seriesName,
+                (candidate == null ? (meta == null ? -1 : meta.index) : candidate.seriesIndex) + 1,
+                sourcePath);
+        NameParts parts = resolved == null
+                ? ImageNameParser.parse(seriesName)
+                : resolved.toNameParts();
+        String animal = !parts.animal.isEmpty()
+                ? parts.animal
+                : (candidate != null && !candidate.animalName.trim().isEmpty()
+                        ? candidate.animalName
+                        : parts.animal);
         List<PresentationTileRecord> out = new ArrayList<PresentationTileRecord>();
         for (PresentationTileRecord record : records) {
             if (record == null || record.imageFile() == null || !record.imageFile().isFile()) {
@@ -789,26 +884,214 @@ public final class RepresentativePreviewRenderer {
         return out;
     }
 
-    private static LinkedHashSet<String> candidateSourceIds(SeriesMeta meta,
-                                                            QcSelectionCandidate candidate) {
+    private static LinkedHashSet<String> candidateSourceIds(String directory,
+                                                            SeriesMeta meta,
+                                                            QcSelectionCandidate candidate,
+                                                            File sourcePath) {
         int index = candidate == null ? (meta == null ? -1 : meta.index) : candidate.seriesIndex;
         int seriesNumber = index + 1;
         String seriesName = candidate != null && !candidate.seriesName.trim().isEmpty()
                 ? candidate.seriesName
                 : (meta == null ? "" : safe(meta.name));
         LinkedHashSet<String> ids = new LinkedHashSet<String>();
+        ResolvedImageMetadata resolved = resolveMetadata(
+                directory, seriesName, seriesNumber, sourcePath);
+        if (resolved != null && !resolved.imageKey.isEmpty()) {
+            ids.add(resolved.imageKey);
+        }
         ids.add("series:" + seriesNumber);
-        if (!seriesName.trim().isEmpty()) {
-            ids.add("series:" + seriesNumber + "|" + seriesName.trim());
-            String extracted = ImageNameParser.extractBioFormatsSeriesName(seriesName);
-            if (extracted != null && !extracted.trim().isEmpty()) {
-                ids.add("series:" + seriesNumber + "|" + extracted.trim());
+        for (String title : metadataTitleCandidates(seriesName, sourcePath)) {
+            if (!title.trim().isEmpty()) {
+                ids.add("series:" + seriesNumber + "|" + title.trim());
             }
         }
         return ids;
     }
 
-    private static String sourceFingerprint(File sourcePath, SeriesMeta meta) {
+    private static List<PresentationTileRecord> savedPresentationPngRecords(
+            String directory,
+            NameParts parts,
+            String sourceImageId,
+            List<ChannelSpec> channels,
+            SeriesMeta meta) {
+        if (directory == null || directory.trim().isEmpty()
+                || parts == null || safe(parts.animal).isEmpty()
+                || channels == null || channels.isEmpty()) {
+            return Collections.emptyList();
+        }
+        File animalDir;
+        try {
+            animalDir = new File(
+                    FlashProjectLayout.forDirectory(directory).presentationImagesDir(),
+                    parts.animal);
+        } catch (IllegalArgumentException e) {
+            return Collections.emptyList();
+        }
+        if (!animalDir.isDirectory()) {
+            return Collections.emptyList();
+        }
+
+        String suffix = parts.fileSuffix();
+        List<PresentationTileRecord> out = new ArrayList<PresentationTileRecord>();
+        for (ChannelSpec spec : channels) {
+            File file = new File(animalDir,
+                    ChannelFilenameCodec.toSafe(spec.channelName)
+                            + (suffix.isEmpty() ? "" : "_" + suffix)
+                            + ".png");
+            if (!file.isFile()) {
+                continue;
+            }
+            int[] size = imageDimensions(file, meta);
+            out.add(new PresentationTileRecord(
+                    file,
+                    parts.animal,
+                    parts.hemisphere,
+                    parts.csvRegion(),
+                    sourceImageId,
+                    spec.channelName,
+                    spec.channelName,
+                    spec.channelIndex,
+                    size[0],
+                    size[1],
+                    pixelSizeUm(meta, true),
+                    pixelSizeUm(meta, false)));
+        }
+
+        File merge = new File(animalDir,
+                suffix.isEmpty() ? "Merge.png" : "Merge_" + suffix + ".png");
+        if (merge.isFile()) {
+            int[] size = imageDimensions(merge, meta);
+            out.add(new PresentationTileRecord(
+                    merge,
+                    parts.animal,
+                    parts.hemisphere,
+                    parts.csvRegion(),
+                    sourceImageId,
+                    MERGE_NAME,
+                    MERGE_NAME,
+                    -1,
+                    size[0],
+                    size[1],
+                    pixelSizeUm(meta, true),
+                    pixelSizeUm(meta, false)));
+        }
+        return out;
+    }
+
+    private static ResolvedImageMetadata resolveMetadata(String directory,
+                                                        String seriesName,
+                                                        int seriesNumber,
+                                                        File sourcePath) {
+        if (directory == null || directory.trim().isEmpty()) {
+            return null;
+        }
+        List<String> titles = metadataTitleCandidates(seriesName, sourcePath);
+        for (String title : titles) {
+            try {
+                Optional<OrientationManifestRow> row =
+                        ImageOrientationResolver.findConfirmed(directory, title, seriesNumber);
+                if (row.isPresent()) {
+                    return ResolvedImageMetadata.fromManifest(row.get());
+                }
+            } catch (RuntimeException e) {
+                return null;
+            }
+        }
+        String fallbackTitle = titles.isEmpty() ? seriesName : titles.get(0);
+        try {
+            return ImageOrientationResolver.resolve(directory, fallbackTitle, seriesNumber);
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    private static List<String> metadataTitleCandidates(String seriesName, File sourcePath) {
+        LinkedHashSet<String> titles = new LinkedHashSet<String>();
+        String cleanSeries = safe(seriesName);
+        if (!cleanSeries.isEmpty()) {
+            titles.add(cleanSeries);
+        }
+        String extracted = ImageNameParser.extractBioFormatsSeriesName(cleanSeries);
+        if (extracted != null && !extracted.trim().isEmpty()) {
+            titles.add(extracted.trim());
+        }
+        String sourceName = sourcePath == null ? "" : safe(sourcePath.getName());
+        if (!sourceName.isEmpty()) {
+            List<String> bases = new ArrayList<String>(titles);
+            for (String base : bases) {
+                if (base == null || base.trim().isEmpty() || base.contains(" - ")) {
+                    continue;
+                }
+                titles.add(sourceName + " - " + base.trim());
+                String stripped = ImageNameParser.stripExtension(sourceName);
+                if (stripped != null && !stripped.trim().isEmpty()
+                        && !stripped.equals(sourceName)) {
+                    titles.add(stripped.trim() + " - " + base.trim());
+                }
+            }
+        }
+        return new ArrayList<String>(titles);
+    }
+
+    private static String sourceImageId(ResolvedImageMetadata metadata,
+                                        String seriesName,
+                                        int seriesNumber) {
+        if (metadata != null && !metadata.imageKey.isEmpty()) {
+            return metadata.imageKey;
+        }
+        int normalizedSeries = seriesNumber < 1 ? 1 : seriesNumber;
+        String title = safe(seriesName);
+        if (title.isEmpty()) {
+            return "series:" + normalizedSeries;
+        }
+        return "series:" + normalizedSeries + "|" + title;
+    }
+
+    private static int[] imageDimensions(File file, SeriesMeta meta) {
+        ImageInputStream input = null;
+        ImageReader reader = null;
+        try {
+            input = ImageIO.createImageInputStream(file);
+            if (input != null) {
+                Iterator<ImageReader> readers = ImageIO.getImageReaders(input);
+                if (readers.hasNext()) {
+                    reader = readers.next();
+                    reader.setInput(input);
+                    return new int[]{
+                            Math.max(1, reader.getWidth(0)),
+                            Math.max(1, reader.getHeight(0))};
+                }
+            }
+        } catch (IOException e) {
+            // Fall through to metadata dimensions.
+        } finally {
+            if (reader != null) {
+                reader.dispose();
+            }
+            if (input != null) {
+                try {
+                    input.close();
+                } catch (IOException ignored) {
+                }
+            }
+        }
+        return new int[]{
+                Math.max(1, meta == null ? 1 : meta.width),
+                Math.max(1, meta == null ? 1 : meta.height)};
+    }
+
+    private static double pixelSizeUm(SeriesMeta meta, boolean xAxis) {
+        if (meta == null) return Double.NaN;
+        double value = xAxis ? meta.pixelWidth : meta.pixelHeight;
+        if (!Double.isFinite(value) || value <= 0) return Double.NaN;
+        double multiplier = calibrationUnitToMicronMultiplier(meta.unit);
+        if (!Double.isFinite(multiplier) || multiplier <= 0) return Double.NaN;
+        return value * multiplier;
+    }
+
+    private static String sourceFingerprint(File sourcePath,
+                                            SeriesMeta meta,
+                                            ResolvedImageMetadata metadata) {
         StringBuilder sb = new StringBuilder();
         sb.append("source=");
         if (sourcePath != null) {
@@ -824,6 +1107,20 @@ public final class RepresentativePreviewRenderer {
                     .append('z').append(meta.nSlices)
                     .append('c').append(meta.nChannels);
         }
+        sb.append("|orientation=").append(orientationFingerprint(metadata));
+        return sb.toString();
+    }
+
+    private static String orientationFingerprint(ResolvedImageMetadata metadata) {
+        if (metadata == null) return "none";
+        StringBuilder sb = new StringBuilder();
+        sb.append(safe(metadata.imageKey)).append('|')
+                .append(safe(metadata.sourceLabel())).append('|')
+                .append(metadata.rotateDegrees == null ? "" : metadata.rotateDegrees.toCsv()).append('|')
+                .append(metadata.flipHorizontal).append('|')
+                .append(metadata.flipVertical).append('|')
+                .append(safe(metadata.hemisphere)).append('|')
+                .append(metadata.viewPolicy == null ? "" : metadata.viewPolicy.toCsv());
         return sb.toString();
     }
 
@@ -1067,6 +1364,7 @@ public final class RepresentativePreviewRenderer {
         final List<ChannelSpec> channels;
         final ManifestCoverage presentationCoverage;
         final String sourceFingerprint;
+        final ResolvedImageMetadata orientationMetadata;
 
         WorkItem(String id,
                  int seriesIndex,
@@ -1079,7 +1377,8 @@ public final class RepresentativePreviewRenderer {
                  File sourcePath,
                  List<ChannelSpec> channels,
                  ManifestCoverage presentationCoverage,
-                 String sourceFingerprint) {
+                 String sourceFingerprint,
+                 ResolvedImageMetadata orientationMetadata) {
             this.id = safe(id);
             this.seriesIndex = seriesIndex;
             this.seriesNumber = seriesNumber;
@@ -1096,6 +1395,7 @@ public final class RepresentativePreviewRenderer {
                     ? ManifestCoverage.empty()
                     : presentationCoverage;
             this.sourceFingerprint = safe(sourceFingerprint);
+            this.orientationMetadata = orientationMetadata;
         }
     }
 

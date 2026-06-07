@@ -1,7 +1,9 @@
 package flash.pipeline.representative;
 
 import flash.pipeline.bin.BinConfig;
+import flash.pipeline.io.OrientationManifestIO;
 import flash.pipeline.io.SeriesMeta;
+import flash.pipeline.naming.OrientationManifestRow;
 import flash.pipeline.presentation.PresentationTileRecord;
 import flash.pipeline.qc.QcSelectionCandidate;
 import ij.ImagePlus;
@@ -18,6 +20,7 @@ import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
@@ -75,6 +78,70 @@ public class RepresentativePreviewRendererTest {
     }
 
     @Test
+    public void presentationManifestMatchesSavedOrientationImageKey() throws Exception {
+        File project = temp.newFolder("orientation-project");
+        File cacheDir = temp.newFolder("orientation-cache");
+        File source = new File(project, "source.lif");
+        String originalName = "source.lif - Exp-Mouse1_LH_SCN";
+        String sourceId = OrientationManifestRow.buildImageKey(
+                "container", source.getName(), 1, originalName);
+        OrientationManifestIO.saveRows(project.getAbsolutePath(),
+                Collections.singletonList(orientationRow(sourceId, originalName)));
+
+        File dapi = temp.newFile("Orientation_DAPI.png");
+        File gfap = temp.newFile("Orientation_GFAP.png");
+        File merge = temp.newFile("Orientation_Merge.png");
+        writeSolidPng(dapi, 440, 120, Color.BLUE);
+        writeSolidPng(gfap, 440, 120, Color.GREEN);
+        writeSolidPng(merge, 440, 120, Color.CYAN);
+
+        List<PresentationTileRecord> records = Arrays.asList(
+                new PresentationTileRecord(dapi, "Mouse1", "LH", "SCN",
+                        sourceId, "DAPI", "DAPI", 0, 440, 120, 0.5, 0.5),
+                new PresentationTileRecord(gfap, "Mouse1", "LH", "SCN",
+                        sourceId, "GFAP", "GFAP", 1, 440, 120, 0.5, 0.5),
+                new PresentationTileRecord(merge, "Mouse1", "LH", "SCN",
+                        sourceId, "Merge", "Merge", -1, 440, 120, 0.5, 0.5));
+
+        RepresentativeSeries series = RepresentativePreviewRenderer.renderPresentationSeriesForTests(
+                project.getAbsolutePath(), cacheDir,
+                meta(0, "Exp-Mouse1_LH_SCN", 440, 120, 1, 2),
+                candidate(0, "Exp-Mouse1_LH_SCN", "Mouse1", "Control"),
+                configuredTwoChannelBinConfig("None", "None"),
+                new RepresentativeFigureConfig(),
+                records,
+                source);
+
+        assertEquals(RepresentativeSeries.PreviewSource.PRESENTATION, series.previewSource());
+        assertFalse(series.cacheHit());
+        assertEquals(2, series.channelThumbnails().size());
+    }
+
+    @Test
+    public void existingPresentationPngsAreUsedWhenManifestIsMissing() throws Exception {
+        File project = temp.newFolder("legacy-presentation-project");
+        File cacheDir = temp.newFolder("legacy-presentation-cache");
+        File animalDir = new File(project,
+                "FLASH/Results/Presentation Images/Images/Mouse1");
+        assertTrue(animalDir.mkdirs());
+        writeSolidPng(new File(animalDir, "DAPI_LH_SCN.png"), 440, 120, Color.BLUE);
+        writeSolidPng(new File(animalDir, "GFAP_LH_SCN.png"), 440, 120, Color.GREEN);
+        writeSolidPng(new File(animalDir, "Merge_LH_SCN.png"), 440, 120, Color.CYAN);
+
+        RepresentativeSeries series = RepresentativePreviewRenderer.renderPresentationSeriesForTests(
+                project.getAbsolutePath(), cacheDir,
+                meta(0, "Exp-Mouse1_LH_SCN", 440, 120, 1, 2),
+                candidate(0, "Exp-Mouse1_LH_SCN", "Mouse1", "Control"),
+                configuredTwoChannelBinConfig("None", "None"),
+                new RepresentativeFigureConfig(),
+                Collections.<PresentationTileRecord>emptyList());
+
+        assertEquals(RepresentativeSeries.PreviewSource.PRESENTATION, series.previewSource());
+        assertFalse(series.cacheHit());
+        assertEquals(220, series.mergeThumbnail().getWidth());
+    }
+
+    @Test
     public void generatedPreviewUsesConfiguredRangesAndPseudoColors() throws Exception {
         File cacheDir = temp.newFolder("generated-cache");
         BinConfig cfg = configuredTwoChannelBinConfig("0-100", "0-200");
@@ -105,6 +172,30 @@ public class RepresentativePreviewRendererTest {
     }
 
     @Test
+    public void generatedPreviewAppliesSavedOrientationBeforeSelection() throws Exception {
+        File project = temp.newFolder("generated-orientation-project");
+        File cacheDir = temp.newFolder("generated-orientation-cache");
+        File sourcePath = new File(project, "source.lif");
+        saveOrientation(project, sourcePath, OrientationManifestRow.RotationDegrees.DEG_90);
+
+        RepresentativeSeries series = RepresentativePreviewRenderer.renderGeneratedSeriesForTests(
+                project.getAbsolutePath(), cacheDir,
+                meta(0, "Exp-Mouse1_LH_SCN", 4, 2, 1, 1),
+                candidate(0, "Exp-Mouse1_LH_SCN", "Mouse1", "Control"),
+                configuredOneChannelBinConfig("0-255"),
+                new RepresentativeFigureConfig(),
+                oneChannelGradientImage(4, 2),
+                sourcePath);
+
+        assertEquals(RepresentativeSeries.PreviewSource.GENERATED, series.previewSource());
+        assertEquals(1, series.channelThumbnails().size());
+        assertEquals(2, series.channelThumbnails().get(0).image().getWidth());
+        assertEquals(4, series.channelThumbnails().get(0).image().getHeight());
+        assertEquals(2, series.mergeThumbnail().getWidth());
+        assertEquals(4, series.mergeThumbnail().getHeight());
+    }
+
+    @Test
     public void generatedPreviewUsesRepresentativeCustomRangeBeforeSetupRange() throws Exception {
         File cacheDir = temp.newFolder("custom-range-cache");
         BinConfig cfg = configuredTwoChannelBinConfig("0-100", "0-200");
@@ -122,6 +213,31 @@ public class RepresentativePreviewRendererTest {
                 red(redPixel) >= 120 && red(redPixel) <= 135);
         assertEquals(0, green(redPixel));
         assertEquals(0, blue(redPixel));
+    }
+
+    @Test
+    public void finalRenderAppliesSavedOrientation() throws Exception {
+        File project = temp.newFolder("final-orientation-project");
+        File sourcePath = new File(project, "source.lif");
+        saveOrientation(project, sourcePath, OrientationManifestRow.RotationDegrees.DEG_90);
+        BinConfig cfg = configuredOneChannelBinConfig("0-255");
+        RepresentativeFigureConfig config = new RepresentativeFigureConfig();
+        config.setCustomDisplayRangeForChannel(0, "0-255");
+
+        RepresentativePreviewRenderer.RenderedFinalSeries rendered =
+                RepresentativePreviewRenderer.renderFinalSeriesForTests(
+                        project.getAbsolutePath(),
+                        cfg,
+                        config,
+                        oneChannelRepresentativeSeries(0, "Control", sourcePath),
+                        oneChannelGradientImage(4, 2),
+                        sourcePath);
+
+        assertEquals(1, rendered.channels().size());
+        assertEquals(2, rendered.channels().get(0).image().getWidth());
+        assertEquals(4, rendered.channels().get(0).image().getHeight());
+        assertEquals(2, rendered.mergeImage().getWidth());
+        assertEquals(4, rendered.mergeImage().getHeight());
     }
 
     @Test
@@ -207,6 +323,14 @@ public class RepresentativePreviewRendererTest {
         return cfg;
     }
 
+    private static BinConfig configuredOneChannelBinConfig(String range) {
+        BinConfig cfg = new BinConfig();
+        cfg.channelNames.add("DAPI");
+        cfg.channelColors.add("Red");
+        cfg.channelMinMax.add(range);
+        return cfg;
+    }
+
     private static SeriesMeta meta(int index, String name, int width, int height,
                                    int slices, int channels) {
         return new SeriesMeta(index, name, width, height, slices, channels,
@@ -216,6 +340,45 @@ public class RepresentativePreviewRendererTest {
     private static QcSelectionCandidate candidate(int index, String name,
                                                   String animal, String condition) {
         return new QcSelectionCandidate(index, name, animal, condition);
+    }
+
+    private static void saveOrientation(File project,
+                                        File source,
+                                        OrientationManifestRow.RotationDegrees rotation)
+            throws Exception {
+        String originalName = source.getName() + " - Exp-Mouse1_LH_SCN";
+        String sourceId = OrientationManifestRow.buildImageKey(
+                "container", source.getName(), 1, originalName);
+        OrientationManifestIO.saveRows(project.getAbsolutePath(),
+                Collections.singletonList(orientationRow(sourceId, originalName, rotation)));
+    }
+
+    private static OrientationManifestRow orientationRow(String imageKey,
+                                                         String originalName) {
+        return orientationRow(imageKey, originalName,
+                OrientationManifestRow.RotationDegrees.DEG_0);
+    }
+
+    private static OrientationManifestRow orientationRow(
+            String imageKey,
+            String originalName,
+            OrientationManifestRow.RotationDegrees rotation) {
+        return new OrientationManifestRow(
+                imageKey,
+                "source.lif",
+                1,
+                originalName,
+                originalName,
+                "Mouse1",
+                OrientationManifestRow.Hemisphere.LH,
+                "SCN",
+                rotation,
+                false,
+                false,
+                OrientationManifestRow.ViewPolicy.MANUAL_ONLY,
+                OrientationManifestRow.DecisionSource.MANUAL,
+                OrientationManifestRow.ConfirmationState.YES,
+                "");
     }
 
     private static RepresentativeSeries representativeSeries(int index, String condition) {
@@ -232,6 +395,28 @@ public class RepresentativePreviewRendererTest {
                 Arrays.asList(
                         new RepresentativeSeries.ChannelThumbnail(0, "DAPI", null, null),
                         new RepresentativeSeries.ChannelThumbnail(1, "GFAP", null, null)),
+                null,
+                null,
+                RepresentativeSeries.PreviewSource.GENERATED,
+                false);
+    }
+
+    private static RepresentativeSeries oneChannelRepresentativeSeries(
+            int index,
+            String condition,
+            File sourcePath) {
+        return new RepresentativeSeries(
+                RepresentativeStatTable.seriesIdForIndex(index),
+                index,
+                index + 1,
+                "Exp-Mouse1_LH_SCN",
+                "Mouse1",
+                condition,
+                "LH",
+                "SCN",
+                sourcePath,
+                Collections.singletonList(
+                        new RepresentativeSeries.ChannelThumbnail(0, "DAPI", null, null)),
                 null,
                 null,
                 RepresentativeSeries.PreviewSource.GENERATED,

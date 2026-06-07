@@ -326,7 +326,6 @@ public final class RepresentativeSelectionPanel extends JPanel {
         column.setAlignmentY(Component.TOP_ALIGNMENT);
 
         int width = preferredColumnWidth(seriesForCondition);
-        column.setPreferredSize(new Dimension(width, 120));
         column.setMaximumSize(new Dimension(width, Integer.MAX_VALUE));
 
         JLabel header = new JLabel(condition);
@@ -346,6 +345,8 @@ public final class RepresentativeSelectionPanel extends JPanel {
             column.add(Box.createVerticalStrut(ROW_GAP));
         }
         rowsByCondition.put(condition, rows);
+        Dimension preferred = column.getPreferredSize();
+        column.setPreferredSize(new Dimension(width, preferred.height));
         return column;
     }
 
@@ -388,15 +389,12 @@ public final class RepresentativeSelectionPanel extends JPanel {
                 FlashTheme.TEXT_SUBHEADER);
         JLabel region = metadataLabel(regionText(series), FlashTheme.caption(),
                 FlashTheme.TEXT_MUTED);
-        JLabel source = metadataLabel(sourceText(series), FlashTheme.caption(),
-                FlashTheme.TEXT_MUTED);
 
         meta.add(title);
         meta.add(Box.createVerticalStrut(3));
         meta.add(animal);
         meta.add(region);
         meta.add(Box.createVerticalGlue());
-        meta.add(source);
         return meta;
     }
 
@@ -417,11 +415,6 @@ public final class RepresentativeSelectionPanel extends JPanel {
         if (hemi.isEmpty()) return region;
         if (region.isEmpty()) return hemi;
         return hemi + " " + region;
-    }
-
-    private String sourceText(RepresentativeSeries series) {
-        String source = series.previewSource().name().toLowerCase();
-        return series.cacheHit() ? source + " cache" : source;
     }
 
     private JComponent thumbnailTile(String label,
