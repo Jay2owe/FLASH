@@ -11,6 +11,9 @@ import java.util.List;
  */
 public final class RepresentativeSeries {
 
+    /**
+     * Source used to populate the representative selection thumbnail.
+     */
     public enum PreviewSource {
         CACHE,
         PRESENTATION,
@@ -132,6 +135,9 @@ public final class RepresentativeSeries {
         return value == null ? "" : value.trim();
     }
 
+    /**
+     * One channel preview image plus its persistent cache file.
+     */
     public static final class ChannelThumbnail {
         private final int channelIndex;
         private final String channelName;

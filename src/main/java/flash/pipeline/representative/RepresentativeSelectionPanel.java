@@ -42,10 +42,16 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public final class RepresentativeSelectionPanel extends JPanel {
 
+    /**
+     * Listener notified whenever the representative row selection changes.
+     */
     public interface SelectionListener {
         void selectionChanged(SelectionEvent event);
     }
 
+    /**
+     * Snapshot of selection state after a representative row click.
+     */
     public static final class SelectionEvent {
         private final RepresentativeSeries series;
         private final boolean complete;

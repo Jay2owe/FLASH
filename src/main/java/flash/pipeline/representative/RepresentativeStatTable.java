@@ -143,6 +143,9 @@ public final class RepresentativeStatTable {
         }
     }
 
+    /**
+     * Immutable statistic values and metadata for one source series.
+     */
     public static final class Row {
         public final String seriesId;
         public final int seriesIndex;

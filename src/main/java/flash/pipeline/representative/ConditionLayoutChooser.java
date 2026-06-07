@@ -122,6 +122,9 @@ public final class ConditionLayoutChooser {
         return Collections.unmodifiableList(new ArrayList<String>(order));
     }
 
+    /**
+     * User-confirmed representative layout and tile annotation settings.
+     */
     public static final class Result {
         private final RepresentativeLayout layout;
         private final PresentationTileConfig tileConfig;

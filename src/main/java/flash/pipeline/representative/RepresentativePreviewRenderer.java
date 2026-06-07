@@ -1213,6 +1213,9 @@ public final class RepresentativePreviewRenderer {
         }
     }
 
+    /**
+     * Full-resolution rendered images for one locked representative series.
+     */
     public static final class RenderedFinalSeries {
         private final String id;
         private final int seriesIndex;
@@ -1313,6 +1316,9 @@ public final class RepresentativePreviewRenderer {
         }
     }
 
+    /**
+     * Full-resolution rendered image for one representative channel.
+     */
     public static final class RenderedFinalChannel {
         private final int channelIndex;
         private final String channelName;
