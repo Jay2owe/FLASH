@@ -77,7 +77,7 @@ public final class MinMaxControlPanel extends JPanel {
     }
 
     public void setRange(double min, double max) {
-        applyRange(min, max, false, false);
+        applyRange(min, max, false, false, true);
     }
 
     public double getMinValue() {
@@ -168,6 +168,14 @@ public final class MinMaxControlPanel extends JPanel {
     }
 
     private void applyRange(double requestedMin, double requestedMax, boolean fire, boolean adjusting) {
+        applyRange(requestedMin, requestedMax, fire, adjusting, false);
+    }
+
+    private void applyRange(double requestedMin, double requestedMax, boolean fire, boolean adjusting,
+                            boolean allowDomainExpansion) {
+        if (allowDomainExpansion && expandDomainToInclude(requestedMin, requestedMax)) {
+            configureSliderDomains();
+        }
         double min = FijiStyleRangeSliderPanel.clamp(requestedMin, domainMin, domainMax);
         double max = FijiStyleRangeSliderPanel.clamp(requestedMax, domainMin, domainMax);
         if (min > max) {
@@ -192,6 +200,25 @@ public final class MinMaxControlPanel extends JPanel {
         if (fire && listener != null) {
             listener.rangeChanged(minValue, maxValue, adjusting);
         }
+    }
+
+    private boolean expandDomainToInclude(double first, double second) {
+        double newMin = domainMin;
+        double newMax = domainMax;
+        if (Double.isFinite(first)) {
+            if (first < newMin) newMin = first;
+            if (first > newMax) newMax = first;
+        }
+        if (Double.isFinite(second)) {
+            if (second < newMin) newMin = second;
+            if (second > newMax) newMax = second;
+        }
+        if (newMin == domainMin && newMax == domainMax) {
+            return false;
+        }
+        domainMin = newMin;
+        domainMax = newMax;
+        return true;
     }
 
     private void updateBrightnessContrastSliders() {

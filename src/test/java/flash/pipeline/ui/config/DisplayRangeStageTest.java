@@ -56,6 +56,26 @@ public class DisplayRangeStageTest {
     }
 
     @Test
+    public void savedRangeAboveCurrentImageMaximumIsNotClampedWhenLockedAgain() {
+        RecordingRangeStore store = new RecordingRangeStore("10-200");
+        RecordingActions actions = new RecordingActions();
+        DisplayRangeStage stage = new DisplayRangeStage(store, new RecordingPreviewAdapter());
+        ConfigQcContext context = context();
+
+        stage.buildControls(context, actions);
+        stage.onEnter(context, new PreviewPairPanel("Original", "Adjusted"));
+
+        assertEquals("10-200", stage.currentRangeTokenForTest());
+        assertNotNull(actions.adjustedPreview);
+        assertEquals(10.0, actions.adjustedPreview.getDisplayRangeMin(), 0.0001);
+        assertEquals(200.0, actions.adjustedPreview.getDisplayRangeMax(), 0.0001);
+
+        assertTrue(stage.lockIn(context));
+
+        assertEquals("10-200", store.token);
+    }
+
+    @Test
     public void restartKeepsCurrentEditedRangeAfterStageRebuild() {
         RecordingRangeStore store = new RecordingRangeStore("10-90");
         DisplayRangeStage stage = new DisplayRangeStage(store, new RecordingPreviewAdapter());
