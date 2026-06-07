@@ -119,9 +119,11 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
                 IJ.log("[Representative Figure] Locked custom display ranges for "
                         + config.customDisplayRangesByChannel.size() + " channel"
                         + (config.customDisplayRangesByChannel.size() == 1 ? "" : "s") + ".");
-            } else {
+            } else if (rangeChoice.useSetupRanges) {
                 config.clearCustomDisplayRanges();
                 IJ.log("[Representative Figure] Using display ranges from Set Up Configuration.");
+            } else {
+                IJ.log("[Representative Figure] Using remembered representative display ranges.");
             }
 
             ConditionLayoutChooser.Result layoutResult =
@@ -438,7 +440,10 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
 
     private DisplayRangeChoice chooseDisplayRangeMode(BinConfig setupConfig,
                                                       RepresentativeSelection selection) {
-        if (!RepresentativeRangeStage.hasCompleteSetupRanges(setupConfig, selection)) {
+        boolean hasRememberedRanges = hasCompleteRememberedRanges(selection);
+        boolean hasSetupRanges =
+                RepresentativeRangeStage.hasCompleteSetupRanges(setupConfig, selection);
+        if (!hasSetupRanges && !hasRememberedRanges) {
             return DisplayRangeChoice.adjustNow();
         }
 
@@ -446,9 +451,20 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
                 "Representative Image Figure - Display Ranges", PipelineDialog.Phase.EXPORT);
         dialog.addHeader("Display Ranges");
         dialog.addMessage("Choose whether to keep the display ranges from Set Up Configuration or adjust them for this representative figure.");
+        String[] choices = hasRememberedRanges
+                ? (hasSetupRanges
+                        ? new String[]{DisplayRangeChoice.USE_REMEMBERED_LABEL,
+                                DisplayRangeChoice.USE_SETUP_LABEL,
+                                DisplayRangeChoice.ADJUST_NOW_LABEL}
+                        : new String[]{DisplayRangeChoice.USE_REMEMBERED_LABEL,
+                                DisplayRangeChoice.ADJUST_NOW_LABEL})
+                : new String[]{DisplayRangeChoice.USE_SETUP_LABEL,
+                        DisplayRangeChoice.ADJUST_NOW_LABEL};
         dialog.addChoice("Display range setup",
-                new String[]{DisplayRangeChoice.USE_SETUP_LABEL, DisplayRangeChoice.ADJUST_NOW_LABEL},
-                DisplayRangeChoice.USE_SETUP_LABEL);
+                choices,
+                hasRememberedRanges
+                        ? DisplayRangeChoice.USE_REMEMBERED_LABEL
+                        : DisplayRangeChoice.USE_SETUP_LABEL);
         dialog.setPrimaryButtonText("Continue");
 
         if (!dialog.showDialog()) {
@@ -458,7 +474,51 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
         if (DisplayRangeChoice.ADJUST_NOW_LABEL.equals(choice)) {
             return DisplayRangeChoice.adjustNow();
         }
+        if (DisplayRangeChoice.USE_REMEMBERED_LABEL.equals(choice)) {
+            return DisplayRangeChoice.useRemembered();
+        }
         return DisplayRangeChoice.useSetup();
+    }
+
+    private boolean hasCompleteRememberedRanges(RepresentativeSelection selection) {
+        if (selection == null || config.customDisplayRangesByChannel.isEmpty()) {
+            return false;
+        }
+        boolean sawChannel = false;
+        for (RepresentativeSeries series : selection.series()) {
+            if (series == null) {
+                continue;
+            }
+            for (RepresentativeSeries.ChannelThumbnail thumbnail : series.channelThumbnails()) {
+                if (thumbnail == null) {
+                    continue;
+                }
+                sawChannel = true;
+                String token = config.customDisplayRangeForChannel(thumbnail.channelIndex());
+                if (!isValidRangeToken(token)) {
+                    return false;
+                }
+            }
+        }
+        return sawChannel;
+    }
+
+    private static boolean isValidRangeToken(String token) {
+        String text = clean(token);
+        if (text.isEmpty() || "none".equalsIgnoreCase(text)) {
+            return false;
+        }
+        int dash = text.indexOf('-');
+        if (dash <= 0 || dash >= text.length() - 1) {
+            return false;
+        }
+        try {
+            double min = Double.parseDouble(text.substring(0, dash).trim());
+            double max = Double.parseDouble(text.substring(dash + 1).trim());
+            return Double.isFinite(min) && Double.isFinite(max) && max > min;
+        } catch (NumberFormatException e) {
+            return false;
+        }
     }
 
     private static String statTableSummary(RepresentativeStatTable table) {
@@ -479,7 +539,7 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
         dialog.addHeader("Select Representatives");
         final RepresentativeSelectionPanel selectionPanel =
                 new RepresentativeSelectionPanel(previewSeries,
-                        config.statistic, config.statTable);
+                        config.statistic, config.statTable, config.selection);
         dialog.addComponent(selectionPanel);
         dialog.setPrimaryButtonText("Lock in");
         dialog.setPrimaryButtonEnabled(selectionPanel.hasCompleteSelection());
@@ -514,21 +574,28 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
     }
 
     private static final class DisplayRangeChoice {
+        static final String USE_REMEMBERED_LABEL = "Use remembered representative ranges";
         static final String USE_SETUP_LABEL = "Use display ranges already set up";
         static final String ADJUST_NOW_LABEL = "Adjust now";
 
         final boolean adjustNow;
+        final boolean useSetupRanges;
 
-        private DisplayRangeChoice(boolean adjustNow) {
+        private DisplayRangeChoice(boolean adjustNow, boolean useSetupRanges) {
             this.adjustNow = adjustNow;
+            this.useSetupRanges = useSetupRanges;
         }
 
         static DisplayRangeChoice useSetup() {
-            return new DisplayRangeChoice(false);
+            return new DisplayRangeChoice(false, true);
+        }
+
+        static DisplayRangeChoice useRemembered() {
+            return new DisplayRangeChoice(false, false);
         }
 
         static DisplayRangeChoice adjustNow() {
-            return new DisplayRangeChoice(true);
+            return new DisplayRangeChoice(true, false);
         }
     }
 }

@@ -101,18 +101,26 @@ public final class RepresentativeSelectionPanel extends JPanel {
     private volatile boolean disposed = false;
 
     public RepresentativeSelectionPanel(List<RepresentativeSeries> series) {
-        this(series, RepresentativeStatistic.NONE, null);
+        this(series, RepresentativeStatistic.NONE, null, null);
     }
 
     public RepresentativeSelectionPanel(List<RepresentativeSeries> series,
                                         RepresentativeStatistic statistic,
                                         RepresentativeStatTable statTable) {
+        this(series, statistic, statTable, null);
+    }
+
+    public RepresentativeSelectionPanel(List<RepresentativeSeries> series,
+                                        RepresentativeStatistic statistic,
+                                        RepresentativeStatTable statTable,
+                                        RepresentativeSelection rememberedSelection) {
         this.seriesByCondition = groupByCondition(series);
         this.statsPanel = shouldShowStatsPanel(statistic)
                 ? new RepresentativeStatsPanel(statTable) : null;
         this.thumbnailExecutor = Executors.newFixedThreadPool(thumbnailThreadCount(),
                 new ThumbnailThreadFactory());
         buildUi();
+        applyRememberedSelection(rememberedSelection);
         updateStatus();
     }
 
@@ -230,6 +238,75 @@ public final class RepresentativeSelectionPanel extends JPanel {
             body.add(statsPanel, BorderLayout.EAST);
             add(body, BorderLayout.CENTER);
         }
+    }
+
+    private void applyRememberedSelection(RepresentativeSelection rememberedSelection) {
+        if (rememberedSelection == null || seriesByCondition.isEmpty()) {
+            return;
+        }
+        for (String condition : rememberedSelection.conditionNames()) {
+            RepresentativeSeries remembered =
+                    rememberedSelection.seriesForCondition(condition);
+            RepresentativeSeries current = matchingCurrentSeries(condition, remembered);
+            if (current != null) {
+                selectSeries(current);
+            }
+        }
+    }
+
+    private RepresentativeSeries matchingCurrentSeries(String condition,
+                                                       RepresentativeSeries remembered) {
+        if (remembered == null) {
+            return null;
+        }
+        String normalizedCondition =
+                RepresentativeSelection.conditionLabel(condition);
+        SeriesRowPanel byId = rowBySeriesId.get(remembered.id());
+        if (byId != null && sameCondition(byId.series, normalizedCondition)) {
+            return byId.series;
+        }
+        List<SeriesRowPanel> rows = rowsByCondition.get(normalizedCondition);
+        if (rows == null) {
+            return null;
+        }
+        for (SeriesRowPanel row : rows) {
+            if (sameSeries(row.series, remembered)) {
+                return row.series;
+            }
+        }
+        return null;
+    }
+
+    private static boolean sameSeries(RepresentativeSeries current,
+                                      RepresentativeSeries remembered) {
+        if (current == null || remembered == null) {
+            return false;
+        }
+        if (current.seriesIndex() == remembered.seriesIndex()
+                && samePath(current.sourcePath(), remembered.sourcePath())) {
+            return true;
+        }
+        return clean(current.seriesName()).equals(clean(remembered.seriesName()))
+                && clean(current.animal()).equals(clean(remembered.animal()))
+                && clean(current.hemisphere()).equals(clean(remembered.hemisphere()))
+                && clean(current.region()).equals(clean(remembered.region()));
+    }
+
+    private static boolean sameCondition(RepresentativeSeries series, String condition) {
+        return series != null
+                && RepresentativeSelection.conditionLabel(series.condition())
+                .equals(RepresentativeSelection.conditionLabel(condition));
+    }
+
+    private static boolean samePath(File left, File right) {
+        if (left == null || right == null) {
+            return left == right;
+        }
+        return left.getAbsoluteFile().equals(right.getAbsoluteFile());
+    }
+
+    private static String clean(String value) {
+        return value == null ? "" : value.trim();
     }
 
     private JPanel buildConditionColumn(String condition,

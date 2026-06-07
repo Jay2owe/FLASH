@@ -8,7 +8,9 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -107,6 +109,45 @@ public class RepresentativeSelectionPanelTest {
                             .highlightedSeriesIdForTest());
                 } finally {
                     statsPanel.dispose();
+                }
+            }
+        });
+    }
+
+    @Test
+    public void rememberedSelectionPreselectsMatchingRenderedRows()
+            throws Exception {
+        final RepresentativeSeries controlA = series("0", "Control", "Control-A");
+        final RepresentativeSeries controlB = series("1", "Control", "Control-B");
+        final RepresentativeSeries treatment = series("2", "Treatment", "Treatment-A");
+        Map<String, RepresentativeSeries> remembered =
+                new LinkedHashMap<String, RepresentativeSeries>();
+        remembered.put("Control", series("1", "Control", "Control-B"));
+        remembered.put("Treatment", series("2", "Treatment", "Treatment-A"));
+        final RepresentativeSelection rememberedSelection =
+                new RepresentativeSelection(Arrays.asList("Control", "Treatment"),
+                        remembered);
+
+        runOnEdt(new Runnable() {
+            @Override
+            public void run() {
+                RepresentativeSelectionPanel panel =
+                        new RepresentativeSelectionPanel(
+                                Arrays.asList(controlA, controlB, treatment),
+                                RepresentativeStatistic.NONE, null,
+                                rememberedSelection);
+                try {
+                    assertTrue(panel.hasCompleteSelection());
+                    assertEquals(controlB, panel.selectedSeries("Control"));
+                    assertEquals(treatment, panel.selectedSeries("Treatment"));
+
+                    RepresentativeSelection selection = panel.createSelection();
+                    assertEquals(controlB,
+                            selection.seriesForCondition("Control"));
+                    assertEquals(treatment,
+                            selection.seriesForCondition("Treatment"));
+                } finally {
+                    panel.dispose();
                 }
             }
         });
