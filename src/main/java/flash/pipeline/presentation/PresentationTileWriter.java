@@ -308,7 +308,7 @@ public final class PresentationTileWriter {
         return count;
     }
 
-    private static void writePngAtomically(BufferedImage image, File outputFile) throws IOException {
+    public static void writePngAtomically(BufferedImage image, File outputFile) throws IOException {
         File parent = outputFile.getParentFile();
         if (parent != null) IoUtils.mustMkdirs(parent);
         File temp = tempFileFor(outputFile);
@@ -508,7 +508,7 @@ public final class PresentationTileWriter {
         }
     }
 
-    private static void drawAnnotations(Graphics2D g,
+    public static void drawAnnotations(Graphics2D g,
                                         PresentationTileRecord record,
                                         Map<String, String> conditions,
                                         PresentationTileConfig config,
@@ -518,7 +518,7 @@ public final class PresentationTileWriter {
                 scaleFactor, 1.0, Math.max(0.6, scaleFactor));
     }
 
-    private static void drawAnnotations(Graphics2D g,
+    public static void drawAnnotations(Graphics2D g,
                                         PresentationTileRecord record,
                                         Map<String, String> conditions,
                                         PresentationTileConfig config,
@@ -753,7 +753,7 @@ public final class PresentationTileWriter {
         return out;
     }
 
-    private static void applyQualityHints(Graphics2D g) {
+    public static void applyQualityHints(Graphics2D g) {
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
         g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
@@ -762,9 +762,18 @@ public final class PresentationTileWriter {
 
     private static String conditionFor(PresentationTileRecord record, Map<String, String> conditions) {
         if (conditions != null) {
-            String condition = conditions.get(record.animal());
-            if (condition != null && !condition.trim().isEmpty()) {
-                return condition.trim();
+            String[] keys = new String[]{
+                    record.imageId(),
+                    record.imageKey(),
+                    record.animal()
+            };
+            for (int i = 0; i < keys.length; i++) {
+                String key = keys[i];
+                if (key == null || key.trim().isEmpty()) continue;
+                String condition = conditions.get(key);
+                if (condition != null && !condition.trim().isEmpty()) {
+                    return condition.trim();
+                }
             }
         }
         return "Unassigned";

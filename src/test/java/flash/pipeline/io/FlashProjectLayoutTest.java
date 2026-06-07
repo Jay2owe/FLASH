@@ -62,6 +62,8 @@ public class FlashProjectLayoutTest {
         assertPath(new File(project, "FLASH/Results/Tables/Spectral Decontamination"),
                 layout.tablesSpectralWriteDir());
         assertPath(new File(project, "FLASH/Results/Presentation Images"), layout.presentationImagesRoot());
+        assertPath(new File(project, "FLASH/Results/Presentation Images/Representative Figures"),
+                layout.representativeFiguresDir());
         assertPath(new File(project, "FLASH/Results/Presentation Images/Images"),
                 layout.presentationImagesDir());
         assertPath(new File(project, "FLASH/Results/Presentation Images/Annotated Images"),

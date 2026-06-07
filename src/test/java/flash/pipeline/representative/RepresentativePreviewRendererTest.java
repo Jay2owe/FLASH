@@ -6,6 +6,7 @@ import flash.pipeline.presentation.PresentationTileRecord;
 import flash.pipeline.qc.QcSelectionCandidate;
 import ij.ImagePlus;
 import ij.ImageStack;
+import ij.measure.Calibration;
 import ij.process.ByteProcessor;
 import org.junit.Rule;
 import org.junit.Test;
@@ -22,6 +23,7 @@ import java.util.List;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 public class RepresentativePreviewRendererTest {
 
@@ -148,6 +150,52 @@ public class RepresentativePreviewRendererTest {
         assertTrue(second.cacheHit());
     }
 
+    @Test
+    public void finalRenderUsesFullResolutionAndRepresentativeCustomRange() throws Exception {
+        BinConfig cfg = configuredTwoChannelBinConfig("0-100", "0-200");
+        RepresentativeFigureConfig config = new RepresentativeFigureConfig();
+        config.setCustomDisplayRangeForChannel(0, "0-200");
+        config.setCustomDisplayRangeForChannel(1, "0-200");
+        ImagePlus source = twoChannelImage(300, 100, 100, 200);
+        Calibration calibration = new Calibration();
+        calibration.pixelWidth = 0.5;
+        calibration.pixelHeight = 0.75;
+        calibration.setUnit("micron");
+        source.setCalibration(calibration);
+
+        RepresentativePreviewRenderer.RenderedFinalSeries rendered =
+                RepresentativePreviewRenderer.renderFinalSeriesForTests(
+                        cfg, config, representativeSeries(0, "Control"), source);
+
+        assertEquals(2, rendered.channels().size());
+        assertEquals(300, rendered.channels().get(0).image().getWidth());
+        assertEquals(100, rendered.channels().get(0).image().getHeight());
+        assertEquals(0.5, rendered.pixelWidthUm(), 0.0001);
+        assertEquals(0.75, rendered.pixelHeightUm(), 0.0001);
+
+        int redPixel = centerRgb(rendered.channels().get(0).image());
+        assertTrue("custom final range should avoid setup-range saturation",
+                red(redPixel) >= 120 && red(redPixel) <= 135);
+        assertEquals(0, green(redPixel));
+        assertEquals(0, blue(redPixel));
+    }
+
+    @Test
+    public void finalRenderRequiresLockedRangeInsteadOfAutoEnhance() throws Exception {
+        BinConfig cfg = new BinConfig();
+        cfg.channelNames.add("DAPI");
+        cfg.channelColors.add("Red");
+
+        try {
+            RepresentativePreviewRenderer.renderFinalSeriesForTests(
+                    cfg, new RepresentativeFigureConfig(),
+                    representativeSeries(0, "Control"), oneChannelGradientImage(260, 80));
+            fail("Final rendering should require custom or setup display ranges.");
+        } catch (Exception expected) {
+            assertTrue(expected.getMessage().contains("No locked display range"));
+        }
+    }
+
     private static BinConfig configuredTwoChannelBinConfig(String c1Range, String c2Range) {
         BinConfig cfg = new BinConfig();
         cfg.channelNames.add("DAPI");
@@ -168,6 +216,26 @@ public class RepresentativePreviewRendererTest {
     private static QcSelectionCandidate candidate(int index, String name,
                                                   String animal, String condition) {
         return new QcSelectionCandidate(index, name, animal, condition);
+    }
+
+    private static RepresentativeSeries representativeSeries(int index, String condition) {
+        return new RepresentativeSeries(
+                RepresentativeStatTable.seriesIdForIndex(index),
+                index,
+                index + 1,
+                "Exp-Mouse1_LH_SCN",
+                "Mouse1",
+                condition,
+                "LH",
+                "SCN",
+                null,
+                Arrays.asList(
+                        new RepresentativeSeries.ChannelThumbnail(0, "DAPI", null, null),
+                        new RepresentativeSeries.ChannelThumbnail(1, "GFAP", null, null)),
+                null,
+                null,
+                RepresentativeSeries.PreviewSource.GENERATED,
+                false);
     }
 
     private static ImagePlus twoChannelImage(int width, int height, int c1, int c2) {

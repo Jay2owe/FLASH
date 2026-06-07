@@ -21,6 +21,7 @@ import flash.pipeline.zslice.ZSliceOps;
 import ij.IJ;
 import ij.ImagePlus;
 import ij.ImageStack;
+import ij.measure.Calibration;
 import ij.plugin.ChannelSplitter;
 import ij.plugin.ContrastEnhancer;
 import ij.plugin.ZProjector;
@@ -96,6 +97,31 @@ public final class RepresentativePreviewRenderer {
         }
     }
 
+    public static List<RenderedFinalSeries> renderFinal(String directory,
+                                                        RepresentativeFigureConfig config,
+                                                        ImageCache imageCache,
+                                                        int parallelThreads,
+                                                        boolean useTifCache) throws Exception {
+        RepresentativeFigureConfig safeConfig =
+                config == null ? new RepresentativeFigureConfig() : config;
+        RepresentativeSelection selection = safeConfig.selection;
+        if (selection == null || !selection.isComplete()) {
+            throw new IllegalStateException("Representative selection is not complete.");
+        }
+
+        BinConfig binConfig = BinConfigIO.readPartialFromDirectory(directory);
+        List<SeriesMeta> metas = ImageSourceDispatcher.readAllMetadata(directory);
+        SourceAccess sourceAccess = new SourceAccess(directory, imageCache, useTifCache);
+        try {
+            List<WorkItem> items = buildFinalWorkItems(
+                    selection, binConfig, metas, sourceAccess);
+            RenderContext context = RenderContext.finalRender(binConfig, safeConfig);
+            return renderFinalItems(items, context, sourceAccess, parallelThreads);
+        } finally {
+            sourceAccess.close();
+        }
+    }
+
     public static File previewCacheDir(String directory) {
         return previewCacheDir(FlashProjectLayout.forDirectory(directory));
     }
@@ -137,6 +163,17 @@ public final class RepresentativePreviewRenderer {
                 config == null ? new RepresentativeFigureConfig() : config,
                 DEFAULT_THUMBNAIL_LONG_EDGE);
         return renderItem(item, context, SourceAccess.fixed(source));
+    }
+
+    static RenderedFinalSeries renderFinalSeriesForTests(BinConfig binConfig,
+                                                         RepresentativeFigureConfig config,
+                                                         RepresentativeSeries series,
+                                                         ImagePlus source)
+            throws Exception {
+        WorkItem item = workItemForSeries(series, null, binConfig, null);
+        RenderContext context = RenderContext.finalRender(binConfig,
+                config == null ? new RepresentativeFigureConfig() : config);
+        return renderFinalItem(item, context, SourceAccess.fixed(source));
     }
 
     private static List<PresentationTileRecord> readPresentationManifest(FlashProjectLayout layout) {
@@ -192,6 +229,45 @@ public final class RepresentativePreviewRenderer {
         }
     }
 
+    private static List<RenderedFinalSeries> renderFinalItems(List<WorkItem> items,
+                                                              final RenderContext context,
+                                                              final SourceAccess sourceAccess,
+                                                              int parallelThreads) throws Exception {
+        if (items == null || items.isEmpty()) {
+            return Collections.emptyList();
+        }
+        int threads = Math.max(1, Math.min(Math.max(1, parallelThreads), items.size()));
+        if (threads == 1) {
+            List<RenderedFinalSeries> out = new ArrayList<RenderedFinalSeries>();
+            for (WorkItem item : items) {
+                out.add(renderFinalItem(item, context, sourceAccess));
+            }
+            return out;
+        }
+
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        try {
+            List<Future<RenderedFinalSeries>> futures =
+                    new ArrayList<Future<RenderedFinalSeries>>();
+            for (final WorkItem item : items) {
+                futures.add(pool.submit(new Callable<RenderedFinalSeries>() {
+                    @Override
+                    public RenderedFinalSeries call() throws Exception {
+                        return renderFinalItem(item, context, sourceAccess);
+                    }
+                }));
+            }
+
+            List<RenderedFinalSeries> out = new ArrayList<RenderedFinalSeries>();
+            for (Future<RenderedFinalSeries> future : futures) {
+                out.add(future.get());
+            }
+            return out;
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
     private static RepresentativeSeries renderItem(WorkItem item,
                                                    RenderContext context,
                                                    SourceAccess sourceAccess)
@@ -205,13 +281,22 @@ public final class RepresentativePreviewRenderer {
 
         RenderedPreviews previews = item.presentationCoverage.covers()
                 ? renderFromPresentation(item, plan)
-                : renderFromSource(item, plan, context, sourceAccess);
+                : renderFromSource(item, plan.longEdge, context, sourceAccess);
         writePreviews(previews, plan);
         return buildSeries(item, plan, previews.channelImages, previews.mergeImage,
                 item.presentationCoverage.covers()
                         ? RepresentativeSeries.PreviewSource.PRESENTATION
                         : RepresentativeSeries.PreviewSource.GENERATED,
                 false);
+    }
+
+    private static RenderedFinalSeries renderFinalItem(WorkItem item,
+                                                       RenderContext context,
+                                                       SourceAccess sourceAccess)
+            throws Exception {
+        RenderedPreviews rendered = renderFromSource(item, context.longEdge,
+                context, sourceAccess);
+        return buildFinalSeries(item, rendered);
     }
 
     private static RepresentativeSeries tryReadCached(WorkItem item, RenderPlan plan)
@@ -262,6 +347,40 @@ public final class RepresentativePreviewRenderer {
                 cacheHit);
     }
 
+    private static RenderedFinalSeries buildFinalSeries(WorkItem item,
+                                                        RenderedPreviews rendered) {
+        List<RenderedFinalChannel> channels =
+                new ArrayList<RenderedFinalChannel>();
+        List<BufferedImage> images = rendered == null
+                ? Collections.<BufferedImage>emptyList()
+                : rendered.channelImages;
+        for (int i = 0; i < item.channels.size() && i < images.size(); i++) {
+            ChannelSpec spec = item.channels.get(i);
+            channels.add(new RenderedFinalChannel(
+                    spec.channelIndex,
+                    spec.channelName,
+                    spec.colorName,
+                    images.get(i)));
+        }
+        BufferedImage merge = rendered == null
+                ? new BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB)
+                : rendered.mergeImage;
+        return new RenderedFinalSeries(
+                item.id,
+                item.seriesIndex,
+                item.seriesNumber,
+                item.seriesName,
+                item.animal,
+                item.condition,
+                item.hemisphere,
+                item.region,
+                item.sourcePath,
+                channels,
+                merge,
+                rendered == null ? Double.NaN : rendered.pixelWidthUm,
+                rendered == null ? Double.NaN : rendered.pixelHeightUm);
+    }
+
     private static RenderedPreviews renderFromPresentation(WorkItem item, RenderPlan plan)
             throws IOException {
         List<BufferedImage> channelImages = new ArrayList<BufferedImage>();
@@ -286,7 +405,7 @@ public final class RepresentativePreviewRenderer {
     }
 
     private static RenderedPreviews renderFromSource(WorkItem item,
-                                                     RenderPlan plan,
+                                                     int longEdge,
                                                      RenderContext context,
                                                      SourceAccess sourceAccess)
             throws Exception {
@@ -301,6 +420,8 @@ public final class RepresentativePreviewRenderer {
         List<ImagePlus> projected = new ArrayList<ImagePlus>();
         try {
             working = applyConfiguredZSliceSubset(context.binConfig, item, source);
+            double pixelWidthUm = calibratedPixelWidthUm(working, true);
+            double pixelHeightUm = calibratedPixelWidthUm(working, false);
             split = ChannelSplitter.split(working);
             if (split == null || split.length == 0) {
                 throw new IOException("No channels found in " + item.seriesName);
@@ -311,16 +432,17 @@ public final class RepresentativePreviewRenderer {
             for (int i = 0; i < n; i++) {
                 ChannelSpec spec = item.channels.get(i);
                 ImagePlus mip = ZProjector.run(split[i], "max");
-                ImagePlus scaled = downscaleImagePlus(mip, plan.longEdge);
+                ImagePlus scaled = downscaleImagePlus(mip, longEdge);
                 closeQuietly(mip);
 
                 DisplayRange range = context.rangeResolver.resolve(item, spec);
-                applyDisplayRange(scaled, range);
+                applyDisplayRange(scaled, range, context.allowAutoEnhanceFallback,
+                        item.seriesName, spec.channelName);
                 projected.add(scaled);
                 channelImages.add(renderPseudoColor(scaled, spec.colorName));
             }
             BufferedImage merge = mergePseudoColorImages(channelImages);
-            return new RenderedPreviews(channelImages, merge);
+            return new RenderedPreviews(channelImages, merge, pixelWidthUm, pixelHeightUm);
         } finally {
             for (ImagePlus imp : projected) {
                 closeQuietly(imp);
@@ -340,7 +462,7 @@ public final class RepresentativePreviewRenderer {
             return source;
         }
         return ZSliceOps.applyConfiguredRange(source, cfg, item.seriesIndex,
-                "Representative Figure preview");
+                "Representative Figure");
     }
 
     private static ImagePlus downscaleImagePlus(ImagePlus source, int longEdge) {
@@ -357,11 +479,19 @@ public final class RepresentativePreviewRenderer {
         return out;
     }
 
-    private static void applyDisplayRange(ImagePlus imp, DisplayRange range) {
+    private static void applyDisplayRange(ImagePlus imp,
+                                          DisplayRange range,
+                                          boolean allowAutoEnhance,
+                                          String seriesName,
+                                          String channelName) throws IOException {
         if (imp == null) return;
         if (range != null && range.isValid()) {
             imp.setDisplayRange(range.min, range.max);
             return;
+        }
+        if (!allowAutoEnhance) {
+            throw new IOException("No locked display range is available for "
+                    + safe(channelName) + " in " + safe(seriesName) + ".");
         }
         new ContrastEnhancer().stretchHistogram(imp, AUTO_SATURATION);
     }
@@ -489,6 +619,35 @@ public final class RepresentativePreviewRenderer {
         return items;
     }
 
+    private static List<WorkItem> buildFinalWorkItems(RepresentativeSelection selection,
+                                                      BinConfig cfg,
+                                                      List<SeriesMeta> metas,
+                                                      SourceAccess sourceAccess) {
+        Map<Integer, SeriesMeta> metasByIndex =
+                new LinkedHashMap<Integer, SeriesMeta>();
+        if (metas != null) {
+            for (SeriesMeta meta : metas) {
+                if (meta != null) metasByIndex.put(Integer.valueOf(meta.index), meta);
+            }
+        }
+
+        List<WorkItem> items = new ArrayList<WorkItem>();
+        List<RepresentativeSeries> selected = selection == null
+                ? Collections.<RepresentativeSeries>emptyList()
+                : selection.series();
+        for (int i = 0; i < selected.size(); i++) {
+            RepresentativeSeries series = selected.get(i);
+            if (series == null) continue;
+            SeriesMeta meta = metasByIndex.get(Integer.valueOf(series.seriesIndex()));
+            File sourcePath = sourceAccess == null
+                    ? series.sourcePath()
+                    : sourceAccess.sourcePath(series.seriesIndex());
+            if (sourcePath == null) sourcePath = series.sourcePath();
+            items.add(workItemForSeries(series, meta, cfg, sourcePath));
+        }
+        return items;
+    }
+
     private static WorkItem workItemFor(String directory,
                                         SeriesMeta meta,
                                         QcSelectionCandidate candidate,
@@ -521,6 +680,47 @@ public final class RepresentativePreviewRenderer {
                 channels,
                 coverage,
                 sourceFingerprint(sourcePath, meta));
+    }
+
+    private static WorkItem workItemForSeries(RepresentativeSeries series,
+                                              SeriesMeta meta,
+                                              BinConfig cfg,
+                                              File sourcePath) {
+        if (series == null) {
+            throw new IllegalArgumentException("Representative series is required.");
+        }
+        SeriesMeta effectiveMeta = meta;
+        if (effectiveMeta == null) {
+            int channelCount = Math.max(1, series.channelThumbnails().size());
+            int width = series.mergeThumbnail() == null ? 1 : series.mergeThumbnail().getWidth();
+            int height = series.mergeThumbnail() == null ? 1 : series.mergeThumbnail().getHeight();
+            effectiveMeta = new SeriesMeta(
+                    series.seriesIndex(),
+                    series.seriesName(),
+                    width,
+                    height,
+                    1,
+                    channelCount,
+                    Double.NaN,
+                    Double.NaN,
+                    Double.NaN,
+                    "");
+        }
+        List<ChannelSpec> channels = channelSpecs(cfg, effectiveMeta, null);
+        File effectiveSourcePath = sourcePath == null ? series.sourcePath() : sourcePath;
+        return new WorkItem(
+                series.id(),
+                series.seriesIndex(),
+                series.seriesNumber(),
+                series.seriesName(),
+                series.animal(),
+                RepresentativeSelection.conditionLabel(series.condition()),
+                series.hemisphere(),
+                series.region(),
+                effectiveSourcePath,
+                channels,
+                ManifestCoverage.empty(),
+                sourceFingerprint(effectiveSourcePath, effectiveMeta));
     }
 
     private static List<ChannelSpec> channelSpecs(BinConfig cfg,
@@ -690,6 +890,36 @@ public final class RepresentativePreviewRenderer {
         image.flush();
     }
 
+    private static double calibratedPixelWidthUm(ImagePlus imp, boolean xAxis) {
+        if (imp == null) return Double.NaN;
+        Calibration calibration = imp.getCalibration();
+        if (calibration == null) return Double.NaN;
+        double value = xAxis ? calibration.pixelWidth : calibration.pixelHeight;
+        if (!Double.isFinite(value) || value <= 0) return Double.NaN;
+        double multiplier = calibrationUnitToMicronMultiplier(calibration.getUnit());
+        if (!Double.isFinite(multiplier) || multiplier <= 0) return Double.NaN;
+        return value * multiplier;
+    }
+
+    private static double calibrationUnitToMicronMultiplier(String unit) {
+        String normalized = unit == null ? "" : unit.trim().toLowerCase(Locale.ROOT);
+        if (normalized.isEmpty() || "pixel".equals(normalized) || "pixels".equals(normalized)) {
+            return Double.NaN;
+        }
+        if ("um".equals(normalized) || "\u00b5m".equals(normalized) || "\u03bcm".equals(normalized)
+                || "micron".equals(normalized) || "microns".equals(normalized)
+                || "micrometer".equals(normalized) || "micrometers".equals(normalized)) {
+            return 1.0;
+        }
+        if ("nm".equals(normalized) || "nanometer".equals(normalized) || "nanometers".equals(normalized)) {
+            return 0.001;
+        }
+        if ("mm".equals(normalized) || "millimeter".equals(normalized) || "millimeters".equals(normalized)) {
+            return 1000.0;
+        }
+        return Double.NaN;
+    }
+
     private static String valueAt(List<String> values, int index, String fallback) {
         if (values == null || index < 0 || index >= values.size()) return fallback;
         String value = values.get(index);
@@ -732,17 +962,37 @@ public final class RepresentativePreviewRenderer {
         final BinConfig binConfig;
         final RepresentativeFigureConfig config;
         final int longEdge;
+        final boolean includeQuickFallback;
+        final boolean allowAutoEnhanceFallback;
         final DisplayRangeResolver rangeResolver;
 
         RenderContext(File cacheDir,
                       BinConfig binConfig,
                       RepresentativeFigureConfig config,
                       int longEdge) {
+            this(cacheDir, binConfig, config, longEdge, true, true);
+        }
+
+        RenderContext(File cacheDir,
+                      BinConfig binConfig,
+                      RepresentativeFigureConfig config,
+                      int longEdge,
+                      boolean includeQuickFallback,
+                      boolean allowAutoEnhanceFallback) {
             this.cacheDir = cacheDir;
             this.binConfig = binConfig == null ? new BinConfig() : binConfig;
             this.config = config == null ? new RepresentativeFigureConfig() : config;
             this.longEdge = Math.max(1, longEdge);
-            this.rangeResolver = new DisplayRangeResolver(this.binConfig, this.config);
+            this.includeQuickFallback = includeQuickFallback;
+            this.allowAutoEnhanceFallback = allowAutoEnhanceFallback;
+            this.rangeResolver = new DisplayRangeResolver(
+                    this.binConfig, this.config, includeQuickFallback);
+        }
+
+        static RenderContext finalRender(BinConfig binConfig,
+                                         RepresentativeFigureConfig config) {
+            return new RenderContext(null, binConfig, config,
+                    Integer.MAX_VALUE, false, false);
         }
     }
 
@@ -945,28 +1195,176 @@ public final class RepresentativePreviewRenderer {
     private static final class RenderedPreviews {
         final List<BufferedImage> channelImages;
         final BufferedImage mergeImage;
+        final double pixelWidthUm;
+        final double pixelHeightUm;
 
         RenderedPreviews(List<BufferedImage> channelImages, BufferedImage mergeImage) {
+            this(channelImages, mergeImage, Double.NaN, Double.NaN);
+        }
+
+        RenderedPreviews(List<BufferedImage> channelImages,
+                         BufferedImage mergeImage,
+                         double pixelWidthUm,
+                         double pixelHeightUm) {
             this.channelImages = channelImages == null
                     ? Collections.<BufferedImage>emptyList()
                     : channelImages;
             this.mergeImage = mergeImage == null
                     ? new BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB)
                     : mergeImage;
+            this.pixelWidthUm = pixelWidthUm;
+            this.pixelHeightUm = pixelHeightUm;
+        }
+    }
+
+    public static final class RenderedFinalSeries {
+        private final String id;
+        private final int seriesIndex;
+        private final int seriesNumber;
+        private final String seriesName;
+        private final String animal;
+        private final String condition;
+        private final String hemisphere;
+        private final String region;
+        private final File sourcePath;
+        private final List<RenderedFinalChannel> channels;
+        private final BufferedImage mergeImage;
+        private final double pixelWidthUm;
+        private final double pixelHeightUm;
+
+        RenderedFinalSeries(String id,
+                            int seriesIndex,
+                            int seriesNumber,
+                            String seriesName,
+                            String animal,
+                            String condition,
+                            String hemisphere,
+                            String region,
+                            File sourcePath,
+                            List<RenderedFinalChannel> channels,
+                            BufferedImage mergeImage,
+                            double pixelWidthUm,
+                            double pixelHeightUm) {
+            this.id = safe(id);
+            this.seriesIndex = seriesIndex;
+            this.seriesNumber = seriesNumber;
+            this.seriesName = safe(seriesName);
+            this.animal = safe(animal);
+            this.condition = RepresentativeSelection.conditionLabel(condition);
+            this.hemisphere = safe(hemisphere);
+            this.region = safe(region);
+            this.sourcePath = sourcePath;
+            this.channels = channels == null
+                    ? Collections.<RenderedFinalChannel>emptyList()
+                    : Collections.unmodifiableList(new ArrayList<RenderedFinalChannel>(channels));
+            this.mergeImage = mergeImage == null
+                    ? new BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB)
+                    : mergeImage;
+            this.pixelWidthUm = pixelWidthUm;
+            this.pixelHeightUm = pixelHeightUm;
+        }
+
+        public String id() {
+            return id;
+        }
+
+        public int seriesIndex() {
+            return seriesIndex;
+        }
+
+        public int seriesNumber() {
+            return seriesNumber;
+        }
+
+        public String seriesName() {
+            return seriesName;
+        }
+
+        public String animal() {
+            return animal;
+        }
+
+        public String condition() {
+            return condition;
+        }
+
+        public String hemisphere() {
+            return hemisphere;
+        }
+
+        public String region() {
+            return region;
+        }
+
+        public File sourcePath() {
+            return sourcePath;
+        }
+
+        public List<RenderedFinalChannel> channels() {
+            return channels;
+        }
+
+        public BufferedImage mergeImage() {
+            return mergeImage;
+        }
+
+        public double pixelWidthUm() {
+            return pixelWidthUm;
+        }
+
+        public double pixelHeightUm() {
+            return pixelHeightUm;
+        }
+    }
+
+    public static final class RenderedFinalChannel {
+        private final int channelIndex;
+        private final String channelName;
+        private final String colorName;
+        private final BufferedImage image;
+
+        RenderedFinalChannel(int channelIndex,
+                             String channelName,
+                             String colorName,
+                             BufferedImage image) {
+            this.channelIndex = channelIndex;
+            this.channelName = safe(channelName);
+            this.colorName = safe(colorName);
+            this.image = image;
+        }
+
+        public int channelIndex() {
+            return channelIndex;
+        }
+
+        public String channelName() {
+            return channelName;
+        }
+
+        public String colorName() {
+            return colorName;
+        }
+
+        public BufferedImage image() {
+            return image;
         }
     }
 
     private static final class DisplayRangeResolver {
         private final BinConfig cfg;
         private final RepresentativeFigureConfig config;
+        private final boolean includeQuickFallback;
         private final Map<String, DisplayRange> quickRanges =
                 new LinkedHashMap<String, DisplayRange>();
         private final Map<String, DisplayRange> quickOverall =
                 new LinkedHashMap<String, DisplayRange>();
 
-        DisplayRangeResolver(BinConfig cfg, RepresentativeFigureConfig config) {
+        DisplayRangeResolver(BinConfig cfg,
+                             RepresentativeFigureConfig config,
+                             boolean includeQuickFallback) {
             this.cfg = cfg == null ? new BinConfig() : cfg;
             this.config = config == null ? new RepresentativeFigureConfig() : config;
+            this.includeQuickFallback = includeQuickFallback;
             buildQuickRanges();
         }
 
@@ -977,8 +1375,10 @@ public final class RepresentativePreviewRenderer {
             DisplayRange setup = parseRange(valueAt(cfg.channelMinMax, spec.channelIndex, ""));
             if (setup != null) return setup.withSource("setup");
 
-            DisplayRange quick = quickRange(item, spec);
-            if (quick != null) return quick;
+            if (includeQuickFallback) {
+                DisplayRange quick = quickRange(item, spec);
+                if (quick != null) return quick;
+            }
 
             return null;
         }
@@ -1009,6 +1409,7 @@ public final class RepresentativePreviewRenderer {
 
         private void buildQuickRanges() {
             if (config.statistic != RepresentativeStatistic.QUICK
+                    || !includeQuickFallback
                     || config.statTable == null
                     || config.statTable.isEmpty()) {
                 return;

@@ -7,6 +7,7 @@ import flash.pipeline.cli.CLIConfig;
 import flash.pipeline.io.ImageCache;
 import flash.pipeline.representative.ConditionLayoutChooser;
 import flash.pipeline.representative.RepresentativeFigureConfig;
+import flash.pipeline.representative.RepresentativeFigureWriter;
 import flash.pipeline.representative.RepresentativePreviewRenderer;
 import flash.pipeline.representative.RepresentativeRangeStage;
 import flash.pipeline.representative.RepresentativeSelection;
@@ -22,6 +23,7 @@ import ij.IJ;
 
 import javax.swing.JComboBox;
 import java.awt.GraphicsEnvironment;
+import java.io.File;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
@@ -125,8 +127,12 @@ public class RepresentativeFigureAnalysis implements Analysis {
                     + (config.layout.rowCount() == 1 ? "" : "s")
                     + " and " + config.layout.conditionCount() + " condition"
                     + (config.layout.conditionCount() == 1 ? "" : "s") + ".");
-            // TODO(representative-image-figure stage 09): render the PNG using
-            // config.layout and config.tileConfig.
+            File output = new RepresentativeFigureWriter().write(
+                    directory, config, imageCache, parallelThreads, useTifCache);
+            IJ.log("[Representative Figure] Representative figure written: "
+                    + output.getAbsolutePath());
+            // TODO(representative-image-figure stage 10): persist the selected series,
+            // display ranges, layout, tile config, and output path in project/run records.
         } catch (Exception e) {
             IJ.log("[Representative Figure] Could not prepare representative selection: "
                     + e.getMessage());

@@ -23,6 +23,7 @@ public final class FlashProjectLayout {
     public static final String LINE_DISTANCE_DIR = "Line Distance";
     public static final String SPECTRAL_DECONTAMINATION_DIR = "Spectral Decontamination";
     public static final String PRESENTATION_IMAGES_DIR = "Presentation Images";
+    public static final String REPRESENTATIVE_FIGURES_DIR = "Representative Figures";
     public static final String IMAGES_DIR = "Images";
     public static final String ANNOTATED_IMAGES_DIR = "Annotated Images";
     public static final String TILES_DIR = "Tiles";
@@ -131,6 +132,10 @@ public final class FlashProjectLayout {
 
     public File presentationImagesRoot() {
         return new File(resultsRoot(), PRESENTATION_IMAGES_DIR);
+    }
+
+    public File representativeFiguresDir() {
+        return new File(presentationImagesRoot(), REPRESENTATIVE_FIGURES_DIR);
     }
 
     public File presentationImagesDir() {
