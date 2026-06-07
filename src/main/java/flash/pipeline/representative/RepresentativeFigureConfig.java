@@ -11,8 +11,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Mutable configuration holder for the representative image figure workflow.
- * Later representative-image-figure stages add concrete fields here.
+ * Mutable, serializable state for the representative image figure workflow.
  */
 public class RepresentativeFigureConfig {
     public static final String PROJECT_EXTRA_KEY = "representativeFigure";

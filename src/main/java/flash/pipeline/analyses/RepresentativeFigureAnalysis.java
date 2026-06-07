@@ -45,16 +45,10 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
     private final RepresentativeFigureConfig config = new RepresentativeFigureConfig();
 
     private boolean headless = true;
-    private boolean verboseLogging = false;
-    private boolean skipExisting = false;
     private int parallelThreads = 1;
     private ImageCache imageCache = null;
-    private int loaderThreads = 1;
-    private int loaderPercent = 50;
     private boolean useTifCache = false;
-    private QualityReport qualityReport = null;
     private boolean suppressDialogs = false;
-    private CLIConfig cliConfig = null;
     private AnalysisRunContext runRecordContext = null;
 
     @Override
@@ -174,12 +168,10 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
 
     @Override
     public void setVerboseLogging(boolean verbose) {
-        this.verboseLogging = verbose;
     }
 
     @Override
     public void setSkipExisting(boolean skip) {
-        this.skipExisting = skip;
     }
 
     @Override
@@ -194,12 +186,10 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
 
     @Override
     public void setLoaderThreads(int threads) {
-        this.loaderThreads = Math.max(1, threads);
     }
 
     @Override
     public void setLoaderPercent(int percent) {
-        this.loaderPercent = Math.max(0, Math.min(percent, 100));
     }
 
     @Override
@@ -209,7 +199,6 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
 
     @Override
     public void setQualityReport(QualityReport report) {
-        this.qualityReport = report;
     }
 
     @Override
@@ -219,7 +208,6 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
 
     @Override
     public void setCliConfig(CLIConfig config) {
-        this.cliConfig = config;
     }
 
     @Override

@@ -962,7 +962,6 @@ public final class RepresentativePreviewRenderer {
         final BinConfig binConfig;
         final RepresentativeFigureConfig config;
         final int longEdge;
-        final boolean includeQuickFallback;
         final boolean allowAutoEnhanceFallback;
         final DisplayRangeResolver rangeResolver;
 
@@ -983,7 +982,6 @@ public final class RepresentativePreviewRenderer {
             this.binConfig = binConfig == null ? new BinConfig() : binConfig;
             this.config = config == null ? new RepresentativeFigureConfig() : config;
             this.longEdge = Math.max(1, longEdge);
-            this.includeQuickFallback = includeQuickFallback;
             this.allowAutoEnhanceFallback = allowAutoEnhanceFallback;
             this.rangeResolver = new DisplayRangeResolver(
                     this.binConfig, this.config, includeQuickFallback);
@@ -998,13 +996,11 @@ public final class RepresentativePreviewRenderer {
 
     private static final class RenderPlan {
         final int longEdge;
-        final String cacheKey;
         final List<File> channelFiles;
         final File mergeFile;
 
-        RenderPlan(int longEdge, String cacheKey, List<File> channelFiles, File mergeFile) {
+        RenderPlan(int longEdge, List<File> channelFiles, File mergeFile) {
             this.longEdge = longEdge;
-            this.cacheKey = cacheKey;
             this.channelFiles = channelFiles;
             this.mergeFile = mergeFile;
         }
@@ -1023,7 +1019,7 @@ public final class RepresentativePreviewRenderer {
                 channelFiles.add(new File(context.cacheDir, name));
             }
             File merge = new File(context.cacheDir, prefix + "_" + MERGE_NAME + ".png");
-            return new RenderPlan(context.longEdge, baseKey, channelFiles, merge);
+            return new RenderPlan(context.longEdge, channelFiles, merge);
         }
 
         boolean allFilesExist() {
