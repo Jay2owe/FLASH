@@ -5250,10 +5250,24 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         }
         for (int i = 0; i < orderedIndexes.size(); i++) {
             int seriesIndex = orderedIndexes.get(i);
+            long started = System.currentTimeMillis();
+            IJ.log("Set Up QC opening image " + (i + 1) + "/" + orderedIndexes.size()
+                    + ": Series " + (seriesIndex + 1));
             ImagePlus imp = supplier.openSeries(seriesIndex);
-            if (imp == null) continue;
+            if (imp == null) {
+                IJ.log("Set Up QC warning: Series " + (seriesIndex + 1)
+                        + " returned no image.");
+                continue;
+            }
             String warning = qcZSliceWarning(cfg, seriesIndex, imp);
+            if (hasText(warning)) {
+                IJ.log("Set Up QC " + warning);
+            }
             ImagePlus finalImp = applyQcZSliceSubset(cfg, seriesIndex, imp);
+            if (finalImp != imp) {
+                IJ.log("Set Up QC applied saved z-slice subset to Series "
+                        + (seriesIndex + 1) + ": " + imageShape(finalImp));
+            }
             QcMinMaxPerConditionSelector.SelectedSeries selected =
                     minMaxSelectionBySeries == null
                             ? null
@@ -5274,6 +5288,10 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                     warning,
                     orderByChannel,
                     minMaxReviewLabelsByChannel(selectedByChannel)));
+            IJ.log("Set Up QC image ready " + (i + 1) + "/" + orderedIndexes.size()
+                    + ": Series " + (seriesIndex + 1) + " "
+                    + imageShape(finalImp) + " in "
+                    + (System.currentTimeMillis() - started) + " ms.");
         }
         return selections;
     }
@@ -5375,6 +5393,31 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         return ImageNameParser.buildMultiSeriesDisplayLabel(
                 lifFile == null ? "" : lifFile.getName(),
                 seriesName);
+    }
+
+    private static String summarizeSeriesIndexes(List<Integer> seriesIndexes) {
+        if (seriesIndexes == null || seriesIndexes.isEmpty()) {
+            return "none";
+        }
+        StringBuilder sb = new StringBuilder();
+        int limit = Math.min(seriesIndexes.size(), 12);
+        for (int i = 0; i < limit; i++) {
+            if (i > 0) sb.append(", ");
+            Integer index = seriesIndexes.get(i);
+            sb.append("Series ").append(index == null ? "?" : String.valueOf(index.intValue() + 1));
+        }
+        if (seriesIndexes.size() > limit) {
+            sb.append(", ... +").append(seriesIndexes.size() - limit).append(" more");
+        }
+        return sb.toString();
+    }
+
+    private static String imageShape(ImagePlus image) {
+        if (image == null) return "(no image)";
+        return image.getWidth() + "x" + image.getHeight()
+                + " C" + Math.max(1, image.getNChannels())
+                + " Z" + Math.max(1, image.getNSlices())
+                + " T" + Math.max(1, image.getNFrames());
     }
 
     private Map<Integer, QcMinMaxPerConditionSelector.SelectedSeries> selectedSeriesByIndex(
@@ -7434,17 +7477,30 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                                                    File binFolder, boolean[][] customSettings,
                                                    boolean resumeConfiguredSteps) {
         List<InteractiveQcStep> steps = buildInteractiveQcSteps(cfg, customSettings);
+        int plannedStepCount = steps.size();
+        IJ.log("Set Up QC workflow: " + plannedStepCount + " stage"
+                + (plannedStepCount == 1 ? "" : "s")
+                + " planned across " + (images == null ? 0 : images.size())
+                + " selected image" + ((images == null || images.size() == 1) ? "" : "s") + ".");
         if (resumeConfiguredSteps) {
             steps = remainingInteractiveQcSteps(steps,
                     ChannelConfigIO.read(channelConfigSettingsDir(binFolder)), cfg);
+            IJ.log("Set Up QC workflow resume: " + steps.size() + " of "
+                    + plannedStepCount + " stage"
+                    + (plannedStepCount == 1 ? "" : "s") + " still need setup.");
         }
         int stepIndex = 0;
         while (stepIndex < steps.size()) {
             InteractiveQcStep step = steps.get(stepIndex);
             List<String> stagePath = interactiveStagePathForChannel(steps, step.channelIndex);
             int activeStagePathIndex = interactiveStagePathIndex(steps, step);
+            String stepLabel = interactiveQcStepLogLabel(cfg, step);
+            IJ.log("Set Up QC stage " + (stepIndex + 1) + "/" + steps.size()
+                    + " starting: " + stepLabel);
             String result = runInteractiveQcStep(
                     images, cfg, binFolder, step, stagePath, activeStagePathIndex);
+            IJ.log("Set Up QC stage " + (stepIndex + 1) + "/" + steps.size()
+                    + " result: " + stepLabel + " -> " + result);
             if ("cancel".equals(result)) {
                 return "cancel";
             }
@@ -7455,9 +7511,14 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                 stepIndex--;
                 continue;
             }
+            IJ.log("Set Up QC stage " + (stepIndex + 1) + "/" + steps.size()
+                    + " saving: " + stepLabel);
             persistInteractiveQcStep(binFolder, cfg, customSettings, step);
+            IJ.log("Set Up QC stage " + (stepIndex + 1) + "/" + steps.size()
+                    + " saved: " + stepLabel);
             stepIndex++;
         }
+        IJ.log("Set Up QC workflow complete.");
         return "done";
     }
 
@@ -7793,6 +7854,31 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         }
     }
 
+    private static String interactiveQcStepLogLabel(BinUserConfig cfg,
+                                                    InteractiveQcStep step) {
+        if (step == null) return "unknown stage";
+        StringBuilder sb = new StringBuilder();
+        sb.append(interactiveStageLabel(step.stage));
+        sb.append(" | ").append(qcChannelLabel(cfg, step.channelIndex));
+        if (step.includeAiChannelThreshold) {
+            sb.append(" | includes channel threshold");
+        }
+        return sb.toString();
+    }
+
+    private static String qcChannelLabel(BinUserConfig cfg, int channelIndex) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("C").append(channelIndex + 1);
+        if (cfg != null && cfg.names != null
+                && channelIndex >= 0 && channelIndex < cfg.names.size()) {
+            String name = safe(cfg.names.get(channelIndex)).trim();
+            if (!name.isEmpty()) {
+                sb.append(" (").append(name).append(")");
+            }
+        }
+        return sb.toString();
+    }
+
     private enum InteractiveQcStage {
         FILTER_PARAMETERS,
         DISPLAY_RANGE,
@@ -8066,6 +8152,10 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         if (filteredSource == null) return null;
         ImagePlus input = ImageOps.duplicateThreadSafe(filteredSource);
         input.setTitle(inputTitle);
+        long started = System.currentTimeMillis();
+        IJ.log("Set Up QC object preview running: " + inputTitle
+                + " | threshold=" + threshold
+                + " | size=" + minSize + "-" + (maxSize == Integer.MAX_VALUE ? "Infinity" : String.valueOf(maxSize)));
         try {
             ObjectsCounter3DWrapper wrapper = new ObjectsCounter3DWrapper();
             ObjectsCounter3DWrapper.Result result;
@@ -8102,6 +8192,9 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
             if (map != null) {
                 map.setTitle(mapTitle);
             }
+            IJ.log("Set Up QC object preview complete: " + inputTitle
+                    + " | objects=" + countObjectsInPreview(result)
+                    + " | " + (System.currentTimeMillis() - started) + " ms.");
             return result;
         } finally {
             closeImageQuietly(input);
@@ -8978,10 +9071,16 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
             if (source == null) return null;
         }
         if (hasText(filterContent) && !cacheHit) {
+            long started = System.currentTimeMillis();
+            IJ.log("Set Up QC filter applying: " + chLabel
+                    + " | " + (context == null ? "" : context.getCurrentImageDisplayName())
+                    + " | preset " + safe(valueAt(cfg.filterPresets, channelIndex, "")));
             FilterExecutor.runThreadSafe(source, filterContent);
             if (context != null) {
                 context.cacheFilteredStackForCurrentImage(channelIndex, filterContent, source);
             }
+            IJ.log("Set Up QC filter complete: " + chLabel + " in "
+                    + (System.currentTimeMillis() - started) + " ms.");
         }
         source.setTitle(titlePrefix + " | " + chLabel + " | "
                 + (context == null ? "" : context.getCurrentImageDisplayName()));
