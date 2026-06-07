@@ -4,7 +4,10 @@ import flash.pipeline.bin.BinField;
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinConfigIO;
 import flash.pipeline.cli.CLIConfig;
+import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.ImageCache;
+import flash.pipeline.project.ProjectFile;
+import flash.pipeline.project.ProjectFileIO;
 import flash.pipeline.representative.ConditionLayoutChooser;
 import flash.pipeline.representative.RepresentativeFigureConfig;
 import flash.pipeline.representative.RepresentativeFigureWriter;
@@ -17,13 +20,17 @@ import flash.pipeline.representative.RepresentativeStatTable;
 import flash.pipeline.representative.RepresentativeStatistic;
 import flash.pipeline.representative.RepresentativeSeries;
 import flash.pipeline.report.QualityReport;
+import flash.pipeline.results.RepresentativeFigureDetailsWriter;
+import flash.pipeline.runrecord.AnalysisRunContext;
 import flash.pipeline.runrecord.LoadedRunParameters;
+import flash.pipeline.runrecord.RunRecordAware;
 import flash.pipeline.ui.PipelineDialog;
 import ij.IJ;
 
 import javax.swing.JComboBox;
 import java.awt.GraphicsEnvironment;
 import java.io.File;
+import java.io.IOException;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
@@ -34,7 +41,7 @@ import java.util.Set;
 /**
  * Scaffold analysis for building a representative image figure.
  */
-public class RepresentativeFigureAnalysis implements Analysis {
+public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
     private final RepresentativeFigureConfig config = new RepresentativeFigureConfig();
 
     private boolean headless = true;
@@ -48,9 +55,12 @@ public class RepresentativeFigureAnalysis implements Analysis {
     private QualityReport qualityReport = null;
     private boolean suppressDialogs = false;
     private CLIConfig cliConfig = null;
+    private AnalysisRunContext runRecordContext = null;
 
     @Override
     public void execute(String directory) {
+        loadRememberedProjectParameters(directory);
+
         if (headless || suppressDialogs || GraphicsEnvironment.isHeadless()) {
             config.statistic = RepresentativeStatistic.NONE;
             config.existingResult = null;
@@ -131,8 +141,7 @@ public class RepresentativeFigureAnalysis implements Analysis {
                     directory, config, imageCache, parallelThreads, useTifCache);
             IJ.log("[Representative Figure] Representative figure written: "
                     + output.getAbsolutePath());
-            // TODO(representative-image-figure stage 10): persist the selected series,
-            // display ranges, layout, tile config, and output path in project/run records.
+            persistCompletedRun(directory, setupConfig, output);
         } catch (Exception e) {
             IJ.log("[Representative Figure] Could not prepare representative selection: "
                     + e.getMessage());
@@ -211,16 +220,145 @@ public class RepresentativeFigureAnalysis implements Analysis {
         this.cliConfig = config;
     }
 
+    @Override
+    public void setRunRecordContext(AnalysisRunContext context) {
+        this.runRecordContext = context;
+    }
+
     public LoadedRunParameters.Result applyLoadedParameters(Map<String, Object> parameters) {
-        // TODO(representative-image-figure stage 10): restore persisted figure parameters into config.
+        Map<String, Object> block = representativeFigureBlock(parameters);
+        if (!block.isEmpty()) {
+            config.applyMap(block);
+        }
         LoadedRunParameters.Result result = LoadedRunParameters.resultForKnownKeys(
-                parameters, Collections.<String>emptySet());
+                parameters, Collections.singleton(RepresentativeFigureConfig.PROJECT_EXTRA_KEY));
         LoadedRunParameters.rememberLastResult(result);
         return result;
     }
 
     RepresentativeFigureConfig configForTests() {
         return config;
+    }
+
+    void persistCompletedRun(String directory, BinConfig setupConfig, File output) throws Exception {
+        Map<String, Object> representative = config.toMap();
+        representative.put("lastOutputPng", output == null ? "" : output.getAbsolutePath());
+        Map<String, Object> parameters = new LinkedHashMap<String, Object>();
+        parameters.put(RepresentativeFigureConfig.PROJECT_EXTRA_KEY, representative);
+
+        File projectJson = writeProjectExtras(directory, representative);
+        File details = RepresentativeFigureDetailsWriter.write(
+                new File(directory), config, setupConfig, output);
+
+        if (runRecordContext != null) {
+            recordSelectedInputs();
+            runRecordContext.recordParameters(parameters);
+            if (output != null) {
+                runRecordContext.recordOutput(output, "png");
+            }
+            if (details != null) {
+                runRecordContext.recordOutput(details, "txt");
+            }
+            if (projectJson != null) {
+                runRecordContext.info("Representative figure settings saved to "
+                        + projectJson.getAbsolutePath());
+            }
+            if (output != null) {
+                runRecordContext.info("Representative figure written to "
+                        + output.getAbsolutePath());
+            }
+        }
+    }
+
+    private void loadRememberedProjectParameters(String directory) {
+        if (directory == null || directory.trim().isEmpty()) {
+            return;
+        }
+        try {
+            ProjectFile project = ProjectFileIO.read(
+                    FlashProjectLayout.forDirectory(directory).configurationWriteDir());
+            if (project != null && project.extras != null
+                    && project.extras.containsKey(RepresentativeFigureConfig.PROJECT_EXTRA_KEY)) {
+                applyLoadedParameters(project.extras);
+            }
+        } catch (RuntimeException e) {
+            IJ.log("[Representative Figure] Could not load remembered figure settings: "
+                    + e.getMessage());
+        }
+    }
+
+    private File writeProjectExtras(String directory,
+                                    Map<String, Object> representative) throws IOException {
+        FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
+        File settingsDir = layout.configurationWriteDir();
+        boolean existingFile = ProjectFileIO.exists(settingsDir);
+        ProjectFile project = ProjectFileIO.read(settingsDir);
+        if (project == null && existingFile) {
+            throw new IOException("Cannot preserve existing project.json; file could not be read.");
+        }
+        if (project == null) {
+            project = new ProjectFile();
+            project.name = layout.projectRoot().getName();
+            project.outputRoot = layout.projectRoot().getAbsolutePath();
+        }
+        project.writerId = "FLASH";
+        project.writtenAtMillis = System.currentTimeMillis();
+        if (project.extras == null) {
+            project.extras = new LinkedHashMap<String, Object>();
+        }
+        project.extras.put(RepresentativeFigureConfig.PROJECT_EXTRA_KEY, representative);
+        ProjectFileIO.write(settingsDir, project);
+        return new File(settingsDir, ProjectFileIO.FILE_NAME);
+    }
+
+    private void recordSelectedInputs() {
+        if (runRecordContext == null || config.selection == null) {
+            return;
+        }
+        for (RepresentativeSeries series : config.selection.series()) {
+            if (series == null) {
+                continue;
+            }
+            ProjectFile.Item item = new ProjectFile.Item();
+            item.animalId = series.animal();
+            item.hemisphere = series.hemisphere();
+            item.region = series.region();
+            item.condition = series.condition();
+            AnalysisRunContext.InputHandle input =
+                    runRecordContext.recordInputStart(
+                            series.sourcePath(), series.seriesIndex(), item);
+            runRecordContext.recordInputEnd(input, "processed", 0L);
+        }
+    }
+
+    private static Map<String, Object> representativeFigureBlock(
+            Map<String, Object> parameters) {
+        if (parameters == null || parameters.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        Object block = parameters.get(RepresentativeFigureConfig.PROJECT_EXTRA_KEY);
+        if (block instanceof Map<?, ?>) {
+            return stringObjectMap(block);
+        }
+        if (parameters.containsKey("lockedSeries")
+                || parameters.containsKey("conditionNames")
+                || parameters.containsKey("customDisplayRanges")) {
+            return stringObjectMap(parameters);
+        }
+        return Collections.emptyMap();
+    }
+
+    private static Map<String, Object> stringObjectMap(Object value) {
+        LinkedHashMap<String, Object> out = new LinkedHashMap<String, Object>();
+        if (!(value instanceof Map<?, ?>)) {
+            return out;
+        }
+        for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
+            if (entry.getKey() != null) {
+                out.put(String.valueOf(entry.getKey()), entry.getValue());
+            }
+        }
+        return out;
     }
 
     private StatisticChoice showStatisticChooser(String directory) {
@@ -239,6 +377,7 @@ public class RepresentativeFigureAnalysis implements Analysis {
                 existingByLabel.put(option.label, option);
             }
         }
+        String defaultExistingLabel = defaultExistingResultLabel(existingLabels, existingOptions);
 
         PipelineDialog dialog = new PipelineDialog(
                 "Representative Image Figure - Statistic", PipelineDialog.Phase.EXPORT);
@@ -248,7 +387,7 @@ public class RepresentativeFigureAnalysis implements Analysis {
                 RepresentativeStatistic.labels(),
                 config.statistic == null ? RepresentativeStatistic.QUICK.label() : config.statistic.label());
         JComboBox<String> existingChoice = dialog.addChoice(
-                "Existing result column", existingLabels, existingLabels[0]);
+                "Existing result column", existingLabels, defaultExistingLabel);
         existingChoice.setEnabled(!existingOptions.isEmpty());
         dialog.addHelpText("Existing result is only used when Statistic source is set to Existing result.");
         dialog.setPrimaryButtonText("Continue");
@@ -265,6 +404,36 @@ public class RepresentativeFigureAnalysis implements Analysis {
             throw new IllegalStateException("No numeric existing result column is available.");
         }
         return new StatisticChoice(statistic, existing);
+    }
+
+    private String defaultExistingResultLabel(
+            String[] labels,
+            List<RepresentativeStatLoader.ExistingResultOption> options) {
+        String fallback = labels == null || labels.length == 0
+                ? RepresentativeStatLoader.NO_EXISTING_RESULT_OPTION
+                : labels[0];
+        if (config.existingResult == null || options == null || options.isEmpty()) {
+            return fallback;
+        }
+        for (RepresentativeStatLoader.ExistingResultOption option : options) {
+            if (option == null) {
+                continue;
+            }
+            if (sameExistingResult(option, config.existingResult)) {
+                return option.label;
+            }
+        }
+        return fallback;
+    }
+
+    private static boolean sameExistingResult(
+            RepresentativeStatLoader.ExistingResultOption left,
+            RepresentativeStatLoader.ExistingResultOption right) {
+        if (left == null || right == null) {
+            return false;
+        }
+        return clean(left.columnName).equalsIgnoreCase(clean(right.columnName))
+                && clean(left.relativePath).equalsIgnoreCase(clean(right.relativePath));
     }
 
     private DisplayRangeChoice chooseDisplayRangeMode(BinConfig setupConfig,
@@ -298,6 +467,10 @@ public class RepresentativeFigureAnalysis implements Analysis {
         }
         return table.rowCount() + " series, " + table.channelNames().size() + " channel"
                 + (table.channelNames().size() == 1 ? "" : "s");
+    }
+
+    private static String clean(String value) {
+        return value == null ? "" : value.trim();
     }
 
     private RepresentativeSelection showSelectionGrid(List<RepresentativeSeries> previewSeries) {

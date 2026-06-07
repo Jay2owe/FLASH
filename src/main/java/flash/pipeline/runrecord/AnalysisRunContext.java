@@ -184,6 +184,12 @@ public final class AnalysisRunContext implements AutoCloseable {
         }
     }
 
+    public void info(String message) {
+        synchronized (lock) {
+            addMessageLocked("info", message);
+        }
+    }
+
     public void error(String message, Throwable t) {
         String text = message == null ? "" : message;
         if (t != null) {

@@ -1389,8 +1389,6 @@ public final class RepresentativePreviewRenderer {
         }
 
         private DisplayRange representativeCustomRange(WorkItem item, ChannelSpec spec) {
-            // TODO(representative-image-figure stage 10): hydrate representative-custom
-            // display ranges from persisted project.json extras before preview rendering.
             String token = config.customDisplayRangeForChannel(spec.channelIndex);
             DisplayRange range = parseRange(token);
             return range == null ? null : range.withSource("representative");
