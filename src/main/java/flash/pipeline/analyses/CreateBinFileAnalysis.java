@@ -30,6 +30,7 @@ import flash.pipeline.io.ImageSourceDispatcher;
 import flash.pipeline.io.LifIO;
 import flash.pipeline.io.OrientationManifestIO;
 import flash.pipeline.io.SeriesMeta;
+import flash.pipeline.marker.MarkerLibrary;
 import flash.pipeline.runrecord.AnalysisRunContext;
 import flash.pipeline.runrecord.LoadedRunParameterApplier;
 import flash.pipeline.runrecord.LoadedRunParameters;
@@ -118,6 +119,8 @@ import javax.swing.JScrollPane;
 import javax.swing.JTable;
 import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.filechooser.FileNameExtensionFilter;
@@ -250,6 +253,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
     private static final int CHANNEL_IDENTITY_ROW_LABEL_WIDTH = 100;
     private static final int CHANNEL_IDENTITY_CELL_WIDTH = 160;
     private static final int CHANNEL_IDENTITY_NAME_WIDTH = 150;
+    private static final String MARKER_CATEGORY_REPORTER_PROTEIN = "reporter_protein";
     private static final String SEGMENTATION_CLASSICAL = "Classical";
     private static final String SEGMENTATION_ENHANCED_CLASSICAL = "Enhanced Classical";
     private static final String SEGMENTATION_STARDIST = "StarDist 3D";
@@ -3730,6 +3734,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         final JTextField[] nameFields = new JTextField[nCh];
         final JComboBox<String>[] lutCombos = new JComboBox[nCh];
         final JComboBox<String>[] segmentationCombos = new JComboBox[nCh];
+        final MarkerLibrary markerLibrary = loadChannelIdentityMarkerLibrary();
         final JLabel[] rowLabels = new JLabel[]{
                 createChannelIdentityGridRowLabel("Channel name"),
                 createChannelIdentityGridRowLabel("LUT")
@@ -3761,12 +3766,13 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
             nameFields[ch] = new JTextField(defName, 14);
             nameFields[ch].setName("createBin.channel." + ch + ".name");
             constrainChannelIdentityInput(nameFields[ch], CHANNEL_IDENTITY_NAME_WIDTH);
-            MarkerAutoComplete.attach(nameFields[ch], null);
+            MarkerAutoComplete.attach(nameFields[ch], markerLibrary);
 
             lutCombos[ch] = new JComboBox<String>(COLOR_OPTIONS);
             lutCombos[ch].setName("createBin.channel." + ch + ".lut");
             selectComboItem(lutCombos[ch], defColor);
             constrainChannelIdentityInput(lutCombos[ch], CHANNEL_IDENTITY_CELL_WIDTH);
+            installReporterProteinLutSync(nameFields[ch], lutCombos[ch], markerLibrary);
 
             addChannelIdentityGridComponent(panel,
                     createChannelIdentityGridCell(nameFields[ch]),
@@ -3777,6 +3783,49 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         }
 
         return new ChannelIdentityGrid(panel, nameFields, lutCombos, segmentationCombos, rowLabels);
+    }
+
+    private static MarkerLibrary loadChannelIdentityMarkerLibrary() {
+        try {
+            return MarkerLibrary.loadBundled();
+        } catch (IOException e) {
+            IJ.log("WARNING: Could not load bundled marker library for channel identity: " + e.getMessage());
+            return null;
+        }
+    }
+
+    private static void installReporterProteinLutSync(final JTextField nameField,
+                                                      final JComboBox<String> lutCombo,
+                                                      final MarkerLibrary markerLibrary) {
+        if (nameField == null || lutCombo == null || markerLibrary == null) {
+            return;
+        }
+        nameField.getDocument().addDocumentListener(new DocumentListener() {
+            @Override public void insertUpdate(DocumentEvent e) { sync(); }
+            @Override public void removeUpdate(DocumentEvent e) { sync(); }
+            @Override public void changedUpdate(DocumentEvent e) { sync(); }
+
+            private void sync() {
+                MarkerLibrary.Entry entry = markerLibrary.exactMatch(nameField.getText());
+                if (!isReporterProteinMarker(entry) || !hasText(entry.getConventionalLUT())) {
+                    return;
+                }
+                selectComboItem(lutCombo, toLutName(entry.getConventionalLUT()));
+            }
+        });
+    }
+
+    private static boolean isReporterProteinMarker(MarkerLibrary.Entry entry) {
+        if (entry == null) {
+            return false;
+        }
+        List<String> categories = entry.getAllCategories();
+        for (int i = 0; i < categories.size(); i++) {
+            if (MARKER_CATEGORY_REPORTER_PROTEIN.equals(categories.get(i))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static void bindChannelIdentityGrid(BinSetupBindings bindings,

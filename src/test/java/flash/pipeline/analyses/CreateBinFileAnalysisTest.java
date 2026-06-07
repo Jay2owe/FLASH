@@ -949,6 +949,27 @@ public class CreateBinFileAnalysisTest {
     }
 
     @Test
+    public void channelIdentityGridAppliesReporterProteinLutOnExactMarkerName() {
+        CreateBinFileAnalysis.BinUserConfig defaults = twoChannelConfig();
+        defaults.names.set(0, "Channel1");
+        defaults.names.set(1, "Channel2");
+        defaults.colors.set(0, "Blue");
+        defaults.colors.set(1, "Magenta");
+
+        CreateBinFileAnalysis.ChannelIdentityGrid grid =
+                CreateBinFileAnalysis.buildChannelIdentityGrid(defaults, true, true, null);
+
+        grid.nameFields[0].setText("mCh");
+        assertEquals("Blue", grid.lutCombos[0].getSelectedItem());
+
+        grid.nameFields[0].setText("mCherry");
+        assertEquals("Red", grid.lutCombos[0].getSelectedItem());
+
+        grid.nameFields[1].setText("GFP");
+        assertEquals("Green", grid.lutCombos[1].getSelectedItem());
+    }
+
+    @Test
     public void buildConfigFromDialogReadsIdentityGridAndPreservesHiddenFilters() throws Exception {
         CreateBinFileAnalysis analysis = new CreateBinFileAnalysis();
         CreateBinFileAnalysis.BinUserConfig draft = twoChannelConfig();

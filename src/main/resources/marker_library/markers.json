@@ -5464,6 +5464,59 @@
       "additionalCategories": []
     },
     {
+      "id": "immune_igg",
+      "displayName": "IgG",
+      "aliases": [
+        "IgG",
+        "Immunoglobulin G",
+        "Mouse IgG",
+        "Rabbit IgG"
+      ],
+      "category": "immune_infiltrate",
+      "stainingPattern": "diffuse_extracellular",
+      "typicalObjectSizeNote": "diffuse or broad extracellular signal",
+      "conventionalLUT": "Grays",
+      "filterPreset": "Default",
+      "shape": "diffuse",
+      "crowdingSensitive": false,
+      "particleSizeHint": "large",
+      "intensityLevel": "typical",
+      "nameHints": [
+        "igg",
+        "immunoglobulin g",
+        "mouse igg",
+        "rabbit igg"
+      ],
+      "notes": "General IgG signal or control channel.",
+      "additionalCategories": []
+    },
+    {
+      "id": "immune_igg_h_l",
+      "displayName": "IgG H+L",
+      "aliases": [
+        "IgG H+L",
+        "IgG heavy and light chains",
+        "anti-IgG H+L",
+        "IgG (H+L)"
+      ],
+      "category": "immune_infiltrate",
+      "stainingPattern": "diffuse_extracellular",
+      "typicalObjectSizeNote": "diffuse or broad antibody signal",
+      "conventionalLUT": "Grays",
+      "filterPreset": "Default",
+      "shape": "diffuse",
+      "crowdingSensitive": false,
+      "particleSizeHint": "large",
+      "intensityLevel": "typical",
+      "nameHints": [
+        "igg h+l",
+        "igg heavy and light",
+        "anti-igg h+l"
+      ],
+      "notes": "IgG heavy-plus-light-chain antibody signal or control channel.",
+      "additionalCategories": []
+    },
+    {
       "id": "immune_ly6g",
       "displayName": "Ly6G",
       "aliases": [

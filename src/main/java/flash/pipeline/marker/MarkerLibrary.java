@@ -79,6 +79,21 @@ public final class MarkerLibrary {
         return byId.get(id == null ? "" : id.trim());
     }
 
+    public Entry exactMatch(String text) {
+        String needle = MarkerSearchRanking.normalize(text);
+        if (needle.isEmpty()) {
+            return null;
+        }
+        for (Entry entry : entries) {
+            if (entry == null) continue;
+            if (needle.equals(MarkerSearchRanking.normalize(entry.getId()))) return entry;
+            if (needle.equals(MarkerSearchRanking.normalize(entry.getDisplayName()))) return entry;
+            if (containsNormalized(entry.getAliases(), needle)) return entry;
+            if (containsNormalized(entry.getNameHints(), needle)) return entry;
+        }
+        return null;
+    }
+
     public List<Entry> byCategory(String category) {
         List<Entry> categoryEntries = byCategory.get(category == null ? "" : category.trim());
         return categoryEntries == null ? Collections.<Entry>emptyList() : categoryEntries;
@@ -153,6 +168,18 @@ public final class MarkerLibrary {
             out.put(entry.getKey(), Collections.unmodifiableList(entry.getValue()));
         }
         return Collections.unmodifiableMap(out);
+    }
+
+    private static boolean containsNormalized(List<String> values, String needle) {
+        if (values == null || needle == null || needle.isEmpty()) {
+            return false;
+        }
+        for (String value : values) {
+            if (needle.equals(MarkerSearchRanking.normalize(value))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static String readFully(InputStream stream) throws IOException {

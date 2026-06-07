@@ -143,6 +143,27 @@ public class MarkerLibraryValidationTest {
                 tmem119.getAdditionalCategories().isEmpty());
     }
 
+    @Test
+    public void bundledLibraryContainsIggMarkersAndExactTextMatches() throws Exception {
+        MarkerLibrary library = MarkerLibrary.loadBundled();
+
+        MarkerLibrary.Entry igg = library.byId("immune_igg");
+        assertNotNull(igg);
+        assertEquals("IgG", igg.getDisplayName());
+        assertEquals("immune_igg", library.exactMatch("IgG").getId());
+
+        MarkerLibrary.Entry iggHL = library.byId("immune_igg_h_l");
+        assertNotNull(iggHL);
+        assertEquals("IgG H+L", iggHL.getDisplayName());
+        assertEquals("immune_igg_h_l", library.exactMatch("IgG H+L").getId());
+        assertEquals("immune_igg_h_l", library.exactMatch("anti-IgG H+L").getId());
+
+        MarkerLibrary.Entry mCherry = library.exactMatch("mCherry");
+        assertNotNull(mCherry);
+        assertEquals("reporter_mcherry", mCherry.getId());
+        assertEquals("Red", mCherry.getConventionalLUT());
+    }
+
     private static boolean containsNuclearEntryInTopThree(List<MarkerLibrary.Entry> entries) {
         int limit = Math.min(3, entries.size());
         for (int i = 0; i < limit; i++) {
