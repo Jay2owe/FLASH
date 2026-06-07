@@ -45,7 +45,7 @@ public class DrawAndSaveROIsAnalysisCommandTest {
         analysis.setSuppressDialogs(true);
         analysis.setCommandMode(true);
 
-        new AnalysisRunCoordinator().run(analysis, 1, "Draw and Save ROIs",
+        new AnalysisRunCoordinator().run(analysis, 1, "Draw ROIs and Orientate Images",
                 project.getAbsolutePath(), null, null, "", new Callable<Void>() {
                     @Override public Void call() {
                         analysis.execute(project.getAbsolutePath());

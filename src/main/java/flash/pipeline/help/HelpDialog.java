@@ -21,7 +21,7 @@ public final class HelpDialog {
             "Auto-stretch is fine for figures; don't use it on data you'll quantify elsewhere.",
             "Pick Volumetric OR CPC, not both, unless you specifically want both columns.",
             "Re-runs from existing CSVs — won't re-segment images.",
-            "Lines must be drawn before this runs; check Draw and Save ROIs first.",
+            "Lines must be drawn before this runs; check Draw ROIs and Orientate Images first.",
             "Mean vs area-fraction give very different numbers — pick deliberately.",
             "Deprecated compatibility path; use 3D Object Analysis for nuclear counts.",
             "Re-run after any per-image analysis change.",

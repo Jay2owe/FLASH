@@ -127,7 +127,7 @@ public class DrawAndSaveROIsAnalysisTest {
 
         DrawAndSaveROIsAnalysis analysis = new DrawAndSaveROIsAnalysis();
         BinSetupDispatcher.Outcome outcome = BinSetupDispatcher.ensure(
-                dir.getAbsolutePath(), "Draw and Save ROIs",
+                dir.getAbsolutePath(), "Draw ROIs and Orientate Images",
                 analysis.requiredBinFields(), analysis.benefitsFromRois());
 
         assertEquals(BinSetupDispatcher.Outcome.COMPLETED, outcome);
@@ -453,7 +453,7 @@ public class DrawAndSaveROIsAnalysisTest {
         OrientationManifestRow row = DrawAndSaveROIsAnalysis.saveOrientationDecision(
                 new RoiOrientationManifestService(dir.getAbsolutePath()),
                 prepared,
-                "Saved during Draw and Save ROIs");
+                "Saved during Draw ROIs and Orientate Images");
 
         assertEquals(OrientationManifestRow.RotationDegrees.DEG_270, row.rotateDegrees);
         assertTrue(row.flipHorizontal);
@@ -493,13 +493,13 @@ public class DrawAndSaveROIsAnalysisTest {
         OrientationManifestRow row = DrawAndSaveROIsAnalysis.saveOrientationDecision(
                 new RoiOrientationManifestService(dir.getAbsolutePath()),
                 prepared,
-                "Skipped during Draw and Save ROIs; placeholder ROIs padded");
+                "Skipped during Draw ROIs and Orientate Images; placeholder ROIs padded");
 
         assertEquals(OrientationManifestRow.RotationDegrees.DEG_0, row.rotateDegrees);
         assertFalse(row.flipHorizontal);
         assertFalse(row.flipVertical);
         assertEquals(OrientationManifestRow.ConfirmationState.YES, row.confirmed);
-        assertTrue(row.notes.contains("Skipped during Draw and Save ROIs"));
+        assertTrue(row.notes.contains("Skipped during Draw ROIs and Orientate Images"));
 
         List<OrientationManifestRow> rows =
                 OrientationManifestIO.readIfExists(dir.getAbsolutePath());

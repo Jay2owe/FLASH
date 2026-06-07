@@ -16,7 +16,7 @@ public class AnalysisDialogHelpAttachmentTest {
         assertSourceContains("src/main/java/flash/pipeline/analyses/CreateBinFileAnalysis.java",
                 helpCall("Set Up Configuration", "IDX_CREATE_BIN"));
         assertSourceContains("src/main/java/flash/pipeline/analyses/DrawAndSaveROIsAnalysis.java",
-                helpCall("Draw and Save ROIs", "IDX_DRAW_ROIS"));
+                helpCall("Draw ROIs and Orientate Images", "IDX_DRAW_ROIS"));
         assertSourceContains("src/main/java/flash/pipeline/analyses/SplitAndMergeImageChannelsAnalysis.java",
                 helpCall("Make Presentation Images", "IDX_SPLIT_MERGE"));
         assertSourceContains("src/main/java/flash/pipeline/analyses/IntensityAnalysisV2.java",

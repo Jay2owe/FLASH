@@ -58,7 +58,7 @@ public class CoordinatorRoutesAllEntryPointsTest {
     public void commandPathProducesRunRecordThroughCoordinator() throws Exception {
         File project = temp.newFolder("command-route");
         RunResult result = runStubThroughCoordinator(project, FLASH_Pipeline.IDX_DRAW_ROIS,
-                "Draw and Save ROIs");
+                "Draw ROIs and Orientate Images");
 
         RunRecord record = latestRecord(project);
         assertEquals("ok", result.status);

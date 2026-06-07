@@ -131,7 +131,7 @@ public class FLASH_Pipeline implements PlugIn {
 
     private final String[] analyses = {
             "Set Up Configuration",
-            "Draw and Save ROIs",
+            "Draw ROIs and Orientate Images",
             "3D Deconvolution",
             "Make Presentation Images",
             "3D Object Analysis",
@@ -961,12 +961,16 @@ public class FLASH_Pipeline implements PlugIn {
 
         JButton standardRecipeBtn = new JButton("Standard 3D + Intensity");
         JButton quickCountRecipeBtn = new JButton("Quick cell count");
+        JButton presentationRecipeBtn = new JButton("Presentation");
+        JButton fastPresentableResultsBtn = new JButton("Fast Presentable Results");
         JButton fullRecipeBtn = new JButton("Full pipeline");
         JButton lastRunRecipeBtn = new JButton("Last run");
         JButton customRecipeBtn = new JButton("Clear Recipe");
         JButton saveRecipeBtn = new JButton("Save selection as recipe...");
         setRecipeTooltip(standardRecipeBtn, "standard-3d-intensity");
         setRecipeTooltip(quickCountRecipeBtn, "quick-cell-count");
+        setRecipeTooltip(presentationRecipeBtn, "presentation");
+        setRecipeTooltip(fastPresentableResultsBtn, "fast-presentable-results");
         setRecipeTooltip(fullRecipeBtn, "full-pipeline");
         lastRunRecipeBtn.setToolTipText("Tick the same analyses as the last successful run for this project.");
         customRecipeBtn.setToolTipText("Clear all recipe selections.");
@@ -981,10 +985,17 @@ public class FLASH_Pipeline implements PlugIn {
         buttonRows.add(Box.createVerticalStrut(2));
         buttonRows.add(recipeButtonRow(fullRecipeBtn, lastRunRecipeBtn, customRecipeBtn));
         buttonRows.add(Box.createVerticalStrut(2));
+        buttonRows.add(recipeButtonRow(presentationRecipeBtn));
+        buttonRows.add(Box.createVerticalStrut(2));
+        buttonRows.add(recipeButtonRow(fastPresentableResultsBtn));
+        buttonRows.add(Box.createVerticalStrut(2));
         buttonRows.add(recipeButtonRow(saveRecipeBtn));
 
         standardRecipeBtn.addActionListener(e -> applyRecipe(togglesByAnalysis, recipeCaption, "standard-3d-intensity"));
         quickCountRecipeBtn.addActionListener(e -> applyRecipe(togglesByAnalysis, recipeCaption, "quick-cell-count"));
+        presentationRecipeBtn.addActionListener(e -> applyRecipe(togglesByAnalysis, recipeCaption, "presentation"));
+        fastPresentableResultsBtn.addActionListener(
+                e -> applyRecipe(togglesByAnalysis, recipeCaption, "fast-presentable-results"));
         fullRecipeBtn.addActionListener(e -> applyRecipe(togglesByAnalysis, recipeCaption, "full-pipeline"));
         lastRunRecipeBtn.addActionListener(e -> applyLastRunRecipe(togglesByAnalysis, recipeCaption));
         customRecipeBtn.addActionListener(e -> {
@@ -1293,6 +1304,8 @@ public class FLASH_Pipeline implements PlugIn {
         List<String> unknown = new java.util.ArrayList<String>();
         collectRecipeWarnings("standard-3d-intensity", unknown);
         collectRecipeWarnings("quick-cell-count", unknown);
+        collectRecipeWarnings("presentation", unknown);
+        collectRecipeWarnings("fast-presentable-results", unknown);
         collectRecipeWarnings("full-pipeline", unknown);
         return unknown;
     }

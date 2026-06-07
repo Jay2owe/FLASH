@@ -14,7 +14,7 @@ import java.util.concurrent.Callable;
 
 @Plugin(type = Command.class, headless = true, visible = false,
         name = "flash.drawAndSaveROIsAnalysis",
-        label = "FLASH Draw and Save ROIs")
+        label = "FLASH Draw ROIs and Orientate Images")
 public final class DrawAndSaveROIsAnalysisCommand implements Command {
 
     @Parameter(required = false)
@@ -62,7 +62,7 @@ public final class DrawAndSaveROIsAnalysisCommand implements Command {
         analysis.setCommandMode(true);
         applyCommonOptions(analysis);
 
-        coordinator().run(analysis, FLASH_Pipeline.IDX_DRAW_ROIS, "Draw and Save ROIs",
+        coordinator().run(analysis, FLASH_Pipeline.IDX_DRAW_ROIS, "Draw ROIs and Orientate Images",
                 projectDir.getAbsolutePath(), null, commandParameters(), empty(parentRunId),
                 new Callable<Void>() {
                     @Override public Void call() {

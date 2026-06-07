@@ -188,6 +188,8 @@ public class DependencyRegistryTest {
                 "flash/pipeline/recipes/PipelineRecipeIO.class",
                 "pipeline_recipes/standard-3d-intensity.json",
                 "pipeline_recipes/quick-cell-count.json",
+                "pipeline_recipes/presentation.json",
+                "pipeline_recipes/fast-presentable-results.json",
                 "pipeline_recipes/full-pipeline.json");
 
         DependencyStatus status = DependencyRegistry.get(DependencyId.PLUGIN_JAR_INTEGRITY)
@@ -459,6 +461,8 @@ public class DependencyRegistryTest {
                 "flash/pipeline/recipes/PipelineRecipeIO.class",
                 "pipeline_recipes/standard-3d-intensity.json",
                 "pipeline_recipes/quick-cell-count.json",
+                "pipeline_recipes/presentation.json",
+                "pipeline_recipes/fast-presentable-results.json",
                 "pipeline_recipes/full-pipeline.json"
         };
     }

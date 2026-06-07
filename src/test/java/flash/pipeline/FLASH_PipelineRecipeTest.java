@@ -45,7 +45,7 @@ public class FLASH_PipelineRecipeTest {
         PipelineRecipe recipe = PipelineRecipeIO.loadFromResources("full-pipeline");
         String[] labels = new String[FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE + 1];
         labels[FLASH_Pipeline.IDX_CREATE_BIN] = "Create Bin File";
-        labels[FLASH_Pipeline.IDX_DRAW_ROIS] = "Draw and Save ROIs";
+        labels[FLASH_Pipeline.IDX_DRAW_ROIS] = "Draw ROIs and Orientate Images";
         labels[FLASH_Pipeline.IDX_DECONVOLUTION] = "3D Deconvolution";
         labels[FLASH_Pipeline.IDX_SPLIT_MERGE] = "Make Presentation Images";
         labels[FLASH_Pipeline.IDX_3D_OBJECT] = "3D Object Analysis";
@@ -64,24 +64,93 @@ public class FLASH_PipelineRecipeTest {
     }
 
     @Test
+    public void presentationRecipeSelectsPresentationImagesAndRepresentativeFigure() throws Exception {
+        PipelineRecipe recipe = PipelineRecipeIO.loadFromResources("presentation");
+
+        assertEquals(Arrays.asList("SplitMerge", "RepresentativeFigure"), recipe.getAnalyses());
+    }
+
+    @Test
+    public void fastPresentableResultsRecipeSelectsDisplayIntensityResultsAndValidation() throws Exception {
+        PipelineRecipe recipe = PipelineRecipeIO.loadFromResources("fast-presentable-results");
+
+        assertEquals(Arrays.asList("SplitMerge", "RepresentativeFigure", "Intensity",
+                "Aggregation", "Statistics", "Excel"), recipe.getAnalyses());
+    }
+
+    @Test
+    public void presentationRecipeButtonTicksPresentationImagesAndRepresentativeFigure() throws Exception {
+        FLASH_Pipeline pipeline = new FLASH_Pipeline();
+        PipelineDialog dialog = new PipelineDialog("Recipes");
+        try {
+            ToggleSwitch[] toggles = new ToggleSwitch[FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE + 1];
+            toggles[FLASH_Pipeline.IDX_SPLIT_MERGE] = new ToggleSwitch(false);
+            toggles[FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE] = new ToggleSwitch(false);
+            toggles[FLASH_Pipeline.IDX_INTENSITY] = new ToggleSwitch(true);
+            JPanel quickStart = quickStartPanel(pipeline, dialog, toggles);
+
+            findButton(quickStart, "Presentation").doClick();
+
+            assertTrue(toggles[FLASH_Pipeline.IDX_SPLIT_MERGE].isSelected());
+            assertTrue(toggles[FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE].isSelected());
+            assertFalse(toggles[FLASH_Pipeline.IDX_INTENSITY].isSelected());
+        } finally {
+            dialog.closeWithAction("test");
+        }
+    }
+
+    @Test
+    public void fastPresentableResultsButtonTicksDisplayIntensityResultsAndValidation() throws Exception {
+        FLASH_Pipeline pipeline = new FLASH_Pipeline();
+        PipelineDialog dialog = new PipelineDialog("Recipes");
+        try {
+            ToggleSwitch[] toggles = new ToggleSwitch[FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE + 1];
+            for (int i = 0; i < toggles.length; i++) {
+                toggles[i] = new ToggleSwitch(false);
+            }
+            toggles[FLASH_Pipeline.IDX_3D_OBJECT].setSelected(true);
+            JPanel quickStart = quickStartPanel(pipeline, dialog, toggles);
+
+            findButton(quickStart, "Fast Presentable Results").doClick();
+
+            assertTrue(toggles[FLASH_Pipeline.IDX_SPLIT_MERGE].isSelected());
+            assertTrue(toggles[FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE].isSelected());
+            assertTrue(toggles[FLASH_Pipeline.IDX_INTENSITY].isSelected());
+            assertTrue(toggles[FLASH_Pipeline.IDX_AGGREGATION].isSelected());
+            assertTrue(toggles[FLASH_Pipeline.IDX_STATISTICS].isSelected());
+            assertTrue(toggles[FLASH_Pipeline.IDX_EXCEL_EXPORT].isSelected());
+            assertFalse(toggles[FLASH_Pipeline.IDX_3D_OBJECT].isSelected());
+            assertFalse(toggles[FLASH_Pipeline.IDX_DECONVOLUTION].isSelected());
+        } finally {
+            dialog.closeWithAction("test");
+        }
+    }
+
+    @Test
     public void quickStartSaveRecipeButtonIsDistinctAndLeftAligned() throws Exception {
         FLASH_Pipeline pipeline = new FLASH_Pipeline();
         PipelineDialog dialog = new PipelineDialog("Recipes");
         try {
             JPanel quickStart = quickStartPanel(pipeline, dialog);
             JButton standard = findButton(quickStart, "Standard 3D + Intensity");
+            JButton presentation = findButton(quickStart, "Presentation");
+            JButton fastPresentableResults = findButton(quickStart, "Fast Presentable Results");
             JButton lastRun = findButton(quickStart, "Last run");
             JButton save = findButton(quickStart, "Save selection as recipe...");
             JButton help = findButton(quickStart, "?");
             JLabel caption = findLabelContaining(quickStart, "Pick a recipe");
 
             assertNotNull(standard);
+            assertNotNull(presentation);
+            assertNotNull(fastPresentableResults);
             assertNotNull(lastRun);
             assertNotNull(save);
             assertNotNull(help);
             assertNotNull(caption);
             assertSame(standard, standard.getParent().getComponent(0));
             assertSame(findButton(quickStart, "Full pipeline").getParent(), lastRun.getParent());
+            assertSame(presentation, presentation.getParent().getComponent(0));
+            assertSame(fastPresentableResults, fastPresentableResults.getParent().getComponent(0));
             assertEquals(Component.LEFT_ALIGNMENT, caption.getAlignmentX(), 0.001f);
             assertEquals(new Color(232, 245, 253), save.getBackground());
             assertEquals(new Color(15, 87, 140), save.getForeground());

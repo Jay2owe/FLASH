@@ -234,11 +234,11 @@ public class AnalysisHelpCatalogTest {
         assertContains(AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_INTENSITY).inputs,
                 "Set Up Configuration");
         assertContains(AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_INTENSITY).inputs,
-                "Draw and Save ROIs");
+                "Draw ROIs and Orientate Images");
         assertContains(AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_3D_OBJECT).inputs,
                 "Set Up Configuration");
         assertContains(AnalysisHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_3D_OBJECT).inputs,
-                "Draw and Save ROIs");
+                "Draw ROIs and Orientate Images");
     }
 
     @Test

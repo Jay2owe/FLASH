@@ -387,7 +387,7 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
         if (!hasVolumeData) {
             JLabel explanation = new JLabel(
                     "<html><body style='width:420px;color:#7a4a00'>"
-                    + "<i>Per-mm^3 requires ROI volume data &mdash; re-run Draw &amp; Save ROIs"
+                    + "<i>Per-mm^3 requires ROI volume data &mdash; re-run Draw ROIs &amp; Orientate Images"
                     + " or 3D Object Analysis first.</i></body></html>");
             gbc.gridx = 0; gbc.gridy = row; gbc.gridwidth = 3;
             main.add(explanation, gbc);

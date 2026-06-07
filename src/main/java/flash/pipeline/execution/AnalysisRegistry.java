@@ -39,7 +39,7 @@ public enum AnalysisRegistry {
             "Set Up Configuration", "run_bin", CreateBinFileAnalysis.class, true,
             "Registered setup analysis."),
     DRAW_ROIS("DrawAndSaveROIsAnalysis", FLASH_Pipeline.IDX_DRAW_ROIS,
-            "Draw and Save ROIs", "run_roi", DrawAndSaveROIsAnalysis.class, false,
+            "Draw ROIs and Orientate Images", "run_roi", DrawAndSaveROIsAnalysis.class, false,
             "Registered ROI analysis; no replay parameter adapter is available."),
     DECONVOLUTION("DeconvolutionAnalysis", FLASH_Pipeline.IDX_DECONVOLUTION,
             "3D Deconvolution", "run_deconv", DeconvolutionAnalysis.class, true,

@@ -64,7 +64,7 @@ public class AnalysisStatusScanner {
         boolean orientationManifest = OrientationManifestIO.getExistingFile(directory.getAbsolutePath()) != null;
         put(out, FLASH_Pipeline.IDX_DRAW_ROIS,
                 fallbackStatus(directory, roiOutputs),
-                "Draw and Save ROIs");
+                "Draw ROIs and Orientate Images");
         tooltips.put(Integer.valueOf(FLASH_Pipeline.IDX_DRAW_ROIS),
                 roiTooltip(roiOutputs, orientationManifest));
         put(out, FLASH_Pipeline.IDX_DECONVOLUTION,
@@ -74,7 +74,7 @@ public class AnalysisStatusScanner {
                 fallbackStatus(directory, hasAnyFile(layout.presentationImagesDir())),
                 "Split and Merge Image Channels");
         put(out, FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE,
-                fallbackStatus(directory, false),
+                fallbackStatus(directory, hasPng(layout.representativeFiguresDir())),
                 "Representative Image Figure");
         put(out, FLASH_Pipeline.IDX_3D_OBJECT,
                 fallbackStatus(directory, hasCsv(
@@ -270,10 +270,10 @@ public class AnalysisStatusScanner {
 
     private String roiTooltip(boolean roiOutputs, boolean orientationManifest) {
         if (roiOutputs && orientationManifest) {
-            return "Draw and Save ROIs outputs and saved image orientation transforms found on this folder";
+            return "Draw ROIs and Orientate Images outputs and saved image orientation transforms found on this folder";
         }
         if (roiOutputs) {
-            return "Draw and Save ROIs outputs found on this folder";
+            return "Draw ROIs and Orientate Images outputs found on this folder";
         }
         if (orientationManifest) {
             return "Saved image orientation transforms found; ROI outputs not found on this folder";
@@ -344,6 +344,21 @@ public class AnalysisStatusScanner {
         if (dirs == null) return false;
         for (int i = 0; i < dirs.size(); i++) {
             if (hasCsv(dirs.get(i))) return true;
+        }
+        return false;
+    }
+
+    private static boolean hasPng(File dir) {
+        if (dir == null || !dir.isDirectory()) return false;
+        File[] files = dir.listFiles();
+        if (files == null) return false;
+        for (int i = 0; i < files.length; i++) {
+            File file = files[i];
+            if (file.isFile()
+                    && file.getName().toLowerCase(Locale.US).endsWith(".png")) {
+                return true;
+            }
+            if (file.isDirectory() && hasPng(file)) return true;
         }
         return false;
     }

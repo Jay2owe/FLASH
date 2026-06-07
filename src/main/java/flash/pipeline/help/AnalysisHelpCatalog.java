@@ -230,7 +230,7 @@ public final class AnalysisHelpCatalog {
         return new AnalysisHelpTopic(
                 FLASH_Pipeline.IDX_DRAW_ROIS,
                 "draw-save-rois",
-                "Draw and Save ROIs",
+                "Draw ROIs and Orientate Images",
                 "Create the regions of interest that limit later measurements, with always-open rotate/flip controls that save each image transform for reuse.",
                 list(
                         "Use this after Set Up Configuration and before intensity, object, spatial, or aggregation steps that need region boundaries.",
@@ -402,11 +402,11 @@ public final class AnalysisHelpCatalog {
                 "Measure fluorescence inside saved ROIs, with optional thresholding, channel-mask restriction, and pixel-based spatial analysis.",
                 list(
                         "Use this when the question is how bright a marker is inside each saved region of interest, or how the signal is spatially distributed within those regions.",
-                        "Use it after Set Up Configuration and Draw and Save ROIs, because the analysis needs configured channels and ROI zip files.",
+                        "Use it after Set Up Configuration and Draw ROIs and Orientate Images, because the analysis needs configured channels and ROI zip files.",
                         "Use thresholded measurement when you want bright positive signal only, and whole-ROI measurement when background and dim signal should remain part of the mean."),
                 list(
                         "A saved channel configuration from Set Up Configuration, including channel names and intensity thresholds when thresholded measurement is used.",
-                        "Saved ROI zip files from Draw and Save ROIs; intensity measurement is region-based and expects ROI sets.",
+                        "Saved ROI zip files from Draw ROIs and Orientate Images; intensity measurement is region-based and expects ROI sets.",
                         "The measurement channel choices, optional per-channel binarisation thresholds, and optional Channel ROI Mask if measurement should be restricted to another channel's positive area."),
                 list(
                         "Choose the channels whose fluorescence should be measured.",
@@ -442,11 +442,11 @@ public final class AnalysisHelpCatalog {
                 "Segment 3D objects and measure object counts, size, shape, intensity, colocalisation, and optional process length.",
                 list(
                         "Use this when the question is how many 3D objects are present, how large they are, or whether segmented objects overlap between channels.",
-                        "Use it after Set Up Configuration and Draw and Save ROIs so thresholds, filters, segmentation methods, size limits, and region boundaries are available.",
+                        "Use it after Set Up Configuration and Draw ROIs and Orientate Images so thresholds, filters, segmentation methods, size limits, and region boundaries are available.",
                         "Use optional process-length extraction only for channels where skeleton-like branches are biologically meaningful."),
                 list(
                         "A saved channel configuration from Set Up Configuration with object thresholds, particle-size filters, filter macros, and segmentation method choices.",
-                        "Saved ROI sets from Draw and Save ROIs when counts and object tables should be restricted to tissue regions.",
+                        "Saved ROI sets from Draw ROIs and Orientate Images when counts and object tables should be restricted to tissue regions.",
                         "Correct channel identities for object channels, nuclear marker selection when process length is enabled, and colocalisation threshold choices when overlap metrics are used."),
                 list(
                         "Confirm which object channels should be segmented and whether classical thresholding or StarDist-based nuclear segmentation is configured for each channel.",

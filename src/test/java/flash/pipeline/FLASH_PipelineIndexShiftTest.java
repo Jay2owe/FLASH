@@ -56,7 +56,7 @@ public class FLASH_PipelineIndexShiftTest {
 
         assertEquals(13, analyses.length);
         assertEquals("Set Up Configuration", analyses[FLASH_Pipeline.IDX_CREATE_BIN]);
-        assertEquals("Draw and Save ROIs", analyses[FLASH_Pipeline.IDX_DRAW_ROIS]);
+        assertEquals("Draw ROIs and Orientate Images", analyses[FLASH_Pipeline.IDX_DRAW_ROIS]);
         assertEquals("3D Deconvolution", analyses[FLASH_Pipeline.IDX_DECONVOLUTION]);
         assertEquals("Make Presentation Images", analyses[FLASH_Pipeline.IDX_SPLIT_MERGE]);
         assertEquals("Spectral Decontamination (Experimental)", analyses[FLASH_Pipeline.IDX_SPECTRAL_DECONTAMINATION]);

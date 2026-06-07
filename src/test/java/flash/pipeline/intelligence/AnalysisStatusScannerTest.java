@@ -70,7 +70,8 @@ public class AnalysisStatusScannerTest {
 
         assertEquals(AnalysisStatus.DONE,
                 statuses.get(Integer.valueOf(FLASH_Pipeline.IDX_DRAW_ROIS)));
-        assertTrue(scanner.tooltipFor(FLASH_Pipeline.IDX_DRAW_ROIS).contains("ROIs outputs"));
+        assertTrue(scanner.tooltipFor(FLASH_Pipeline.IDX_DRAW_ROIS)
+                .contains("Draw ROIs and Orientate Images outputs"));
     }
 
     @Test
@@ -117,6 +118,37 @@ public class AnalysisStatusScannerTest {
                 statuses.get(Integer.valueOf(FLASH_Pipeline.IDX_3D_OBJECT)));
         assertEquals(AnalysisStatus.DONE,
                 statuses.get(Integer.valueOf(FLASH_Pipeline.IDX_EXCEL_EXPORT)));
+    }
+
+    @Test
+    public void scan_detectsRepresentativeFigureOutput() throws Exception {
+        File dir = temp.newFolder("representative-figure-done");
+        FlashProjectLayout layout = FlashProjectLayout.forDirectory(dir.getAbsolutePath());
+        assertEquals(true, layout.representativeFiguresDir().mkdirs());
+        assertEquals(true, new File(layout.representativeFiguresDir(),
+                "Representative_Figure.png").createNewFile());
+
+        AnalysisStatusScanner scanner = new AnalysisStatusScanner();
+        Map<Integer, AnalysisStatus> statuses = scanner.scan(dir);
+
+        assertEquals(AnalysisStatus.DONE,
+                statuses.get(Integer.valueOf(FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE)));
+        assertTrue(scanner.tooltipFor(FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE)
+                .contains("Representative Image Figure outputs"));
+    }
+
+    @Test
+    public void scan_ignoresNonPngRepresentativeFigureFiles() throws Exception {
+        File dir = temp.newFolder("representative-figure-stray-file");
+        FlashProjectLayout layout = FlashProjectLayout.forDirectory(dir.getAbsolutePath());
+        assertEquals(true, layout.representativeFiguresDir().mkdirs());
+        assertEquals(true, new File(layout.representativeFiguresDir(),
+                "Representative_Figure.png.tmp").createNewFile());
+
+        Map<Integer, AnalysisStatus> statuses = new AnalysisStatusScanner().scan(dir);
+
+        assertEquals(AnalysisStatus.NOT_STARTED,
+                statuses.get(Integer.valueOf(FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE)));
     }
 
     @Test

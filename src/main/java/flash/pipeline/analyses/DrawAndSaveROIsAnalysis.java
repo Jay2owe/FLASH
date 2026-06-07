@@ -138,7 +138,7 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
     @Override
     public void execute(String directory) {
         if (GraphicsEnvironment.isHeadless() || (commandMode && headless)) {
-            String message = "Draw and Save ROIs is headed-only; command/headless "
+            String message = "Draw ROIs and Orientate Images is headed-only; command/headless "
                     + "invocation cannot drive interactive ROI drawing. Run this workflow "
                     + "in the FLASH GUI, then reuse the saved ROI artifacts in downstream analyses.";
             IJ.log("[" + getClass().getSimpleName() + "] " + message + " Skipping.");
@@ -151,15 +151,15 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
             headless = false;
         }
         BinSetupDispatcher.Outcome outcome = BinSetupDispatcher.ensure(
-                directory, "Draw and Save ROIs", requiredBinFields(),
+                directory, "Draw ROIs and Orientate Images", requiredBinFields(),
                 benefitsFromRois(), suppressDialogs, cliConfig);
         if (outcome == BinSetupDispatcher.Outcome.CANCELLED) {
-            IJ.log("[FLASH] Draw and Save ROIs cancelled by user.");
+            IJ.log("[FLASH] Draw ROIs and Orientate Images cancelled by user.");
             return;
         }
 
         if (!FeatureDependencyGate.gate(DependencyId.BIO_FORMATS_RUNTIME,
-                "Draw and Save ROIs", "Bio-Formats image loading")) {
+                "Draw ROIs and Orientate Images", "Bio-Formats image loading")) {
             return;
         }
 
@@ -188,8 +188,8 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
 
         boolean hasExisting = !roiNames.isEmpty();
 
-        PipelineDialog pd = new PipelineDialog("Draw & Save ROIs", PipelineDialog.Phase.SETUP);
-        pd.addAnalysisHelpHeader("Draw and Save ROIs", FLASH_Pipeline.IDX_DRAW_ROIS);
+        PipelineDialog pd = new PipelineDialog("Draw ROIs & Orientate Images", PipelineDialog.Phase.SETUP);
+        pd.addAnalysisHelpHeader("Draw ROIs and Orientate Images", FLASH_Pipeline.IDX_DRAW_ROIS);
         pd.addSubHeader("ROI Set Selection");
 
         ToggleSwitch createNewToggle = null;
@@ -284,7 +284,7 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
             supplier = ImageSourceDispatcher.createSupplier(directory);
             totalImages = supplier.getTotalSeries();
         } catch (Exception e) {
-            showOrLog("Draw and Save ROIs", e.getMessage());
+            showOrLog("Draw ROIs and Orientate Images", e.getMessage());
             return;
         }
 
@@ -302,7 +302,7 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
                     ? "No images were found to draw ROIs."
                     : "Selected ROI set already contains ROI pairs for all "
                     + totalImages + " images. No new images to append.";
-            showOrLog("Draw and Save ROIs", message);
+            showOrLog("Draw ROIs and Orientate Images", message);
             return;
         }
         int startRoiIndex = range.firstSeriesIndexInclusive + 1;
@@ -417,14 +417,14 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
                 int missing = expectedAfter - countAfter;
                 if (missing <= 0) {
                     saveOrientationDecision(orientationManifestService, prep,
-                            "Saved during Draw and Save ROIs");
+                            "Saved during Draw ROIs and Orientate Images");
                     continue;
                 }
 
                 if (headless || GraphicsEnvironment.isHeadless()) {
                     padPlaceholderRois(rm, processingIndex, i, startOffset, width, height);
                     saveOrientationDecision(orientationManifestService, prep,
-                            "Skipped during Draw and Save ROIs; placeholder ROIs padded");
+                            "Skipped during Draw ROIs and Orientate Images; placeholder ROIs padded");
                     IJ.log("[DrawROIs] image " + (i + 1) + " missing " + missing
                             + " ROI(s) — padded with placeholders (headless mode).");
                     continue;
@@ -447,7 +447,7 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
                 } else if (choice == 1) {
                     padPlaceholderRois(rm, processingIndex, i, startOffset, width, height);
                     saveOrientationDecision(orientationManifestService, prep,
-                            "Skipped during Draw and Save ROIs; placeholder ROIs padded");
+                            "Skipped during Draw ROIs and Orientate Images; placeholder ROIs padded");
                     IJ.log("[DrawROIs] image " + (i + 1)
                             + " padded with " + missing + " placeholder ROI(s).");
                     continue;
@@ -532,7 +532,7 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
             }
 
             saveOrientationDecision(orientationManifestService, prep,
-                    "Saved during Draw and Save ROIs");
+                    "Saved during Draw ROIs and Orientate Images");
 
             // Cleanup
             cropped.changes = false;
@@ -598,7 +598,7 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
 
         rm.close();
 
-        showOrLog("Draw and Save ROIs",
+        showOrLog("Draw ROIs and Orientate Images",
                 "Saved ROIs to:\n" + roiZip.getAbsolutePath() +
                         "\n\nROI properties saved to:\n" + roiPropsOut.getAbsolutePath());
 
@@ -980,13 +980,13 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
             recordOutput(new File(path), "zip");
         }
         if (path != null) {
-            showOrLog("Draw and Save ROIs",
+            showOrLog("Draw ROIs and Orientate Images",
                     "Run aborted (" + reason + ").\n\n"
                     + "Partial ROI set saved to:\n" + path + "\n\n"
                     + "To recover: re-run Draw ROIs, choose 'Append to existing',\n"
                     + "and load that zip (or copy it into the ROI output folder first).");
         } else {
-            showOrLog("Draw and Save ROIs",
+            showOrLog("Draw ROIs and Orientate Images",
                     "Run aborted (" + reason + "). No ROIs were saved.");
         }
         rm.close();

@@ -33,7 +33,7 @@ public final class BinSetupChooser {
         if (showRoiTip) {
             dialog.addHelpText(analysis + " can be limited to regions you draw on each image, "
                     + "such as a single hemisphere. No regions have been saved for this folder yet "
-                    + "— run Draw and Save ROIs first if you want that.");
+                    + "— run Draw ROIs and Orientate Images first if you want that.");
         }
 
         dialog.setDefaultButtonsVisible(true);

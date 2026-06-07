@@ -194,7 +194,7 @@ public final class CLIArgumentParser {
                 + "\n"
                 + "Analysis Selection (pick any):\n"
                 + "  run_bin               Set Up Configuration (0)\n"
-                + "  run_roi               Draw and Save ROIs (1)\n"
+                + "  run_roi               Draw ROIs and Orientate Images (1)\n"
                 + "  run_deconv            3D Deconvolution (2)\n"
                 + "  run_split             Split and Merge Channels (3)\n"
                 + "  run_3d                3D Object Analysis (4)\n"
