@@ -70,6 +70,8 @@ public final class ConditionLayoutChooser {
         dialog.addHeader("Live Preview");
         final FigurePreviewPanel preview = new FigurePreviewPanel();
         dialog.addComponent(preview.panel);
+        final javax.swing.JButton tileEditorButton =
+                dialog.addButton("Preview / adjust single tile...");
 
         dialog.addHeader("Condition Layout");
         final LayoutAssignmentPanel layoutPanel =
@@ -107,6 +109,17 @@ public final class ConditionLayoutChooser {
         };
         layoutPanel.setOnChange(schedule);
         tileOptions.setOnChange(schedule);
+        tileEditorButton.addActionListener(new java.awt.event.ActionListener() {
+            @Override public void actionPerformed(java.awt.event.ActionEvent e) {
+                PresentationTileConfig edited = TileAnnotationEditor.edit(
+                        javax.swing.SwingUtilities.getWindowAncestor(tileEditorButton),
+                        previewSelection, tileOptions.buildConfig());
+                if (edited != null) {
+                    tileOptions.applyEditorResult(edited);
+                    refresh.run();
+                }
+            }
+        });
         refresh.run();
 
         dialog.setPrimaryButtonText("Continue");
@@ -514,6 +527,10 @@ public final class ConditionLayoutChooser {
         private final JTextField conditionFontField;
         private final JTextField channelFontField;
         private final JComboBox<String> exportScaleBox;
+        private double labelFracX = -1.0;
+        private double labelFracY = -1.0;
+        private double scaleBarFracX = -1.0;
+        private double scaleBarFracY = -1.0;
         private Runnable onChange;
 
         void setOnChange(Runnable onChange) {
@@ -565,6 +582,10 @@ public final class ConditionLayoutChooser {
             channelFontField = compactField(String.valueOf(initial.channelFontSizePx()), 4);
             exportScaleBox = new JComboBox<String>(new String[]{"1x", "2x", "3x", "4x"});
             exportScaleBox.setSelectedItem(Math.max(1, Math.min(4, initial.exportScale())) + "x");
+            labelFracX = initial.labelFracX();
+            labelFracY = initial.labelFracY();
+            scaleBarFracX = initial.scaleBarFracX();
+            scaleBarFracY = initial.scaleBarFracY();
 
             panel.add(compactRow(
                     labelled("Rows by", tileGroupBox),
@@ -692,7 +713,27 @@ public final class ConditionLayoutChooser {
                     .conditionFontSizePx(parseInt(conditionFontField, 15))
                     .channelFontSizePx(parseInt(channelFontField, 16))
                     .exportScale(parseExportScale(exportScaleBox))
+                    .labelFracX(labelFracX)
+                    .labelFracY(labelFracY)
+                    .scaleBarFracX(scaleBarFracX)
+                    .scaleBarFracY(scaleBarFracY)
                     .build();
+        }
+
+        void applyEditorResult(PresentationTileConfig edited) {
+            if (edited == null) {
+                return;
+            }
+            labelFracX = edited.labelFracX();
+            labelFracY = edited.labelFracY();
+            scaleBarFracX = edited.scaleBarFracX();
+            scaleBarFracY = edited.scaleBarFracY();
+            labelFontSizeField.setText(String.valueOf(edited.labelFontSizePx()));
+            scaleBarThicknessField.setText(String.valueOf(edited.scaleBarThicknessPx()));
+            scaleBarLengthField.setText(formatNumber(edited.scaleBarLengthUm()));
+            annotationColorBox.setSelectedItem(
+                    Color.BLACK.equals(edited.annotationColor()) ? "Black" : "White");
+            fireChange();
         }
 
         private void updateForcedAnnotationState() {
