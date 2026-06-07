@@ -34,12 +34,10 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
-import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -940,7 +938,8 @@ public final class QcMinMaxPerConditionSelector {
 
     static double meanOfBrightestFraction(float[] values, double fraction) {
         if (values == null || values.length == 0) return Double.NaN;
-        int topCount = Math.max(1, (int) Math.round(values.length * fraction));
+        int topCount = Math.max(1, Math.min(values.length,
+                (int) Math.round(values.length * fraction)));
         int kth = Math.max(0, values.length - topCount);
         quickSelect(values, 0, values.length - 1, kth);
 
@@ -1202,29 +1201,21 @@ public final class QcMinMaxPerConditionSelector {
             return scoreSequential(lifFile, localSeriesIndexes, candidates, qcChannels, zSliceConfig);
         }
 
-        int loaderThreads = Math.max(1, (int) Math.round(safeThreads * 0.8));
-        int workerThreads = Math.max(1, safeThreads - loaderThreads);
-        if (loaderThreads + workerThreads > safeThreads) {
-            loaderThreads = Math.max(1, safeThreads - workerThreads);
-        }
-        final int effectiveLoaders = loaderThreads;
-        final int effectiveWorkers = workerThreads;
-        int bufferSize = Math.min(4, Math.max(2, workerThreads));
-        IJ.log("QC min/max selector thread split: "
-                + effectiveLoaders + " loaders, " + effectiveWorkers + " workers");
+        IJ.log("QC min/max selector: scanning and scoring " + candidates.size()
+                + " image series across " + qcChannels.size() + " channel"
+                + (qcChannels.size() == 1 ? "" : "s")
+                + " using " + safeThreads + " thread"
+                + (safeThreads == 1 ? "" : "s") + ".");
 
-        final ArrayBlockingQueue<LoadedCandidate> queue =
-                new ArrayBlockingQueue<LoadedCandidate>(bufferSize);
         final AtomicInteger nextCandidate = new AtomicInteger(0);
-        final AtomicInteger loadersFinished = new AtomicInteger(0);
-        final AtomicBoolean allLoadersDone = new AtomicBoolean(false);
+        final AtomicInteger completedCandidates = new AtomicInteger(0);
         final ConcurrentHashMap<Integer, ScoreRecord> scored =
                 new ConcurrentHashMap<Integer, ScoreRecord>();
 
-        ExecutorService loaderPool = Executors.newFixedThreadPool(effectiveLoaders);
-        for (int t = 0; t < effectiveLoaders; t++) {
-            final int loaderNum = t + 1;
-            loaderPool.submit(new Runnable() {
+        ExecutorService pool = Executors.newFixedThreadPool(safeThreads);
+        for (int t = 0; t < safeThreads; t++) {
+            final int workerNum = t + 1;
+            pool.submit(new Runnable() {
                 @Override
                 public void run() {
                     try (Memoizer reader = new Memoizer(new ImageReader())) {
@@ -1235,62 +1226,33 @@ public final class QcMinMaxPerConditionSelector {
 
                             QcSelectionCandidate candidate = candidates.get(idx);
                             try {
-                                IJ.log("QC Loader " + loaderNum + ": sampling " + candidate.seriesName
+                                IJ.log("QC min/max worker " + workerNum
+                                        + ": sampling and scoring " + candidate.seriesName
                                         + " [" + (idx + 1) + "/" + candidates.size() + "]");
-                                queue.put(loadCandidate(reader, candidate,
+                                LoadedCandidate loaded = loadCandidate(reader, candidate,
                                         localSeriesIndex(localSeriesIndexes, candidate.seriesIndex),
-                                        qcChannels, zSliceConfig));
+                                        qcChannels, zSliceConfig);
+                                ScoreRecord record = scoreLoadedCandidate(loaded);
+                                scored.put(candidate.seriesIndex, record);
+                                logCandidateScored(record, qcChannels,
+                                        completedCandidates.incrementAndGet(), candidates.size());
                             } catch (Exception e) {
-                                IJ.log("Warning: QC loader failed for " + candidate.seriesName
+                                IJ.log("Warning: QC min/max scan failed for " + candidate.seriesName
                                         + ": " + e.getMessage());
-                                try {
-                                    queue.put(new LoadedCandidate(candidate,
-                                            new LinkedHashMap<Integer, float[]>()));
-                                } catch (InterruptedException interrupted) {
-                                    Thread.currentThread().interrupt();
-                                    break;
-                                }
+                                ScoreRecord record = new ScoreRecord(candidate);
+                                scored.put(candidate.seriesIndex, record);
+                                logCandidateScored(record, qcChannels,
+                                        completedCandidates.incrementAndGet(), candidates.size());
                             }
                         }
                     } catch (Exception e) {
-                        IJ.log("Warning: QC loader thread failed: " + e.getMessage());
-                    } finally {
-                        if (loadersFinished.incrementAndGet() >= effectiveLoaders) {
-                            allLoadersDone.set(true);
-                        }
+                        IJ.log("Warning: QC min/max worker thread failed: " + e.getMessage());
                     }
                 }
             });
         }
-        loaderPool.shutdown();
-
-        ExecutorService workerPool = Executors.newFixedThreadPool(effectiveWorkers);
-        for (int t = 0; t < effectiveWorkers; t++) {
-            workerPool.submit(new Runnable() {
-                @Override
-                public void run() {
-                    while (true) {
-                        LoadedCandidate loaded = null;
-                        try {
-                            loaded = queue.poll(200, TimeUnit.MILLISECONDS);
-                        } catch (InterruptedException e) {
-                            Thread.currentThread().interrupt();
-                            break;
-                        }
-                        if (loaded == null) {
-                            if (allLoadersDone.get() && queue.isEmpty()) break;
-                            continue;
-                        }
-                        ScoreRecord record = scoreLoadedCandidate(loaded);
-                        scored.put(loaded.candidate.seriesIndex, record);
-                    }
-                }
-            });
-        }
-        workerPool.shutdown();
-
-        loaderPool.awaitTermination(1, TimeUnit.HOURS);
-        workerPool.awaitTermination(1, TimeUnit.HOURS);
+        pool.shutdown();
+        pool.awaitTermination(1, TimeUnit.HOURS);
 
         List<ScoreRecord> ordered = new ArrayList<ScoreRecord>();
         for (QcSelectionCandidate candidate : candidates) {
@@ -1299,6 +1261,32 @@ public final class QcMinMaxPerConditionSelector {
             ordered.add(record);
         }
         return ordered;
+    }
+
+    private static void logCandidateScored(ScoreRecord record,
+                                           List<QcSelectionChannel> qcChannels,
+                                           int completed,
+                                           int total) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("QC min/max selector: scored ")
+                .append(completed).append('/').append(total);
+        if (record != null && record.candidate != null) {
+            sb.append(" - Series ").append(record.candidate.seriesNumber);
+            String name = record.candidate.seriesName;
+            if (name != null && !name.trim().isEmpty()) {
+                sb.append(" [").append(name.trim()).append("]");
+            }
+        }
+        if (record != null && qcChannels != null) {
+            for (QcSelectionChannel channel : qcChannels) {
+                if (channel == null) continue;
+                Double score = record.channelScores.get(Integer.valueOf(channel.channelNumber));
+                if (score == null || score.isNaN() || score.isInfinite()) continue;
+                sb.append(", C").append(channel.channelNumber).append('=')
+                        .append(formatDouble(score.doubleValue()));
+            }
+        }
+        IJ.log(sb.toString());
     }
 
     private static Map<Integer, Integer> localSeriesIndexMap(
@@ -1358,11 +1346,16 @@ public final class QcMinMaxPerConditionSelector {
         List<ScoreRecord> records = new ArrayList<ScoreRecord>();
         try (Memoizer reader = new Memoizer(new ImageReader())) {
             reader.setId(lifFile.getAbsolutePath());
-            for (QcSelectionCandidate candidate : candidates) {
+            for (int i = 0; i < candidates.size(); i++) {
+                QcSelectionCandidate candidate = candidates.get(i);
+                IJ.log("QC min/max selector: sampling and scoring " + candidate.seriesName
+                        + " [" + (i + 1) + "/" + candidates.size() + "]");
                 LoadedCandidate loaded = loadCandidate(reader, candidate,
                         localSeriesIndex(localSeriesIndexes, candidate.seriesIndex),
                         qcChannels, zSliceConfig);
-                records.add(scoreLoadedCandidate(loaded));
+                ScoreRecord record = scoreLoadedCandidate(loaded);
+                records.add(record);
+                logCandidateScored(record, qcChannels, i + 1, candidates.size());
             }
         }
         return records;
