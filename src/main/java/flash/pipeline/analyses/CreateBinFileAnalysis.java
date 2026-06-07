@@ -562,9 +562,56 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                                                                    List<ConfigQcStage> stages,
                                                                    List<String> stagePath,
                                                                    int activeStagePathIndex) {
+        String logLabel = embeddedConfigQcDialogLogLabel(context, stages);
+        IJ.log("Set Up QC dialog opening: " + logLabel);
         ConfigQcDialog dialog = ConfigQcDialog.createModeless(
                 null, context, stages, stagePath, activeStagePathIndex);
-        return dialog.showDialog();
+        ConfigQcResult result = dialog.showDialog();
+        IJ.log("Set Up QC dialog closed: " + logLabel + " -> " + configQcResultLabel(result));
+        return result;
+    }
+
+    private static String embeddedConfigQcDialogLogLabel(ConfigQcContext context,
+                                                         List<ConfigQcStage> stages) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(stageTitleSummary(stages));
+        if (context != null) {
+            sb.append(" | C").append(context.getChannelNumber());
+            String channelName = context.getChannelName();
+            if (channelName != null && !channelName.trim().isEmpty()) {
+                sb.append(" (").append(channelName.trim()).append(")");
+            }
+            sb.append(" | ").append(context.getImageCount()).append(" QC image")
+                    .append(context.getImageCount() == 1 ? "" : "s");
+        }
+        return sb.toString();
+    }
+
+    private static String stageTitleSummary(List<ConfigQcStage> stages) {
+        if (stages == null || stages.isEmpty()) {
+            return "No stages";
+        }
+        List<String> titles = new ArrayList<String>();
+        for (ConfigQcStage stage : stages) {
+            if (stage == null) continue;
+            String title;
+            try {
+                title = stage.title();
+            } catch (RuntimeException e) {
+                title = stage.getClass().getSimpleName();
+            }
+            if (title != null && !title.trim().isEmpty()) {
+                titles.add(title.trim());
+            }
+        }
+        if (titles.isEmpty()) {
+            return stages.size() + " stage" + (stages.size() == 1 ? "" : "s");
+        }
+        return String.join(" -> ", titles);
+    }
+
+    private static String configQcResultLabel(ConfigQcResult result) {
+        return result == null ? "null" : result.name();
     }
 
     private void attachSavedStatus(ConfigQcContext context) {
@@ -4648,6 +4695,8 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
             }
         }
         int totalSeries = qcSeriesMetas.size();
+        IJ.log("Set Up QC image selection: " + lifFile.getName()
+                + " has " + totalSeries + " selectable image series.");
 
         PipelineDialog pd = new PipelineDialog("Quality Check - Image Selection");
         installWizardCancelHook(pd);
@@ -4692,6 +4741,11 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         String mode = pd.getNextChoice();
         int randomCount = (int) pd.getNextNumber();
         boolean recomputeMinMax = pd.getNextBoolean();
+        IJ.log("Set Up QC image selection mode: " + mode
+                + (QC_SELECTION_MODE_RANDOM.equals(mode)
+                ? " (" + randomCount + " random image"
+                        + (randomCount == 1 ? "" : "s") + " requested)"
+                : ""));
 
         try {
             List<Integer> selectedSeriesIndexes;
@@ -4713,6 +4767,9 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                     return QcImageOpenResult.cancel(
                             "Cannot run quality check: No QC-selected channels were found for min/max assessment.");
                 }
+                IJ.log("Set Up QC min/max selection: assessing " + qcChannels.size()
+                        + " channel" + (qcChannels.size() == 1 ? "" : "s")
+                        + " with " + totalSeries + " candidate image series.");
                 Map<Integer, QcMinMaxPerConditionSelector.MetadataAssignment> reviewedMetadata =
                         Collections.<Integer, QcMinMaxPerConditionSelector.MetadataAssignment>emptyMap();
                 boolean metadataChanged = false;
@@ -4747,6 +4804,10 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                 }
                 resultMessage = selection.message;
                 selectedSeriesIndexes = selection.selectedSeriesIndexes;
+                IJ.log("Set Up QC min/max selection complete: "
+                        + selectedSeriesIndexes.size() + " selected image"
+                        + (selectedSeriesIndexes.size() == 1 ? "" : "s")
+                        + " (" + summarizeSeriesIndexes(selectedSeriesIndexes) + ").");
                 minMaxSelectionBySeries = selectedSeriesByIndex(selection.selectedSeries);
                 minMaxSelectionBySeriesAndChannel =
                         selectedSeriesBySeriesAndChannel(selection.selectedSeriesByChannelNumber);
@@ -4754,6 +4815,10 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                         selectedSeriesOrderBySeriesAndChannel(selection.selectedSeriesByChannelNumber);
             } else {
                 selectedSeriesIndexes = chooseRandomSeriesIndexes(qcSeriesMetas, randomCount);
+                IJ.log("Set Up QC random selection complete: "
+                        + selectedSeriesIndexes.size() + " selected image"
+                        + (selectedSeriesIndexes.size() == 1 ? "" : "s")
+                        + " (" + summarizeSeriesIndexes(selectedSeriesIndexes) + ").");
             }
 
             if (!selectionCanceled
@@ -4768,6 +4833,9 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                 return QcImageOpenResult.fromPreparation(preparation, resultMessage);
             }
 
+            IJ.log("Set Up QC opening " + preparation.selectedSeriesIndexes.size()
+                    + " selected image series from " + preparation.lifFile.getName()
+                    + ": " + summarizeSeriesIndexes(preparation.selectedSeriesIndexes));
             List<QcImageSelection> images =
                     openQcSelections(qcSupplier, preparation.lifFile,
                             preparation.selectedSeriesIndexes, cfg,
@@ -4780,6 +4848,8 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                         "Cannot run quality check: Failed to open one or more selected image series from "
                                 + lifFile.getName() + ".");
             }
+            IJ.log("Set Up QC selected images ready: " + images.size()
+                    + " image" + (images.size() == 1 ? "" : "s") + " opened.");
             return QcImageOpenResult.ready(images, resultMessage);
         } catch (Exception e) {
             return QcImageOpenResult.cancel("Cannot run quality check: " + e.getMessage());
