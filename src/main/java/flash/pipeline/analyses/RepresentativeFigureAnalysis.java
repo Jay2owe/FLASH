@@ -4,8 +4,12 @@ import flash.pipeline.bin.BinField;
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinConfigIO;
 import flash.pipeline.cli.CLIConfig;
+import flash.pipeline.io.ConditionManifestIO;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.ImageCache;
+import flash.pipeline.io.ImageSourceDispatcher;
+import flash.pipeline.io.SeriesMeta;
+import flash.pipeline.naming.ImageNameParser;
 import flash.pipeline.project.ProjectFile;
 import flash.pipeline.project.ProjectFileIO;
 import flash.pipeline.representative.ConditionLayoutChooser;
@@ -25,6 +29,7 @@ import flash.pipeline.runrecord.AnalysisRunContext;
 import flash.pipeline.runrecord.LoadedRunParameters;
 import flash.pipeline.runrecord.RunRecordAware;
 import flash.pipeline.ui.PipelineDialog;
+import flash.pipeline.ui.wizard.ConditionManifestPanel;
 import ij.IJ;
 
 import javax.swing.JComboBox;
@@ -36,6 +41,7 @@ import java.io.IOException;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -52,6 +58,18 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
     private boolean useTifCache = false;
     private boolean suppressDialogs = false;
     private AnalysisRunContext runRecordContext = null;
+    private ConditionReviewDialog conditionReviewDialog =
+            new ConditionReviewDialog() {
+                @Override
+                public LinkedHashMap<String, String> show(
+                        String directory,
+                        Set<String> animals,
+                        Map<String, String> prefill,
+                        String title) {
+                    return ConditionManifestPanel.showDialog(
+                            directory, animals, prefill, title);
+                }
+            };
 
     @Override
     public void execute(String directory) {
@@ -69,6 +87,10 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
             StatisticChoice choice = showStatisticChooser(directory);
             if (choice == null) {
                 IJ.log("[Representative Figure] Statistic chooser cancelled.");
+                return;
+            }
+            if (!reviewConditionAssignments(directory)) {
+                IJ.log("[Representative Figure] Condition assignment review cancelled.");
                 return;
             }
 
@@ -230,6 +252,10 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
 
     RepresentativeFigureConfig configForTests() {
         return config;
+    }
+
+    void setConditionReviewDialogForTests(ConditionReviewDialog dialog) {
+        conditionReviewDialog = dialog;
     }
 
     void persistCompletedRun(String directory, BinConfig setupConfig, File output) throws Exception {
@@ -546,6 +572,56 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
         return value == null ? "" : value.trim();
     }
 
+    boolean reviewConditionAssignments(String directory) throws Exception {
+        return reviewConditionAssignments(
+                directory, ImageSourceDispatcher.readAllMetadata(directory));
+    }
+
+    boolean reviewConditionAssignments(String directory, List<SeriesMeta> metas)
+            throws Exception {
+        LinkedHashSet<String> animals = conditionReviewAnimals(metas);
+        if (animals.isEmpty()) {
+            IJ.log("[Representative Figure] No source animals were available for condition review.");
+            return true;
+        }
+        LinkedHashMap<String, String> prefill =
+                ConditionManifestIO.resolveAssignments(directory, animals);
+        LinkedHashMap<String, String> reviewed = conditionReviewDialog == null
+                ? null
+                : conditionReviewDialog.show(
+                        directory,
+                        animals,
+                        prefill,
+                        "Representative Figure - Condition Assignment");
+        return reviewed != null;
+    }
+
+    static LinkedHashSet<String> conditionReviewAnimals(List<SeriesMeta> metas) {
+        LinkedHashSet<String> animals = new LinkedHashSet<String>();
+        if (metas == null) {
+            return animals;
+        }
+        for (SeriesMeta meta : metas) {
+            if (meta == null || ImageNameParser.isPreviewSeriesName(meta.name)) {
+                continue;
+            }
+            String animal = representativeAnimalName(meta);
+            if (!animal.isEmpty()) {
+                animals.add(animal);
+            }
+        }
+        return animals;
+    }
+
+    private static String representativeAnimalName(SeriesMeta meta) {
+        String animal = ConditionManifestIO.extractAnimalName(
+                meta == null ? null : meta.name);
+        if (!clean(animal).isEmpty()) {
+            return clean(animal);
+        }
+        return "Series" + (meta == null ? 0 : meta.index + 1);
+    }
+
     private RepresentativeSelection showSelectionGrid(List<RepresentativeSeries> previewSeries) {
         PipelineDialog dialog = new PipelineDialog(
                 "Representative Image Figure - Select Images", PipelineDialog.Phase.EXPORT);
@@ -573,6 +649,13 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
         } finally {
             selectionPanel.dispose();
         }
+    }
+
+    interface ConditionReviewDialog {
+        LinkedHashMap<String, String> show(String directory,
+                                           Set<String> animals,
+                                           Map<String, String> prefill,
+                                           String title);
     }
 
     private static final class StatisticChoice {
