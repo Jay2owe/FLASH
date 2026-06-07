@@ -12,6 +12,8 @@ import java.util.List;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 public class RepresentativeSelectionPanelTest {
@@ -63,6 +65,48 @@ public class RepresentativeSelectionPanelTest {
                     assertTrue(events.get(2).isComplete());
                 } finally {
                     panel.dispose();
+                }
+            }
+        });
+    }
+
+    @Test
+    public void statisticPanelHiddenForNoneAndHighlightsSelectedSeries()
+            throws Exception {
+        final RepresentativeSeries controlA = series("0", "Control", "Control-A");
+        final RepresentativeSeries controlB = series("1", "Control", "Control-B");
+        final RepresentativeStatTable table = new RepresentativeStatTable();
+        table.putValue("0", 0, 1, "Control-A", "Control-A",
+                "Control", "LH", "SCN", "DAPI", 10.0);
+        table.putValue("1", 1, 2, "Control-B", "Control-B",
+                "Control", "LH", "SCN", "DAPI", 14.0);
+
+        runOnEdt(new Runnable() {
+            @Override
+            public void run() {
+                RepresentativeSelectionPanel nonePanel =
+                        new RepresentativeSelectionPanel(
+                                Arrays.asList(controlA, controlB),
+                                RepresentativeStatistic.NONE, table);
+                try {
+                    assertNull(nonePanel.statsPanelForTests());
+                } finally {
+                    nonePanel.dispose();
+                }
+
+                RepresentativeSelectionPanel statsPanel =
+                        new RepresentativeSelectionPanel(
+                                Arrays.asList(controlA, controlB),
+                                RepresentativeStatistic.QUICK, table);
+                try {
+                    assertNotNull(statsPanel.statsPanelForTests());
+
+                    assertTrue(statsPanel.selectSeriesForTests("1"));
+
+                    assertEquals("1", statsPanel.statsPanelForTests()
+                            .highlightedSeriesIdForTest());
+                } finally {
+                    statsPanel.dispose();
                 }
             }
         });

@@ -87,9 +87,6 @@ public class RepresentativeFigureAnalysis implements Analysis {
             IJ.log("[Representative Figure] Locked representatives for "
                     + selection.size() + " condition"
                     + (selection.size() == 1 ? "" : "s") + ".");
-            // TODO(representative-image-figure stage 06): register the quantification
-            // side-panel with RepresentativeSelectionPanel.addSelectionListener(...).
-            // TODO(representative-image-figure stage 06): hide the quantification side-panel when statistic is NONE.
         } catch (Exception e) {
             IJ.log("[Representative Figure] Could not prepare representative selection: "
                     + e.getMessage());
@@ -237,7 +234,8 @@ public class RepresentativeFigureAnalysis implements Analysis {
                 "Representative Image Figure - Select Images", PipelineDialog.Phase.EXPORT);
         dialog.addHeader("Select Representatives");
         final RepresentativeSelectionPanel selectionPanel =
-                new RepresentativeSelectionPanel(previewSeries);
+                new RepresentativeSelectionPanel(previewSeries,
+                        config.statistic, config.statTable);
         dialog.addComponent(selectionPanel);
         dialog.setPrimaryButtonText("Lock in");
         dialog.setPrimaryButtonEnabled(selectionPanel.hasCompleteSelection());

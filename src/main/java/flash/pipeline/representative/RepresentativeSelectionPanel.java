@@ -96,11 +96,20 @@ public final class RepresentativeSelectionPanel extends JPanel {
     private final List<Future<?>> thumbnailTasks = new ArrayList<Future<?>>();
     private final ExecutorService thumbnailExecutor;
     private final JLabel statusLabel = new JLabel();
+    private final RepresentativeStatsPanel statsPanel;
 
     private volatile boolean disposed = false;
 
     public RepresentativeSelectionPanel(List<RepresentativeSeries> series) {
+        this(series, RepresentativeStatistic.NONE, null);
+    }
+
+    public RepresentativeSelectionPanel(List<RepresentativeSeries> series,
+                                        RepresentativeStatistic statistic,
+                                        RepresentativeStatTable statTable) {
         this.seriesByCondition = groupByCondition(series);
+        this.statsPanel = shouldShowStatsPanel(statistic)
+                ? new RepresentativeStatsPanel(statTable) : null;
         this.thumbnailExecutor = Executors.newFixedThreadPool(thumbnailThreadCount(),
                 new ThumbnailThreadFactory());
         buildUi();
@@ -157,6 +166,9 @@ public final class RepresentativeSelectionPanel extends JPanel {
                 row.setSelected(row.series == selectedSeries);
             }
         }
+        if (statsPanel != null) {
+            statsPanel.setHighlightedSeries(selectedSeries);
+        }
         updateStatus();
         fireSelectionChanged(selectedSeries);
         return true;
@@ -165,6 +177,10 @@ public final class RepresentativeSelectionPanel extends JPanel {
     boolean selectSeriesForTests(String seriesId) {
         SeriesRowPanel row = rowBySeriesId.get(seriesId);
         return row != null && selectSeries(row.series);
+    }
+
+    RepresentativeStatsPanel statsPanelForTests() {
+        return statsPanel;
     }
 
     public void dispose() {
@@ -202,9 +218,18 @@ public final class RepresentativeSelectionPanel extends JPanel {
         scroll.setBorder(BorderFactory.createLineBorder(FlashTheme.BORDER));
         scroll.getVerticalScrollBar().setUnitIncrement(24);
         scroll.getHorizontalScrollBar().setUnitIncrement(24);
-        scroll.setPreferredSize(new Dimension(1080, 620));
+        scroll.setPreferredSize(new Dimension(statsPanel == null ? 1080 : 760, 620));
         scroll.setMinimumSize(new Dimension(640, 360));
-        add(scroll, BorderLayout.CENTER);
+
+        if (statsPanel == null) {
+            add(scroll, BorderLayout.CENTER);
+        } else {
+            JPanel body = new JPanel(new BorderLayout(FlashTheme.SPACE_M, 0));
+            body.setBackground(FlashTheme.SURFACE_RAISED);
+            body.add(scroll, BorderLayout.CENTER);
+            body.add(statsPanel, BorderLayout.EAST);
+            add(body, BorderLayout.CENTER);
+        }
     }
 
     private JPanel buildConditionColumn(String condition,
@@ -440,6 +465,10 @@ public final class RepresentativeSelectionPanel extends JPanel {
     private static int thumbnailThreadCount() {
         int processors = Runtime.getRuntime().availableProcessors();
         return Math.max(1, Math.min(MAX_THUMB_THREADS, processors));
+    }
+
+    private static boolean shouldShowStatsPanel(RepresentativeStatistic statistic) {
+        return statistic != null && statistic != RepresentativeStatistic.NONE;
     }
 
     private static Border rowBorder(boolean selected) {
