@@ -1037,45 +1037,43 @@ public class CLIConfig {
 
         /**
          * Returns a copy of {@code base} (or a fresh default config when
-         * {@code base} is null) with every non-null override applied. The
-         * tile styling fields not represented as macro keys in this build
-         * (gaps, margins, condition/channel fonts, export scale, fractional
-         * positions) are accepted and stored, but only the fields the
-         * underlying {@link PresentationTileConfig} builder exposes are
-         * forwarded to the returned config.
+         * {@code base} is null) with every non-null override applied. Seeds
+         * from {@code base.toBuilder()} so all fields (including spacing, fonts,
+         * export scale and fractional positions) carry through, then forwards
+         * each set override.
          */
         public PresentationTileConfig applyTo(PresentationTileConfig base) {
             PresentationTileConfig source = base != null
                     ? base
                     : PresentationTileConfig.builder().build();
-            PresentationTileConfig.Builder builder = PresentationTileConfig.builder()
-                    .createOverviewTile(source.createOverviewTile())
-                    .annotateOverviewTile(source.annotateOverviewTile())
-                    .annotateIndividualImages(source.annotateIndividualImages())
-                    .groupRowsBy(source.groupRowsBy())
-                    .channelOrder(source.channelOrder())
-                    .cellSizePx(source.cellSizePx())
-                    .scaleBarEnabled(source.scaleBarEnabled())
-                    .scaleBarLengthUm(source.scaleBarLengthUm())
-                    .scaleBarThicknessPx(source.scaleBarThicknessPx())
-                    .scaleBarPosition(source.scaleBarPosition())
-                    .annotationColor(source.annotationColor())
-                    .labelMode(source.labelMode())
-                    .customLabelTemplate(source.customLabelTemplate())
-                    .labelFontSizePx(source.labelFontSizePx())
-                    .labelPosition(source.labelPosition());
+            PresentationTileConfig.Builder builder = source.toBuilder();
 
             if (cellSizePx != null) builder.cellSizePx(cellSizePx.intValue());
+            if (rowGapPx != null) builder.rowGapPx(rowGapPx.intValue());
+            if (conditionGapPx != null) builder.conditionGapPx(conditionGapPx.intValue());
+            if (innerColGapPx != null) builder.innerColGapPx(innerColGapPx.intValue());
+            if (marginPx != null) builder.marginPx(marginPx.intValue());
+            if (conditionFontSizePx != null) {
+                builder.conditionFontSizePx(conditionFontSizePx.intValue());
+            }
+            if (channelFontSizePx != null) {
+                builder.channelFontSizePx(channelFontSizePx.intValue());
+            }
+            if (exportScale != null) builder.exportScale(exportScale.intValue());
             if (scaleBarEnabled != null) builder.scaleBarEnabled(scaleBarEnabled.booleanValue());
             if (scaleBarLengthUm != null) builder.scaleBarLengthUm(scaleBarLengthUm.doubleValue());
             if (scaleBarThicknessPx != null) {
                 builder.scaleBarThicknessPx(scaleBarThicknessPx.intValue());
             }
             if (scaleBarPosition != null) builder.scaleBarPosition(scaleBarPosition);
+            if (scaleBarFracX != null) builder.scaleBarFracX(scaleBarFracX.doubleValue());
+            if (scaleBarFracY != null) builder.scaleBarFracY(scaleBarFracY.doubleValue());
             if (labelMode != null) builder.labelMode(labelMode);
             if (customLabelTemplate != null) builder.customLabelTemplate(customLabelTemplate);
             if (labelFontSizePx != null) builder.labelFontSizePx(labelFontSizePx.intValue());
             if (labelPosition != null) builder.labelPosition(labelPosition);
+            if (labelFracX != null) builder.labelFracX(labelFracX.doubleValue());
+            if (labelFracY != null) builder.labelFracY(labelFracY.doubleValue());
             if (annotationColor != null) builder.annotationColor(annotationColor);
             if (annotateOverviewTile != null) {
                 builder.annotateOverviewTile(annotateOverviewTile.booleanValue());

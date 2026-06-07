@@ -241,6 +241,27 @@ public class CLIArgumentParserRepfigTest {
     }
 
     @Test
+    public void applyToForwardsSpacingFontsExportScaleAndFractions() {
+        CLIConfig.RepfigConfig repfig = parseRepfig(
+                "repfig.row_gap=21 repfig.column_gap=22 repfig.inner_gap=7 repfig.margin=9 "
+                        + "repfig.condition_font=20 repfig.channel_font=24 repfig.export_scale=3 "
+                        + "repfig.label_frac=0.1,0.2 repfig.scalebar_frac=0.7,0.8");
+        PresentationTileConfig applied = repfig.applyTo(
+                PresentationTileConfig.builder().build());
+        assertEquals(21, applied.rowGapPx());
+        assertEquals(22, applied.conditionGapPx());
+        assertEquals(7, applied.innerColGapPx());
+        assertEquals(9, applied.marginPx());
+        assertEquals(20, applied.conditionFontSizePx());
+        assertEquals(24, applied.channelFontSizePx());
+        assertEquals(3, applied.exportScale());
+        assertEquals(0.1, applied.labelFracX(), 1e-9);
+        assertEquals(0.2, applied.labelFracY(), 1e-9);
+        assertEquals(0.7, applied.scaleBarFracX(), 1e-9);
+        assertEquals(0.8, applied.scaleBarFracY(), 1e-9);
+    }
+
+    @Test
     public void serializeRoundTripIsStable() {
         String options = "dir=[/tmp] repfig.cell_size=420 repfig.row_gap=9 repfig.column_gap=14 "
                 + "repfig.inner_gap=2 repfig.margin=10 repfig.condition_font=13 "
