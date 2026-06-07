@@ -414,6 +414,13 @@ public final class ConditionLayoutChooser {
         private final JTextField customLabelField;
         private final JTextField labelFontSizeField;
         private final JComboBox<String> labelPositionBox;
+        private final JTextField rowGapField;
+        private final JTextField conditionGapField;
+        private final JTextField innerGapField;
+        private final JTextField marginField;
+        private final JTextField conditionFontField;
+        private final JTextField channelFontField;
+        private final JComboBox<String> exportScaleBox;
 
         TileOptionsPanel(List<String> defaultOrder, PresentationTileConfig initialConfig) {
             PresentationTileConfig initial =
@@ -446,6 +453,14 @@ public final class ConditionLayoutChooser {
             labelFontSizeField = compactField(String.valueOf(initial.labelFontSizePx()), 4);
             labelPositionBox = new JComboBox<String>(positionChoices());
             labelPositionBox.setSelectedItem(positionLabel(initial.labelPosition()));
+            rowGapField = compactField(String.valueOf(initial.rowGapPx()), 4);
+            conditionGapField = compactField(String.valueOf(initial.conditionGapPx()), 4);
+            innerGapField = compactField(String.valueOf(initial.innerColGapPx()), 4);
+            marginField = compactField(String.valueOf(initial.marginPx()), 4);
+            conditionFontField = compactField(String.valueOf(initial.conditionFontSizePx()), 4);
+            channelFontField = compactField(String.valueOf(initial.channelFontSizePx()), 4);
+            exportScaleBox = new JComboBox<String>(new String[]{"1x", "2x", "3x", "4x"});
+            exportScaleBox.setSelectedItem(Math.max(1, Math.min(4, initial.exportScale())) + "x");
 
             panel.add(compactRow(
                     labelled("Rows by", tileGroupBox),
@@ -464,6 +479,15 @@ public final class ConditionLayoutChooser {
                     labelled("Custom", customLabelField),
                     labelled("Font px", labelFontSizeField),
                     labelled("Label position", labelPositionBox)));
+            panel.add(compactRow(
+                    labelled("Row gap", rowGapField),
+                    labelled("Column gap", conditionGapField),
+                    labelled("Inner gap", innerGapField),
+                    labelled("Margin", marginField)));
+            panel.add(compactRow(
+                    labelled("Condition font", conditionFontField),
+                    labelled("Channel font", channelFontField),
+                    labelled("Export scale", exportScaleBox)));
             panel.add(tileOrderPanel.panel);
 
             annotateIndividualToggle.addChangeListener(new Runnable() {
@@ -496,6 +520,13 @@ public final class ConditionLayoutChooser {
                     .customLabelTemplate(textValue(customLabelField, "{stain}"))
                     .labelFontSizePx(parseInt(labelFontSizeField, 18))
                     .labelPosition(parsePosition(selectedText(labelPositionBox)))
+                    .marginPx(parseInt(marginField, 6))
+                    .innerColGapPx(parseInt(innerGapField, 4))
+                    .conditionGapPx(parseInt(conditionGapField, 12))
+                    .rowGapPx(parseInt(rowGapField, 8))
+                    .conditionFontSizePx(parseInt(conditionFontField, 15))
+                    .channelFontSizePx(parseInt(channelFontField, 16))
+                    .exportScale(parseExportScale(exportScaleBox))
                     .build();
         }
 
@@ -734,6 +765,15 @@ public final class ConditionLayoutChooser {
             return Integer.parseInt(textValue(field, String.valueOf(fallback)));
         } catch (NumberFormatException e) {
             return fallback;
+        }
+    }
+
+    private static int parseExportScale(JComboBox<String> box) {
+        String text = selectedText(box).toLowerCase(Locale.ROOT).replace("x", "").trim();
+        try {
+            return Math.max(1, Math.min(4, Integer.parseInt(text)));
+        } catch (NumberFormatException e) {
+            return 1;
         }
     }
 

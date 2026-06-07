@@ -227,6 +227,134 @@ public class RepresentativeFigureWriterTest {
         assertTrue(new File(individualRoot, "Treatment").isDirectory());
     }
 
+    @Test
+    public void figureWidthHonorsSpacingAndExportScale() {
+        // Two conditions in one row, two outputs (DAPI, Merge), cell=80.
+        // width = margin*2 + cols*(outputs*cell + (outputs-1)*innerGap) + (cols-1)*conditionGap
+        //       = margin*2 + 2*(2*80 + innerGap) + conditionGap
+        assertEquals(352, widthFor(spacing(6, 4, 12, 1)));   // baseline
+        assertEquals(390, widthFor(spacing(6, 4, 50, 1)));   // +38 from conditionGap
+        assertEquals(364, widthFor(spacing(6, 10, 12, 1)));  // +12 from innerGap (2 blocks)
+        assertEquals(380, widthFor(spacing(20, 4, 12, 1)));  // +28 from margin (both sides)
+        assertEquals(704, widthFor(spacing(6, 4, 12, 2)));   // exportScale doubles everything
+    }
+
+    @Test
+    public void rowGapChangesFigureHeightByExactDelta() {
+        int tall = heightForTwoRows(30);
+        int tight = heightForTwoRows(8);
+        assertEquals("row gap delta should add directly to a two-row figure height",
+                22, tall - tight);
+    }
+
+    @Test
+    public void exportScaleScalesOverviewAnnotationText() {
+        int basePixels = annotationBrightPixelsForExportScale(1);
+        int scaledPixels = annotationBrightPixelsForExportScale(2);
+
+        assertTrue("baseline annotation should draw inside the tile", basePixels > 0);
+        assertTrue("2x export should scale annotation text, not only canvas geometry",
+                scaledPixels > basePixels * 2);
+    }
+
+    private static PresentationTileConfig spacing(int margin, int innerGap,
+                                                  int conditionGap, int exportScale) {
+        return PresentationTileConfig.builder()
+                .createOverviewTile(true)
+                .annotateOverviewTile(false)
+                .scaleBarEnabled(false)
+                .labelMode(PresentationTileConfig.LabelMode.NONE)
+                .channelOrder(Arrays.asList("DAPI", "Merge"))
+                .cellSizePx(80)
+                .marginPx(margin)
+                .innerColGapPx(innerGap)
+                .conditionGapPx(conditionGap)
+                .exportScale(exportScale)
+                .build();
+    }
+
+    private static int widthFor(PresentationTileConfig tileConfig) {
+        RepresentativeFigureConfig config =
+                configFor(Arrays.asList("Control", "Treatment"), tileConfig);
+        BufferedImage figure = RepresentativeFigureWriter.renderFigureImage(config,
+                Arrays.asList(
+                        renderedSeries(0, "Control", Color.RED, Color.CYAN),
+                        renderedSeries(1, "Treatment", Color.GREEN, Color.YELLOW)));
+        return figure.getWidth();
+    }
+
+    private static int heightForTwoRows(int rowGapPx) {
+        RepresentativeFigureConfig config = configFor(
+                Arrays.asList("Control", "Treatment"),
+                PresentationTileConfig.builder()
+                        .createOverviewTile(true)
+                        .annotateOverviewTile(false)
+                        .scaleBarEnabled(false)
+                        .labelMode(PresentationTileConfig.LabelMode.NONE)
+                        .channelOrder(Collections.singletonList("DAPI"))
+                        .cellSizePx(50)
+                        .rowGapPx(rowGapPx)
+                        .build());
+        config.layout = new RepresentativeLayout(Arrays.asList(
+                Collections.singletonList("Control"),
+                Collections.singletonList("Treatment")));
+        BufferedImage figure = RepresentativeFigureWriter.renderFigureImage(config,
+                Arrays.asList(
+                        renderedSeries(0, "Control", Color.RED, Color.CYAN),
+                        renderedSeries(1, "Treatment", Color.GREEN, Color.YELLOW)));
+        return figure.getHeight();
+    }
+
+    private static int annotationBrightPixelsForExportScale(int exportScale) {
+        RepresentativeFigureConfig config = configFor(
+                Collections.singletonList("Control"),
+                PresentationTileConfig.builder()
+                        .createOverviewTile(true)
+                        .annotateOverviewTile(true)
+                        .scaleBarEnabled(false)
+                        .labelMode(PresentationTileConfig.LabelMode.STAIN_NAME)
+                        .labelFontSizePx(18)
+                        .labelPosition(PresentationTileConfig.Position.TOP_LEFT)
+                        .annotationColor(Color.WHITE)
+                        .channelOrder(Collections.singletonList("DAPI"))
+                        .cellSizePx(80)
+                        .exportScale(exportScale)
+                        .build());
+        BufferedImage figure = RepresentativeFigureWriter.renderFigureImage(config,
+                Collections.singletonList(
+                        renderedSeries(0, "Control", Color.BLACK, Color.BLACK)));
+        return brightPixelsInsideDarkTile(figure);
+    }
+
+    private static int brightPixelsInsideDarkTile(BufferedImage image) {
+        int minX = Integer.MAX_VALUE;
+        int minY = Integer.MAX_VALUE;
+        int maxX = -1;
+        int maxY = -1;
+        for (int y = 0; y < image.getHeight(); y++) {
+            for (int x = 0; x < image.getWidth(); x++) {
+                Color c = new Color(image.getRGB(x, y), true);
+                if (c.getRed() < 8 && c.getGreen() < 8 && c.getBlue() < 8) {
+                    minX = Math.min(minX, x);
+                    minY = Math.min(minY, y);
+                    maxX = Math.max(maxX, x);
+                    maxY = Math.max(maxY, y);
+                }
+            }
+        }
+        if (maxX < minX || maxY < minY) return 0;
+        int bright = 0;
+        for (int y = minY; y <= maxY; y++) {
+            for (int x = minX; x <= maxX; x++) {
+                Color c = new Color(image.getRGB(x, y), true);
+                if (c.getRed() > 180 && c.getGreen() > 180 && c.getBlue() > 180) {
+                    bright++;
+                }
+            }
+        }
+        return bright;
+    }
+
     private static RepresentativeFigureConfig configFor(Iterable<String> conditions,
                                                         PresentationTileConfig tileConfig) {
         RepresentativeFigureConfig config = new RepresentativeFigureConfig();

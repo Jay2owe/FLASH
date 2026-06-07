@@ -46,6 +46,13 @@ public final class PresentationTileConfig {
     private final String customLabelTemplate;
     private final int labelFontSizePx;
     private final Position labelPosition;
+    private final int marginPx;
+    private final int innerColGapPx;
+    private final int conditionGapPx;
+    private final int rowGapPx;
+    private final int conditionFontSizePx;
+    private final int channelFontSizePx;
+    private final int exportScale;
 
     private PresentationTileConfig(Builder b) {
         this.annotateIndividualImages = b.annotateIndividualImages;
@@ -63,6 +70,13 @@ public final class PresentationTileConfig {
         this.customLabelTemplate = b.customLabelTemplate == null ? "" : b.customLabelTemplate.trim();
         this.labelFontSizePx = clamp(b.labelFontSizePx, 8, 96);
         this.labelPosition = b.labelPosition == null ? Position.TOP_LEFT : b.labelPosition;
+        this.marginPx = clamp(b.marginPx, 0, 200);
+        this.innerColGapPx = clamp(b.innerColGapPx, 0, 200);
+        this.conditionGapPx = clamp(b.conditionGapPx, 0, 400);
+        this.rowGapPx = clamp(b.rowGapPx, 0, 400);
+        this.conditionFontSizePx = clamp(b.conditionFontSizePx, 6, 96);
+        this.channelFontSizePx = clamp(b.channelFontSizePx, 6, 96);
+        this.exportScale = clamp(b.exportScale, 1, 4);
     }
 
     public static Builder builder() {
@@ -133,6 +147,34 @@ public final class PresentationTileConfig {
         return labelPosition;
     }
 
+    public int marginPx() {
+        return marginPx;
+    }
+
+    public int innerColGapPx() {
+        return innerColGapPx;
+    }
+
+    public int conditionGapPx() {
+        return conditionGapPx;
+    }
+
+    public int rowGapPx() {
+        return rowGapPx;
+    }
+
+    public int conditionFontSizePx() {
+        return conditionFontSizePx;
+    }
+
+    public int channelFontSizePx() {
+        return channelFontSizePx;
+    }
+
+    public int exportScale() {
+        return exportScale;
+    }
+
     private static int clamp(int value, int min, int max) {
         return Math.max(min, Math.min(max, value));
     }
@@ -153,6 +195,13 @@ public final class PresentationTileConfig {
         private String customLabelTemplate = "{stain}";
         private int labelFontSizePx = 18;
         private Position labelPosition = Position.TOP_LEFT;
+        private int marginPx = 6;
+        private int innerColGapPx = 4;
+        private int conditionGapPx = 12;
+        private int rowGapPx = 8;
+        private int conditionFontSizePx = 15;
+        private int channelFontSizePx = 16;
+        private int exportScale = 1;
 
         public Builder createOverviewTile(boolean value) {
             this.createOverviewTile = value;
@@ -233,6 +282,41 @@ public final class PresentationTileConfig {
 
         public Builder labelPosition(Position value) {
             this.labelPosition = value;
+            return this;
+        }
+
+        public Builder marginPx(int value) {
+            this.marginPx = value;
+            return this;
+        }
+
+        public Builder innerColGapPx(int value) {
+            this.innerColGapPx = value;
+            return this;
+        }
+
+        public Builder conditionGapPx(int value) {
+            this.conditionGapPx = value;
+            return this;
+        }
+
+        public Builder rowGapPx(int value) {
+            this.rowGapPx = value;
+            return this;
+        }
+
+        public Builder conditionFontSizePx(int value) {
+            this.conditionFontSizePx = value;
+            return this;
+        }
+
+        public Builder channelFontSizePx(int value) {
+            this.channelFontSizePx = value;
+            return this;
+        }
+
+        public Builder exportScale(int value) {
+            this.exportScale = value;
             return this;
         }
 

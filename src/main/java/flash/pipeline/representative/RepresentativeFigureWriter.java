@@ -38,10 +38,6 @@ public final class RepresentativeFigureWriter {
     private static final Color TILE_LINE = new Color(210, 210, 210);
     private static final Color TILE_TEXT = new Color(35, 35, 35);
     private static final Color TILE_HELP_TEXT = new Color(90, 90, 90);
-    private static final int MARGIN = 6;
-    private static final int COL_GAP = 4;
-    private static final int CONDITION_GAP = 12;
-    private static final int ROW_GAP = 8;
     private static final String MERGE_NAME = "Merge";
     private static final String INDIVIDUAL_IMAGES_DIR = "Individual Images";
 
@@ -195,11 +191,20 @@ public final class RepresentativeFigureWriter {
                 renderedByCondition(safeRendered);
         Map<String, String> conditions = conditionLookup(safeRendered);
 
-        int cell = safeConfig.tileConfig.cellSizePx();
-        Font conditionFont = new Font(Font.SANS_SERIF, Font.BOLD, 15);
-        Font channelFont = new Font(Font.SANS_SERIF, Font.BOLD, 16);
+        PresentationTileConfig tileConfig = safeConfig.tileConfig;
+        int scale = Math.max(1, tileConfig.exportScale());
+        int cell = Math.max(1, tileConfig.cellSizePx() * scale);
+        int marginPx = tileConfig.marginPx() * scale;
+        int innerColGapPx = tileConfig.innerColGapPx() * scale;
+        int conditionGapPx = tileConfig.conditionGapPx() * scale;
+        int rowGapPx = tileConfig.rowGapPx() * scale;
+        Font conditionFont = new Font(Font.SANS_SERIF, Font.BOLD,
+                Math.max(1, tileConfig.conditionFontSizePx() * scale));
+        Font channelFont = new Font(Font.SANS_SERIF, Font.BOLD,
+                Math.max(1, tileConfig.channelFontSizePx() * scale));
         FigureLayout layout = createFigureLayout(
-                safeConfig.layout, outputs, cell, conditionFont, channelFont);
+                safeConfig.layout, outputs, cell, conditionFont, channelFont,
+                marginPx, innerColGapPx, conditionGapPx, rowGapPx, scale);
 
         BufferedImage figure = new BufferedImage(
                 layout.width, layout.height, BufferedImage.TYPE_INT_ARGB);
@@ -209,20 +214,20 @@ public final class RepresentativeFigureWriter {
             g.setColor(TILE_BG);
             g.fillRect(0, 0, layout.width, layout.height);
 
-            int y = MARGIN;
+            int y = layout.marginPx;
             List<List<String>> rows = safeConfig.layout.rows();
             for (int r = 0; r < rows.size(); r++) {
                 List<String> row = rows.get(r);
-                int x = MARGIN;
+                int x = layout.marginPx;
                 for (int c = 0; c < row.size(); c++) {
                     String condition = row.get(c);
                     RepresentativePreviewRenderer.RenderedFinalSeries series =
                             byCondition.get(RepresentativeSelection.conditionLabel(condition));
                     drawConditionBlock(g, condition, series, outputs, conditions,
                             safeConfig.tileConfig, layout, x, y);
-                    x += layout.conditionBlockWidth + CONDITION_GAP;
+                    x += layout.conditionBlockWidth + layout.conditionGapPx;
                 }
-                y += layout.rowHeight + ROW_GAP;
+                y += layout.rowHeight + layout.rowGapPx;
             }
         } finally {
             g.dispose();
@@ -250,14 +255,14 @@ public final class RepresentativeFigureWriter {
 
         int headerY = y + layout.conditionHeaderHeight;
         drawOutputHeaders(g, outputs, x, headerY, layout.cell,
-                layout.channelHeaderHeight, layout.channelFont);
+                layout.channelHeaderHeight, layout.channelFont, layout.innerColGapPx);
 
         int tileY = headerY + layout.channelHeaderHeight;
         Map<String, RenderedTile> tiles = tilesByOutput(series);
         for (int i = 0; i < outputs.size(); i++) {
-            int tileX = x + i * (layout.cell + COL_GAP);
+            int tileX = x + i * (layout.cell + layout.innerColGapPx);
             drawTile(g, tiles.get(outputs.get(i)), conditions, config,
-                    tileX, tileY, layout.cell);
+                    tileX, tileY, layout.cell, layout.exportScale);
         }
     }
 
@@ -267,12 +272,13 @@ public final class RepresentativeFigureWriter {
                                           int y,
                                           int cell,
                                           int headerHeight,
-                                          Font font) {
+                                          Font font,
+                                          int colGap) {
         g.setFont(font);
         g.setColor(TILE_TEXT);
         FontMetrics fm = g.getFontMetrics();
         for (int i = 0; i < outputs.size(); i++) {
-            int cellX = x + i * (cell + COL_GAP);
+            int cellX = x + i * (cell + colGap);
             String label = fitSingleLine(outputs.get(i), fm, cell);
             int textX = cellX + Math.max(0, (cell - fm.stringWidth(label)) / 2);
             int textY = y + Math.max(fm.getAscent(), (headerHeight + fm.getAscent()) / 2 - 1);
@@ -286,7 +292,8 @@ public final class RepresentativeFigureWriter {
                                  PresentationTileConfig config,
                                  int x,
                                  int y,
-                                 int cell) {
+                                 int cell,
+                                 int annotationStyleScale) {
         g.setColor(Color.BLACK);
         g.fillRect(x, y, cell, cell);
         g.setColor(TILE_LINE);
@@ -311,7 +318,8 @@ public final class RepresentativeFigureWriter {
         if (config.annotateOverviewTile()) {
             double recordScale = drawW / (double) Math.max(1, tile.record.widthPx());
             PresentationTileWriter.drawAnnotations(g, tile.record, conditions, config,
-                    new Rectangle(drawX, drawY, drawW, drawH), recordScale);
+                    new Rectangle(drawX, drawY, drawW, drawH), recordScale,
+                    Math.max(1, annotationStyleScale), Math.max(0.6, recordScale));
         }
     }
 
@@ -319,7 +327,12 @@ public final class RepresentativeFigureWriter {
                                                    List<String> outputs,
                                                    int cell,
                                                    Font conditionFont,
-                                                   Font channelFont) {
+                                                   Font channelFont,
+                                                   int marginPx,
+                                                   int innerColGapPx,
+                                                   int conditionGapPx,
+                                                   int rowGapPx,
+                                                   int exportScale) {
         BufferedImage scratch = new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB);
         Graphics2D g = scratch.createGraphics();
         try {
@@ -329,18 +342,20 @@ public final class RepresentativeFigureWriter {
             int conditionHeaderHeight = conditionFm.getHeight() + 4;
             int channelHeaderHeight = channelFm.getHeight() + 4;
             int conditionBlockWidth = outputs.size() * cell
-                    + Math.max(0, outputs.size() - 1) * COL_GAP;
+                    + Math.max(0, outputs.size() - 1) * innerColGapPx;
             int maxConditionsPerRow = representativeLayout.maxColumnCount();
-            int width = MARGIN * 2
+            int width = marginPx * 2
                     + maxConditionsPerRow * conditionBlockWidth
-                    + Math.max(0, maxConditionsPerRow - 1) * CONDITION_GAP;
+                    + Math.max(0, maxConditionsPerRow - 1) * conditionGapPx;
             int rowHeight = conditionHeaderHeight + channelHeaderHeight + cell;
-            int height = MARGIN * 2
+            int height = marginPx * 2
                     + representativeLayout.rowCount() * rowHeight
-                    + Math.max(0, representativeLayout.rowCount() - 1) * ROW_GAP;
+                    + Math.max(0, representativeLayout.rowCount() - 1) * rowGapPx;
             return new FigureLayout(width, height, cell, conditionBlockWidth,
                     conditionHeaderHeight, channelHeaderHeight, rowHeight,
-                    conditionFont, channelFont);
+                    conditionFont, channelFont,
+                    marginPx, innerColGapPx, conditionGapPx, rowGapPx,
+                    exportScale);
         } finally {
             g.dispose();
         }
@@ -650,6 +665,11 @@ public final class RepresentativeFigureWriter {
         final int rowHeight;
         final Font conditionFont;
         final Font channelFont;
+        final int marginPx;
+        final int innerColGapPx;
+        final int conditionGapPx;
+        final int rowGapPx;
+        final int exportScale;
 
         FigureLayout(int width,
                      int height,
@@ -659,7 +679,12 @@ public final class RepresentativeFigureWriter {
                      int channelHeaderHeight,
                      int rowHeight,
                      Font conditionFont,
-                     Font channelFont) {
+                     Font channelFont,
+                     int marginPx,
+                     int innerColGapPx,
+                     int conditionGapPx,
+                     int rowGapPx,
+                     int exportScale) {
             this.width = width;
             this.height = height;
             this.cell = cell;
@@ -669,6 +694,11 @@ public final class RepresentativeFigureWriter {
             this.rowHeight = rowHeight;
             this.conditionFont = conditionFont;
             this.channelFont = channelFont;
+            this.marginPx = marginPx;
+            this.innerColGapPx = innerColGapPx;
+            this.conditionGapPx = conditionGapPx;
+            this.rowGapPx = rowGapPx;
+            this.exportScale = Math.max(1, exportScale);
         }
     }
 }

@@ -50,6 +50,13 @@ public class RepresentativeFigureConfigTest {
                 .customLabelTemplate("{condition} {image}")
                 .labelFontSizePx(14)
                 .labelPosition(PresentationTileConfig.Position.TOP_RIGHT)
+                .marginPx(20)
+                .innerColGapPx(9)
+                .conditionGapPx(33)
+                .rowGapPx(17)
+                .conditionFontSizePx(22)
+                .channelFontSizePx(24)
+                .exportScale(3)
                 .build();
 
         RepresentativeFigureConfig back =
@@ -71,6 +78,48 @@ public class RepresentativeFigureConfigTest {
         assertEquals(Color.BLACK, back.tileConfig.annotationColor());
         assertEquals(PresentationTileConfig.LabelMode.CONDITION_IMAGE,
                 back.tileConfig.labelMode());
+        assertEquals(20, back.tileConfig.marginPx());
+        assertEquals(9, back.tileConfig.innerColGapPx());
+        assertEquals(33, back.tileConfig.conditionGapPx());
+        assertEquals(17, back.tileConfig.rowGapPx());
+        assertEquals(22, back.tileConfig.conditionFontSizePx());
+        assertEquals(24, back.tileConfig.channelFontSizePx());
+        assertEquals(3, back.tileConfig.exportScale());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void legacyTileConfigWithoutSpacingKeysFallsBackToDefaults() {
+        RepresentativeFigureConfig config = new RepresentativeFigureConfig();
+        Map<String, RepresentativeSeries> selected =
+                new LinkedHashMap<String, RepresentativeSeries>();
+        selected.put("Control", representativeSeries(0, "Control"));
+        config.selection = new RepresentativeSelection(
+                Arrays.asList("Control"), selected);
+        config.layout = new RepresentativeLayout(Arrays.asList(Arrays.asList("Control")));
+        config.tileConfig = PresentationTileConfig.builder()
+                .channelOrder(Arrays.asList("Merge"))
+                .build();
+
+        Map<String, Object> map = config.toMap();
+        Map<String, Object> tileConfig = (Map<String, Object>) map.get("tileConfig");
+        // Simulate a project saved before the spacing/font fields existed.
+        tileConfig.remove("marginPx");
+        tileConfig.remove("innerColGapPx");
+        tileConfig.remove("conditionGapPx");
+        tileConfig.remove("rowGapPx");
+        tileConfig.remove("conditionFontSizePx");
+        tileConfig.remove("channelFontSizePx");
+        tileConfig.remove("exportScale");
+
+        RepresentativeFigureConfig back = RepresentativeFigureConfig.fromMap(map);
+        assertEquals(6, back.tileConfig.marginPx());
+        assertEquals(4, back.tileConfig.innerColGapPx());
+        assertEquals(12, back.tileConfig.conditionGapPx());
+        assertEquals(8, back.tileConfig.rowGapPx());
+        assertEquals(15, back.tileConfig.conditionFontSizePx());
+        assertEquals(16, back.tileConfig.channelFontSizePx());
+        assertEquals(1, back.tileConfig.exportScale());
     }
 
     private static RepresentativeSeries representativeSeries(int index, String condition) {

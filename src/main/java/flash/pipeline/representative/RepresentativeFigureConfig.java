@@ -348,6 +348,13 @@ public class RepresentativeFigureConfig {
         out.put("customLabelTemplate", config.customLabelTemplate());
         out.put("labelFontSizePx", Integer.valueOf(config.labelFontSizePx()));
         out.put("labelPosition", config.labelPosition().name());
+        out.put("marginPx", Integer.valueOf(config.marginPx()));
+        out.put("innerColGapPx", Integer.valueOf(config.innerColGapPx()));
+        out.put("conditionGapPx", Integer.valueOf(config.conditionGapPx()));
+        out.put("rowGapPx", Integer.valueOf(config.rowGapPx()));
+        out.put("conditionFontSizePx", Integer.valueOf(config.conditionFontSizePx()));
+        out.put("channelFontSizePx", Integer.valueOf(config.channelFontSizePx()));
+        out.put("exportScale", Integer.valueOf(config.exportScale()));
         return out;
     }
 
@@ -375,6 +382,13 @@ public class RepresentativeFigureConfig {
                 .labelFontSizePx(intValue(map.get("labelFontSizePx"), 18))
                 .labelPosition(enumValue(PresentationTileConfig.Position.class,
                         map.get("labelPosition"), PresentationTileConfig.Position.TOP_LEFT))
+                .marginPx(intValue(map.get("marginPx"), 6))
+                .innerColGapPx(intValue(map.get("innerColGapPx"), 4))
+                .conditionGapPx(intValue(map.get("conditionGapPx"), 12))
+                .rowGapPx(intValue(map.get("rowGapPx"), 8))
+                .conditionFontSizePx(intValue(map.get("conditionFontSizePx"), 15))
+                .channelFontSizePx(intValue(map.get("channelFontSizePx"), 16))
+                .exportScale(intValue(map.get("exportScale"), 1))
                 .build();
     }
 
