@@ -208,7 +208,7 @@ public class OrientationResolverIntegrationTest {
                 "Mouse",
                 OrientationManifestRow.Hemisphere.LH,
                 "SCN",
-                "Saved during Draw and Save ROIs");
+                "Saved during Draw ROIs and Orientate Images");
 
         ResolvedImageMetadata metadata = ImageOrientationResolver.resolve(
                 dir.getAbsolutePath(), title, 1);

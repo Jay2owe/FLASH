@@ -27,6 +27,7 @@ import flash.pipeline.objects.CpcUtils;
 
 import flash.pipeline.help.SpatialHelpCatalog;
 import flash.pipeline.image.AdaptiveParallelism;
+import flash.pipeline.image.OrientationOps;
 import flash.pipeline.io.CalibrationIO;
 import flash.pipeline.io.CsvTableIO;
 import flash.pipeline.io.DeferredImageSupplier;
@@ -44,6 +45,8 @@ import flash.pipeline.morphometry.ObjectTextureFeatures;
 import flash.pipeline.morphometry.ObjectTextureFeatures3D;
 import flash.pipeline.morphometry.ObjectTextureGLCM;
 import flash.pipeline.morphometry.ObjectTextureGLCM3D;
+import flash.pipeline.naming.ImageOrientationResolver;
+import flash.pipeline.naming.ResolvedImageMetadata;
 import flash.pipeline.results.MorphometryDetailsWriter;
 import flash.pipeline.results.ObjectCsvColumnOrder;
 import flash.pipeline.results.RunIdCsv;
@@ -5381,6 +5384,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
     }
 
     private static final class RawTextureImageResolver {
+        private final String directory;
         private final DeferredImageSupplier supplier;
         private final List<String> channelNames;
         private final ChannelIdentities identities;
@@ -5388,6 +5392,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
 
         private RawTextureImageResolver(String directory, List<String> channelNames,
                                         AnalysisRunContext runRecordContext) throws Exception {
+            this.directory = directory;
             this.supplier = ImageSourceDispatcher.createSupplier(directory);
             this.channelNames = channelNames == null
                     ? new ArrayList<String>()
@@ -5407,6 +5412,11 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
             long started = System.currentTimeMillis();
             try {
                 ImagePlus image = supplier.openSeriesMaterializedChannel(seriesIndex, channelIndex);
+                if (image != null) {
+                    ResolvedImageMetadata metadata = ImageOrientationResolver.resolve(
+                            directory, image.getTitle(), seriesIndex + 1);
+                    OrientationOps.applyTransform(image, metadata);
+                }
                 if (runRecordContext != null && input != null) {
                     runRecordContext.recordInputEnd(input, image == null ? "skipped" : "processed",
                             System.currentTimeMillis() - started);

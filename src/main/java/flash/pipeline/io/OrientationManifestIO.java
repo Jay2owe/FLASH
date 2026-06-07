@@ -1,6 +1,7 @@
 package flash.pipeline.io;
 
 import flash.pipeline.naming.OrientationManifestRow;
+import flash.pipeline.project.ProjectFileIO;
 
 import java.io.File;
 import java.io.IOException;
@@ -37,8 +38,42 @@ public final class OrientationManifestIO {
     private OrientationManifestIO() {}
 
     public static File getFile(String directory) {
-        FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
+        FlashProjectLayout layout = FlashProjectLayout.forDirectory(
+                orientationProjectRoot(directory).getAbsolutePath());
         return layout.projectSummaryWriteFile(FILE_NAME);
+    }
+
+    static File orientationProjectRoot(String directory) {
+        if (directory == null || directory.trim().isEmpty()) {
+            throw new IllegalArgumentException("Project directory must not be blank.");
+        }
+
+        File selected = new File(directory);
+        if (ProjectFileIO.FILE_NAME.equalsIgnoreCase(selected.getName())) {
+            File parent = selected.getParentFile();
+            if (parent == null) {
+                return selected;
+            }
+            File root = FlashProjectLayout.projectRootForConfigurationDir(parent);
+            return root == null ? parent : root;
+        }
+
+        if (selected.isFile()) {
+            selected = selected.getParentFile();
+        }
+
+        File root = FlashProjectLayout.projectRootForConfigurationDir(selected);
+        if (root != null) {
+            return root;
+        }
+
+        if (selected != null
+                && FlashProjectLayout.FLASH_DIR.equals(selected.getName())
+                && selected.getParentFile() != null) {
+            return selected.getParentFile();
+        }
+
+        return selected;
     }
 
     public static File getExistingFile(String directory) {

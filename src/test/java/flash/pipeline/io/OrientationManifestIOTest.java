@@ -1,6 +1,7 @@
 package flash.pipeline.io;
 
 import flash.pipeline.naming.OrientationManifestRow;
+import flash.pipeline.project.ProjectFileIO;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -49,6 +50,40 @@ public class OrientationManifestIOTest {
 
         assertEquals(1, rows.size());
         assertEquals("current", rows.get(0).notes);
+    }
+
+    @Test
+    public void readAndWriteUseProjectRootForProjectSelectionVariants() throws Exception {
+        File root = temp.newFolder("selection-root");
+        FlashProjectLayout layout = FlashProjectLayout.forDirectory(root.getAbsolutePath());
+        File settings = layout.configurationWriteDir();
+        assertTrue(settings.mkdirs());
+        File projectJson = new File(settings, ProjectFileIO.FILE_NAME);
+        assertTrue(projectJson.createNewFile());
+
+        OrientationManifestIO.saveRows(root.getAbsolutePath(),
+                Arrays.asList(row("ROOT", "root-row")));
+
+        String[] selections = {
+                new File(root, FlashProjectLayout.FLASH_DIR).getAbsolutePath(),
+                layout.visibleConfigurationDir().getAbsolutePath(),
+                settings.getAbsolutePath(),
+                projectJson.getAbsolutePath()
+        };
+
+        for (String selection : selections) {
+            List<OrientationManifestRow> rows = OrientationManifestIO.readIfExists(selection);
+            assertEquals("Expected root manifest for " + selection, 1, rows.size());
+            assertEquals("root-row", rows.get(0).notes);
+        }
+
+        OrientationManifestIO.saveRows(settings.getAbsolutePath(),
+                Arrays.asList(row("SETTINGS", "settings-write")));
+
+        List<OrientationManifestRow> rootRows =
+                OrientationManifestIO.readIfExists(root.getAbsolutePath());
+        assertEquals(1, rootRows.size());
+        assertEquals("settings-write", rootRows.get(0).notes);
     }
 
     @Test

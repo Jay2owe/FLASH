@@ -1073,7 +1073,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         RoiSetData[] roiSets = selectedRoiSetData.toArray(new RoiSetData[0]);
 
         if (roiSets.length == 0) {
-            String message = "No ROIs loaded. Run 'Draw and Save ROIs' first (must create 2 ROIs per image).";
+            String message = "No ROIs loaded. Run 'Draw ROIs and Orientate Images' first (must create 2 ROIs per image).";
             IJ.error("3D Object Analysis", message);
             recordWarn(message);
             return;
@@ -1479,7 +1479,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                 return selection;
             }
             String message = "[FLASH] 3D Object Analysis cancelled because no ROI sets "
-                    + "were saved after Draw and Save ROIs.";
+                    + "were saved after Draw ROIs and Orientate Images.";
             IJ.log(message);
             recordWarn(message);
             return null;
@@ -1567,7 +1567,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
     }
 
     private void launchRoiDrawingWorkflowDirect(String directory) {
-        IJ.log("[FLASH] Opening Draw and Save ROIs before 3D Object Analysis.");
+        IJ.log("[FLASH] Opening Draw ROIs and Orientate Images before 3D Object Analysis.");
         DrawAndSaveROIsAnalysis roiAnalysis = new DrawAndSaveROIsAnalysis();
         roiAnalysis.setSuppressDialogs(false);
         roiAnalysis.setHeadless(false);
@@ -5660,7 +5660,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                     recordInputEnd(input, imp == null ? "skipped" : "processed", started);
                     return imp;
                 }
-                File container = rawSupplier.getContainerFile();
+                File container = rawSupplier.getContainerFileForSeries(seriesIndex);
                 String seriesName = rawSupplier.getSeriesName(seriesIndex);
                 String baseName = baseNameForSeries(seriesName, seriesIndex);
                 File inputFile = DeconvolvedInputResolver.resolveInput(rootDir, container, baseName, useDeconv);

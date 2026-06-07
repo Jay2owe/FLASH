@@ -38,10 +38,24 @@ public final class ImageOrientationResolver {
 
         List<OrientationManifestRow> rows = OrientationManifestIO.readIfExists(directory);
         int normalizedSeriesIndex = normalizeSeriesIndex(seriesIndex);
+        OrientationManifestRow uniqueTitleMatch = null;
+        boolean ambiguousTitleMatch = false;
         for (OrientationManifestRow row : rows) {
-            if (isUsable(row) && matches(row, imageTitle, normalizedSeriesIndex)) {
+            if (!isUsable(row)) continue;
+            if (matches(row, imageTitle, normalizedSeriesIndex)) {
                 return Optional.of(row);
             }
+            if (matchesTitle(row, imageTitle)) {
+                if (uniqueTitleMatch == null && !ambiguousTitleMatch) {
+                    uniqueTitleMatch = row;
+                } else {
+                    uniqueTitleMatch = null;
+                    ambiguousTitleMatch = true;
+                }
+            }
+        }
+        if (uniqueTitleMatch != null) {
+            return Optional.of(uniqueTitleMatch);
         }
         return Optional.empty();
     }
@@ -65,6 +79,11 @@ public final class ImageOrientationResolver {
                                    String imageTitle,
                                    int seriesIndex) {
         if (row.seriesIndex != seriesIndex) return false;
+        return matchesTitle(row, imageTitle);
+    }
+
+    private static boolean matchesTitle(OrientationManifestRow row,
+                                        String imageTitle) {
         String title = trimToEmpty(imageTitle);
         if (title.isEmpty()) return false;
 
@@ -72,7 +91,7 @@ public final class ImageOrientationResolver {
         if (title.equals(row.displayName)) return true;
         if (title.equals(row.sourceFile)) return true;
 
-        String keySuffix = "|" + seriesIndex + "|" + title;
+        String keySuffix = "|" + title;
         return row.imageKey.endsWith(keySuffix);
     }
 

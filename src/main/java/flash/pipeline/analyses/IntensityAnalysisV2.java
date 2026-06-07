@@ -4383,7 +4383,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                 if (rawSupplier.getMode() == DeferredImageSupplier.Mode.TIFF_FOLDER) {
                     return openRawSeriesRecorded(rawSupplier, seriesIndex, materialized);
                 }
-                File container = rawSupplier.getContainerFile();
+                File container = rawSupplier.getContainerFileForSeries(seriesIndex);
                 String seriesName = rawSupplier.getSeriesName(seriesIndex);
                 String baseName = baseNameForSeries(seriesName, seriesIndex);
                 File inputFile = DeconvolvedInputResolver.resolveInput(rootDir, container, baseName, useDeconv);

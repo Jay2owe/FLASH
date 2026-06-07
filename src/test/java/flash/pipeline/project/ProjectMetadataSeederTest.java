@@ -152,7 +152,7 @@ public class ProjectMetadataSeederTest {
                 OrientationManifestRow.RotationDegrees.DEG_90, false, true,
                 OrientationManifestRow.ViewPolicy.MANUAL_ONLY,
                 OrientationManifestRow.DecisionSource.MANUAL,
-                OrientationManifestRow.ConfirmationState.YES, "Saved during Draw and Save ROIs");
+                OrientationManifestRow.ConfirmationState.YES, "Saved during Draw ROIs and Orientate Images");
         OrientationManifestIO.saveRows(dir, Arrays.asList(staleProjectBuilder, manualRoiDecision));
 
         ProjectFile project = projectWithContainer("slide.lif",
@@ -171,7 +171,7 @@ public class ProjectMetadataSeederTest {
         assertEquals(OrientationManifestRow.RotationDegrees.DEG_90, preserved.rotateDegrees);
         assertFalse(preserved.flipHorizontal);
         assertTrue(preserved.flipVertical);
-        assertEquals("Saved during Draw and Save ROIs", preserved.notes);
+        assertEquals("Saved during Draw ROIs and Orientate Images", preserved.notes);
     }
 
     @Test
