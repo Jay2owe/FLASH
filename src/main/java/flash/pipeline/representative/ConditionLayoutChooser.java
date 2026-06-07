@@ -9,6 +9,7 @@ import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.DefaultListCellRenderer;
 import javax.swing.DefaultListModel;
+import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
@@ -18,6 +19,7 @@ import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTextField;
 import javax.swing.ListSelectionModel;
+import javax.swing.SwingConstants;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
@@ -25,6 +27,7 @@ import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.GraphicsEnvironment;
+import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashSet;
@@ -63,15 +66,48 @@ public final class ConditionLayoutChooser {
 
         PipelineDialog dialog = new PipelineDialog(
                 "Representative Image Figure - Layout", PipelineDialog.Phase.EXPORT);
+
+        dialog.addHeader("Live Preview");
+        final FigurePreviewPanel preview = new FigurePreviewPanel();
+        dialog.addComponent(preview.panel);
+
         dialog.addHeader("Condition Layout");
-        LayoutAssignmentPanel layoutPanel =
+        final LayoutAssignmentPanel layoutPanel =
                 new LayoutAssignmentPanel(conditions, initialLayout);
         dialog.addComponent(layoutPanel.panel);
 
         dialog.addHeader("Tile and Annotations");
-        TileOptionsPanel tileOptions =
+        final TileOptionsPanel tileOptions =
                 new TileOptionsPanel(defaultOrder, initialTile);
         dialog.addComponent(tileOptions.panel);
+
+        final RepresentativeSelection previewSelection = selection;
+        final Runnable refresh = new Runnable() {
+            @Override public void run() {
+                RepresentativeLayout currentLayout = layoutPanel.createLayout();
+                PresentationTileConfig currentTile = tileOptions.buildConfig();
+                BufferedImage thumb = RepresentativeFigurePreview.renderLayoutThumbnail(
+                        previewSelection, currentLayout, currentTile, 480);
+                Dimension size = RepresentativeFigurePreview.finalFigureSize(
+                        previewSelection, currentLayout, currentTile);
+                preview.update(thumb, size);
+            }
+        };
+        final javax.swing.Timer debounce = new javax.swing.Timer(220, null);
+        debounce.setRepeats(false);
+        debounce.addActionListener(new java.awt.event.ActionListener() {
+            @Override public void actionPerformed(java.awt.event.ActionEvent e) {
+                refresh.run();
+            }
+        });
+        Runnable schedule = new Runnable() {
+            @Override public void run() {
+                debounce.restart();
+            }
+        };
+        layoutPanel.setOnChange(schedule);
+        tileOptions.setOnChange(schedule);
+        refresh.run();
 
         dialog.setPrimaryButtonText("Continue");
         if (!dialog.showDialog()) {
@@ -149,11 +185,64 @@ public final class ConditionLayoutChooser {
         }
     }
 
+    static final class FigurePreviewPanel {
+        final JPanel panel;
+        private final JLabel imageLabel = new JLabel("Building preview...");
+        private final JLabel sizeLabel = new JLabel(" ");
+
+        FigurePreviewPanel() {
+            panel = new JPanel(new BorderLayout(4, 4));
+            panel.setOpaque(false);
+            panel.setBorder(BorderFactory.createEmptyBorder(2, 16, 8, 4));
+
+            imageLabel.setHorizontalAlignment(SwingConstants.CENTER);
+            imageLabel.setVerticalAlignment(SwingConstants.CENTER);
+            imageLabel.setOpaque(true);
+            imageLabel.setBackground(new Color(245, 245, 245));
+            imageLabel.setForeground(new Color(120, 120, 120));
+            imageLabel.setBorder(BorderFactory.createLineBorder(new Color(210, 210, 210)));
+            imageLabel.setPreferredSize(new Dimension(440, 280));
+
+            sizeLabel.setFont(sizeLabel.getFont().deriveFont(Font.PLAIN, 11f));
+            sizeLabel.setForeground(new Color(90, 90, 90));
+
+            panel.add(imageLabel, BorderLayout.CENTER);
+            panel.add(sizeLabel, BorderLayout.SOUTH);
+        }
+
+        void update(BufferedImage thumbnail, Dimension finalSize) {
+            if (thumbnail != null) {
+                imageLabel.setIcon(new ImageIcon(thumbnail));
+                imageLabel.setText(null);
+            } else {
+                imageLabel.setIcon(null);
+                imageLabel.setText("Preview unavailable");
+            }
+            if (finalSize != null && finalSize.width > 0 && finalSize.height > 0) {
+                sizeLabel.setText("Output: " + finalSize.width + " × "
+                        + finalSize.height + " px");
+            } else {
+                sizeLabel.setText(" ");
+            }
+        }
+    }
+
     static final class LayoutAssignmentPanel {
         final JPanel panel;
         private final DefaultListModel<ConditionRow> model =
                 new DefaultListModel<ConditionRow>();
         private final JList<ConditionRow> list = new JList<ConditionRow>(model);
+        private Runnable onChange;
+
+        void setOnChange(Runnable onChange) {
+            this.onChange = onChange;
+        }
+
+        private void fireChange() {
+            if (onChange != null) {
+                onChange.run();
+            }
+        }
 
         LayoutAssignmentPanel(List<String> conditionNames, RepresentativeLayout layout) {
             panel = new JPanel(new BorderLayout(8, 4));
@@ -268,6 +357,7 @@ public final class ConditionLayoutChooser {
                 moveSelectedDown(selected);
             }
             restoreSelection(selectedRows);
+            fireChange();
         }
 
         private void adjustSelectedRow(int delta) {
@@ -282,6 +372,7 @@ public final class ConditionLayoutChooser {
             }
             list.setSelectedIndices(selected);
             list.repaint();
+            fireChange();
         }
 
         private void moveSelectedUp(int[] selected) {
@@ -360,6 +451,7 @@ public final class ConditionLayoutChooser {
                 model.setElementAt(new ConditionRow(current.condition, 1), i);
             }
             list.repaint();
+            fireChange();
         }
 
         private void setOneConditionPerRow() {
@@ -368,6 +460,7 @@ public final class ConditionLayoutChooser {
                 model.setElementAt(new ConditionRow(current.condition, i + 1), i);
             }
             list.repaint();
+            fireChange();
         }
 
         int selectionModeForTest() {
@@ -421,6 +514,17 @@ public final class ConditionLayoutChooser {
         private final JTextField conditionFontField;
         private final JTextField channelFontField;
         private final JComboBox<String> exportScaleBox;
+        private Runnable onChange;
+
+        void setOnChange(Runnable onChange) {
+            this.onChange = onChange;
+        }
+
+        private void fireChange() {
+            if (onChange != null) {
+                onChange.run();
+            }
+        }
 
         TileOptionsPanel(List<String> defaultOrder, PresentationTileConfig initialConfig) {
             PresentationTileConfig initial =
@@ -493,9 +597,70 @@ public final class ConditionLayoutChooser {
             annotateIndividualToggle.addChangeListener(new Runnable() {
                 @Override public void run() {
                     updateForcedAnnotationState();
+                    fireChange();
                 }
             });
             updateForcedAnnotationState();
+            attachChangeListeners();
+        }
+
+        private void attachChangeListeners() {
+            tileOrderPanel.setOnChange(new Runnable() {
+                @Override public void run() {
+                    fireChange();
+                }
+            });
+            annotateOverviewToggle.addChangeListener(new Runnable() {
+                @Override public void run() {
+                    fireChange();
+                }
+            });
+            scaleBarToggle.addChangeListener(new Runnable() {
+                @Override public void run() {
+                    fireChange();
+                }
+            });
+            onCombo(tileGroupBox);
+            onCombo(scaleBarPositionBox);
+            onCombo(annotationColorBox);
+            onCombo(labelModeBox);
+            onCombo(labelPositionBox);
+            onCombo(exportScaleBox);
+            onText(tileCellSizeField);
+            onText(scaleBarLengthField);
+            onText(scaleBarThicknessField);
+            onText(customLabelField);
+            onText(labelFontSizeField);
+            onText(rowGapField);
+            onText(conditionGapField);
+            onText(innerGapField);
+            onText(marginField);
+            onText(conditionFontField);
+            onText(channelFontField);
+        }
+
+        private void onCombo(JComboBox<String> box) {
+            box.addActionListener(new java.awt.event.ActionListener() {
+                @Override public void actionPerformed(java.awt.event.ActionEvent e) {
+                    fireChange();
+                }
+            });
+        }
+
+        private void onText(JTextField field) {
+            field.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+                @Override public void insertUpdate(javax.swing.event.DocumentEvent e) {
+                    fireChange();
+                }
+
+                @Override public void removeUpdate(javax.swing.event.DocumentEvent e) {
+                    fireChange();
+                }
+
+                @Override public void changedUpdate(javax.swing.event.DocumentEvent e) {
+                    fireChange();
+                }
+            });
         }
 
         PresentationTileConfig buildConfig() {
@@ -543,6 +708,11 @@ public final class ConditionLayoutChooser {
         final JPanel panel;
         private final DefaultListModel<String> model = new DefaultListModel<String>();
         private final JList<String> list = new JList<String>(model);
+        private Runnable onChange;
+
+        void setOnChange(Runnable onChange) {
+            this.onChange = onChange;
+        }
 
         TileOrderPanel(List<String> items) {
             panel = new JPanel(new BorderLayout(8, 4));
@@ -604,6 +774,9 @@ public final class ConditionLayoutChooser {
             model.removeElementAt(index);
             model.add(next, value);
             list.setSelectedIndex(next);
+            if (onChange != null) {
+                onChange.run();
+            }
         }
     }
 

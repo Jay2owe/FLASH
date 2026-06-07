@@ -87,6 +87,33 @@ public final class PresentationTileConfig {
         return builder().createOverviewTile(false).channelOrder(channelOrder).build();
     }
 
+    /** A builder pre-populated with this config's values, for small overrides. */
+    public Builder toBuilder() {
+        return new Builder()
+                .createOverviewTile(createOverviewTile)
+                .annotateOverviewTile(annotateOverviewTile)
+                .annotateIndividualImages(annotateIndividualImages)
+                .groupRowsBy(groupRowsBy)
+                .channelOrder(channelOrder)
+                .cellSizePx(cellSizePx)
+                .scaleBarEnabled(scaleBarEnabled)
+                .scaleBarLengthUm(scaleBarLengthUm)
+                .scaleBarThicknessPx(scaleBarThicknessPx)
+                .scaleBarPosition(scaleBarPosition)
+                .annotationColor(annotationColor)
+                .labelMode(labelMode)
+                .customLabelTemplate(customLabelTemplate)
+                .labelFontSizePx(labelFontSizePx)
+                .labelPosition(labelPosition)
+                .marginPx(marginPx)
+                .innerColGapPx(innerColGapPx)
+                .conditionGapPx(conditionGapPx)
+                .rowGapPx(rowGapPx)
+                .conditionFontSizePx(conditionFontSizePx)
+                .channelFontSizePx(channelFontSizePx)
+                .exportScale(exportScale);
+    }
+
     public boolean createOverviewTile() {
         return createOverviewTile;
     }

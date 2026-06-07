@@ -191,20 +191,7 @@ public final class RepresentativeFigureWriter {
                 renderedByCondition(safeRendered);
         Map<String, String> conditions = conditionLookup(safeRendered);
 
-        PresentationTileConfig tileConfig = safeConfig.tileConfig;
-        int scale = Math.max(1, tileConfig.exportScale());
-        int cell = Math.max(1, tileConfig.cellSizePx() * scale);
-        int marginPx = tileConfig.marginPx() * scale;
-        int innerColGapPx = tileConfig.innerColGapPx() * scale;
-        int conditionGapPx = tileConfig.conditionGapPx() * scale;
-        int rowGapPx = tileConfig.rowGapPx() * scale;
-        Font conditionFont = new Font(Font.SANS_SERIF, Font.BOLD,
-                Math.max(1, tileConfig.conditionFontSizePx() * scale));
-        Font channelFont = new Font(Font.SANS_SERIF, Font.BOLD,
-                Math.max(1, tileConfig.channelFontSizePx() * scale));
-        FigureLayout layout = createFigureLayout(
-                safeConfig.layout, outputs, cell, conditionFont, channelFont,
-                marginPx, innerColGapPx, conditionGapPx, rowGapPx, scale);
+        FigureLayout layout = figureLayoutFor(safeConfig.layout, outputs, safeConfig.tileConfig);
 
         BufferedImage figure = new BufferedImage(
                 layout.width, layout.height, BufferedImage.TYPE_INT_ARGB);
@@ -323,6 +310,47 @@ public final class RepresentativeFigureWriter {
         }
     }
 
+    /**
+     * Final figure pixel size for the given layout, channel outputs and tile
+     * config. Reuses the exact compositing geometry so previews and size labels
+     * never diverge from the written PNG.
+     */
+    static java.awt.Dimension computeFigureSize(
+            RepresentativeLayout layout,
+            List<RepresentativePreviewRenderer.RenderedFinalSeries> rendered,
+            PresentationTileConfig tileConfig) {
+        if (layout == null || tileConfig == null) {
+            return new java.awt.Dimension(0, 0);
+        }
+        List<String> outputs = orderedOutputs(
+                rendered == null
+                        ? Collections.<RepresentativePreviewRenderer.RenderedFinalSeries>emptyList()
+                        : rendered,
+                tileConfig.channelOrder());
+        if (outputs.isEmpty()) {
+            return new java.awt.Dimension(0, 0);
+        }
+        FigureLayout figureLayout = figureLayoutFor(layout, outputs, tileConfig);
+        return new java.awt.Dimension(figureLayout.width, figureLayout.height);
+    }
+
+    private static FigureLayout figureLayoutFor(RepresentativeLayout layout,
+                                                List<String> outputs,
+                                                PresentationTileConfig tileConfig) {
+        int scale = Math.max(1, tileConfig.exportScale());
+        int cell = Math.max(1, tileConfig.cellSizePx() * scale);
+        int marginPx = tileConfig.marginPx() * scale;
+        int innerColGapPx = tileConfig.innerColGapPx() * scale;
+        int conditionGapPx = tileConfig.conditionGapPx() * scale;
+        int rowGapPx = tileConfig.rowGapPx() * scale;
+        Font conditionFont = new Font(Font.SANS_SERIF, Font.BOLD,
+                Math.max(1, tileConfig.conditionFontSizePx() * scale));
+        Font channelFont = new Font(Font.SANS_SERIF, Font.BOLD,
+                Math.max(1, tileConfig.channelFontSizePx() * scale));
+        return createFigureLayout(layout, outputs, cell, conditionFont, channelFont,
+                marginPx, innerColGapPx, conditionGapPx, rowGapPx, scale);
+    }
+
     private static FigureLayout createFigureLayout(RepresentativeLayout representativeLayout,
                                                    List<String> outputs,
                                                    int cell,
@@ -399,7 +427,7 @@ public final class RepresentativeFigureWriter {
                 series.pixelHeightUm());
     }
 
-    private static List<String> orderedOutputs(
+    static List<String> orderedOutputs(
             List<RepresentativePreviewRenderer.RenderedFinalSeries> rendered,
             List<String> requestedOrder) {
         LinkedHashSet<String> available = new LinkedHashSet<String>();
