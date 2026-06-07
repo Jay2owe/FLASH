@@ -1,7 +1,9 @@
 package flash.pipeline.analyses;
 
 import flash.pipeline.bin.BinConfig;
+import flash.pipeline.io.ConditionManifestIO;
 import flash.pipeline.io.FlashProjectLayout;
+import flash.pipeline.io.SeriesMeta;
 import flash.pipeline.presentation.PresentationTileConfig;
 import flash.pipeline.project.ProjectFile;
 import flash.pipeline.project.ProjectFileIO;
@@ -23,10 +25,13 @@ import javax.swing.JComboBox;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -116,6 +121,73 @@ public class RepresentativeFigureAnalysisTest {
     }
 
     @Test
+    public void conditionReviewAnimalsUseSourceMetadataOrderAndSkipPreviews() {
+        LinkedHashSet<String> animals = RepresentativeFigureAnalysis.conditionReviewAnimals(
+                Arrays.asList(
+                        meta(0, "study.lif - Syn1WeekTwo_LH_SCN"),
+                        meta(1, "study.lif - thumbnail"),
+                        meta(2, "study.lif - Syn1WeekTwo_RH_SCN"),
+                        meta(3, "")));
+
+        assertEquals(Arrays.asList("Syn1WeekTwo", "Series4"),
+                new ArrayList<String>(animals));
+    }
+
+    @Test
+    public void conditionReviewUsesSharedDialogPrefillAndCancelStopsFlow()
+            throws Exception {
+        File projectRoot = temp.newFolder("repfig-conditions");
+        LinkedHashMap<String, String> saved = new LinkedHashMap<String, String>();
+        saved.put("Syn1WeekTwo", "SynWeekTwo");
+        ConditionManifestIO.saveAssignments(projectRoot.getAbsolutePath(), saved);
+
+        RepresentativeFigureAnalysis analysis = new RepresentativeFigureAnalysis();
+        final LinkedHashSet<String>[] seenAnimals = new LinkedHashSet[1];
+        final LinkedHashMap<String, String>[] seenPrefill = new LinkedHashMap[1];
+        final String[] seenTitle = new String[1];
+        analysis.setConditionReviewDialogForTests(
+                new RepresentativeFigureAnalysis.ConditionReviewDialog() {
+                    @Override
+                    public LinkedHashMap<String, String> show(
+                            String directory,
+                            Set<String> animals,
+                            Map<String, String> prefill,
+                            String title) {
+                        seenAnimals[0] = new LinkedHashSet<String>(animals);
+                        seenPrefill[0] = new LinkedHashMap<String, String>(prefill);
+                        seenTitle[0] = title;
+                        return new LinkedHashMap<String, String>(prefill);
+                    }
+                });
+
+        assertTrue(analysis.reviewConditionAssignments(projectRoot.getAbsolutePath(),
+                Arrays.asList(
+                        meta(0, "study.lif - Syn1WeekTwo_LH_SCN"),
+                        meta(1, "study.lif - hAPP2WeekEight_LH_SCN"))));
+
+        assertEquals(Arrays.asList("Syn1WeekTwo", "hAPP2WeekEight"),
+                new ArrayList<String>(seenAnimals[0]));
+        assertEquals("SynWeekTwo", seenPrefill[0].get("Syn1WeekTwo"));
+        assertEquals("hAPPWeekEight", seenPrefill[0].get("hAPP2WeekEight"));
+        assertEquals("Representative Figure - Condition Assignment", seenTitle[0]);
+
+        analysis.setConditionReviewDialogForTests(
+                new RepresentativeFigureAnalysis.ConditionReviewDialog() {
+                    @Override
+                    public LinkedHashMap<String, String> show(
+                            String directory,
+                            Set<String> animals,
+                            Map<String, String> prefill,
+                            String title) {
+                        return null;
+                    }
+                });
+        assertFalse(analysis.reviewConditionAssignments(projectRoot.getAbsolutePath(),
+                Collections.singletonList(
+                        meta(0, "study.lif - Syn1WeekTwo_LH_SCN"))));
+    }
+
+    @Test
     public void persistCompletedRunWritesProjectExtrasDetailsAndRunRecord() throws Exception {
         File projectRoot = temp.newFolder("repfig-project");
         File source = new File(projectRoot, "source.lif");
@@ -195,6 +267,10 @@ public class RepresentativeFigureAnalysisTest {
                 .channelOrder(Collections.singletonList("DAPI"))
                 .build();
         return config;
+    }
+
+    private static SeriesMeta meta(int index, String name) {
+        return new SeriesMeta(index, name, 1, 1.0, 1.0, 1.0, "um");
     }
 
     private static boolean hasOutputKind(RunRecord record, String kind) {
