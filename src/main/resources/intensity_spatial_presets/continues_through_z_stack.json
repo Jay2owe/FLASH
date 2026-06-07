@@ -1,0 +1,21 @@
+{
+  "name": "Do patterns continue through the z-stack?",
+  "description": "Use this for real 3D stacks when the through-depth shape or relationship between channels matters.",
+  "libraryVersion": "1",
+  "config": {
+    "enabled": true,
+    "analyses": ["anisotropy_3d", "crossmark_3d", "distance_shell_3d"],
+    "sourceMode": "full_stack",
+    "native3d": true,
+    "overlays": false,
+    "shellWidthUm": 10,
+    "shellCount": 5,
+    "tileScalesUm": [50, 100, 250],
+    "granularityScalesUm": [2, 4, 8, 16, 32, 64],
+    "depthBinWidthUm": 10,
+    "rimDepthUm": 10,
+    "textureClassCount": 4,
+    "permutations": 199,
+    "seed": 1
+  }
+}

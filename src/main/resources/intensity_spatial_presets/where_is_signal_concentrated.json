@@ -1,0 +1,21 @@
+{
+  "name": "Where is the signal concentrated?",
+  "description": "Use this to find local hotspots or clustered bright areas without first thresholding the signal.",
+  "libraryVersion": "1",
+  "config": {
+    "enabled": true,
+    "analyses": ["hotspots", "nullmodel"],
+    "sourceMode": "full_stack",
+    "native3d": false,
+    "overlays": true,
+    "shellWidthUm": 10,
+    "shellCount": 5,
+    "tileScalesUm": [50, 100, 250],
+    "granularityScalesUm": [2, 4, 8, 16, 32, 64],
+    "depthBinWidthUm": 10,
+    "rimDepthUm": 10,
+    "textureClassCount": 4,
+    "permutations": 199,
+    "seed": 1
+  }
+}

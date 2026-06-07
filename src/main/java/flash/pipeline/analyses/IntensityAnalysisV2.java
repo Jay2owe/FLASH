@@ -9,6 +9,8 @@ import flash.pipeline.analyses.wizard.IntensityPreset;
 import flash.pipeline.analyses.wizard.IntensityPresetIO;
 import flash.pipeline.analyses.wizard.IntensitySetupConfig;
 import flash.pipeline.analyses.wizard.IntensitySpatialConfig;
+import flash.pipeline.analyses.wizard.IntensitySpatialPreset;
+import flash.pipeline.analyses.wizard.IntensitySpatialPresetIO;
 import flash.pipeline.bin.BinField;
 import flash.pipeline.bin.BinSetupDispatcher;
 import flash.pipeline.cli.CLIConfig;
@@ -150,6 +152,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
     private final AtomicBoolean stalePluginWarningShown = new AtomicBoolean(false);
 
     private static final String INTENSITY_PRESET_PLACEHOLDER = "(choose preset)";
+    private static final String INTENSITY_SPATIAL_PRESET_PLACEHOLDER = "(choose preset)";
 
     /** Live references to the primary-dialog controls, used by the preset row. */
     private static final class IntensityPresetBindings {
@@ -160,6 +163,26 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         ToggleSwitch intensitySpatialToggle;
         List<ToggleSwitch> binarizeToggles;
         List<JComboBox<String>> filterSourceChoices;
+    }
+
+    /** Live references to the nested Intensity-Spatial dialog controls. */
+    private static final class IntensitySpatialPresetBindings {
+        boolean programmaticChange;
+        JComboBox<String> presetCombo;
+        JComboBox<String> sourceChoice;
+        ToggleSwitch native3dToggle;
+        ToggleSwitch overlaysToggle;
+        Map<IntensitySpatialConfig.AnalysisKey, ToggleSwitch> analysisToggles =
+                new LinkedHashMap<IntensitySpatialConfig.AnalysisKey, ToggleSwitch>();
+        JTextField shellWidthField;
+        JTextField shellCountField;
+        JTextField tileScalesField;
+        JTextField granularityScalesField;
+        JTextField depthBinWidthField;
+        JTextField rimDepthField;
+        JTextField textureClassCountField;
+        JTextField permutationsField;
+        JTextField seedField;
     }
 
     interface IntensitySpatialOptionsDialogLauncher {
@@ -206,7 +229,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                                                      boolean[] binarization,
                                                      Integer likelyStackDepth) {
                     return showIntensitySpatialOptionsDialog(
-                            currentConfig, channelNames, binarization, likelyStackDepth);
+                            directory, currentConfig, channelNames, binarization, likelyStackDepth);
                 }
             };
 
@@ -3251,6 +3274,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
     }
 
     private static IntensitySpatialConfig showIntensitySpatialOptionsDialog(
+            String directory,
             IntensitySpatialConfig currentConfig,
             String[] channelNames,
             boolean[] binarization,
@@ -3276,30 +3300,36 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                     PipelineDialog.Phase.ANALYSE);
             dialog.addAnalysisHelpHeader("Intensity-Spatial Analysis", FLASH_Pipeline.IDX_INTENSITY);
             dialog.addMessage("Choose spatial measurements to append to the intensity outputs.");
+            final IntensitySpatialPresetBindings bindings = new IntensitySpatialPresetBindings();
+            addIntensitySpatialPresetControls(dialog, directory, bindings, safeChannelNames.length,
+                    safeBinarization, likelyStackDepth);
 
             String sourceDefault = base.isMipEnabled() ? SPATIAL_SOURCE_MIP : SPATIAL_SOURCE_FULL_STACK;
             if (likelyStackDepth != null && likelyStackDepth.intValue() <= 1) {
                 sourceDefault = SPATIAL_SOURCE_FULL_STACK;
             }
-            dialog.addChoice("2D source",
+            bindings.sourceChoice = dialog.addChoice("2D source",
                     new String[]{SPATIAL_SOURCE_FULL_STACK, SPATIAL_SOURCE_MIP},
                     sourceDefault);
 
             ToggleSwitch native3dToggle = dialog.addToggle("Include native 3D outputs",
                     native3dAvailable && base.isNative3dEnabled());
+            bindings.native3dToggle = native3dToggle;
             if (!native3dAvailable) {
                 native3dToggle.setSelected(false);
                 native3dToggle.setEnabled(false);
                 dialog.addHelpText("Native 3D metrics require at least "
                         + IntensitySpatialConfig.MIN_NATIVE_3D_SLICES + " z-slices.");
             }
-            dialog.addToggle("Write verification overlays", base.isOverlaysEnabled());
+            bindings.overlaysToggle =
+                    dialog.addToggle("Write verification overlays", base.isOverlaysEnabled());
 
             dialog.addHeader("Same-Channel Metrics");
             for (IntensitySpatialConfig.AnalysisKey key : GUI_SAME_CHANNEL_2D_ANALYSES) {
-                addIntensitySpatialAnalysisToggle(dialog, key, defaultAnalyses,
-                        isIntensitySpatialAnalysisAvailable(
-                                key, safeChannelNames.length, hasBinarizedChannel, native3dAvailable));
+                bindings.analysisToggles.put(key,
+                        addIntensitySpatialAnalysisToggle(dialog, key, defaultAnalyses,
+                                isIntensitySpatialAnalysisAvailable(
+                                        key, safeChannelNames.length, hasBinarizedChannel, native3dAvailable)));
             }
 
             dialog.addHeader("Cross-Channel Metrics");
@@ -3310,30 +3340,39 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                 dialog.addHelpText("Distance-shell metrics require at least one binarised channel.");
             }
             for (IntensitySpatialConfig.AnalysisKey key : GUI_CROSS_CHANNEL_2D_ANALYSES) {
-                addIntensitySpatialAnalysisToggle(dialog, key, defaultAnalyses,
-                        isIntensitySpatialAnalysisAvailable(
-                                key, safeChannelNames.length, hasBinarizedChannel, native3dAvailable));
+                bindings.analysisToggles.put(key,
+                        addIntensitySpatialAnalysisToggle(dialog, key, defaultAnalyses,
+                                isIntensitySpatialAnalysisAvailable(
+                                        key, safeChannelNames.length, hasBinarizedChannel, native3dAvailable)));
             }
 
             dialog.addHeader("Native 3D Metrics");
             for (IntensitySpatialConfig.AnalysisKey key : GUI_NATIVE_3D_ANALYSES) {
-                addIntensitySpatialAnalysisToggle(dialog, key, defaultAnalyses,
-                        isIntensitySpatialAnalysisAvailable(
-                                key, safeChannelNames.length, hasBinarizedChannel, native3dAvailable));
+                bindings.analysisToggles.put(key,
+                        addIntensitySpatialAnalysisToggle(dialog, key, defaultAnalyses,
+                                isIntensitySpatialAnalysisAvailable(
+                                        key, safeChannelNames.length, hasBinarizedChannel, native3dAvailable)));
             }
 
             dialog.addHeader("Parameters");
-            dialog.addNumericField("Distance shell width (um)", base.getShellWidthUm(), 1);
-            dialog.addNumericField("Distance shell count", base.getShellCount(), 0);
-            dialog.addStringField("Tile scales (um, comma-separated)",
+            bindings.shellWidthField =
+                    dialog.addNumericField("Distance shell width (um)", base.getShellWidthUm(), 1);
+            bindings.shellCountField =
+                    dialog.addNumericField("Distance shell count", base.getShellCount(), 0);
+            bindings.tileScalesField = dialog.addStringField("Tile scales (um, comma-separated)",
                     IntensitySpatialConfig.joinDoubles(base.getTileScalesUm()), 28);
-            dialog.addStringField("Granularity scales (um, comma-separated)",
+            bindings.granularityScalesField = dialog.addStringField("Granularity scales (um, comma-separated)",
                     IntensitySpatialConfig.joinDoubles(base.getGranularityScalesUm()), 28);
-            dialog.addNumericField("Depth bin width (um)", base.getDepthBinWidthUm(), 1);
-            dialog.addNumericField("Rim depth (um)", base.getRimDepthUm(), 1);
-            dialog.addNumericField("Texture class count", base.getTextureClassCount(), 0);
-            dialog.addNumericField("Random permutations", base.getPermutations(), 0);
-            dialog.addStringField("Random seed", String.valueOf(base.getSeed()), 12);
+            bindings.depthBinWidthField =
+                    dialog.addNumericField("Depth bin width (um)", base.getDepthBinWidthUm(), 1);
+            bindings.rimDepthField =
+                    dialog.addNumericField("Rim depth (um)", base.getRimDepthUm(), 1);
+            bindings.textureClassCountField =
+                    dialog.addNumericField("Texture class count", base.getTextureClassCount(), 0);
+            bindings.permutationsField =
+                    dialog.addNumericField("Random permutations", base.getPermutations(), 0);
+            bindings.seedField =
+                    dialog.addStringField("Random seed", String.valueOf(base.getSeed()), 12);
 
             if (!dialog.showDialog()) {
                 return null;
@@ -3394,6 +3433,311 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         }
     }
 
+    private static void addIntensitySpatialPresetControls(
+            final PipelineDialog dialog,
+            final String directory,
+            final IntensitySpatialPresetBindings bindings,
+            final int channelCount,
+            final boolean[] binarization,
+            final Integer likelyStackDepth) {
+        final JComboBox<String> presetCombo =
+                new JComboBox<String>(listIntensitySpatialPresetNames(directory));
+        presetCombo.setMaximumSize(new java.awt.Dimension(260, 24));
+        if (bindings != null) {
+            bindings.presetCombo = presetCombo;
+        }
+        JButton savePreset = new JButton("Save as preset...");
+        flash.pipeline.ui.FlashIcons.apply(savePreset, flash.pipeline.ui.FlashIcons.save());
+        savePreset.setToolTipText("Save the current Intensity-Spatial options as a named preset.");
+        savePreset.addActionListener(e -> handleSaveIntensitySpatialPreset(directory, bindings));
+        JButton managePreset = new JButton("Manage...");
+        managePreset.setToolTipText("Delete saved Intensity-Spatial presets.");
+        managePreset.addActionListener(e -> {
+            boolean changed = flash.pipeline.ui.config.PresetManagerDialog.manage(
+                    presetCombo, new IntensitySpatialPresetIO(projectRootForDirectory(directory)),
+                    "Manage Intensity-Spatial Presets");
+            if (changed) {
+                refreshIntensitySpatialPresetChoice(directory, bindings,
+                        INTENSITY_SPATIAL_PRESET_PLACEHOLDER);
+            }
+        });
+        JPanel row = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 6, 0));
+        row.setOpaque(false);
+        row.add(presetCombo);
+        row.add(savePreset);
+        row.add(managePreset);
+        presetCombo.addActionListener(e -> {
+            if (bindings != null && bindings.programmaticChange) {
+                return;
+            }
+            Object selected = presetCombo.getSelectedItem();
+            if (selected != null
+                    && !INTENSITY_SPATIAL_PRESET_PLACEHOLDER.equals(String.valueOf(selected))) {
+                IntensitySpatialConfig config = loadIntensitySpatialPresetConfig(
+                        directory, String.valueOf(selected));
+                if (config != null) {
+                    applyIntensitySpatialConfigToDialog(config, bindings, channelCount,
+                            binarization, likelyStackDepth, String.valueOf(selected));
+                }
+            }
+        });
+        dialog.addComponent(row);
+    }
+
+    private static String[] listIntensitySpatialPresetNames(String directory) {
+        List<String> labels = new ArrayList<String>();
+        labels.add(INTENSITY_SPATIAL_PRESET_PLACEHOLDER);
+        try {
+            List<IntensitySpatialPreset> presets =
+                    new IntensitySpatialPresetIO(projectRootForDirectory(directory)).listAll();
+            for (IntensitySpatialPreset preset : presets) {
+                labels.add(preset.getName());
+            }
+        } catch (IOException e) {
+            IJ.log("WARNING: Could not list Intensity-Spatial presets: " + e.getMessage());
+        }
+        return labels.toArray(new String[labels.size()]);
+    }
+
+    private static void refreshIntensitySpatialPresetChoice(
+            String directory,
+            IntensitySpatialPresetBindings bindings,
+            String selectedName) {
+        if (bindings == null || bindings.presetCombo == null) {
+            return;
+        }
+        bindings.programmaticChange = true;
+        try {
+            bindings.presetCombo.removeAllItems();
+            for (String presetName : listIntensitySpatialPresetNames(directory)) {
+                bindings.presetCombo.addItem(presetName);
+            }
+            bindings.presetCombo.setSelectedItem(selectedName == null
+                    ? INTENSITY_SPATIAL_PRESET_PLACEHOLDER
+                    : selectedName);
+        } finally {
+            bindings.programmaticChange = false;
+        }
+    }
+
+    private static IntensitySpatialConfig loadIntensitySpatialPresetConfig(
+            String directory,
+            String presetName) {
+        try {
+            IntensitySpatialPreset preset =
+                    new IntensitySpatialPresetIO(projectRootForDirectory(directory)).load(presetName);
+            return preset.getConfig();
+        } catch (IOException e) {
+            IJ.showMessage("Intensity-Spatial Analysis", "Could not load preset: " + e.getMessage());
+            return null;
+        }
+    }
+
+    private static void handleSaveIntensitySpatialPreset(
+            String directory,
+            IntensitySpatialPresetBindings bindings) {
+        if (GraphicsEnvironment.isHeadless()) {
+            return;
+        }
+        if (bindings == null) {
+            IJ.showMessage("Intensity-Spatial Analysis",
+                    "Could not save preset: dialog options are not available.");
+            return;
+        }
+        String name = JOptionPane.showInputDialog(
+                bindings.presetCombo,
+                "Preset name:",
+                "Save Intensity-Spatial Preset",
+                JOptionPane.PLAIN_MESSAGE);
+        if (name == null) {
+            return;
+        }
+        String trimmed = name.trim();
+        if (trimmed.isEmpty()) {
+            IJ.showMessage("Intensity-Spatial Analysis", "Preset name cannot be empty.");
+            return;
+        }
+        try {
+            IntensitySpatialConfig config = buildIntensitySpatialConfigFromBindings(bindings);
+            if (config.getEnabledAnalyses().isEmpty()) {
+                IJ.showMessage("Intensity-Spatial Analysis",
+                        "Select at least one metric before saving a preset.");
+                return;
+            }
+            IntensitySpatialPreset preset = new IntensitySpatialPreset(
+                    trimmed,
+                    "Saved from Intensity-Spatial Analysis dialog",
+                    IntensitySpatialPreset.CURRENT_LIBRARY_VERSION,
+                    config);
+            new IntensitySpatialPresetIO(projectRootForDirectory(directory)).save(preset);
+            IJ.log("Saved Intensity-Spatial preset: " + trimmed);
+            refreshIntensitySpatialPresetChoice(directory, bindings, preset.getName());
+        } catch (IOException e) {
+            IJ.showMessage("Intensity-Spatial Analysis",
+                    "Could not save preset: " + e.getMessage());
+        } catch (IllegalArgumentException e) {
+            IJ.showMessage("Intensity-Spatial Analysis",
+                    "Could not save preset: " + e.getMessage());
+        }
+    }
+
+    private static void applyIntensitySpatialConfigToDialog(
+            IntensitySpatialConfig config,
+            IntensitySpatialPresetBindings bindings,
+            int channelCount,
+            boolean[] binarization,
+            Integer likelyStackDepth,
+            String selectedPresetName) {
+        if (config == null || bindings == null) {
+            return;
+        }
+        final String presetLabel = selectedPresetName == null ? "selected preset" : selectedPresetName;
+        IntensitySpatialConfig validated = config.validateForChannelSetup(
+                channelCount, binarization, likelyStackDepth,
+                new IntensitySpatialConfig.LockLogger() {
+                    public void log(String message) {
+                        IJ.log("[FLASH] Intensity-Spatial preset " + presetLabel + ": " + message);
+                    }
+                });
+        bindings.programmaticChange = true;
+        try {
+            if (bindings.presetCombo != null) {
+                bindings.presetCombo.setSelectedItem(selectedPresetName == null
+                        ? INTENSITY_SPATIAL_PRESET_PLACEHOLDER
+                        : selectedPresetName);
+            }
+            if (bindings.sourceChoice != null) {
+                bindings.sourceChoice.setSelectedItem(validated.isMipEnabled()
+                        ? SPATIAL_SOURCE_MIP
+                        : SPATIAL_SOURCE_FULL_STACK);
+            }
+            setToggle(bindings.native3dToggle, validated.isNative3dEnabled());
+            setToggle(bindings.overlaysToggle, validated.isOverlaysEnabled());
+            for (Map.Entry<IntensitySpatialConfig.AnalysisKey, ToggleSwitch> entry
+                    : bindings.analysisToggles.entrySet()) {
+                ToggleSwitch toggle = entry.getValue();
+                boolean selected = validated.getEnabledAnalyses().contains(entry.getKey());
+                setToggle(toggle, selected && (toggle == null || toggle.isEnabled()));
+            }
+            setFieldText(bindings.shellWidthField,
+                    numericText(validated.getShellWidthUm(), 1));
+            setFieldText(bindings.shellCountField,
+                    numericText(validated.getShellCount(), 0));
+            setFieldText(bindings.tileScalesField,
+                    IntensitySpatialConfig.joinDoubles(validated.getTileScalesUm()));
+            setFieldText(bindings.granularityScalesField,
+                    IntensitySpatialConfig.joinDoubles(validated.getGranularityScalesUm()));
+            setFieldText(bindings.depthBinWidthField,
+                    numericText(validated.getDepthBinWidthUm(), 1));
+            setFieldText(bindings.rimDepthField,
+                    numericText(validated.getRimDepthUm(), 1));
+            setFieldText(bindings.textureClassCountField,
+                    numericText(validated.getTextureClassCount(), 0));
+            setFieldText(bindings.permutationsField,
+                    numericText(validated.getPermutations(), 0));
+            setFieldText(bindings.seedField, String.valueOf(validated.getSeed()));
+        } finally {
+            bindings.programmaticChange = false;
+        }
+    }
+
+    private static IntensitySpatialConfig buildIntensitySpatialConfigFromBindings(
+            IntensitySpatialPresetBindings bindings) {
+        EnumSet<IntensitySpatialConfig.AnalysisKey> selected =
+                EnumSet.noneOf(IntensitySpatialConfig.AnalysisKey.class);
+        if (bindings != null && bindings.analysisToggles != null) {
+            for (Map.Entry<IntensitySpatialConfig.AnalysisKey, ToggleSwitch> entry
+                    : bindings.analysisToggles.entrySet()) {
+                if (isSelected(entry.getValue())) {
+                    selected.add(entry.getKey());
+                }
+            }
+        }
+        IntensitySpatialConfig.SpatialSourceMode sourceMode =
+                bindings != null && bindings.sourceChoice != null
+                        && SPATIAL_SOURCE_MIP.equals(bindings.sourceChoice.getSelectedItem())
+                        ? IntensitySpatialConfig.SpatialSourceMode.MIP
+                        : IntensitySpatialConfig.SpatialSourceMode.FULL_STACK;
+        return IntensitySpatialConfig.builder()
+                .enabled(true)
+                .enabledAnalyses(selected)
+                .spatialSourceMode(sourceMode)
+                .native3dEnabled(bindings != null && isSelected(bindings.native3dToggle))
+                .overlaysEnabled(bindings != null && isSelected(bindings.overlaysToggle))
+                .shellWidthUm(positiveDoubleFieldOrDefault(
+                        bindings == null ? null : bindings.shellWidthField,
+                        IntensitySpatialConfig.DEFAULT_SHELL_WIDTH_UM))
+                .shellCount(positiveIntFieldOrDefault(
+                        bindings == null ? null : bindings.shellCountField,
+                        IntensitySpatialConfig.DEFAULT_SHELL_COUNT))
+                .tileScalesUm(IntensitySpatialConfig.parseDoubleList(
+                        fieldText(bindings == null ? null : bindings.tileScalesField),
+                        IntensitySpatialConfig.DEFAULT_TILE_SCALES_UM))
+                .granularityScalesUm(IntensitySpatialConfig.parseDoubleList(
+                        fieldText(bindings == null ? null : bindings.granularityScalesField),
+                        IntensitySpatialConfig.DEFAULT_GRANULARITY_SCALES_UM))
+                .depthBinWidthUm(positiveDoubleFieldOrDefault(
+                        bindings == null ? null : bindings.depthBinWidthField,
+                        IntensitySpatialConfig.DEFAULT_DEPTH_BIN_WIDTH_UM))
+                .rimDepthUm(positiveDoubleFieldOrDefault(
+                        bindings == null ? null : bindings.rimDepthField,
+                        IntensitySpatialConfig.DEFAULT_RIM_DEPTH_UM))
+                .textureClassCount(positiveIntFieldOrDefault(
+                        bindings == null ? null : bindings.textureClassCountField,
+                        IntensitySpatialConfig.DEFAULT_TEXTURE_CLASS_COUNT))
+                .permutations(nonNegativeIntFieldOrDefault(
+                        bindings == null ? null : bindings.permutationsField,
+                        IntensitySpatialConfig.DEFAULT_PERMUTATIONS))
+                .seed(longOrDefault(fieldText(bindings == null ? null : bindings.seedField),
+                        IntensitySpatialConfig.DEFAULT_SEED))
+                .build();
+    }
+
+    private static File projectRootForDirectory(String directory) {
+        return directory == null || directory.trim().isEmpty() ? new File(".") : new File(directory);
+    }
+
+    private static void setFieldText(JTextField field, String value) {
+        if (field != null) {
+            field.setText(value == null ? "" : value);
+        }
+    }
+
+    private static String fieldText(JTextField field) {
+        return field == null || field.getText() == null ? "" : field.getText().trim();
+    }
+
+    private static double positiveDoubleFieldOrDefault(JTextField field, double fallback) {
+        return positiveDoubleOrDefault(doubleFieldValue(field), fallback);
+    }
+
+    private static int positiveIntFieldOrDefault(JTextField field, int fallback) {
+        return positiveIntOrDefault(doubleFieldValue(field), fallback);
+    }
+
+    private static int nonNegativeIntFieldOrDefault(JTextField field, int fallback) {
+        return nonNegativeIntOrDefault(doubleFieldValue(field), fallback);
+    }
+
+    private static double doubleFieldValue(JTextField field) {
+        String text = fieldText(field);
+        if (text.isEmpty()) {
+            return 0.0;
+        }
+        try {
+            return Double.parseDouble(text);
+        } catch (NumberFormatException e) {
+            return 0.0;
+        }
+    }
+
+    private static String numericText(double value, int decimals) {
+        if (decimals <= 0) {
+            return String.valueOf((int) Math.round(value));
+        }
+        return String.format(Locale.ROOT, "%." + decimals + "f", value);
+    }
+
     private static Set<IntensitySpatialConfig.AnalysisKey> defaultIntensitySpatialSelections(
             IntensitySpatialConfig base) {
         EnumSet<IntensitySpatialConfig.AnalysisKey> selected =
@@ -3407,7 +3751,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         return selected;
     }
 
-    private static void addIntensitySpatialAnalysisToggle(
+    private static ToggleSwitch addIntensitySpatialAnalysisToggle(
             PipelineDialog dialog,
             IntensitySpatialConfig.AnalysisKey key,
             Set<IntensitySpatialConfig.AnalysisKey> defaultAnalyses,
@@ -3418,6 +3762,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
             toggle.setSelected(false);
             toggle.setEnabled(false);
         }
+        return toggle;
     }
 
     private static void readIntensitySpatialAnalysisToggles(
@@ -4247,7 +4592,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                 return true;
             }
             String message = "[FLASH] Intensity Analysis cancelled because no ROI sets "
-                    + "were saved after Draw and Save ROIs.";
+                    + "were saved after Draw ROIs and Orientate Images.";
             IJ.log(message);
             recordWarn(message);
             return false;
@@ -4314,7 +4659,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
     }
 
     private void launchRoiDrawingWorkflowDirect(String directory) {
-        IJ.log("[FLASH] Opening Draw and Save ROIs before Intensity Analysis.");
+        IJ.log("[FLASH] Opening Draw ROIs and Orientate Images before Intensity Analysis.");
         DrawAndSaveROIsAnalysis roiAnalysis = new DrawAndSaveROIsAnalysis();
         roiAnalysis.setSuppressDialogs(false);
         roiAnalysis.setHeadless(false);
