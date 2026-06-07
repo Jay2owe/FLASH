@@ -5,6 +5,7 @@ import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinConfigIO;
 import flash.pipeline.cli.CLIConfig;
 import flash.pipeline.io.ImageCache;
+import flash.pipeline.representative.ConditionLayoutChooser;
 import flash.pipeline.representative.RepresentativeFigureConfig;
 import flash.pipeline.representative.RepresentativePreviewRenderer;
 import flash.pipeline.representative.RepresentativeRangeStage;
@@ -106,12 +107,26 @@ public class RepresentativeFigureAnalysis implements Analysis {
                 IJ.log("[Representative Figure] Locked custom display ranges for "
                         + config.customDisplayRangesByChannel.size() + " channel"
                         + (config.customDisplayRangesByChannel.size() == 1 ? "" : "s") + ".");
-                // TODO(representative-image-figure stage 08): pass updated range-aware
-                // representative previews into the condition-layout screen.
             } else {
                 config.clearCustomDisplayRanges();
                 IJ.log("[Representative Figure] Using display ranges from Set Up Configuration.");
             }
+
+            ConditionLayoutChooser.Result layoutResult =
+                    new ConditionLayoutChooser().show(config);
+            if (layoutResult == null) {
+                IJ.log("[Representative Figure] Condition layout chooser cancelled.");
+                return;
+            }
+            config.layout = layoutResult.layout();
+            config.tileConfig = layoutResult.tileConfig();
+            IJ.log("[Representative Figure] Locked layout with "
+                    + config.layout.rowCount() + " row"
+                    + (config.layout.rowCount() == 1 ? "" : "s")
+                    + " and " + config.layout.conditionCount() + " condition"
+                    + (config.layout.conditionCount() == 1 ? "" : "s") + ".");
+            // TODO(representative-image-figure stage 09): render the PNG using
+            // config.layout and config.tileConfig.
         } catch (Exception e) {
             IJ.log("[Representative Figure] Could not prepare representative selection: "
                     + e.getMessage());

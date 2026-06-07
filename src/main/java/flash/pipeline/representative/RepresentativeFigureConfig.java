@@ -1,5 +1,7 @@
 package flash.pipeline.representative;
 
+import flash.pipeline.presentation.PresentationTileConfig;
+
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -12,6 +14,8 @@ public class RepresentativeFigureConfig {
     public RepresentativeStatLoader.ExistingResultOption existingResult = null;
     public RepresentativeStatTable statTable = new RepresentativeStatTable();
     public RepresentativeSelection selection = null;
+    public RepresentativeLayout layout = null;
+    public PresentationTileConfig tileConfig = null;
     public final Map<Integer, String> customDisplayRangesByChannel =
             new LinkedHashMap<Integer, String>();
 
