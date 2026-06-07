@@ -43,8 +43,10 @@ import flash.pipeline.ui.ToggleSwitch;
 import ij.IJ;
 import ij.ImagePlus;
 import ij.ImageStack;
+import ij.WindowManager;
 import ij.io.FileSaver;
 import ij.io.Opener;
+import ij.macro.Interpreter;
 import ij.plugin.RGBStackMerge;
 import ij.process.ImageProcessor;
 
@@ -630,8 +632,13 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
                 // skipPreview flag (meant for unattended runs) is set. `current` is a throwaway copy
                 // and is never returned to execute(), so clearing it here is safe.
                 current.skipPreview = false;
+                int[] previewChannels = choosePreviewChannels(channelNames, current.selectedChannels);
+                if (previewChannels == null) {
+                    return; // The user cancelled the channel picker: leave the setup dialog open.
+                }
                 DeconvPreviewDialog.Decision decision =
-                        showPreviewBeforeBatch(directory, representative, channelNames, current);
+                        showPreviewBeforeBatch(directory, representative, channelNames, current,
+                                previewChannels);
                 if (decision == DeconvPreviewDialog.Decision.RUN_FULL_BATCH) {
                     previewState.accept(fingerprint);
                     dialog.setTransientStatus("Preview accepted - press OK to run the full batch, "
@@ -1140,38 +1147,201 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
                                                                 SeriesJob job,
                                                                 String[] channelNames,
                                                                 RunSettings settings) {
+        return showPreviewBeforeBatch(directory, job, channelNames, settings, null);
+    }
+
+    /**
+     * Renders a raw/deconvolved preview for each requested channel and shows the modal preview
+     * dialog with one row per channel. {@code channelsToPreview} selects which channel indices to
+     * render; when {@code null} every channel currently toggled on for deconvolution is previewed.
+     */
+    private DeconvPreviewDialog.Decision showPreviewBeforeBatch(String directory,
+                                                                SeriesJob job,
+                                                                String[] channelNames,
+                                                                RunSettings settings,
+                                                                int[] channelsToPreview) {
         if (settings == null || settings.skipPreview || isInteractiveHeadless()) {
             return DeconvPreviewDialog.Decision.RUN_FULL_BATCH;
         }
 
-        int channelIndex = firstSelectedChannel(settings.selectedChannels);
-        if (channelIndex < 0 || channelIndex >= channelNames.length) {
+        int[] channels = sanitizePreviewChannels(
+                channelsToPreview != null ? channelsToPreview
+                        : selectedChannelIndices(settings.selectedChannels),
+                channelNames.length);
+        if (channels.length == 0) {
             return DeconvPreviewDialog.Decision.RUN_FULL_BATCH;
         }
 
-        DeconvPreviewDialog.PreviewContent content;
+        String[] channelLuts = resolveChannelLuts(directory, channelNames.length);
+        List<DeconvPreviewDialog.ChannelPreview> entries =
+                new ArrayList<DeconvPreviewDialog.ChannelPreview>();
         try {
-            content = renderPreviewContent(directory, job, channelNames, settings,
-                    channelIndex, PREVIEW_CROP_SIZE, PREVIEW_CROP_SIZE);
-        } catch (Exception e) {
-            String message = "Deconvolution preview failed: " + e.getMessage()
-                    + ". Continuing without preview.";
-            IJ.log(message);
-            recordWarn(message);
-            return DeconvPreviewDialog.Decision.RUN_FULL_BATCH;
-        }
-        if (content == null) {
-            return DeconvPreviewDialog.Decision.RUN_FULL_BATCH;
-        }
-
-        try {
-            return DeconvPreviewDialog.show(content, false);
+            // The preview renders in-memory stacks that are displayed inside the Swing dialog, never
+            // as ImageJ windows. Some deconvolution backends (notably DeconvolutionLab2) still leak an
+            // orphan image window despite our -monitor no flag, so we render under ImageJ batch mode
+            // to suppress stray windows and close anything that slipped through afterwards. Without
+            // this, each previewed channel could pop a loose window outside the preview dialog.
+            int[] windowsBeforeRender = snapshotOpenImageWindows();
+            boolean previousBatchMode = Interpreter.batchMode;
+            Interpreter.batchMode = true;
+            try {
+                for (int channelIndex : channels) {
+                    DeconvPreviewDialog.PreviewContent single;
+                    try {
+                        single = renderPreviewContent(directory, job, channelNames, settings,
+                                channelIndex, PREVIEW_CROP_SIZE, PREVIEW_CROP_SIZE);
+                    } catch (Exception e) {
+                        String message = "Deconvolution preview failed for " + channelNames[channelIndex]
+                                + ": " + e.getMessage() + ". Skipping this channel in the preview.";
+                        IJ.log(message);
+                        recordWarn(message);
+                        continue;
+                    }
+                    if (single == null) {
+                        continue;
+                    }
+                    String lut = channelIndex < channelLuts.length ? channelLuts[channelIndex] : null;
+                    entries.add(new DeconvPreviewDialog.ChannelPreview(
+                            single.rawStack, single.deconvolvedStack,
+                            single.rawLabel, single.deconvolvedLabel,
+                            channelNames[channelIndex], lut));
+                }
+            } finally {
+                Interpreter.batchMode = previousBatchMode;
+                closeStrayPreviewWindows(windowsBeforeRender);
+            }
+            if (entries.isEmpty()) {
+                return DeconvPreviewDialog.Decision.RUN_FULL_BATCH;
+            }
+            return DeconvPreviewDialog.show(new DeconvPreviewDialog.PreviewContent(entries), false);
         } finally {
-            // Ownership of the returned stacks transfers here. The dialog is
-            // modal, so the stacks stay valid until show(...) returns.
-            closeQuietly(content.deconvolvedStack);
-            closeQuietly(content.rawStack);
+            // Ownership of the rendered stacks transfers here. The dialog is modal, so the stacks
+            // stay valid until show(...) returns.
+            for (DeconvPreviewDialog.ChannelPreview entry : entries) {
+                closeQuietly(entry.deconvolvedStack);
+                closeQuietly(entry.rawStack);
+            }
         }
+    }
+
+    /**
+     * Asks the user which deconvolution channels to render in the preview. Returns the chosen
+     * channel indices, or {@code null} if the user cancelled. When only one channel is selected for
+     * deconvolution there is nothing to choose, so that channel is returned directly without a
+     * dialog; in headless mode every selected channel is returned.
+     */
+    private int[] choosePreviewChannels(String[] channelNames, boolean[] selectedChannels) {
+        int[] selectable = selectedChannelIndices(selectedChannels);
+        if (selectable.length <= 1 || isInteractiveHeadless()) {
+            return selectable;
+        }
+
+        PipelineDialog picker = new PipelineDialog("Preview Channels", PipelineDialog.Phase.SETUP);
+        picker.addHeader("Channels to preview");
+        JPanel column = new JPanel();
+        column.setLayout(new BoxLayout(column, BoxLayout.Y_AXIS));
+        column.setOpaque(false);
+        List<ToggleSwitch> toggles = new ArrayList<ToggleSwitch>();
+        for (int channelIndex : selectable) {
+            ToggleSwitch toggle = new ToggleSwitch(true);
+            toggles.add(toggle);
+            column.add(labeledRow(channelNames[channelIndex], toggle));
+        }
+        picker.addComponent(column);
+        if (!picker.showDialog()) {
+            return null;
+        }
+
+        List<Integer> chosen = new ArrayList<Integer>();
+        for (int i = 0; i < selectable.length; i++) {
+            if (toggles.get(i).isSelected()) {
+                chosen.add(selectable[i]);
+            }
+        }
+        if (chosen.isEmpty()) {
+            chosen.add(selectable[0]); // Always preview at least one channel.
+        }
+        return toIntArray(chosen);
+    }
+
+    /** Reads the per-channel LUT colour names from the project config; missing entries stay null. */
+    private String[] resolveChannelLuts(String directory, int channelCount) {
+        String[] luts = new String[Math.max(0, channelCount)];
+        try {
+            BinConfig config = BinConfigIO.readFromDirectory(directory);
+            for (int i = 0; i < luts.length && i < config.channelColors.size(); i++) {
+                luts[i] = config.channelColors.get(i);
+            }
+        } catch (IOException | RuntimeException e) {
+            // Channel colours are cosmetic; an unreadable or malformed config must never abort the
+            // preview, so fall back to grey LUTs rather than letting the failure propagate.
+        }
+        return luts;
+    }
+
+    /** Snapshot of the currently open ImageJ image-window IDs (empty when headless). */
+    private static int[] snapshotOpenImageWindows() {
+        if (GraphicsEnvironment.isHeadless()) return new int[0];
+        int[] ids = WindowManager.getIDList();
+        return ids == null ? new int[0] : ids.clone();
+    }
+
+    /**
+     * Closes any ImageJ image window that appeared since {@code beforeIds} was captured. Used to
+     * mop up orphan windows leaked by third-party deconvolution backends during a preview render.
+     * The preview's own stacks are never registered as ImageJ windows, so this only closes strays.
+     */
+    private void closeStrayPreviewWindows(int[] beforeIds) {
+        if (GraphicsEnvironment.isHeadless()) return;
+        int[] afterIds = WindowManager.getIDList();
+        if (afterIds == null) return;
+        Set<Integer> before = new HashSet<Integer>();
+        for (int id : beforeIds) {
+            before.add(Integer.valueOf(id));
+        }
+        for (int id : afterIds) {
+            if (before.contains(Integer.valueOf(id))) continue;
+            ImagePlus stray = WindowManager.getImage(id);
+            if (stray == null) continue;
+            stray.changes = false;
+            try {
+                stray.close();
+            } finally {
+                stray.flush();
+            }
+            IJ.log("[FLASH] Closed a stray deconvolution-preview window: " + stray.getTitle());
+        }
+    }
+
+    private static int[] selectedChannelIndices(boolean[] selectedChannels) {
+        if (selectedChannels == null) return new int[0];
+        List<Integer> indices = new ArrayList<Integer>();
+        for (int i = 0; i < selectedChannels.length; i++) {
+            if (selectedChannels[i]) {
+                indices.add(i);
+            }
+        }
+        return toIntArray(indices);
+    }
+
+    private static int[] sanitizePreviewChannels(int[] channels, int channelCount) {
+        if (channels == null) return new int[0];
+        List<Integer> cleaned = new ArrayList<Integer>();
+        Set<Integer> seen = new HashSet<Integer>();
+        for (int channel : channels) {
+            if (channel >= 0 && channel < channelCount && seen.add(channel)) {
+                cleaned.add(channel);
+            }
+        }
+        return toIntArray(cleaned);
+    }
+
+    private static int[] toIntArray(List<Integer> values) {
+        int[] out = new int[values.size()];
+        for (int i = 0; i < out.length; i++) {
+            out[i] = values.get(i);
+        }
+        return out;
     }
 
     /**

@@ -44,6 +44,12 @@ public class DeconvolutionLab2EngineTest {
                     commandSeen[0].contains("-monitor no"));
             assertTrue("command must mute console verbosity",
                     commandSeen[0].contains("-verbose mute"));
+            // Multithreading is intentionally left ON for speed: the engine gets a synchronous
+            // result by running DeconvolutionLab2 on the calling thread (run()/getOutput()), not by
+            // disabling threads. deconvolution.algorithm.Algorithm also reads -multithreading to size
+            // its internal parallelism, so disabling it here would slow every deconvolution.
+            assertTrue("base command must NOT disable DeconvolutionLab2 multithreading",
+                    !commandSeen[0].contains("-multithreading no"));
             assertTrue("command must not request any displayed/saved output window",
                     !commandSeen[0].contains("-out"));
             assertTrue(commandSeen[0].contains("-algorithm RL 7"));
