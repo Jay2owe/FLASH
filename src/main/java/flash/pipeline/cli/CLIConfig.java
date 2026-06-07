@@ -8,8 +8,10 @@ import flash.pipeline.deconv.engine.Algorithm;
 import flash.pipeline.deconv.engine.DeconvParams;
 import flash.pipeline.deconv.psf.PsfModel;
 import flash.pipeline.deconv.psf.ScopeModality;
+import flash.pipeline.presentation.PresentationTileConfig;
 import flash.pipeline.segmentation.SegmentationTokenParser;
 
+import java.awt.Color;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumMap;
@@ -52,6 +54,7 @@ public class CLIConfig {
     final AggregateConfig aggregate = new AggregateConfig();
     final ExcelConfig excel = new ExcelConfig();
     final StatsConfig stats = new StatsConfig();
+    final RepfigConfig repfig = new RepfigConfig();
 
     public String getDirectory() { return directory; }
     public boolean[] getSelectedAnalyses() { return selectedAnalyses; }
@@ -85,6 +88,7 @@ public class CLIConfig {
     public AggregateConfig getAggregate() { return aggregate; }
     public ExcelConfig getExcel() { return excel; }
     public StatsConfig getStats() { return stats; }
+    public RepfigConfig getRepfig() { return repfig; }
 
     /**
      * Re-serializes the config into macro-style CLI arguments.
@@ -378,6 +382,10 @@ public class CLIConfig {
                 parts.add("stats.metric_aggregation="
                         + (joined.contains(" ") ? "[" + joined + "]" : joined));
             }
+        }
+
+        if (repfig.hasConfiguration()) {
+            repfig.appendMacroOptions(parts);
         }
 
         if (!splitMergeUseDeconv) parts.add("splitmerge.useDeconv=false");
@@ -934,6 +942,250 @@ public class CLIConfig {
                     || postHoc != null
                     || (metrics != null && !metrics.isEmpty())
                     || (metricAggregations != null && !metricAggregations.isEmpty());
+        }
+    }
+
+    /**
+     * Optional macro overrides for representative-figure tile styling.
+     * Every field is nullable; a {@code null} field means "do not override".
+     */
+    public static final class RepfigConfig {
+        Integer cellSizePx = null;
+        Integer rowGapPx = null;
+        Integer conditionGapPx = null;
+        Integer innerColGapPx = null;
+        Integer marginPx = null;
+        Integer conditionFontSizePx = null;
+        Integer channelFontSizePx = null;
+        Integer exportScale = null;
+        Boolean scaleBarEnabled = null;
+        Double scaleBarLengthUm = null;
+        Integer scaleBarThicknessPx = null;
+        PresentationTileConfig.Position scaleBarPosition = null;
+        Double scaleBarFracX = null;
+        Double scaleBarFracY = null;
+        PresentationTileConfig.LabelMode labelMode = null;
+        String customLabelTemplate = null;
+        Integer labelFontSizePx = null;
+        PresentationTileConfig.Position labelPosition = null;
+        Double labelFracX = null;
+        Double labelFracY = null;
+        Color annotationColor = null;
+        Boolean annotateOverviewTile = null;
+        Boolean annotateIndividualImages = null;
+        PresentationTileConfig.GroupRowsBy groupRowsBy = null;
+        List<String> channelOrder = null;
+        Integer rows = null;
+
+        public Integer getCellSizePx() { return cellSizePx; }
+        public Integer getRowGapPx() { return rowGapPx; }
+        public Integer getConditionGapPx() { return conditionGapPx; }
+        public Integer getInnerColGapPx() { return innerColGapPx; }
+        public Integer getMarginPx() { return marginPx; }
+        public Integer getConditionFontSizePx() { return conditionFontSizePx; }
+        public Integer getChannelFontSizePx() { return channelFontSizePx; }
+        public Integer getExportScale() { return exportScale; }
+        public Boolean getScaleBarEnabled() { return scaleBarEnabled; }
+        public Double getScaleBarLengthUm() { return scaleBarLengthUm; }
+        public Integer getScaleBarThicknessPx() { return scaleBarThicknessPx; }
+        public PresentationTileConfig.Position getScaleBarPosition() { return scaleBarPosition; }
+        public Double getScaleBarFracX() { return scaleBarFracX; }
+        public Double getScaleBarFracY() { return scaleBarFracY; }
+        public PresentationTileConfig.LabelMode getLabelMode() { return labelMode; }
+        public String getCustomLabelTemplate() { return customLabelTemplate; }
+        public Integer getLabelFontSizePx() { return labelFontSizePx; }
+        public PresentationTileConfig.Position getLabelPosition() { return labelPosition; }
+        public Double getLabelFracX() { return labelFracX; }
+        public Double getLabelFracY() { return labelFracY; }
+        public Color getAnnotationColor() { return annotationColor; }
+        public Boolean getAnnotateOverviewTile() { return annotateOverviewTile; }
+        public Boolean getAnnotateIndividualImages() { return annotateIndividualImages; }
+        public PresentationTileConfig.GroupRowsBy getGroupRowsBy() { return groupRowsBy; }
+        public List<String> getChannelOrder() {
+            return channelOrder == null ? null : new ArrayList<String>(channelOrder);
+        }
+        public Integer getRows() { return rows; }
+
+        public boolean hasConfiguration() {
+            return cellSizePx != null
+                    || rowGapPx != null
+                    || conditionGapPx != null
+                    || innerColGapPx != null
+                    || marginPx != null
+                    || conditionFontSizePx != null
+                    || channelFontSizePx != null
+                    || exportScale != null
+                    || scaleBarEnabled != null
+                    || scaleBarLengthUm != null
+                    || scaleBarThicknessPx != null
+                    || scaleBarPosition != null
+                    || scaleBarFracX != null
+                    || scaleBarFracY != null
+                    || labelMode != null
+                    || customLabelTemplate != null
+                    || labelFontSizePx != null
+                    || labelPosition != null
+                    || labelFracX != null
+                    || labelFracY != null
+                    || annotationColor != null
+                    || annotateOverviewTile != null
+                    || annotateIndividualImages != null
+                    || groupRowsBy != null
+                    || (channelOrder != null && !channelOrder.isEmpty())
+                    || rows != null;
+        }
+
+        /**
+         * Returns a copy of {@code base} (or a fresh default config when
+         * {@code base} is null) with every non-null override applied. The
+         * tile styling fields not represented as macro keys in this build
+         * (gaps, margins, condition/channel fonts, export scale, fractional
+         * positions) are accepted and stored, but only the fields the
+         * underlying {@link PresentationTileConfig} builder exposes are
+         * forwarded to the returned config.
+         */
+        public PresentationTileConfig applyTo(PresentationTileConfig base) {
+            PresentationTileConfig source = base != null
+                    ? base
+                    : PresentationTileConfig.builder().build();
+            PresentationTileConfig.Builder builder = PresentationTileConfig.builder()
+                    .createOverviewTile(source.createOverviewTile())
+                    .annotateOverviewTile(source.annotateOverviewTile())
+                    .annotateIndividualImages(source.annotateIndividualImages())
+                    .groupRowsBy(source.groupRowsBy())
+                    .channelOrder(source.channelOrder())
+                    .cellSizePx(source.cellSizePx())
+                    .scaleBarEnabled(source.scaleBarEnabled())
+                    .scaleBarLengthUm(source.scaleBarLengthUm())
+                    .scaleBarThicknessPx(source.scaleBarThicknessPx())
+                    .scaleBarPosition(source.scaleBarPosition())
+                    .annotationColor(source.annotationColor())
+                    .labelMode(source.labelMode())
+                    .customLabelTemplate(source.customLabelTemplate())
+                    .labelFontSizePx(source.labelFontSizePx())
+                    .labelPosition(source.labelPosition());
+
+            if (cellSizePx != null) builder.cellSizePx(cellSizePx.intValue());
+            if (scaleBarEnabled != null) builder.scaleBarEnabled(scaleBarEnabled.booleanValue());
+            if (scaleBarLengthUm != null) builder.scaleBarLengthUm(scaleBarLengthUm.doubleValue());
+            if (scaleBarThicknessPx != null) {
+                builder.scaleBarThicknessPx(scaleBarThicknessPx.intValue());
+            }
+            if (scaleBarPosition != null) builder.scaleBarPosition(scaleBarPosition);
+            if (labelMode != null) builder.labelMode(labelMode);
+            if (customLabelTemplate != null) builder.customLabelTemplate(customLabelTemplate);
+            if (labelFontSizePx != null) builder.labelFontSizePx(labelFontSizePx.intValue());
+            if (labelPosition != null) builder.labelPosition(labelPosition);
+            if (annotationColor != null) builder.annotationColor(annotationColor);
+            if (annotateOverviewTile != null) {
+                builder.annotateOverviewTile(annotateOverviewTile.booleanValue());
+            }
+            if (annotateIndividualImages != null) {
+                builder.annotateIndividualImages(annotateIndividualImages.booleanValue());
+            }
+            if (groupRowsBy != null) builder.groupRowsBy(groupRowsBy);
+            if (channelOrder != null) builder.channelOrder(channelOrder);
+
+            return builder.build();
+        }
+
+        void appendMacroOptions(List<String> parts) {
+            if (cellSizePx != null) parts.add("repfig.cell_size=" + cellSizePx.intValue());
+            if (rowGapPx != null) parts.add("repfig.row_gap=" + rowGapPx.intValue());
+            if (conditionGapPx != null) parts.add("repfig.column_gap=" + conditionGapPx.intValue());
+            if (innerColGapPx != null) parts.add("repfig.inner_gap=" + innerColGapPx.intValue());
+            if (marginPx != null) parts.add("repfig.margin=" + marginPx.intValue());
+            if (conditionFontSizePx != null) {
+                parts.add("repfig.condition_font=" + conditionFontSizePx.intValue());
+            }
+            if (channelFontSizePx != null) {
+                parts.add("repfig.channel_font=" + channelFontSizePx.intValue());
+            }
+            if (exportScale != null) parts.add("repfig.export_scale=" + exportScale.intValue());
+            if (scaleBarEnabled != null) {
+                parts.add("repfig.scalebar=" + scaleBarEnabled.booleanValue());
+            }
+            if (scaleBarLengthUm != null) {
+                parts.add("repfig.scalebar_um=" + formatDouble(scaleBarLengthUm.doubleValue()));
+            }
+            if (scaleBarThicknessPx != null) {
+                parts.add("repfig.scalebar_thickness=" + scaleBarThicknessPx.intValue());
+            }
+            if (scaleBarPosition != null) {
+                parts.add("repfig.scalebar_position=" + canonicalPosition(scaleBarPosition));
+            }
+            if (scaleBarFracX != null && scaleBarFracY != null) {
+                parts.add("repfig.scalebar_frac=" + formatFrac(scaleBarFracX, scaleBarFracY));
+            }
+            if (labelMode != null) {
+                parts.add("repfig.label_mode=" + canonicalLabelMode(labelMode));
+            }
+            if (customLabelTemplate != null) {
+                parts.add("repfig.label_text=[" + customLabelTemplate + "]");
+            }
+            if (labelFontSizePx != null) {
+                parts.add("repfig.label_font=" + labelFontSizePx.intValue());
+            }
+            if (labelPosition != null) {
+                parts.add("repfig.label_position=" + canonicalPosition(labelPosition));
+            }
+            if (labelFracX != null && labelFracY != null) {
+                parts.add("repfig.label_frac=" + formatFrac(labelFracX, labelFracY));
+            }
+            if (annotationColor != null) {
+                parts.add("repfig.color=" + canonicalColor(annotationColor));
+            }
+            if (annotateOverviewTile != null) {
+                parts.add("repfig.annotate_tile=" + annotateOverviewTile.booleanValue());
+            }
+            if (annotateIndividualImages != null) {
+                parts.add("repfig.annotate_individual="
+                        + annotateIndividualImages.booleanValue());
+            }
+            if (groupRowsBy != null) {
+                parts.add("repfig.group_by="
+                        + groupRowsBy.name().toLowerCase(Locale.ROOT));
+            }
+            if (channelOrder != null && !channelOrder.isEmpty()) {
+                parts.add("repfig.channel_order=[" + joinChannelOrder(channelOrder) + "]");
+            }
+            if (rows != null) parts.add("repfig.rows=" + rows.intValue());
+        }
+
+        private static String formatFrac(Double x, Double y) {
+            return formatDouble(x.doubleValue()) + "," + formatDouble(y.doubleValue());
+        }
+
+        private static String canonicalColor(Color color) {
+            return color != null && color.equals(Color.BLACK) ? "black" : "white";
+        }
+
+        private static String canonicalPosition(PresentationTileConfig.Position position) {
+            switch (position) {
+                case TOP_LEFT: return "top_left";
+                case TOP_RIGHT: return "top_right";
+                case BOTTOM_LEFT: return "bottom_left";
+                default: return "bottom_right";
+            }
+        }
+
+        private static String canonicalLabelMode(PresentationTileConfig.LabelMode mode) {
+            switch (mode) {
+                case NONE: return "none";
+                case IMAGE_NAME: return "image";
+                case CONDITION_IMAGE: return "condition_image";
+                case CUSTOM: return "custom";
+                default: return "stain";
+            }
+        }
+
+        private static String joinChannelOrder(List<String> channels) {
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < channels.size(); i++) {
+                if (i > 0) sb.append(',');
+                sb.append(channels.get(i));
+            }
+            return sb.toString();
         }
     }
 }

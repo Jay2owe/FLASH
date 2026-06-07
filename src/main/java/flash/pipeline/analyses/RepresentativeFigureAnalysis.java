@@ -10,12 +10,14 @@ import flash.pipeline.io.ImageCache;
 import flash.pipeline.io.ImageSourceDispatcher;
 import flash.pipeline.io.SeriesMeta;
 import flash.pipeline.naming.ImageNameParser;
+import flash.pipeline.presentation.PresentationTileConfig;
 import flash.pipeline.project.ProjectFile;
 import flash.pipeline.project.ProjectFileIO;
 import flash.pipeline.qc.QcMinMaxPerConditionSelector;
 import flash.pipeline.qc.QcSelectionCandidate;
 import flash.pipeline.representative.ConditionLayoutChooser;
 import flash.pipeline.representative.RepresentativeFigureConfig;
+import flash.pipeline.representative.RepresentativeLayout;
 import flash.pipeline.representative.RepresentativeFigureWriter;
 import flash.pipeline.representative.RepresentativePreviewRenderer;
 import flash.pipeline.representative.RepresentativeRangeStage;
@@ -40,6 +42,7 @@ import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
@@ -59,6 +62,7 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
     private ImageCache imageCache = null;
     private boolean useTifCache = false;
     private boolean suppressDialogs = false;
+    private CLIConfig cliConfig = null;
     private AnalysisRunContext runRecordContext = null;
     private ConditionReviewDialog conditionReviewDialog =
             new ConditionReviewDialog() {
@@ -78,10 +82,7 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
         loadRememberedProjectParameters(directory);
 
         if (headless || suppressDialogs || GraphicsEnvironment.isHeadless()) {
-            config.statistic = RepresentativeStatistic.NONE;
-            config.existingResult = null;
-            config.statTable = new RepresentativeStatTable();
-            IJ.log("[Representative Figure] Headed mode is required for representative image selection.");
+            executeHeadless(directory);
             return;
         }
 
@@ -179,6 +180,7 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
                     + (config.layout.rowCount() == 1 ? "" : "s")
                     + " and " + config.layout.conditionCount() + " condition"
                     + (config.layout.conditionCount() == 1 ? "" : "s") + ".");
+            applyCliTileOverrides();
             long writeStart = System.currentTimeMillis();
             File output = new RepresentativeFigureWriter().write(
                     directory, config, imageCache, parallelThreads, useTifCache, metas);
@@ -191,6 +193,96 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
                     + e.getMessage());
             IJ.error("Representative Figure",
                     "Could not prepare representative selection:\n" + e.getMessage());
+        }
+    }
+
+    /**
+     * Headless path. Representative selection still requires headed mode, but
+     * when a complete selection, layout, and tile config were remembered from a
+     * prior interactive run, the figure is re-rendered (optionally restyled via
+     * {@code repfig.*} macro overrides) without any dialogs.
+     */
+    private void executeHeadless(String directory) {
+        if (config.selection != null && config.selection.isComplete()
+                && config.layout != null && config.tileConfig != null) {
+            try {
+                applyCliTileOverrides();
+                List<SeriesMeta> metas = loadSourceMetadata(directory);
+                BinConfig setupConfig = BinConfigIO.readPartialFromDirectory(directory);
+                long writeStart = System.currentTimeMillis();
+                File output = new RepresentativeFigureWriter().write(
+                        directory, config, imageCache, parallelThreads, useTifCache, metas);
+                IJ.log("[Representative Figure] Re-rendered saved representative figure: "
+                        + output.getAbsolutePath()
+                        + " (" + elapsed(writeStart) + ").");
+                persistCompletedRun(directory, setupConfig, output);
+            } catch (Exception e) {
+                IJ.log("[Representative Figure] Headless re-render failed: " + e.getMessage());
+                IJ.error("Representative Figure",
+                        "Headless re-render failed:\n" + e.getMessage());
+            }
+            return;
+        }
+
+        config.statistic = RepresentativeStatistic.NONE;
+        config.existingResult = null;
+        config.statTable = new RepresentativeStatTable();
+        IJ.log("[Representative Figure] Headless representative figure requires a saved "
+                + "selection from a prior interactive run; none found.");
+    }
+
+    /**
+     * Applies any {@code repfig.*} CLI overrides to the tile config (and the
+     * row layout for {@code repfig.rows}). No-op when no overrides are set.
+     * Called once just before each {@code write(...)} so it works in both the
+     * headed and headless paths.
+     */
+    void applyCliTileOverrides() {
+        if (cliConfig == null || cliConfig.getRepfig() == null
+                || !cliConfig.getRepfig().hasConfiguration()) {
+            return;
+        }
+        CLIConfig.RepfigConfig repfig = cliConfig.getRepfig();
+        config.tileConfig = repfig.applyTo(config.tileConfig);
+        if (repfig.getRows() != null && config.layout != null) {
+            RepresentativeLayout reshaped = reshapeLayoutRows(
+                    config.layout, repfig.getRows().intValue());
+            if (reshaped != null) {
+                config.layout = reshaped;
+            }
+        }
+    }
+
+    /**
+     * Distributes the flattened conditions of {@code layout} into {@code rows}
+     * rows, balancing row sizes. Returns null if reshaping is not possible.
+     */
+    static RepresentativeLayout reshapeLayoutRows(RepresentativeLayout layout, int rows) {
+        if (layout == null || rows < 1) {
+            return null;
+        }
+        List<String> conditions = new ArrayList<String>(layout.flattenedConditions());
+        if (conditions.isEmpty()) {
+            return null;
+        }
+        int rowCount = Math.min(rows, conditions.size());
+        List<List<String>> grid = new ArrayList<List<String>>();
+        for (int i = 0; i < rowCount; i++) {
+            grid.add(new ArrayList<String>());
+        }
+        int base = conditions.size() / rowCount;
+        int remainder = conditions.size() % rowCount;
+        int index = 0;
+        for (int r = 0; r < rowCount; r++) {
+            int size = base + (r < remainder ? 1 : 0);
+            for (int c = 0; c < size; c++) {
+                grid.get(r).add(conditions.get(index++));
+            }
+        }
+        try {
+            return new RepresentativeLayout(grid);
+        } catch (IllegalArgumentException e) {
+            return null;
         }
     }
 
@@ -256,6 +348,7 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
 
     @Override
     public void setCliConfig(CLIConfig config) {
+        this.cliConfig = config;
     }
 
     @Override

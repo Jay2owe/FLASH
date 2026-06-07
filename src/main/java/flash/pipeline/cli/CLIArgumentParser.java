@@ -10,6 +10,7 @@ import flash.pipeline.deconv.engine.Algorithm;
 import flash.pipeline.deconv.engine.DeconvParams;
 import flash.pipeline.deconv.psf.PsfModel;
 import flash.pipeline.deconv.psf.ScopeModality;
+import flash.pipeline.presentation.PresentationTileConfig;
 import ij.IJ;
 
 import java.io.File;
@@ -140,6 +141,7 @@ public final class CLIArgumentParser {
         parseAggregateOptions(macroOptions, cfg);
         parseExcelOptions(macroOptions, cfg);
         parseStatsOptions(macroOptions, cfg);
+        parseRepfigOptions(macroOptions, cfg);
         parseDownstreamUseDeconvOptions(macroOptions, cfg);
         if (cfg.deconv.enabled || containsDeconvolutionOverrides(cfg.deconv)) {
             cfg.selectedAnalyses[2] = true;
@@ -167,6 +169,9 @@ public final class CLIArgumentParser {
         }
         if (cfg.spectral.hasConfiguration()) {
             cfg.selectedAnalyses[11] = true;
+        }
+        if (cfg.repfig.hasConfiguration()) {
+            cfg.selectedAnalyses[12] = true;
         }
 
         return cfg;
@@ -306,6 +311,20 @@ public final class CLIArgumentParser {
                 + "  splitmerge.useDeconv=true|false\n"
                 + "  threeD.useDeconv=true|false\n"
                 + "  intensityV2.useDeconv=true|false\n"
+                + "\n"
+                + "Representative Figure Options (re-render a saved selection; selection itself needs headed mode):\n"
+                + "  repfig.cell_size=260            repfig.export_scale=1\n"
+                + "  repfig.row_gap=8                repfig.column_gap=12   repfig.inner_gap=4   repfig.margin=6\n"
+                + "  repfig.condition_font=15        repfig.channel_font=16\n"
+                + "  repfig.scalebar=true|false      repfig.scalebar_um=100   repfig.scalebar_thickness=6\n"
+                + "  repfig.scalebar_position=tl|tr|bl|br   repfig.scalebar_frac=0.9,0.9\n"
+                + "  repfig.label_mode=none|stain|image|condition_image|custom\n"
+                + "  repfig.label_text=[{stain}]     repfig.label_font=18   repfig.label_position=tl|tr|bl|br\n"
+                + "  repfig.label_frac=0.05,0.05     repfig.color=white|black\n"
+                + "  repfig.annotate_tile=true|false repfig.annotate_individual=true|false\n"
+                + "  repfig.group_by=condition|animal\n"
+                + "  repfig.channel_order=[DAPI,GFP,Iba1]\n"
+                + "  repfig.rows=2                   (reshape the saved conditions into N rows)\n"
                 + "\n"
                 + "PyImageJ Example:\n"
                 + "  ij.py.run_plugin(\"FLASH - The Pipeline for Fluorescence Automated Spatial Histology\", args={'dir': '/data', 'run_deconv': True, 'threads': 4})\n"
@@ -951,6 +970,259 @@ public final class CLIArgumentParser {
         if (meanMetrics != null && !meanMetrics.trim().isEmpty()) {
             parseMetricAggregationList(meanMetrics, StatisticsConfig.MetricAggregation.MEAN, stats);
         }
+    }
+
+    /**
+     * Parses {@code repfig.*} options into {@link CLIConfig.RepfigConfig}.
+     * Every key is optional; an unset key leaves the corresponding override
+     * null so the saved tile styling is preserved.
+     */
+    private static void parseRepfigOptions(String options, CLIConfig cfg) {
+        CLIConfig.RepfigConfig repfig = cfg.repfig;
+
+        String cellSize = getValue(options, "repfig.cell_size");
+        if (cellSize != null) {
+            repfig.cellSizePx = Integer.valueOf(parseIntValue(
+                    "repfig.cell_size", cellSize, 260, 80, 1200));
+        }
+
+        String rowGap = getValue(options, "repfig.row_gap");
+        if (rowGap != null) {
+            repfig.rowGapPx = Integer.valueOf(parseIntValue(
+                    "repfig.row_gap", rowGap, 8, 0, 400));
+        }
+
+        String columnGap = getValue(options, "repfig.column_gap");
+        if (columnGap != null) {
+            repfig.conditionGapPx = Integer.valueOf(parseIntValue(
+                    "repfig.column_gap", columnGap, 12, 0, 400));
+        }
+
+        String innerGap = getValue(options, "repfig.inner_gap");
+        if (innerGap != null) {
+            repfig.innerColGapPx = Integer.valueOf(parseIntValue(
+                    "repfig.inner_gap", innerGap, 4, 0, 200));
+        }
+
+        String margin = getValue(options, "repfig.margin");
+        if (margin != null) {
+            repfig.marginPx = Integer.valueOf(parseIntValue(
+                    "repfig.margin", margin, 6, 0, 200));
+        }
+
+        String conditionFont = getValue(options, "repfig.condition_font");
+        if (conditionFont != null) {
+            repfig.conditionFontSizePx = Integer.valueOf(parseIntValue(
+                    "repfig.condition_font", conditionFont, 15, 6, 96));
+        }
+
+        String channelFont = getValue(options, "repfig.channel_font");
+        if (channelFont != null) {
+            repfig.channelFontSizePx = Integer.valueOf(parseIntValue(
+                    "repfig.channel_font", channelFont, 16, 6, 96));
+        }
+
+        String exportScale = getValue(options, "repfig.export_scale");
+        if (exportScale != null) {
+            repfig.exportScale = Integer.valueOf(parseIntValue(
+                    "repfig.export_scale", exportScale, 1, 1, 4));
+        }
+
+        String scaleBar = getValue(options, "repfig.scalebar");
+        if (scaleBar != null) {
+            repfig.scaleBarEnabled = Boolean.valueOf(parseBooleanValue(
+                    "repfig.scalebar", scaleBar, true));
+        }
+
+        String scaleBarUm = getValue(options, "repfig.scalebar_um");
+        if (scaleBarUm != null) {
+            repfig.scaleBarLengthUm = Double.valueOf(parseDoubleValue(
+                    "repfig.scalebar_um", scaleBarUm, 100.0, 0.000001, Double.MAX_VALUE));
+        }
+
+        String scaleBarThickness = getValue(options, "repfig.scalebar_thickness");
+        if (scaleBarThickness != null) {
+            repfig.scaleBarThicknessPx = Integer.valueOf(parseIntValue(
+                    "repfig.scalebar_thickness", scaleBarThickness, 6, 1, 30));
+        }
+
+        String scaleBarPosition = getValue(options, "repfig.scalebar_position");
+        if (scaleBarPosition != null && !scaleBarPosition.trim().isEmpty()) {
+            PresentationTileConfig.Position parsed = parseTilePosition(scaleBarPosition);
+            if (parsed != null) {
+                repfig.scaleBarPosition = parsed;
+            }
+        }
+
+        double[] scaleBarFrac = parseFracPair("repfig.scalebar_frac",
+                getValue(options, "repfig.scalebar_frac"));
+        if (scaleBarFrac != null) {
+            repfig.scaleBarFracX = Double.valueOf(scaleBarFrac[0]);
+            repfig.scaleBarFracY = Double.valueOf(scaleBarFrac[1]);
+        }
+
+        String labelMode = getValue(options, "repfig.label_mode");
+        if (labelMode != null && !labelMode.trim().isEmpty()) {
+            PresentationTileConfig.LabelMode parsed = parseLabelMode(labelMode);
+            if (parsed != null) {
+                repfig.labelMode = parsed;
+            }
+        }
+
+        String labelText = getValue(options, "repfig.label_text");
+        if (labelText != null) {
+            repfig.customLabelTemplate = labelText;
+        }
+
+        String labelFont = getValue(options, "repfig.label_font");
+        if (labelFont != null) {
+            repfig.labelFontSizePx = Integer.valueOf(parseIntValue(
+                    "repfig.label_font", labelFont, 18, 8, 96));
+        }
+
+        String labelPosition = getValue(options, "repfig.label_position");
+        if (labelPosition != null && !labelPosition.trim().isEmpty()) {
+            PresentationTileConfig.Position parsed = parseTilePosition(labelPosition);
+            if (parsed != null) {
+                repfig.labelPosition = parsed;
+            }
+        }
+
+        double[] labelFrac = parseFracPair("repfig.label_frac",
+                getValue(options, "repfig.label_frac"));
+        if (labelFrac != null) {
+            repfig.labelFracX = Double.valueOf(labelFrac[0]);
+            repfig.labelFracY = Double.valueOf(labelFrac[1]);
+        }
+
+        String color = getValue(options, "repfig.color");
+        if (color != null && !color.trim().isEmpty()) {
+            java.awt.Color parsed = parseAnnotationColor(color);
+            if (parsed != null) {
+                repfig.annotationColor = parsed;
+            }
+        }
+
+        String annotateTile = getValue(options, "repfig.annotate_tile");
+        if (annotateTile != null) {
+            repfig.annotateOverviewTile = Boolean.valueOf(parseBooleanValue(
+                    "repfig.annotate_tile", annotateTile, true));
+        }
+
+        String annotateIndividual = getValue(options, "repfig.annotate_individual");
+        if (annotateIndividual != null) {
+            repfig.annotateIndividualImages = Boolean.valueOf(parseBooleanValue(
+                    "repfig.annotate_individual", annotateIndividual, false));
+        }
+
+        String groupBy = getValue(options, "repfig.group_by");
+        if (groupBy != null && !groupBy.trim().isEmpty()) {
+            PresentationTileConfig.GroupRowsBy parsed = parseGroupRowsBy(groupBy);
+            if (parsed != null) {
+                repfig.groupRowsBy = parsed;
+            }
+        }
+
+        String channelOrder = getValue(options, "repfig.channel_order");
+        if (channelOrder != null) {
+            repfig.channelOrder = parseStringList(channelOrder);
+        }
+
+        String rows = getValue(options, "repfig.rows");
+        if (rows != null) {
+            repfig.rows = Integer.valueOf(parseIntValue(
+                    "repfig.rows", rows, 1, 1, Integer.MAX_VALUE));
+        }
+    }
+
+    private static PresentationTileConfig.Position parseTilePosition(String raw) {
+        String normalized = raw.trim().toLowerCase(Locale.ROOT).replace("-", "").replace("_", "");
+        if ("tl".equals(normalized) || "topleft".equals(normalized)) {
+            return PresentationTileConfig.Position.TOP_LEFT;
+        }
+        if ("tr".equals(normalized) || "topright".equals(normalized)) {
+            return PresentationTileConfig.Position.TOP_RIGHT;
+        }
+        if ("bl".equals(normalized) || "bottomleft".equals(normalized)) {
+            return PresentationTileConfig.Position.BOTTOM_LEFT;
+        }
+        if ("br".equals(normalized) || "bottomright".equals(normalized)) {
+            return PresentationTileConfig.Position.BOTTOM_RIGHT;
+        }
+        IJ.log("[CLI] Warning: Unknown repfig position '" + raw + "'.");
+        return null;
+    }
+
+    private static PresentationTileConfig.LabelMode parseLabelMode(String raw) {
+        String normalized = raw.trim().toLowerCase(Locale.ROOT).replace("-", "_");
+        if ("none".equals(normalized)) return PresentationTileConfig.LabelMode.NONE;
+        if ("stain".equals(normalized) || "stain_name".equals(normalized)) {
+            return PresentationTileConfig.LabelMode.STAIN_NAME;
+        }
+        if ("image".equals(normalized) || "image_name".equals(normalized)) {
+            return PresentationTileConfig.LabelMode.IMAGE_NAME;
+        }
+        if ("condition_image".equals(normalized) || "conditionimage".equals(normalized)) {
+            return PresentationTileConfig.LabelMode.CONDITION_IMAGE;
+        }
+        if ("custom".equals(normalized)) return PresentationTileConfig.LabelMode.CUSTOM;
+        IJ.log("[CLI] Warning: Unknown repfig.label_mode '" + raw + "'.");
+        return null;
+    }
+
+    private static PresentationTileConfig.GroupRowsBy parseGroupRowsBy(String raw) {
+        String normalized = raw.trim().toLowerCase(Locale.ROOT);
+        if ("condition".equals(normalized)) return PresentationTileConfig.GroupRowsBy.CONDITION;
+        if ("animal".equals(normalized)) return PresentationTileConfig.GroupRowsBy.ANIMAL;
+        IJ.log("[CLI] Warning: Unknown repfig.group_by '" + raw + "'.");
+        return null;
+    }
+
+    private static java.awt.Color parseAnnotationColor(String raw) {
+        String normalized = raw.trim().toLowerCase(Locale.ROOT);
+        if ("white".equals(normalized)) return java.awt.Color.WHITE;
+        if ("black".equals(normalized)) return java.awt.Color.BLACK;
+        IJ.log("[CLI] Warning: Unknown repfig.color '" + raw + "'. Expected white or black.");
+        return null;
+    }
+
+    private static double[] parseFracPair(String key, String raw) {
+        if (raw == null || raw.trim().isEmpty()) {
+            return null;
+        }
+        String[] parts = raw.split(",");
+        if (parts.length != 2) {
+            IJ.log("[CLI] Warning: Invalid " + key + " value: " + raw
+                    + ". Expected 'x,y'.");
+            return null;
+        }
+        try {
+            double x = Double.parseDouble(parts[0].trim());
+            double y = Double.parseDouble(parts[1].trim());
+            if (Double.isNaN(x) || Double.isNaN(y)
+                    || Double.isInfinite(x) || Double.isInfinite(y)) {
+                throw new NumberFormatException("non-finite");
+            }
+            return new double[]{x, y};
+        } catch (NumberFormatException e) {
+            IJ.log("[CLI] Warning: Invalid " + key + " value: " + raw);
+            return null;
+        }
+    }
+
+    private static List<String> parseStringList(String raw) {
+        List<String> values = new ArrayList<String>();
+        if (raw == null) {
+            return values;
+        }
+        String[] parts = raw.split(",");
+        for (String part : parts) {
+            String trimmed = part.trim();
+            if (!trimmed.isEmpty()) {
+                values.add(trimmed);
+            }
+        }
+        return values;
     }
 
     private static String firstValue(String options, String... keys) {
