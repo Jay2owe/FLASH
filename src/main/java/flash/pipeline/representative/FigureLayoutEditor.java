@@ -515,7 +515,11 @@ public final class FigureLayoutEditor extends JDialog {
         JLabel name = new JLabel(label);
         name.setPreferredSize(new Dimension(78, 18));
         final JLabel valueLabel = new JLabel(String.valueOf(value));
-        JSlider slider = new JSlider(0, 60, Math.max(0, Math.min(60, value)));
+        // Expand the max so a project saved with a large gap (config allows up to
+        // 400) shows the true value instead of pinning the thumb at 60 and
+        // overwriting it on the first drag.
+        int sliderMax = Math.max(60, Math.max(0, value));
+        JSlider slider = new JSlider(0, sliderMax, Math.max(0, value));
         slider.setPreferredSize(new Dimension(120, 22));
         slider.addChangeListener(e -> {
             int v = slider.getValue();

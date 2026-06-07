@@ -19,8 +19,12 @@ import java.util.List;
  */
 public final class RepresentativeFigurePreview {
 
-    /** Source cell size cap before downscaling, to bound preview cost. */
-    private static final int PREVIEW_CELL_CAP = 200;
+    /**
+     * Source cell size cap before downscaling, to bound preview cost. Kept above
+     * the default cell (260) so the common case renders at proportionally exact
+     * geometry; only unusually large cells are capped.
+     */
+    private static final int PREVIEW_CELL_CAP = 320;
 
     private RepresentativeFigurePreview() {
     }
