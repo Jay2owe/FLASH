@@ -15,7 +15,9 @@ import flash.pipeline.runtime.FeatureDependencyGate;
 import flash.pipeline.io.AsyncImageSaver;
 import flash.pipeline.io.BoundedImageLoader;
 import flash.pipeline.io.DeferredImageSupplier;
+import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.naming.NameParts;
+import flash.pipeline.presentation.PresentationTileConfig;
 import flash.pipeline.presentation.PresentationTileRecord;
 import flash.pipeline.presentation.PresentationTileWriter;
 import ij.ImagePlus;
@@ -453,6 +455,46 @@ public class SplitAndMergeImageChannelsAnalysisTest {
     }
 
     @Test
+    public void disabledTileOptionsStillWritePresentationManifest() throws Exception {
+        File dir = temp.newFolder("manifestWithoutTiles");
+        FlashProjectLayout layout = FlashProjectLayout.forDirectory(dir.getAbsolutePath());
+        File outDir = new File(layout.presentationImagesDir(), "Animal1");
+        File tifDir = layout.presentationOmeTiffDir();
+        File detailsDir = new File(layout.analysisDetailsWriteDir(), "Split and Merge/Animal1");
+        assertTrue(outDir.mkdirs());
+        assertTrue(detailsDir.mkdirs());
+
+        ImageStack stack = new ImageStack(2, 2);
+        stack.addSlice("DAPI", new byte[]{0, 64, 127, (byte) 255});
+        stack.addSlice("GFAP", new byte[]{5, 25, 125, (byte) 200});
+        ImagePlus imp = new ImagePlus("Experiment-Animal1_LH_Cortex", stack);
+        imp.setDimensions(2, 1, 1);
+        imp.setOpenAsHyperStack(true);
+
+        SplitAndMergeImageChannelsAnalysis analysis = new SplitAndMergeImageChannelsAnalysis();
+        invokeProcessOneImage(analysis,
+                imp,
+                new String[]{"DAPI", "GFAP"},
+                new String[]{"Blue", "Green"},
+                outDir,
+                tifDir,
+                detailsDir,
+                true,
+                false,
+                new NameParts("Experiment", "Animal1", "LH", "Cortex"));
+
+        AsyncImageSaver.waitForAll();
+        invokeWritePresentationTileOutputs(analysis, dir.getAbsolutePath(), layout,
+                PresentationTileConfig.disabled(Arrays.asList("DAPI", "GFAP")));
+
+        File manifest = new File(layout.presentationImagesRoot(), "Presentation_Image_Manifest.csv");
+        assertTrue(manifest.isFile());
+        List<PresentationTileRecord> records = PresentationTileWriter.readManifest(manifest);
+        assertEquals(3, records.size());
+        assertEquals("source-series-test", records.get(0).imageId());
+    }
+
+    @Test
     public void parallelProcessingRethrowsWorkerFailuresAfterWorkersFinish() throws Exception {
         File dir = temp.newFolder("parallelFailure");
         File outRoot = new File(dir, "Images");
@@ -664,6 +706,20 @@ public class SplitAndMergeImageChannelsAnalysisTest {
                 "mergeExistingPresentationManifest", File.class, List.class);
         method.setAccessible(true);
         return (List<PresentationTileRecord>) method.invoke(null, manifest, currentRecords);
+    }
+
+    private static void invokeWritePresentationTileOutputs(
+            SplitAndMergeImageChannelsAnalysis analysis,
+            String directory,
+            FlashProjectLayout layout,
+            PresentationTileConfig config) throws Exception {
+        Method method = SplitAndMergeImageChannelsAnalysis.class.getDeclaredMethod(
+                "writePresentationTileOutputs",
+                String.class,
+                FlashProjectLayout.class,
+                PresentationTileConfig.class);
+        method.setAccessible(true);
+        method.invoke(analysis, directory, layout, config);
     }
 
     private static final class SyntheticDeferredImageSupplier extends DeferredImageSupplier {

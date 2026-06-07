@@ -2181,10 +2181,8 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis, RunRecordAw
 
     private void writePresentationTileOutputs(String directory, FlashProjectLayout layout,
                                               PresentationTileConfig config) {
-        if (config == null || (!config.createOverviewTile() && !config.annotateIndividualImages())) {
-            return;
-        }
-
+        boolean writeRequestedOutputs = config != null
+                && (config.createOverviewTile() || config.annotateIndividualImages());
         List<PresentationTileRecord> records;
         synchronized (presentationTileRecords) {
             records = new ArrayList<PresentationTileRecord>(presentationTileRecords);
@@ -2192,24 +2190,33 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis, RunRecordAw
         File manifestFile = presentationManifestFile(layout);
         records = mergeExistingPresentationManifest(manifestFile, records);
         if (records.isEmpty()) {
-            IJ.log("  - Presentation overview tile skipped: no saved image records were found.");
+            IJ.log(writeRequestedOutputs
+                    ? "  - Presentation overview tile skipped: no saved image records were found."
+                    : "  - Presentation image manifest skipped: no saved image records were found.");
             return;
         }
 
-        LinkedHashSet<String> animals = new LinkedHashSet<String>();
-        for (PresentationTileRecord record : records) {
-            animals.add(record.animal());
+        Map<String, String> conditions = Collections.emptyMap();
+        if (writeRequestedOutputs) {
+            LinkedHashSet<String> animals = new LinkedHashSet<String>();
+            for (PresentationTileRecord record : records) {
+                animals.add(record.animal());
+            }
+            conditions = ConditionManifestIO.resolveAssignments(directory, animals);
         }
-        Map<String, String> conditions = ConditionManifestIO.resolveAssignments(directory, animals);
 
         try {
-            PresentationTileWriter.writeRequestedOutputs(
-                    layout.presentationAnnotatedDir(),
-                    layout.presentationTilesDir(),
-                    manifestFile,
-                    records, conditions, config);
+            if (writeRequestedOutputs) {
+                PresentationTileWriter.writeRequestedOutputs(
+                        layout.presentationAnnotatedDir(),
+                        layout.presentationTilesDir(),
+                        manifestFile,
+                        records, conditions, config);
+            } else {
+                PresentationTileWriter.writeManifest(manifestFile, records, conditions);
+            }
             recordOutput(manifestFile, "csv");
-            if (config.createOverviewTile()) {
+            if (writeRequestedOutputs && config.createOverviewTile()) {
                 String grouped = config.groupRowsBy() == PresentationTileConfig.GroupRowsBy.CONDITION
                         ? "ByCondition" : "ByAnimal";
                 recordOutput(new File(layout.presentationTilesDir(),
@@ -2879,7 +2886,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis, RunRecordAw
                 if (rawSupplier.getMode() == DeferredImageSupplier.Mode.TIFF_FOLDER) {
                     return materialized ? rawSupplier.openSeriesMaterialized(seriesIndex) : rawSupplier.openSeries(seriesIndex);
                 }
-                File container = rawSupplier.getContainerFile();
+                File container = sourceFileForSeries(rawSupplier, seriesIndex);
                 String seriesName = rawSupplier.getSeriesName(seriesIndex);
                 String baseName = baseNameForSeries(seriesName, seriesIndex);
                 File inputFile = DeconvolvedInputResolver.resolveInput(rootDir, container, baseName, useDeconv);
