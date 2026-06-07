@@ -405,7 +405,9 @@ public final class ConfigQcDialog {
         setStatus(" ");
         setPrimaryButtonEnabled(true);
         previewPair.setChannelLutName(context.getChannelLutName());
-        previewPair.setDisplayControlsAvailable(stage.showPreviewDisplayControls());
+        previewPair.setDisplayControlsAvailable(
+                stage.showPreviewDisplayControls(),
+                stage.showPreviewLutToggle());
         previewPair.resetStageToolstripState();
         previewPair.resetZ();
         previewPair.setOriginal(context.getCurrentImagePlus());
@@ -465,8 +467,10 @@ public final class ConfigQcDialog {
                 ? "Lock in & Done"
                 : "Lock in & Next");
         lockInButton.setEnabled(currentStage() != null && primaryButtonValid);
-        previewPair.setDisplayControlsAvailable(currentStage() == null
-                || currentStage().showPreviewDisplayControls());
+        ConfigQcStage activeStage = currentStage();
+        previewPair.setDisplayControlsAvailable(
+                activeStage == null || activeStage.showPreviewDisplayControls(),
+                activeStage == null || activeStage.showPreviewLutToggle());
         if (loadRunButton != null) {
             ConfigQcStage stage = currentStage();
             boolean canLoad = stage != null && stage.supportsLoadedParameters();
@@ -1164,6 +1168,10 @@ public final class ConfigQcDialog {
 
     JButton displayControlsButtonForTest() {
         return previewPair.displayControlsButton();
+    }
+
+    JButton lutToggleButtonForTest() {
+        return previewPair.lutToggleButton();
     }
 
     JButton lockInButtonForTest() {

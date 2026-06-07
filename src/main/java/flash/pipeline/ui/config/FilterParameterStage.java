@@ -333,6 +333,7 @@ public final class FilterParameterStage implements ConfigQcStage {
         try {
             sourceImage = previewAdapter.createSource(context);
             if (preview != null) {
+                preview.setOtsuOverlayAvailable(true);
                 preview.setOriginal(sourceImage);
                 preview.setAdjusted(null);
                 preview.setAdjustedState(hasMacro()

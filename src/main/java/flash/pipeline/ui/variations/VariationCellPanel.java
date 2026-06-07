@@ -9,7 +9,6 @@ import flash.pipeline.ui.preview.ThresholdOverlayRenderer;
 import ij.ImagePlus;
 import ij.ImageStack;
 import ij.measure.ResultsTable;
-import ij.process.AutoThresholder;
 import ij.process.ByteProcessor;
 import ij.process.ImageProcessor;
 
@@ -70,7 +69,6 @@ public final class VariationCellPanel extends JPanel {
     private static final int UNKNOWN_DELTA = Integer.MIN_VALUE;
     private static final int PEEK_DELAY_MS = 120;
     private static final int PEEK_DRAG_CANCEL_PX = 4;
-    private static final int OTSU_HISTOGRAM_BINS = 256;
     private static final int FILTER_PARAM_LABEL_MAX_CHARS = 56;
     private static final int CELL_SIZE = 260;
     private static final int METRIC_STRIP_HEIGHT = 24;
@@ -1266,21 +1264,19 @@ public final class VariationCellPanel extends JPanel {
         if (cachedOverlayImage != null) {
             return cachedOverlayImage;
         }
-        Histogram histogram = histogramFor(filtered);
-        if (!histogram.hasValues()) {
+        ThresholdOverlayRenderer.OtsuThreshold threshold =
+                ThresholdOverlayRenderer.otsuThreshold(filtered);
+        if (!threshold.hasValues()) {
             return filtered;
         }
-        int thresholdBin = new AutoThresholder().getThreshold(
-                AutoThresholder.Method.Otsu, histogram.counts);
-        double lower = histogram.foregroundLowerFor(thresholdBin);
         ImagePlus rendered = ThresholdOverlayRenderer.render(filtered,
-                lower,
-                histogram.max,
+                threshold.getLower(),
+                threshold.getUpper(),
                 ThresholdOverlayRenderer.MODE_RED_OVERLAY);
         if (rendered == null) {
             return filtered;
         }
-        cachedOtsuLower = lower;
+        cachedOtsuLower = threshold.getLower();
         cachedOverlayImage = rendered;
         return rendered;
     }
@@ -2220,83 +2216,6 @@ public final class VariationCellPanel extends JPanel {
         return sourceProcessor != null && labelProcessor != null;
     }
 
-    private static Histogram histogramFor(ImagePlus image) {
-        if (image == null) {
-            return Histogram.empty();
-        }
-        double min = Double.POSITIVE_INFINITY;
-        double max = Double.NEGATIVE_INFINITY;
-        boolean integral = true;
-        ImageStack stack = image.getStack();
-        int size = stack == null ? 1 : Math.max(1, stack.getSize());
-        for (int slice = 1; slice <= size; slice++) {
-            ImageProcessor processor = stack == null
-                    ? image.getProcessor()
-                    : stack.getProcessor(slice);
-            if (processor == null) {
-                continue;
-            }
-            for (int y = 0; y < processor.getHeight(); y++) {
-                for (int x = 0; x < processor.getWidth(); x++) {
-                    double value = processor.getPixelValue(x, y);
-                    if (!Double.isFinite(value)) {
-                        continue;
-                    }
-                    if (value < min) min = value;
-                    if (value > max) max = value;
-                    if (Math.abs(value - Math.rint(value)) > 0.000001d) {
-                        integral = false;
-                    }
-                }
-            }
-        }
-        if (!Double.isFinite(min) || !Double.isFinite(max)) {
-            return Histogram.empty();
-        }
-        boolean direct = integral && min >= 0.0d && max <= 65535.0d;
-        int bins = direct
-                ? (max <= 255.0d ? 256 : 65536)
-                : OTSU_HISTOGRAM_BINS;
-        int[] counts = new int[bins];
-        if (max <= min) {
-            int bin = direct ? (int) Math.round(min) : 0;
-            counts[Math.max(0, Math.min(counts.length - 1, bin))] = pixelCount(image);
-            return new Histogram(counts, min, max, direct, true);
-        }
-        for (int slice = 1; slice <= size; slice++) {
-            ImageProcessor processor = stack == null
-                    ? image.getProcessor()
-                    : stack.getProcessor(slice);
-            if (processor == null) {
-                continue;
-            }
-            for (int y = 0; y < processor.getHeight(); y++) {
-                for (int x = 0; x < processor.getWidth(); x++) {
-                    double value = processor.getPixelValue(x, y);
-                    if (!Double.isFinite(value)) {
-                        continue;
-                    }
-                    int bin = direct
-                            ? (int) Math.round(value)
-                            : (int) Math.floor(((value - min) / (max - min))
-                            * (bins - 1));
-                    counts[Math.max(0, Math.min(counts.length - 1, bin))]++;
-                }
-            }
-        }
-        return new Histogram(counts, min, max, direct, true);
-    }
-
-    private static int pixelCount(ImagePlus image) {
-        if (image == null) {
-            return 0;
-        }
-        int width = Math.max(1, image.getWidth());
-        int height = Math.max(1, image.getHeight());
-        int slices = Math.max(1, image.getStackSize());
-        return width * height * slices;
-    }
-
     private static String errorDetails(Throwable error) {
         if (error == null) {
             return "Unknown error";
@@ -2326,50 +2245,4 @@ public final class VariationCellPanel extends JPanel {
                 .replace(">", "&gt;");
     }
 
-    private static final class Histogram {
-        final int[] counts;
-        final double min;
-        final double max;
-        final boolean direct;
-        final boolean hasValues;
-
-        Histogram(int[] counts, double min, double max, boolean direct,
-                  boolean hasValues) {
-            this.counts = counts == null ? new int[0] : counts;
-            this.min = min;
-            this.max = max;
-            this.direct = direct;
-            this.hasValues = hasValues;
-        }
-
-        static Histogram empty() {
-            return new Histogram(new int[OTSU_HISTOGRAM_BINS], 0.0d, 0.0d,
-                    false, false);
-        }
-
-        boolean hasValues() {
-            return hasValues && counts.length > 0;
-        }
-
-        double foregroundLowerFor(int thresholdBin) {
-            if (max <= min) {
-                return max;
-            }
-            int clamped = Math.max(0, Math.min(counts.length - 1, thresholdBin));
-            int next = Math.min(counts.length - 1, clamped + 1);
-            return valueFor(next);
-        }
-
-        private double valueFor(int bin) {
-            int clamped = Math.max(0, Math.min(counts.length - 1, bin));
-            if (max <= min) {
-                return min;
-            }
-            if (direct) {
-                return clamped;
-            }
-            return min + ((double) clamped / (double) Math.max(1, counts.length - 1))
-                    * (max - min);
-        }
-    }
 }

@@ -2,6 +2,7 @@ package flash.pipeline.ui.preview;
 
 import ij.ImagePlus;
 import ij.ImageStack;
+import ij.process.AutoThresholder;
 import ij.process.ByteProcessor;
 import ij.process.ColorProcessor;
 import ij.process.ImageProcessor;
@@ -14,6 +15,7 @@ public final class ThresholdOverlayRenderer {
 
     private static final int RED = 0xff3030;
     private static final double OVERLAY_ALPHA = 0.62;
+    private static final int OTSU_HISTOGRAM_BINS = 256;
 
     private ThresholdOverlayRenderer() {
     }
@@ -31,6 +33,25 @@ public final class ThresholdOverlayRenderer {
             return renderMask(source, lower, upper);
         }
         return renderRedOverlay(source, lower, upper);
+    }
+
+    public static ImagePlus renderOtsuRedOverlay(ImagePlus source) {
+        OtsuThreshold threshold = otsuThreshold(source);
+        if (!threshold.hasValues()) return null;
+        return render(source, threshold.getLower(), threshold.getUpper(), MODE_RED_OVERLAY);
+    }
+
+    public static OtsuThreshold otsuThreshold(ImagePlus source) {
+        Histogram histogram = histogramFor(source);
+        if (!histogram.hasValues()) {
+            return OtsuThreshold.empty();
+        }
+        int thresholdBin = new AutoThresholder().getThreshold(
+                AutoThresholder.Method.Otsu, histogram.counts);
+        return new OtsuThreshold(
+                histogram.foregroundLowerFor(thresholdBin),
+                histogram.max,
+                true);
     }
 
     private static ImagePlus renderMask(ImagePlus source, double lower, double upper) {
@@ -133,5 +154,157 @@ public final class ThresholdOverlayRenderer {
             result.setDimensions(channels, slices, frames);
         }
         result.setOpenAsHyperStack(source.isHyperStack());
+    }
+
+    private static Histogram histogramFor(ImagePlus image) {
+        if (image == null) {
+            return Histogram.empty();
+        }
+        double min = Double.POSITIVE_INFINITY;
+        double max = Double.NEGATIVE_INFINITY;
+        boolean integral = true;
+        ImageStack stack = image.getStack();
+        int size = stack == null ? 1 : Math.max(1, stack.getSize());
+        for (int slice = 1; slice <= size; slice++) {
+            ImageProcessor processor = stack == null
+                    ? image.getProcessor()
+                    : stack.getProcessor(slice);
+            if (processor == null) {
+                continue;
+            }
+            for (int y = 0; y < processor.getHeight(); y++) {
+                for (int x = 0; x < processor.getWidth(); x++) {
+                    double value = processor.getPixelValue(x, y);
+                    if (!Double.isFinite(value)) {
+                        continue;
+                    }
+                    if (value < min) min = value;
+                    if (value > max) max = value;
+                    if (Math.abs(value - Math.rint(value)) > 0.000001d) {
+                        integral = false;
+                    }
+                }
+            }
+        }
+        if (!Double.isFinite(min) || !Double.isFinite(max)) {
+            return Histogram.empty();
+        }
+        boolean direct = integral && min >= 0.0d && max <= 65535.0d;
+        int bins = direct
+                ? (max <= 255.0d ? 256 : 65536)
+                : OTSU_HISTOGRAM_BINS;
+        int[] counts = new int[bins];
+        if (max <= min) {
+            int bin = direct ? (int) Math.round(min) : 0;
+            counts[Math.max(0, Math.min(counts.length - 1, bin))] = pixelCount(image);
+            return new Histogram(counts, min, max, direct, true);
+        }
+        for (int slice = 1; slice <= size; slice++) {
+            ImageProcessor processor = stack == null
+                    ? image.getProcessor()
+                    : stack.getProcessor(slice);
+            if (processor == null) {
+                continue;
+            }
+            for (int y = 0; y < processor.getHeight(); y++) {
+                for (int x = 0; x < processor.getWidth(); x++) {
+                    double value = processor.getPixelValue(x, y);
+                    if (!Double.isFinite(value)) {
+                        continue;
+                    }
+                    int bin = direct
+                            ? (int) Math.round(value)
+                            : (int) Math.floor(((value - min) / (max - min))
+                            * (bins - 1));
+                    counts[Math.max(0, Math.min(counts.length - 1, bin))]++;
+                }
+            }
+        }
+        return new Histogram(counts, min, max, direct, true);
+    }
+
+    private static int pixelCount(ImagePlus image) {
+        if (image == null) {
+            return 0;
+        }
+        int width = Math.max(1, image.getWidth());
+        int height = Math.max(1, image.getHeight());
+        int slices = Math.max(1, image.getStackSize());
+        return width * height * slices;
+    }
+
+    public static final class OtsuThreshold {
+        private final double lower;
+        private final double upper;
+        private final boolean hasValues;
+
+        private OtsuThreshold(double lower, double upper, boolean hasValues) {
+            this.lower = lower;
+            this.upper = upper;
+            this.hasValues = hasValues;
+        }
+
+        public static OtsuThreshold empty() {
+            return new OtsuThreshold(Double.NaN, Double.NaN, false);
+        }
+
+        public boolean hasValues() {
+            return hasValues;
+        }
+
+        public double getLower() {
+            return lower;
+        }
+
+        public double getUpper() {
+            return upper;
+        }
+    }
+
+    private static final class Histogram {
+        final int[] counts;
+        final double min;
+        final double max;
+        final boolean direct;
+        final boolean hasValues;
+
+        Histogram(int[] counts, double min, double max, boolean direct,
+                  boolean hasValues) {
+            this.counts = counts == null ? new int[0] : counts;
+            this.min = min;
+            this.max = max;
+            this.direct = direct;
+            this.hasValues = hasValues;
+        }
+
+        static Histogram empty() {
+            return new Histogram(new int[OTSU_HISTOGRAM_BINS], 0.0d, 0.0d,
+                    false, false);
+        }
+
+        boolean hasValues() {
+            return hasValues && counts.length > 0;
+        }
+
+        double foregroundLowerFor(int thresholdBin) {
+            if (max <= min) {
+                return max;
+            }
+            int clamped = Math.max(0, Math.min(counts.length - 1, thresholdBin));
+            int next = Math.min(counts.length - 1, clamped + 1);
+            return valueFor(next);
+        }
+
+        private double valueFor(int bin) {
+            int clamped = Math.max(0, Math.min(counts.length - 1, bin));
+            if (max <= min) {
+                return min;
+            }
+            if (direct) {
+                return clamped;
+            }
+            return min + ((double) clamped / (double) Math.max(1, counts.length - 1))
+                    * (max - min);
+        }
     }
 }

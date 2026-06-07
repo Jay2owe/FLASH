@@ -1,7 +1,9 @@
 package flash.pipeline.ui.config;
 
+import flash.pipeline.bin.BinConfig;
 import flash.pipeline.help.SetupHelpCatalog;
 import flash.pipeline.help.SetupHelpTopic;
+import flash.pipeline.ui.preview.PreviewDisplaySettings;
 import flash.pipeline.testutil.UiTestAssumptions;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import ij.ImagePlus;
@@ -147,6 +149,29 @@ public class ConfigQcDialogTest {
         ConfigQcDialog dialog = ConfigQcDialog.createForTest(contextWithTwoImages(), Arrays.asList(stage));
 
         assertFalse(dialog.displayControlsButtonForTest().isVisible());
+    }
+
+    @Test
+    public void displayRangeStageCanShowLutToggleWithoutBrightnessButton() {
+        RecordingStage stage = new RecordingStage("Display range");
+        stage.previewDisplayControls = false;
+        stage.previewLutToggle = true;
+        BinConfig config = new BinConfig();
+        config.channelNames.add("DAPI");
+        config.channelNames.add("IBA1");
+        config.channelColors.add("Green");
+        config.channelColors.add("Red");
+
+        ConfigQcDialog dialog = ConfigQcDialog.createForTest(
+                contextWithTwoImages(config), Arrays.asList(stage));
+
+        assertFalse(dialog.displayControlsButtonForTest().isVisible());
+        assertTrue(dialog.lutToggleButtonForTest().isVisible());
+        assertEquals("Grey LUT", dialog.lutToggleButtonForTest().getText());
+        assertEquals(PreviewDisplaySettings.LutMode.CHANNEL,
+                dialog.previewForTest().getDisplaySettings().getLutMode());
+        assertEquals("Red",
+                dialog.previewForTest().getDisplaySettings().getChannelLutName());
     }
 
     @Test
@@ -627,10 +652,14 @@ public class ConfigQcDialogTest {
     }
 
     private static ConfigQcContext contextWithTwoImages() {
+        return contextWithTwoImages(null);
+    }
+
+    private static ConfigQcContext contextWithTwoImages(Object config) {
         return ConfigQcContext.fromImages(
                 null,
                 null,
-                null,
+                config,
                 Arrays.asList(stack("Image A", 3), stack("Image B", 3)),
                 Arrays.asList("DAPI", "IBA1"),
                 1);
@@ -703,6 +732,7 @@ public class ConfigQcDialogTest {
         private int restartCount;
         private ConfigQcActions actions;
         private boolean previewDisplayControls = true;
+        private boolean previewLutToggle = true;
         private boolean controlsCanExpand;
         private int preferredControlHeight;
         private SetupHelpTopic helpTopic;
@@ -717,6 +747,10 @@ public class ConfigQcDialogTest {
 
         @Override public boolean showPreviewDisplayControls() {
             return previewDisplayControls;
+        }
+
+        @Override public boolean showPreviewLutToggle() {
+            return previewLutToggle;
         }
 
         @Override public SetupHelpTopic helpTopic() {

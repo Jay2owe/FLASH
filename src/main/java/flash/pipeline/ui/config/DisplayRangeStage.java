@@ -64,6 +64,11 @@ public final class DisplayRangeStage implements ConfigQcStage {
     }
 
     @Override
+    public boolean showPreviewLutToggle() {
+        return true;
+    }
+
+    @Override
     public boolean controlsCanExpand() {
         return true;
     }

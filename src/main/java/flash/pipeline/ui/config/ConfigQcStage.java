@@ -27,6 +27,10 @@ public interface ConfigQcStage {
         return true;
     }
 
+    default boolean showPreviewLutToggle() {
+        return showPreviewDisplayControls();
+    }
+
     default boolean controlsCanExpand() {
         return false;
     }

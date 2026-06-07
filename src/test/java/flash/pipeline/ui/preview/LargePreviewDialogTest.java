@@ -178,7 +178,7 @@ public class LargePreviewDialogTest {
                     lutRequests.incrementAndGet();
                 }
             });
-            dialog.setDisplayActionState("Red LUT", "Show red LUT");
+            dialog.setDisplayActionState(true, true, "Red LUT", "Show red LUT");
 
             assertTrue(dialog.displayControlsButtonForTest().isVisible());
             assertTrue(dialog.displayControlsButtonForTest().isEnabled());
@@ -190,6 +190,24 @@ public class LargePreviewDialogTest {
 
             assertEquals(1, brightnessRequests.get());
             assertEquals(1, lutRequests.get());
+        } finally {
+            dialog.dispose();
+        }
+    }
+
+    @Test
+    public void displayActionStateCanHideBrightnessButKeepLut() {
+        assumeFalse(GraphicsEnvironment.isHeadless());
+
+        LargePreviewDialog dialog = new LargePreviewDialog(null);
+        try {
+            dialog.setDisplayActionState(false, true, "Red LUT", "Show red LUT");
+
+            assertFalse(dialog.displayControlsButtonForTest().isVisible());
+            assertFalse(dialog.displayControlsButtonForTest().isEnabled());
+            assertTrue(dialog.lutToggleButtonForTest().isVisible());
+            assertTrue(dialog.lutToggleButtonForTest().isEnabled());
+            assertEquals("Red LUT", dialog.lutToggleButtonForTest().getText());
         } finally {
             dialog.dispose();
         }

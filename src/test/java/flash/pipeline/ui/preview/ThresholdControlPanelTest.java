@@ -40,6 +40,30 @@ public class ThresholdControlPanelTest {
     }
 
     @Test
+    public void preservedThresholdExpansionAllowsSliderEditsAboveCurrentImageDomain() {
+        ThresholdControlPanel panel = new ThresholdControlPanel();
+        panel.setImage(image(0, 25, 100));
+        panel.setThresholdPreservingRange(200.0, 200.0);
+
+        panel.lowerSliderForTest().sliderForTest().setValue(750);
+
+        assertEquals(150.0, panel.getLowerThreshold(), 0.0001);
+        assertEquals(200.0, panel.getUpperThreshold(), 0.0001);
+    }
+
+    @Test
+    public void autoAfterPreservedThresholdUsesCurrentImageDomain() {
+        ThresholdControlPanel panel = new ThresholdControlPanel();
+        panel.setImage(image(0, 25, 100));
+        panel.setThresholdPreservingRange(200.0, 200.0);
+
+        panel.autoButtonForTest().doClick();
+
+        assertTrue(panel.getLowerThreshold() >= 0.0);
+        assertTrue(panel.getUpperThreshold() <= 100.0);
+    }
+
+    @Test
     public void lowerSliderCannotCrossUpperThreshold() {
         ThresholdControlPanel panel = new ThresholdControlPanel();
         panel.setImage(image(0, 100));
@@ -114,6 +138,18 @@ public class ThresholdControlPanelTest {
 
         assertEquals(0.0, minMax.getMinValue(), 0.0001);
         assertEquals(255.0, minMax.getMaxValue(), 0.0001);
+    }
+
+    @Test
+    public void preservedMinMaxExpansionAllowsSliderEditsAboveCurrentImageDomain() {
+        MinMaxControlPanel minMax = new MinMaxControlPanel();
+        minMax.setImage(image(0, 25, 100));
+        minMax.setRange(10.0, 200.0);
+
+        minMax.maximumSliderForTest().sliderForTest().setValue(750);
+
+        assertEquals(10.0, minMax.getMinValue(), 0.0001);
+        assertEquals(150.0, minMax.getMaxValue(), 0.0001);
     }
 
     private static ImagePlus image(int... values) {

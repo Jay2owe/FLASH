@@ -100,6 +100,7 @@ public class DisplayRangeStageTest {
                 new RecordingPreviewAdapter());
 
         assertFalse(stage.showPreviewDisplayControls());
+        assertTrue(stage.showPreviewLutToggle());
         assertTrue(stage.controlsCanExpand());
     }
 

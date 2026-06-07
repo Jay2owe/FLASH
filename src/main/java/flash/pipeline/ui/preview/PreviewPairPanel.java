@@ -102,6 +102,7 @@ public final class PreviewPairPanel extends JPanel {
     private final JButton comparePreviewButton = new JButton("Compare previews");
     private final JButton displayControlsButton = new JButton("Adjust Brightness/Contrast");
     private final JButton lutToggleButton = new JButton("Grey LUT");
+    private final JCheckBox otsuOverlayCheckBox = new JCheckBox("Show Otsu overlay");
     private final JPanel objectOverlayControls = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
     private final JCheckBox objectOverlayCheck = new JCheckBox();
     private final JComboBox<String> objectOverlaySourceChoice = new JComboBox<String>();
@@ -122,6 +123,7 @@ public final class PreviewPairPanel extends JPanel {
     private String comparisonPreviousStatus = "";
     private Runnable comparisonRestoreAction;
     private ImagePlus generatedObjectOverlayImage;
+    private ImagePlus generatedOtsuOverlayImage;
     private ImagePlus objectTrueLabelMap;
     private Set<Integer> objectRemovedLabels = Collections.emptySet();
     private boolean showRemovedObjects;
@@ -139,6 +141,7 @@ public final class PreviewPairPanel extends JPanel {
     private boolean syncingSlices;
     private boolean updatingDisplayControls;
     private boolean displayControlsAvailable = true;
+    private boolean lutToggleAvailable = true;
     private boolean largeDisplayControlsActivated;
     private boolean displayRangeInitialized;
     private LargePreviewDialog largePreviewDialog;
@@ -167,6 +170,7 @@ public final class PreviewPairPanel extends JPanel {
     private boolean sourceToggleVisible;
     private boolean sourceModeEnabled = true;
     private boolean objectOverlayEnabled = true;
+    private boolean otsuOverlayAvailable;
     private boolean comparisonPreviewVisible;
     private SourceMode sourceMode = SourceMode.FILTERED;
 
@@ -191,6 +195,8 @@ public final class PreviewPairPanel extends JPanel {
         this.adjustedPreview = new ImagePreviewPanel(adjustedTitle);
         this.displayControlsPanel = buildDisplayControls();
         buildObjectOverlayControls();
+        otsuOverlayCheckBox.setOpaque(false);
+        otsuOverlayCheckBox.setVisible(false);
         setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
         add(buildPreviewArea(), BorderLayout.CENTER);
         if (this.layout == PreviewLayout.HORIZONTAL_SLIM) {
@@ -229,6 +235,7 @@ public final class PreviewPairPanel extends JPanel {
         if (objectTrueLabelMap != null && image != objectTrueLabelMap) {
             clearObjectFilterPreviewState();
         }
+        closeGeneratedOtsuOverlayImage();
         this.adjustedImage = image;
         updateObjectOverlayControls();
         updateAdjustedPreviewImage();
@@ -249,6 +256,7 @@ public final class PreviewPairPanel extends JPanel {
             }
         })) return;
         closeGeneratedObjectOverlayImage();
+        closeGeneratedOtsuOverlayImage();
         clearObjectFilterPreviewFields();
         originalImage = null;
         adjustedImage = null;
@@ -266,6 +274,7 @@ public final class PreviewPairPanel extends JPanel {
         currentZ = 1;
         objectOverlayCheck.setSelected(false);
         updateObjectOverlayControls();
+        applyOtsuOverlayControlState();
         setObjectSizeGuide(null);
 
         originalPreview.setImage(null);
@@ -408,6 +417,7 @@ public final class PreviewPairPanel extends JPanel {
             }
         })) return;
         closeGeneratedObjectOverlayImage();
+        closeGeneratedOtsuOverlayImage();
         objectTrueLabelMap = trueLabelMap;
         objectRemovedLabels = defensiveRemovedLabels(removedLabels, summary);
         objectFilterObjectCount = Math.max(0, objectCount);
@@ -628,13 +638,41 @@ public final class PreviewPairPanel extends JPanel {
         return lutToggleButton;
     }
 
+    public JCheckBox otsuOverlayCheckBox() {
+        return otsuOverlayCheckBox;
+    }
+
+    public void setOtsuOverlayAvailable(final boolean available) {
+        if (invokeOnEdtIfNeeded(new Runnable() {
+            @Override public void run() {
+                setOtsuOverlayAvailable(available);
+            }
+        })) return;
+        if (otsuOverlayAvailable == available) {
+            applyOtsuOverlayControlState();
+            return;
+        }
+        otsuOverlayAvailable = available;
+        applyOtsuOverlayControlState();
+        updateAdjustedPreviewImage();
+        updateLargeImages();
+        updateComparisonImages();
+    }
+
     public void setDisplayControlsAvailable(boolean available) {
+        setDisplayControlsAvailable(available, available);
+    }
+
+    public void setDisplayControlsAvailable(boolean available,
+                                            boolean lutToggleAvailable) {
         displayControlsAvailable = available;
+        this.lutToggleAvailable = lutToggleAvailable;
         displayControlsButton.setVisible(available);
         displayControlsButton.setEnabled(available);
-        lutToggleButton.setVisible(available);
-        lutToggleButton.setEnabled(available);
-        if (!available && !largeDisplayControlsActivated) {
+        lutToggleButton.setVisible(lutToggleAvailable);
+        lutToggleButton.setEnabled(lutToggleAvailable);
+        applyOtsuOverlayControlState();
+        if (!available && !lutToggleAvailable && !largeDisplayControlsActivated) {
             hideDisplayControlsDialog();
             displaySettings = PreviewDisplaySettings.defaultFor(channelLutName);
             displaySettingsByImage.clear();
@@ -657,7 +695,9 @@ public final class PreviewPairPanel extends JPanel {
     }
 
     public void requestGreyLutToggle() {
-        activateLargeDisplayControls();
+        if (!displayControlsAvailable && !lutToggleAvailable) {
+            activateLargeDisplayControls();
+        }
         togglePreviewLutMode();
     }
 
@@ -698,11 +738,13 @@ public final class PreviewPairPanel extends JPanel {
         right.add(comparePreviewButton);
         right.add(displayControlsButton);
         right.add(lutToggleButton);
+        right.add(otsuOverlayCheckBox);
 
         previewToolstripComponent = new JPanel(new BorderLayout(8, 0));
         previewToolstripComponent.setOpaque(false);
         previewToolstripComponent.add(left, BorderLayout.WEST);
         previewToolstripComponent.add(right, BorderLayout.EAST);
+        applyOtsuOverlayControlState();
         applySourceControlsState();
         updateComparisonButtonState();
         return previewToolstripComponent;
@@ -809,6 +851,7 @@ public final class PreviewPairPanel extends JPanel {
         setSourceMode(SourceMode.FILTERED);
         setSourceModeEnabled(true);
         setObjectOverlayEnabled(true);
+        setOtsuOverlayAvailable(false);
         setObjectSizeGuide(null);
         clearComparisonPreview();
         largeDisplayControlsActivated = false;
@@ -817,6 +860,7 @@ public final class PreviewPairPanel extends JPanel {
             displaySettings = PreviewDisplaySettings.defaultFor(channelLutName);
             displaySettingsByImage.clear();
             displayControlImage = null;
+            selectChannelLutMode();
             applyDisplaySettings();
         }
         updateLargeDialogDisplayActionState();
@@ -1167,6 +1211,18 @@ public final class PreviewPairPanel extends JPanel {
         }
     }
 
+    private void applyOtsuOverlayControlState() {
+        boolean visible = otsuOverlayAvailable && lutToggleAvailable;
+        otsuOverlayCheckBox.setVisible(visible);
+        otsuOverlayCheckBox.setEnabled(visible);
+        otsuOverlayCheckBox.setToolTipText(
+                "Show the filtered preview with an Otsu threshold red overlay.");
+        if (previewToolstripComponent != null) {
+            previewToolstripComponent.revalidate();
+            previewToolstripComponent.repaint();
+        }
+    }
+
     private JPanel buildDisplayControls() {
         JPanel controls = new JPanel(new BorderLayout(0, 4));
         controls.setOpaque(false);
@@ -1212,6 +1268,13 @@ public final class PreviewPairPanel extends JPanel {
         lutToggleButton.addActionListener(new ActionListener() {
             @Override public void actionPerformed(ActionEvent e) {
                 togglePreviewLutMode();
+            }
+        });
+        otsuOverlayCheckBox.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                updateAdjustedPreviewImage();
+                updateLargeImages();
+                updateComparisonImages();
             }
         });
     }
@@ -1377,7 +1440,6 @@ public final class PreviewPairPanel extends JPanel {
             }
 
             @Override public void lutToggleRequested() {
-                activateLargeDisplayControls();
                 togglePreviewLutMode();
             }
         });
@@ -1475,7 +1537,6 @@ public final class PreviewPairPanel extends JPanel {
             }
 
             @Override public void lutToggleRequested() {
-                activateLargeDisplayControls();
                 togglePreviewLutMode();
             }
         });
@@ -1600,7 +1661,7 @@ public final class PreviewPairPanel extends JPanel {
                     currentZ);
         } else {
             largePreviewDialog.clearSourceChoices();
-            largePreviewDialog.setImages(originalImage, adjustedImage, currentZ);
+            largePreviewDialog.setImages(originalImage, adjustedImageForLargePreview(), currentZ);
         }
         largePreviewDialog.setObjectSizeGuide(objectSizeGuide);
         largePreviewDialog.setAdjustedStatusText(adjustedPreview.statusTextForTest());
@@ -1639,6 +1700,10 @@ public final class PreviewPairPanel extends JPanel {
         updateComparisonRestoreActionState();
     }
 
+    private ImagePlus adjustedImageForLargePreview() {
+        return generatedOtsuOverlayImage != null ? generatedOtsuOverlayImage : adjustedImage;
+    }
+
     private void updateComparisonButtonState() {
         comparePreviewButton.setVisible(comparisonPreviewVisible);
         comparePreviewButton.setEnabled(comparisonPreviewAvailable());
@@ -1673,7 +1738,9 @@ public final class PreviewPairPanel extends JPanel {
     private void updateAdjustedPreviewImageLegacy() {
         ImagePlus displayImage = adjustedImage;
         ImagePlus oldOverlay = generatedObjectOverlayImage;
+        ImagePlus oldOtsuOverlay = generatedOtsuOverlayImage;
         generatedObjectOverlayImage = null;
+        generatedOtsuOverlayImage = null;
         if (isObjectOverlaySelected()) {
             ImagePlus sourceImage = selectedObjectOverlaySourceImage();
             ImagePlus overlay = ObjectOverlayRenderer.renderOverlay(
@@ -1682,10 +1749,19 @@ public final class PreviewPairPanel extends JPanel {
                 displayImage = overlay;
                 generatedObjectOverlayImage = overlay;
             }
+        } else if (isOtsuOverlaySelected()) {
+            ImagePlus overlay = ThresholdOverlayRenderer.renderOtsuRedOverlay(adjustedImage);
+            if (overlay != null) {
+                displayImage = overlay;
+                generatedOtsuOverlayImage = overlay;
+            }
         }
         adjustedPreview.setImage(displayImage);
         if (oldOverlay != null && oldOverlay != generatedObjectOverlayImage) {
             oldOverlay.flush();
+        }
+        if (oldOtsuOverlay != null && oldOtsuOverlay != generatedOtsuOverlayImage) {
+            oldOtsuOverlay.flush();
         }
         applyClickOverlayMarkers();
     }
@@ -2064,6 +2140,14 @@ public final class PreviewPairPanel extends JPanel {
                 && (largePreviewFirstImage != null || largePreviewSecondImage != null);
     }
 
+    private boolean isOtsuOverlaySelected() {
+        return otsuOverlayAvailable
+                && lutToggleAvailable
+                && otsuOverlayCheckBox.isSelected()
+                && adjustedImage != null
+                && objectTrueLabelMap == null;
+    }
+
     private ImagePlus selectedObjectOverlaySourceImage() {
         Object selected = objectOverlaySourceChoice.getSelectedItem();
         boolean raw = sourceToggleVisible
@@ -2412,6 +2496,13 @@ public final class PreviewPairPanel extends JPanel {
         }
     }
 
+    private void closeGeneratedOtsuOverlayImage() {
+        if (generatedOtsuOverlayImage != null) {
+            generatedOtsuOverlayImage.flush();
+            generatedOtsuOverlayImage = null;
+        }
+    }
+
     private void updateLutModeLabels() {
         updatingDisplayControls = true;
         try {
@@ -2422,6 +2513,18 @@ public final class PreviewPairPanel extends JPanel {
             if (selected != null && selected.toString().startsWith("Grey")) {
                 lutModeChoice.setSelectedIndex(0);
             } else {
+                lutModeChoice.setSelectedIndex(1);
+            }
+        } finally {
+            updatingDisplayControls = false;
+        }
+        updateLutToggleButton();
+    }
+
+    private void selectChannelLutMode() {
+        updatingDisplayControls = true;
+        try {
+            if (lutModeChoice.getItemCount() > 1) {
                 lutModeChoice.setSelectedIndex(1);
             }
         } finally {
@@ -2445,7 +2548,7 @@ public final class PreviewPairPanel extends JPanel {
     }
 
     private boolean displaySettingsAvailable() {
-        return displayControlsAvailable || largeDisplayControlsActivated;
+        return displayControlsAvailable || lutToggleAvailable || largeDisplayControlsActivated;
     }
 
     private void activateLargeDisplayControls() {
@@ -2458,6 +2561,8 @@ public final class PreviewPairPanel extends JPanel {
     private void updateLargeDialogDisplayActionState() {
         if (largePreviewDialog == null) return;
         largePreviewDialog.setDisplayActionState(
+                displayControlsAvailable || largeDisplayControlsActivated,
+                lutToggleAvailable || largeDisplayControlsActivated,
                 lutToggleButton.getText(),
                 lutToggleButton.getToolTipText());
     }
@@ -2465,6 +2570,8 @@ public final class PreviewPairPanel extends JPanel {
     private void updateComparisonDialogDisplayActionState() {
         if (comparisonPreviewDialog == null) return;
         comparisonPreviewDialog.setDisplayActionState(
+                displayControlsAvailable || largeDisplayControlsActivated,
+                lutToggleAvailable || largeDisplayControlsActivated,
                 lutToggleButton.getText(),
                 lutToggleButton.getToolTipText());
     }

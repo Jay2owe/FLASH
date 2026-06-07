@@ -50,6 +50,8 @@ public final class ThresholdControlPanel extends JPanel {
     private final JButton setButton = new JButton("Set");
 
     private ImagePlus image;
+    private double imageDomainMin = 0.0;
+    private double imageDomainMax = 255.0;
     private double domainMin = 0.0;
     private double domainMax = 255.0;
     private double resetLower = 0.0;
@@ -80,12 +82,14 @@ public final class ThresholdControlPanel extends JPanel {
         HistogramPanel.Histogram histogram = HistogramPanel.calculateHistogram(image, HistogramPanel.DEFAULT_BIN_COUNT);
         histogramPanel.setHistogram(histogram);
         if (histogram.isEmpty()) {
-            domainMin = 0.0;
-            domainMax = 255.0;
+            imageDomainMin = 0.0;
+            imageDomainMax = 255.0;
         } else {
-            domainMin = histogram.getMinimum();
-            domainMax = histogram.getMaximum();
+            imageDomainMin = histogram.getMinimum();
+            imageDomainMax = histogram.getMaximum();
         }
+        domainMin = imageDomainMin;
+        domainMax = imageDomainMax;
         double[] existing = existingThreshold(image);
         if (existing == null) {
             resetLower = domainMin;
@@ -334,18 +338,18 @@ public final class ThresholdControlPanel extends JPanel {
                 double upper = processor.getMaxThreshold();
                 if (isValidThreshold(lower)) {
                     if (!isValidThreshold(upper) || upper < lower) {
-                        upper = domainMax;
+                        upper = imageDomainMax;
                     }
                     return new double[]{
-                            FijiStyleRangeSliderPanel.clamp(lower, domainMin, domainMax),
-                            FijiStyleRangeSliderPanel.clamp(upper, domainMin, domainMax)
+                            FijiStyleRangeSliderPanel.clamp(lower, imageDomainMin, imageDomainMax),
+                            FijiStyleRangeSliderPanel.clamp(upper, imageDomainMin, imageDomainMax)
                     };
                 }
             } catch (RuntimeException ignored) {
                 // Keep the embedded control usable even if an ImageJ method is unavailable.
             }
         }
-        return new double[]{domainMin, domainMax};
+        return new double[]{imageDomainMin, imageDomainMax};
     }
 
     private ImageProcessor duplicateCurrentProcessor() {

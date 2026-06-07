@@ -138,6 +138,8 @@ public class PreviewPairPanelTest {
         assertTrue(toolstrip.isAncestorOf(pair.comparePreviewButton()));
         assertTrue(toolstrip.isAncestorOf(pair.displayControlsButton()));
         assertTrue(toolstrip.isAncestorOf(pair.lutToggleButton()));
+        assertTrue(toolstrip.isAncestorOf(pair.otsuOverlayCheckBox()));
+        assertFalse(pair.otsuOverlayCheckBox().isVisible());
     }
 
     @Test
@@ -203,6 +205,73 @@ public class PreviewPairPanelTest {
         assertEquals(PreviewDisplaySettings.LutMode.CHANNEL,
                 pair.displaySettingsForTest().getLutMode());
         assertEquals("Grey LUT", pair.lutToggleButton().getText());
+    }
+
+    @Test
+    public void lutToggleCanRemainVisibleWhenBrightnessButtonIsHidden() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
+        pair.setChannelLutName("Red");
+        pair.setOriginal(singleSlice("original", 0, 100));
+
+        pair.setDisplayControlsAvailable(false, true);
+
+        assertFalse(pair.displayControlsButton().isVisible());
+        assertTrue(pair.lutToggleButton().isVisible());
+        assertEquals(PreviewDisplaySettings.LutMode.CHANNEL,
+                pair.getDisplaySettings().getLutMode());
+        assertEquals("Red", pair.getDisplaySettings().getChannelLutName());
+
+        pair.lutToggleButton().doClick();
+
+        assertEquals(PreviewDisplaySettings.LutMode.GREY,
+                pair.getDisplaySettings().getLutMode());
+        assertEquals("Red LUT", pair.lutToggleButton().getText());
+    }
+
+    @Test
+    public void resetStageToolstripSynchronizesVisibleLutToggleAfterPreviousGreyMode() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
+        pair.setChannelLutName("Red");
+        pair.setOriginal(singleSlice("original", 0, 100));
+
+        pair.lutToggleButton().doClick();
+        assertEquals(PreviewDisplaySettings.LutMode.GREY,
+                pair.getDisplaySettings().getLutMode());
+
+        pair.setDisplayControlsAvailable(false, true);
+        pair.resetStageToolstripState();
+
+        assertEquals(PreviewDisplaySettings.LutMode.CHANNEL,
+                pair.getDisplaySettings().getLutMode());
+        assertEquals("Grey LUT", pair.lutToggleButton().getText());
+
+        pair.lutToggleButton().doClick();
+
+        assertEquals(PreviewDisplaySettings.LutMode.GREY,
+                pair.getDisplaySettings().getLutMode());
+        assertEquals("Red LUT", pair.lutToggleButton().getText());
+    }
+
+    @Test
+    public void otsuOverlayCheckboxRendersRedTintedAdjustedPreview() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
+        pair.setOriginal(otsuOverlayImage("source"));
+        pair.setAdjusted(otsuOverlayImage("filtered"));
+
+        pair.setOtsuOverlayAvailable(true);
+
+        assertTrue(pair.otsuOverlayCheckBox().isVisible());
+
+        pair.otsuOverlayCheckBox().doClick();
+
+        ImageProcessor overlay = pair.adjustedPreviewForTest().renderedProcessorForTest();
+        assertTrue(redTinted(overlay.getPixel(16, 16)));
+        assertFalse(redTinted(overlay.getPixel(1, 1)));
+
+        pair.otsuOverlayCheckBox().doClick();
+
+        ImageProcessor filtered = pair.adjustedPreviewForTest().renderedProcessorForTest();
+        assertFalse(redTinted(filtered.getPixel(16, 16)));
     }
 
     @Test
@@ -753,7 +822,7 @@ public class PreviewPairPanelTest {
     }
 
     @Test
-    public void largePreviewDisplayButtonsWorkWhenCompactControlsAreHidden() {
+    public void largePreviewLutButtonWorksWhenBrightnessHidden() {
         assumeFalse(GraphicsEnvironment.isHeadless());
 
         PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
@@ -761,12 +830,13 @@ public class PreviewPairPanelTest {
         try {
             pair.setChannelLutName("Red");
             pair.setOriginal(singleSlice("original", 0, 100));
-            pair.setDisplayControlsAvailable(false);
+            pair.setDisplayControlsAvailable(false, true);
             pair.setLargePreviewDialogForTest(dialog);
 
             assertFalse(pair.displayControlsButton().isVisible());
-            assertFalse(pair.lutToggleButton().isVisible());
-            assertTrue(dialog.displayControlsButtonForTest().isVisible());
+            assertTrue(pair.lutToggleButton().isVisible());
+            assertFalse(dialog.displayControlsButtonForTest().isVisible());
+            assertFalse(dialog.displayControlsButtonForTest().isEnabled());
             assertTrue(dialog.lutToggleButtonForTest().isVisible());
 
             dialog.lutToggleButtonForTest().doClick();
@@ -776,7 +846,7 @@ public class PreviewPairPanelTest {
 
             dialog.displayControlsButtonForTest().doClick();
 
-            assertSame(dialog, pair.displayControlsOwnerForTest());
+            assertNull(pair.displayControlsOwnerForTest());
         } finally {
             pair.disposeDisplayControlsDialogForTest();
             dialog.dispose();
@@ -784,7 +854,7 @@ public class PreviewPairPanelTest {
     }
 
     @Test
-    public void comparisonPreviewDisplayButtonsWorkWhenCompactControlsAreHidden() {
+    public void comparisonPreviewLutButtonWorksWhenBrightnessHidden() {
         assumeFalse(GraphicsEnvironment.isHeadless());
 
         PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
@@ -797,12 +867,13 @@ public class PreviewPairPanelTest {
             pair.setPreviousComparisonPreview(singleSlice("previous", 0, 1),
                     "Previous preview ready.");
             pair.setComparisonPreviewVisible(true);
-            pair.setDisplayControlsAvailable(false);
+            pair.setDisplayControlsAvailable(false, true);
             pair.setComparisonPreviewDialogForTest(dialog);
 
             assertFalse(pair.displayControlsButton().isVisible());
-            assertFalse(pair.lutToggleButton().isVisible());
-            assertTrue(dialog.displayControlsButtonForTest().isVisible());
+            assertTrue(pair.lutToggleButton().isVisible());
+            assertFalse(dialog.displayControlsButtonForTest().isVisible());
+            assertFalse(dialog.displayControlsButtonForTest().isEnabled());
             assertTrue(dialog.lutToggleButtonForTest().isVisible());
 
             dialog.lutToggleButtonForTest().doClick();
@@ -812,7 +883,7 @@ public class PreviewPairPanelTest {
 
             dialog.displayControlsButtonForTest().doClick();
 
-            assertSame(dialog, pair.displayControlsOwnerForTest());
+            assertNull(pair.displayControlsOwnerForTest());
         } finally {
             pair.disposeDisplayControlsDialogForTest();
             pair.disposeComparisonPreviewForTest();
@@ -1053,6 +1124,24 @@ public class PreviewPairPanelTest {
         processor.set(0, 0, value);
         processor.set(1, 0, value);
         return new ImagePlus(title, processor);
+    }
+
+    private static ImagePlus otsuOverlayImage(String title) {
+        ByteProcessor processor = new ByteProcessor(32, 32);
+        for (int y = 0; y < 32; y++) {
+            for (int x = 0; x < 32; x++) {
+                processor.set(x, y,
+                        x >= 10 && x < 24 && y >= 10 && y < 24 ? 220 : 20);
+            }
+        }
+        return new ImagePlus(title, processor);
+    }
+
+    private static boolean redTinted(int rgb) {
+        int r = (rgb >> 16) & 0xff;
+        int g = (rgb >> 8) & 0xff;
+        int b = rgb & 0xff;
+        return r > g && r > b && r > 160;
     }
 
     private static ImagePlus labelThenBackground(String title) {

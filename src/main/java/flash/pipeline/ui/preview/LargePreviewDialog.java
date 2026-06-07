@@ -154,11 +154,14 @@ public final class LargePreviewDialog extends JDialog {
         overlayControls.repaint();
     }
 
-    void setDisplayActionState(String lutButtonText, String lutButtonTooltip) {
-        displayControlsButton.setVisible(true);
-        displayControlsButton.setEnabled(true);
-        lutToggleButton.setVisible(true);
-        lutToggleButton.setEnabled(true);
+    void setDisplayActionState(boolean displayControlsAvailable,
+                               boolean lutToggleAvailable,
+                               String lutButtonText,
+                               String lutButtonTooltip) {
+        displayControlsButton.setVisible(displayControlsAvailable);
+        displayControlsButton.setEnabled(displayControlsAvailable);
+        lutToggleButton.setVisible(lutToggleAvailable);
+        lutToggleButton.setEnabled(lutToggleAvailable);
         lutToggleButton.setText(lutButtonText == null || lutButtonText.trim().isEmpty()
                 ? "Grey LUT"
                 : lutButtonText);
