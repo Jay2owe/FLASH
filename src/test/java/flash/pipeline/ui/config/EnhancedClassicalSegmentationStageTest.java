@@ -59,7 +59,8 @@ public class EnhancedClassicalSegmentationStageTest {
 
     @Test
     public void savedThresholdAboveCurrentImageMaximumIsPreservedInMethodToken() {
-        RecordingParameterStore parameterStore = new RecordingParameterStore("enhanced_classical");
+        RecordingParameterStore parameterStore = new RecordingParameterStore(
+                "enhanced_classical:thresh=200:minSize=1:maxSize=2147483647");
         RecordingThresholdStore thresholdStore = new RecordingThresholdStore("200");
         EnhancedClassicalSegmentationStage stage = new EnhancedClassicalSegmentationStage(
                 parameterStore,
