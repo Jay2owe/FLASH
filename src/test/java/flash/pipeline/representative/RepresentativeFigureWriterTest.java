@@ -90,6 +90,79 @@ public class RepresentativeFigureWriterTest {
     }
 
     @Test
+    public void scaleBarFractionMovesBarHigherThanBottomRightCorner() {
+        double cornerCentroidY = barCentroidYInTile(renderSingleControlBar(
+                PresentationTileConfig.Position.BOTTOM_RIGHT, -1.0, -1.0));
+        double fracCentroidY = barCentroidYInTile(renderSingleControlBar(
+                PresentationTileConfig.Position.BOTTOM_RIGHT, 0.05, 0.05));
+
+        assertTrue("both renders should draw a white scale bar inside the tile",
+                cornerCentroidY >= 0 && fracCentroidY >= 0);
+        assertTrue("fractional top-left bar should sit higher than the corner bar",
+                fracCentroidY < cornerCentroidY);
+    }
+
+    private static BufferedImage renderSingleControlBar(
+            PresentationTileConfig.Position cornerPosition, double fracX, double fracY) {
+        RepresentativeFigureConfig config = configFor(
+                Collections.singletonList("Control"),
+                PresentationTileConfig.builder()
+                        .createOverviewTile(true)
+                        .annotateOverviewTile(true)
+                        .scaleBarEnabled(true)
+                        .scaleBarLengthUm(20.0)
+                        .scaleBarThicknessPx(5)
+                        .scaleBarPosition(cornerPosition)
+                        .scaleBarFracX(fracX)
+                        .scaleBarFracY(fracY)
+                        .labelMode(PresentationTileConfig.LabelMode.NONE)
+                        .channelOrder(Collections.singletonList("DAPI"))
+                        .cellSizePx(80)
+                        .annotationColor(Color.WHITE)
+                        .build());
+        return RepresentativeFigureWriter.renderFigureImage(config,
+                Collections.singletonList(renderedSeries(0, "Control", Color.BLACK, Color.BLACK)));
+    }
+
+    private static double barCentroidYInTile(BufferedImage image) {
+        int[] bb = blackBoundingBox(image);
+        if (bb == null) {
+            return -1;
+        }
+        long sum = 0;
+        long count = 0;
+        for (int y = bb[1]; y <= bb[3]; y++) {
+            for (int x = bb[0]; x <= bb[2]; x++) {
+                Color c = new Color(image.getRGB(x, y), true);
+                if (c.getRed() > 220 && c.getGreen() > 220 && c.getBlue() > 220) {
+                    sum += y;
+                    count++;
+                }
+            }
+        }
+        return count == 0 ? -1 : (double) sum / count;
+    }
+
+    private static int[] blackBoundingBox(BufferedImage image) {
+        int minX = Integer.MAX_VALUE;
+        int minY = Integer.MAX_VALUE;
+        int maxX = -1;
+        int maxY = -1;
+        for (int y = 0; y < image.getHeight(); y++) {
+            for (int x = 0; x < image.getWidth(); x++) {
+                Color c = new Color(image.getRGB(x, y), true);
+                if (c.getRed() < 40 && c.getGreen() < 40 && c.getBlue() < 40) {
+                    minX = Math.min(minX, x);
+                    minY = Math.min(minY, y);
+                    maxX = Math.max(maxX, x);
+                    maxY = Math.max(maxY, y);
+                }
+            }
+        }
+        return maxX < 0 ? null : new int[]{minX, minY, maxX, maxY};
+    }
+
+    @Test
     public void writesIndividualImagesAndOriginalTifPerCondition() throws Exception {
         File project = temp.newFolder("project-with-individuals");
         File source = temp.newFile("Exp-Mouse1_LH_SCN.tif");

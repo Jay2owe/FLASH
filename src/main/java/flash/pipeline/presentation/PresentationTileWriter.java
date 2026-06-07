@@ -534,7 +534,9 @@ public final class PresentationTileWriter {
             String label = labelText(record, conditions, config);
             if (!label.isEmpty()) {
                 drawTextLabel(g, label, imageRect, config.labelPosition(),
-                        config.labelFontSizePx(), config.annotationColor(), safeStyleScale);
+                        config.labelFontSizePx(), config.annotationColor(), safeStyleScale,
+                        config.hasLabelFraction() ? config.labelFracX() : -1.0,
+                        config.hasLabelFraction() ? config.labelFracY() : -1.0);
             }
         }
         if (config.scaleBarEnabled()) {
@@ -559,8 +561,18 @@ public final class PresentationTileWriter {
         if (barLen < 4) return;
 
         int thickness = scaledDimension(config.scaleBarThicknessPx(), thicknessScale);
-        int x = horizontalPosition(config.scaleBarPosition(), imageRect, inset, barLen);
-        int y = verticalPosition(config.scaleBarPosition(), imageRect, inset, thickness);
+        int x;
+        int y;
+        boolean captionBelow;
+        if (config.hasScaleBarFraction()) {
+            x = fracOriginX(imageRect, config.scaleBarFracX(), barLen, inset);
+            y = fracOriginY(imageRect, config.scaleBarFracY(), thickness, inset);
+            captionBelow = (y + thickness / 2) < (imageRect.y + imageRect.height / 2);
+        } else {
+            x = horizontalPosition(config.scaleBarPosition(), imageRect, inset, barLen);
+            y = verticalPosition(config.scaleBarPosition(), imageRect, inset, thickness);
+            captionBelow = isTop(config.scaleBarPosition());
+        }
 
         g.setColor(config.annotationColor());
         g.fillRect(x, y, barLen, thickness);
@@ -573,7 +585,7 @@ public final class PresentationTileWriter {
         FontMetrics fm = g.getFontMetrics();
         int textX = x + Math.max(0, (barLen - fm.stringWidth(label)) / 2);
         int textY = y - scaledDimension(4, styleScale);
-        if (isTop(config.scaleBarPosition())) {
+        if (captionBelow) {
             textY = y + thickness + fm.getAscent() + scaledDimension(3, styleScale);
         }
         drawAnnotationText(g, label, textX, textY, config.annotationColor());
@@ -585,21 +597,54 @@ public final class PresentationTileWriter {
                                       PresentationTileConfig.Position position,
                                       int fontSize,
                                       Color color,
-                                      double styleScale) {
+                                      double styleScale,
+                                      double fracX,
+                                      double fracY) {
         Font font = new Font(Font.SANS_SERIF, Font.BOLD,
                 scaledDimension(fontSize, styleScale));
         g.setFont(font);
         FontMetrics fm = g.getFontMetrics();
         int inset = scaledDimension(Math.max(8, fontSize / 2), styleScale);
         int textW = fm.stringWidth(text);
-        int textX = horizontalPosition(position, imageRect, inset, textW);
+        int textX;
         int textY;
-        if (isTop(position)) {
-            textY = imageRect.y + inset + fm.getAscent();
+        if (fracX >= 0 && fracY >= 0) {
+            int textH = fm.getAscent() + fm.getDescent();
+            textX = fracOriginX(imageRect, fracX, textW, inset);
+            textY = fracOriginY(imageRect, fracY, textH, inset) + fm.getAscent();
         } else {
-            textY = imageRect.y + imageRect.height - inset;
+            textX = horizontalPosition(position, imageRect, inset, textW);
+            if (isTop(position)) {
+                textY = imageRect.y + inset + fm.getAscent();
+            } else {
+                textY = imageRect.y + imageRect.height - inset;
+            }
         }
         drawAnnotationText(g, text, textX, textY, color);
+    }
+
+    /**
+     * Top-left X for a {@code contentWidth}-wide box at {@code frac} of the
+     * tile width, clamped so the box stays inside {@code rect} minus {@code inset}.
+     */
+    private static int fracOriginX(Rectangle rect, double frac, int contentWidth, int inset) {
+        int min = rect.x + inset;
+        int max = rect.x + rect.width - inset - contentWidth;
+        if (max < min) {
+            max = min;
+        }
+        int pos = rect.x + (int) Math.round(frac * rect.width);
+        return Math.max(min, Math.min(max, pos));
+    }
+
+    private static int fracOriginY(Rectangle rect, double frac, int contentHeight, int inset) {
+        int min = rect.y + inset;
+        int max = rect.y + rect.height - inset - contentHeight;
+        if (max < min) {
+            max = min;
+        }
+        int pos = rect.y + (int) Math.round(frac * rect.height);
+        return Math.max(min, Math.min(max, pos));
     }
 
     private static void drawAnnotationText(Graphics2D g, String text, int textX, int baseline,

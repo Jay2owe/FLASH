@@ -53,6 +53,10 @@ public final class PresentationTileConfig {
     private final int conditionFontSizePx;
     private final int channelFontSizePx;
     private final int exportScale;
+    private final double labelFracX;
+    private final double labelFracY;
+    private final double scaleBarFracX;
+    private final double scaleBarFracY;
 
     private PresentationTileConfig(Builder b) {
         this.annotateIndividualImages = b.annotateIndividualImages;
@@ -77,6 +81,10 @@ public final class PresentationTileConfig {
         this.conditionFontSizePx = clamp(b.conditionFontSizePx, 6, 96);
         this.channelFontSizePx = clamp(b.channelFontSizePx, 6, 96);
         this.exportScale = clamp(b.exportScale, 1, 4);
+        this.labelFracX = clampFrac(b.labelFracX);
+        this.labelFracY = clampFrac(b.labelFracY);
+        this.scaleBarFracX = clampFrac(b.scaleBarFracX);
+        this.scaleBarFracY = clampFrac(b.scaleBarFracY);
     }
 
     public static Builder builder() {
@@ -111,7 +119,11 @@ public final class PresentationTileConfig {
                 .rowGapPx(rowGapPx)
                 .conditionFontSizePx(conditionFontSizePx)
                 .channelFontSizePx(channelFontSizePx)
-                .exportScale(exportScale);
+                .exportScale(exportScale)
+                .labelFracX(labelFracX)
+                .labelFracY(labelFracY)
+                .scaleBarFracX(scaleBarFracX)
+                .scaleBarFracY(scaleBarFracY);
     }
 
     public boolean createOverviewTile() {
@@ -202,8 +214,44 @@ public final class PresentationTileConfig {
         return exportScale;
     }
 
+    /**
+     * Fractional X position of the label box top-left within a tile, or a value
+     * {@code < 0} meaning "not set — fall back to {@link #labelPosition()}".
+     */
+    public double labelFracX() {
+        return labelFracX;
+    }
+
+    public double labelFracY() {
+        return labelFracY;
+    }
+
+    /** True when both label fractions are set (free placement, not a corner). */
+    public boolean hasLabelFraction() {
+        return labelFracX >= 0 && labelFracY >= 0;
+    }
+
+    public double scaleBarFracX() {
+        return scaleBarFracX;
+    }
+
+    public double scaleBarFracY() {
+        return scaleBarFracY;
+    }
+
+    public boolean hasScaleBarFraction() {
+        return scaleBarFracX >= 0 && scaleBarFracY >= 0;
+    }
+
     private static int clamp(int value, int min, int max) {
         return Math.max(min, Math.min(max, value));
+    }
+
+    private static double clampFrac(double value) {
+        if (Double.isNaN(value) || value < 0) {
+            return -1.0;
+        }
+        return Math.max(0.0, Math.min(1.0, value));
     }
 
     public static final class Builder {
@@ -229,6 +277,10 @@ public final class PresentationTileConfig {
         private int conditionFontSizePx = 15;
         private int channelFontSizePx = 16;
         private int exportScale = 1;
+        private double labelFracX = -1.0;
+        private double labelFracY = -1.0;
+        private double scaleBarFracX = -1.0;
+        private double scaleBarFracY = -1.0;
 
         public Builder createOverviewTile(boolean value) {
             this.createOverviewTile = value;
@@ -344,6 +396,26 @@ public final class PresentationTileConfig {
 
         public Builder exportScale(int value) {
             this.exportScale = value;
+            return this;
+        }
+
+        public Builder labelFracX(double value) {
+            this.labelFracX = value;
+            return this;
+        }
+
+        public Builder labelFracY(double value) {
+            this.labelFracY = value;
+            return this;
+        }
+
+        public Builder scaleBarFracX(double value) {
+            this.scaleBarFracX = value;
+            return this;
+        }
+
+        public Builder scaleBarFracY(double value) {
+            this.scaleBarFracY = value;
             return this;
         }
 

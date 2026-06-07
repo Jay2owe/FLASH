@@ -355,6 +355,10 @@ public class RepresentativeFigureConfig {
         out.put("conditionFontSizePx", Integer.valueOf(config.conditionFontSizePx()));
         out.put("channelFontSizePx", Integer.valueOf(config.channelFontSizePx()));
         out.put("exportScale", Integer.valueOf(config.exportScale()));
+        out.put("labelFracX", Double.valueOf(config.labelFracX()));
+        out.put("labelFracY", Double.valueOf(config.labelFracY()));
+        out.put("scaleBarFracX", Double.valueOf(config.scaleBarFracX()));
+        out.put("scaleBarFracY", Double.valueOf(config.scaleBarFracY()));
         return out;
     }
 
@@ -389,6 +393,10 @@ public class RepresentativeFigureConfig {
                 .conditionFontSizePx(intValue(map.get("conditionFontSizePx"), 15))
                 .channelFontSizePx(intValue(map.get("channelFontSizePx"), 16))
                 .exportScale(intValue(map.get("exportScale"), 1))
+                .labelFracX(doubleValue(map.get("labelFracX"), -1.0))
+                .labelFracY(doubleValue(map.get("labelFracY"), -1.0))
+                .scaleBarFracX(doubleValue(map.get("scaleBarFracX"), -1.0))
+                .scaleBarFracY(doubleValue(map.get("scaleBarFracY"), -1.0))
                 .build();
     }
 
