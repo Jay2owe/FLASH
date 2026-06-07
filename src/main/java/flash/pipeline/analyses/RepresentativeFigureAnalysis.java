@@ -1,10 +1,13 @@
 package flash.pipeline.analyses;
 
 import flash.pipeline.bin.BinField;
+import flash.pipeline.bin.BinConfig;
+import flash.pipeline.bin.BinConfigIO;
 import flash.pipeline.cli.CLIConfig;
 import flash.pipeline.io.ImageCache;
 import flash.pipeline.representative.RepresentativeFigureConfig;
 import flash.pipeline.representative.RepresentativePreviewRenderer;
+import flash.pipeline.representative.RepresentativeRangeStage;
 import flash.pipeline.representative.RepresentativeSelection;
 import flash.pipeline.representative.RepresentativeSelectionPanel;
 import flash.pipeline.representative.RepresentativeStatLoader;
@@ -87,6 +90,28 @@ public class RepresentativeFigureAnalysis implements Analysis {
             IJ.log("[Representative Figure] Locked representatives for "
                     + selection.size() + " condition"
                     + (selection.size() == 1 ? "" : "s") + ".");
+
+            BinConfig setupConfig = BinConfigIO.readPartialFromDirectory(directory);
+            DisplayRangeChoice rangeChoice = chooseDisplayRangeMode(setupConfig, selection);
+            if (rangeChoice == null) {
+                IJ.log("[Representative Figure] Display-range setup cancelled.");
+                return;
+            }
+            if (rangeChoice.adjustNow) {
+                RepresentativeRangeStage rangeStage = new RepresentativeRangeStage();
+                if (!rangeStage.run(directory, config, setupConfig, imageCache, useTifCache)) {
+                    IJ.log("[Representative Figure] Display-range adjustment cancelled.");
+                    return;
+                }
+                IJ.log("[Representative Figure] Locked custom display ranges for "
+                        + config.customDisplayRangesByChannel.size() + " channel"
+                        + (config.customDisplayRangesByChannel.size() == 1 ? "" : "s") + ".");
+                // TODO(representative-image-figure stage 08): pass updated range-aware
+                // representative previews into the condition-layout screen.
+            } else {
+                config.clearCustomDisplayRanges();
+                IJ.log("[Representative Figure] Using display ranges from Set Up Configuration.");
+            }
         } catch (Exception e) {
             IJ.log("[Representative Figure] Could not prepare representative selection: "
                     + e.getMessage());
@@ -221,6 +246,31 @@ public class RepresentativeFigureAnalysis implements Analysis {
         return new StatisticChoice(statistic, existing);
     }
 
+    private DisplayRangeChoice chooseDisplayRangeMode(BinConfig setupConfig,
+                                                      RepresentativeSelection selection) {
+        if (!RepresentativeRangeStage.hasCompleteSetupRanges(setupConfig, selection)) {
+            return DisplayRangeChoice.adjustNow();
+        }
+
+        PipelineDialog dialog = new PipelineDialog(
+                "Representative Image Figure - Display Ranges", PipelineDialog.Phase.EXPORT);
+        dialog.addHeader("Display Ranges");
+        dialog.addMessage("Choose whether to keep the display ranges from Set Up Configuration or adjust them for this representative figure.");
+        dialog.addChoice("Display range setup",
+                new String[]{DisplayRangeChoice.USE_SETUP_LABEL, DisplayRangeChoice.ADJUST_NOW_LABEL},
+                DisplayRangeChoice.USE_SETUP_LABEL);
+        dialog.setPrimaryButtonText("Continue");
+
+        if (!dialog.showDialog()) {
+            return null;
+        }
+        String choice = dialog.getNextChoice();
+        if (DisplayRangeChoice.ADJUST_NOW_LABEL.equals(choice)) {
+            return DisplayRangeChoice.adjustNow();
+        }
+        return DisplayRangeChoice.useSetup();
+    }
+
     private static String statTableSummary(RepresentativeStatTable table) {
         if (table == null || table.isEmpty()) {
             return "no statistic values";
@@ -266,6 +316,25 @@ public class RepresentativeFigureAnalysis implements Analysis {
                         RepresentativeStatLoader.ExistingResultOption existingResult) {
             this.statistic = statistic == null ? RepresentativeStatistic.QUICK : statistic;
             this.existingResult = existingResult;
+        }
+    }
+
+    private static final class DisplayRangeChoice {
+        static final String USE_SETUP_LABEL = "Use display ranges already set up";
+        static final String ADJUST_NOW_LABEL = "Adjust now";
+
+        final boolean adjustNow;
+
+        private DisplayRangeChoice(boolean adjustNow) {
+            this.adjustNow = adjustNow;
+        }
+
+        static DisplayRangeChoice useSetup() {
+            return new DisplayRangeChoice(false);
+        }
+
+        static DisplayRangeChoice adjustNow() {
+            return new DisplayRangeChoice(true);
         }
     }
 }

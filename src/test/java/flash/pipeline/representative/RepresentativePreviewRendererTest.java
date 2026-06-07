@@ -103,6 +103,26 @@ public class RepresentativePreviewRendererTest {
     }
 
     @Test
+    public void generatedPreviewUsesRepresentativeCustomRangeBeforeSetupRange() throws Exception {
+        File cacheDir = temp.newFolder("custom-range-cache");
+        BinConfig cfg = configuredTwoChannelBinConfig("0-100", "0-200");
+        RepresentativeFigureConfig config = new RepresentativeFigureConfig();
+        config.setCustomDisplayRangeForChannel(0, "0-200");
+        ImagePlus source = twoChannelImage(300, 100, 100, 200);
+
+        RepresentativeSeries series = RepresentativePreviewRenderer.renderGeneratedSeriesForTests(
+                cacheDir, meta(0, "Exp-Mouse1_LH_SCN", 300, 100, 1, 2),
+                candidate(0, "Exp-Mouse1_LH_SCN", "Mouse1", "Control"),
+                cfg, config, source);
+
+        int redPixel = centerRgb(series.channelThumbnails().get(0).image());
+        assertTrue("custom range should avoid setup saturation",
+                red(redPixel) >= 120 && red(redPixel) <= 135);
+        assertEquals(0, green(redPixel));
+        assertEquals(0, blue(redPixel));
+    }
+
+    @Test
     public void generatedPreviewWithoutSetupFallsBackToAutoEnhance() throws Exception {
         File cacheDir = temp.newFolder("auto-cache");
         BinConfig cfg = new BinConfig();
